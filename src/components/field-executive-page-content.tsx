@@ -360,6 +360,16 @@ function FieldExecutiveForm({
       <label>Pollution expiry<input className="field" name="vehicle_pollution_exp_date" required type="date" defaultValue={textValue(executive?.vehicle_pollution_exp_date)} /></label>
 
       {mode === "edit" ? (
+        <>
+          <label>Aadhaar front file<input className="field" name="aadhaar_front_file" type="file" /></label>
+          <label>Aadhaar back file<input className="field" name="aadhaar_back_file" type="file" /></label>
+          <label>DL front file<input className="field" name="dl_front_file" type="file" /></label>
+          <label>DL back file<input className="field" name="dl_back_file" type="file" /></label>
+          <label>Profile photo<input accept="image/*" className="field" name="profile_photo_file" type="file" /></label>
+        </>
+      ) : null}
+
+      {mode === "edit" ? (
         <label>Status
           <SearchableSelect name="is_active" options={statusOptions} defaultValue={executive?.is_active ? "true" : "false"} placeholder="Select status" required />
         </label>

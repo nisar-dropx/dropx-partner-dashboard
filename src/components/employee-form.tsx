@@ -19,6 +19,21 @@ type EmployeeFormProps = {
     date_of_join: string;
     location_id?: string | null;
     designation_id?: string | null;
+    gender?: string | null;
+    date_of_birth?: string | null;
+    father_name?: string | null;
+    blood_group?: string | null;
+    aadhaar_number?: string | null;
+    pan_number?: string | null;
+    address?: string | null;
+    state_code?: string | null;
+    pincode?: string | null;
+    landmark?: string | null;
+    emergency_contact_name?: string | null;
+    emergency_contact_number?: string | null;
+    emergency_contact_relation?: string | null;
+    bank_account_no?: string | null;
+    ifsc?: string | null;
     statutory_applicability: string[] | null;
     is_active?: boolean;
   } | null;
@@ -37,6 +52,16 @@ const statutoryOptions = [
   { value: "pf", label: "PF" },
   { value: "esi", label: "ESI" }
 ];
+
+const genderOptions = [
+  { value: "Male", label: "Male" },
+  { value: "Female", label: "Female" },
+  { value: "Other", label: "Other" }
+];
+
+const stateOptions = [
+  "AP", "AR", "AS", "BR", "CG", "GA", "GJ", "HR", "HP", "JH", "KA", "KL", "MP", "MH", "MN", "ML", "MZ", "NL", "OD", "PB", "RJ", "SK", "TN", "TS", "TR", "UP", "UK", "WB", "AN", "CH", "DN", "DL", "JK", "LA", "LD", "PY"
+].map((value) => ({ value, label: value }));
 
 function StatutoryMultiSelect({ defaultValue }: { defaultValue?: string[] | null }) {
   const [selected, setSelected] = useState<string[]>(defaultValue?.length ? defaultValue : ["not_applicable"]);
@@ -137,6 +162,33 @@ export function EmployeeForm({ action, designationOptions, employee, locationOpt
         Statutory applicability
         <StatutoryMultiSelect defaultValue={employee?.statutory_applicability} />
       </label>
+      {isEdit ? (
+        <>
+          <label>Gender
+            <SearchableSelect name="gender" options={genderOptions} defaultValue={employee?.gender ?? undefined} placeholder="Select gender" />
+          </label>
+          <label>Date of birth<input className="field" defaultValue={employee?.date_of_birth ?? ""} name="date_of_birth" type="date" /></label>
+          <label>Blood group<input className="field" defaultValue={employee?.blood_group ?? ""} name="blood_group" placeholder="Enter blood group" /></label>
+          <label>Father name<input className="field" defaultValue={employee?.father_name ?? ""} name="father_name" placeholder="Enter father name" /></label>
+          <label>Aadhaar number<input className="field" defaultValue={employee?.aadhaar_number ?? ""} inputMode="numeric" maxLength={12} name="aadhaar_number" pattern="[0-9]{12}" placeholder="Enter Aadhaar number" /></label>
+          <label>PAN number<input className="field" defaultValue={employee?.pan_number ?? ""} name="pan_number" placeholder="Enter PAN number" /></label>
+          <label className="span-3">Address<input className="field" defaultValue={employee?.address ?? ""} name="address" placeholder="Enter complete address" /></label>
+          <label>State
+            <SearchableSelect name="state_code" options={stateOptions} defaultValue={employee?.state_code ?? undefined} placeholder="Select state" />
+          </label>
+          <label>Postal PIN<input className="field" defaultValue={employee?.pincode ?? ""} inputMode="numeric" maxLength={6} name="pincode" pattern="[0-9]{6}" placeholder="Enter PIN" /></label>
+          <label>Landmark<input className="field" defaultValue={employee?.landmark ?? ""} name="landmark" placeholder="Enter landmark" /></label>
+          <label>Bank account number<input className="field" defaultValue={employee?.bank_account_no ?? ""} inputMode="numeric" name="bank_account_no" placeholder="Enter bank account number" /></label>
+          <label>IFSC<input className="field" defaultValue={employee?.ifsc ?? ""} name="ifsc" placeholder="Enter IFSC" /></label>
+          <label>Emergency contact number<input className="field" defaultValue={employee?.emergency_contact_number ?? ""} inputMode="numeric" maxLength={10} name="emergency_contact_number" pattern="[0-9]{10}" placeholder="Enter emergency contact number" /></label>
+          <label>Emergency contact name<input className="field" defaultValue={employee?.emergency_contact_name ?? ""} name="emergency_contact_name" placeholder="Enter contact person name" /></label>
+          <label>Emergency relation<input className="field" defaultValue={employee?.emergency_contact_relation ?? ""} name="emergency_contact_relation" placeholder="Enter relation" /></label>
+          <label>Aadhaar front file<input className="field" name="aadhaar_front_file" type="file" /></label>
+          <label>Aadhaar back file<input className="field" name="aadhaar_back_file" type="file" /></label>
+          <label>PAN upload<input className="field" name="pan_upload_file" type="file" /></label>
+          <label>Profile photo<input accept="image/*" className="field" name="profile_photo_file" type="file" /></label>
+        </>
+      ) : null}
       {isEdit ? (
         <label>Status
           <select className="select" defaultValue={employee?.is_active === false ? "false" : "true"} name="is_active" required>

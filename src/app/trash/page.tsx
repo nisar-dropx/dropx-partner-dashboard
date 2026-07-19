@@ -35,6 +35,17 @@ type FleetTrashRow = {
   uploaded_at: string | null;
 };
 
+type ProfileTrashRow = {
+  id: string;
+  owner_type: string;
+  owner_id: string;
+  document_label: string | null;
+  file_name: string | null;
+  file_size: number | null;
+  replaced_at: string | null;
+  delete_after: string | null;
+};
+
 export default async function TrashPage() {
   const permission = await requirePagePermission("trash", "access");
   const companyId = requireCompanyId(permission);
@@ -54,7 +65,7 @@ export default async function TrashPage() {
 
 async function loadTrashItems(companyId: string): Promise<TrashItem[]> {
   if (!supabaseAdmin) return [];
-  const [businessResult, fleetResult] = await Promise.all([
+  const [businessResult, fleetResult, profileResult] = await Promise.all([
     supabaseAdmin
       .from("business_document_records")
       .select("id, document_type_code, scope_label, file_name, file_size, storage_bucket, storage_path, replaced_at, delete_after, updated_at, document_types (name)")
@@ -69,9 +80,21 @@ async function loadTrashItems(companyId: string): Promise<TrashItem[]> {
       .eq("is_active", false)
       .not("storage_path", "is", null)
       .order("delete_after", { ascending: true })
+    ,
+    supabaseAdmin
+      .from("profile_document_trash")
+      .select("id, owner_type, owner_id, document_label, file_name, file_size, replaced_at, delete_after")
+      .eq("company_id", companyId)
+      .order("delete_after", { ascending: true })
   ]);
   if (businessResult.error) throw new Error(businessResult.error.message);
   if (fleetResult.error) throw new Error(fleetResult.error.message);
+  if (profileResult.error) {
+    const message = profileResult.error.message.toLowerCase();
+    if (!message.includes("profile_document_trash") && !message.includes("does not exist") && !message.includes("schema cache")) {
+      throw new Error(profileResult.error.message);
+    }
+  }
 
   const business = ((businessResult.data ?? []) as BusinessTrashRow[]).map((row) => {
     const relation = Array.isArray(row.document_types) ? row.document_types[0] : row.document_types;
@@ -104,7 +127,21 @@ async function loadTrashItems(companyId: string): Promise<TrashItem[]> {
     sizeLabel: formatBytes(row.file_size)
   }));
 
-  return [...business, ...fleet].sort((a, b) => {
+  const profile = ((profileResult.data ?? []) as ProfileTrashRow[]).map((row) => ({
+    id: row.id,
+    key: `profile:${row.id}`,
+    source: "profile" as const,
+    reason: "Replaced",
+    fileName: row.file_name || "Profile document",
+    owner: row.owner_type === "field_executive" ? "Field executive" : "Employee",
+    documentName: row.document_label || "Profile document",
+    deletedAt: row.replaced_at,
+    deleteAfter: row.delete_after,
+    daysRemaining: daysRemaining(row.delete_after),
+    sizeLabel: formatBytes(row.file_size)
+  }));
+
+  return [...business, ...fleet, ...profile].sort((a, b) => {
     const left = a.deleteAfter ? new Date(a.deleteAfter).getTime() : Number.MAX_SAFE_INTEGER;
     const right = b.deleteAfter ? new Date(b.deleteAfter).getTime() : Number.MAX_SAFE_INTEGER;
     return left - right;
@@ -121,9 +158,11 @@ async function permanentlyDeleteTrashItems(formData: FormData) {
   const keys = Array.from(new Set(formData.getAll("trash_key").map((value) => String(value))));
   const businessIds = keys.filter((key) => key.startsWith("business:")).map((key) => key.replace("business:", ""));
   const fleetIds = keys.filter((key) => key.startsWith("fleet:")).map((key) => key.replace("fleet:", ""));
+  const profileIds = keys.filter((key) => key.startsWith("profile:")).map((key) => key.replace("profile:", ""));
 
   await deleteTrashRows("business_document_records", businessIds, companyId);
   await deleteTrashRows("fleet_vehicle_documents", fleetIds, companyId);
+  await deleteProfileTrashRows(profileIds, companyId);
   revalidatePath("/trash");
 }
 
@@ -155,6 +194,36 @@ async function deleteTrashRows(table: "business_document_records" | "fleet_vehic
     .delete()
     .eq("company_id", companyId)
     .eq("is_active", false)
+    .in("id", ids);
+  if (deleteError) throw new Error(deleteError.message);
+}
+
+async function deleteProfileTrashRows(ids: string[], companyId: string) {
+  if (!ids.length || !supabaseAdmin) return;
+  const { data, error } = await supabaseAdmin
+    .from("profile_document_trash")
+    .select("id, storage_bucket, storage_path")
+    .eq("company_id", companyId)
+    .in("id", ids);
+  if (error) throw new Error(error.message);
+
+  const filesByBucket = new Map<string, string[]>();
+  for (const row of data ?? []) {
+    const bucket = String(row.storage_bucket ?? "").trim();
+    const path = String(row.storage_path ?? "").trim();
+    if (!bucket || !path) continue;
+    filesByBucket.set(bucket, [...(filesByBucket.get(bucket) ?? []), path]);
+  }
+
+  for (const [bucket, paths] of filesByBucket.entries()) {
+    const removeResult = await supabaseAdmin.storage.from(bucket).remove(paths);
+    if (removeResult.error) throw new Error(removeResult.error.message);
+  }
+
+  const { error: deleteError } = await supabaseAdmin
+    .from("profile_document_trash")
+    .delete()
+    .eq("company_id", companyId)
     .in("id", ids);
   if (deleteError) throw new Error(deleteError.message);
 }

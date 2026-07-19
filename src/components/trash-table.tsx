@@ -7,7 +7,7 @@ import { SubmitButton } from "@/components/submit-button";
 export type TrashItem = {
   id: string;
   key: string;
-  source: "business" | "fleet";
+  source: "business" | "fleet" | "profile";
   reason: string;
   fileName: string;
   owner: string;

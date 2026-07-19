@@ -22,18 +22,18 @@ export async function GET(request: NextRequest) {
     const source = request.nextUrl.searchParams.get("source");
     const id = request.nextUrl.searchParams.get("id");
     const asInline = request.nextUrl.searchParams.get("disposition") === "inline";
-    if ((source !== "business" && source !== "fleet") || !id) {
+    if ((source !== "business" && source !== "fleet" && source !== "profile") || !id) {
       return NextResponse.json({ error: "Trash file is required." }, { status: 400 });
     }
 
-    const table = source === "business" ? "business_document_records" : "fleet_vehicle_documents";
-    const { data, error } = await supabaseAdmin
-      .from(table)
+    const query = supabaseAdmin
+      .from(source === "business" ? "business_document_records" : source === "fleet" ? "fleet_vehicle_documents" : "profile_document_trash")
       .select("file_name, content_type, storage_bucket, storage_path")
       .eq("company_id", companyId)
-      .eq("id", id)
-      .eq("is_active", false)
-      .maybeSingle();
+      .eq("id", id);
+    const { data, error } = source === "profile"
+      ? await query.maybeSingle()
+      : await query.eq("is_active", false).maybeSingle();
     if (error) throw new Error(error.message);
 
     const row = data as TrashFileRow | null;

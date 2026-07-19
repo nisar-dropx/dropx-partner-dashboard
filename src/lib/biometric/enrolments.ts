@@ -65,6 +65,7 @@ export async function syncBiometricEnrolment({
     .from("biometric_enrolments")
     .select("id, employee_id, field_executive_id")
     .eq("company_id", companyId)
+    .eq("worker_type", workerType)
     .eq("enrolment_id", cleaned)
     .is("effective_to", null)
     .maybeSingle();

@@ -9,6 +9,7 @@ import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
 import { generateBiometricEnrolmentId } from "@/lib/biometric/ids";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { cleanCountryCode } from "@/lib/country-codes";
+import { moveProfileDocumentToTrash, uploadProfileDocument } from "@/lib/profile-document-storage";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { sendFieldExecutiveOnboardingWhatsApp } from "@/lib/whatsapp";
 
@@ -51,6 +52,14 @@ function friendlyFieldExecutiveError(message: string) {
 function generatedDropxId() {
   return `FE-${Date.now().toString(36).toUpperCase()}`;
 }
+
+const fieldExecutiveDocumentFields = [
+  { formKey: "aadhaar_front_file", pathKey: "aadhaar_front_path", label: "Aadhaar front" },
+  { formKey: "aadhaar_back_file", pathKey: "aadhaar_back_path", label: "Aadhaar back" },
+  { formKey: "dl_front_file", pathKey: "dl_front_path", label: "DL front" },
+  { formKey: "dl_back_file", pathKey: "dl_back_path", label: "DL back" },
+  { formKey: "profile_photo_file", pathKey: "profile_photo_path", label: "Profile photo" }
+] as const;
 
 function normalizeFieldExecutivePayload(formData: FormData, requireId = false) {
   const id = requireId ? required(formData.get("id"), "Field executive") : null;
@@ -256,6 +265,15 @@ export async function updateFieldExecutive(formData: FormData) {
 
   try {
     const { id, payload } = normalizeFieldExecutivePayload(formData, true);
+    if (!id) throw new Error("Field executive is required.");
+    const executiveId = id;
+    const existingResult = await supabaseAdmin
+      .from("field_executives")
+      .select("aadhaar_front_path, aadhaar_back_path, dl_front_path, dl_back_path, profile_photo_path")
+      .eq("id", executiveId)
+      .eq("company_id", companyId)
+      .maybeSingle();
+    if (existingResult.error) throw new Error(existingResult.error.message);
 
     if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(payload.location_id)) {
       throw new Error("You do not have access to the selected location.");
@@ -269,13 +287,40 @@ export async function updateFieldExecutive(formData: FormData) {
     if (locationError) throw new Error(locationError.message);
     if (!location) throw new Error("Selected location is not available for this company.");
 
+    const documentPayload: Record<string, string> = {};
+    const existingPaths = existingResult.data as Record<string, string | null> | null;
+    for (const field of fieldExecutiveDocumentFields) {
+      const uploaded = await uploadProfileDocument({
+        companyId,
+        documentKey: field.pathKey.replace("_path", ""),
+        fileValue: formData.get(field.formKey),
+        ownerId: executiveId,
+        ownerType: "field_executive"
+      });
+      if (!uploaded) continue;
+      const oldPath = existingPaths?.[field.pathKey] ?? null;
+      if (oldPath) {
+        await moveProfileDocumentToTrash({
+          companyId,
+          ownerId: executiveId,
+          ownerType: "field_executive",
+          documentLabel: field.label,
+          fileName: oldPath.split("/").pop(),
+          storagePath: oldPath,
+          replacedBy: authorization.userId
+        });
+      }
+      documentPayload[field.pathKey] = uploaded.storagePath;
+    }
+
     const { error } = await supabaseAdmin
       .from("field_executives")
       .update({
         ...payload,
+        ...documentPayload,
         updated_at: new Date().toISOString()
       })
-      .eq("id", id)
+      .eq("id", executiveId)
       .eq("company_id", companyId);
 
     if (error) {
@@ -291,7 +336,7 @@ export async function updateFieldExecutive(formData: FormData) {
       createdBy: authorization.userId,
       effectiveFrom: payload.date_of_join,
       enrolmentId: payload.biometric_id,
-      fieldExecutiveId: id,
+      fieldExecutiveId: executiveId,
       isActive: Boolean(payload.is_active),
       locationId: payload.location_id,
       workerType: "individual_contract"
