@@ -3,9 +3,10 @@
 import Image from "next/image";
 import { useEffect, useState, type FormEvent } from "react";
 import { ConnectProfileCompletion } from "./connect-profile-completion";
+import { ConnectExitManagement } from "./connect-exit-management";
 import { countryCodeOptions } from "@/lib/country-codes";
 
-type Step = "mobile" | "pin" | "otp" | "createPin" | "account" | "profile" | "home" | "settings";
+type Step = "mobile" | "pin" | "otp" | "createPin" | "account" | "profile" | "exit" | "home" | "settings";
 
 type ConnectAccount = {
   id: string;
@@ -249,7 +250,7 @@ export function ConnectLoginFlow() {
     setStep(account.profileType === "employee" ? "profile" : "home");
   }
 
-  const isLoggedInView = step === "account" || step === "profile" || step === "home" || step === "settings";
+  const isLoggedInView = step === "account" || step === "profile" || step === "exit" || step === "home" || step === "settings";
   const activeAccount = selectedAccount ?? findDefaultAccount(accounts, defaultAccountKey);
 
   return (
@@ -277,6 +278,7 @@ export function ConnectLoginFlow() {
           </div>
           {menuOpen ? (
             <section className="connect-header-menu connect-main-menu">
+              {activeAccount?.profileType === "employee" ? <button onClick={() => { setSelectedAccount(activeAccount); setStep("exit"); setMenuOpen(false); setProfileMenuOpen(false); }} type="button">Exit management</button> : null}
               <button onClick={() => { setStep("settings"); setMenuOpen(false); setProfileMenuOpen(false); }} type="button">
                 <svg aria-hidden="true" fill="none" height="18" viewBox="0 0 24 24" width="18">
                   <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" strokeWidth="2" />
@@ -428,6 +430,8 @@ export function ConnectLoginFlow() {
           </label>
           <button className="connect-secondary" onClick={() => setStep(selectedAccount ? selectedAccount.profileType === "employee" ? "profile" : "home" : "account")} type="button">Back</button>
         </section>
+      ) : step === "exit" && selectedAccount ? (
+        <ConnectExitManagement account={selectedAccount} onBack={() => setStep("profile")} />
       ) : (
         step === "profile" && selectedAccount ? (
         <ConnectProfileCompletion

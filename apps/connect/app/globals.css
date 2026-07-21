@@ -7336,6 +7336,44 @@ tr:last-child td {
   margin: 0;
 }
 
+.connect-exit-page, .connect-exit-stack { display: grid; gap: 14px; }
+.connect-section-heading { align-items: center; display: flex; gap: 12px; }
+.connect-section-heading p { color: #e84815; font-size: 11px; font-weight: 850; letter-spacing: .08em; margin: 0 0 3px; text-transform: uppercase; }
+.connect-section-heading h2 { font-size: 24px; margin: 0; }
+.connect-back-button { background: #fff; border: 1px solid #e5e7eb; border-radius: 50%; color: #111827; font-size: 20px; height: 40px; width: 40px; }
+.connect-exit-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 4px 16px rgba(17,24,39,.05); display: grid; gap: 15px; padding: 18px; }
+.connect-exit-card h3 { font-size: 19px; margin: 3px 0 5px; }
+.connect-exit-card p { color: #6b7280; font-size: 13px; line-height: 1.5; margin: 0; }
+.connect-exit-card label { color: #374151; display: grid; font-size: 12px; font-weight: 800; gap: 6px; }
+.connect-exit-card input, .connect-exit-card select, .connect-exit-card textarea { background: #fff; border: 1px solid #d1d5db; border-radius: 8px; color: #111827; font: inherit; min-height: 44px; padding: 10px 11px; width: 100%; }
+.connect-exit-card textarea { min-height: 84px; resize: vertical; }
+.connect-exit-card label small { color: #6b7280; font-weight: 500; }
+.connect-exit-eyebrow { color: #d6263a; font-size: 11px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+.connect-exit-warning { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; display: grid; gap: 4px; padding: 12px; }
+.connect-exit-warning strong { color: #9a3412; font-size: 12px; }
+.connect-exit-warning span { color: #7c2d12; font-size: 11px; line-height: 1.45; }
+.connect-exit-status-head { align-items: start; display: flex; justify-content: space-between; gap: 12px; }
+.connect-status-badge { background: #fff1f2; border-radius: 99px; color: #be123c; font-size: 10px; font-style: normal; font-weight: 800; padding: 6px 9px; text-transform: capitalize; }
+.connect-status-badge.closed, .connect-status-badge.documents_ready { background: #ecfdf5; color: #047857; }
+.connect-exit-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.connect-exit-facts div { background: #f9fafb; border-radius: 8px; display: grid; gap: 4px; padding: 11px; }
+.connect-exit-facts span { color: #6b7280; font-size: 10px; text-transform: uppercase; }
+.connect-exit-facts strong { font-size: 12px; overflow-wrap: anywhere; text-transform: capitalize; }
+.connect-exit-list, .connect-document-list { display: grid; gap: 8px; }
+.connect-exit-list > div { align-items: center; border-top: 1px solid #eef0f2; display: grid; gap: 9px; grid-template-columns: 12px 1fr auto; padding: 10px 0; }
+.connect-task-dot { background: #f59e0b; border-radius: 50%; height: 9px; width: 9px; }
+.connect-task-dot.completed, .connect-task-dot.waived { background: #059669; }
+.connect-task-dot.blocked { background: #dc2626; }
+.connect-exit-list strong, .connect-exit-list small { display: block; }
+.connect-exit-list strong { font-size: 12px; }
+.connect-exit-list small { color: #6b7280; font-size: 10px; margin-top: 3px; }
+.connect-exit-list em { color: #6b7280; font-size: 10px; font-style: normal; text-transform: capitalize; }
+.connect-document-list a { align-items: center; border: 1px solid #e5e7eb; border-radius: 8px; color: inherit; display: grid; gap: 10px; grid-template-columns: 38px 1fr auto; padding: 10px; text-decoration: none; }
+.connect-document-list a > span { background: #fff1f2; border-radius: 6px; color: #be123c; font-size: 10px; font-weight: 850; padding: 9px 5px; text-align: center; }
+.connect-document-list strong, .connect-document-list small { display: block; overflow-wrap: anywhere; }
+.connect-document-list strong { font-size: 11px; }.connect-document-list small { color: #6b7280; font-size: 9px; margin-top: 3px; text-transform: capitalize; }.connect-document-list b { color: #d6263a; font-size: 10px; }
+.connect-empty-note { background: #f9fafb; border-radius: 8px; padding: 13px !important; text-align: center; }
+
 @media (max-width: 520px) {
   .connect-page {
     align-items: start;

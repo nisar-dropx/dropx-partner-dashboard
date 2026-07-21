@@ -239,3 +239,21 @@ export async function createConnectSession({
     expires: expiresAt
   });
 }
+
+export async function requireConnectAccount(profileType: ConnectAccount["profileType"], accountId: string) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const token = cookies().get(connectSessionCookieName)?.value;
+  if (!token) throw new Error("Connect session expired. Please log in again.");
+  const sessionHash = createHash("sha256").update(token).digest("hex");
+  const { data: session, error } = await supabaseAdmin.from("connect_login_sessions")
+    .select("country_code, mobile_number, expires_at, revoked_at").eq("session_hash", sessionHash).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!session || session.revoked_at || new Date(session.expires_at).getTime() < Date.now()) {
+    cookies().delete(connectSessionCookieName);
+    throw new Error("Connect session expired. Please log in again.");
+  }
+  const accounts = await findConnectAccounts(session.country_code, session.mobile_number);
+  const account = accounts.find((item) => item.profileType === profileType && item.id === accountId);
+  if (!account) throw new Error("This account is not available for the current login.");
+  return account;
+}
