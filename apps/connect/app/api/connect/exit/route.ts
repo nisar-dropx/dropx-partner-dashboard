@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { requireConnectAccount } from "@/lib/connect-auth";
-import { notifyEmployeeExitSubmitted, notifyEmployeeExitWithdrawal } from "@/lib/connect-exit-notifications";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { requireConnectAccount } from "../../../../src/lib/connect-auth";
+import { notifyEmployeeExitSubmitted, notifyEmployeeExitWithdrawal } from "../../../../src/lib/connect-exit-notifications";
+import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database is unavailable."); return supabaseAdmin; }
 function clean(value: unknown) { return String(value ?? "").trim(); }

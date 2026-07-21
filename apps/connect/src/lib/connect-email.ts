@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { supabaseAdmin } from "./supabase-admin";
 
 export async function sendConnectEmail(input: { companyId: string; to: string[]; cc?: string[]; subject: string; body: string }) {
   if (!supabaseAdmin) throw new Error("Database is unavailable.");

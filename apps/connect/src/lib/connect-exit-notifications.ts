@@ -1,5 +1,5 @@
-import { sendConnectEmail } from "@/lib/connect-email";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { sendConnectEmail } from "./connect-email";
+import { supabaseAdmin } from "./supabase-admin";
 
 function fill(template: string, values: Record<string, string>) { return template.replace(/{{\s*([a-z0-9_]+)\s*}}/gi, (_, key: string) => values[key] ?? ""); }
 
