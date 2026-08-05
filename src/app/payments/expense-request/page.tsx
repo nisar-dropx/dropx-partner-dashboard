@@ -506,7 +506,7 @@ export default async function ExpenseRequestPage({
                 </label>
                 <label>
                   Actual Amount *
-                  <input className="field" min="0" name="amount" placeholder="0.00" required step="0.01" type="number" defaultValue={bankRequest.amount_requested ?? ""} />
+                  <input className="field" min="0" name="amount" placeholder="Enter actual amount" required step="0.01" type="number" />
                 </label>
               </div>
               <PaymentBeneficiaryFields
