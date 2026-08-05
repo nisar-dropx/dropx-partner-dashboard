@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
+import { PaymentContactPicker } from "@/components/payment-contact-picker";
 import { SearchableSelect, type SearchableSelectOption } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 import { paymentFileAccept, paymentFileGroupLabels } from "@/lib/payment-file-types";
@@ -116,6 +117,8 @@ export function PaymentRequestForm({
   const [upiVerified, setUpiVerified] = useState(false);
   const [upiVerifying, setUpiVerifying] = useState(false);
   const [upiAccountHolderName, setUpiAccountHolderName] = useState("");
+  const [selectedBankContactId, setSelectedBankContactId] = useState("");
+  const [selectedUpiContactId, setSelectedUpiContactId] = useState("");
   const selectedHead = useMemo(() => heads.find((head) => head.id === selectedHeadId) ?? null, [heads, selectedHeadId]);
   const supportedPaymentModes = useMemo(() => normalizePaymentModes(selectedHead?.supported_payment_modes), [selectedHead]);
   const bankContacts = useMemo(() => savedContacts.filter((contact) => contact.bank_account_no && contact.ifsc), [savedContacts]);
@@ -158,6 +161,7 @@ export function PaymentRequestForm({
   }
 
   function invalidateBankVerification() {
+    setSelectedBankContactId("");
     setBankVerified(false);
     setAccountHolderName("");
     setBankVerificationMessage("");
@@ -187,8 +191,16 @@ export function PaymentRequestForm({
   }
 
   function selectBankContact(contactId: string) {
+    setSelectedBankContactId(contactId);
     const contact = bankContacts.find((item) => item.id === contactId);
-    if (!contact) return;
+    if (!contact) {
+      setBankAccountNo("");
+      setIfsc("");
+      setAccountHolderName("");
+      setBankVerified(false);
+      setBankVerificationMessage("");
+      return;
+    }
     setBankAccountNo(contact.bank_account_no ?? "");
     setIfsc(contact.ifsc ?? "");
     setAccountHolderName(contact.account_holder_name);
@@ -199,8 +211,15 @@ export function PaymentRequestForm({
   }
 
   function selectUpiContact(contactId: string) {
+    setSelectedUpiContactId(contactId);
     const contact = upiContacts.find((item) => item.id === contactId);
-    if (!contact) return;
+    if (!contact) {
+      setUpiId("");
+      setUpiAccountHolderName("");
+      setUpiVerified(false);
+      setBankVerificationMessage("");
+      return;
+    }
     setUpiId(contact.upi_id ?? "");
     setUpiAccountHolderName(contact.account_holder_name);
     setContactNo(contact.contact_no ?? "");
@@ -264,20 +283,13 @@ export function PaymentRequestForm({
             </div>
           ) : isUpiPayment ? (
             <div className="form-grid three">
-              <label className="span-3">
-                Saved UPI Contact
-                <SearchableSelect
-                  disabled={blockedByExpenseApproval || !upiContacts.length}
-                  name="saved_upi_contact_id"
-                  onValueChange={selectUpiContact}
-                  options={upiContacts.map((contact) => ({ value: contact.id, label: contact.account_holder_name, helper: [contact.upi_id, contact.contact_no, contact.email].filter(Boolean).join(" · ") }))}
-                  placeholder={upiContacts.length ? "Search your saved UPI contacts" : "No saved UPI contacts"}
-                />
-              </label>
+              <div className="span-3">
+                <PaymentContactPicker contacts={upiContacts} disabled={blockedByExpenseApproval} mode="upi" onValueChange={selectUpiContact} selectedId={selectedUpiContactId} />
+              </div>
               <label>
                 UPI ID *
                 <span className="field-with-action">
-                  <input className="field" disabled={blockedByExpenseApproval} name="upi_id" onChange={(event) => { setUpiId(event.target.value.replace(/\s/g, "").toLowerCase()); setUpiVerified(false); setUpiAccountHolderName(""); setBankVerificationMessage(""); }} required placeholder="name@bank" value={upiId} />
+                  <input className="field" disabled={blockedByExpenseApproval} name="upi_id" onChange={(event) => { setUpiId(event.target.value.replace(/\s/g, "").toLowerCase()); setSelectedUpiContactId(""); setUpiVerified(false); setUpiAccountHolderName(""); setBankVerificationMessage(""); }} required placeholder="name@bank" value={upiId} />
                   <button className="button secondary compact" disabled={blockedByExpenseApproval || upiVerifying || !upiId || upiVerified} onClick={verifyUpiId} type="button">{upiVerifying ? "Verifying..." : upiVerified ? "Verified" : "Verify"}</button>
                 </span>
                 {bankVerificationMessage ? <span className={upiVerified ? "verification-message success" : "verification-message error"}>{bankVerificationMessage}</span> : null}
@@ -298,16 +310,9 @@ export function PaymentRequestForm({
             </div>
           ) : (
             <div className="form-grid three">
-              <label className="span-3">
-                Saved Bank Contact
-                <SearchableSelect
-                  disabled={blockedByExpenseApproval || !bankContacts.length}
-                  name="saved_bank_contact_id"
-                  onValueChange={selectBankContact}
-                  options={bankContacts.map((contact) => ({ value: contact.id, label: contact.account_holder_name, helper: [contact.bank_account_no, contact.ifsc, contact.contact_no, contact.email].filter(Boolean).join(" · ") }))}
-                  placeholder={bankContacts.length ? "Search your saved bank contacts" : "No saved bank contacts"}
-                />
-              </label>
+              <div className="span-3">
+                <PaymentContactPicker contacts={bankContacts} disabled={blockedByExpenseApproval} mode="bank" onValueChange={selectBankContact} selectedId={selectedBankContactId} />
+              </div>
               <label>
                 Bank Account No *
                 <input className="field" disabled={blockedByExpenseApproval} name="bank_account_no" onChange={(event) => { setBankAccountNo(event.target.value.toUpperCase()); invalidateBankVerification(); }} required value={bankAccountNo} />

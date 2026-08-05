@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { SearchableSelect } from "@/components/searchable-select";
+import { PaymentContactPicker } from "@/components/payment-contact-picker";
 import type { UserPaymentContact } from "@/lib/payment-contacts";
 import { PAYMENT_MODES, normalizePaymentModes, type PaymentMode } from "@/lib/payment-modes";
 
@@ -34,6 +34,8 @@ export function PaymentBeneficiaryFields({
   const [upiVerified, setUpiVerified] = useState(false);
   const [upiVerifying, setUpiVerifying] = useState(false);
   const [upiAccountHolderName, setUpiAccountHolderName] = useState("");
+  const [selectedBankContactId, setSelectedBankContactId] = useState("");
+  const [selectedUpiContactId, setSelectedUpiContactId] = useState("");
   const [verificationMessage, setVerificationMessage] = useState("");
   const supportedPaymentModes = useMemo(() => normalizePaymentModes(allowedPaymentModes), [allowedPaymentModes]);
   const bankContacts = useMemo(() => savedContacts.filter((contact) => contact.bank_account_no && contact.ifsc), [savedContacts]);
@@ -45,6 +47,7 @@ export function PaymentBeneficiaryFields({
   }, [paymentMode, supportedPaymentModes]);
 
   function invalidateBankVerification() {
+    setSelectedBankContactId("");
     setBankVerified(false);
     setAccountHolderName("");
     setVerificationMessage("");
@@ -99,8 +102,16 @@ export function PaymentBeneficiaryFields({
   }
 
   function selectBankContact(contactId: string) {
+    setSelectedBankContactId(contactId);
     const contact = bankContacts.find((item) => item.id === contactId);
-    if (!contact) return;
+    if (!contact) {
+      setBankAccountNo("");
+      setIfsc("");
+      setAccountHolderName("");
+      setBankVerified(false);
+      setVerificationMessage("");
+      return;
+    }
     setBankAccountNo(contact.bank_account_no ?? "");
     setIfsc(contact.ifsc ?? "");
     setAccountHolderName(contact.account_holder_name);
@@ -111,8 +122,15 @@ export function PaymentBeneficiaryFields({
   }
 
   function selectUpiContact(contactId: string) {
+    setSelectedUpiContactId(contactId);
     const contact = upiContacts.find((item) => item.id === contactId);
-    if (!contact) return;
+    if (!contact) {
+      setUpiId("");
+      setUpiAccountHolderName("");
+      setUpiVerified(false);
+      setVerificationMessage("");
+      return;
+    }
     setUpiId(contact.upi_id ?? "");
     setUpiAccountHolderName(contact.account_holder_name);
     setContactNo(contact.contact_no ?? "");
@@ -159,16 +177,9 @@ export function PaymentBeneficiaryFields({
         </div>
       ) : paymentMode === "upi_payment" ? (
         <div className="form-grid three" key="upi-payment-fields">
-          <label className="span-3">
-            Saved UPI Contact
-            <SearchableSelect
-              name="saved_upi_contact_id"
-              onValueChange={selectUpiContact}
-              options={upiContacts.map((contact) => ({ value: contact.id, label: contact.account_holder_name, helper: [contact.upi_id, contact.contact_no, contact.email].filter(Boolean).join(" · ") }))}
-              placeholder={upiContacts.length ? "Search your saved UPI contacts" : "No saved UPI contacts"}
-              disabled={!upiContacts.length}
-            />
-          </label>
+          <div className="span-3">
+            <PaymentContactPicker contacts={upiContacts} mode="upi" onValueChange={selectUpiContact} selectedId={selectedUpiContactId} />
+          </div>
           <label>
             UPI ID *
             <span className="field-with-action">
@@ -178,6 +189,7 @@ export function PaymentBeneficiaryFields({
                 name="upi_id"
                 onChange={(event) => {
                   setUpiId(event.target.value.replace(/\s/g, "").toLowerCase());
+                  setSelectedUpiContactId("");
                   setUpiVerified(false);
                   setUpiAccountHolderName("");
                   setVerificationMessage("");
@@ -208,16 +220,9 @@ export function PaymentBeneficiaryFields({
         </div>
       ) : (
         <div className="form-grid three" key="account-transfer-fields">
-          <label className="span-3">
-            Saved Bank Contact
-            <SearchableSelect
-              name="saved_bank_contact_id"
-              onValueChange={selectBankContact}
-              options={bankContacts.map((contact) => ({ value: contact.id, label: contact.account_holder_name, helper: [contact.bank_account_no, contact.ifsc, contact.contact_no, contact.email].filter(Boolean).join(" · ") }))}
-              placeholder={bankContacts.length ? "Search your saved bank contacts" : "No saved bank contacts"}
-              disabled={!bankContacts.length}
-            />
-          </label>
+          <div className="span-3">
+            <PaymentContactPicker contacts={bankContacts} mode="bank" onValueChange={selectBankContact} selectedId={selectedBankContactId} />
+          </div>
           <label>
             Bank Account No *
             <input
