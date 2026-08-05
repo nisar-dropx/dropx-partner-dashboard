@@ -16,7 +16,6 @@ const payments: NavItem = {
   label: "Payments",
   icon: "₹",
   children: [
-    { code: "expense_requests", label: "Expense Request", href: "/payments/expense-request" },
     { code: "payment_requests", label: "Payment Requests", href: "/payments/requests" },
     { code: "payment_approvals", label: "Approvals", href: "/payments/approvals" }
   ]
