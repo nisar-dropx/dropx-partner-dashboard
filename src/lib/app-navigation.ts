@@ -47,6 +47,7 @@ export const navItems: NavItem[] = [
     icon: "+",
     children: [
       { code: "people_all", label: "All People", href: "/people/all" },
+      { code: "people_review", label: "Under Review", href: "/people/review" },
       { code: "people_review", label: "Workforce Lifecycle", href: "/people/workforce-lifecycle" }
     ]
   },
