@@ -34,7 +34,7 @@ export async function loadPeopleExceptionCount(authorization: AuthorizationConte
     if (text(row.vehicle_reg_no) && row.vehicle_pollution_exp_date && row.vehicle_pollution_exp_date < today) add("vehicle_pollution_expired");
   }
   const [verifications, resolutions] = await Promise.all([
-    supabaseAdmin.from("connect_profile_verifications").select("account_id, profile_type, kind, message, updated_at").eq("company_id", authorization.companyId).eq("verified", false),
+    supabaseAdmin.from("connect_profile_verifications").select("account_id, profile_type, kind, message, updated_at").eq("company_id", authorization.companyId).eq("verified", false).neq("kind", "bank"),
     supabaseAdmin.from("people_exception_resolutions").select("profile_type, profile_id, rule_code, source_updated_at").eq("company_id", authorization.companyId)
   ]);
   if (verifications.error || resolutions.error) return issues.length;

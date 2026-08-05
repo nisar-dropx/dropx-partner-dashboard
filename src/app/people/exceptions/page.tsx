@@ -42,7 +42,7 @@ async function loadExceptions(companyId: string, authorization: AuthorizationCon
   if (profileError) return { rows: [] as ExceptionRow[], error: profileError };
 
   const [verificationResult, resolutionResult] = await Promise.all([
-    supabaseAdmin.from("connect_profile_verifications").select("account_id, profile_type, kind, message, updated_at").eq("company_id", companyId).eq("verified", false),
+    supabaseAdmin.from("connect_profile_verifications").select("account_id, profile_type, kind, message, updated_at").eq("company_id", companyId).eq("verified", false).neq("kind", "bank"),
     supabaseAdmin.from("people_exception_resolutions").select("profile_type, profile_id, rule_code, source_updated_at").eq("company_id", companyId)
   ]);
   if (verificationResult.error || resolutionResult.error) return { rows: [] as ExceptionRow[], error: verificationResult.error?.message || resolutionResult.error?.message || "Unable to load exceptions." };
