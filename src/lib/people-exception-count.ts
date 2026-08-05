@@ -12,7 +12,7 @@ const issueKey = (issue: Issue) => `${issue.type}:${issue.id}:${issue.rule}`;
 export async function loadPeopleExceptionCount(authorization: AuthorizationContext) {
   if (!supabaseAdmin || !authorization.companyId) return 0;
   const results = await Promise.all(SOURCES.map(async ([table, type]) => {
-    let query = supabaseAdmin!.from(table).select("id, statutory_applicability, pf_uan, esi_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, updated_at").eq("company_id", authorization.companyId!).eq("is_active", true);
+    let query = supabaseAdmin!.from(table).select("id, statutory_applicability, pf_uan, esi_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, updated_at").eq("company_id", authorization.companyId!).eq(type === "employee" ? "profile_completion_status" : "onboarding_status", "active");
     if (!authorization.hasAllLocationAccess && !authorization.isMasterOwner) query = query.in("location_id", authorization.locationScopeIds);
     const result = await query;
     return { type, rows: (result.data ?? []) as Profile[], error: result.error };

@@ -31,7 +31,7 @@ export async function updateAndClearPeopleException(formData: FormData) {
   }
   if (Object.keys(payload).length === 1) redirect("/people/exceptions?error=No+editable+details+were+submitted");
 
-  let update = supabaseAdmin.from(table).update(payload).eq("company_id", companyId).eq("id", profileId).eq("is_active", true);
+  let update = supabaseAdmin.from(table).update(payload).eq("company_id", companyId).eq("id", profileId).eq(profileType === "employee" ? "profile_completion_status" : "onboarding_status", "active");
   if (!authorization.hasAllLocationAccess && !authorization.isMasterOwner) update = update.in("location_id", authorization.locationScopeIds);
   const { data, error: updateError } = await update.select("updated_at").maybeSingle();
   if (updateError || !data) redirect(`/people/exceptions?error=${encodeURIComponent(updateError?.message ?? "Active profile was not found")}`);
