@@ -10,6 +10,7 @@ import { requirePagePermission, type AuthorizationContext } from "@/lib/authoriz
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate } from "@/lib/date-format";
 import { paymentFileAccept, paymentFileGroupLabels } from "@/lib/payment-file-types";
+import { loadUserPaymentContacts } from "@/lib/payment-contacts";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import type { PaymentMode } from "@/lib/payment-modes";
 import { createExpenseRequest, resubmitExpenseRequest, submitPaymentBankDetails } from "@/app/payments/requests/actions";
@@ -290,6 +291,7 @@ export default async function ExpenseRequestPage({
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.expense_requests;
   const { error, heads, locations, requests } = await loadExpenseRequestData(companyId, authorization);
+  const savedContacts = await loadUserPaymentContacts(companyId, authorization.userId);
   const scopedLocationIds = new Set(authorization.locationScopeIds);
   const userEmail = authorization.email?.trim().toLowerCase() ?? "";
   const visibleLocations = authorization.hasAllLocationAccess
@@ -513,6 +515,7 @@ export default async function ExpenseRequestPage({
                 defaultContactNo={bankRequest.contact_no}
                 defaultEmail={bankRequest.email}
                 defaultIfsc={bankRequest.ifsc}
+                savedContacts={savedContacts}
               />
               {bankQuestions.length ? (
                 <>

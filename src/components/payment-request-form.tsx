@@ -5,6 +5,7 @@ import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import { SearchableSelect, type SearchableSelectOption } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 import { paymentFileAccept, paymentFileGroupLabels } from "@/lib/payment-file-types";
+import type { UserPaymentContact } from "@/lib/payment-contacts";
 import { PAYMENT_MODES, normalizePaymentModes, type PaymentMode } from "@/lib/payment-modes";
 
 type PaymentQuestion = {
@@ -32,6 +33,7 @@ type PaymentRequestFormProps = {
   headOptions: SearchableSelectOption[];
   heads: PaymentHead[];
   locationOptions: SearchableSelectOption[];
+  savedContacts?: UserPaymentContact[];
   showBankDetails?: boolean;
   submitLabel?: string;
 };
@@ -95,6 +97,7 @@ export function PaymentRequestForm({
   headOptions,
   heads,
   locationOptions,
+  savedContacts = [],
   showBankDetails = true,
   submitLabel = "Submit request"
 }: PaymentRequestFormProps) {
@@ -115,6 +118,8 @@ export function PaymentRequestForm({
   const [upiAccountHolderName, setUpiAccountHolderName] = useState("");
   const selectedHead = useMemo(() => heads.find((head) => head.id === selectedHeadId) ?? null, [heads, selectedHeadId]);
   const supportedPaymentModes = useMemo(() => normalizePaymentModes(selectedHead?.supported_payment_modes), [selectedHead]);
+  const bankContacts = useMemo(() => savedContacts.filter((contact) => contact.bank_account_no && contact.ifsc), [savedContacts]);
+  const upiContacts = useMemo(() => savedContacts.filter((contact) => contact.upi_id), [savedContacts]);
   const amount = Number(amountText);
   const hasAmount = amountText.trim().length > 0 && Number.isFinite(amount);
   const expenseApprovalThreshold = selectedHead?.expense_approval_threshold ?? null;
@@ -181,6 +186,29 @@ export function PaymentRequestForm({
     }
   }
 
+  function selectBankContact(contactId: string) {
+    const contact = bankContacts.find((item) => item.id === contactId);
+    if (!contact) return;
+    setBankAccountNo(contact.bank_account_no ?? "");
+    setIfsc(contact.ifsc ?? "");
+    setAccountHolderName(contact.account_holder_name);
+    setContactNo(contact.contact_no ?? "");
+    setContactEmail(contact.email ?? "");
+    setBankVerified(true);
+    setBankVerificationMessage("Verified bank contact selected.");
+  }
+
+  function selectUpiContact(contactId: string) {
+    const contact = upiContacts.find((item) => item.id === contactId);
+    if (!contact) return;
+    setUpiId(contact.upi_id ?? "");
+    setUpiAccountHolderName(contact.account_holder_name);
+    setContactNo(contact.contact_no ?? "");
+    setContactEmail(contact.email ?? "");
+    setUpiVerified(true);
+    setBankVerificationMessage("Verified UPI contact selected.");
+  }
+
   return (
     <form action={action} className="panel-body" encType="multipart/form-data">
       <div className="form-grid three">
@@ -236,6 +264,16 @@ export function PaymentRequestForm({
             </div>
           ) : isUpiPayment ? (
             <div className="form-grid three">
+              <label className="span-3">
+                Saved UPI Contact
+                <SearchableSelect
+                  disabled={blockedByExpenseApproval || !upiContacts.length}
+                  name="saved_upi_contact_id"
+                  onValueChange={selectUpiContact}
+                  options={upiContacts.map((contact) => ({ value: contact.id, label: contact.account_holder_name, helper: [contact.upi_id, contact.contact_no, contact.email].filter(Boolean).join(" · ") }))}
+                  placeholder={upiContacts.length ? "Search your saved UPI contacts" : "No saved UPI contacts"}
+                />
+              </label>
               <label>
                 UPI ID *
                 <span className="field-with-action">
@@ -260,6 +298,16 @@ export function PaymentRequestForm({
             </div>
           ) : (
             <div className="form-grid three">
+              <label className="span-3">
+                Saved Bank Contact
+                <SearchableSelect
+                  disabled={blockedByExpenseApproval || !bankContacts.length}
+                  name="saved_bank_contact_id"
+                  onValueChange={selectBankContact}
+                  options={bankContacts.map((contact) => ({ value: contact.id, label: contact.account_holder_name, helper: [contact.bank_account_no, contact.ifsc, contact.contact_no, contact.email].filter(Boolean).join(" · ") }))}
+                  placeholder={bankContacts.length ? "Search your saved bank contacts" : "No saved bank contacts"}
+                />
+              </label>
               <label>
                 Bank Account No *
                 <input className="field" disabled={blockedByExpenseApproval} name="bank_account_no" onChange={(event) => { setBankAccountNo(event.target.value.toUpperCase()); invalidateBankVerification(); }} required value={bankAccountNo} />

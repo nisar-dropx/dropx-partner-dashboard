@@ -65,6 +65,7 @@ export async function POST(request: NextRequest) {
       .from("payment_contacts")
       .select("id, account_holder_name")
       .eq("company_id", companyId)
+      .eq("created_by", authorization.userId)
       .ilike("bank_account_no", bankAccountNo)
       .ilike("ifsc", ifsc)
       .maybeSingle();

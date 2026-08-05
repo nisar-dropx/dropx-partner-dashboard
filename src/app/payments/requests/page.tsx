@@ -10,6 +10,7 @@ import { requirePagePermission, type AuthorizationContext } from "@/lib/authoriz
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { paymentFileAccept, paymentFileGroupLabels } from "@/lib/payment-file-types";
+import { loadUserPaymentContacts } from "@/lib/payment-contacts";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import type { PaymentMode } from "@/lib/payment-modes";
 import { createPaymentRequest, resubmitPaymentRequest, submitPaymentBankDetails } from "./actions";
@@ -239,6 +240,7 @@ export default async function PaymentRequestsPage({
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_requests;
   const { heads, locations, requests, error } = await loadPaymentRequestData(companyId, authorization);
+  const savedContacts = await loadUserPaymentContacts(companyId, authorization.userId);
   const headById = new Map(heads.map((head) => [head.id, head]));
   const scopedLocationIds = new Set(authorization.locationScopeIds);
   const userEmail = authorization.email?.trim().toLowerCase() ?? "";
@@ -315,6 +317,7 @@ export default async function PaymentRequestsPage({
             headOptions={headOptions}
             heads={heads.map((head) => ({ ...head, payment_head_questions: questionsForStage(head.payment_head_questions, "payment") }))}
             locationOptions={locationOptions}
+            savedContacts={savedContacts}
           />
         </section>
       ) : null}
@@ -415,6 +418,7 @@ export default async function PaymentRequestsPage({
                 defaultContactNo={bankRequest.contact_no}
                 defaultEmail={bankRequest.email}
                 defaultIfsc={bankRequest.ifsc}
+                savedContacts={savedContacts}
               />
               {bankQuestions.length ? (
                 <>

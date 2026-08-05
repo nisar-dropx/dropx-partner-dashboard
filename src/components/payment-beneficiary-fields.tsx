@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { SearchableSelect } from "@/components/searchable-select";
+import type { UserPaymentContact } from "@/lib/payment-contacts";
 import { PAYMENT_MODES, normalizePaymentModes, type PaymentMode } from "@/lib/payment-modes";
 
 type PaymentBeneficiaryFieldsProps = {
@@ -9,6 +11,7 @@ type PaymentBeneficiaryFieldsProps = {
   defaultContactNo?: string | null;
   defaultEmail?: string | null;
   defaultIfsc?: string | null;
+  savedContacts?: UserPaymentContact[];
 };
 
 export function PaymentBeneficiaryFields({
@@ -16,7 +19,8 @@ export function PaymentBeneficiaryFields({
   defaultBankAccountNo,
   defaultContactNo,
   defaultEmail,
-  defaultIfsc
+  defaultIfsc,
+  savedContacts = []
 }: PaymentBeneficiaryFieldsProps) {
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("account_transfer");
   const [bankAccountNo, setBankAccountNo] = useState((defaultBankAccountNo ?? "").toUpperCase());
@@ -32,6 +36,8 @@ export function PaymentBeneficiaryFields({
   const [upiAccountHolderName, setUpiAccountHolderName] = useState("");
   const [verificationMessage, setVerificationMessage] = useState("");
   const supportedPaymentModes = useMemo(() => normalizePaymentModes(allowedPaymentModes), [allowedPaymentModes]);
+  const bankContacts = useMemo(() => savedContacts.filter((contact) => contact.bank_account_no && contact.ifsc), [savedContacts]);
+  const upiContacts = useMemo(() => savedContacts.filter((contact) => contact.upi_id), [savedContacts]);
 
   useEffect(() => {
     const firstSupportedMode = supportedPaymentModes[0];
@@ -92,6 +98,29 @@ export function PaymentBeneficiaryFields({
     }
   }
 
+  function selectBankContact(contactId: string) {
+    const contact = bankContacts.find((item) => item.id === contactId);
+    if (!contact) return;
+    setBankAccountNo(contact.bank_account_no ?? "");
+    setIfsc(contact.ifsc ?? "");
+    setAccountHolderName(contact.account_holder_name);
+    setContactNo(contact.contact_no ?? "");
+    setContactEmail(contact.email ?? "");
+    setBankVerified(true);
+    setVerificationMessage("Verified bank contact selected.");
+  }
+
+  function selectUpiContact(contactId: string) {
+    const contact = upiContacts.find((item) => item.id === contactId);
+    if (!contact) return;
+    setUpiId(contact.upi_id ?? "");
+    setUpiAccountHolderName(contact.account_holder_name);
+    setContactNo(contact.contact_no ?? "");
+    setContactEmail(contact.email ?? "");
+    setUpiVerified(true);
+    setVerificationMessage("Verified UPI contact selected.");
+  }
+
   return (
     <>
       <div className="payment-mode-switch" role="radiogroup" aria-label="Payment method">
@@ -130,6 +159,16 @@ export function PaymentBeneficiaryFields({
         </div>
       ) : paymentMode === "upi_payment" ? (
         <div className="form-grid three" key="upi-payment-fields">
+          <label className="span-3">
+            Saved UPI Contact
+            <SearchableSelect
+              name="saved_upi_contact_id"
+              onValueChange={selectUpiContact}
+              options={upiContacts.map((contact) => ({ value: contact.id, label: contact.account_holder_name, helper: [contact.upi_id, contact.contact_no, contact.email].filter(Boolean).join(" · ") }))}
+              placeholder={upiContacts.length ? "Search your saved UPI contacts" : "No saved UPI contacts"}
+              disabled={!upiContacts.length}
+            />
+          </label>
           <label>
             UPI ID *
             <span className="field-with-action">
@@ -169,6 +208,16 @@ export function PaymentBeneficiaryFields({
         </div>
       ) : (
         <div className="form-grid three" key="account-transfer-fields">
+          <label className="span-3">
+            Saved Bank Contact
+            <SearchableSelect
+              name="saved_bank_contact_id"
+              onValueChange={selectBankContact}
+              options={bankContacts.map((contact) => ({ value: contact.id, label: contact.account_holder_name, helper: [contact.bank_account_no, contact.ifsc, contact.contact_no, contact.email].filter(Boolean).join(" · ") }))}
+              placeholder={bankContacts.length ? "Search your saved bank contacts" : "No saved bank contacts"}
+              disabled={!bankContacts.length}
+            />
+          </label>
           <label>
             Bank Account No *
             <input

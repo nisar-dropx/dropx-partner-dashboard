@@ -385,6 +385,7 @@ export async function createPaymentRequest(formData: FormData) {
         .from("payment_contacts")
         .select("account_holder_name")
         .eq("company_id", companyId)
+        .eq("created_by", authorization.userId)
         .ilike("upi_id", paymentReference)
         .maybeSingle();
       if (verifiedContact.error) throw new Error(verifiedContact.error.message);
@@ -686,6 +687,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
         .from("payment_contacts")
         .select("account_holder_name")
         .eq("company_id", companyId)
+        .eq("created_by", authorization.userId)
         .ilike("bank_account_no", bankAccountNo)
         .ilike("ifsc", ifsc)
         .maybeSingle();
@@ -703,6 +705,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
         .from("payment_contacts")
         .select("account_holder_name")
         .eq("company_id", companyId)
+        .eq("created_by", authorization.userId)
         .ilike("upi_id", upiId)
         .maybeSingle();
       if (verifiedContact.error) throw new Error(verifiedContact.error.message);
