@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { SearchableSelectOption } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 import { DEFAULT_PAYMENT_FILE_GROUPS, PAYMENT_FILE_GROUPS, normalizePaymentFileGroups } from "@/lib/payment-file-types";
+import { ALL_PAYMENT_MODES, PAYMENT_MODES, type PaymentMode } from "@/lib/payment-modes";
 
 type Question = {
   id?: string | null;
@@ -29,6 +30,7 @@ type PaymentHeadFormProps = {
     final_approval_role_id?: string | null;
     final_approval_role_ids?: string[] | null;
     payment_process_role_ids?: string[] | null;
+    supported_payment_modes?: PaymentMode[] | null;
     requires_supporting_document: boolean;
     request_expense_approval: boolean;
     expense_approval_threshold?: number | null;
@@ -62,6 +64,43 @@ function emptyQuestion(fieldStage: FieldStage = "expense"): Question {
     is_required: true,
     field_stage: fieldStage,
   };
+}
+
+function PaymentModeMultiSelect({ selectedValues }: { selectedValues?: PaymentMode[] | null }) {
+  const [selected, setSelected] = useState<PaymentMode[]>(selectedValues?.length ? selectedValues : [...ALL_PAYMENT_MODES]);
+  const [open, setOpen] = useState(false);
+
+  function toggle(value: PaymentMode) {
+    setSelected((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
+  }
+
+  return (
+    <div className="multi-select payment-role-multi-select">
+      <input name="supported_payment_modes" type="hidden" value={JSON.stringify(selected)} />
+      <button className={`multi-select-trigger ${open ? "open" : ""}`} onClick={() => setOpen((current) => !current)} type="button">
+        {selected.length ? (
+          <span className="payment-role-selected-tags">
+            {PAYMENT_MODES.filter((option) => selected.includes(option.value)).map((option) => (
+              <strong className="payment-role-selected-tag" key={option.value}>{option.label}</strong>
+            ))}
+          </span>
+        ) : <span>Select supported methods</span>}
+        <span>v</span>
+      </button>
+      {open ? (
+        <div className="multi-select-menu">
+          <div className="multi-select-options">
+            {PAYMENT_MODES.map((option) => (
+              <label className="multi-select-option payment-role-option" key={option.value}>
+                <input checked={selected.includes(option.value)} onChange={() => toggle(option.value)} type="checkbox" />
+                <span className="payment-role-option-copy"><strong>{option.label}</strong></span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function initialQuestionsWithStages(questions?: Question[] | null): Question[] {
@@ -456,6 +495,11 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
             placeholder="Select process roles"
             selectedValues={initialHead?.payment_process_role_ids ?? []}
           />
+        </label>
+        <label className="span-3">
+          Supported Payment Methods
+          <PaymentModeMultiSelect selectedValues={initialHead?.supported_payment_modes} />
+          <span className="helper-text">Requesters can select only these methods.</span>
         </label>
         <label className="check-row payment-head-option">
           <input

@@ -11,6 +11,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate } from "@/lib/date-format";
 import { paymentFileAccept, paymentFileGroupLabels } from "@/lib/payment-file-types";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
+import type { PaymentMode } from "@/lib/payment-modes";
 import { createExpenseRequest, resubmitExpenseRequest, submitPaymentBankDetails } from "@/app/payments/requests/actions";
 
 type LocationRow = {
@@ -36,6 +37,7 @@ type PaymentHeadRow = {
   code: string;
   name: string;
   requires_supporting_document: boolean;
+  supported_payment_modes: PaymentMode[] | null;
   payment_head_questions?: QuestionRow[] | null;
 };
 
@@ -238,7 +240,7 @@ async function loadExpenseRequestData(companyId: string, authorization: Authoriz
       .order("station_code");
   const headsQuery = supabaseAdmin
       .from("payment_heads")
-      .select("id, code, name, requires_supporting_document, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order)")
+      .select("id, code, name, requires_supporting_document, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order)")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("code");
@@ -506,6 +508,7 @@ export default async function ExpenseRequestPage({
                 </label>
               </div>
               <PaymentBeneficiaryFields
+                allowedPaymentModes={bankHead?.supported_payment_modes}
                 defaultBankAccountNo={bankRequest.bank_account_no}
                 defaultContactNo={bankRequest.contact_no}
                 defaultEmail={bankRequest.email}

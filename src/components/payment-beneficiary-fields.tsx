@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
-
-type PaymentMode = "account_transfer" | "upi_payment";
+import { useEffect, useMemo, useState } from "react";
+import { PAYMENT_MODES, normalizePaymentModes, type PaymentMode } from "@/lib/payment-modes";
 
 type PaymentBeneficiaryFieldsProps = {
+  allowedPaymentModes?: PaymentMode[] | null;
   defaultBankAccountNo?: string | null;
   defaultContactNo?: string | null;
   defaultEmail?: string | null;
@@ -12,6 +12,7 @@ type PaymentBeneficiaryFieldsProps = {
 };
 
 export function PaymentBeneficiaryFields({
+  allowedPaymentModes,
   defaultBankAccountNo,
   defaultContactNo,
   defaultEmail,
@@ -27,6 +28,12 @@ export function PaymentBeneficiaryFields({
   const [bankVerified, setBankVerified] = useState(false);
   const [bankVerifying, setBankVerifying] = useState(false);
   const [verificationMessage, setVerificationMessage] = useState("");
+  const supportedPaymentModes = useMemo(() => normalizePaymentModes(allowedPaymentModes), [allowedPaymentModes]);
+
+  useEffect(() => {
+    const firstSupportedMode = supportedPaymentModes[0];
+    if (firstSupportedMode && !supportedPaymentModes.includes(paymentMode)) setPaymentMode(firstSupportedMode);
+  }, [paymentMode, supportedPaymentModes]);
 
   function invalidateBankVerification() {
     setBankVerified(false);
@@ -62,10 +69,7 @@ export function PaymentBeneficiaryFields({
   return (
     <>
       <div className="payment-mode-switch" role="radiogroup" aria-label="Payment method">
-        {[
-          { value: "account_transfer" as const, label: "Account Transfer" },
-          { value: "upi_payment" as const, label: "UPI Payment" }
-        ].map((option) => (
+        {PAYMENT_MODES.filter((option) => supportedPaymentModes.includes(option.value)).map((option) => (
           <label key={option.value} className={paymentMode === option.value ? "active" : undefined}>
             <input
               checked={paymentMode === option.value}
@@ -79,7 +83,26 @@ export function PaymentBeneficiaryFields({
         ))}
       </div>
 
-      {paymentMode === "upi_payment" ? (
+      {paymentMode === "online_payment" ? (
+        <div className="form-grid three" key="online-payment-fields">
+          <label>
+            Payment Portal *
+            <input className="field" name="payment_portal" required placeholder="Portal or service name" />
+          </label>
+          <label>
+            Reference ID / Service Number / Consumer ID
+            <input className="field" name="payment_reference" placeholder="Optional" />
+          </label>
+          <label>
+            Contact No
+            <input className="field" name="contact_no" onChange={(event) => setContactNo(event.target.value)} placeholder="Optional" type="tel" value={contactNo} />
+          </label>
+          <label>
+            Email
+            <input className="field" name="email" onChange={(event) => setContactEmail(event.target.value)} placeholder="Optional" type="email" value={contactEmail} />
+          </label>
+        </div>
+      ) : paymentMode === "upi_payment" ? (
         <div className="form-grid three" key="upi-payment-fields">
           <label>
             UPI ID *

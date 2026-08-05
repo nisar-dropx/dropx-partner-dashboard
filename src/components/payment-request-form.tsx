@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import { SearchableSelect, type SearchableSelectOption } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 import { paymentFileAccept, paymentFileGroupLabels } from "@/lib/payment-file-types";
+import { PAYMENT_MODES, normalizePaymentModes, type PaymentMode } from "@/lib/payment-modes";
 
 type PaymentQuestion = {
   id: string;
@@ -21,10 +22,9 @@ type PaymentHead = {
   requires_supporting_document: boolean;
   request_expense_approval?: boolean | null;
   expense_approval_threshold?: number | null;
+  supported_payment_modes?: PaymentMode[] | null;
   payment_head_questions: PaymentQuestion[];
 };
-
-type PaymentMode = "online_payment" | "account_transfer" | "upi_payment";
 
 type PaymentRequestFormProps = {
   action: (formData: FormData) => void;
@@ -110,6 +110,7 @@ export function PaymentRequestForm({
   const [bankVerificationMessage, setBankVerificationMessage] = useState("");
   const [bankVerifying, setBankVerifying] = useState(false);
   const selectedHead = useMemo(() => heads.find((head) => head.id === selectedHeadId) ?? null, [heads, selectedHeadId]);
+  const supportedPaymentModes = useMemo(() => normalizePaymentModes(selectedHead?.supported_payment_modes), [selectedHead]);
   const amount = Number(amountText);
   const hasAmount = amountText.trim().length > 0 && Number.isFinite(amount);
   const expenseApprovalThreshold = selectedHead?.expense_approval_threshold ?? null;
@@ -118,6 +119,11 @@ export function PaymentRequestForm({
   );
   const isOnlinePayment = showBankDetails && paymentMode === "online_payment";
   const isUpiPayment = showBankDetails && paymentMode === "upi_payment";
+
+  useEffect(() => {
+    const firstSupportedMode = supportedPaymentModes[0];
+    if (firstSupportedMode && !supportedPaymentModes.includes(paymentMode)) setPaymentMode(firstSupportedMode);
+  }, [paymentMode, supportedPaymentModes]);
 
   async function verifyBankAccount() {
     setBankVerifying(true);
@@ -168,11 +174,7 @@ export function PaymentRequestForm({
       {showBankDetails ? (
         <>
           <div className="payment-mode-switch" role="radiogroup" aria-label="Payment mode">
-            {[
-              { value: "account_transfer" as PaymentMode, label: "Account Transfer" },
-              { value: "online_payment" as PaymentMode, label: "Online Payment" },
-              { value: "upi_payment" as PaymentMode, label: "UPI Payment" }
-            ].map((option) => (
+            {PAYMENT_MODES.filter((option) => supportedPaymentModes.includes(option.value)).map((option) => (
               <label key={option.value} className={paymentMode === option.value ? "active" : undefined}>
                 <input
                   checked={paymentMode === option.value}

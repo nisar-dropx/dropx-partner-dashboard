@@ -2,6 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import { PageHead } from "@/components/page-head";
 import { PaymentRequestForm } from "@/components/payment-request-form";
+import { PaymentBeneficiaryFields } from "@/components/payment-beneficiary-fields";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
@@ -10,6 +11,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { paymentFileAccept, paymentFileGroupLabels } from "@/lib/payment-file-types";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
+import type { PaymentMode } from "@/lib/payment-modes";
 import { createPaymentRequest, resubmitPaymentRequest, submitPaymentBankDetails } from "./actions";
 
 type QuestionRow = { id: string; question_text: string; answer_type: string; dropdown_options: string | null; field_stage: string | null; is_required: boolean; sort_order: number };
@@ -27,6 +29,7 @@ type PaymentHeadRow = {
   requires_supporting_document: boolean;
   request_expense_approval: boolean;
   expense_approval_threshold: number | null;
+  supported_payment_modes: PaymentMode[] | null;
   payment_head_questions?: QuestionRow[] | null;
 };
 type PaymentRequestRow = {
@@ -153,7 +156,7 @@ async function loadPaymentRequestData(companyId: string, authorization: Authoriz
       .order("station_code");
   const headsQuery = supabaseAdmin
       .from("payment_heads")
-      .select("id, code, name, requires_supporting_document, request_expense_approval, expense_approval_threshold, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order)")
+      .select("id, code, name, requires_supporting_document, request_expense_approval, expense_approval_threshold, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order)")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("code");
@@ -405,27 +408,14 @@ export default async function PaymentRequestsPage({
                   Actual Amount *
                   <input className="field" min="0" name="amount" placeholder="0.00" required step="0.01" type="number" defaultValue={bankRequest.amount_requested ?? ""} />
                 </label>
-                <label>
-                  Bank Account No *
-                  <input className="field" name="bank_account_no" required defaultValue={bankRequest.bank_account_no ?? ""} />
-                </label>
-                <label>
-                  IFSC *
-                  <input className="field" name="ifsc" required defaultValue={bankRequest.ifsc ?? ""} />
-                </label>
-                <label>
-                  Acc Holder Name *
-                  <input className="field" name="account_holder_name" required defaultValue={bankRequest.account_holder_name ?? ""} />
-                </label>
-                <label>
-                  Contact No
-                  <input className="field" name="contact_no" placeholder="Optional" type="tel" defaultValue={bankRequest.contact_no ?? ""} />
-                </label>
-                <label>
-                  Email
-                  <input className="field" name="email" placeholder="Optional" type="email" defaultValue={bankRequest.email ?? ""} />
-                </label>
               </div>
+              <PaymentBeneficiaryFields
+                allowedPaymentModes={bankHead?.supported_payment_modes}
+                defaultBankAccountNo={bankRequest.bank_account_no}
+                defaultContactNo={bankRequest.contact_no}
+                defaultEmail={bankRequest.email}
+                defaultIfsc={bankRequest.ifsc}
+              />
               {bankQuestions.length ? (
                 <>
                   <div className="section-divider" />

@@ -8,6 +8,7 @@ import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { canAccessPaymentLocation } from "@/lib/payment-approval-scope";
 import { validatePaymentFile } from "@/lib/payment-file-types";
+import { normalizePaymentModes, type PaymentMode } from "@/lib/payment-modes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { insertPaymentApprovalLog } from "../approvals/actions";
 
@@ -363,13 +364,16 @@ export async function createPaymentRequest(formData: FormData) {
       admin.from("stations").select("id, station_code, station_email, station_manager_email").eq("id", locationId).eq("company_id", companyId).single(),
       admin
         .from("payment_heads")
-        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, requires_supporting_document, request_expense_approval, expense_approval_threshold, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order)")
+        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, requires_supporting_document, request_expense_approval, expense_approval_threshold, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order)")
         .eq("id", paymentHeadId)
         .eq("company_id", companyId)
         .single()
     ]);
     if (locationResult.error) throw new Error("Location not found for this company.");
     if (headResult.error) throw new Error("Payment head not found for this company.");
+    if (!normalizePaymentModes(headResult.data.supported_payment_modes).includes(paymentMode)) {
+      throw new Error("The selected payment method is not supported by this payment head.");
+    }
     const requestedAmount = Number(amountText);
     const expenseApprovalThreshold = headResult.data.expense_approval_threshold == null ? null : Number(headResult.data.expense_approval_threshold);
     if (headResult.data.request_expense_approval && (expenseApprovalThreshold == null || requestedAmount > expenseApprovalThreshold)) {
@@ -620,15 +624,17 @@ export async function submitPaymentBankDetails(formData: FormData) {
     const requestId = required(formData.get("request_id"), "Payment request");
     const amountText = required(formData.get("amount"), "Actual Amount");
     const paymentModeValue = clean(formData.get("payment_mode"));
-    if (paymentModeValue !== "account_transfer" && paymentModeValue !== "upi_payment") {
-      throw new Error("Select either Account Transfer or UPI Payment.");
+    if (paymentModeValue !== "account_transfer" && paymentModeValue !== "upi_payment" && paymentModeValue !== "online_payment") {
+      throw new Error("Select a supported payment method.");
     }
-    const paymentMode = paymentModeValue as "account_transfer" | "upi_payment";
+    const paymentMode = paymentModeValue as PaymentMode;
     const isAccountTransfer = paymentMode === "account_transfer";
     const bankAccountNo = isAccountTransfer ? required(formData.get("bank_account_no"), "Bank Account No").toUpperCase() : null;
     const ifsc = isAccountTransfer ? required(formData.get("ifsc"), "IFSC").toUpperCase() : null;
     const submittedHolderName = isAccountTransfer ? required(formData.get("account_holder_name"), "Acc Holder Name") : null;
     const upiId = paymentMode === "upi_payment" ? required(formData.get("upi_id"), "UPI ID") : null;
+    const paymentPortal = paymentMode === "online_payment" ? required(formData.get("payment_portal"), "Payment Portal") : null;
+    const onlineReference = paymentMode === "online_payment" ? clean(formData.get("payment_reference")) : null;
     if (isAccountTransfer && clean(formData.get("bank_verified")) !== "1") {
       throw new Error("Verify the bank account before submitting payment details.");
     }
@@ -685,11 +691,14 @@ export async function submitPaymentBankDetails(formData: FormData) {
 
     const { data: headData, error: headError } = await admin
       .from("payment_heads")
-      .select("id, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order)")
+      .select("id, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order)")
       .eq("id", request.payment_head_id)
       .eq("company_id", companyId)
       .single();
     if (headError || !headData) throw new Error("Payment head not found for this company.");
+    if (!normalizePaymentModes(headData.supported_payment_modes).includes(paymentMode)) {
+      throw new Error("The selected payment method is not supported by this payment head.");
+    }
 
     const paymentQuestions = questionsForStage(headData.payment_head_questions, "payment");
     const questionIds = formData.getAll("question_ids").map((value) => String(value));
@@ -753,8 +762,8 @@ export async function submitPaymentBankDetails(formData: FormData) {
       .update({
         amount: Number(amountText),
         payment_mode: paymentMode,
-        payment_portal: paymentMode === "upi_payment" ? "UPI" : null,
-        payment_reference: upiId,
+        payment_portal: paymentMode === "upi_payment" ? "UPI" : paymentPortal,
+        payment_reference: upiId ?? onlineReference,
         bank_account_no: bankAccountNo,
         ifsc,
         account_holder_name: accountHolderName,
@@ -837,7 +846,6 @@ export async function resubmitExpenseRequest(formData: FormData) {
     ]);
     if (locationResult.error) throw new Error("Location not found for this company.");
     if (headResult.error) throw new Error("Payment head not found for this company.");
-
     const normalizedApprovalStatus = String(request.approval_status ?? "").toUpperCase();
     const normalizedStatus = String(request.status ?? "").toLowerCase();
     const latestReturnedApproval = String(returnedApprovalResult.data?.action ?? "").toLowerCase() === "returned"

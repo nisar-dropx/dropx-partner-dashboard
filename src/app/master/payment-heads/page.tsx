@@ -6,6 +6,7 @@ import { StatusPill } from "@/components/status-pill";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
+import { normalizePaymentModes, paymentModeLabel, type PaymentMode } from "@/lib/payment-modes";
 import { createPaymentHead, updatePaymentHead } from "./actions";
 
 type QuestionRow = {
@@ -28,6 +29,7 @@ type PaymentHeadRow = {
   final_approval_role_id: string | null;
   final_approval_role_ids: string[] | null;
   payment_process_role_ids: string[] | null;
+  supported_payment_modes: PaymentMode[] | null;
   requires_supporting_document: boolean;
   request_expense_approval: boolean;
   expense_approval_threshold: number | null;
@@ -58,7 +60,7 @@ async function loadPaymentHeads(companyId: string) {
   const [headsResult, rolesResult] = await Promise.all([
     supabaseAdmin
       .from("payment_heads")
-      .select("id, code, name, external_id, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, requires_supporting_document, request_expense_approval, expense_approval_threshold, is_active, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order)")
+      .select("id, code, name, external_id, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, requires_supporting_document, request_expense_approval, expense_approval_threshold, is_active, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order)")
       .eq("company_id", companyId)
       .order("code"),
     supabaseAdmin
@@ -157,6 +159,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
                   <th>Initial Approver</th>
                   <th>Final Approval</th>
                   <th>Payment Process</th>
+                  <th>Payment Methods</th>
                   <th>Expense Approval</th>
                   <th>Fields</th>
                   <th>File Upload</th>
@@ -176,6 +179,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
                       <td>{configuredRoleIds(head.initial_approval_role_ids, head.initial_approval_role_id).map((roleId) => roleById.get(roleId)?.name).filter(Boolean).join(", ") || "-"}</td>
                       <td>{configuredRoleIds(head.final_approval_role_ids, head.final_approval_role_id).map((roleId) => roleById.get(roleId)?.name).filter(Boolean).join(", ") || "-"}</td>
                       <td>{(head.payment_process_role_ids ?? []).map((roleId) => roleById.get(roleId)?.name).filter(Boolean).join(", ") || "-"}</td>
+                      <td>{normalizePaymentModes(head.supported_payment_modes).map(paymentModeLabel).join(", ")}</td>
                       <td>{head.request_expense_approval ? (head.expense_approval_threshold == null ? "All requests" : `Above Rs ${Number(head.expense_approval_threshold).toLocaleString("en-IN")}`) : "-"}</td>
                       <td>{expenseFields} expense / {paymentFields} payment</td>
                       <td>{head.payment_head_questions?.some((question) => question.answer_type === "file") ? "Configured" : "-"}</td>
@@ -184,7 +188,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
                     </tr>
                   );
                 }) : (
-                  <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 11 : 10}>No payment heads added yet.</td></tr>
+                  <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 12 : 11}>No payment heads added yet.</td></tr>
                 )}
               </tbody>
             </table>
