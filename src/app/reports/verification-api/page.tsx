@@ -50,6 +50,7 @@ const kindOptions = [
   ["dl", "Driving licence"],
   ["vehicle", "Vehicle RC"],
   ["bank", "Bank account"],
+  ["upi", "UPI ID"],
   ["pf_uan", "PF UAN"]
 ];
 

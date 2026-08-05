@@ -29,12 +29,14 @@ function normalizeIfsc(value: string) {
 }
 
 function payload(formData: FormData) {
+  const upiId = optional(formData.get("upi_id"));
   return {
     account_holder_name: required(formData.get("account_holder_name"), "Account holder name"),
-    bank_account_no: normalizeAccount(required(formData.get("bank_account_no"), "Bank account no")),
+    bank_account_no: upiId ? null : normalizeAccount(required(formData.get("bank_account_no"), "Bank account no")),
     contact_no: optional(formData.get("contact_no")),
     email: optional(formData.get("email")),
-    ifsc: normalizeIfsc(required(formData.get("ifsc"), "IFSC")),
+    ifsc: upiId ? null : normalizeIfsc(required(formData.get("ifsc"), "IFSC")),
+    upi_id: upiId?.toLowerCase() ?? null,
     updated_at: new Date().toISOString()
   };
 }
@@ -46,7 +48,7 @@ export async function createContact(formData: FormData) {
   const { error } = await supabaseAdmin.from("payment_contacts").insert(withCompany({
     ...payload(formData), created_by: authorization.userId
   }, companyId));
-  if (error) throw new Error(error.code === "23505" ? "This bank account and IFSC already exist in Contacts." : error.message);
+  if (error) throw new Error(error.code === "23505" ? "This beneficiary already exists in Contacts." : error.message);
   revalidatePath("/master/contacts");
 }
 
@@ -56,7 +58,7 @@ export async function updateContact(formData: FormData) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const id = required(formData.get("id"), "Contact");
   const { error } = await supabaseAdmin.from("payment_contacts").update(payload(formData)).eq("id", id).eq("company_id", companyId);
-  if (error) throw new Error(error.code === "23505" ? "This bank account and IFSC already exist in Contacts." : error.message);
+  if (error) throw new Error(error.code === "23505" ? "This beneficiary already exists in Contacts." : error.message);
   revalidatePath("/master/contacts");
   redirect("/master/contacts");
 }

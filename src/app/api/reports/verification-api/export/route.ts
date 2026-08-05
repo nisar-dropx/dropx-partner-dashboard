@@ -32,6 +32,7 @@ const kindLabels: Record<string, string> = {
   pan: "PAN",
   pan_aadhaar: "PAN Aadhaar link",
   pf_uan: "PF UAN",
+  upi: "UPI ID",
   vehicle: "Vehicle RC"
 };
 

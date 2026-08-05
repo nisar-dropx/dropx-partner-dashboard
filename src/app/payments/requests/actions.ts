@@ -356,6 +356,10 @@ export async function createPaymentRequest(formData: FormData) {
       : isUpiPayment
         ? required(formData.get("upi_id"), "UPI ID")
         : null;
+    const submittedUpiHolderName = isUpiPayment ? required(formData.get("upi_account_holder_name"), "UPI Account Holder Name") : null;
+    if (isUpiPayment && clean(formData.get("upi_verified")) !== "1") {
+      throw new Error("Verify the UPI ID before submitting the payment request.");
+    }
     const contactNo = clean(formData.get("contact_no"));
     const email = clean(formData.get("email"));
     const remarks = clean(formData.get("remarks"));
@@ -373,6 +377,21 @@ export async function createPaymentRequest(formData: FormData) {
     if (headResult.error) throw new Error("Payment head not found for this company.");
     if (!normalizePaymentModes(headResult.data.supported_payment_modes).includes(paymentMode)) {
       throw new Error("The selected payment method is not supported by this payment head.");
+    }
+
+    let verifiedUpiHolderName: string | null = null;
+    if (isUpiPayment && paymentReference) {
+      const verifiedContact = await admin
+        .from("payment_contacts")
+        .select("account_holder_name")
+        .eq("company_id", companyId)
+        .ilike("upi_id", paymentReference)
+        .maybeSingle();
+      if (verifiedContact.error) throw new Error(verifiedContact.error.message);
+      verifiedUpiHolderName = clean(verifiedContact.data?.account_holder_name);
+      if (!verifiedUpiHolderName || verifiedUpiHolderName.toUpperCase() !== submittedUpiHolderName?.toUpperCase()) {
+        throw new Error("UPI verification has changed. Verify the UPI ID again.");
+      }
     }
     const requestedAmount = Number(amountText);
     const expenseApprovalThreshold = headResult.data.expense_approval_threshold == null ? null : Number(headResult.data.expense_approval_threshold);
@@ -399,7 +418,7 @@ export async function createPaymentRequest(formData: FormData) {
     const workDate = new Date().toISOString().slice(0, 10);
     const legacyAccountValue = bankAccountNo ?? paymentReference ?? paymentPortal ?? locationResult.data.station_code;
     const legacyIfscValue = ifsc ?? (isUpiPayment ? "UPI" : "ONLINE");
-    const legacyHolderValue = accountHolderName ?? paymentPortal ?? (isUpiPayment ? "UPI Payment" : "Online Payment");
+    const legacyHolderValue = accountHolderName ?? verifiedUpiHolderName ?? paymentPortal ?? "Online Payment";
     const startsWithFinalApproval = !initialApprovalRoleIds.length;
     const currentApprovalRoleIds = startsWithFinalApproval ? finalApprovalRoleIds : initialApprovalRoleIds;
     const approver = await approverForRoles(
@@ -633,10 +652,14 @@ export async function submitPaymentBankDetails(formData: FormData) {
     const ifsc = isAccountTransfer ? required(formData.get("ifsc"), "IFSC").toUpperCase() : null;
     const submittedHolderName = isAccountTransfer ? required(formData.get("account_holder_name"), "Acc Holder Name") : null;
     const upiId = paymentMode === "upi_payment" ? required(formData.get("upi_id"), "UPI ID") : null;
+    const submittedUpiHolderName = paymentMode === "upi_payment" ? required(formData.get("upi_account_holder_name"), "UPI Account Holder Name") : null;
     const paymentPortal = paymentMode === "online_payment" ? required(formData.get("payment_portal"), "Payment Portal") : null;
     const onlineReference = paymentMode === "online_payment" ? clean(formData.get("payment_reference")) : null;
     if (isAccountTransfer && clean(formData.get("bank_verified")) !== "1") {
       throw new Error("Verify the bank account before submitting payment details.");
+    }
+    if (paymentMode === "upi_payment" && clean(formData.get("upi_verified")) !== "1") {
+      throw new Error("Verify the UPI ID before submitting payment details.");
     }
     if (bankAccountNo && !/^[A-Z0-9]{4,30}$/.test(bankAccountNo)) throw new Error("Invalid bank account number.");
     if (ifsc && !/^[A-Z0-9]{11}$/.test(ifsc)) throw new Error("Invalid IFSC.");
@@ -673,6 +696,19 @@ export async function submitPaymentBankDetails(formData: FormData) {
       accountHolderName = String(verifiedContact.data.account_holder_name).trim();
       if (!accountHolderName || accountHolderName.toUpperCase() !== submittedHolderName?.trim().toUpperCase()) {
         throw new Error("Bank verification has changed. Verify the account again.");
+      }
+    }
+    if (paymentMode === "upi_payment" && upiId) {
+      const verifiedContact = await admin
+        .from("payment_contacts")
+        .select("account_holder_name")
+        .eq("company_id", companyId)
+        .ilike("upi_id", upiId)
+        .maybeSingle();
+      if (verifiedContact.error) throw new Error(verifiedContact.error.message);
+      accountHolderName = clean(verifiedContact.data?.account_holder_name);
+      if (!accountHolderName || accountHolderName.toUpperCase() !== submittedUpiHolderName?.toUpperCase()) {
+        throw new Error("UPI verification has changed. Verify the UPI ID again.");
       }
     }
 

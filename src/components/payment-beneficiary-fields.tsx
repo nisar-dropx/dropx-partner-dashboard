@@ -27,6 +27,9 @@ export function PaymentBeneficiaryFields({
   const [contactEmail, setContactEmail] = useState(defaultEmail ?? "");
   const [bankVerified, setBankVerified] = useState(false);
   const [bankVerifying, setBankVerifying] = useState(false);
+  const [upiVerified, setUpiVerified] = useState(false);
+  const [upiVerifying, setUpiVerifying] = useState(false);
+  const [upiAccountHolderName, setUpiAccountHolderName] = useState("");
   const [verificationMessage, setVerificationMessage] = useState("");
   const supportedPaymentModes = useMemo(() => normalizePaymentModes(allowedPaymentModes), [allowedPaymentModes]);
 
@@ -63,6 +66,29 @@ export function PaymentBeneficiaryFields({
       setVerificationMessage(error instanceof Error ? error.message : "Bank verification failed.");
     } finally {
       setBankVerifying(false);
+    }
+  }
+
+  async function verifyUpiId() {
+    setUpiVerifying(true);
+    setVerificationMessage("");
+    try {
+      const response = await fetch("/api/payments/upi-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ upiId, contactNo, email: contactEmail })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.verified) throw new Error(result.error || result.message || "UPI verification failed.");
+      setUpiAccountHolderName(result.accountHolderName || "");
+      setUpiVerified(true);
+      setVerificationMessage(result.source === "contact" ? "Verified UPI ID found in Contacts." : "UPI ID verified.");
+    } catch (error) {
+      setUpiVerified(false);
+      setUpiAccountHolderName("");
+      setVerificationMessage(error instanceof Error ? error.message : "UPI verification failed.");
+    } finally {
+      setUpiVerifying(false);
     }
   }
 
@@ -106,15 +132,31 @@ export function PaymentBeneficiaryFields({
         <div className="form-grid three" key="upi-payment-fields">
           <label>
             UPI ID *
-            <input
-              autoComplete="off"
-              className="field"
-              name="upi_id"
-              onChange={(event) => setUpiId(event.target.value.replace(/\s/g, ""))}
-              placeholder="name@bank"
-              required
-              value={upiId}
-            />
+            <span className="field-with-action">
+              <input
+                autoComplete="off"
+                className="field"
+                name="upi_id"
+                onChange={(event) => {
+                  setUpiId(event.target.value.replace(/\s/g, "").toLowerCase());
+                  setUpiVerified(false);
+                  setUpiAccountHolderName("");
+                  setVerificationMessage("");
+                }}
+                placeholder="name@bank"
+                required
+                value={upiId}
+              />
+              <button className="button secondary compact" disabled={upiVerifying || !upiId || upiVerified} onClick={verifyUpiId} type="button">
+                {upiVerifying ? "Verifying..." : upiVerified ? "Verified" : "Verify"}
+              </button>
+            </span>
+            {verificationMessage ? <span className={upiVerified ? "verification-message success" : "verification-message error"}>{verificationMessage}</span> : null}
+          </label>
+          <label>
+            Account Holder Name *
+            <input className="field" name="upi_account_holder_name" readOnly required value={upiAccountHolderName} />
+            <input name="upi_verified" type="hidden" value={upiVerified ? "1" : "0"} />
           </label>
           <label>
             Contact No
