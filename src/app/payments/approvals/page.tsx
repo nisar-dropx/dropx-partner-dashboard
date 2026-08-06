@@ -123,6 +123,16 @@ async function loadNextActionFrom(companyId: string, request: RequestRow | null)
   if (status === "RETURNED") return "Requester";
   if (["REJECTED", "CANCELLED", "PROCESSED"].includes(status)) return "-";
 
+  const assignedRoleIds = Array.from(new Set([
+    request.current_approver_role_id,
+    ...(request.current_approver_role_ids ?? [])
+  ].filter(Boolean))) as string[];
+  const finalRoleIds = new Set([
+    request.final_approval_role_id,
+    ...(request.final_approval_role_ids ?? [])
+  ].filter(Boolean));
+  if (assignedRoleIds.some((roleId) => finalRoleIds.has(roleId))) return "Final Approver";
+
   if (request.current_approver_user_id) {
     const { data } = await supabaseAdmin
       .from("profiles")
@@ -133,16 +143,12 @@ async function loadNextActionFrom(companyId: string, request: RequestRow | null)
     if (data) return data.full_name || data.email || "Assigned approver";
   }
 
-  const roleIds = Array.from(new Set([
-    request.current_approver_role_id,
-    ...(request.current_approver_role_ids ?? [])
-  ].filter(Boolean))) as string[];
-  if (roleIds.length) {
+  if (assignedRoleIds.length) {
     const { data } = await supabaseAdmin
       .from("user_roles")
       .select("name, code")
       .eq("company_id", companyId)
-      .in("id", roleIds);
+      .in("id", assignedRoleIds);
     const names = (data ?? []).map((role) => role.name || role.code).filter(Boolean);
     if (names.length) return names.join(", ");
   }
