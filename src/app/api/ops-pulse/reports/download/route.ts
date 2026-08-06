@@ -50,7 +50,7 @@ async function allRows<T>(page: (from: number, to: number) => PromiseLike<{ data
 
 export async function GET(request: Request) {
   const authorization = await getAuthorization();
-  if (!authorization || !hasPermission(authorization, "reports", "access")) return Response.json({ error: "Report access denied." }, { status: 403 });
+  if (!authorization || !hasPermission(authorization, "cod_reports", "access")) return Response.json({ error: "Report access denied." }, { status: 403 });
   if (!supabaseAdmin) return Response.json({ error: "Database unavailable." }, { status: 500 });
   const db = supabaseAdmin;
   const url = new URL(request.url);

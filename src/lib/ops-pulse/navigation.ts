@@ -9,7 +9,7 @@ const commonStart: NavItem[] = [
   { code: "delivery_associates", label: "Workforce Onboarding", href: "/field-executive", icon: "+" }
 ];
 
-const reports: NavItem = { code: "reports", label: "Reports", href: "/reports", icon: "R" };
+const reports: NavItem = { code: "cod_reports", label: "Reports", href: "/reports", icon: "R" };
 
 const payments: NavItem = {
   code: "payments",
@@ -17,7 +17,8 @@ const payments: NavItem = {
   icon: "₹",
   children: [
     { code: "payment_requests", label: "Payment Requests", href: "/payments/requests" },
-    { code: "payment_approvals", label: "Approvals", href: "/payments/approvals" }
+    { code: "payment_approvals", label: "Approvals", href: "/payments/approvals" },
+    { code: "payment_reports", label: "Report", href: "/payments/report" }
   ]
 };
 

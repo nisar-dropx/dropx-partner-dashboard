@@ -28,6 +28,7 @@ const opsPageCodes = new Set([
   "expense_requests",
   "payment_requests",
   "payment_approvals",
+  "payment_reports",
   "master_locations",
   "master_providers",
   "master_models",
@@ -43,8 +44,7 @@ const opsPageCodes = new Set([
   "fleet_fuel_log",
   "fleet_live_gps",
   "fleet_maintenance",
-  "fleet_reports",
-  "reports"
+  "fleet_reports"
 ]);
 
 const sharedPageCodes = new Set([
@@ -52,6 +52,7 @@ const sharedPageCodes = new Set([
   "expense_requests",
   "payment_requests",
   "payment_approvals",
+  "payment_reports",
   "master_locations",
   "master_providers",
   "master_models",
@@ -65,8 +66,7 @@ const sharedPageCodes = new Set([
   "fleet_fuel_log",
   "fleet_live_gps",
   "fleet_maintenance",
-  "fleet_reports",
-  "reports"
+  "fleet_reports"
 ]);
 
 export function currentAccessSurface(): AccessSurface {
