@@ -116,6 +116,49 @@ const draftUploadSlots: Record<string, string> = {
   profile_photo: "photo"
 };
 
+const maxUploadBytes = 3.5 * 1024 * 1024;
+
+async function responsePayload(response: Response) {
+  const body = await response.text();
+  try {
+    return body ? JSON.parse(body) : {};
+  } catch {
+    if (response.status === 413) {
+      throw new Error("The selected file is too large. Choose a file smaller than 3.5 MB.");
+    }
+    throw new Error(response.ok ? "The server returned an invalid response." : `Upload failed (HTTP ${response.status}).`);
+  }
+}
+
+async function prepareUpload(file: File) {
+  if (file.size <= maxUploadBytes) return file;
+  if (!file.type.startsWith("image/")) {
+    throw new Error(`${file.name} is too large. Choose a PDF or file smaller than 3.5 MB.`);
+  }
+
+  const imageUrl = URL.createObjectURL(file);
+  try {
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error(`${file.name} could not be prepared. Choose a JPG, PNG, WEBP or PDF file.`));
+      image.src = imageUrl;
+    });
+    const scale = Math.min(1, 1800 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.78));
+    if (!blob || blob.size > maxUploadBytes) {
+      throw new Error(`${file.name} is too large. Choose a smaller image.`);
+    }
+    return new File([blob], `${file.name.replace(/\.[^.]+$/, "") || "upload"}.jpg`, { type: "image/jpeg" });
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
+
 const profileInputRules: Record<string, {
   pattern: RegExp;
   message: string;
@@ -340,6 +383,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
+  const [selectedUploads, setSelectedUploads] = useState<Record<string, string>>({});
   const [draftSaving, setDraftSaving] = useState(false);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [agreementAccepted, setAgreementAccepted] = useState(false);
@@ -583,6 +627,13 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     setNotice("");
     try {
       const data = new FormData(formRef.current);
+      const selectedFiles = Object.keys(draftUploadSlots)
+        .map((slot) => [slot, data.get(slot)] as const)
+        .filter((entry): entry is readonly [string, File] => entry[1] instanceof File && entry[1].size > 0);
+      if (selectedFiles.length) {
+        await saveDraftForm(data, selectedFiles);
+        selectedFiles.forEach(([slot]) => data.delete(slot));
+      }
       data.set(executive ? "executive_id" : "employee_id", account.id);
       if (executive) data.set("profile_type", account.profileType);
       const currentChecks = Object.values(verifications).filter((item) => currentCheck(item.kind) === item);
@@ -596,11 +647,12 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       }
       currentChecks.forEach((item) => data.append("profile_verification_results", JSON.stringify(item)));
       const response = await fetch(endpoint, { method: "POST", body: data });
-      const payload = await response.json();
+      const payload = await responsePayload(response);
       if (!response.ok) throw new Error(payload.error || "Unable to save profile.");
       setProfile(payload.profile);
       setNotice("Profile saved.");
       setConfirmationOpen(false);
+      setSelectedUploads({});
       if (payload.profile.profilePhotoUrl) onPhoto?.(payload.profile.profilePhotoUrl);
       await onSubmitted?.();
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -611,6 +663,35 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     }
   }
 
+  async function saveDraftForm(form: FormData, files?: readonly (readonly [string, File])[]) {
+    const draftData: Record<string, string> = {};
+    form.forEach((value, key) => {
+      if (typeof value === "string" && key !== "profile_verification_results") draftData[key] = value;
+    });
+    draftData.has_pf_uan = pfAnswer;
+    draftData.has_esi_no = esiAnswer;
+    const currentChecks = Object.values(verifications).filter((item) => currentCheck(item.kind) === item);
+    const uploads = files ?? Object.keys(draftUploadSlots)
+      .map((slot) => [slot, form.get(slot)] as const)
+      .filter((entry): entry is readonly [string, File] => entry[1] instanceof File && entry[1].size > 0);
+    const requests: readonly (readonly [string, File] | null)[] = uploads.length ? uploads : [null];
+    let latestDraft: ProfileDraft | null = null;
+
+    for (const uploadEntry of requests) {
+      const data = new FormData();
+      data.set("account_id", account.id);
+      data.set("profile_type", account.profileType);
+      data.set("draft_data", JSON.stringify(draftData));
+      currentChecks.forEach((item) => data.append("profile_verification_results", JSON.stringify(item)));
+      if (uploadEntry) data.set(uploadEntry[0], await prepareUpload(uploadEntry[1]));
+      const response = await fetch("/api/connect/profile-draft", { method: "POST", body: data });
+      const payload = await responsePayload(response);
+      if (!response.ok) throw new Error(payload.error || "Unable to upload the selected file.");
+      latestDraft = payload.draft as ProfileDraft;
+    }
+    return latestDraft;
+  }
+
   async function saveDraft() {
     if (!formRef.current) return;
     setDraftSaving(true);
@@ -618,28 +699,8 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     setNotice("");
     try {
       const form = new FormData(formRef.current);
-      const draftData: Record<string, string> = {};
-      form.forEach((value, key) => {
-        if (typeof value === "string" && key !== "profile_verification_results") {
-          draftData[key] = value;
-        }
-      });
-      draftData.has_pf_uan = pfAnswer;
-      draftData.has_esi_no = esiAnswer;
-      const data = new FormData();
-      data.set("account_id", account.id);
-      data.set("profile_type", account.profileType);
-      data.set("draft_data", JSON.stringify(draftData));
-      const currentChecks = Object.values(verifications).filter((item) => currentCheck(item.kind) === item);
-      currentChecks.forEach((item) => data.append("profile_verification_results", JSON.stringify(item)));
-      for (const slot of Object.keys(draftUploadSlots)) {
-        const file = form.get(slot);
-        if (file instanceof File && file.size > 0) data.set(slot, file);
-      }
-      const response = await fetch("/api/connect/profile-draft", { method: "POST", body: data });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to save draft.");
-      const draft = payload.draft as ProfileDraft;
+      const draft = await saveDraftForm(form);
+      if (!draft) throw new Error("Unable to save draft.");
       setProfile((current) => {
         if (!current) return current;
         const uploads = { ...current.uploads };
@@ -650,6 +711,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
         });
         return { ...current, uploads, uploadUrls };
       });
+      setSelectedUploads({});
       setNotice("Details saved in draft");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to save draft.");
@@ -820,8 +882,8 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
 
   const upload = (name: string, label: string, slot: string) => enabled.has(name) ? <label className="dx-upload">
     <span>{label}{required.has(name) ? " *" : ""}</span>
-    <input accept="image/*,.pdf" name={name} required={required.has(name) && !profile.uploads[slot]} type="file" />
-    <em>{profile.uploads[slot] ? "Uploaded" : "Choose file"}</em>
+    <input accept="image/*,.pdf" name={name} onChange={(event) => setSelectedUploads((current) => ({ ...current, [name]: event.target.files?.[0]?.name ?? "" }))} required={required.has(name) && !profile.uploads[slot]} type="file" />
+    <em>{selectedUploads[name] ? `Selected: ${selectedUploads[name]}` : profile.uploads[slot] ? "Uploaded" : "Choose file"}</em>
   </label> : null;
 
   const dlCheck = currentCheck("dl");
