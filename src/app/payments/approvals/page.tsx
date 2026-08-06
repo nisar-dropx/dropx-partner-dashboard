@@ -131,7 +131,7 @@ async function loadNextActionFrom(companyId: string, request: RequestRow | null)
     request.final_approval_role_id,
     ...(request.final_approval_role_ids ?? [])
   ].filter(Boolean));
-  if (assignedRoleIds.some((roleId) => finalRoleIds.has(roleId))) return "Final Approver";
+  const isFinalApproverStage = assignedRoleIds.some((roleId) => finalRoleIds.has(roleId));
 
   if (request.current_approver_user_id) {
     const { data } = await supabaseAdmin
@@ -140,8 +140,13 @@ async function loadNextActionFrom(companyId: string, request: RequestRow | null)
       .eq("company_id", companyId)
       .eq("id", request.current_approver_user_id)
       .maybeSingle();
-    if (data) return data.full_name || data.email || "Assigned approver";
+    if (data) {
+      const name = data.full_name || data.email || "Assigned approver";
+      return isFinalApproverStage ? `${name} (Final Approver)` : name;
+    }
   }
+
+  if (isFinalApproverStage) return "Final Approver";
 
   if (assignedRoleIds.length) {
     const { data } = await supabaseAdmin
