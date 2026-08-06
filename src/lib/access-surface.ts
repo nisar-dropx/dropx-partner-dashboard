@@ -43,7 +43,8 @@ const opsPageCodes = new Set([
   "fleet_fuel_log",
   "fleet_live_gps",
   "fleet_maintenance",
-  "fleet_reports"
+  "fleet_reports",
+  "reports"
 ]);
 
 const sharedPageCodes = new Set([
@@ -64,7 +65,8 @@ const sharedPageCodes = new Set([
   "fleet_fuel_log",
   "fleet_live_gps",
   "fleet_maintenance",
-  "fleet_reports"
+  "fleet_reports",
+  "reports"
 ]);
 
 export function currentAccessSurface(): AccessSurface {

@@ -5,6 +5,8 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 
+type PaymentReportFilters = { from: string; to: string; location: string; paymentHead: string; status: string };
+
 type PaymentRequestRow = {
   id: string;
   request_no: string;
@@ -65,7 +67,17 @@ function firstRelation<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
 
-async function loadPaymentReport(companyId: string) {
+function filteredRequestQuery(query: any, filters: PaymentReportFilters) {
+  let filtered = query.order("updated_at", { ascending: false });
+  if (filters.from) filtered = filtered.gte("created_at", `${filters.from}T00:00:00.000Z`);
+  if (filters.to) filtered = filtered.lte("created_at", `${filters.to}T23:59:59.999Z`);
+  if (filters.location) filtered = filtered.eq("location_code", filters.location);
+  if (filters.paymentHead) filtered = filtered.eq("payment_head_id", filters.paymentHead);
+  if (filters.status) filtered = filtered.eq("status", filters.status);
+  return filtered;
+}
+
+async function loadPaymentReport(companyId: string, filters: PaymentReportFilters) {
   if (!supabaseAdmin) {
     return {
       answersByRequestId: new Map<string, PaymentReportAnswer[]>(),
@@ -79,11 +91,10 @@ async function loadPaymentReport(companyId: string) {
   let requestsResult: any;
   let headsResult: any;
   [requestsResult, headsResult] = await Promise.all([
-    supabaseAdmin
+    filteredRequestQuery(supabaseAdmin
       .from("payment_requests")
       .select("id, request_no, location_code, payment_head_id, amount, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, utr_cin, bank_status, bank_processing_remarks, processing_started_at, processed_at, requested_by, created_at, updated_at")
-      .eq("company_id", companyId)
-      .order("created_at", { ascending: false }),
+      .eq("company_id", companyId), filters),
     supabaseAdmin
       .from("payment_heads")
       .select("id, code, name, external_id")
@@ -91,11 +102,10 @@ async function loadPaymentReport(companyId: string) {
   ]);
 
   if (requestsResult.error?.message.toLowerCase().includes("processing_started_at")) {
-    requestsResult = await supabaseAdmin
+    requestsResult = await filteredRequestQuery(supabaseAdmin
       .from("payment_requests")
       .select("id, request_no, location_code, payment_head_id, amount, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, utr_cin, bank_status, bank_processing_remarks, processed_at, requested_by, created_at, updated_at")
-      .eq("company_id", companyId)
-      .order("created_at", { ascending: false });
+      .eq("company_id", companyId), filters);
   }
   const error = requestsResult.error?.message || headsResult.error?.message || null;
   if (error) {
@@ -211,12 +221,22 @@ async function loadPaymentReport(companyId: string) {
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentReportPage() {
+export default async function PaymentReportPage({ searchParams }: { searchParams?: Record<string, string | string[] | undefined> }) {
   const authorization = await requirePagePermission("payment_reports", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_reports;
-  const { answersByRequestId, heads, logsByRequestId, profilesById, requests, error } = await loadPaymentReport(companyId);
+  const param = (name: string) => typeof searchParams?.[name] === "string" ? searchParams[name] as string : "";
+  const date = (name: string) => /^\d{4}-\d{2}-\d{2}$/.test(param(name)) ? param(name) : "";
+  const filters: PaymentReportFilters = {
+    from: date("from"),
+    to: date("to"),
+    location: param("location").slice(0, 40),
+    paymentHead: /^[0-9a-f-]{36}$/i.test(param("payment_head")) ? param("payment_head") : "",
+    status: param("status").slice(0, 40)
+  };
+  const { answersByRequestId, heads, logsByRequestId, profilesById, requests, error } = await loadPaymentReport(companyId, filters);
   const headById = new Map(heads.map((head) => [head.id, head]));
+  const locations = [...new Set([filters.location, ...requests.map((request) => request.location_code)].filter(Boolean))].sort();
   const totalAmount = requests.reduce((sum, request) => sum + Number(request.amount ?? 0), 0);
 
   return (
@@ -239,6 +259,16 @@ export default async function PaymentReportPage() {
 
       {!error && pagePermission.canView ? (
         <>
+          <section className="panel">
+            <form className="panel-body form-grid" method="get">
+              <label>From date<input className="field" name="from" type="date" defaultValue={filters.from} /></label>
+              <label>To date<input className="field" name="to" type="date" defaultValue={filters.to} /></label>
+              <label>Location<select className="field" name="location" defaultValue={filters.location}><option value="">All locations</option>{locations.map((location) => <option key={location} value={location}>{location}</option>)}</select></label>
+              <label>Payment head<select className="field" name="payment_head" defaultValue={filters.paymentHead}><option value="">All payment heads</option>{heads.map((head) => <option key={head.id} value={head.id}>{head.name}</option>)}</select></label>
+              <label>Status<select className="field" name="status" defaultValue={filters.status}><option value="">All statuses</option>{["pending", "approved", "processing", "processed", "returned", "rejected", "cancelled"].map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}</select></label>
+              <div className="form-actions"><button className="button" type="submit">Apply filters</button><a className="button secondary" href="/payments/report">Clear</a></div>
+            </form>
+          </section>
           <div className="stat-grid four">
             <div className="stat-card">
               <span>Total requests</span>

@@ -52,6 +52,7 @@ type PaymentRequestRow = {
   approval_status: string | null;
   requested_by: string | null;
   created_at: string;
+  updated_at: string;
 };
 type AnswerRow = {
   id: string;
@@ -164,10 +165,10 @@ async function loadPaymentRequestData(companyId: string, authorization: Authoriz
       .order("code");
   let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, created_at")
+      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, created_at, updated_at")
       .eq("company_id", companyId)
       .not("amount", "is", null)
-      .order("created_at", { ascending: false })
+      .order("updated_at", { ascending: false })
       .limit(20);
 
   if (!authorization.hasAllLocationAccess) {

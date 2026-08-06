@@ -9,7 +9,7 @@ const commonStart: NavItem[] = [
   { code: "delivery_associates", label: "Workforce Onboarding", href: "/field-executive", icon: "+" }
 ];
 
-const reports: NavItem = { code: "cod_reports", label: "Reports", href: "/reports", icon: "R" };
+const reports: NavItem = { code: "reports", label: "Reports", href: "/reports", icon: "R" };
 
 const payments: NavItem = {
   code: "payments",
