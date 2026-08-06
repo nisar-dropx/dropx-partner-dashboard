@@ -1,12 +1,13 @@
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PaymentReportTable, type PaymentReportAnswer, type PaymentReportLog } from "@/components/payment-report-table";
-import { requirePagePermission } from "@/lib/authorization";
+import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 
 type PaymentRequestRow = {
   id: string;
+  location_id: string | null;
   request_no: string;
   location_code: string;
   payment_head_id: string;
@@ -65,7 +66,9 @@ function firstRelation<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
 
-async function loadPaymentReport(companyId: string) {
+const NO_LOCATION_SCOPE_ID = "00000000-0000-0000-0000-000000000000";
+
+async function loadPaymentReport(companyId: string, authorization: AuthorizationContext) {
   if (!supabaseAdmin) {
     return {
       answersByRequestId: new Map<string, PaymentReportAnswer[]>(),
@@ -78,12 +81,16 @@ async function loadPaymentReport(companyId: string) {
   }
   let requestsResult: any;
   let headsResult: any;
-  [requestsResult, headsResult] = await Promise.all([
-    supabaseAdmin
+  let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_code, payment_head_id, amount, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, utr_cin, bank_status, bank_processing_remarks, processing_started_at, processed_at, requested_by, created_at, updated_at")
+      .select("id, request_no, location_id, location_code, payment_head_id, amount, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, utr_cin, bank_status, bank_processing_remarks, processing_started_at, processed_at, requested_by, created_at, updated_at")
       .eq("company_id", companyId)
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false });
+  if (!authorization.hasAllLocationAccess) {
+    requestsQuery = requestsQuery.in("location_id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [NO_LOCATION_SCOPE_ID]);
+  }
+  [requestsResult, headsResult] = await Promise.all([
+    requestsQuery,
     supabaseAdmin
       .from("payment_heads")
       .select("id, code, name, external_id")
@@ -91,11 +98,15 @@ async function loadPaymentReport(companyId: string) {
   ]);
 
   if (requestsResult.error?.message.toLowerCase().includes("processing_started_at")) {
-    requestsResult = await supabaseAdmin
+    let fallbackQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_code, payment_head_id, amount, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, utr_cin, bank_status, bank_processing_remarks, processed_at, requested_by, created_at, updated_at")
+      .select("id, request_no, location_id, location_code, payment_head_id, amount, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, utr_cin, bank_status, bank_processing_remarks, processed_at, requested_by, created_at, updated_at")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
+    if (!authorization.hasAllLocationAccess) {
+      fallbackQuery = fallbackQuery.in("location_id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [NO_LOCATION_SCOPE_ID]);
+    }
+    requestsResult = await fallbackQuery;
   }
   const error = requestsResult.error?.message || headsResult.error?.message || null;
   if (error) {
@@ -215,7 +226,7 @@ export default async function PaymentReportPage() {
   const authorization = await requirePagePermission("payment_reports", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_reports;
-  const { answersByRequestId, heads, logsByRequestId, profilesById, requests, error } = await loadPaymentReport(companyId);
+  const { answersByRequestId, heads, logsByRequestId, profilesById, requests, error } = await loadPaymentReport(companyId, authorization);
   const headById = new Map(heads.map((head) => [head.id, head]));
   const totalAmount = requests.reduce((sum, request) => sum + Number(request.amount ?? 0), 0);
 

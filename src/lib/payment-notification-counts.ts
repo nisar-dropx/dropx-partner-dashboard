@@ -1,6 +1,6 @@
 import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import { currentAccessSurface } from "@/lib/access-surface";
-import { getPaymentApprovalEligibility } from "@/lib/payment-approval-scope";
+import { canAccessPaymentLocation } from "@/lib/payment-approval-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadPeopleExceptionCount } from "@/lib/people-exception-count";
 
@@ -133,6 +133,14 @@ function addItem(items: PaymentNotificationItem[], key: string, label: string, d
   items.push({ key, label, detail, href, count });
 }
 
+function isAssignedToCurrentUser(request: PaymentNotificationRequest, authorization: AuthorizationContext) {
+  if (!canAccessPaymentLocation(authorization, request.location_id)) return false;
+  if (request.current_approver_user_id === authorization.userId) return true;
+  if (!authorization.roleId) return false;
+  return request.current_approver_role_id === authorization.roleId ||
+    (request.current_approver_role_ids ?? []).includes(authorization.roleId);
+}
+
 async function loadPeopleReviewCount(authorization: AuthorizationContext) {
   if (!supabaseAdmin || !authorization.companyId || !hasPermission(authorization, "people_review", "access")) return 0;
   if (!authorization.hasAllLocationAccess && !authorization.isMasterOwner && authorization.locationScopeIds.length === 0) return 0;
@@ -242,20 +250,8 @@ export async function loadPaymentNotificationSnapshot(authorization: Authorizati
   }
 
   if (hasPermission(authorization, "payment_approvals", "access")) {
-    const eligibleApprovalIds = await getPaymentApprovalEligibility(
-      authorization.companyId,
-      authorization,
-      requests.map((request) => ({
-        id: request.id,
-        location_id: request.location_id,
-        requested_by: request.requested_by,
-        current_approver_user_id: request.current_approver_user_id,
-        current_approver_role_id: request.current_approver_role_id,
-        current_approver_role_ids: request.current_approver_role_ids
-      }))
-    );
     badges.payment_approvals = requests
-      .filter((request) => eligibleApprovalIds.has(request.id))
+      .filter((request) => isAssignedToCurrentUser(request, authorization))
       .filter(isPendingApproval)
       .length;
     addItem(

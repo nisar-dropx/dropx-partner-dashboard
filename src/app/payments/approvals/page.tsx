@@ -117,6 +117,42 @@ async function loadApprovalLogs(companyId: string, requestId: string) {
   };
 }
 
+async function loadNextActionFrom(companyId: string, request: RequestRow | null) {
+  if (!supabaseAdmin || !request) return "-";
+  const status = String(request.approval_status || request.status || "").trim().toUpperCase();
+  if (status === "RETURNED") return "Requester";
+  if (["REJECTED", "CANCELLED", "PROCESSED"].includes(status)) return "-";
+
+  if (request.current_approver_user_id) {
+    const { data } = await supabaseAdmin
+      .from("profiles")
+      .select("full_name, email")
+      .eq("company_id", companyId)
+      .eq("id", request.current_approver_user_id)
+      .maybeSingle();
+    if (data) return data.full_name || data.email || "Assigned approver";
+  }
+
+  const roleIds = Array.from(new Set([
+    request.current_approver_role_id,
+    ...(request.current_approver_role_ids ?? [])
+  ].filter(Boolean))) as string[];
+  if (roleIds.length) {
+    const { data } = await supabaseAdmin
+      .from("user_roles")
+      .select("name, code")
+      .eq("company_id", companyId)
+      .in("id", roleIds);
+    const names = (data ?? []).map((role) => role.name || role.code).filter(Boolean);
+    if (names.length) return names.join(", ");
+  }
+
+  if (["APPROVED", "OWNER_APPROVED", "RE_APPROVED"].includes(status) || status.endsWith("_APPROVED")) {
+    return "Payment processor";
+  }
+  return "-";
+}
+
 async function loadApprovals(companyId: string, authorization: AuthorizationContext, statusFilter: string | undefined, searchTerm: string | undefined) {
   if (!supabaseAdmin) {
     return {
@@ -270,6 +306,7 @@ export default async function PaymentApprovalsPage({
     payment_head_questions: firstRelation(answer.payment_head_questions)
   }));
   const logs = detailData?.[1].logs ?? [];
+  const currentNextActionFrom = await loadNextActionFrom(companyId, selectedRequest);
   const currentApprovalCycle = Number(selectedRequest?.approval_cycle) || 1;
   const isResubmitted =
     selectedRequest?.status.toLowerCase() === "resubmitted" ||
@@ -279,7 +316,7 @@ export default async function PaymentApprovalsPage({
       log.approver_user_id === authorization.userId &&
       (Number(log.approval_cycle) || 1) === currentApprovalCycle
   );
-  const lifecycleRows = selectedRequest
+  const lifecycleBaseRows = selectedRequest
     ? [
         {
           id: `created-${selectedRequest.id}`,
@@ -309,6 +346,13 @@ export default async function PaymentApprovalsPage({
           : [])
       ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
     : [];
+  const lifecycleRows = lifecycleBaseRows.map((entry, index) => {
+    const nextEntry = lifecycleBaseRows[index + 1];
+    const nextActionFrom = nextEntry
+      ? `${nextEntry.actor}${nextEntry.role && nextEntry.role !== "-" ? ` (${nextEntry.role})` : ""}`
+      : currentNextActionFrom;
+    return { ...entry, nextActionFrom };
+  });
   const canShowApprovalActions =
     pagePermission.canEdit &&
     !currentUserAlreadyActed &&
@@ -462,12 +506,14 @@ export default async function PaymentApprovalsPage({
                   <h3>Request history</h3>
                   <div className="table-wrap">
                     <table>
+                      <thead><tr><th>Action</th><th>Action by</th><th>Role</th><th>Next action from</th><th>Remarks</th><th>Date</th></tr></thead>
                       <tbody>
                         {lifecycleRows.map((entry) => (
                           <tr key={entry.id}>
                             <td><StatusPill status={entry.action} /></td>
                             <td>{entry.actor}</td>
                             <td>{entry.role}</td>
+                            <td>{entry.nextActionFrom}</td>
                             <td>{entry.comments || "-"}</td>
                             <td>{formatDashboardDateTime(entry.created_at)}</td>
                           </tr>
