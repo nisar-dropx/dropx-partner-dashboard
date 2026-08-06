@@ -52,6 +52,9 @@ type PaymentRequestRow = {
   bank_account_no: string | null;
   created_at: string;
   contact_no: string | null;
+  current_approver_role_id: string | null;
+  current_approver_role_ids: string[] | null;
+  current_approver_user_id: string | null;
   email: string | null;
   ifsc: string | null;
   location_code: string;
@@ -74,6 +77,25 @@ type ApprovalRemarkRow = { action: string | null; comments: string | null; creat
 
 const NO_LOCATION_SCOPE_ID = "00000000-0000-0000-0000-000000000000";
 
+function hasCurrentApprover(request: PaymentRequestRow) {
+  return Boolean(request.current_approver_user_id || request.current_approver_role_id || request.current_approver_role_ids?.length);
+}
+
+function isFinalApprovalComplete(request: PaymentRequestRow) {
+  const status = String(request.status ?? "").toUpperCase();
+  const approvalStatus = String(request.approval_status ?? "").toUpperCase();
+  const approved = status === "APPROVED" || approvalStatus === "APPROVED" || status.endsWith("_APPROVED") || approvalStatus.endsWith("_APPROVED");
+  return approved && !hasCurrentApprover(request);
+}
+
+function displayApprovalStatus(request: PaymentRequestRow) {
+  const status = String(request.status ?? "").toUpperCase();
+  const approvalStatus = String(request.approval_status ?? "").toUpperCase();
+  if (isFinalApprovalComplete(request)) return "Final Approved";
+  if (status.endsWith("_APPROVED") || approvalStatus.endsWith("_APPROVED")) return "Initial Approved";
+  return request.approval_status || request.status;
+}
+
 function canSubmitBankDetails(request: PaymentRequestRow, userId: string) {
   if (request.requested_by !== userId) return false;
   const status = String(request.status ?? "").toUpperCase();
@@ -81,8 +103,7 @@ function canSubmitBankDetails(request: PaymentRequestRow, userId: string) {
   const isRejectedOrReturned = ["REJECTED", "RETURNED", "CANCELLED"].includes(status) || ["REJECTED", "RETURNED", "CANCELLED"].includes(approvalStatus);
   const isAlreadyProcessing = ["PROCESSING", "PROCESSED"].includes(status) || ["PROCESSING", "PROCESSED"].includes(approvalStatus);
   const hasBankDetails = Boolean(request.amount != null && request.bank_account_no?.trim() && request.ifsc?.trim() && request.account_holder_name?.trim());
-  const isApproved = status === "APPROVED" || approvalStatus === "APPROVED" || status === "OWNER_APPROVED" || approvalStatus === "OWNER_APPROVED" || approvalStatus.endsWith("_APPROVED");
-  return isApproved && !isRejectedOrReturned && !isAlreadyProcessing && !hasBankDetails;
+  return isFinalApprovalComplete(request) && !isRejectedOrReturned && !isAlreadyProcessing && !hasBankDetails;
 }
 
 function isResubmittable(request: PaymentRequestRow, userId: string) {
@@ -247,7 +268,7 @@ async function loadExpenseRequestData(companyId: string, authorization: Authoriz
       .order("code");
   let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, status, approval_status, created_at")
+      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, created_at")
       .eq("company_id", companyId)
       .is("amount", null)
       .order("created_at", { ascending: false })
@@ -402,7 +423,7 @@ export default async function ExpenseRequestPage({
                     <td>{request.location_code}</td>
                     <td>{headById.get(request.payment_head_id)?.name ?? "-"}</td>
                     <td>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN")}`}</td>
-                    <td><StatusPill status={request.approval_status || request.status} /></td>
+                    <td><StatusPill status={displayApprovalStatus(request)} /></td>
                     <td>{formatDashboardDate(request.created_at)}</td>
                     {pagePermission.canAdd ? (
                       <td>

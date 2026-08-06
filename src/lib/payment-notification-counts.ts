@@ -91,12 +91,13 @@ function hasCurrentApprover(request: PaymentNotificationRequest) {
 
 function isFinalApproved(request: PaymentNotificationRequest) {
   const status = requestStatus(request);
-  return (
+  const approved = (
     status === "APPROVED" ||
     status === "OWNER_APPROVED" ||
     status === "RE_APPROVED" ||
-    (status.endsWith("_APPROVED") && !hasCurrentApprover(request))
+    status.endsWith("_APPROVED")
   );
+  return approved && !hasCurrentApprover(request);
 }
 
 function hasPaymentDetails(request: PaymentNotificationRequest) {
