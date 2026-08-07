@@ -17,7 +17,7 @@ import { moveProfileDocumentToTrash, uploadProfileDocument } from "@/lib/profile
 import { saveProfileVerifications } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
-import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
+import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules, loadWorkforceCategoryStatutoryEnabled } from "@/lib/workforce-category-rules";
 import { sendEmployeeOnboardingWhatsApp } from "@/lib/whatsapp";
 
 function required(value: FormDataEntryValue | null, field: string) {
@@ -60,9 +60,13 @@ function isNextRedirectError(error: unknown) {
     String((error as { digest: string }).digest).startsWith("NEXT_REDIRECT");
 }
 
-function normalizeStatutory(values: FormDataEntryValue[]) {
+function normalizeStatutory(values: FormDataEntryValue[], requiredSelection = false) {
   const selected = values.map((value) => String(value)).filter((value) => ["not_applicable", "pf", "esi"].includes(value));
-  if (!selected.length || selected.includes("not_applicable")) return ["not_applicable"];
+  if (!selected.length) {
+    if (requiredSelection) throw new Error("Statutory applicability is required.");
+    return ["not_applicable"];
+  }
+  if (selected.includes("not_applicable")) return ["not_applicable"];
   return Array.from(new Set(selected));
 }
 
@@ -123,7 +127,6 @@ export async function createEmployee(formData: FormData) {
     const dateOfJoin = required(formData.get("date_of_join"), "Date of join");
     const locationId = required(formData.get("location_id"), "Location");
     const designationId = required(formData.get("designation_id"), "Designation");
-    const statutoryApplicability = normalizeStatutory(formData.getAll("statutory_applicability"));
 
     if (!/^\d{6,15}$/.test(mobile)) throw new Error("Mobile number must contain 6 to 15 digits.");
     if (Number.isNaN(Date.parse(dateOfJoin))) throw new Error("Enter a valid date of join.");
@@ -141,7 +144,11 @@ export async function createEmployee(formData: FormData) {
     if (!designationResult.data) throw new Error("Selected designation is not available.");
     requireDesignationOnboardingAccess(designationResult.data, authorization);
   requireDesignationPortalAccess(designationResult.data, "dashboard", "add", { isOwner: isCompanyOwner(authorization) });
-    const directActivate = await loadWorkforceCategoryDirectActivate(companyId, "employees");
+    const [directActivate, statutoryEnabled] = await Promise.all([
+      loadWorkforceCategoryDirectActivate(companyId, "employees"),
+      loadWorkforceCategoryStatutoryEnabled(companyId, "employees")
+    ]);
+    const statutoryApplicability = normalizeStatutory(formData.getAll("statutory_applicability"), statutoryEnabled);
     const dashboardRules = (await loadWorkforceCategoryRules(
       companyId,
       "employees",
@@ -270,7 +277,8 @@ export async function updateEmployee(formData: FormData) {
     const dateOfJoin = required(formData.get("date_of_join"), "Date of join");
     const locationId = required(formData.get("location_id"), "Location");
     const designationId = required(formData.get("designation_id"), "Designation");
-    const statutoryApplicability = normalizeStatutory(formData.getAll("statutory_applicability"));
+    const statutoryEnabled = await loadWorkforceCategoryStatutoryEnabled(companyId, "employees");
+    const statutoryApplicability = normalizeStatutory(formData.getAll("statutory_applicability"), statutoryEnabled);
     const isActive = optional(formData.get("is_active")) !== "false";
     const extraPayload = {
       gender: optional(formData.get("gender")),

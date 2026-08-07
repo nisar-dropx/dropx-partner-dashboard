@@ -105,7 +105,7 @@ function StatutoryMultiSelect({
     const next = selectedSet.has(value)
       ? withoutNotApplicable.filter((item) => item !== value)
       : [...withoutNotApplicable, value];
-    onChange(next.length ? next : ["not_applicable"]);
+    onChange(next);
   }
 
   return (
@@ -130,7 +130,7 @@ export function EmployeeForm({ action, dashboardRules, designationOptions, direc
   const [selectedLocationId, setSelectedLocationId] = useState(employee?.location_id ?? "");
   const [selectedDesignationId, setSelectedDesignationId] = useState(employee?.designation_id ?? "");
   const [selectedStatutory, setSelectedStatutory] = useState<string[]>(
-    employee?.statutory_applicability?.length ? employee.statutory_applicability : ["not_applicable"]
+    employee?.statutory_applicability?.length ? employee.statutory_applicability : []
   );
   const isEdit = mode === "edit";
   const showProfileFields = isEdit || directActivate;
@@ -266,8 +266,14 @@ export function EmployeeForm({ action, dashboardRules, designationOptions, direc
           confirmMessage={`Do you want to ${isEdit ? "save" : "submit"} this Employee registration?`}
           confirmSubmitText="Yes"
           confirmTitle="Confirm submission"
-          disabled={!locationOptions.length || designationDisabled}
-          disabledText={!locationOptions.length ? "Add location first" : !selectedLocationId ? "Select location first" : "Add designation for this model first"}
+          disabled={!locationOptions.length || designationDisabled || (statutoryEnabled && !selectedStatutory.length)}
+          disabledText={!locationOptions.length
+            ? "Add location first"
+            : !selectedLocationId
+              ? "Select location first"
+              : designationDisabled
+                ? "Add designation for this model first"
+                : "Select statutory applicability"}
         >
           {isEdit ? "Save changes" : directActivate ? "Add and activate" : "Submit"}
         </SubmitButton>
