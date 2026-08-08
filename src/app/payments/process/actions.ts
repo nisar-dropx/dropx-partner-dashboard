@@ -272,6 +272,7 @@ export async function updatePaymentProcessStatus(formData: FormData) {
     await updatePaymentRequest(companyId, requestId, {
       status: "returned",
       approval_status: "RETURNED",
+      current_step_order: 3,
       bank_status: "Returned",
       bank_processing_remarks: remarks,
       current_approver_user_id: null,
@@ -369,6 +370,7 @@ export async function finalizePaymentProcess(formData: FormData) {
         await updatePaymentRequest(companyId, request.id, {
           status: "returned",
           approval_status: "RETURNED",
+          current_step_order: 3,
           bank_status: "Cancelled",
           bank_processing_remarks: row.remarks || null,
           current_approver_user_id: null,

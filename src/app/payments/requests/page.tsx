@@ -52,6 +52,7 @@ type PaymentRequestRow = {
   remarks: string | null;
   status: string;
   approval_status: string | null;
+  current_step_order: number | null;
   requested_by: string | null;
   payment_mode: PaymentMode | null;
   payment_reference: string | null;
@@ -174,7 +175,7 @@ async function loadPaymentRequestData(companyId: string, authorization: Authoriz
       .order("code");
   let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, payment_mode, payment_reference, created_at")
+      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, current_step_order, requested_by, payment_mode, payment_reference, created_at")
       .eq("company_id", companyId)
       .not("amount", "is", null)
       .order("created_at", { ascending: false })
@@ -226,7 +227,9 @@ async function loadReturnRemark(companyId: string, requestId: string) {
       .map((log) => ({
         action: String(log.action ?? ""),
         comments: String(log.comments ?? ""),
-        created_at: String(log.created_at ?? "")
+        created_at: String(log.created_at ?? ""),
+        approver_role_id: log.approver_role_id ?? null,
+        approver_user_id: log.approver_user_id ?? null
       }))
       .filter((log) => log.comments.trim());
     const returnLog = logs.find((log) => {
@@ -278,9 +281,10 @@ export default async function PaymentRequestsPage({
   const isProcessorReturn = Boolean(
     selectedReturnRemark &&
     (
+      selectedResubmitRequest?.current_step_order === 3 ||
       (selectedReturnRemark.approver_role_id &&
         selectedResubmitHead?.payment_process_role_ids?.includes(selectedReturnRemark.approver_role_id)) ||
-      (selectedResubmitRequest?.amount != null && selectedResubmitRequest.payment_mode)
+      String(selectedResubmitRequest?.approval_status ?? "").toUpperCase() === "RE_PROCESSING_PENDING"
     )
   );
   const bankRequest = searchParams?.bank

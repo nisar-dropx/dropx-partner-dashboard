@@ -662,7 +662,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
 
     const { data: request, error: requestError } = await admin
       .from("payment_requests")
-      .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, amount, payment_mode, current_approver_user_id, current_approver_role_id, current_approver_role_ids")
+      .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, current_step_order, amount, payment_mode, current_approver_user_id, current_approver_role_id, current_approver_role_ids")
       .eq("id", requestId)
       .eq("company_id", companyId)
       .single();
@@ -741,8 +741,9 @@ export async function submitPaymentBankDetails(formData: FormData) {
       isReturned &&
       latestReturn &&
       (
+        request.current_step_order === 3 ||
         (latestReturn.approver_role_id && paymentProcessRoleIds.includes(latestReturn.approver_role_id)) ||
-        (request.amount != null && request.payment_mode)
+        approvalStatus === "RE_PROCESSING_PENDING"
       )
     );
     if ((!isApproved && !returnedFromPaymentProcessing) || isRejectedOrCancelled || isAlreadyProcessing) {
