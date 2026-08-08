@@ -662,7 +662,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
 
     const { data: request, error: requestError } = await admin
       .from("payment_requests")
-      .select("id, location_id, payment_head_id, requested_by, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids")
+      .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, amount, payment_mode, current_approver_user_id, current_approver_role_id, current_approver_role_ids")
       .eq("id", requestId)
       .eq("company_id", companyId)
       .single();
@@ -708,24 +708,46 @@ export async function submitPaymentBankDetails(formData: FormData) {
 
     const status = String(request.status ?? "").toUpperCase();
     const approvalStatus = String(request.approval_status ?? "").toUpperCase();
-    const isRejectedOrReturned = ["REJECTED", "RETURNED", "CANCELLED"].includes(status) || ["REJECTED", "RETURNED", "CANCELLED"].includes(approvalStatus);
+    const isReturned = status === "RETURNED" || approvalStatus === "RETURNED";
+    const isRejectedOrCancelled = ["REJECTED", "CANCELLED"].includes(status) || ["REJECTED", "CANCELLED"].includes(approvalStatus);
     const isAlreadyProcessing = ["PROCESSING", "PROCESSED"].includes(status) || ["PROCESSING", "PROCESSED"].includes(approvalStatus);
     const isApproved = status === "APPROVED" ||
       approvalStatus === "APPROVED" ||
       status === "OWNER_APPROVED" ||
       approvalStatus === "OWNER_APPROVED" ||
       (approvalStatus.endsWith("_APPROVED") && !request.current_approver_user_id && !request.current_approver_role_id && !(request.current_approver_role_ids?.length));
-    if (!isApproved || isRejectedOrReturned || isAlreadyProcessing) {
-      throw new Error("Bank details can be submitted only after final approval.");
-    }
-
     const { data: headData, error: headError } = await admin
       .from("payment_heads")
-      .select("id, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order)")
+      .select("id, supported_payment_modes, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order)")
       .eq("id", request.payment_head_id)
       .eq("company_id", companyId)
       .single();
     if (headError || !headData) throw new Error("Payment head not found for this company.");
+    const latestReturnResult = isReturned
+      ? await admin
+          .from("payment_request_approvals")
+          .select("action, approver_user_id, approver_role_id, created_at")
+          .eq("company_id", companyId)
+          .or(`payment_request_id.eq.${request.id},request_id.eq.${request.id}`)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : null;
+    const latestReturn = String(latestReturnResult?.data?.action ?? "").toLowerCase() === "returned"
+      ? latestReturnResult?.data
+      : null;
+    const paymentProcessRoleIds = (headData.payment_process_role_ids ?? []) as string[];
+    const returnedFromPaymentProcessing = Boolean(
+      isReturned &&
+      latestReturn &&
+      (
+        (latestReturn.approver_role_id && paymentProcessRoleIds.includes(latestReturn.approver_role_id)) ||
+        (request.amount != null && request.payment_mode)
+      )
+    );
+    if ((!isApproved && !returnedFromPaymentProcessing) || isRejectedOrCancelled || isAlreadyProcessing) {
+      throw new Error("Payment details can be submitted only after final approval or a processor return.");
+    }
     if (!normalizePaymentModes(headData.supported_payment_modes).includes(paymentMode)) {
       throw new Error("The selected payment method is not supported by this payment head.");
     }
@@ -787,6 +809,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
       if (answersError) throw new Error(answersError.message);
     }
 
+    const nextApprovalCycle = returnedFromPaymentProcessing ? (Number(request.approval_cycle) || 1) + 1 : request.approval_cycle;
     const { error: updateError } = await admin
       .from("payment_requests")
       .update({
@@ -804,13 +827,31 @@ export async function submitPaymentBankDetails(formData: FormData) {
         contact_no: contactNo,
         email,
         remarks,
-        status: "approved",
-        approval_status: "APPROVED",
+        status: returnedFromPaymentProcessing ? "re_approved" : "approved",
+        approval_status: returnedFromPaymentProcessing ? "RE_APPROVED" : "APPROVED",
+        approval_cycle: nextApprovalCycle,
+        current_step_order: returnedFromPaymentProcessing ? 3 : undefined,
+        current_approver_user_id: returnedFromPaymentProcessing ? latestReturn?.approver_user_id ?? null : null,
+        current_approver_role_id: returnedFromPaymentProcessing ? latestReturn?.approver_role_id ?? null : null,
+        current_approver_role_ids: returnedFromPaymentProcessing && latestReturn?.approver_role_id
+          ? [latestReturn.approver_role_id]
+          : [],
         updated_at: new Date().toISOString()
       })
       .eq("id", request.id)
       .eq("company_id", companyId);
     if (updateError) throw new Error(updateError.message);
+    if (returnedFromPaymentProcessing) {
+      await insertPaymentApprovalLog(withCompany({
+        payment_request_id: request.id,
+        request_id: request.id,
+        approver_user_id: authorization.userId,
+        approver_role_id: authorization.roleId,
+        approval_cycle: nextApprovalCycle,
+        action: "resubmitted",
+        comments: remarks || "Payment details corrected and resubmitted to processor."
+      }, companyId), companyId);
+    }
 
     revalidatePath("/payments/requests");
     revalidatePath("/payments/expense-request");

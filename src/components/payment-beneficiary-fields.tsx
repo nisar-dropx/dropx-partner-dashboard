@@ -11,6 +11,9 @@ type PaymentBeneficiaryFieldsProps = {
   defaultContactNo?: string | null;
   defaultEmail?: string | null;
   defaultIfsc?: string | null;
+  defaultPaymentMode?: PaymentMode | null;
+  defaultUpiId?: string | null;
+  defaultAccountHolderName?: string | null;
   savedContacts?: UserPaymentContact[];
 };
 
@@ -20,20 +23,23 @@ export function PaymentBeneficiaryFields({
   defaultContactNo,
   defaultEmail,
   defaultIfsc,
+  defaultPaymentMode,
+  defaultUpiId,
+  defaultAccountHolderName,
   savedContacts = []
 }: PaymentBeneficiaryFieldsProps) {
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>("account_transfer");
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>(defaultPaymentMode ?? "account_transfer");
   const [bankAccountNo, setBankAccountNo] = useState((defaultBankAccountNo ?? "").toUpperCase());
   const [ifsc, setIfsc] = useState((defaultIfsc ?? "").toUpperCase());
-  const [upiId, setUpiId] = useState("");
-  const [accountHolderName, setAccountHolderName] = useState("");
+  const [upiId, setUpiId] = useState(defaultUpiId ?? "");
+  const [accountHolderName, setAccountHolderName] = useState(defaultAccountHolderName ?? "");
   const [contactNo, setContactNo] = useState(defaultContactNo ?? "");
   const [contactEmail, setContactEmail] = useState(defaultEmail ?? "");
   const [bankVerified, setBankVerified] = useState(false);
   const [bankVerifying, setBankVerifying] = useState(false);
   const [upiVerified, setUpiVerified] = useState(false);
   const [upiVerifying, setUpiVerifying] = useState(false);
-  const [upiAccountHolderName, setUpiAccountHolderName] = useState("");
+  const [upiAccountHolderName, setUpiAccountHolderName] = useState(defaultAccountHolderName ?? "");
   const [selectedBankContactId, setSelectedBankContactId] = useState("");
   const [selectedUpiContactId, setSelectedUpiContactId] = useState("");
   const [verificationMessage, setVerificationMessage] = useState("");

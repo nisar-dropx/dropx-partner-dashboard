@@ -33,6 +33,7 @@ type PaymentHeadRow = {
   request_expense_approval: boolean;
   expense_approval_threshold: number | null;
   supported_payment_modes: PaymentMode[] | null;
+  payment_process_role_ids: string[] | null;
   payment_head_questions?: QuestionRow[] | null;
 };
 type PaymentRequestRow = {
@@ -52,6 +53,8 @@ type PaymentRequestRow = {
   status: string;
   approval_status: string | null;
   requested_by: string | null;
+  payment_mode: PaymentMode | null;
+  payment_reference: string | null;
   created_at: string;
 };
 type AnswerRow = {
@@ -61,7 +64,13 @@ type AnswerRow = {
   file_name: string | null;
   file_path: string | null;
 };
-type ApprovalRemarkRow = { action: string | null; comments: string | null; created_at: string };
+type ApprovalRemarkRow = {
+  action: string | null;
+  comments: string | null;
+  created_at: string;
+  approver_role_id: string | null;
+  approver_user_id: string | null;
+};
 
 const NO_LOCATION_SCOPE_ID = "00000000-0000-0000-0000-000000000000";
 
@@ -159,13 +168,13 @@ async function loadPaymentRequestData(companyId: string, authorization: Authoriz
       .order("station_code");
   const headsQuery = supabaseAdmin
       .from("payment_heads")
-      .select("id, code, name, requires_supporting_document, request_expense_approval, expense_approval_threshold, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order)")
+      .select("id, code, name, requires_supporting_document, request_expense_approval, expense_approval_threshold, supported_payment_modes, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order)")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("code");
   let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, created_at")
+      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, payment_mode, payment_reference, created_at")
       .eq("company_id", companyId)
       .not("amount", "is", null)
       .order("created_at", { ascending: false })
@@ -206,7 +215,7 @@ async function loadReturnRemark(companyId: string, requestId: string) {
   for (const requestColumn of requestColumns) {
     const result = await admin
       .from("payment_request_approvals")
-      .select("action, comments, created_at")
+      .select("action, comments, created_at, approver_role_id, approver_user_id")
       .eq("company_id", companyId)
       .eq(requestColumn, requestId)
       .order("created_at", { ascending: false })
@@ -257,14 +266,29 @@ export default async function PaymentRequestsPage({
       });
   const locationOptions = visibleLocations.map((location) => ({ value: location.id, label: location.station_code, helper: location.station_name ?? undefined }));
   const headOptions = heads.map((head) => ({ value: head.id, label: head.name, helper: head.code }));
-  const bankRequest = searchParams?.bank
-    ? requests.find((request) => request.id === searchParams.bank && canSubmitBankDetails(request, authorization.userId)) ?? null
-    : null;
-  const bankHead = bankRequest ? headById.get(bankRequest.payment_head_id) ?? null : null;
-  const bankQuestions = questionsForStage(bankHead?.payment_head_questions, "payment");
-  const resubmitRequest = searchParams?.resubmit
+  const selectedResubmitRequest = searchParams?.resubmit
     ? requests.find((request) => request.id === searchParams.resubmit && isResubmittable(request, authorization.userId)) ?? null
     : null;
+  const selectedReturnRemark = selectedResubmitRequest
+    ? await loadReturnRemark(companyId, selectedResubmitRequest.id)
+    : null;
+  const selectedResubmitHead = selectedResubmitRequest
+    ? headById.get(selectedResubmitRequest.payment_head_id) ?? null
+    : null;
+  const isProcessorReturn = Boolean(
+    selectedReturnRemark &&
+    (
+      (selectedReturnRemark.approver_role_id &&
+        selectedResubmitHead?.payment_process_role_ids?.includes(selectedReturnRemark.approver_role_id)) ||
+      (selectedResubmitRequest?.amount != null && selectedResubmitRequest.payment_mode)
+    )
+  );
+  const bankRequest = searchParams?.bank
+    ? requests.find((request) => request.id === searchParams.bank && canSubmitBankDetails(request, authorization.userId)) ?? null
+    : isProcessorReturn ? selectedResubmitRequest : null;
+  const bankHead = bankRequest ? headById.get(bankRequest.payment_head_id) ?? null : null;
+  const bankQuestions = questionsForStage(bankHead?.payment_head_questions, "payment");
+  const resubmitRequest = isProcessorReturn ? null : selectedResubmitRequest;
   const resubmitHead = resubmitRequest ? headById.get(resubmitRequest.payment_head_id) ?? null : null;
   const resubmitQuestions = questionsForStage(resubmitHead?.payment_head_questions, "payment");
   const answersResult = resubmitRequest && supabaseAdmin ? await supabaseAdmin
@@ -424,6 +448,9 @@ export default async function PaymentRequestsPage({
                 defaultContactNo={bankRequest.contact_no}
                 defaultEmail={bankRequest.email}
                 defaultIfsc={bankRequest.ifsc}
+                defaultPaymentMode={bankRequest.payment_mode}
+                defaultUpiId={bankRequest.payment_mode === "upi_payment" ? bankRequest.payment_reference : null}
+                defaultAccountHolderName={bankRequest.account_holder_name}
                 savedContacts={savedContacts}
               />
               {bankQuestions.length ? (
