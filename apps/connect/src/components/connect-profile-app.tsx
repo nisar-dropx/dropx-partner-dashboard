@@ -116,6 +116,54 @@ const draftUploadSlots: Record<string, string> = {
   profile_photo: "photo"
 };
 
+const maxUploadBytes = 3_500_000;
+const imageCompressionThreshold = 1_200_000;
+
+async function apiPayload(response: Response) {
+  const text = await response.text();
+  if (!text) return {} as Record<string, any>;
+  try {
+    return JSON.parse(text) as Record<string, any>;
+  } catch {
+    if (response.status === 413 || /request entity too large|payload too large/i.test(text)) {
+      throw new Error("One or more files are too large. Please choose smaller files and try again.");
+    }
+    throw new Error(response.ok ? "The server returned an invalid response. Please try again." : "Unable to submit the registration. Please try again.");
+  }
+}
+
+function imageFromFile(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Unable to read ${file.name}.`));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error(`Unable to prepare ${file.name}. Please choose a JPG, PNG or PDF file.`));
+      image.onload = () => resolve(image);
+      image.src = String(reader.result ?? "");
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function prepareUpload(file: File) {
+  let prepared = file;
+  if (file.type.startsWith("image/") && file.size > imageCompressionThreshold) {
+    const image = await imageFromFile(file);
+    const scale = Math.min(1, 1800 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.78));
+    if (blob) prepared = new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
+  }
+  if (prepared.size > maxUploadBytes) {
+    throw new Error(`${file.name} is too large. Each file must be smaller than 3.5 MB.`);
+  }
+  return prepared;
+}
+
 const profileInputRules: Record<string, {
   pattern: RegExp;
   message: string;
@@ -594,8 +642,26 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
         data.set("agreement_version", String(profile.agreement.version));
       }
       currentChecks.forEach((item) => data.append("profile_verification_results", JSON.stringify(item)));
+      const draftData: Record<string, string> = {};
+      data.forEach((value, key) => {
+        if (typeof value === "string" && key !== "profile_verification_results") draftData[key] = value;
+      });
+      for (const slot of Object.keys(draftUploadSlots)) {
+        const file = data.get(slot);
+        if (!(file instanceof File) || file.size === 0) continue;
+        const uploadData = new FormData();
+        uploadData.set("account_id", account.id);
+        uploadData.set("profile_type", account.profileType);
+        uploadData.set("draft_data", JSON.stringify(draftData));
+        currentChecks.forEach((item) => uploadData.append("profile_verification_results", JSON.stringify(item)));
+        uploadData.set(slot, await prepareUpload(file));
+        const uploadResponse = await fetch("/api/connect/profile-draft", { method: "POST", body: uploadData });
+        const uploadPayload = await apiPayload(uploadResponse);
+        if (!uploadResponse.ok) throw new Error(uploadPayload.error || `Unable to upload ${file.name}.`);
+        data.delete(slot);
+      }
       const response = await fetch(endpoint, { method: "POST", body: data });
-      const payload = await response.json();
+      const payload = await apiPayload(response);
       if (!response.ok) throw new Error(payload.error || "Unable to save profile.");
       setProfile(payload.profile);
       setNotice("Profile saved.");
@@ -625,19 +691,21 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       });
       draftData.has_pf_uan = pfAnswer;
       draftData.has_esi_no = esiAnswer;
-      const data = new FormData();
-      data.set("account_id", account.id);
-      data.set("profile_type", account.profileType);
-      data.set("draft_data", JSON.stringify(draftData));
       const currentChecks = Object.values(verifications).filter((item) => currentCheck(item.kind) === item);
-      currentChecks.forEach((item) => data.append("profile_verification_results", JSON.stringify(item)));
-      for (const slot of Object.keys(draftUploadSlots)) {
-        const file = form.get(slot);
-        if (file instanceof File && file.size > 0) data.set(slot, file);
+      let payload: Record<string, any> = {};
+      const files = Object.keys(draftUploadSlots).map((slot) => [slot, form.get(slot)] as const).filter(([, file]) => file instanceof File && file.size > 0);
+      const batches = files.length ? files : [["", null] as const];
+      for (const [slot, file] of batches) {
+        const data = new FormData();
+        data.set("account_id", account.id);
+        data.set("profile_type", account.profileType);
+        data.set("draft_data", JSON.stringify(draftData));
+        currentChecks.forEach((item) => data.append("profile_verification_results", JSON.stringify(item)));
+        if (slot && file instanceof File) data.set(slot, await prepareUpload(file));
+        const response = await fetch("/api/connect/profile-draft", { method: "POST", body: data });
+        payload = await apiPayload(response);
+        if (!response.ok) throw new Error(payload.error || "Unable to save draft.");
       }
-      const response = await fetch("/api/connect/profile-draft", { method: "POST", body: data });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to save draft.");
       const draft = payload.draft as ProfileDraft;
       setProfile((current) => {
         if (!current) return current;

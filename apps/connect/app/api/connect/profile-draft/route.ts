@@ -105,6 +105,7 @@ async function uploadDraftFile(
   slot: ProfileDraftFileSlot
 ) {
   if (!supabaseAdmin || !(file instanceof File) || file.size === 0) return null;
+  if (file.size > 3_500_000) throw new Error(`${file.name || "File"} is too large. Each file must be smaller than 3.5 MB.`);
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const path = `${companyId}/registration-drafts/${profileType}/${accountId}/${slot}-${Date.now()}${fileExt(safeName)}`;
   const result = await supabaseAdmin.storage
