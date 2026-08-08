@@ -218,7 +218,7 @@ export async function updatePaymentProcessStatus(formData: FormData) {
       .eq("id", requestId)
       .single();
     if (error || !request) throw new Error("Payment request was not found.");
-    if (String(request.approval_status ?? "").toUpperCase() === "RE_APPROVED" && request.current_approver_user_id !== authorization.userId) {
+    if (["RE_APPROVED", "RE_PROCESSING_PENDING"].includes(String(request.approval_status ?? "").toUpperCase()) && request.current_approver_user_id !== authorization.userId) {
       throw new Error("This returned request is assigned to another processor.");
     }
 
@@ -330,7 +330,7 @@ export async function finalizePaymentProcess(formData: FormData) {
         skippedCount += 1;
         continue;
       }
-      if (String(request.approval_status ?? "").toUpperCase() === "RE_APPROVED" && request.current_approver_user_id !== authorization.userId) {
+      if (["RE_APPROVED", "RE_PROCESSING_PENDING"].includes(String(request.approval_status ?? "").toUpperCase()) && request.current_approver_user_id !== authorization.userId) {
         skippedCount += 1;
         continue;
       }

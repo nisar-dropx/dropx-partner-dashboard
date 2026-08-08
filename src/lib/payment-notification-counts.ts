@@ -91,7 +91,7 @@ function hasCurrentApprover(request: PaymentNotificationRequest) {
 
 function isFinalApproved(request: PaymentNotificationRequest) {
   const status = requestStatus(request);
-  if (status === "RE_APPROVED") return true;
+  if (status === "RE_APPROVED" || status === "RE_PROCESSING_PENDING") return true;
   const approved = (
     status === "APPROVED" ||
     status === "OWNER_APPROVED" ||
@@ -114,7 +114,7 @@ function needsPaymentDetails(request: PaymentNotificationRequest) {
 
 function isPendingApproval(request: PaymentNotificationRequest) {
   const status = requestStatus(request);
-  if (status === "RE_APPROVED") return false;
+  if (status === "RE_APPROVED" || status === "RE_PROCESSING_PENDING") return false;
   if (CLOSED_STATUSES.has(status)) return false;
   return Boolean(request.current_approver_user_id || request.current_approver_role_id || request.current_approver_role_ids?.length || status === "PENDING" || !status);
 }
@@ -269,7 +269,7 @@ export async function loadPaymentNotificationSnapshot(authorization: Authorizati
     badges.payment_process = requests
       .filter((request) => canProcessPayment(request, authorization))
       .filter(isReadyForPaymentProcess)
-      .filter((request) => requestStatus(request) !== "RE_APPROVED" || request.current_approver_user_id === authorization.userId)
+      .filter((request) => !["RE_APPROVED", "RE_PROCESSING_PENDING"].includes(requestStatus(request)) || request.current_approver_user_id === authorization.userId)
       .length;
     addItem(
       items,

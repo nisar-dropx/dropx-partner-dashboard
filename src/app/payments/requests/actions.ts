@@ -827,8 +827,8 @@ export async function submitPaymentBankDetails(formData: FormData) {
         contact_no: contactNo,
         email,
         remarks,
-        status: returnedFromPaymentProcessing ? "re_approved" : "approved",
-        approval_status: returnedFromPaymentProcessing ? "RE_APPROVED" : "APPROVED",
+        status: returnedFromPaymentProcessing ? "resubmitted" : "approved",
+        approval_status: returnedFromPaymentProcessing ? "RE_PROCESSING_PENDING" : "APPROVED",
         approval_cycle: nextApprovalCycle,
         current_step_order: returnedFromPaymentProcessing ? 3 : undefined,
         current_approver_user_id: returnedFromPaymentProcessing ? latestReturn?.approver_user_id ?? null : null,
@@ -1011,8 +1011,8 @@ export async function resubmitExpenseRequest(formData: FormData) {
         amount: null,
         amount_requested: Number(amountText),
         remarks,
-        status: currentApprovalStep === 1 ? "re_pending" : "re_cluster_approved",
-        approval_status: currentApprovalStep === 1 ? "RE_PENDING" : "RE_CLUSTER_APPROVED",
+        status: "resubmitted",
+        approval_status: currentApprovalStep === 1 ? "RE_PENDING" : "RE_FINAL_PENDING",
         approval_cycle: nextApprovalCycle,
         current_step_order: currentApprovalStep,
         current_approver_user_id: approver.userId,
@@ -1125,12 +1125,12 @@ export async function resubmitPaymentRequest(formData: FormData) {
       };
       currentApprovalRoleIds = approver.roleId ? [approver.roleId] : paymentProcessRoleIds;
       currentApprovalStep = 3;
-      resubmittedApprovalStatus = "RE_APPROVED";
+      resubmittedApprovalStatus = "RE_PROCESSING_PENDING";
     } else if (latestReturnedApproval?.approver_user_id) {
       approver = { userId: latestReturnedApproval.approver_user_id, roleId: returnedRoleId };
       currentApprovalRoleIds = returnedRoleId ? [returnedRoleId] : [];
       currentApprovalStep = initialApprovalRoleIds.includes(returnedRoleId ?? "") ? 1 : 2;
-      resubmittedApprovalStatus = currentApprovalStep === 1 ? "RE_PENDING" : "RE_CLUSTER_APPROVED";
+      resubmittedApprovalStatus = currentApprovalStep === 1 ? "RE_PENDING" : "RE_FINAL_PENDING";
     } else {
       const startsWithFinalApproval = !initialApprovalRoleIds.length;
       currentApprovalRoleIds = startsWithFinalApproval ? finalApprovalRoleIds : initialApprovalRoleIds;
@@ -1140,7 +1140,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
         currentApprovalRoleIds,
         startsWithFinalApproval ? "final approver roles" : "initial approver roles"
       );
-      resubmittedApprovalStatus = startsWithFinalApproval ? "RE_CLUSTER_APPROVED" : "RE_PENDING";
+      resubmittedApprovalStatus = startsWithFinalApproval ? "RE_FINAL_PENDING" : "RE_PENDING";
     }
 
     const { data: existingAnswers } = await admin
@@ -1195,7 +1195,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
     }
 
     const statusPayload = {
-        status: resubmittedApprovalStatus.toLowerCase(),
+        status: "resubmitted",
         approval_status: resubmittedApprovalStatus,
         approval_cycle: nextApprovalCycle,
         current_step_order: currentApprovalStep,
