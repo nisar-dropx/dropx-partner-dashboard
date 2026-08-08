@@ -91,10 +91,10 @@ function hasCurrentApprover(request: PaymentNotificationRequest) {
 
 function isFinalApproved(request: PaymentNotificationRequest) {
   const status = requestStatus(request);
+  if (status === "RE_APPROVED") return true;
   const approved = (
     status === "APPROVED" ||
     status === "OWNER_APPROVED" ||
-    status === "RE_APPROVED" ||
     status.endsWith("_APPROVED")
   );
   return approved && !hasCurrentApprover(request);
@@ -269,6 +269,7 @@ export async function loadPaymentNotificationSnapshot(authorization: Authorizati
     badges.payment_process = requests
       .filter((request) => canProcessPayment(request, authorization))
       .filter(isReadyForPaymentProcess)
+      .filter((request) => requestStatus(request) !== "RE_APPROVED" || request.current_approver_user_id === authorization.userId)
       .length;
     addItem(
       items,
