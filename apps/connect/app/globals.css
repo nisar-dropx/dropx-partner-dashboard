@@ -8169,3 +8169,4 @@ tr:last-child td {
   .dx-agreement-accept { padding: 10px; }
 }
 .dx-resignation-status,.dx-resignation-form{display:grid;gap:10px;padding:14px;background:#f7f8fb;border:1px solid #e2e3eb;border-radius:9px}.dx-resignation-status span,.dx-resignation-status small{color:#6b6d78}.dx-resignation-form p{margin:0;color:#656771;font-size:13px}.dx-resignation-form label{display:grid;gap:5px;color:#656771;font-size:12px}.dx-resignation-form input,.dx-resignation-form textarea{padding:10px;border:1px solid #dedfe7;border-radius:8px;background:#fff}.dx-resignation-form textarea{min-height:82px;resize:vertical}
+.dx-upload em.selected{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#187a55;background:#ebfaf3;border-color:#b9ead5}

@@ -392,6 +392,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [agreementAccepted, setAgreementAccepted] = useState(false);
   const [agreementGatePassed, setAgreementGatePassed] = useState(false);
+  const [selectedFileNames, setSelectedFileNames] = useState<Record<string, string>>({});
   const [resignationCases, setResignationCases] = useState<ResignationCase[]>([]);
   const [resignationDate, setResignationDate] = useState("");
   const [resignationReason, setResignationReason] = useState("");
@@ -884,10 +885,18 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     />;
   };
 
-  const upload = (name: string, label: string, slot: string) => enabled.has(name) ? <label className="dx-upload">
+  const upload = (name: string, label: string, slot: string) => enabled.has(name) ? <label className="dx-upload" key={name}>
     <span>{label}{required.has(name) ? " *" : ""}</span>
-    <input accept="image/*,.pdf" name={name} required={required.has(name) && !profile.uploads[slot]} type="file" />
-    <em>{profile.uploads[slot] ? "Uploaded" : "Choose file"}</em>
+    <input
+      accept="image/*,.pdf"
+      name={name}
+      onChange={(event) => setSelectedFileNames((current) => ({ ...current, [name]: event.target.files?.[0]?.name ?? "" }))}
+      required={required.has(name) && !profile.uploads[slot]}
+      type="file"
+    />
+    <em className={selectedFileNames[name] ? "selected" : ""} title={selectedFileNames[name] || undefined}>
+      {selectedFileNames[name] || (profile.uploads[slot] ? "Uploaded" : "Choose file")}
+    </em>
   </label> : null;
 
   const dlCheck = currentCheck("dl");
