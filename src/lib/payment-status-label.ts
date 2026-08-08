@@ -17,10 +17,7 @@ export function paymentStatusLabel(request: PaymentStatusLike) {
   const approvalStatus = String(request.approval_status ?? "").trim().toUpperCase();
   const effectiveStatus = approvalStatus || status;
 
-  if (effectiveStatus === "RE_PENDING") return "Resubmitted - Initial Approval";
-  if (effectiveStatus === "RE_CLUSTER_APPROVED") return "Resubmitted - Final Approval";
-  if (effectiveStatus === "RE_APPROVED") return "Resubmitted - Payment Processing";
-  if (effectiveStatus === "RESUBMITTED") return "Resubmitted";
+  if (effectiveStatus === "RESUBMITTED" || effectiveStatus.startsWith("RE_")) return "Resubmitted";
   if (effectiveStatus === "PROCESSED") return "Processed";
   if (effectiveStatus === "PROCESSING") return "Processing";
   if (effectiveStatus === "RETURNED") return "Returned";
