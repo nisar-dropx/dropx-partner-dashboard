@@ -6,6 +6,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { canActOnPaymentRequest } from "@/lib/payment-approval-scope";
 import { sendPaymentNotification } from "@/lib/payment-email-notifications";
+import { isRoleAtOrAboveFinalApprover } from "@/lib/payment-role-hierarchy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function clean(value: FormDataEntryValue | null) {
@@ -340,15 +341,25 @@ export async function approvePaymentRequest(formData: FormData) {
   const finalRoleIds = (request.final_approval_role_ids?.length ? request.final_approval_role_ids : request.final_approval_role_id ? [request.final_approval_role_id] : []) as string[];
   if (!finalRoleIds.length) throw new Error("Final approval role is not configured for this payment request.");
 
-  // Routing is determined by the request stage, not by the actor's role. This
-  // prevents an initial approver who also has a configured final role from
-  // accidentally completing both approval stages in one action.
+  const { data: companyRoles, error: companyRolesError } = await supabaseAdmin
+    .from("user_roles")
+    .select("id, parent_role_id")
+    .eq("company_id", companyId)
+    .eq("is_active", true);
+  if (companyRolesError) throw new Error(companyRolesError.message);
+
+  // A final approver, any role above a final approver in the configured role
+  // hierarchy, and the company/master owner can complete approval immediately.
+  const actorCanFinalize =
+    authorization.isMasterOwner ||
+    roleCode === "OWNER" ||
+    isRoleAtOrAboveFinalApprover(authorization.roleId, finalRoleIds, companyRoles ?? []);
   const storedStepOrder = Number(request.current_step_order);
   const legacyStatus = String(request.approval_status || request.status || "").trim().toUpperCase();
   const currentStepOrder = storedStepOrder > 0
     ? storedStepOrder
     : legacyStatus.endsWith("_APPROVED") ? 2 : 1;
-  const isFinalApproval = currentStepOrder >= 2;
+  const isFinalApproval = currentStepOrder >= 2 || actorCanFinalize;
 
   if (isFinalApproval) {
     await updatePaymentRequest(request.id, companyId, {
