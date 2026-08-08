@@ -9125,6 +9125,35 @@ tbody tr:hover td {
   gap: 8px;
 }
 
+.whatsapp-campaign-report > .table-wrap > table > thead > tr {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr 1.25fr 0.45fr 0.5fr 0.65fr 0.5fr 0.55fr 0.85fr;
+  gap: 12px;
+  align-items: center;
+  padding: 0 16px;
+}
+
+.whatsapp-campaign-report.with-channel > .table-wrap > table > thead > tr {
+  grid-template-columns: 15fr 10fr 13fr 15fr 6fr 7fr 10fr 7fr 7fr 10fr;
+  gap: 8px;
+}
+
+.whatsapp-campaign-report > .table-wrap > table > thead > tr > th {
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.whatsapp-campaign-report > .table-wrap > table > thead > tr > th:nth-last-child(-n + 6),
+.campaign-row summary > span:nth-last-child(-n + 6) {
+  text-align: center;
+}
+
+.campaign-row summary > .status-pill {
+  display: inline-flex;
+  justify-content: center;
+  width: 100%;
+}
+
 .campaign-row summary > span {
   min-width: 0;
   overflow-wrap: anywhere;
