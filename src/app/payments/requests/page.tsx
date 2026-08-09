@@ -15,9 +15,10 @@ import { paymentStatusLabel } from "@/lib/payment-status-label";
 import { loadPaymentNotificationSnapshot } from "@/lib/payment-notification-counts";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import type { PaymentMode } from "@/lib/payment-modes";
+import { paymentQuestionDateBounds } from "@/lib/payment-question-date-rules";
 import { createPaymentRequest, resubmitPaymentRequest, submitPaymentBankDetails } from "./actions";
 
-type QuestionRow = { id: string; question_text: string; answer_type: string; dropdown_options: string | null; field_stage: string | null; is_required: boolean; sort_order: number };
+type QuestionRow = { id: string; question_text: string; answer_type: string; dropdown_options: string | null; field_stage: string | null; is_required: boolean; sort_order: number; date_rule?: string | null; date_days?: number | null };
 type LocationRow = {
   id: string;
   station_code: string;
@@ -145,15 +146,21 @@ function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
       </>
     );
   }
+  const dateBounds = question.answer_type === "date" ? paymentQuestionDateBounds(question) : null;
   return (
-    <input
-      className="field"
-      name={name}
-      required={question.is_required}
-      step={question.answer_type === "number" ? "0.01" : undefined}
-      type={question.answer_type === "number" ? "number" : question.answer_type === "date" ? "date" : "text"}
-      defaultValue={answer?.answer_value ?? ""}
-    />
+    <>
+      <input
+        className="field"
+        name={name}
+        required={question.is_required}
+        step={question.answer_type === "number" ? "0.01" : undefined}
+        type={question.answer_type === "number" ? "number" : question.answer_type === "date" ? "date" : "text"}
+        defaultValue={answer?.answer_value ?? ""}
+        min={dateBounds?.min}
+        max={dateBounds?.max}
+      />
+      {dateBounds?.helper ? <span className="helper-text">Allowed: {dateBounds.helper}</span> : null}
+    </>
   );
 }
 
@@ -169,7 +176,7 @@ async function loadPaymentRequestData(companyId: string, authorization: Authoriz
       .order("station_code");
   const headsQuery = supabaseAdmin
       .from("payment_heads")
-      .select("id, code, name, requires_supporting_document, request_expense_approval, expense_approval_threshold, supported_payment_modes, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order)")
+      .select("id, code, name, requires_supporting_document, request_expense_approval, expense_approval_threshold, supported_payment_modes, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days)")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("code");

@@ -8,6 +8,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { paymentFileAccept, paymentFileGroupLabels } from "@/lib/payment-file-types";
 import type { UserPaymentContact } from "@/lib/payment-contacts";
 import { PAYMENT_MODES, normalizePaymentModes, type PaymentMode } from "@/lib/payment-modes";
+import { paymentQuestionDateBounds } from "@/lib/payment-question-date-rules";
 
 type PaymentQuestion = {
   id: string;
@@ -15,6 +16,8 @@ type PaymentQuestion = {
   answer_type: string;
   dropdown_options: string | null;
   is_required: boolean;
+  date_rule?: string | null;
+  date_days?: number | null;
 };
 
 type PaymentHead = {
@@ -80,7 +83,9 @@ function inputForQuestion(question: PaymentQuestion, disabled = false) {
       </>
     );
   }
+  const dateBounds = question.answer_type === "date" ? paymentQuestionDateBounds(question) : null;
   return (
+    <>
     <input
       className="field"
       disabled={disabled}
@@ -88,7 +93,11 @@ function inputForQuestion(question: PaymentQuestion, disabled = false) {
       required={question.is_required}
       step={question.answer_type === "number" ? "0.01" : undefined}
       type={question.answer_type === "number" ? "number" : question.answer_type === "date" ? "date" : "text"}
+      min={dateBounds?.min}
+      max={dateBounds?.max}
     />
+    {dateBounds?.helper ? <span className="helper-text">Allowed: {dateBounds.helper}</span> : null}
+    </>
   );
 }
 

@@ -32,6 +32,8 @@ type QuestionRow = {
   is_required: boolean;
   question_text: string;
   sort_order: number;
+  date_rule?: string | null;
+  date_days?: number | null;
 };
 
 type PaymentHeadRow = {
@@ -259,7 +261,7 @@ async function loadExpenseRequestData(companyId: string, authorization: Authoriz
       .order("station_code");
   const headsQuery = supabaseAdmin
       .from("payment_heads")
-      .select("id, code, name, requires_supporting_document, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order)")
+      .select("id, code, name, requires_supporting_document, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, field_stage, is_required, sort_order, date_rule, date_days)")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("code");

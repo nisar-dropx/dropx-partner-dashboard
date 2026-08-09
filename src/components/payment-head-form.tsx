@@ -12,6 +12,8 @@ type Question = {
   answer_type: string;
   dropdown_options?: string | null;
   allowed_file_types?: string[] | null;
+  date_rule?: string | null;
+  date_days?: number | null;
   is_required: boolean;
   field_stage?: FieldStage | null;
 };
@@ -63,6 +65,8 @@ function emptyQuestion(fieldStage: FieldStage = "expense"): Question {
     allowed_file_types: [...DEFAULT_PAYMENT_FILE_GROUPS],
     is_required: true,
     field_stage: fieldStage,
+    date_rule: "any",
+    date_days: null,
   };
 }
 
@@ -418,6 +422,45 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
                 </div>
               ) : (
                 <input type="hidden" name={`questions[${index}][dropdown_options]`} value={question.dropdown_options ?? ""} />
+              )}
+              {question.answer_type === "date" ? (
+                <div className="span-4 form-grid two">
+                  <label>
+                    Allowed dates
+                    <select
+                      className="field"
+                      name={`questions[${index}][date_rule]`}
+                      onChange={(event) => updateQuestion(index, { date_rule: event.target.value })}
+                      value={question.date_rule ?? "any"}
+                    >
+                      <option value="any">Any date</option>
+                      <option value="today">Current date only</option>
+                      <option value="past">Past dates only</option>
+                      <option value="future">Future dates only</option>
+                    </select>
+                  </label>
+                  {question.date_rule === "past" || question.date_rule === "future" ? (
+                    <label>
+                      Maximum number of days
+                      <input
+                        className="field"
+                        min="1"
+                        name={`questions[${index}][date_days]`}
+                        onChange={(event) => updateQuestion(index, { date_days: Number(event.target.value) || null })}
+                        placeholder="Example: 30"
+                        required
+                        step="1"
+                        type="number"
+                        value={question.date_days ?? ""}
+                      />
+                    </label>
+                  ) : <input name={`questions[${index}][date_days]`} type="hidden" value="" />}
+                </div>
+              ) : (
+                <>
+                  <input name={`questions[${index}][date_rule]`} type="hidden" value="any" />
+                  <input name={`questions[${index}][date_days]`} type="hidden" value="" />
+                </>
               )}
               {question.answer_type === "file" ? (
                 <div className="span-4 form-field-block">

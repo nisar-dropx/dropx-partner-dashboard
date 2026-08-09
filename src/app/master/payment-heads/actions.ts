@@ -80,6 +80,10 @@ function parseQuestions(formData: FormData) {
       .filter((value) => ["image", "video", "document"].includes(value));
     const fieldStage = clean(formData.get(`questions[${index}][field_stage]`)) === "payment" ? "payment" : "expense";
     const isRequired = formData.get(`questions[${index}][is_required]`) === "yes";
+    const dateRuleValue = clean(formData.get(`questions[${index}][date_rule]`)) ?? "any";
+    const dateRule = ["any", "today", "past", "future"].includes(dateRuleValue) ? dateRuleValue : "any";
+    const dateDaysValue = clean(formData.get(`questions[${index}][date_days]`));
+    const dateDays = dateDaysValue ? Number(dateDaysValue) : null;
     if (!questionText) return null;
     if (!["text", "number", "date", "dropdown", "textarea", "yes_no", "file"].includes(answerType)) {
       throw new Error("Field type is invalid.");
@@ -89,6 +93,9 @@ function parseQuestions(formData: FormData) {
     }
     if (answerType === "file" && !allowedFileTypes.length) {
       throw new Error(`${questionText}: select at least one supported file type.`);
+    }
+    if (answerType === "date" && ["past", "future"].includes(dateRule) && (!Number.isInteger(dateDays) || Number(dateDays) < 1)) {
+      throw new Error(`${questionText}: enter a valid maximum number of days.`);
     }
     return {
       id,
@@ -101,6 +108,8 @@ function parseQuestions(formData: FormData) {
           : null,
       field_stage: fieldStage,
       is_required: isRequired,
+      date_rule: answerType === "date" ? dateRule : "any",
+      date_days: answerType === "date" && ["past", "future"].includes(dateRule) ? dateDays : null,
       sort_order: index + 1
     };
   }).filter(Boolean) as Array<{
@@ -110,6 +119,8 @@ function parseQuestions(formData: FormData) {
     dropdown_options: string | null;
     field_stage: "expense" | "payment";
     is_required: boolean;
+    date_rule: string;
+    date_days: number | null;
     sort_order: number;
   }>;
 }
@@ -238,6 +249,8 @@ async function updatePaymentHeadUnsafe(formData: FormData) {
       dropdown_options: question.dropdown_options,
       field_stage: question.field_stage,
       is_required: question.is_required,
+      date_rule: question.date_rule,
+      date_days: question.date_days,
       sort_order: question.sort_order,
       updated_at: new Date().toISOString()
     };

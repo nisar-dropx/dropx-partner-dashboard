@@ -9,6 +9,7 @@ import { sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { canAccessPaymentLocation } from "@/lib/payment-approval-scope";
 import { validatePaymentFile } from "@/lib/payment-file-types";
 import { normalizePaymentModes, type PaymentMode } from "@/lib/payment-modes";
+import { validatePaymentQuestionDate } from "@/lib/payment-question-date-rules";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { insertPaymentApprovalLog } from "../approvals/actions";
 
@@ -82,7 +83,15 @@ type PaymentQuestionForAction = {
   is_required: boolean;
   field_stage?: string | null;
   sort_order?: number | null;
+  date_rule?: string | null;
+  date_days?: number | null;
 };
+
+function validateQuestionDates(formData: FormData, questions: PaymentQuestionForAction[]) {
+  for (const question of questions) {
+    validatePaymentQuestionDate(clean(formData.get(`answers[${question.id}]`)), question);
+  }
+}
 
 function validateQuestionFile(file: File, question: PaymentQuestionForAction) {
   const error = validatePaymentFile(file, question.dropdown_options);
@@ -164,7 +173,7 @@ export async function createExpenseRequest(formData: FormData) {
       admin.from("stations").select("id, station_code, station_email, station_manager_email").eq("id", locationId).eq("company_id", companyId).single(),
       admin
         .from("payment_heads")
-        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order)")
+        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
         .eq("id", paymentHeadId)
         .eq("company_id", companyId)
         .single()
@@ -189,6 +198,7 @@ export async function createExpenseRequest(formData: FormData) {
     if (!paymentProcessRoleIds.length) throw new Error("Payment process role is not configured for this payment head.");
 
     const expenseQuestions = questionsForStage(headResult.data.payment_head_questions, "expense");
+    validateQuestionDates(formData, expenseQuestions);
     const fileQuestions = expenseQuestions.filter((question) => question.answer_type === "file");
     for (const question of fileQuestions) {
       const file = formData.get(`files[${question.id}]`);
@@ -363,7 +373,7 @@ export async function createPaymentRequest(formData: FormData) {
       admin.from("stations").select("id, station_code, station_email, station_manager_email").eq("id", locationId).eq("company_id", companyId).single(),
       admin
         .from("payment_heads")
-        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, requires_supporting_document, request_expense_approval, expense_approval_threshold, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order)")
+        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, requires_supporting_document, request_expense_approval, expense_approval_threshold, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
         .eq("id", paymentHeadId)
         .eq("company_id", companyId)
         .single()
@@ -423,6 +433,7 @@ export async function createPaymentRequest(formData: FormData) {
       startsWithFinalApproval ? "final approver roles" : "initial approver roles"
     );
     const paymentQuestions = questionsForStage(headResult.data.payment_head_questions, "payment");
+    validateQuestionDates(formData, paymentQuestions);
     const fileQuestions = paymentQuestions.filter((question) => question.answer_type === "file");
     for (const question of fileQuestions) {
       const file = formData.get(`files[${question.id}]`);
@@ -718,7 +729,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
       (approvalStatus.endsWith("_APPROVED") && !request.current_approver_user_id && !request.current_approver_role_id && !(request.current_approver_role_ids?.length));
     const { data: headData, error: headError } = await admin
       .from("payment_heads")
-      .select("id, supported_payment_modes, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order)")
+      .select("id, supported_payment_modes, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
       .eq("id", request.payment_head_id)
       .eq("company_id", companyId)
       .single();
@@ -754,6 +765,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
     }
 
     const paymentQuestions = questionsForStage(headData.payment_head_questions, "payment");
+    validateQuestionDates(formData, paymentQuestions);
     const questionIds = formData.getAll("question_ids").map((value) => String(value));
     const questionById = new Map(paymentQuestions.map((question) => [question.id, question]));
     const questionAnswers = await Promise.all(questionIds.map(async (questionId) => {
@@ -903,7 +915,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
       admin.from("stations").select("id, station_code").eq("id", request.location_id).eq("company_id", companyId).single(),
       admin
         .from("payment_heads")
-        .select("id, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order)")
+        .select("id, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
         .eq("id", request.payment_head_id)
         .eq("company_id", companyId)
         .single(),
@@ -960,6 +972,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
     if (existingAnswersError) throw new Error(existingAnswersError.message);
     const existingAnswerByQuestionId = new Map((existingAnswers ?? []).map((answer) => [answer.question_id, answer]));
     const expenseQuestions = questionsForStage(headResult.data.payment_head_questions, "expense");
+    validateQuestionDates(formData, expenseQuestions);
     const questionById = new Map(expenseQuestions.map((question) => [question.id, question]));
 
     for (const questionId of formData.getAll("question_ids").map(String)) {
@@ -1077,7 +1090,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
       admin.from("stations").select("id, station_code, station_manager_email").eq("id", request.location_id).eq("company_id", companyId).single(),
       admin
         .from("payment_heads")
-        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order)")
+        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
         .eq("id", request.payment_head_id)
         .eq("company_id", companyId)
         .single(),
@@ -1154,6 +1167,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
     const questionIds = formData.getAll("question_ids").map((value) => String(value));
     if (questionIds.length) {
       const paymentQuestions = questionsForStage(headResult.data.payment_head_questions, "payment");
+      validateQuestionDates(formData, paymentQuestions);
       const questionById = new Map(paymentQuestions.map((question) => [question.id, question]));
       for (const questionId of questionIds) {
         const question = questionById.get(questionId);
