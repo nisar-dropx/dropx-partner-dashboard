@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useFormStatus } from "react-dom";
 import QRCode from "qrcode";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
+import { SubmitButton } from "@/components/submit-button";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 
 export type PaymentProcessBank = {
@@ -109,12 +109,14 @@ type Props = {
 };
 
 function FinalizeSubmitButton() {
-  const { pending } = useFormStatus();
   return (
-    <button className={`button ${pending ? "loading" : ""}`} disabled={pending} type="submit">
-      {pending ? <span className="button-spinner" aria-hidden="true" /> : null}
-      <span>{pending ? "Finalizing" : "Finalize requests"}</span>
-    </button>
+    <SubmitButton
+      confirmDescription="The selected requests will be finalized for bank processing."
+      confirmMessage="Are you sure you want to finalize the selected payment requests?"
+      confirmSubmitText="Finalize requests"
+      confirmTitle="Finalize payment requests?"
+      pendingText="Finalizing"
+    >Finalize requests</SubmitButton>
   );
 }
 
@@ -127,12 +129,18 @@ function ProcessActionButton({
   className: string;
   value: string;
 }) {
-  const { pending } = useFormStatus();
+  const actionLabel = children.toLowerCase();
   return (
-    <button className={`button compact ${className} ${pending ? "loading" : ""}`} disabled={pending} name="process_action" type="submit" value={value}>
-      {pending ? <span className="button-spinner" aria-hidden="true" /> : null}
-      <span>{pending ? "Saving" : children}</span>
-    </button>
+    <SubmitButton
+      className={`button compact ${className}`}
+      confirmDescription="This action updates the payment request immediately."
+      confirmMessage={`Are you sure you want to mark this payment as ${actionLabel}?`}
+      confirmSubmitText={children}
+      confirmTitle={`${children} payment?`}
+      name="process_action"
+      pendingText="Saving"
+      value={value}
+    >{children}</SubmitButton>
   );
 }
 

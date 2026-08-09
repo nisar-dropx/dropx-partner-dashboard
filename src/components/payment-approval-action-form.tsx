@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { useFormStatus } from "react-dom";
+import { useRef } from "react";
+import { SubmitButton } from "@/components/submit-button";
 
 type PaymentApprovalActionFormProps = {
   requestId: string;
@@ -17,32 +17,27 @@ function PaymentApprovalButton({
   children,
   className,
   formAction,
-  onBeforeSubmit,
-  pendingAction
+  onBeforeSubmit
 }: {
   actionName: string;
   children: string;
   className: string;
   formAction: (formData: FormData) => void | Promise<void>;
   onBeforeSubmit: () => boolean;
-  pendingAction: string | null;
 }) {
-  const { pending } = useFormStatus();
-  const isPending = pending && pendingAction === actionName;
-
   return (
-    <button
-      className={`${className} ${isPending ? "loading" : ""}`}
-      disabled={pending}
+    <SubmitButton
+      className={className}
+      confirmDescription="This action updates the request immediately."
+      confirmMessage={`Are you sure you want to ${actionName} this request?`}
+      confirmSubmitText={children}
+      confirmTitle={`${children} request?`}
       formAction={formAction}
-      onClick={(event) => {
-        if (!onBeforeSubmit()) event.preventDefault();
-      }}
-      type="submit"
+      onBeforeConfirm={onBeforeSubmit}
+      pendingText="Working"
     >
-      {isPending ? <span className="button-spinner" aria-hidden="true" /> : null}
-      <span>{isPending ? "Working" : children}</span>
-    </button>
+      {children}
+    </SubmitButton>
   );
 }
 
@@ -55,8 +50,6 @@ export function PaymentApprovalActionForm({
   rejectAction
 }: PaymentApprovalActionFormProps) {
   const remarksRef = useRef<HTMLTextAreaElement>(null);
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
-
   function validateAction(actionName: string) {
     const remarks = remarksRef.current;
     if (!remarks) return true;
@@ -69,7 +62,6 @@ export function PaymentApprovalActionForm({
     }
 
     const valid = remarks.reportValidity();
-    if (valid) setPendingAction(actionName);
     return valid;
   }
 
@@ -92,7 +84,6 @@ export function PaymentApprovalActionForm({
           className="button payment-approve-button"
           formAction={approveAction}
           onBeforeSubmit={() => validateAction("approve")}
-          pendingAction={pendingAction}
         >
           Approve
         </PaymentApprovalButton>
@@ -101,7 +92,6 @@ export function PaymentApprovalActionForm({
           className="button payment-return-button"
           formAction={returnAction}
           onBeforeSubmit={() => validateAction("return")}
-          pendingAction={pendingAction}
         >
           Return
         </PaymentApprovalButton>
@@ -110,7 +100,6 @@ export function PaymentApprovalActionForm({
           className="button payment-reject-button"
           formAction={rejectAction}
           onBeforeSubmit={() => validateAction("reject")}
-          pendingAction={pendingAction}
         >
           Reject
         </PaymentApprovalButton>

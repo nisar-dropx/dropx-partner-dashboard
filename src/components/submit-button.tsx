@@ -33,7 +33,11 @@ export function SubmitButton({
   confirmationSelect,
   confirmationCheckboxes,
   confirmationBlocked = false,
-  form
+  form,
+  formAction,
+  name,
+  onBeforeConfirm,
+  value
 }: {
   children: ReactNode;
   className?: string;
@@ -49,6 +53,10 @@ export function SubmitButton({
   confirmationCheckboxes?: ConfirmationCheckbox[];
   confirmationBlocked?: boolean;
   form?: string;
+  formAction?: (formData: FormData) => void | Promise<void>;
+  name?: string;
+  onBeforeConfirm?: () => boolean;
+  value?: string;
 }) {
   const { pending } = useFormStatus();
   const [confirmationOpen, setConfirmationOpen] = useState(false);
@@ -77,8 +85,11 @@ export function SubmitButton({
         className={className}
         disabled={pending || disabled}
         form={form}
+        formAction={formAction}
+        name={confirmMessage ? undefined : name}
         onClick={(event) => {
           if (confirmMessage) {
+            if (onBeforeConfirm && !onBeforeConfirm()) return;
             const form = event.currentTarget.form;
             if (form && !form.reportValidity()) return;
             setConfirmationSelection("");
@@ -86,6 +97,7 @@ export function SubmitButton({
           }
         }}
         type={confirmMessage ? "button" : "submit"}
+        value={confirmMessage ? undefined : value}
       >
         {pending ? <span className="button-spinner" aria-hidden="true" /> : null}
         <span>{pending ? pendingText : disabled && disabledText ? disabledText : children}</span>
@@ -153,7 +165,10 @@ export function SubmitButton({
                 className={className}
                 disabled={pending || confirmationBlocked || Boolean(confirmationSelect && !confirmationSelection)}
                 form={form}
+                formAction={formAction}
+                name={name}
                 type="submit"
+                value={value}
               >
                 {pending ? <span className="button-spinner" aria-hidden="true" /> : null}
                 <span>{pending ? pendingText : confirmSubmitText ?? children}</span>

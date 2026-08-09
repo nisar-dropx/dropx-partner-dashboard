@@ -389,6 +389,10 @@ export function PaymentRequestForm({
 
       <div className="form-actions">
         <SubmitButton
+          confirmDescription="Please review the request before continuing."
+          confirmMessage="Are you sure you want to submit this request?"
+          confirmSubmitText={submitLabel}
+          confirmTitle={submitLabel === "Submit for approval" ? "Submit expense request?" : "Submit payment request?"}
           disabled={!heads.length || !locationOptions.length || blockedByExpenseApproval}
           disabledText={blockedByExpenseApproval ? "Required Expense Approval" : !heads.length ? "Add payment head first" : "Add location first"}
         >

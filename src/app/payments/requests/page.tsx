@@ -481,7 +481,7 @@ export default async function PaymentRequestsPage({
               </label>
               <div className="form-actions modal-actions">
                 <PendingLink className="button secondary" href="/payments/requests" scroll={false}>Cancel</PendingLink>
-                <SubmitButton pendingText="Submitting">Submit details</SubmitButton>
+                <SubmitButton confirmDescription="These payment details will be sent for payment processing." confirmMessage="Are you sure the entered payment details are correct?" confirmSubmitText="Submit details" confirmTitle="Submit payment details?" pendingText="Submitting">Submit details</SubmitButton>
               </div>
             </form>
           </section>
@@ -579,7 +579,7 @@ export default async function PaymentRequestsPage({
               </label>
               <div className="form-actions modal-actions">
                 <PendingLink className="button secondary" href="/payments/requests" scroll={false}>Cancel</PendingLink>
-                <SubmitButton pendingText="Resubmitting">Resubmit request</SubmitButton>
+                <SubmitButton confirmDescription="The request will return to the person who sent it back." confirmMessage="Are you sure you want to resubmit this payment request?" confirmSubmitText="Resubmit request" confirmTitle="Resubmit payment request?" pendingText="Resubmitting">Resubmit request</SubmitButton>
               </div>
             </form>
           </section>
