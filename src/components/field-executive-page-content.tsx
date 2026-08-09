@@ -3,6 +3,7 @@ import { AppShell } from "@/components/app-shell";
 import { CompensationBulkUpload } from "@/components/compensation-bulk-upload";
 import { FieldExecutiveList, type FieldExecutiveListRow } from "@/components/field-executive-list";
 import { PageHead } from "@/components/page-head";
+import { PersonNameInput } from "@/components/person-name-input";
 import { PendingLink } from "@/components/pending-link";
 import { ProfileVerificationPanel } from "@/components/profile-verification-panel";
 import { ScopedDesignationFields, type ScopedDesignationOption, type ScopedLocationOption } from "@/components/scoped-designation-fields";
@@ -368,7 +369,7 @@ function FieldExecutiveForm({
       <input type="hidden" name="return_path" value={returnPath} />
       {executive ? <input type="hidden" name="id" value={executive.id} /> : null}
 
-      <label>Full name<input className="field" name="full_name" placeholder="Enter full name" required={!optionalEditFields} defaultValue={textValue(executive?.full_name)} /></label>
+      <label>Full name<PersonNameInput className="field" name="full_name" placeholder="Enter full name" required={!optionalEditFields} defaultValue={textValue(executive?.full_name)} /></label>
       <label>Email<input className="field" name="email" placeholder="Enter email" required={!optionalEditFields} type="email" defaultValue={textValue(executive?.email)} /></label>
 
       <label>Country code
@@ -496,7 +497,7 @@ function AddFieldExecutiveForm({
   return (
     <form action={createFieldExecutive} className="form-grid three field-executive-add-form">
       <input type="hidden" name="return_path" value={returnPath} />
-      <label>Full name<input className="field" name="full_name" placeholder="Enter full name" required defaultValue={values?.fullName ?? ""} /></label>
+      <label>Full name<PersonNameInput className="field" name="full_name" placeholder="Enter full name" required defaultValue={values?.fullName ?? ""} /></label>
       <label className="field-executive-mobile-group">Mobile number
         <div className="field-executive-mobile-row">
           <div className="field-executive-country-code">

@@ -16,6 +16,7 @@ import { assertWorkerDesignationMappedToIdSeries, generateConfiguredBiometricId,
 import { requireDesignationOnboardingAccess } from "@/lib/designation-onboarding-access";
 import { requireDesignationPortalAccess } from "@/lib/designation-portal-access";
 import { moveProfileDocumentToTrash, uploadProfileDocument } from "@/lib/profile-document-storage";
+import { normalizePersonName } from "@/lib/person-name";
 import { saveProfileVerifications } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
@@ -62,7 +63,7 @@ function fieldExecutiveRedirect(params?: Record<string, string>, returnPath: Fie
 
 function addFormParams(formData: FormData) {
   return {
-    full_name: String(formData.get("full_name") ?? ""),
+    full_name: String(formData.get("full_name") ?? "").toUpperCase(),
     mobile_country_code: cleanCountryCode(formData.get("mobile_country_code")),
     mobile: String(formData.get("mobile") ?? "").replace(/\D/g, ""),
     email: String(formData.get("email") ?? "").trim().toLowerCase(),
@@ -107,7 +108,7 @@ const fieldExecutiveDocumentFields = [
 
 function normalizeFieldExecutivePayload(formData: FormData, requireId = false) {
   const id = requireId ? required(formData.get("id"), "Field executive") : null;
-  const fullName = required(formData.get("full_name"), "Full name");
+  const fullName = normalizePersonName(formData.get("full_name"));
   const mobileCountryCode = cleanCountryCode(formData.get("mobile_country_code"));
   const mobile = required(formData.get("mobile"), "Mobile number").replace(/\D/g, "");
   const email = required(formData.get("email"), "Email").toLowerCase();
@@ -222,7 +223,7 @@ export async function createFieldExecutive(formData: FormData) {
   if (!supabaseAdmin) fieldExecutiveRedirect({ error: "Supabase service role key is not configured." }, returnPath);
 
   try {
-    const fullName = required(formData.get("full_name"), "Full name");
+    const fullName = normalizePersonName(formData.get("full_name"));
     const mobileCountryCode = cleanCountryCode(formData.get("mobile_country_code"));
     const mobile = required(formData.get("mobile"), "Mobile number").replace(/\D/g, "");
     const email = required(formData.get("email"), "Email").toLowerCase();
@@ -775,7 +776,7 @@ async function parseBulkWorkbook(fileValue: FormDataEntryValue | null) {
 
   return rawRows.map((row, index) => {
     const rowNumber = index + 2;
-    const fullName = cellText(row, ["Full name", "Full Name"]);
+    const fullName = normalizePersonName(cellText(row, ["Full name", "Full Name"]));
     const mobile = cellText(row, ["Mob no", "Mobile", "Mobile number", "Mob number"]).replace(/\D/g, "");
     const locationCode = cellText(row, ["Location", "Location code"]).toUpperCase();
     const designationCode = cellText(row, ["Designation code", "Delisignation code", "Designation"]).toUpperCase();

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { SearchableSelect, type SearchableSelectOption } from "@/components/searchable-select";
 import { ProfileVerificationPanel } from "@/components/profile-verification-panel";
+import { PersonNameInput } from "@/components/person-name-input";
 import { SubmitButton } from "@/components/submit-button";
 import { countryCodeOptions } from "@/lib/country-codes";
 
@@ -160,7 +161,7 @@ export function EmployeeForm({ action, dashboardRules, designationOptions, direc
       {employee ? <input name="id" type="hidden" value={employee.id} /> : null}
       <label>
         Full name
-        <input className="field" defaultValue={employee?.full_name ?? ""} name="full_name" placeholder="Enter full name" required={!isEdit} />
+        <PersonNameInput className="field" defaultValue={employee?.full_name ?? ""} name="full_name" placeholder="Enter full name" required={!isEdit} />
       </label>
       <label className="field-executive-mobile-group">
         Mobile number

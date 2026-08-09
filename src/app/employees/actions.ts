@@ -14,6 +14,7 @@ import { assertWorkerDesignationMappedToIdSeries, generateConfiguredBiometricId,
 import { requireDesignationOnboardingAccess } from "@/lib/designation-onboarding-access";
 import { requireDesignationPortalAccess } from "@/lib/designation-portal-access";
 import { moveProfileDocumentToTrash, uploadProfileDocument } from "@/lib/profile-document-storage";
+import { normalizePersonName } from "@/lib/person-name";
 import { saveProfileVerifications } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
@@ -120,7 +121,7 @@ export async function createEmployee(formData: FormData) {
   if (!supabaseAdmin) employeesRedirect({ error: "Supabase service role key is not configured." });
 
   try {
-    const fullName = required(formData.get("full_name"), "Full name");
+    const fullName = normalizePersonName(formData.get("full_name"));
     const mobileCountryCode = cleanCountryCode(formData.get("mobile_country_code"));
     const mobile = required(formData.get("mobile"), "Mobile number").replace(/\D/g, "");
     const email = optional(formData.get("email"))?.toLowerCase() ?? null;
@@ -270,7 +271,7 @@ export async function updateEmployee(formData: FormData) {
 
   try {
     const id = required(formData.get("id"), "Employee");
-    const fullName = required(formData.get("full_name"), "Full name");
+    const fullName = normalizePersonName(formData.get("full_name"));
     const mobileCountryCode = cleanCountryCode(formData.get("mobile_country_code"));
     const mobile = required(formData.get("mobile"), "Mobile number").replace(/\D/g, "");
     const email = optional(formData.get("email"))?.toLowerCase() ?? null;
@@ -580,7 +581,7 @@ async function parseBulkWorkbook(fileValue: FormDataEntryValue | null) {
 
   return rawRows.map((row, index) => {
     const rowNumber = index + 2;
-    const fullName = cellText(row, ["Full name", "Full Name"]);
+    const fullName = normalizePersonName(cellText(row, ["Full name", "Full Name"]));
     const mobile = cellText(row, ["Mob no", "Mobile", "Mobile number", "Mob number"]).replace(/\D/g, "");
     const locationCode = cellText(row, ["Location", "Location code"]).toUpperCase();
     const designationCode = cellText(row, ["Designation code", "Delisignation code", "Designation"]).toUpperCase();
