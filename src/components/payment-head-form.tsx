@@ -73,6 +73,13 @@ function emptyQuestion(fieldStage: FieldStage = "expense"): Question {
 function PaymentModeMultiSelect({ selectedValues }: { selectedValues?: PaymentMode[] | null }) {
   const [selected, setSelected] = useState<PaymentMode[]>(selectedValues?.length ? selectedValues : [...ALL_PAYMENT_MODES]);
   const [open, setOpen] = useState(false);
+  const selectedValuesKey = (selectedValues ?? []).join("|");
+
+  useEffect(() => {
+    setSelected(selectedValues?.length ? selectedValues : [...ALL_PAYMENT_MODES]);
+    // selectedValues may be a fresh array on render, so synchronize by content.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedValuesKey]);
 
   function toggle(value: PaymentMode) {
     setSelected((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);

@@ -226,6 +226,7 @@ export default async function PaymentHeadsPage({ searchParams }: { searchParams?
                 final_approval_role_id: editHead.final_approval_role_id,
                 final_approval_role_ids: editHead.final_approval_role_ids,
                 payment_process_role_ids: editHead.payment_process_role_ids,
+                supported_payment_modes: editHead.supported_payment_modes,
                 requires_supporting_document: editHead.requires_supporting_document,
                 request_expense_approval: editHead.request_expense_approval,
                 expense_approval_threshold: editHead.expense_approval_threshold,
