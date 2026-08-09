@@ -135,19 +135,39 @@ async function approverForRoles(companyId: string, roleIds: string[], label: str
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
   if (!roleIds.length) throw new Error(`${label} is not configured.`);
 
-  const { data: approver, error } = await supabaseAdmin
-    .from("profiles")
-    .select("id, role_id")
-    .eq("company_id", companyId)
-    .in("role_id", roleIds)
-    .eq("is_active", true)
-    .order("full_name")
-    .limit(1)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!approver) throw new Error(`No active user is assigned to any configured ${label}.`);
+  let candidateRoleIds = Array.from(new Set(roleIds));
+  const visitedRoleIds = new Set<string>();
 
-  return { userId: approver.id, roleId: approver.role_id ?? roleIds[0] };
+  // Prefer the configured roles. If none has an active user, move one level up
+  // the role hierarchy at a time and stop at the nearest staffed role.
+  while (candidateRoleIds.length) {
+    const unvisitedRoleIds = candidateRoleIds.filter((roleId) => !visitedRoleIds.has(roleId));
+    if (!unvisitedRoleIds.length) break;
+    unvisitedRoleIds.forEach((roleId) => visitedRoleIds.add(roleId));
+
+    const { data: approver, error: approverError } = await supabaseAdmin
+      .from("profiles")
+      .select("id, role_id")
+      .eq("company_id", companyId)
+      .in("role_id", unvisitedRoleIds)
+      .eq("is_active", true)
+      .order("full_name")
+      .limit(1)
+      .maybeSingle();
+    if (approverError) throw new Error(approverError.message);
+    if (approver) return { userId: approver.id, roleId: approver.role_id ?? unvisitedRoleIds[0] };
+
+    const { data: roles, error: roleError } = await supabaseAdmin
+      .from("user_roles")
+      .select("parent_role_id")
+      .eq("company_id", companyId)
+      .in("id", unvisitedRoleIds)
+      .eq("is_active", true);
+    if (roleError) throw new Error(roleError.message);
+    candidateRoleIds = Array.from(new Set((roles ?? []).map((role) => role.parent_role_id).filter(Boolean) as string[]));
+  }
+
+  throw new Error(`No active user is assigned to the configured ${label} or a higher role.`);
 }
 
 function configuredRoleIds(roleIds: string[] | null | undefined, legacyRoleId: string | null | undefined) {
