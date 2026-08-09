@@ -9,6 +9,7 @@ import { cleanCountryCode } from "@/lib/country-codes";
 import { dynamicWorkforceTable, isCustomWorkforceCategoryCode, normalizeWorkforceCategoryCode, workforceCategoryPageCode } from "@/lib/dynamic-workforce";
 import { generateConfiguredBiometricId, generateConfiguredWorkerId } from "@/lib/dropx-id-generation";
 import { moveProfileDocumentToTrash, uploadProfileDocument } from "@/lib/profile-document-storage";
+import { normalizePersonName } from "@/lib/person-name";
 import { normalizeCategoryProfileFieldRules } from "@/lib/profile-field-rules";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -92,7 +93,7 @@ export async function createDynamicWorkforceProfile(formData: FormData) {
       throw new Error(`${provisionResult.error.message} Run scripts/workforce_dynamic_category_tables_v1.sql in Supabase SQL Editor.`);
     }
 
-    const fullName = required(formData.get("full_name"), "Full name");
+    const fullName = normalizePersonName(formData.get("full_name"));
     const mobileCountryCode = cleanCountryCode(formData.get("mobile_country_code"));
     const mobile = required(formData.get("mobile"), "Mobile number").replace(/\D/g, "");
     const email = required(formData.get("email"), "Email").toLowerCase();
@@ -271,7 +272,7 @@ export async function updateDynamicWorkforceProfile(formData: FormData) {
         .map((column) => [column, profileValues[column]])
     );
     const payload: Record<string, unknown> = {
-      full_name: optional(formData.get("full_name")) ?? existing.full_name,
+      full_name: optional(formData.get("full_name")) ? normalizePersonName(formData.get("full_name")) : existing.full_name,
       mobile_country_code: cleanCountryCode(formData.get("mobile_country_code")) || existing.mobile_country_code,
       mobile: String(formData.get("mobile") ?? existing.mobile ?? "").replace(/\D/g, ""),
       email: String(formData.get("email") ?? existing.email ?? "").trim().toLowerCase(),

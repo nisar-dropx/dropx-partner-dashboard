@@ -3,6 +3,7 @@ import { createDynamicWorkforceProfile, updateDynamicWorkforceProfile } from "@/
 import { AppShell } from "@/components/app-shell";
 import { FieldExecutiveList, type FieldExecutiveListRow } from "@/components/field-executive-list";
 import { PageHead } from "@/components/page-head";
+import { PersonNameInput } from "@/components/person-name-input";
 import { ScopedDesignationFields } from "@/components/scoped-designation-fields";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
@@ -242,7 +243,7 @@ export default async function DynamicWorkforceCategoryPage({
           <div className="panel-head"><h2>{`Add ${entityLabel.toLowerCase()}`}</h2></div>
           <form action={createDynamicWorkforceProfile} className="form-grid three field-executive-add-form">
             <input name="category_code" type="hidden" value={code} />
-            <label>Full name<input className="field" defaultValue={searchParams?.full_name ?? ""} name="full_name" placeholder="Enter full name" required /></label>
+            <label>Full name<PersonNameInput className="field" defaultValue={searchParams?.full_name ?? ""} name="full_name" placeholder="Enter full name" required /></label>
             <label className="field-executive-mobile-group">Mobile number
               <div className="field-executive-mobile-row">
                 <div className="field-executive-country-code">
@@ -324,7 +325,7 @@ export default async function DynamicWorkforceCategoryPage({
             </div>
             <form action={updateDynamicWorkforceProfile} className="form-grid three" encType="multipart/form-data">
               <input name="category_code" type="hidden" value={code} /><input name="id" type="hidden" value={selectedProfile.id} />
-              <label>Full name<input className="field" defaultValue={selectedProfile.full_name} name="full_name" /></label>
+              <label>Full name<PersonNameInput className="field" defaultValue={selectedProfile.full_name} name="full_name" /></label>
               <label className="field-executive-mobile-group">Mobile number<div className="field-executive-mobile-row"><div className="field-executive-country-code"><SearchableSelect name="mobile_country_code" options={countryOptions} placeholder="+91" value={selectedProfile.mobile_country_code ?? "91"} /></div><input className="field" defaultValue={selectedProfile.mobile} inputMode="numeric" name="mobile" /></div></label>
               <label>Email<input className="field" defaultValue={selectedProfile.email} name="email" type="email" /></label>
               <label>Date of join<input className="field" defaultValue={selectedProfile.date_of_join ?? ""} name="date_of_join" type="date" /></label>
