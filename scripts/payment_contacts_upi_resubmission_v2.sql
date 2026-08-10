@@ -35,7 +35,7 @@ begin
 
     alter table public.payment_request_approvals
       add constraint payment_request_approvals_action_check
-        check (lower(action) in ('created', 'approved', 'rejected', 'returned', 'resubmitted', 'processing', 'processed', 'cancelled'));
+        check (lower(action) in ('created', 'submitted', 'approved', 'rejected', 'returned', 'resubmitted', 'processing', 'processed', 'cancelled'));
   end if;
 end $$;
 
