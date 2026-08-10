@@ -130,13 +130,62 @@ function buildHistory(request: PaymentReportRequest) {
   return history.sort((left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime());
 }
 
+function MultiCheckFilter({
+  allLabel,
+  label,
+  options,
+  selected,
+  setSelected,
+  displayValue = (value) => value
+}: {
+  allLabel: string;
+  label: string;
+  options: string[];
+  selected: string[];
+  setSelected: (values: string[]) => void;
+  displayValue?: (value: string) => string;
+}) {
+  const summary = selected.length === 0
+    ? allLabel
+    : selected.length <= 2
+      ? selected.map(displayValue).join(", ")
+      : `${selected.length} selected`;
+
+  function toggle(value: string) {
+    setSelected(selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value]);
+  }
+
+  return (
+    <div className="payment-report-multi-filter">
+      <span>{label}</span>
+      <details className="multi-select">
+        <summary className="multi-select-trigger"><span className="multi-select-summary">{summary}</span><span aria-hidden="true">⌄</span></summary>
+        <div className="multi-select-menu payment-report-filter-menu">
+          <label className="multi-select-all">
+            <input checked={selected.length === 0} onChange={() => setSelected([])} type="checkbox" />
+            <span>{allLabel}</span>
+          </label>
+          <div className="multi-select-options">
+            {options.map((option) => (
+              <label className="multi-select-option" key={option}>
+                <input checked={selected.includes(option)} onChange={() => toggle(option)} type="checkbox" />
+                <span>{displayValue(option)}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      </details>
+    </div>
+  );
+}
+
 export function PaymentReportTable({ requests }: { requests: PaymentReportRequest[] }) {
   const [selectedRequest, setSelectedRequest] = useState<PaymentReportRequest | null>(null);
   const [search, setSearch] = useState("");
-  const [location, setLocation] = useState("");
-  const [head, setHead] = useState("");
-  const [status, setStatus] = useState("");
-  const [paymentMode, setPaymentMode] = useState("");
+  const [locationsSelected, setLocationsSelected] = useState<string[]>([]);
+  const [headsSelected, setHeadsSelected] = useState<string[]>([]);
+  const [statusesSelected, setStatusesSelected] = useState<string[]>([]);
+  const [paymentModesSelected, setPaymentModesSelected] = useState<string[]>([]);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [pageSize, setPageSize] = useState("20");
@@ -154,29 +203,29 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
         request.account_holder_name, request.bank_account_no, request.ifsc, request.contact_no, request.email, request.utr_cin,
         request.requested_by_name, request.requested_by_email].filter(Boolean).join(" ").toLowerCase();
       return (!needle || searchable.includes(needle)) &&
-        (!location || request.location_code === location) &&
-        (!head || request.payment_head_name === head) &&
-        (!status || reportStatusLabel(request) === status) &&
-        (!paymentMode || request.payment_mode === paymentMode) &&
+        (!locationsSelected.length || locationsSelected.includes(request.location_code)) &&
+        (!headsSelected.length || headsSelected.includes(request.payment_head_name)) &&
+        (!statusesSelected.length || statusesSelected.includes(reportStatusLabel(request))) &&
+        (!paymentModesSelected.length || (request.payment_mode != null && paymentModesSelected.includes(request.payment_mode))) &&
         (!fromDate || createdDate >= fromDate) &&
         (!toDate || createdDate <= toDate);
     });
-  }, [requests, search, location, head, status, paymentMode, fromDate, toDate]);
+  }, [requests, search, locationsSelected, headsSelected, statusesSelected, paymentModesSelected, fromDate, toDate]);
   const effectivePageSize = pageSize === "all" ? Math.max(filteredRequests.length, 1) : Number(pageSize);
   const totalPages = Math.max(1, Math.ceil(filteredRequests.length / effectivePageSize));
   const visibleRequests = pageSize === "all" ? filteredRequests : filteredRequests.slice((page - 1) * effectivePageSize, page * effectivePageSize);
 
-  useEffect(() => setPage(1), [search, location, head, status, paymentMode, fromDate, toDate, pageSize]);
+  useEffect(() => setPage(1), [search, locationsSelected, headsSelected, statusesSelected, paymentModesSelected, fromDate, toDate, pageSize]);
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
   return (
     <>
       <div className="payment-report-filters">
         <label className="payment-report-search">Search<input className="field" onChange={(event) => setSearch(event.target.value)} placeholder="Request, person, account, IFSC, UTR..." type="search" value={search} /></label>
-        <label>Location<select className="select" onChange={(event) => setLocation(event.target.value)} value={location}><option value="">All locations</option>{locations.map((item) => <option key={item}>{item}</option>)}</select></label>
-        <label>Payment head<select className="select" onChange={(event) => setHead(event.target.value)} value={head}><option value="">All heads</option>{heads.map((item) => <option key={item}>{item}</option>)}</select></label>
-        <label>Status<select className="select" onChange={(event) => setStatus(event.target.value)} value={status}><option value="">All statuses</option>{statuses.map((item) => <option key={item}>{item}</option>)}</select></label>
-        <label>Payment method<select className="select" onChange={(event) => setPaymentMode(event.target.value)} value={paymentMode}><option value="">All methods</option>{paymentModes.map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}</select></label>
+        <MultiCheckFilter allLabel="All locations" label="Location" options={locations} selected={locationsSelected} setSelected={setLocationsSelected} />
+        <MultiCheckFilter allLabel="All heads" label="Payment head" options={heads} selected={headsSelected} setSelected={setHeadsSelected} />
+        <MultiCheckFilter allLabel="All statuses" label="Status" options={statuses} selected={statusesSelected} setSelected={setStatusesSelected} />
+        <MultiCheckFilter allLabel="All methods" displayValue={(item) => item.replaceAll("_", " ")} label="Payment method" options={paymentModes} selected={paymentModesSelected} setSelected={setPaymentModesSelected} />
         <label>From<input className="field" onChange={(event) => setFromDate(event.target.value)} type="date" value={fromDate} /></label>
         <label>To<input className="field" onChange={(event) => setToDate(event.target.value)} type="date" value={toDate} /></label>
         <label>Rows<select className="select" onChange={(event) => setPageSize(event.target.value)} value={pageSize}>{["20", "100", "500", "1000"].map((size) => <option key={size}>{size}</option>)}<option value="all">All</option></select></label>

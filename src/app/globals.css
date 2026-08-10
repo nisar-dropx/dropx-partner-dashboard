@@ -1622,6 +1622,46 @@ h3 {
   text-transform: uppercase;
 }
 
+.payment-report-multi-filter {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.payment-report-multi-filter .multi-select-trigger {
+  min-height: 42px;
+  font-size: 13px;
+  font-weight: 500;
+  text-transform: none;
+  list-style: none;
+}
+
+.payment-report-multi-filter .multi-select-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.payment-report-multi-filter details[open] .multi-select-trigger {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(245, 164, 0, 0.14);
+}
+
+.payment-report-filter-menu {
+  min-width: 250px;
+  text-transform: none;
+}
+
+.payment-report-filter-menu label {
+  display: flex;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  text-transform: none;
+}
+
 .payment-report-result-count {
   margin: 0;
   padding: 10px 16px;
