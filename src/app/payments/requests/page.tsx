@@ -537,28 +537,17 @@ export default async function PaymentRequestsPage({
                   <input className="field" min="0" name="amount" placeholder="0.00" required step="0.01" type="number" defaultValue={resubmitRequest.amount ?? ""} />
                 </label>
               </div>
-              <div className="form-grid three">
-                <label>
-                  Bank Account No *
-                  <input className="field" name="bank_account_no" required defaultValue={resubmitRequest.bank_account_no ?? ""} />
-                </label>
-                <label>
-                  IFSC *
-                  <input className="field" name="ifsc" required defaultValue={resubmitRequest.ifsc ?? ""} />
-                </label>
-                <label>
-                  Acc Holder Name *
-                  <input className="field" name="account_holder_name" required defaultValue={resubmitRequest.account_holder_name ?? ""} />
-                </label>
-                <label>
-                  Contact No
-                  <input className="field" name="contact_no" placeholder="Optional" type="tel" defaultValue={resubmitRequest.contact_no ?? ""} />
-                </label>
-                <label>
-                  Email
-                  <input className="field" name="email" placeholder="Optional" type="email" defaultValue={resubmitRequest.email ?? ""} />
-                </label>
-              </div>
+              <PaymentBeneficiaryFields
+                allowedPaymentModes={resubmitHead.supported_payment_modes}
+                defaultBankAccountNo={resubmitRequest.payment_mode === "account_transfer" ? resubmitRequest.bank_account_no : null}
+                defaultContactNo={resubmitRequest.contact_no}
+                defaultEmail={resubmitRequest.email}
+                defaultIfsc={resubmitRequest.payment_mode === "account_transfer" ? resubmitRequest.ifsc : null}
+                defaultPaymentMode={resubmitRequest.payment_mode}
+                defaultUpiId={resubmitRequest.payment_mode === "upi_payment" ? resubmitRequest.payment_reference : null}
+                defaultAccountHolderName={resubmitRequest.account_holder_name}
+                savedContacts={savedContacts}
+              />
 
               {resubmitQuestions.length ? (
                 <>

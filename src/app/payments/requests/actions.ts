@@ -1086,9 +1086,19 @@ export async function resubmitPaymentRequest(formData: FormData) {
     const admin = supabaseAdmin;
     const requestId = required(formData.get("request_id"), "Payment request");
     const amountText = required(formData.get("amount"), "Amount");
-    const bankAccountNo = required(formData.get("bank_account_no"), "Bank Account No");
-    const ifsc = required(formData.get("ifsc"), "IFSC");
-    const accountHolderName = required(formData.get("account_holder_name"), "Acc Holder Name");
+    const paymentModeValue = clean(formData.get("payment_mode"));
+    if (paymentModeValue !== "account_transfer" && paymentModeValue !== "upi_payment" && paymentModeValue !== "online_payment") {
+      throw new Error("Select a supported payment method.");
+    }
+    const paymentMode = paymentModeValue as PaymentMode;
+    const bankAccountNo = paymentMode === "account_transfer" ? required(formData.get("bank_account_no"), "Bank Account No").toUpperCase() : null;
+    const ifsc = paymentMode === "account_transfer" ? required(formData.get("ifsc"), "IFSC").toUpperCase() : null;
+    const bankHolderName = paymentMode === "account_transfer" ? required(formData.get("account_holder_name"), "Acc Holder Name") : null;
+    const upiId = paymentMode === "upi_payment" ? required(formData.get("upi_id"), "UPI ID") : null;
+    const upiHolderName = paymentMode === "upi_payment" ? required(formData.get("upi_account_holder_name"), "UPI Account Holder Name") : null;
+    const paymentPortal = paymentMode === "online_payment" ? required(formData.get("payment_portal"), "Payment Portal") : null;
+    const onlineReference = paymentMode === "online_payment" ? clean(formData.get("payment_reference")) : null;
+    const accountHolderName = bankHolderName ?? upiHolderName;
     const contactNo = clean(formData.get("contact_no"));
     const email = clean(formData.get("email"));
     const remarks = required(formData.get("remarks"), "Remarks");
@@ -1110,7 +1120,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
       admin.from("stations").select("id, station_code, station_manager_email").eq("id", request.location_id).eq("company_id", companyId).single(),
       admin
         .from("payment_heads")
-        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
+        .select("id, code, initial_approval_role_id, initial_approval_role_ids, final_approval_role_id, final_approval_role_ids, payment_process_role_ids, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
         .eq("id", request.payment_head_id)
         .eq("company_id", companyId)
         .single(),
@@ -1125,6 +1135,9 @@ export async function resubmitPaymentRequest(formData: FormData) {
     ]);
     if (locationResult.error) throw new Error("Location not found for this company.");
     if (headResult.error) throw new Error("Payment head not found for this company.");
+    if (!normalizePaymentModes(headResult.data.supported_payment_modes).includes(paymentMode)) {
+      throw new Error("The selected payment method is not supported by this payment head.");
+    }
 
     const normalizedApprovalStatus = String(request.approval_status ?? "").toUpperCase();
     const normalizedStatus = String(request.status ?? "").toLowerCase();
@@ -1246,6 +1259,9 @@ export async function resubmitPaymentRequest(formData: FormData) {
         station_code: locationResult.data.station_code,
         amount: Number(amountText),
         amount_requested: Number(amountText),
+        payment_mode: paymentMode,
+        payment_portal: paymentMode === "upi_payment" ? "UPI" : paymentPortal,
+        payment_reference: upiId ?? onlineReference,
         bank_account_no: bankAccountNo,
         ifsc,
         account_holder_name: accountHolderName,
