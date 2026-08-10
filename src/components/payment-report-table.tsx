@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Eye } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
@@ -34,6 +34,7 @@ export type PaymentReportRequest = {
   payment_head_name: string;
   payment_head_external_id: string;
   amount: number | null;
+  payment_mode: string | null;
   account_holder_name: string | null;
   bank_account_no: string | null;
   ifsc: string | null;
@@ -131,10 +132,56 @@ function buildHistory(request: PaymentReportRequest) {
 
 export function PaymentReportTable({ requests }: { requests: PaymentReportRequest[] }) {
   const [selectedRequest, setSelectedRequest] = useState<PaymentReportRequest | null>(null);
+  const [search, setSearch] = useState("");
+  const [location, setLocation] = useState("");
+  const [head, setHead] = useState("");
+  const [status, setStatus] = useState("");
+  const [paymentMode, setPaymentMode] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [pageSize, setPageSize] = useState("20");
+  const [page, setPage] = useState(1);
   const history = selectedRequest ? buildHistory(selectedRequest) : [];
+  const locations = useMemo(() => [...new Set(requests.map((item) => item.location_code).filter(Boolean))].sort(), [requests]);
+  const heads = useMemo(() => [...new Set(requests.map((item) => item.payment_head_name).filter(Boolean))].sort(), [requests]);
+  const statuses = useMemo(() => [...new Set(requests.map(reportStatusLabel).filter(Boolean))].sort(), [requests]);
+  const paymentModes = useMemo(() => [...new Set(requests.map((item) => item.payment_mode).filter(Boolean) as string[])].sort(), [requests]);
+  const filteredRequests = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return requests.filter((request) => {
+      const createdDate = request.created_at.slice(0, 10);
+      const searchable = [request.request_no, request.location_code, request.payment_head_name, request.payment_head_external_id,
+        request.account_holder_name, request.bank_account_no, request.ifsc, request.contact_no, request.email, request.utr_cin,
+        request.requested_by_name, request.requested_by_email].filter(Boolean).join(" ").toLowerCase();
+      return (!needle || searchable.includes(needle)) &&
+        (!location || request.location_code === location) &&
+        (!head || request.payment_head_name === head) &&
+        (!status || reportStatusLabel(request) === status) &&
+        (!paymentMode || request.payment_mode === paymentMode) &&
+        (!fromDate || createdDate >= fromDate) &&
+        (!toDate || createdDate <= toDate);
+    });
+  }, [requests, search, location, head, status, paymentMode, fromDate, toDate]);
+  const effectivePageSize = pageSize === "all" ? Math.max(filteredRequests.length, 1) : Number(pageSize);
+  const totalPages = Math.max(1, Math.ceil(filteredRequests.length / effectivePageSize));
+  const visibleRequests = pageSize === "all" ? filteredRequests : filteredRequests.slice((page - 1) * effectivePageSize, page * effectivePageSize);
+
+  useEffect(() => setPage(1), [search, location, head, status, paymentMode, fromDate, toDate, pageSize]);
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
   return (
     <>
+      <div className="payment-report-filters">
+        <label className="payment-report-search">Search<input className="field" onChange={(event) => setSearch(event.target.value)} placeholder="Request, person, account, IFSC, UTR..." type="search" value={search} /></label>
+        <label>Location<select className="select" onChange={(event) => setLocation(event.target.value)} value={location}><option value="">All locations</option>{locations.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label>Payment head<select className="select" onChange={(event) => setHead(event.target.value)} value={head}><option value="">All heads</option>{heads.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label>Status<select className="select" onChange={(event) => setStatus(event.target.value)} value={status}><option value="">All statuses</option>{statuses.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label>Payment method<select className="select" onChange={(event) => setPaymentMode(event.target.value)} value={paymentMode}><option value="">All methods</option>{paymentModes.map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}</select></label>
+        <label>From<input className="field" onChange={(event) => setFromDate(event.target.value)} type="date" value={fromDate} /></label>
+        <label>To<input className="field" onChange={(event) => setToDate(event.target.value)} type="date" value={toDate} /></label>
+        <label>Rows<select className="select" onChange={(event) => setPageSize(event.target.value)} value={pageSize}>{["20", "100", "500", "1000"].map((size) => <option key={size}>{size}</option>)}<option value="all">All</option></select></label>
+      </div>
+      <p className="subtle payment-report-result-count">Showing {visibleRequests.length} of {filteredRequests.length} matching records</p>
       <div className="table-wrap">
         <table>
           <thead>
@@ -154,7 +201,7 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
             </tr>
           </thead>
           <tbody>
-            {requests.length ? requests.map((request) => (
+            {visibleRequests.length ? visibleRequests.map((request) => (
               <tr key={request.id}>
                 <td><strong>{request.request_no}</strong></td>
                 <td>{request.location_code}</td>
@@ -179,6 +226,7 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
           </tbody>
         </table>
       </div>
+      {filteredRequests.length > effectivePageSize ? <div className="panel-foot pagination"><button className="pager-button" disabled={page === 1} onClick={() => setPage((value) => value - 1)} type="button">Previous</button><span>Page {page} of {totalPages}</span><button className="pager-button" disabled={page === totalPages} onClick={() => setPage((value) => value + 1)} type="button">Next</button></div> : null}
 
       {selectedRequest ? (
         <div className="modal-backdrop">
