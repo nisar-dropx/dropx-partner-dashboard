@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Eye } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
@@ -145,22 +145,40 @@ function MultiCheckFilter({
   setSelected: (values: string[]) => void;
   displayValue?: (value: string) => string;
 }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const summary = selected.length === 0
     ? allLabel
     : selected.length <= 2
       ? selected.map(displayValue).join(", ")
       : `${selected.length} selected`;
 
+  useEffect(() => {
+    if (!open) return;
+    function closeOnOutsideClick(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
   function toggle(value: string) {
     setSelected(selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value]);
   }
 
   return (
-    <div className="payment-report-multi-filter">
+    <div className="payment-report-multi-filter" ref={rootRef}>
       <span>{label}</span>
-      <details className="multi-select">
-        <summary className="multi-select-trigger"><span className="multi-select-summary">{summary}</span><span aria-hidden="true">⌄</span></summary>
-        <div className="multi-select-menu payment-report-filter-menu">
+      <div className="multi-select">
+        <button aria-expanded={open} className={`multi-select-trigger ${open ? "open" : ""}`} onClick={() => setOpen((value) => !value)} type="button"><span className="multi-select-summary">{summary}</span><span aria-hidden="true">⌄</span></button>
+        {open ? <div className="multi-select-menu payment-report-filter-menu">
           <label className="multi-select-all">
             <input checked={selected.length === 0} onChange={() => setSelected([])} type="checkbox" />
             <span>{allLabel}</span>
@@ -173,8 +191,8 @@ function MultiCheckFilter({
               </label>
             ))}
           </div>
-        </div>
-      </details>
+        </div> : null}
+      </div>
     </div>
   );
 }
