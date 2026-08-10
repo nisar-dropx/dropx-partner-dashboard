@@ -269,7 +269,7 @@ export async function loadPaymentNotificationSnapshot(authorization: Authorizati
     badges.payment_process = requests
       .filter((request) => canProcessPayment(request, authorization))
       .filter(isReadyForPaymentProcess)
-      .filter((request) => !["RE_APPROVED", "RE_PROCESSING_PENDING"].includes(requestStatus(request)) || request.current_approver_user_id === authorization.userId)
+      .filter((request) => !["RE_APPROVED", "RE_PROCESSING_PENDING"].includes(requestStatus(request)) || isAssignedToCurrentUser(request, authorization))
       .length;
     addItem(
       items,

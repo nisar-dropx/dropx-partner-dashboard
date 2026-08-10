@@ -36,6 +36,7 @@ type PaymentRequestRow = {
   approval_status: string | null;
   current_approver_user_id: string | null;
   current_approver_role_id: string | null;
+  current_approver_role_ids: string[] | null;
   created_at: string;
   payment_heads?: { name: string; code: string } | null;
   payment_details?: Array<{ id: string; label: string; value: string | null; file_name: string | null }>;
@@ -76,7 +77,7 @@ function firstRelation<T>(value: T | T[] | null | undefined) {
 function isReadyForPaymentProcess(request: PaymentRequestRow) {
   const status = String(request.status ?? "").toUpperCase();
   const approvalStatus = String(request.approval_status ?? "").toUpperCase();
-  const hasCurrentApprover = Boolean(request.current_approver_user_id || request.current_approver_role_id);
+  const hasCurrentApprover = Boolean(request.current_approver_user_id || request.current_approver_role_id || request.current_approver_role_ids?.length);
   const isOnlinePayment = (request.payment_mode ?? "account_transfer") === "online_payment";
   const isUpiPayment = request.payment_mode === "upi_payment";
   const hasPaymentDetails = isOnlinePayment
@@ -90,6 +91,7 @@ function isReadyForPaymentProcess(request: PaymentRequestRow) {
       request.account_holder_name?.trim()
     );
   return hasPaymentDetails && (status === "APPROVED" ||
+    status === "RESUBMITTED" ||
     status === "RE_APPROVED" ||
     status === "RE_PROCESSING_PENDING" ||
     status === "PROCESSING" ||
@@ -117,7 +119,7 @@ async function loadPaymentProcess(companyId: string, userId: string | null, role
 
   let requestsQuery = supabaseAdmin
     .from("payment_requests")
-    .select("id, request_no, location_code, payment_head_id, amount, amount_requested, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, processed_at, status, approval_status, current_approver_user_id, current_approver_role_id, created_at, payment_heads ( name, code )")
+    .select("id, request_no, location_code, payment_head_id, amount, amount_requested, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, processed_at, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, created_at, payment_heads ( name, code )")
     .eq("company_id", companyId)
     .order("created_at", { ascending: false });
 
@@ -139,7 +141,12 @@ async function loadPaymentProcess(companyId: string, userId: string | null, role
   if (error) return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], error };
   const requestRows = ((requestsResult.data ?? []) as unknown as PaymentRequestRow[])
     .filter(isReadyForPaymentProcess)
-    .filter((request) => !["RE_APPROVED", "RE_PROCESSING_PENDING"].includes(String(request.approval_status ?? "").toUpperCase()) || request.current_approver_user_id === userId);
+    .filter((request) => {
+      if (!["RE_APPROVED", "RE_PROCESSING_PENDING"].includes(String(request.approval_status ?? "").toUpperCase())) return true;
+      return request.current_approver_user_id === userId ||
+        request.current_approver_role_id === roleId ||
+        Boolean(roleId && request.current_approver_role_ids?.includes(roleId));
+    });
   const requestIds = requestRows.map((request) => request.id);
   const [answersResult, approvalsResult] = requestIds.length ? await Promise.all([
     supabaseAdmin
