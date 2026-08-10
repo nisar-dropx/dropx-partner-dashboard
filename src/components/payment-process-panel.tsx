@@ -123,10 +123,12 @@ function FinalizeSubmitButton() {
 function ProcessActionButton({
   children,
   className,
+  onBeforeConfirm,
   value
 }: {
   children: string;
   className: string;
+  onBeforeConfirm?: () => boolean;
   value: string;
 }) {
   const actionLabel = children.toLowerCase();
@@ -138,6 +140,7 @@ function ProcessActionButton({
       confirmSubmitText={children}
       confirmTitle={`${children} payment?`}
       name="process_action"
+      onBeforeConfirm={onBeforeConfirm}
       pendingText="Saving"
       value={value}
     >{children}</SubmitButton>
@@ -153,10 +156,28 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
   const [status, setStatus] = useState("approved");
   const [selectedBankId, setSelectedBankId] = useState("");
   const [fileType, setFileType] = useState("");
+  const [processRemarks, setProcessRemarks] = useState("");
+  const [processRemarksError, setProcessRemarksError] = useState("");
 
   useEffect(() => {
     if (finalizeResultKey) setFinalizeOpen(false);
   }, [finalizeResultKey]);
+
+  useEffect(() => {
+    setProcessRemarks("");
+    setProcessRemarksError("");
+  }, [processRequest?.id]);
+
+  function validateProcessAction(action: "processed" | "returned") {
+    if (processRemarks.trim()) {
+      setProcessRemarksError("");
+      return true;
+    }
+    setProcessRemarksError(action === "processed"
+      ? "Enter the UTR number before marking this request as processed."
+      : "Enter the reason before returning this request.");
+    return false;
+  }
 
   const filteredRequests = useMemo(() => {
     return requests.filter((request) => {
@@ -409,12 +430,18 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
                 <label>Status
                   <input className="field" readOnly value={statusLabel(processRequest)} />
                 </label>
-                <label>Remarks
+                <label>{statusKey(processRequest) === "processed" ? "Return remarks" : "UTR No / Return remarks"}
                   <input
                     className="field"
                     name="process_remarks"
+                    onChange={(event) => {
+                      setProcessRemarks(event.target.value);
+                      if (processRemarksError) setProcessRemarksError("");
+                    }}
                     placeholder={statusKey(processRequest) === "processed" ? "Reason for return" : "UTR No / error remarks"}
+                    value={processRemarks}
                   />
+                  {processRemarksError ? <span className="field-error" role="alert">{processRemarksError}</span> : null}
                 </label>
               </div>
               <div style={{ marginTop: 16 }}>
@@ -489,9 +516,9 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
                   <ProcessActionButton className="secondary" value="processing">Processing</ProcessActionButton>
                 ) : null}
                 {statusKey(processRequest) !== "processed" ? (
-                  <ProcessActionButton className="payment-approve-button" value="processed">Processed</ProcessActionButton>
+                  <ProcessActionButton className="payment-approve-button" onBeforeConfirm={() => validateProcessAction("processed")} value="processed">Processed</ProcessActionButton>
                 ) : null}
-                <ProcessActionButton className="payment-return-button" value="returned">
+                <ProcessActionButton className="payment-return-button" onBeforeConfirm={() => validateProcessAction("returned")} value="returned">
                   {statusKey(processRequest) === "processed" ? "Return processed" : "Return"}
                 </ProcessActionButton>
               </div>
