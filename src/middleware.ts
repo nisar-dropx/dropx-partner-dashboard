@@ -10,7 +10,8 @@ const CLEAN_OPS_ROOTS = ["/daily-submission", "/performance", "/capacity", "/ser
 const MOVED_OPS_PAYMENT_PATHS = [
   "/payments/expense-request",
   "/payments/requests",
-  "/payments/approvals"
+  "/payments/approvals",
+  "/payments/report"
 ];
 
 function cleanOpsPath(path: string) {
