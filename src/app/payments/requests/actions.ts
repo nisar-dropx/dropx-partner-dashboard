@@ -693,7 +693,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
 
     const { data: request, error: requestError } = await admin
       .from("payment_requests")
-      .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, current_step_order, amount, payment_mode, current_approver_user_id, current_approver_role_id, current_approver_role_ids")
+      .select("id, category, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, current_step_order, amount, payment_mode, current_approver_user_id, current_approver_role_id, current_approver_role_ids")
       .eq("id", requestId)
       .eq("company_id", companyId)
       .single();
@@ -846,6 +846,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
     const { error: updateError } = await admin
       .from("payment_requests")
       .update({
+        category: "payment",
         amount: Number(amountText),
         payment_mode: paymentMode,
         payment_portal: paymentMode === "upi_payment" ? "UPI" : paymentPortal,
@@ -883,6 +884,18 @@ export async function submitPaymentBankDetails(formData: FormData) {
         approval_cycle: nextApprovalCycle,
         action: "resubmitted",
         comments: remarks || "Payment details corrected and resubmitted to processor."
+      }, companyId), companyId);
+    } else {
+      await insertPaymentApprovalLog(withCompany({
+        payment_request_id: request.id,
+        request_id: request.id,
+        approver_user_id: authorization.userId,
+        approver_role_id: authorization.roleId,
+        approval_cycle: request.approval_cycle,
+        action: "submitted",
+        comments: request.category === "expense"
+          ? "Approved expense converted to payment request and payment details submitted."
+          : "Payment details submitted for payment processing."
       }, companyId), companyId);
     }
 

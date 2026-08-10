@@ -9,6 +9,7 @@ type PaymentRequestRow = {
   id: string;
   location_id: string | null;
   request_no: string;
+  category: string | null;
   location_code: string;
   payment_head_id: string;
   amount: number | null;
@@ -87,7 +88,7 @@ async function loadPaymentReport(companyId: string, authorization: Authorization
   let headsResult: any;
   let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_id, location_code, payment_head_id, amount, payment_mode, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, utr_cin, bank_status, bank_processing_remarks, processing_started_at, processed_at, requested_by, created_at, updated_at")
+      .select("id, request_no, category, location_id, location_code, payment_head_id, amount, payment_mode, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, utr_cin, bank_status, bank_processing_remarks, processing_started_at, processed_at, requested_by, created_at, updated_at")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
   if (!authorization.hasAllLocationAccess) {
@@ -104,7 +105,7 @@ async function loadPaymentReport(companyId: string, authorization: Authorization
   if (requestsResult.error?.message.toLowerCase().includes("processing_started_at")) {
     let fallbackQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_id, location_code, payment_head_id, amount, payment_mode, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, utr_cin, bank_status, bank_processing_remarks, processed_at, requested_by, created_at, updated_at")
+      .select("id, request_no, category, location_id, location_code, payment_head_id, amount, payment_mode, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, utr_cin, bank_status, bank_processing_remarks, processed_at, requested_by, created_at, updated_at")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
     if (!authorization.hasAllLocationAccess) {
@@ -286,6 +287,7 @@ export default async function PaymentReportPage() {
                 return {
                   id: request.id,
                   request_no: request.request_no,
+                  category: request.category,
                   location_code: request.location_code,
                   payment_head_name: head?.name ?? "-",
                   payment_head_external_id: head?.external_id ?? "-",

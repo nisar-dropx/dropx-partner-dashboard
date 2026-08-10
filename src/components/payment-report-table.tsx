@@ -30,6 +30,7 @@ export type PaymentReportLog = {
 export type PaymentReportRequest = {
   id: string;
   request_no: string;
+  category: string | null;
   location_code: string;
   payment_head_name: string;
   payment_head_external_id: string;
@@ -85,16 +86,26 @@ function reportStatusLabel(request: PaymentReportRequest) {
   return paymentStatusLabel(request);
 }
 
+function reportRequestType(request: PaymentReportRequest) {
+  return String(request.category ?? "").toLowerCase() === "expense" && request.amount == null
+    ? "Expense Request"
+    : "Payment Request";
+}
+
 function buildHistory(request: PaymentReportRequest) {
+  const hasCreatedLog = request.logs.some((log) => String(log.action).toLowerCase() === "created");
+  const hasSubmittedLog = request.logs.some((log) => String(log.action).toLowerCase() === "submitted");
+  const hasProcessingLog = request.logs.some((log) => String(log.action).toLowerCase() === "processing");
+  const hasProcessedLog = request.logs.some((log) => String(log.action).toLowerCase() === "processed");
   const history = [
-    {
+    ...(!hasCreatedLog ? [{
       id: `${request.id}-requested`,
       status: "requested",
       actor: request.requested_by_name ?? request.requested_by_email ?? "-",
       role: "Requester",
       comments: request.remarks || "-",
       created_at: request.created_at
-    },
+    }] : []),
     ...request.logs.map((log) => ({
       id: log.id,
       status: log.action,
@@ -105,7 +116,19 @@ function buildHistory(request: PaymentReportRequest) {
     }))
   ];
 
-  if (isProcessingStarted(request)) {
+  if (!hasSubmittedLog && String(request.category ?? "").toLowerCase() === "expense" && request.amount != null) {
+    const firstProcessingLog = request.logs.find((log) => String(log.action).toLowerCase() === "processing");
+    history.push({
+      id: `${request.id}-details-submitted`,
+      status: "submitted",
+      actor: request.requested_by_name ?? request.requested_by_email ?? "Requester",
+      role: "Requester",
+      comments: "Approved expense converted to payment request and payment details submitted.",
+      created_at: firstProcessingLog?.created_at ?? request.processing_started_at ?? request.updated_at
+    });
+  }
+
+  if (isProcessingStarted(request) && !hasProcessingLog) {
     history.push({
       id: `${request.id}-processing`,
       status: "processing",
@@ -116,7 +139,7 @@ function buildHistory(request: PaymentReportRequest) {
     });
   }
 
-  if (request.processed_at) {
+  if (request.processed_at && !hasProcessedLog) {
     history.push({
       id: `${request.id}-processed`,
       status: request.bank_status || "processed",
@@ -204,6 +227,7 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
   const [headsSelected, setHeadsSelected] = useState<string[]>([]);
   const [statusesSelected, setStatusesSelected] = useState<string[]>([]);
   const [paymentModesSelected, setPaymentModesSelected] = useState<string[]>([]);
+  const [requestTypesSelected, setRequestTypesSelected] = useState<string[]>([]);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [pageSize, setPageSize] = useState("20");
@@ -213,6 +237,7 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
   const heads = useMemo(() => [...new Set(requests.map((item) => item.payment_head_name).filter(Boolean))].sort(), [requests]);
   const statuses = useMemo(() => [...new Set(requests.map(reportStatusLabel).filter(Boolean))].sort(), [requests]);
   const paymentModes = useMemo(() => [...new Set(requests.map((item) => item.payment_mode).filter(Boolean) as string[])].sort(), [requests]);
+  const requestTypes = useMemo(() => [...new Set(requests.map(reportRequestType))].sort(), [requests]);
   const filteredRequests = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return requests.filter((request) => {
@@ -225,15 +250,16 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
         (!headsSelected.length || headsSelected.includes(request.payment_head_name)) &&
         (!statusesSelected.length || statusesSelected.includes(reportStatusLabel(request))) &&
         (!paymentModesSelected.length || (request.payment_mode != null && paymentModesSelected.includes(request.payment_mode))) &&
+        (!requestTypesSelected.length || requestTypesSelected.includes(reportRequestType(request))) &&
         (!fromDate || createdDate >= fromDate) &&
         (!toDate || createdDate <= toDate);
     });
-  }, [requests, search, locationsSelected, headsSelected, statusesSelected, paymentModesSelected, fromDate, toDate]);
+  }, [requests, search, locationsSelected, headsSelected, statusesSelected, paymentModesSelected, requestTypesSelected, fromDate, toDate]);
   const effectivePageSize = pageSize === "all" ? Math.max(filteredRequests.length, 1) : Number(pageSize);
   const totalPages = Math.max(1, Math.ceil(filteredRequests.length / effectivePageSize));
   const visibleRequests = pageSize === "all" ? filteredRequests : filteredRequests.slice((page - 1) * effectivePageSize, page * effectivePageSize);
 
-  useEffect(() => setPage(1), [search, locationsSelected, headsSelected, statusesSelected, paymentModesSelected, fromDate, toDate, pageSize]);
+  useEffect(() => setPage(1), [search, locationsSelected, headsSelected, statusesSelected, paymentModesSelected, requestTypesSelected, fromDate, toDate, pageSize]);
   useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
 
   return (
@@ -244,6 +270,7 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
         <MultiCheckFilter allLabel="All heads" label="Payment head" options={heads} selected={headsSelected} setSelected={setHeadsSelected} />
         <MultiCheckFilter allLabel="All statuses" label="Status" options={statuses} selected={statusesSelected} setSelected={setStatusesSelected} />
         <MultiCheckFilter allLabel="All methods" displayValue={(item) => item.replaceAll("_", " ")} label="Payment method" options={paymentModes} selected={paymentModesSelected} setSelected={setPaymentModesSelected} />
+        <MultiCheckFilter allLabel="All request types" label="Request type" options={requestTypes} selected={requestTypesSelected} setSelected={setRequestTypesSelected} />
         <label>From<input className="field" onChange={(event) => setFromDate(event.target.value)} type="date" value={fromDate} /></label>
         <label>To<input className="field" onChange={(event) => setToDate(event.target.value)} type="date" value={toDate} /></label>
         <label>Rows<select className="select" onChange={(event) => setPageSize(event.target.value)} value={pageSize}>{["20", "100", "500", "1000"].map((size) => <option key={size}>{size}</option>)}<option value="all">All</option></select></label>
@@ -254,6 +281,7 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
           <thead>
             <tr>
               <th>Request</th>
+              <th>Request Type</th>
               <th>Location</th>
               <th>Payment Head</th>
               <th>External ID</th>
@@ -271,6 +299,7 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
             {visibleRequests.length ? visibleRequests.map((request) => (
               <tr key={request.id}>
                 <td><strong>{request.request_no}</strong></td>
+                <td>{reportRequestType(request)}</td>
                 <td>{request.location_code}</td>
                 <td>{request.payment_head_name}</td>
                 <td>{request.payment_head_external_id}</td>
@@ -288,7 +317,7 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
                 </td>
               </tr>
             )) : (
-              <tr><td className="empty-cell" colSpan={12}>No payment requests found.</td></tr>
+              <tr><td className="empty-cell" colSpan={13}>No payment requests found.</td></tr>
             )}
           </tbody>
         </table>
@@ -309,6 +338,7 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
               <div className="form-grid three">
                 <label>Payment Head<input className="field" readOnly value={selectedRequest.payment_head_name} /></label>
                 <label>External ID<input className="field" readOnly value={selectedRequest.payment_head_external_id} /></label>
+                <label>Request Type<input className="field" readOnly value={reportRequestType(selectedRequest)} /></label>
                 <label>Status<input className="field" readOnly value={reportStatusLabel(selectedRequest)} /></label>
                 <label>Amount<input className="field" readOnly value={formatAmount(selectedRequest.amount)} /></label>
                 <label>Location<input className="field" readOnly value={selectedRequest.location_code} /></label>
