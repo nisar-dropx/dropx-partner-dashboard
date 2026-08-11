@@ -326,10 +326,10 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
 
       {selectedRequest ? (
         <div className="modal-backdrop">
-          <section className="modal-panel wide" aria-label="View payment request">
+          <section className="modal-panel wide" aria-label={`View ${reportRequestType(selectedRequest).toLowerCase()}`}>
             <div className="panel-head">
               <div>
-                <h2>Payment request details</h2>
+                <h2>{reportRequestType(selectedRequest)} Details</h2>
                 <p className="subtle">{selectedRequest.request_no} - {selectedRequest.location_code}</p>
               </div>
               <button className="modal-close" onClick={() => setSelectedRequest(null)} type="button">x</button>
