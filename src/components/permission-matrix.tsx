@@ -33,7 +33,7 @@ const groupDefinitions: PermissionGroup[] = [
   { key: "service_network", label: "Service Network", codes: ["service_network", "service_network_master"] },
   { key: "cps", label: "CPS", codes: ["cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "cps_inputs", "cps_unmapped"], hiddenCodes: ["cps"] },
   { key: "payments", label: "Payments", codes: ["expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports"], hiddenCodes: ["payments"] },
-  { key: "reports", label: "Reports", codes: ["attendance_reports", "verification_api_reports", "event_log_reports"], hiddenCodes: ["reports"] },
+  { key: "reports", label: "Reports", codes: ["attendance_reports", "raw_punch_reports", "verification_api_reports", "event_log_reports"], hiddenCodes: ["reports"] },
   {
     key: "onboard",
     label: "People",
