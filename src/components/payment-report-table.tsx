@@ -169,7 +169,12 @@ function MultiCheckFilter({
   displayValue?: (value: string) => string;
 }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleOptions = normalizedQuery
+    ? options.filter((option) => displayValue(option).toLowerCase().includes(normalizedQuery))
+    : options;
   const summary = selected.length === 0
     ? allLabel
     : selected.length <= 2
@@ -177,12 +182,22 @@ function MultiCheckFilter({
       : `${selected.length} selected`;
 
   useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
+  useEffect(() => {
     if (!open) return;
     function closeOnOutsideClick(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
     }
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        setOpen(false);
+        setQuery("");
+      }
     }
     document.addEventListener("pointerdown", closeOnOutsideClick);
     document.addEventListener("keydown", closeOnEscape);
@@ -202,17 +217,29 @@ function MultiCheckFilter({
       <div className="multi-select">
         <button aria-expanded={open} className={`multi-select-trigger ${open ? "open" : ""}`} onClick={() => setOpen((value) => !value)} type="button"><span className="multi-select-summary">{summary}</span><span aria-hidden="true">⌄</span></button>
         {open ? <div className="multi-select-menu payment-report-filter-menu">
+          <div className="multi-select-search payment-report-filter-search">
+            <input
+              aria-label={`Search ${label}`}
+              autoFocus
+              className="field multi-select-search-field"
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={`Search ${label.toLowerCase()}`}
+              type="search"
+              value={query}
+            />
+          </div>
           <label className="multi-select-all">
             <input checked={selected.length === 0} onChange={() => setSelected([])} type="checkbox" />
             <span>{allLabel}</span>
           </label>
           <div className="multi-select-options">
-            {options.map((option) => (
+            {visibleOptions.map((option) => (
               <label className="multi-select-option" key={option}>
                 <input checked={selected.includes(option)} onChange={() => toggle(option)} type="checkbox" />
                 <span>{displayValue(option)}</span>
               </label>
             ))}
+            {visibleOptions.length === 0 ? <p className="payment-report-filter-empty">No matching options</p> : null}
           </div>
         </div> : null}
       </div>
