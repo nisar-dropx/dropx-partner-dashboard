@@ -15,7 +15,7 @@ import { paymentStatusLabel } from "@/lib/payment-status-label";
 import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 import { loadPaymentNotificationSnapshot } from "@/lib/payment-notification-counts";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
-import type { PaymentMode } from "@/lib/payment-modes";
+import { paymentModeLabel, type PaymentMode } from "@/lib/payment-modes";
 import { paymentQuestionDateBounds } from "@/lib/payment-question-date-rules";
 import { createPaymentRequest, resubmitPaymentRequest, submitPaymentBankDetails } from "./actions";
 
@@ -381,9 +381,10 @@ export default async function PaymentRequestsPage({
                   <th>Payment Head</th>
                   <th>Estimated</th>
                   <th>Amount</th>
+                  <th>Payment Method</th>
                   <th>Account Holder</th>
-                  <th>Bank Account</th>
-                  <th>IFSC</th>
+                  <th>Account / UPI ID</th>
+                  <th>IFSC / Portal</th>
                   <th>Status</th>
                   <th>Created</th>
                   {pagePermission.canAdd ? <th>Action</th> : null}
@@ -399,9 +400,10 @@ export default async function PaymentRequestsPage({
                       <td>{head?.name ?? "-"}</td>
                       <td>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN")}`}</td>
                       <td>{request.amount == null ? "-" : `Rs ${Number(request.amount).toLocaleString("en-IN")}`}</td>
+                      <td>{request.payment_mode ? paymentModeLabel(request.payment_mode) : "-"}</td>
                       <td>{request.account_holder_name ?? "-"}</td>
-                      <td>{request.bank_account_no ?? "-"}</td>
-                      <td>{request.ifsc ?? "-"}</td>
+                      <td>{request.payment_mode === "upi_payment" ? request.payment_reference ?? "-" : request.bank_account_no ?? "-"}</td>
+                      <td>{request.payment_mode === "online_payment" ? request.payment_portal ?? "-" : request.ifsc ?? "-"}</td>
                       <td><StatusPill status={paymentStatusLabel(request)} /></td>
                       <td>{formatDashboardDate(request.created_at)}</td>
                       {pagePermission.canAdd ? (
@@ -416,7 +418,7 @@ export default async function PaymentRequestsPage({
                     </tr>
                   );
                 }) : (
-                  <tr><td className="empty-cell" colSpan={pagePermission.canAdd ? 11 : 10}>No payment requests added yet.</td></tr>
+                  <tr><td className="empty-cell" colSpan={pagePermission.canAdd ? 12 : 11}>No payment requests added yet.</td></tr>
                 )}
               </tbody>
             </table>
