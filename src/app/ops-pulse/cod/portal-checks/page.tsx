@@ -1,5 +1,4 @@
 import { cookies } from "next/headers";
-import { AppShell } from "@/components/app-shell";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
@@ -123,7 +122,7 @@ export default async function PortalChecksPage({ searchParams }: { searchParams?
   const worker = workerLinks();
 
   return (
-    <AppShell active="COD" pageCode="cod_portal_checks">
+    <>
       <PageHead
         eyebrow="Ops Pulse"
         title="COD Portal Checks"
@@ -280,6 +279,6 @@ export default async function PortalChecksPage({ searchParams }: { searchParams?
           </section>
         </>
       ) : null}
-    </AppShell>
+    </>
   );
 }

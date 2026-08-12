@@ -386,3 +386,84 @@ export async function finalizeCodClosure({
   if (saved.error) throw new Error(saved.error.message);
   return { collectedCod, difference };
 }
+
+/** Final-submitted day closures in a date window (for COD Reports). */
+export async function loadFinalCodDayClosures(
+  companyId: string,
+  locationIds: string[],
+  params: { fromDate?: string; toDate?: string; locationId?: string }
+) {
+  if (!supabaseAdmin || !locationIds.length) {
+    return { rows: [] as CodDayClosure[], error: null as string | null };
+  }
+
+  let query = supabaseAdmin
+    .from("cod_day_closures")
+    .select("id, business_date, location_id, station_code, collected_cod, amazon_open_remittance_expected, amazon_open_remittance_count, difference_amount, driver_reconciliation_pending, no_deposit_liability, validation_status, submission_status, manager_status, override_reason, validation_snapshot, submitted_at, driver_check_status, driver_exception_reason, driver_exception_manager_remarks, deposit_check_status, deposit_exception_reason, deposit_exception_manager_remarks, is_final_submitted, final_submitted_at")
+    .eq("company_id", companyId)
+    .eq("is_final_submitted", true)
+    .in("location_id", locationIds)
+    .order("business_date", { ascending: false })
+    .order("station_code");
+
+  if (params.fromDate) query = query.gte("business_date", params.fromDate);
+  if (params.toDate) query = query.lte("business_date", params.toDate);
+  if (params.locationId) query = query.eq("location_id", params.locationId);
+
+  const { data, error } = await query.limit(500);
+  if (error) return { rows: [] as CodDayClosure[], error: error.message };
+  return { rows: (data ?? []) as CodDayClosure[], error: null };
+}
+
+export function remittanceExpectedFromClosure(closure: Pick<CodDayClosure, "amazon_open_remittance_expected" | "collected_cod" | "validation_snapshot">) {
+  const snapshot = closure.validation_snapshot && typeof closure.validation_snapshot === "object"
+    ? closure.validation_snapshot as Record<string, unknown>
+    : {};
+  const remittance = snapshot.remittance && typeof snapshot.remittance === "object"
+    ? snapshot.remittance as Record<string, unknown>
+    : {};
+  const fromSnapshot = amount(
+    remittance.remittanceTotalCash
+    ?? remittance.submittedTotal
+    ?? remittance.createdTotal
+  );
+  if (fromSnapshot > 0) return fromSnapshot;
+  const openExpected = amount(closure.amazon_open_remittance_expected);
+  if (openExpected > 0) return openExpected;
+  return amount(closure.collected_cod);
+}
+
+export function remittanceCodesFromClosure(closure: Pick<CodDayClosure, "validation_snapshot">) {
+  const snapshot = closure.validation_snapshot && typeof closure.validation_snapshot === "object"
+    ? closure.validation_snapshot as Record<string, unknown>
+    : {};
+  const remittance = snapshot.remittance && typeof snapshot.remittance === "object"
+    ? snapshot.remittance as Record<string, unknown>
+    : {};
+  const codes = Array.isArray(remittance.remittanceCodes)
+    ? remittance.remittanceCodes.map((code) => String(code ?? "").trim()).filter(Boolean)
+    : [];
+  return codes;
+}
+
+export function yesterdayKolkata() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "Asia/Kolkata",
+    year: "numeric"
+  }).formatToParts(new Date());
+  const y = Number(parts.find((p) => p.type === "year")?.value);
+  const m = Number(parts.find((p) => p.type === "month")?.value);
+  const d = Number(parts.find((p) => p.type === "day")?.value);
+  const utc = new Date(Date.UTC(y, m - 1, d));
+  utc.setUTCDate(utc.getUTCDate() - 1);
+  return utc.toISOString().slice(0, 10);
+}
+
+export function daysBetweenYmd(fromYmd: string, toYmd: string) {
+  const from = Date.parse(`${fromYmd}T00:00:00+05:30`);
+  const to = Date.parse(`${toYmd}T00:00:00+05:30`);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
+  return Math.max(0, Math.round((to - from) / 86_400_000));
+}

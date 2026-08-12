@@ -89,8 +89,7 @@ function modelOperations(mode: OperatingMode): NavItem {
         { code: "ops_pulse", label: "Shift Control", href: "/?view=shift" },
         { code: "ops_pulse", label: "Hourly Performance", href: "/?view=hourly" },
         { code: "daily_submission", label: "Attendance & Reporting", href: "/daily-submission" },
-        { code: "cod_reports", label: "Exceptions", href: "/cod/reports?client=amazon" },
-        { code: "cod_reports", label: "Performance Reports", href: "/reports/amazon" }
+        { code: "cod_reports", label: "Exceptions", href: "/cod/reports?client=amazon" }
       ]
     };
   }
@@ -101,7 +100,6 @@ function modelOperations(mode: OperatingMode): NavItem {
       icon: "O",
       children: [
         { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=flipkart" },
-        { code: "cod_validation", label: "Deposit Validation", href: "/cod/validation?client=flipkart" },
         { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=flipkart" }
       ]
     };
@@ -113,10 +111,9 @@ function modelOperations(mode: OperatingMode): NavItem {
     children: [
       { code: "cod_executive_reconciliation", label: "Executive Reconciliation", href: "/cod/executive-reconciliation?client=amazon" },
       { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=amazon" },
-      { code: "cod_validation", label: "Validation & Closure", href: "/cod/validation?client=amazon" },
-      { code: "cod_portal_checks", label: "SCC Portal Checks", href: "/cod/portal-checks" },
-      { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=amazon" }
-      ,{ code: "cod_reports", label: "Performance Reports", href: "/reports/amazon" }
+      { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=amazon" },
+      // Same permission as COD Reports (dropx-ops-pulse 79f85aa).
+      { code: "cod_reports", label: "Cash In Associate", href: "/cod/cash-in-associate?client=amazon" }
     ]
   };
 }

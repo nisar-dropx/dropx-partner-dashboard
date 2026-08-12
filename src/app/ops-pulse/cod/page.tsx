@@ -15,6 +15,9 @@ export default async function CodPage() {
   if (hasPermission(authorization, "cod_reports", "access")) {
     redirect("/ops-pulse/cod/reports");
   }
+  if (hasPermission(authorization, "cod_cash_in_associate", "access")) {
+    redirect("/ops-pulse/cod/cash-in-associate");
+  }
 
   redirect("/dashboard");
 }

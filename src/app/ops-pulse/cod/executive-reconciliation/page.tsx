@@ -1,5 +1,4 @@
 import { cookies } from "next/headers";
-import { AppShell } from "@/components/app-shell";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
@@ -294,7 +293,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
     step: String(step)
   });
   return (
-    <AppShell active="COD" pageCode="cod_executive_reconciliation">
+    <>
       <PageHead
         eyebrow="Ops Pulse"
         title="Executive Reconciliation"
@@ -692,6 +691,6 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
           ) : null}
         </CashStepGateProvider>
       ) : null}
-    </AppShell>
+    </>
   );
 }

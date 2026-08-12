@@ -1,9 +1,12 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { DocumentTitle } from "@/components/document-title";
+import { OpsLoginPanel } from "@/components/ops-login-panel";
 import { SubmitButton } from "@/components/submit-button";
 import { firstAllowedHref } from "@/lib/app-navigation";
-import { getAuthorization } from "@/lib/authorization";
+import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
+import { opsAccessPageCodes } from "@/lib/access-surface";
+import { safeOpsNextPath } from "@/lib/ops-pulse/auth";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { signInWithGoogle } from "./actions";
 
@@ -16,17 +19,31 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     headers().get("host")?.split(":")[0].toLowerCase() ??
     "";
   const isOpsHost = host === "ops.dropxlogistics.com";
-  const supabase = createServerSupabaseClient();
-  const { data } = !isOpsHost && supabase
-    ? await supabase.auth.getUser()
-    : { data: { user: null } };
+  const supabase = createServerSupabaseClient(undefined, isOpsHost ? true : undefined);
+  const { data } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
   if (data.user) {
     if (host === "admin-panel.dropxlogistics.com") redirect("/");
     const authorization = await getAuthorization();
+    if (isOpsHost) {
+      const hasOpsAccess = Boolean(authorization && (
+        isCompanyOwner(authorization) ||
+        opsAccessPageCodes.some((code) => hasPermission(authorization, code, "access"))
+      ));
+      redirect(hasOpsAccess ? safeOpsNextPath(searchParams?.next) : "/unauthorized?reason=access");
+    }
     redirect(authorization ? firstAllowedHref(authorization) ?? "/unauthorized" : "/dashboard");
   }
 
   const message = searchParams?.error ?? searchParams?.reason;
+
+  if (isOpsHost) {
+    return (
+      <>
+        <DocumentTitle pageName="OpsPulse Login" />
+        <OpsLoginPanel initialMessage={message} nextPath={safeOpsNextPath(searchParams?.next)} />
+      </>
+    );
+  }
 
   return (
     <main className="login-page">

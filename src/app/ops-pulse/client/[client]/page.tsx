@@ -14,15 +14,13 @@ const workflows = {
     ["Daily Submission", "/ops-pulse/daily-submission?client=amazon", "Station EOD checklist and proof."],
     ["Executive Reconciliation", "/ops-pulse/cod/executive-reconciliation?client=amazon", "Associate cash counting with SCC validation."],
     ["COD Submission", "/ops-pulse/cod/submission?client=amazon", "Amazon remittance and deposit proof."],
-    ["Validation", "/ops-pulse/cod/validation?client=amazon", "Manager validation and exceptions."],
-    ["Reports", "/ops-pulse/cod/reports?client=amazon", "Amazon COD and closure reporting."],
-    ["SCC Portal Checks", "/ops-pulse/cod/portal-checks", "Driver Recon and Bank Deposit automation."]
+    ["COD Reports", "/ops-pulse/cod/reports?client=amazon", "Amazon COD and closure reporting."],
+    ["Cash In Associate", "/ops-pulse/cod/cash-in-associate?client=amazon", "Cash still held with delivery associates."]
   ],
   flipkart: [
     ["Daily Submission", "/ops-pulse/daily-submission?client=flipkart", "Flipkart station EOD checklist and proof."],
     ["COD Submission", "/ops-pulse/cod/submission?client=flipkart", "ERP COD, deposited amount, UTR/reference and deposit proof."],
-    ["Validation", "/ops-pulse/cod/validation?client=flipkart", "Validate ERP-versus-deposit differences and exceptions."],
-    ["Reports", "/ops-pulse/cod/reports?client=flipkart", "Flipkart COD and closure reporting."]
+    ["COD Reports", "/ops-pulse/cod/reports?client=flipkart", "Flipkart COD and closure reporting."]
   ]
 } as const;
 

@@ -39,6 +39,7 @@ export const accessPages = [
   { code: "cod_validation", name: "COD Validation", sort_order: 89 },
   { code: "cod_reports", name: "COD Reports", sort_order: 90 },
   { code: "cod_portal_checks", name: "COD Portal Checks", sort_order: 91 },
+  { code: "cod_cash_in_associate", name: "Cash In Associate", sort_order: 94 },
   { code: "cps", name: "CPS", sort_order: 73 },
   { code: "cps_overview", name: "CPS Overview", sort_order: 74 },
   { code: "cps_daily", name: "Daily CPS", sort_order: 75 },
@@ -451,6 +452,14 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
   if (pageTopologyChanged && expectedCodes.has("delivery_associates")) {
     await mergeRetiredPagePermissions(supabase, companyId, "onboarding", "delivery_associates");
   }
+  if (pageTopologyChanged) await copyLegacyGroupPermissions(supabase, companyId, "cod", [
+    "cod_executive_reconciliation",
+    "cod_submission",
+    "cod_validation",
+    "cod_reports",
+    "cod_portal_checks",
+    "cod_cash_in_associate"
+  ], false);
   if (pageTopologyChanged) await copyLegacyGroupPermissions(supabase, companyId, "settings", [
     "master_locations",
     "master_providers",
@@ -477,6 +486,8 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, categoryCodes, "people_all");
     await seedTargetPermissionsFromSources(supabase, companyId, ["people_exceptions"], "people_review");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_reports"], "executive_id_onboarding");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["cod_reports"], "cod_cash_in_associate");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["cod_executive_reconciliation"], "cod_cash_in_associate");
     await seedTargetPermissionsFromSources(supabase, companyId, ["designations"], "workforce_categories");
     await seedTargetPermissionsFromSources(supabase, companyId, ["designations"], "workforce_whatsapp");
     await seedTargetPermissionsFromSources(supabase, companyId, ["imports"], "master_imports");

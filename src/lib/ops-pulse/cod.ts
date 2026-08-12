@@ -73,12 +73,14 @@ export type CodSubmissionRow = {
   validated_amount: number | string | null;
   validated_at: string | null;
   validation_remarks: string | null;
+  form_payload?: Record<string, unknown> | null;
   validation_payload: Record<string, unknown> | null;
   attachments: CodAttachment[] | null;
   deposit_slip_attachments?: CodAttachment[] | null;
   ai_status?: string | null;
   ai_confidence?: number | string | null;
   ai_summary?: string | null;
+  ai_result?: Record<string, unknown> | null;
   created_at: string;
   stations?: CodLocationRow | CodLocationRow[] | null;
 };
@@ -269,8 +271,25 @@ export type ExecutiveReconciliationViewRow = {
 };
 
 export const depositSlipAttachmentFields = [
-  ["deposit_slip", "CMS cash / bank deposit slip"]
+  ["deposit_slip", "Photo of deposit slip"]
 ] as const;
+
+/** Letters, digits, spaces, hyphen, underscore, slash (CMS codes). */
+export function alphaNumericFromForm(value: FormDataEntryValue | null, field: string, options?: { required?: boolean }) {
+  const text = clean(value);
+  if (!text) {
+    if (options?.required === false) return null;
+    throw new Error(`${field} is required.`);
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9 ._/-]*$/.test(text)) {
+    throw new Error(`${field} must be alphanumeric (letters and numbers only).`);
+  }
+  return text;
+}
+
+export function alphaNumericRequired(value: FormDataEntryValue | null, field: string) {
+  return alphaNumericFromForm(value, field, { required: true }) as string;
+}
 
 export const dailySubmissionAttachmentFields = [
   ["driver_reconciliation", "Driver reconciliation screenshot"],
@@ -484,6 +503,10 @@ export function attachmentsFor(row: Pick<CodSubmissionRow, "attachments">) {
 export function depositAttachmentsFor(row: Pick<CodSubmissionRow, "deposit_slip_attachments" | "attachments">) {
   const depositAttachments = Array.isArray(row.deposit_slip_attachments) ? row.deposit_slip_attachments : [];
   return depositAttachments.length ? depositAttachments : attachmentsFor(row);
+}
+
+export function depositSlipViewUrl(submissionId: string) {
+  return `/api/ops-pulse/cod/submissions/slip?id=${encodeURIComponent(submissionId)}`;
 }
 
 export function isMissingCodSetup(error: unknown) {

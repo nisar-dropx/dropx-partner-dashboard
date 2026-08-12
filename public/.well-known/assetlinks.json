@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.dropxlogistics.opspulse",
+      "sha256_cert_fingerprints": [
+        "E4:1A:4D:81:21:43:27:61:29:A3:BC:2B:4A:E9:8F:60:35:C3:19:8A:6C:1A:23:30:A6:58:52:AE:01:EE:12:B1"
+      ]
+    }
+  }
+]

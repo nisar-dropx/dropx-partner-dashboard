@@ -1,16 +1,14 @@
 import { cookies } from "next/headers";
-import { AppShell } from "@/components/app-shell";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
-import { SearchableSelect } from "@/components/searchable-select";
-import { StatusPill } from "@/components/status-pill";
-import { SubmitButton } from "@/components/submit-button";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import {
+  amountValue,
   codPeriod,
   codSetupMessage,
   depositAttachmentsFor,
+  depositSlipViewUrl,
   firstRelation,
   formatAmount,
   formatDate,
@@ -23,7 +21,8 @@ import {
   formTypeLabel
 } from "@/lib/ops-pulse/cod";
 import { isSupabaseAdminConfigured } from "@/lib/supabase-admin";
-import { createCodSubmission } from "./actions";
+import { CodSubmissionForm } from "./cod-submission-form";
+import { CodSubmissionRegister, type CodRegisterRow } from "./cod-submission-register";
 
 type SearchParams = {
   client?: string;
@@ -31,6 +30,9 @@ type SearchParams = {
   location?: string;
   status?: string;
   to?: string;
+  deposit_date?: string;
+  flash_error?: string;
+  flash_notice?: string;
 };
 
 function todayKolkata() {
@@ -42,7 +44,17 @@ function todayKolkata() {
   }).format(new Date());
 }
 
-function loadFlash() {
+function loadFlash(searchParams?: SearchParams) {
+  // URL flash is reliable after server-action redirects (cookie clear during RSC can crash).
+  const fromUrlError = typeof searchParams?.flash_error === "string" ? searchParams.flash_error.trim() : "";
+  const fromUrlNotice = typeof searchParams?.flash_notice === "string" ? searchParams.flash_notice.trim() : "";
+  if (fromUrlError || fromUrlNotice) {
+    return {
+      error: fromUrlError || null,
+      notice: fromUrlNotice || null
+    };
+  }
+
   const raw = cookies().get("dropx_cod_submission_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
   try {
@@ -57,12 +69,13 @@ function loadFlash() {
 }
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 export default async function CodSubmissionPage({ searchParams }: { searchParams?: SearchParams }) {
   const authorization = await requirePagePermission("cod_submission", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.cod_submission;
-  const flash = loadFlash();
+  const flash = loadFlash(searchParams);
   const today = todayKolkata();
   const selectedClient = searchParams?.client === "amazon" || searchParams?.client === "flipkart" ? searchParams.client : "";
   const [{ locations, error: locationsError }, submissionsResult] = await Promise.all([
@@ -82,21 +95,58 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
     return {
       value: location.id,
       label: locationLabel(location),
-      helper: [location.state, inferred ? formTypeLabel(inferred) : "Client from Location Master"].filter(Boolean).join(" / ")
+      helper: [location.state, inferred ? formTypeLabel(inferred) : "Client from Location Master"].filter(Boolean).join(" / "),
+      stationCode: String(location.station_code ?? "").trim().toUpperCase(),
+      formType: inferred || ""
+    };
+  });
+  const defaultLocationId = searchParams?.location && stationOptions.some((o) => o.value === searchParams.location)
+    ? searchParams.location
+    : undefined;
+  const defaultDepositDate = searchParams?.deposit_date && /^\d{4}-\d{2}-\d{2}$/.test(searchParams.deposit_date)
+    ? searchParams.deposit_date
+    : today;
+
+  const registerRows: CodRegisterRow[] = submissionsResult.rows.map((row) => {
+    const station = firstRelation(row.stations);
+    const slips = depositAttachmentsFor(row);
+    const depositRaw = String(row.deposit_date ?? "").slice(0, 10);
+    const fromRaw = String(row.cod_period_from ?? row.cod_date ?? depositRaw).slice(0, 10);
+    const toRaw = String(row.cod_period_to ?? fromRaw).slice(0, 10);
+    return {
+      id: row.id,
+      submittedAt: formatDateTime(row.created_at),
+      stationLabel: locationLabel(station) || row.station_code || "-",
+      client: row.client ?? formTypeLabel(row.form_type),
+      formType: row.form_type || inferFormTypeFromLocation(station) || "",
+      locationId: row.location_id || "",
+      stationCode: String(row.station_code ?? station?.station_code ?? "").trim().toUpperCase(),
+      codPeriod: codPeriod(row),
+      depositDate: depositRaw,
+      depositDateLabel: formatDate(depositRaw),
+      codPeriodFrom: fromRaw,
+      codPeriodTo: toRaw,
+      remittanceCode: row.remittance_code ?? row.reference_no ?? "",
+      amount: formatAmount(row.deposited_amount),
+      amountRaw: String(amountValue(row.deposited_amount)),
+      submitterName: row.submitter_name ?? "",
+      remarks: row.remarks ?? "",
+      status: row.validation_status,
+      hasSlip: slips.length > 0,
+      slipUrl: slips.length ? depositSlipViewUrl(row.id) : null
     };
   });
 
   return (
-    <AppShell active="COD" pageCode="cod_submission">
+    <>
       <PageHead
         eyebrow="Ops Pulse"
         title="COD Submission"
-        subtitle="Submit only the COD remittance code and CMS/bank deposit proof. Daily screenshots stay in Daily Submission."
+        subtitle="Enter remittance details, verify against the portal (Amazon), and upload a photo of the deposit slip."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
       <CodSectionTabs active="submission" />
-
-      {setupError ? (
+{setupError ? (
         <section className="panel message-panel error">
           <div className="panel-body"><strong>Database setup needed</strong><p className="subtle" style={{ marginTop: 6 }}>{codSetupMessage(setupError)}</p></div>
         </section>
@@ -120,32 +170,23 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
             <div className="panel-head toolbar">
               <div>
                 <h2>Submit COD deposit</h2>
-                <p className="subtle">Station access comes from user role. Client/source is inferred from the selected station in Location Master.</p>
+                <p className="subtle">Amazon submissions are checked against the portal for remittance code, deposit date, and amount before saving.</p>
               </div>
             </div>
             <div className="panel-body">
-              <form action={createCodSubmission} className="form-grid three" encType="multipart/form-data">
-                <label className="span-2">Station
-                  <SearchableSelect disabled={!permission.canAdd} name="location_id" options={stationOptions} placeholder="Select station" required />
-                </label>
-                <label>Deposit Date<input className="field" name="deposit_date" type="date" defaultValue={today} required /></label>
-                <label>COD From<input className="field" name="cod_period_from" type="date" defaultValue={today} required /></label>
-                <label>COD To<input className="field" name="cod_period_to" type="date" defaultValue={today} required /></label>
-                <label>Deposited Amount<input className="field" name="deposited_amount" inputMode="decimal" placeholder="Amount deposited" required /></label>
-                <label>Remittance Code<input className="field" name="remittance_code" placeholder="CMS / bank remittance code" required /></label>
-                <label>Submitted By<input className="field" name="submitter_name" placeholder="Name of station user" /></label>
-                <label className="span-2">CMS Cash / Bank Deposit Slip<input className="field" name="deposit_slip" type="file" accept="image/*,.pdf" required /></label>
-                <label className="span-3">Remarks<textarea className="field" name="remarks" placeholder="Exception notes, if any" rows={3} /></label>
-                <div className="form-actions span-3 align-right">
-                  <SubmitButton disabled={!permission.canAdd || !isSupabaseAdminConfigured}>Submit COD</SubmitButton>
-                </div>
-              </form>
+              <CodSubmissionForm
+                canAdd={Boolean(permission.canAdd) && isSupabaseAdminConfigured}
+                client={selectedClient}
+                defaultDepositDate={defaultDepositDate}
+                defaultLocationId={defaultLocationId}
+                stationOptions={stationOptions}
+              />
             </div>
           </section>
 
           <section className="panel">
             <div className="panel-body">
-              <form action="/ops-pulse/cod/submission" className="form-grid four">
+              <form action="/cod/submission" className="form-grid four">
                 <label>From<input className="field" name="from" type="date" defaultValue={searchParams?.from ?? ""} /></label>
                 <label>To<input className="field" name="to" type="date" defaultValue={searchParams?.to ?? ""} /></label>
                 <label>Station
@@ -155,7 +196,7 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
                   </select>
                 </label>
                 <input type="hidden" name="client" value={selectedClient} />
-                <label>Validation
+                <label>Status
                   <select className="field" name="status" defaultValue={searchParams?.status ?? ""}>
                     <option value="">All statuses</option>
                     {["Pending", "Matched", "Short", "Excess", "Rejected"].map((status) => <option key={status}>{status}</option>)}
@@ -172,52 +213,19 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
             <div className="panel-head">
               <div>
                 <h2>COD submission register</h2>
-                <p className="subtle">This is the live queue for manager/payroll validation.</p>
+                <p className="subtle">Recently added first. Preview the slip or edit a row from Actions.</p>
               </div>
-              <span className="count-badge">{submissionsResult.rows.length} records</span>
+              <span className="count-badge">{registerRows.length} records</span>
             </div>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Submitted</th>
-                    <th>Station</th>
-                    <th>Client</th>
-                    <th>COD Date</th>
-                    <th>Deposit Date</th>
-                    <th>Remittance Code</th>
-                    <th>Amount</th>
-                    <th>Slip</th>
-                    <th>Validation</th>
-                    <th>AI</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {submissionsResult.rows.length ? submissionsResult.rows.map((row) => {
-                    const station = firstRelation(row.stations);
-                    return (
-                      <tr key={row.id}>
-                        <td>{formatDateTime(row.created_at)}</td>
-                        <td><strong>{locationLabel(station) || row.station_code || "-"}</strong></td>
-                        <td>{row.client ?? formTypeLabel(row.form_type)}</td>
-                        <td>{codPeriod(row)}</td>
-                        <td>{formatDate(row.deposit_date)}</td>
-                        <td>{row.remittance_code ?? row.reference_no ?? "-"}</td>
-                        <td>{formatAmount(row.deposited_amount)}</td>
-                        <td>{depositAttachmentsFor(row).length}</td>
-                        <td><StatusPill status={row.validation_status} /></td>
-                        <td><StatusPill status={row.ai_status ?? "Not queued"} /></td>
-                      </tr>
-                    );
-                  }) : (
-                    <tr><td className="empty-cell" colSpan={10}>No COD submissions found for this filter.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <CodSubmissionRegister
+              canEdit={Boolean(permission.canEdit) && isSupabaseAdminConfigured}
+              client={selectedClient}
+              rows={registerRows}
+              stationOptions={stationOptions}
+            />
           </section>
         </>
       ) : null}
-    </AppShell>
+    </>
   );
 }

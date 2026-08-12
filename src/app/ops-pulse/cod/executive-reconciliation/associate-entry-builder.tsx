@@ -19,6 +19,8 @@ export type AssociateOption = {
   breakdown: CashReconPendingBreakdown[];
   /** Unmapped Amazon driver (tasId only) — ops must type employee name before save. */
   requiresManualName?: boolean;
+  /** Ageing driver not in getDrivers but name resolved from workforce. */
+  mappedFromWorkforce?: boolean;
 };
 
 type EntryRow = {
