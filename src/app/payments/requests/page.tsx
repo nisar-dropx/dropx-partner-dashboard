@@ -12,6 +12,7 @@ import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format"
 import { paymentFileAccept, paymentFileGroupLabels } from "@/lib/payment-file-types";
 import { loadUserPaymentContacts } from "@/lib/payment-contacts";
 import { paymentStatusLabel } from "@/lib/payment-status-label";
+import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 import { loadPaymentNotificationSnapshot } from "@/lib/payment-notification-counts";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import type { PaymentMode } from "@/lib/payment-modes";
@@ -56,6 +57,7 @@ type PaymentRequestRow = {
   current_step_order: number | null;
   requested_by: string | null;
   payment_mode: PaymentMode | null;
+  payment_portal: string | null;
   payment_reference: string | null;
   created_at: string;
 };
@@ -89,9 +91,8 @@ function canSubmitBankDetails(request: PaymentRequestRow, userId: string) {
   const approvalStatus = String(request.approval_status ?? "").toUpperCase();
   const isRejectedOrReturned = ["REJECTED", "RETURNED", "CANCELLED"].includes(status) || ["REJECTED", "RETURNED", "CANCELLED"].includes(approvalStatus);
   const isAlreadyProcessing = ["PROCESSING", "PROCESSED"].includes(status) || ["PROCESSING", "PROCESSED"].includes(approvalStatus);
-  const hasBankDetails = Boolean(request.amount != null && request.bank_account_no?.trim() && request.ifsc?.trim() && request.account_holder_name?.trim());
   const isApproved = status === "APPROVED" || approvalStatus === "APPROVED" || status === "OWNER_APPROVED" || approvalStatus === "OWNER_APPROVED" || approvalStatus.endsWith("_APPROVED");
-  return isApproved && !isRejectedOrReturned && !isAlreadyProcessing && !hasBankDetails;
+  return isApproved && !isRejectedOrReturned && !isAlreadyProcessing && !hasSubmittedPaymentDetails(request);
 }
 
 function optionsFromText(text: string | null) {
@@ -182,7 +183,7 @@ async function loadPaymentRequestData(companyId: string, authorization: Authoriz
       .order("code");
   let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, current_step_order, requested_by, payment_mode, payment_reference, created_at")
+      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, current_step_order, requested_by, payment_mode, payment_portal, payment_reference, created_at")
       .eq("company_id", companyId)
       .not("amount", "is", null)
       .order("created_at", { ascending: false })

@@ -12,6 +12,7 @@ import { formatDashboardDate } from "@/lib/date-format";
 import { paymentFileAccept, paymentFileGroupLabels } from "@/lib/payment-file-types";
 import { loadUserPaymentContacts } from "@/lib/payment-contacts";
 import { paymentStatusLabel } from "@/lib/payment-status-label";
+import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import type { PaymentMode } from "@/lib/payment-modes";
 import { createExpenseRequest, resubmitExpenseRequest, submitPaymentBankDetails } from "@/app/payments/requests/actions";
@@ -62,6 +63,9 @@ type PaymentRequestRow = {
   ifsc: string | null;
   location_code: string;
   payment_head_id: string;
+  payment_mode: PaymentMode | null;
+  payment_portal: string | null;
+  payment_reference: string | null;
   request_no: string;
   requested_by: string | null;
   remarks: string | null;
@@ -101,8 +105,7 @@ function canSubmitBankDetails(request: PaymentRequestRow, userId: string) {
   const approvalStatus = String(request.approval_status ?? "").toUpperCase();
   const isRejectedOrReturned = ["REJECTED", "RETURNED", "CANCELLED"].includes(status) || ["REJECTED", "RETURNED", "CANCELLED"].includes(approvalStatus);
   const isAlreadyProcessing = ["PROCESSING", "PROCESSED"].includes(status) || ["PROCESSING", "PROCESSED"].includes(approvalStatus);
-  const hasBankDetails = Boolean(request.amount != null && request.bank_account_no?.trim() && request.ifsc?.trim() && request.account_holder_name?.trim());
-  return isFinalApprovalComplete(request) && !isRejectedOrReturned && !isAlreadyProcessing && !hasBankDetails;
+  return isFinalApprovalComplete(request) && !isRejectedOrReturned && !isAlreadyProcessing && !hasSubmittedPaymentDetails(request);
 }
 
 function isResubmittable(request: PaymentRequestRow, userId: string) {
@@ -267,7 +270,7 @@ async function loadExpenseRequestData(companyId: string, authorization: Authoriz
       .order("code");
   let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, created_at")
+      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, payment_mode, payment_portal, payment_reference, created_at")
       .eq("company_id", companyId)
       .is("amount", null)
       .order("created_at", { ascending: false })
