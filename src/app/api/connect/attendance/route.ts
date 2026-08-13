@@ -114,6 +114,7 @@ export async function GET(request: NextRequest) {
     const worker = await resolveWorker({ accountId, profileType });
     const rows = (await loadAttendanceReportRows({
       companyId: worker.companyId,
+      enrolmentIds: [worker.biometricId],
       fromDate: range.fromDate,
       toDate: range.toDate,
       reportType: "performance"

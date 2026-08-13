@@ -520,6 +520,7 @@ function reportMatchesType(row: AttendanceReportRow, type: AttendanceReportType)
 export async function loadAttendanceReportRows({
   companyId,
   date,
+  enrolmentIds: requestedEnrolmentIds,
   fromDate,
   locationIds,
   reportType,
@@ -527,6 +528,7 @@ export async function loadAttendanceReportRows({
 }: {
   companyId: string;
   date?: string;
+  enrolmentIds?: string[];
   fromDate?: string;
   locationIds?: string[];
   reportType: AttendanceReportType;
@@ -575,6 +577,9 @@ export async function loadAttendanceReportRows({
     } else if (date) {
       query = query.eq("punch_date", date);
     }
+
+    const enrolmentVariants = biometricIdVariants(requestedEnrolmentIds ?? []);
+    if (enrolmentVariants.length) query = query.in("enrolment_id", enrolmentVariants);
 
     if (includeLocationFilter && locationIds?.length) query = query.in("location_id", locationIds);
     return query;
