@@ -58,19 +58,6 @@ export default async function CashInAssociateNetworkPage() {
         </section>
       ) : null}
 
-      {refreshActive ? (
-        <section className="panel message-panel info">
-          <div className="panel-body">
-            <strong>Full refresh in progress</strong>
-            <p className="subtle" style={{ marginTop: 6 }}>
-              {refresh?.stationsOk ?? 0} of {refresh?.stationsTotal ?? 0} stations updated so far.
-              This page keeps showing the last full network report while new stations finish
-              (about one every 3 minutes). Click Update numbers to see progress.
-            </p>
-          </div>
-        </section>
-      ) : null}
-
       {payload && totals ? (
         <>
           <CiaSummaryMetrics totals={totals} />
@@ -113,6 +100,7 @@ export default async function CashInAssociateNetworkPage() {
             windowFrom={payload.window.from}
             windowTo={payload.window.to}
             runStatus={refreshActive ? "running" : payload.run?.status ?? null}
+            initialRefreshProgress={refresh ?? null}
           />
         </>
       ) : null}

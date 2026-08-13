@@ -20,3 +20,19 @@ export async function readCiaJson(response: Response) {
   }
   return { payload, text };
 }
+
+export async function postCiaJson(url: string, body: Record<string, unknown> = {}) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store"
+  });
+  const { payload, text } = await readCiaJson(response);
+  if (!response.ok) {
+    throw new Error(
+      friendlyCiaWorkerError(String(payload.error ?? payload.message ?? text ?? ""), response.status)
+    );
+  }
+  return payload;
+}

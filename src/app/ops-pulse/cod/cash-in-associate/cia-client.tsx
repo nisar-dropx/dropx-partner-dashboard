@@ -2,11 +2,17 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { ChevronDown, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
 import { formatAmount } from "@/lib/ops-pulse/cod";
-import { ciaSeverity, ciaSeverityLabel, type CiaStationRow } from "@/lib/ops-pulse/cia-types";
-import { readCiaJson } from "./cia-fetch";
+import {
+  ciaSeverity,
+  ciaSeverityLabel,
+  mapCiaRefreshProgress,
+  type CiaRefreshProgress,
+  type CiaStationRow
+} from "@/lib/ops-pulse/cia-types";
+import { postCiaJson } from "./cia-fetch";
 
 const PAGE_SIZE = 12;
 
@@ -37,23 +43,30 @@ function formatRunStatus(status: string | null | undefined) {
   return labels[raw] ?? raw.replace(/_/g, " ");
 }
 
-async function postCiaRefresh(stationCode?: string) {
-  const response = await fetch("/api/ops-pulse/cod/cash-recon/cash-in-associate/refresh", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(stationCode ? { stationCode } : {})
-  });
-  const { payload, text } = await readCiaJson(response);
-  if (!response.ok) {
-    const raw = String(payload.error ?? payload.message ?? "");
-    if (/Worker exceeded resource limits/i.test(raw) || /<!DOCTYPE html/i.test(text) || /^\s*</.test(raw)) {
-      throw new Error(
-        "Cash recon worker hit resource limits. Try again in a minute, or use a shorter date range."
-      );
-    }
-    throw new Error(raw || `Refresh failed (${response.status})`);
-  }
-  return payload;
+function parseRefreshProgress(raw: unknown): CiaRefreshProgress | null {
+  const mapped = mapCiaRefreshProgress(raw);
+  if (!mapped || (!mapped.stationsTotal && !mapped.id)) return null;
+  return mapped;
+}
+
+function refreshProgressDetail(progress: CiaRefreshProgress) {
+  const bits: string[] = [];
+  if ((progress.stationsSucceeded ?? 0) > 0) bits.push(`${progress.stationsSucceeded} ok`);
+  if ((progress.stationsFailed ?? 0) > 0) bits.push(`${progress.stationsFailed} failed`);
+  if ((progress.stationsRetryQueued ?? 0) > 0) bits.push(`${progress.stationsRetryQueued} queued to retry`);
+  if ((progress.stationsProcessing ?? 0) > 0) bits.push(`${progress.stationsProcessing} in flight`);
+  return bits.length ? ` (${bits.join(", ")})` : "";
+}
+
+function postCiaRefresh(stationCode?: string) {
+  return postCiaJson(
+    "/api/ops-pulse/cod/cash-recon/cash-in-associate/refresh",
+    stationCode ? { stationCode } : {}
+  );
+}
+
+function postCiaContinue() {
+  return postCiaJson("/api/ops-pulse/cod/cash-recon/cash-in-associate/continue");
 }
 
 export function CiaNetworkClient({
@@ -61,13 +74,15 @@ export function CiaNetworkClient({
   asOfDate,
   windowFrom,
   windowTo,
-  runStatus
+  runStatus,
+  initialRefreshProgress = null
 }: {
   stations: CiaStationRow[];
   asOfDate: string;
   windowFrom: string;
   windowTo: string;
   runStatus?: string | null;
+  initialRefreshProgress?: CiaRefreshProgress | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -78,8 +93,17 @@ export function CiaNetworkClient({
   const [refreshingStation, setRefreshingStation] = useState<string | null>(null);
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [notice, setNotice] = useState<RefreshNotice | null>(null);
+  const [liveProgress, setLiveProgress] = useState<CiaRefreshProgress | null>(initialRefreshProgress);
+
+  useEffect(() => {
+    setLiveProgress(initialRefreshProgress);
+  }, [initialRefreshProgress]);
 
   const busy = refreshingAll || refreshingStation !== null || pending;
+  const progress = liveProgress;
+  const refreshActive = Boolean(progress && progress.status === "running")
+    || String(runStatus ?? "").trim() === "running";
+  const effectiveRunStatus = refreshActive ? "running" : (runStatus ?? null);
 
   const ranked = useMemo(
     () => stations.map((row) => ({ ...row, severity: ciaSeverity(row) })),
@@ -150,13 +174,53 @@ export function CiaNetworkClient({
     }
   }
 
+  async function handleUpdateNumbers() {
+    if (busy) return;
+    setNotice(null);
+    if (!refreshActive) {
+      startTransition(() => router.refresh());
+      return;
+    }
+
+    setRefreshingAll(true);
+    try {
+      const result = await postCiaContinue();
+      const nextProgress = parseRefreshProgress(result.refreshProgress);
+      if (nextProgress) setLiveProgress(nextProgress);
+      const station = result.processedStation ? String(result.processedStation) : null;
+      const done = Boolean(result.done);
+      setNotice({
+        kind: station || done ? "ok" : "info",
+        title: done
+          ? "Network refresh finished"
+          : station
+            ? `Updated ${station}`
+            : "No station advanced",
+        detail: done
+          ? "All stations in this run are finished. Reloading numbers…"
+          : station
+            ? `${station} was fetched just now. Reloading page numbers…`
+            : "Refresh is still running, but no station was advanced this time. Try Update numbers again."
+      });
+      startTransition(() => router.refresh());
+    } catch (error) {
+      setNotice({
+        kind: "error",
+        title: "Could not advance refresh",
+        detail: error instanceof Error ? error.message : "Unknown continue error"
+      });
+    } finally {
+      setRefreshingAll(false);
+    }
+  }
+
   async function handleFullRefresh() {
     if (busy) return;
     const confirmed = window.confirm(
       "Refresh Cash In Associate for all stations?\n\n"
-      + "This starts a background run. Stations update one at a time "
-      + "(about every 3 minutes — roughly 2 hours for the full network). "
-      + "You can keep using this page; use “Update numbers” to see progress."
+      + "This starts a fresh network run (clears the previous retry queue) and fetches the first station now. "
+      + "More stations update when you click “Update numbers” (about 1–2 minutes per station). "
+      + "You can keep using this page between stations."
     );
     if (!confirmed) return;
 
@@ -164,17 +228,21 @@ export function CiaNetworkClient({
     setRefreshingAll(true);
     try {
       const result = await postCiaRefresh();
+      const nextProgress = parseRefreshProgress(result.refreshProgress);
+      if (nextProgress) setLiveProgress(nextProgress);
       const run = result.run && typeof result.run === "object" ? (result.run as Record<string, unknown>) : null;
-      const resumed = Boolean(result.resumed);
-      const done = Number(run?.stationsOk ?? 0);
-      const total = Number(run?.stationsTotal ?? stations.length) || stations.length;
+      const attempted = nextProgress?.stationsOk ?? Number(run?.stationsOk ?? 0);
+      const total = nextProgress?.stationsTotal ?? Number(run?.stationsTotal ?? stations.length) ?? stations.length;
+      const firstStation = result.processedStation ? String(result.processedStation) : null;
+      const succeeded = nextProgress?.stationsSucceeded ?? 0;
       setNotice({
         kind: "info",
-        title: resumed ? "Network refresh continued" : "Network refresh started",
-        detail: run
-          ? `${done} of ${total} stations finished so far. `
-            + "New stations update about every 3 minutes — click “Update numbers” to check progress."
-          : String(result.message ?? "Network refresh accepted.")
+        title: "Fresh network refresh started",
+        detail: firstStation
+          ? `Processed ${firstStation}. Progress is now ${attempted}/${total}`
+            + (succeeded > 0 ? ` (${succeeded} ok)` : "")
+            + ". Click “Update numbers” to advance the next station."
+          : `New run started at ${attempted}/${total}. Click “Update numbers” to fetch the next station.`
       });
       startTransition(() => router.refresh());
     } catch (error) {
@@ -188,10 +256,25 @@ export function CiaNetworkClient({
     }
   }
 
-  const statusLabel = formatRunStatus(runStatus);
+  const statusLabel = formatRunStatus(effectiveRunStatus);
 
   return (
     <div className="cia-network">
+      {refreshActive && progress ? (
+        <section className="panel message-panel info">
+          <div className="panel-body">
+            <strong>
+              Full refresh in progress · {progress.stationsOk}/{progress.stationsTotal}
+            </strong>
+            <p className="subtle" style={{ marginTop: 6 }}>
+              {progress.stationsOk} of {progress.stationsTotal} stations attempted so far
+              {refreshProgressDetail(progress)}.
+              Click Update numbers to fetch the next station (same path as row Refresh).
+            </p>
+          </div>
+        </section>
+      ) : null}
+
       <section className="panel cia-refresh-bar">
         <div className="panel-body cia-refresh-bar-inner">
           <div>
@@ -206,7 +289,7 @@ export function CiaNetworkClient({
               type="button"
               className="button secondary"
               disabled={busy}
-              onClick={() => startTransition(() => router.refresh())}
+              onClick={() => void handleUpdateNumbers()}
             >
               {pending && !refreshingAll && !refreshingStation ? <Loader2 size={16} className="cia-spin" /> : <RefreshCw size={16} />}
               Update numbers

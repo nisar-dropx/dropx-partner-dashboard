@@ -19,6 +19,21 @@ export type CiaStationRow = {
   limitedByRemittanceWindow: boolean;
 };
 
+export type CiaRefreshProgress = {
+  id: string;
+  status: string;
+  asOfDate?: string;
+  windowFrom?: string;
+  windowTo?: string;
+  startedAt?: string | null;
+  stationsTotal: number;
+  stationsOk: number;
+  stationsSucceeded?: number;
+  stationsFailed: number;
+  stationsRetryQueued?: number;
+  stationsProcessing?: number;
+};
+
 export type CiaNetworkPayload = {
   status: string;
   asOfDate: string;
@@ -48,18 +63,27 @@ export type CiaNetworkPayload = {
   stations: CiaStationRow[];
   cached: boolean;
   runSource?: "running" | "completed" | string;
-  refreshProgress?: {
-    id: string;
-    status: string;
-    asOfDate?: string;
-    windowFrom?: string;
-    windowTo?: string;
-    startedAt?: string | null;
-    stationsTotal: number;
-    stationsOk: number;
-    stationsFailed: number;
-  } | null;
+  refreshProgress?: CiaRefreshProgress | null;
 };
+
+export function mapCiaRefreshProgress(raw: unknown): CiaRefreshProgress | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  return {
+    id: String(row.id ?? ""),
+    status: String(row.status ?? "running"),
+    asOfDate: row.asOfDate == null ? undefined : String(row.asOfDate),
+    windowFrom: row.windowFrom == null ? undefined : String(row.windowFrom),
+    windowTo: row.windowTo == null ? undefined : String(row.windowTo),
+    startedAt: row.startedAt == null ? null : String(row.startedAt),
+    stationsTotal: Number(row.stationsTotal ?? 0) || 0,
+    stationsOk: Number(row.stationsOk ?? 0) || 0,
+    stationsSucceeded: Number(row.stationsSucceeded ?? row.stationsOk ?? 0) || 0,
+    stationsFailed: Number(row.stationsFailed ?? 0) || 0,
+    stationsRetryQueued: Number(row.stationsRetryQueued ?? 0) || 0,
+    stationsProcessing: Number(row.stationsProcessing ?? 0) || 0
+  };
+}
 
 export type CiaDailyLedgerStationDay = {
   stationCode: string;
