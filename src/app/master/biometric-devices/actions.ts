@@ -7,6 +7,11 @@ import * as XLSX from "xlsx";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import {
+  BIOMETRIC_MIDDLEWARE_HOST,
+  BIOMETRIC_MIDDLEWARE_PORT,
+  biometricDeviceProfile
+} from "@/lib/biometric/device-profiles";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -46,18 +51,22 @@ function payloadFromForm(formData: FormData) {
   const deviceSerial = required(formData.get("device_serial"), "Serial number").toUpperCase();
   const terminalId = required(formData.get("terminal_id"), "Device ID");
   if (!/^\d{1,10}$/.test(terminalId)) throw new Error("Device ID must be numeric.");
+  const profile = biometricDeviceProfile(required(formData.get("model"), "Device model"));
+  if (!profile) throw new Error("Select a supported device model.");
   return {
     device_serial: deviceSerial,
     terminal_id: terminalId,
     device_no: terminalId,
     location_id: required(formData.get("location_id"), "Location"),
     device_name: null,
-    model: required(formData.get("model"), "Model no."),
+    model: profile.model,
     local_ip_address: required(formData.get("local_ip_address"), "Local IP address"),
     local_port: numberValue(formData.get("local_port"), "Local port no."),
     p2p_type: clean(formData.get("p2p_type")),
     p2p_device_id: clean(formData.get("p2p_device_id")),
     connection_mode: clean(formData.get("connection_mode")) ?? "TCP_PUSH",
+    middleware_host: BIOMETRIC_MIDDLEWARE_HOST,
+    middleware_port: BIOMETRIC_MIDDLEWARE_PORT,
     network_password: clean(formData.get("network_password")),
     status: "Disconnected",
     is_active: true,
@@ -94,12 +103,13 @@ async function parseDeviceWorkbook(fileValue: FormDataEntryValue | null) {
     const deviceSerial = workbookCell(row, ["Serial no", "Serial number", "Device serial"]).toUpperCase();
     const locationCode = workbookCell(row, ["Location", "Location code"]).toUpperCase();
     const model = workbookCell(row, ["Model no", "Model", "Model number"]);
+    const profile = biometricDeviceProfile(model);
     const localIpAddress = workbookCell(row, ["Local IP address", "Local IP", "IP address"]);
     const localPortText = workbookCell(row, ["Local port no", "Local port", "Port"]);
     if (!/^\d{1,10}$/.test(terminalId)) throw new Error(`Row ${rowNumber}: Device ID must be numeric.`);
     if (!deviceSerial) throw new Error(`Row ${rowNumber}: Serial number is required.`);
     if (!locationCode) throw new Error(`Row ${rowNumber}: Location is required.`);
-    if (!model) throw new Error(`Row ${rowNumber}: Model number is required.`);
+    if (!profile) throw new Error(`Row ${rowNumber}: Select D01, Z200BW or Z305 as the device model.`);
     if (!localIpAddress) throw new Error(`Row ${rowNumber}: Local IP address is required.`);
     const localPort = Number(localPortText);
     if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535) throw new Error(`Row ${rowNumber}: Local port must be between 1 and 65535.`);
@@ -110,7 +120,7 @@ async function parseDeviceWorkbook(fileValue: FormDataEntryValue | null) {
       terminalId,
       deviceSerial,
       locationCode,
-      model,
+      model: profile.model,
       localIpAddress,
       localPort,
       connectionMode,
@@ -162,6 +172,8 @@ export async function bulkImportBiometricDevices(formData: FormData) {
         p2p_type: row.p2pType,
         p2p_device_id: row.p2pDeviceId,
         connection_mode: row.connectionMode,
+        middleware_host: BIOMETRIC_MIDDLEWARE_HOST,
+        middleware_port: BIOMETRIC_MIDDLEWARE_PORT,
         network_password: row.networkPassword,
         status: "Disconnected",
         is_active: true,

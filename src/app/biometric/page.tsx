@@ -17,6 +17,7 @@ type DeviceRow = {
   last_source_ip: string | null;
   location_id: string | null;
   model: string | null;
+  status: string | null;
   terminal_id: string | null;
 };
 
@@ -87,6 +88,12 @@ function isConnected(device: DeviceRow) {
   if (!device.last_seen_at) return false;
   const lastSeen = new Date(device.last_seen_at).getTime();
   return Number.isFinite(lastSeen) && Date.now() - lastSeen <= 10 * 60 * 1000;
+}
+
+function deviceReportingStatus(device: DeviceRow) {
+  if (!isConnected(device)) return "Disconnected";
+  if (device.status?.toLowerCase() === "heartbeat only") return "Heartbeat only";
+  return "Reporting";
 }
 
 function cleanEnrolment(value: unknown) {
@@ -166,7 +173,7 @@ async function loadBiometricMonitor(companyId: string) {
       .maybeSingle(),
     supabaseAdmin
       .from("biometric_devices")
-      .select("id, device_no, terminal_id, device_serial, location_id, model, last_seen_at, last_source_ip")
+      .select("id, device_no, terminal_id, device_serial, location_id, model, status, last_seen_at, last_source_ip")
       .eq("company_id", companyId)
       .order("last_seen_at", { ascending: false, nullsFirst: false }),
     supabaseAdmin
@@ -223,7 +230,7 @@ export default async function BiometricMonitorPage() {
   const authorization = await requirePagePermission("app_settings", "access");
   const companyId = requireCompanyId(authorization);
   const data = await loadBiometricMonitor(companyId);
-  const connectedCount = data.devices.filter(isConnected).length;
+  const reportingCount = data.devices.filter((device) => deviceReportingStatus(device) === "Reporting").length;
   const calculatedPunches = data.punches.filter((punch) => punch.calculated !== false).length;
 
   return (
@@ -267,7 +274,7 @@ export default async function BiometricMonitorPage() {
 
       <section className="summary-grid">
         <StatCard label="Mapped devices" value={data.devices.length} />
-        <StatCard label="Connected now" value={connectedCount} />
+        <StatCard label="Reporting attendance" value={reportingCount} />
         <StatCard label="Recent raw events" value={data.events.length} />
         <StatCard label="Calculated punches" value={calculatedPunches} />
       </section>
@@ -298,7 +305,7 @@ export default async function BiometricMonitorPage() {
         <div className="panel-head">
           <div>
             <h2>Device status</h2>
-            <p className="subtle">Connected means this device sent data within the last 10 minutes.</p>
+            <p className="subtle">Reporting means attendance data is flowing. Heartbeat only means the server can see the device, but no punch has been received.</p>
           </div>
         </div>
         <div className="table-wrap">
@@ -321,7 +328,7 @@ export default async function BiometricMonitorPage() {
                   <td>{locationLabel(data.locations, device.location_id)}</td>
                   <td><strong>{device.device_serial}</strong></td>
                   <td>{device.model ?? "-"}</td>
-                  <td><StatusPill status={isConnected(device) ? "Connected" : "Disconnected"} /></td>
+                  <td><StatusPill status={deviceReportingStatus(device)} /></td>
                   <td>{formatDateTime(device.last_seen_at)}</td>
                   <td>{device.last_source_ip ?? "-"}</td>
                 </tr>

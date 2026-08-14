@@ -16,6 +16,7 @@ export function StatusPill({ status }: { status: string }) {
     || lower.includes("approved")
     || lower.includes("processed")
     || lower.includes("completed")
+    || lower.includes("reporting")
     || lower === "no"
     ? "good"
     : lower.includes("pending")
@@ -24,6 +25,7 @@ export function StatusPill({ status }: { status: string }) {
       || lower.includes("docs")
       || lower.includes("review")
       || lower.includes("waiting")
+      || lower.includes("heartbeat")
       || lower.includes("medium")
       ? "warn"
       : lower.includes("failed")

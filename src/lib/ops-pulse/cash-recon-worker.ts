@@ -983,16 +983,19 @@ function parseWorkerRun(runRaw: unknown): CiaNetworkRunSummary | null {
   };
 }
 
-async function peekNextCiaStation(runId?: string): Promise<{
+async function peekNextCiaStation(runId?: string, options?: { claim?: boolean }): Promise<{
   stationCode: string | null;
   done: boolean;
   run: CiaNetworkRunSummary | null;
   window: { from: string; to: string } | null;
   refreshProgress: CiaRefreshProgress | null;
 }> {
+  const query: Record<string, string> = {};
+  if (runId) query.runId = runId;
+  if (options?.claim) query.claim = "1";
   const raw = await getWorker<Record<string, unknown>>(
     "/api/admin/internal/cia-snapshot/next-station",
-    runId ? { runId } : undefined
+    Object.keys(query).length ? query : undefined
   );
   const windowRaw = raw.window && typeof raw.window === "object"
     ? (raw.window as Record<string, unknown>)
@@ -1072,7 +1075,7 @@ export async function refreshCiaNetwork(): Promise<CiaNetworkRefreshResult> {
   let processedStation: string | null = null;
   let message = String(raw.message ?? "Snapshot run started.");
 
-  const peek = await peekNextCiaStation(run?.id || undefined);
+  const peek = await peekNextCiaStation(run?.id || undefined, { claim: true });
   if (peek.stationCode && !peek.done) {
     const refreshed = await refreshCiaStation(peek.stationCode, peek.window ?? undefined);
     if (refreshed.snapshotStatus !== "ok") {
@@ -1085,7 +1088,7 @@ export async function refreshCiaNetwork(): Promise<CiaNetworkRefreshResult> {
     const attempted = Number(refreshProgress?.stationsOk ?? 0) || 0;
     const total = Number(refreshProgress?.stationsTotal ?? run?.stationsTotal ?? 0) || 0;
     message = `Fresh snapshot run started; processed ${processedStation} (${attempted}/${total}). `
-      + "Click Update numbers to advance the next station.";
+      + "Next station in about 15 seconds while this page is open.";
   } else {
     run = peek.run ?? run;
     refreshProgress = peek.refreshProgress ?? refreshProgress;
@@ -1112,12 +1115,12 @@ export async function continueCiaSnapshot(runId?: string): Promise<{
   run: CiaNetworkRunSummary | null;
   refreshProgress?: CiaRefreshProgress | null;
 }> {
-  const peek = await peekNextCiaStation(runId);
+  const peek = await peekNextCiaStation(runId, { claim: true });
   if (peek.done || !peek.stationCode) {
     return {
       status: "ok",
       processedStation: null,
-      done: true,
+      done: peek.done,
       run: peek.run,
       refreshProgress: peek.refreshProgress
     };

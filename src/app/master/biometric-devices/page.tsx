@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
+import { BiometricDeviceProfileFields } from "@/components/biometric-device-profile-fields";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -31,6 +32,8 @@ type DeviceRow = {
   p2p_type: string | null;
   p2p_device_id: string | null;
   connection_mode: string | null;
+  middleware_host: string | null;
+  middleware_port: number | null;
   network_password: string | null;
   status: string | null;
   last_seen_at: string | null;
@@ -197,6 +200,8 @@ async function loadDeviceData(companyId: string, locationScopeIds: string[], has
         p2p_type,
         p2p_device_id,
         connection_mode,
+        middleware_host,
+        middleware_port,
         network_password,
         status,
         last_seen_at,
@@ -296,7 +301,7 @@ function DeviceForm({
       </label>
       <label>Serial no.<input className="field" name="device_serial" placeholder="A240901534" required defaultValue={device?.device_serial ?? ""} /></label>
 
-      <label>Model no.<input className="field" name="model" placeholder="Z305" required defaultValue={device?.model ?? ""} /></label>
+      <BiometricDeviceProfileFields defaultModel={device?.model} />
       <label>Local IP address<input className="field" name="local_ip_address" placeholder="192.168.001.224" required defaultValue={device?.local_ip_address ?? ""} /></label>
       <label>Local port no.<input className="field" inputMode="numeric" name="local_port" placeholder="5005" required defaultValue={device?.local_port ?? ""} /></label>
 
@@ -454,8 +459,7 @@ export default async function DeviceMasterPage({
                     <th>Local IP address</th>
                     <th>Local port no.</th>
                     <th>Model</th>
-                    <th>P2P Type</th>
-                    <th>P2P Device Id</th>
+                    <th>Connector</th>
                     <th>Serial no.</th>
                     <th>Last source IP</th>
                     <th>Connect info</th>
@@ -471,8 +475,7 @@ export default async function DeviceMasterPage({
                       <td>{device.local_ip_address || "-"}</td>
                       <td>{device.local_port ?? "-"}</td>
                       <td>{device.model || "-"}</td>
-                      <td>{device.p2p_type || "-"}</td>
-                      <td>{device.p2p_device_id || "-"}</td>
+                      <td>{device.middleware_host || "bio.dropxlogistics.com"}:{device.middleware_port ?? 6010}</td>
                       <td><strong>{device.device_serial}</strong></td>
                       <td>{device.last_source_ip || "-"}</td>
                       <td>{formatDateTime(device.last_seen_at)}</td>
@@ -497,7 +500,7 @@ export default async function DeviceMasterPage({
                       ) : null}
                     </tr>
                   )) : (
-                    <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 12 : 11}>No devices found.</td></tr>
+                    <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 11 : 10}>No devices found.</td></tr>
                   )}
                 </tbody>
               </table>

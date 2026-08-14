@@ -21,6 +21,46 @@
   --radius: 7px;
 }
 
+.biometric-profile-card {
+  display: grid;
+  gap: 12px;
+}
+
+.biometric-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.biometric-profile-grid span {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #e5e9f0);
+  border-radius: 12px;
+  background: #fff;
+  font-weight: 700;
+}
+
+.biometric-profile-grid small {
+  color: var(--muted, #6b778c);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.biometric-profile-card p {
+  margin: 0;
+  color: var(--muted, #6b778c);
+}
+
+@media (max-width: 860px) {
+  .biometric-profile-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Workforce lifecycle: workforce-only HO activation, exits and settlement. */
 .workforce-lifecycle-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0}.workforce-lifecycle-summary article{display:grid;grid-template-columns:34px 1fr auto;gap:4px 10px;align-items:center;padding:16px;background:#fff;border:1px solid var(--border);border-radius:14px}.workforce-lifecycle-summary svg{grid-row:1/3;width:24px;color:#d7275f}.workforce-lifecycle-summary span{color:var(--muted);font-size:12px}.workforce-lifecycle-summary strong{grid-column:3;grid-row:1/3;font-size:25px}.workforce-lifecycle-tabs{display:flex;gap:6px;margin-bottom:16px;padding:5px;background:#fff;border:1px solid var(--border);border-radius:12px}.workforce-lifecycle-tabs a{padding:10px 15px;color:var(--muted);border-radius:8px;text-decoration:none;font-weight:650}.workforce-lifecycle-tabs a.active{color:#fff;background:#252b48}.workforce-lifecycle-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.workforce-lifecycle-card{padding:0;overflow:hidden}.workforce-lifecycle-card>header{display:flex;justify-content:space-between;gap:14px;padding:18px;border-bottom:1px solid var(--border);background:linear-gradient(135deg,#fff,#fff8fb)}.workforce-lifecycle-card h2{margin:3px 0;font-size:19px}.workforce-lifecycle-card header p,.workforce-lifecycle-card header small{margin:0;color:var(--muted)}.workforce-lifecycle-card>.subtle,.workforce-lifecycle-card>p{padding:0 18px}.workforce-lifecycle-card .status{align-self:flex-start;padding:6px 10px;background:#f2f3f7;border-radius:999px;font-size:11px;font-weight:750}.workforce-lifecycle-card .status.active,.workforce-lifecycle-card .status.approved,.workforce-lifecycle-card .status.settled{color:#087650;background:#dff7ed}.workforce-lifecycle-card .status.under_review,.workforce-lifecycle-card .status.settlement_pending{color:#9b5b00;background:#fff0d0}.workforce-lifecycle-card .status.rejected,.workforce-lifecycle-card .status.termination_pending{color:#a9283b;background:#ffe2e7}.workforce-lifecycle-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:16px 18px}.workforce-lifecycle-facts span{display:grid;gap:3px;padding:10px;background:#f7f8fb;border-radius:9px;color:var(--muted);font-size:10px;text-transform:uppercase}.workforce-lifecycle-facts strong{color:var(--text);font-size:13px;text-transform:none}.workforce-review-form,.workforce-exit-start,.workforce-decision-form{display:grid;gap:11px;margin:0;padding:16px 18px;border-top:1px solid var(--border)}.workforce-review-form h3{margin:0 0 3px}.workforce-review-form>label{display:flex;gap:10px;align-items:flex-start;padding:10px;background:#f8f8fb;border:1px solid #e6e7ee;border-radius:9px}.workforce-review-form>label input[type=checkbox]{width:17px;height:17px;flex:0 0 auto}.workforce-review-form>label span{display:grid;gap:3px}.workforce-review-form small{color:var(--muted)}.workforce-review-form textarea,.workforce-decision-form textarea,.workforce-exit-start textarea{width:100%;min-height:70px}.workforce-provider-row,.workforce-settlement-values{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.workforce-provider-row label,.workforce-settlement-values label,.workforce-exit-start label,.workforce-decision-form label{display:grid;gap:5px;color:var(--muted);font-size:12px}.workforce-provider-row input,.workforce-settlement-values input,.workforce-settlement-values select,.workforce-exit-start input,.workforce-exit-start select,.workforce-decision-form textarea{min-height:40px;padding:8px;border:1px solid var(--border);border-radius:8px;background:#fff}.workforce-provider-row .compact-check{display:flex;align-items:center;flex-direction:row}.workforce-empty{grid-column:1/-1;display:grid;place-items:center;min-height:220px;text-align:center}.workforce-empty svg{color:#1c9b69}
 @media(max-width:900px){.workforce-lifecycle-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.workforce-lifecycle-grid{grid-template-columns:1fr}}@media(max-width:560px){.workforce-lifecycle-summary{grid-template-columns:1fr}.workforce-lifecycle-tabs{overflow-x:auto}.workforce-lifecycle-tabs a{white-space:nowrap}.workforce-lifecycle-facts,.workforce-provider-row,.workforce-settlement-values{grid-template-columns:1fr}}

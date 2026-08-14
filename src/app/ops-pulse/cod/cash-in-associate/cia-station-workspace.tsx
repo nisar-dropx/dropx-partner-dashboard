@@ -16,11 +16,16 @@ function validYmd(value: unknown) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? ""));
 }
 
-async function fetchCiaStationLive(stationCode: string, fromDate: string, toDate: string) {
+async function fetchCiaStationClient(
+  stationCode: string,
+  range?: { fromDate: string; toDate: string }
+) {
   const url = new URL("/api/ops-pulse/cod/cash-recon/cash-in-associate", window.location.origin);
   url.searchParams.set("stationCode", stationCode);
-  url.searchParams.set("fromDate", fromDate);
-  url.searchParams.set("toDate", toDate);
+  if (range) {
+    url.searchParams.set("fromDate", range.fromDate);
+    url.searchParams.set("toDate", range.toDate);
+  }
 
   const response = await fetch(url.toString(), {
     method: "GET",
@@ -55,8 +60,28 @@ export function CiaStationWorkspace({
   const liveRange = Boolean(fromDate && toDate);
 
   const [livePayload, setLivePayload] = useState<CiaStationPayload | null>(null);
+  const [snapshotPayload, setSnapshotPayload] = useState<CiaStationPayload | null>(initialPayload);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [loadingLive, setLoadingLive] = useState(false);
+
+  useEffect(() => {
+    setSnapshotPayload(initialPayload);
+  }, [initialPayload]);
+
+  useEffect(() => {
+    if (liveRange || !stationCode) return;
+    let cancelled = false;
+    void fetchCiaStationClient(stationCode)
+      .then((payload) => {
+        if (!cancelled) setSnapshotPayload(payload);
+      })
+      .catch(() => {
+        /* keep server snapshot if client refetch fails */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [liveRange, stationCode]);
 
   useEffect(() => {
     if (!liveRange || !stationCode) {
@@ -70,7 +95,7 @@ export function CiaStationWorkspace({
     setLoadingLive(true);
     setLiveError(null);
 
-    void fetchCiaStationLive(stationCode, fromDate, toDate)
+    void fetchCiaStationClient(stationCode, { fromDate, toDate })
       .then((payload) => {
         if (cancelled) return;
         setLivePayload(payload);
@@ -91,22 +116,23 @@ export function CiaStationWorkspace({
 
   const error = liveRange ? liveError : initialError;
   const showingLive = liveRange && livePayload != null && !loadingLive;
-  const summary: StationSummary | null = (liveRange ? livePayload : initialPayload)?.summary ?? null;
-  const drivers: CiaPendingDriver[] = (liveRange ? livePayload : initialPayload)?.pendingDrivers
-    ?? initialPayload?.pendingDrivers
+  const activePayload = showingLive ? livePayload : snapshotPayload;
+  const summary: StationSummary | null = activePayload?.summary ?? null;
+  const drivers: CiaPendingDriver[] = activePayload?.pendingDrivers
+    ?? snapshotPayload?.pendingDrivers
     ?? [];
-  const ledger = (liveRange ? livePayload : initialPayload)?.ledger
-    ?? initialPayload?.ledger
+  const ledger = activePayload?.ledger
+    ?? snapshotPayload?.ledger
     ?? [];
   const displayCode = String(
-    (livePayload ?? initialPayload)?.stationCode || stationCode || ""
+    (activePayload ?? snapshotPayload)?.stationCode || stationCode || ""
   ).trim().toUpperCase();
   const windowFrom = showingLive
     ? livePayload!.window.from
-    : (initialPayload?.window.from || fromDate);
+    : (snapshotPayload?.window.from || fromDate);
   const windowTo = showingLive
     ? livePayload!.window.to
-    : (initialPayload?.window.to || toDate);
+    : (snapshotPayload?.window.to || toDate);
 
   return (
     <>
@@ -153,7 +179,7 @@ export function CiaStationWorkspace({
         <CiaSummaryMetrics totals={summary} />
       ) : null}
 
-      {(initialPayload || livePayload) && !loadingLive ? (
+      {(snapshotPayload || livePayload) && !loadingLive ? (
         <Suspense
           fallback={
             <section className="panel">
@@ -167,18 +193,18 @@ export function CiaStationWorkspace({
             ledger={ledger}
             windowFrom={windowFrom || fromDate}
             windowTo={windowTo || toDate}
-            reportDate={(livePayload ?? initialPayload)?.asOfDate ?? ""}
+            reportDate={(activePayload ?? snapshotPayload)?.asOfDate ?? ""}
             reportSavedAt={
-              (livePayload ?? initialPayload)?.fetchedAt
-                ? formatDateTime(String((livePayload ?? initialPayload)?.fetchedAt))
+              (activePayload ?? snapshotPayload)?.fetchedAt
+                ? formatDateTime(String((activePayload ?? snapshotPayload)?.fetchedAt))
                 : null
             }
-            availableReportDates={(livePayload ?? initialPayload)?.availableReportDates ?? []}
+            availableReportDates={(activePayload ?? snapshotPayload)?.availableReportDates ?? []}
           />
         </Suspense>
       ) : null}
 
-      {!initialPayload && !livePayload && !error && !loadingLive ? (
+      {!snapshotPayload && !livePayload && !error && !loadingLive ? (
         <section className="panel">
           <div className="panel-body subtle">No Cash In Associate snapshot for this station yet.</div>
         </section>

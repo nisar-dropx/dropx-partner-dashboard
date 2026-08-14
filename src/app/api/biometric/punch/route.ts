@@ -23,6 +23,8 @@ type DeviceRow = {
   company_id: string;
   location_id: string | null;
   is_active: boolean;
+  model: string | null;
+  status: string | null;
 };
 
 type EnrolmentRow = {
@@ -131,7 +133,7 @@ async function resolveDevice(payload: BiometricPunchPayload, sourceIp: string) {
   const deviceSerial = clean(payload.device_serial);
   const existing = await supabaseAdmin
     .from("biometric_devices")
-    .select("id, company_id, location_id, is_active")
+    .select("id, company_id, location_id, is_active, model, status")
     .eq("device_serial", deviceSerial)
     .limit(2);
   if (existing.error) throw new Error(existing.error.message);
@@ -143,11 +145,27 @@ async function resolveDevice(payload: BiometricPunchPayload, sourceIp: string) {
   const now = new Date().toISOString();
   if (existing.data?.[0]) {
     const device = existing.data[0] as DeviceRow;
+    const eventType = clean(payload.event_type).toLowerCase();
+    const isD01Heartbeat = clean(device.model).toUpperCase() === "D01" && eventType !== "timelog";
+    let deviceStatus = "Connected";
+    if (isD01Heartbeat) {
+      const priorTimeLog = await supabaseAdmin
+        .from("biometric_raw_events")
+        .select("id")
+        .eq("device_id", device.id)
+        .ilike("event_type", "TimeLog")
+        .limit(1)
+        .maybeSingle();
+      if (priorTimeLog.error) throw new Error(priorTimeLog.error.message);
+      deviceStatus = priorTimeLog.data ? "Connected" : "Heartbeat only";
+    }
     const { error } = await supabaseAdmin
       .from("biometric_devices")
       .update({
         terminal_id: clean(payload.terminal_id) || null,
-        status: "Connected",
+        // A D01 heartbeat proves network reachability only. Do not claim the
+        // terminal is reporting attendance until a real TimeLog is received.
+        status: deviceStatus,
         last_seen_at: now,
         last_source_ip: sourceIp || null,
         updated_at: now
