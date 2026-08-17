@@ -95,7 +95,6 @@ const groupedParentPermissions: Record<string, string[]> = {
 };
 
 const peopleProfilePageCodes = [
-  "delivery_associates",
   "employees",
   "contractors",
   "vendors",

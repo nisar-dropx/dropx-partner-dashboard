@@ -25,7 +25,7 @@ const actions: Array<{ key: PermissionAction; label: string }> = [
   { key: "edit", label: "Edit" }
 ];
 
-const workforceCategoryCodes = new Set(["employees", "delivery_associates", "contractors", "vendors", "workers"]);
+const workforceCategoryCodes = new Set(["employees", "contractors", "vendors", "workers"]);
 
 const dashboardGroups: PermissionGroup[] = [
   { key: "dashboard", label: "Command Center", codes: ["dashboard"] },
@@ -60,7 +60,7 @@ const opsGroups: PermissionGroup[] = [
   { key: "performance", label: "Performance", codes: ["performance"] },
   { key: "capacity", label: "Capacity", codes: ["capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring"], hiddenCodes: ["capacity"] },
   { key: "service_network", label: "Network Planning", codes: ["service_network"] },
-  { key: "workforce_onboarding", label: "Workforce Onboarding", codes: ["delivery_associates"] },
+  { key: "workforce_onboarding", label: "Workforce Onboarding", codes: ["contractors"] },
   { key: "operations", label: "Operations", codes: ["daily_submission", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate"], hiddenCodes: ["cod"] },
   { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },
   { key: "payments", label: "Payments", codes: ["expense_requests", "payment_requests", "payment_approvals", "payment_reports"], hiddenCodes: ["payments"] },

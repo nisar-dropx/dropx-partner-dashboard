@@ -104,7 +104,6 @@ async function loadWhatsAppSettings(companyId: string) {
   ]);
   const fallbackCategories = [
     { code: "employees", name: "Employees" },
-    { code: "field_executives", name: "Field Executives" },
     { code: "contractors", name: "Independent Contractors" },
     { code: "vendors", name: "Vendors" },
     { code: "workers", name: "Workers" }

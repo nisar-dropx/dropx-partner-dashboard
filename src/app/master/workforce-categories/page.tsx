@@ -63,7 +63,8 @@ export default async function WorkforceCategoriesPage({
       }))
     } as typeof result;
   }
-  const categories = (result.data ?? []) as WorkforceCategoryInitial[];
+  const categories = ((result.data ?? []) as WorkforceCategoryInitial[])
+    .filter((category) => category.code !== "field_executives");
   const query = String(searchParams?.q ?? "").trim().toLowerCase();
   const filtered = categories.filter((category) => `${category.code} ${category.name}`.toLowerCase().includes(query));
   const editing = categories.find((category) => category.id === searchParams?.edit) ?? null;

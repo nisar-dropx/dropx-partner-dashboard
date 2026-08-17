@@ -32,7 +32,7 @@ export const opsAccessPageCodes = [
   "cps_unmapped",
   "service_network",
   "service_network_master",
-  "delivery_associates",
+  "contractors",
   "business_documents",
   "expense_requests",
   "payment_requests",
