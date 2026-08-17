@@ -47,7 +47,7 @@ const dashboardGroups: PermissionGroup[] = [
   { key: "inbox", label: "Inbox", codes: ["inbox"] },
   { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },
   { key: "payments", label: "Payments", codes: ["expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports"], hiddenCodes: ["payments"] },
-  { key: "reports", label: "Reports", codes: ["attendance_reports", "verification_api_reports", "event_log_reports"], hiddenCodes: ["reports"] },
+  { key: "reports", label: "Reports", codes: ["attendance_reports", "raw_punch_reports", "verification_api_reports", "event_log_reports"], hiddenCodes: ["reports"] },
   { key: "trash", label: "Trash", codes: ["trash"] },
   { key: "notifications", label: "Notifications", codes: ["notifications_whatsapp", "notifications_history", "notifications_email", "notifications_app"] },
   { key: "users", label: "Users & Access", codes: ["users"] },
