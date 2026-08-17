@@ -45,6 +45,7 @@ type FieldExecutiveRow = {
   is_handicapped: boolean | null;
   bank_account_no: string | null;
   ifsc_code: string | null;
+  statutory_applicability?: string[] | null;
   pf_uan?: string | null;
   pf_account_no?: string | null;
   esi_no?: string | null;
@@ -223,14 +224,14 @@ async function loadExecutive(executiveId: string, companyId: string, profileType
   const table = workforceTable(profileType);
   const result = await supabaseAdmin
     .from(table)
-    .select("id, company_id, dropx_id, full_name, email, mobile_country_code, mobile, date_of_join, location_id, designation, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, address, postal_pin, landmark, state_code, father_name, blood_group, is_handicapped, bank_account_no, ifsc_code, pf_uan, pf_account_no, esi_no, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, biometric_id, emergency_contact_name, emergency_contact_number, emergency_contact_relation, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, onboarding_status, profile_return_remarks, stations (station_code, station_name)")
+    .select("id, company_id, dropx_id, full_name, email, mobile_country_code, mobile, date_of_join, location_id, designation, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, address, postal_pin, landmark, state_code, father_name, blood_group, is_handicapped, bank_account_no, ifsc_code, statutory_applicability, pf_uan, pf_account_no, esi_no, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, biometric_id, emergency_contact_name, emergency_contact_number, emergency_contact_relation, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, onboarding_status, profile_return_remarks, stations (station_code, station_name)")
     .eq("id", executiveId)
     .eq("company_id", companyId)
     .maybeSingle();
   if (result.error && /eshram_uan|column/i.test(result.error.message)) {
     const fallbackResult = await supabaseAdmin
       .from(table)
-      .select("id, company_id, dropx_id, full_name, email, mobile_country_code, mobile, date_of_join, location_id, designation, gender, date_of_birth, aadhaar_number, pan_number, address, postal_pin, landmark, state_code, father_name, blood_group, is_handicapped, bank_account_no, ifsc_code, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, biometric_id, emergency_contact_name, emergency_contact_number, emergency_contact_relation, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, onboarding_status, profile_return_remarks, stations (station_code, station_name)")
+      .select("id, company_id, dropx_id, full_name, email, mobile_country_code, mobile, date_of_join, location_id, designation, gender, date_of_birth, aadhaar_number, pan_number, address, postal_pin, landmark, state_code, father_name, blood_group, is_handicapped, bank_account_no, ifsc_code, statutory_applicability, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, biometric_id, emergency_contact_name, emergency_contact_number, emergency_contact_relation, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, onboarding_status, profile_return_remarks, stations (station_code, station_name)")
       .eq("id", executiveId)
       .eq("company_id", companyId)
       .maybeSingle();
@@ -358,7 +359,9 @@ async function serializeExecutive(row: FieldExecutiveRow, profileType: NonEmploy
       pollutionExpiry: formatDisplayDate(row.vehicle_pollution_exp_date) === "-" ? "" : formatDisplayDate(row.vehicle_pollution_exp_date)
     },
     designationCode,
-    statutoryApplicability: ["pf", "esi"],
+    statutoryApplicability: row.statutory_applicability?.length
+      ? row.statutory_applicability
+      : ["not_applicable"],
     fieldRules,
     uploads: {
       aadhaarFront: Boolean(row.aadhaar_front_path),
@@ -463,15 +466,24 @@ export async function POST(request: Request) {
     }
     const requiredFields = new Set(rules.required);
     const isRequired = (key: string) => requiredFields.has(key);
+    const statutoryApplicability = new Set(currentExecutive.statutory_applicability ?? ["not_applicable"]);
+    const pfApplicable = statutoryApplicability.has("pf");
+    const esiApplicable = statutoryApplicability.has("esi");
     const textValue = (key: string, label: string) => isRequired(key) ? requiredText(formData.get(key), label) : cleanText(formData.get(key));
     const digitsValue = (key: string, label: string) => isRequired(key) ? requiredDigits(formData.get(key), label) : cleanDigits(formData.get(key));
     const bankAccountValue = alphaNumLengthValue(formData.get("bank_account_no"), "Bank account number", 4, 30, isRequired("bank_account_no"));
     const dateValue = (key: string, label: string) => normalizeDate(isRequired(key) ? requiredText(formData.get(key), label) : formData.get(key));
     const panValue = isRequired("pan_number") || cleanText(formData.get("pan_number")) ? requiredPan(formData.get("pan_number")) : null;
     const eshramValue = isRequired("eshram_uan") || cleanText(formData.get("eshram_uan")) ? requiredTwelveDigits(formData.get("eshram_uan"), "eShram UAN") : null;
-    const pfUanValue = isRequired("pf_uan") || cleanText(formData.get("pf_uan")) ? requiredTwelveDigits(formData.get("pf_uan"), "PF UAN") : null;
-    const pfAccountValue = alphaNumValue(formData.get("pf_account_no"), "PF Account No", isRequired("pf_account_no"));
-    const esiValue = alphaNumValue(formData.get("esi_no"), "ESI No", isRequired("esi_no"));
+    const pfUanValue = pfApplicable && (isRequired("pf_uan") || cleanText(formData.get("pf_uan")))
+      ? requiredTwelveDigits(formData.get("pf_uan"), "PF UAN")
+      : null;
+    const pfAccountValue = pfApplicable
+      ? alphaNumValue(formData.get("pf_account_no"), "PF Account No", isRequired("pf_account_no"))
+      : null;
+    const esiValue = esiApplicable
+      ? alphaNumValue(formData.get("esi_no"), "ESI No", isRequired("esi_no"))
+      : null;
     const dateOfBirth = dateValue("date_of_birth", "Date of birth");
     assertMinimumProfileAge(dateOfBirth);
     const updatePayload: Record<string, unknown> = {
