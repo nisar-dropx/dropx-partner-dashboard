@@ -93,8 +93,9 @@ export const accessPages = [
   { code: "master_imports", name: "Import Master", sort_order: 132 },
   { code: "reports", name: "Reports", sort_order: 130 },
   { code: "attendance_reports", name: "Attendance Reports", sort_order: 131 },
-  { code: "verification_api_reports", name: "Verification API Reports", sort_order: 132 },
-  { code: "event_log_reports", name: "Event Log", sort_order: 133 },
+  { code: "raw_punch_reports", name: "Raw Punches", sort_order: 132 },
+  { code: "verification_api_reports", name: "Verification API Reports", sort_order: 133 },
+  { code: "event_log_reports", name: "Event Log", sort_order: 134 },
   { code: "payment_settings", name: "Payment Settings", sort_order: 131 },
   { code: "app_settings", name: "Settings", sort_order: 132 },
   { code: "ai_connector", name: "AI Connector", sort_order: 133 },
@@ -508,6 +509,7 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["designations"], "workforce_categories");
     await seedTargetPermissionsFromSources(supabase, companyId, ["designations"], "workforce_whatsapp");
     await seedTargetPermissionsFromSources(supabase, companyId, ["imports"], "master_imports");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["attendance_reports"], "raw_punch_reports");
   }
 
   const activePages = Array.from(currentPageByCode.values()).filter((page) => expectedCodes.has(page.code) && page.is_active !== false);
