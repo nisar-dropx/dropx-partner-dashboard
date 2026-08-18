@@ -14,7 +14,9 @@ import {
   type RemittanceSummaryNormalized
 } from "@/lib/ops-pulse/cash-recon-types";
 import {
+  mapCiaBackgroundCron,
   mapCiaRefreshProgress,
+  type CiaBackgroundCron,
   type CiaDailyLedgerPayload,
   type CiaNetworkPayload,
   type CiaPendingDriver,
@@ -714,6 +716,7 @@ export async function fetchCiaNetwork(): Promise<CiaNetworkPayload> {
         }
       : null,
     refreshProgress: mapCiaRefreshProgress(raw.refreshProgress),
+    backgroundCron: mapCiaBackgroundCron(raw.backgroundCron),
     totals: mapCiaSummary(totalsRaw),
     stations,
     cached: Boolean(raw.cached),
@@ -1087,6 +1090,7 @@ async function touchCiaStationClaim(runId: string | undefined, stationCode: stri
 }
 
 function isNetworkRunDone(done: boolean, refreshProgress: CiaRefreshProgress | null | undefined) {
+  if (String(refreshProgress?.status ?? "") === "running") return false;
   const processing = Number(refreshProgress?.stationsProcessing ?? 0) || 0;
   const retryQueued = Number(refreshProgress?.stationsRetryQueued ?? 0) || 0;
   if (processing > 0 || retryQueued > 0) return false;

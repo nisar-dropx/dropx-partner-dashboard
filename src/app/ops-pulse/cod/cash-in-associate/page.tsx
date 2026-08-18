@@ -102,6 +102,7 @@ export default async function CashInAssociateNetworkPage() {
             windowTo={payload.window.to}
             runStatus={refreshActive ? "running" : payload.run?.status ?? null}
             initialRefreshProgress={refresh ?? null}
+            backgroundCron={payload.backgroundCron ?? null}
           />
         </>
       ) : null}

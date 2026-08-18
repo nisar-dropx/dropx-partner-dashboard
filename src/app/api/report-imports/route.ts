@@ -3,8 +3,9 @@ export const maxDuration = 300;
 
 import crypto from "crypto";
 import * as XLSX from "xlsx";
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { getServiceAuthorization, ServiceAuthError } from "@/lib/service-auth";
 import { loadCodLocations, locationModelName, providerName } from "@/lib/ops-pulse/cod";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -1121,7 +1122,15 @@ export async function GET() {
 export async function POST(request: Request) {
   if (!supabaseAdmin) return Response.json({ error: "Supabase service key is not configured." }, { status: 500 });
   const db = supabaseAdmin;
-  const authorization = await getAuthorization();
+  let authorization: AuthorizationContext | null;
+  try {
+    authorization = (await getServiceAuthorization(request)) ?? (await getAuthorization());
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof ServiceAuthError ? error.message : "Service authentication failed." },
+      { status: 401 }
+    );
+  }
   if (!authorization) return Response.json({ error: "Login required." }, { status: 401 });
   const companyId = requireCompanyId(authorization);
   if (!hasPermission(authorization, "imports", "add") && !hasPermission(authorization, "imports", "edit")) {

@@ -9,9 +9,11 @@ import {
   ciaSeverity,
   ciaSeverityLabel,
   mapCiaRefreshProgress,
+  type CiaBackgroundCron,
   type CiaRefreshProgress,
   type CiaStationRow
 } from "@/lib/ops-pulse/cia-types";
+import { formatDateTime } from "@/lib/ops-pulse/cod";
 import { postCiaJson } from "./cia-fetch";
 
 const PAGE_SIZE = 12;
@@ -65,8 +67,26 @@ function postCiaRefresh(stationCode?: string) {
   );
 }
 
-function postCiaContinue() {
-  return postCiaJson("/api/ops-pulse/cod/cash-recon/cash-in-associate/continue");
+function postCiaContinue(runId?: string) {
+  return postCiaJson(
+    "/api/ops-pulse/cod/cash-recon/cash-in-associate/continue",
+    runId ? { runId } : {}
+  );
+}
+
+function formatBackgroundCron(cron: CiaBackgroundCron | null | undefined) {
+  if (!cron?.lastTickAt) return null;
+  const when = formatDateTime(cron.lastTickAt);
+  if (cron.outcome === "processed" && cron.lastStationCode) {
+    return `Background cron processed ${cron.lastStationCode} at ${when}`;
+  }
+  if (cron.outcome === "skipped") {
+    return `Background cron skipped at ${when}${cron.skipReason ? ` — ${cron.skipReason}` : ""}`;
+  }
+  if (cron.outcome === "idle") {
+    return `Background cron idle at ${when} (no running network refresh)`;
+  }
+  return `Background cron tick at ${when}`;
 }
 
 export function CiaNetworkClient({
@@ -75,7 +95,8 @@ export function CiaNetworkClient({
   windowFrom,
   windowTo,
   runStatus,
-  initialRefreshProgress = null
+  initialRefreshProgress = null,
+  backgroundCron = null
 }: {
   stations: CiaStationRow[];
   asOfDate: string;
@@ -83,6 +104,7 @@ export function CiaNetworkClient({
   windowTo: string;
   runStatus?: string | null;
   initialRefreshProgress?: CiaRefreshProgress | null;
+  backgroundCron?: CiaBackgroundCron | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -108,19 +130,21 @@ export function CiaNetworkClient({
   const effectiveRunStatus = refreshActive ? "running" : (runStatus ?? null);
 
   const advanceNextStation = useCallback(async (source: "auto" | "manual") => {
-    if (advancingRef.current) return false;
+    if (advancingRef.current) return true;
     if (source === "auto" && rowRefreshRef.current) return false;
     advancingRef.current = true;
     if (source === "manual") setNotice(null);
     if (source === "manual") setRefreshingAll(true);
     try {
-      const result = await postCiaContinue();
+      const result = await postCiaContinue(progress?.id);
       const nextProgress = parseRefreshProgress(result.refreshProgress);
       if (nextProgress) setLiveProgress(nextProgress);
       const station = result.processedStation ? String(result.processedStation) : null;
-      const blocked = (nextProgress?.stationsProcessing ?? 0) > 0
-        || (nextProgress?.stationsRetryQueued ?? 0) > 0;
-      const done = Boolean(result.done) && !blocked;
+      const processing = nextProgress?.stationsProcessing ?? 0;
+      const retryQueued = nextProgress?.stationsRetryQueued ?? 0;
+      const stillRunning = String(nextProgress?.status ?? progress?.status ?? "") === "running";
+      const blocked = processing > 0 || retryQueued > 0;
+      const done = Boolean(result.done) && !blocked && !stillRunning;
       // Browser Rendering quota cannot recover by retrying, so stop the loop
       // instead of walking the remaining stations into the same 429.
       if (String(result.status ?? "") === "blocked") {
@@ -151,12 +175,16 @@ export function CiaNetworkClient({
           ? "Network refresh finished"
           : station
             ? `Updated ${station}`
-            : "Waiting for next station",
+            : blocked
+              ? "Waiting for in-flight station"
+              : "Waiting for next station",
         detail: done
           ? "All stations in this run are finished. Reloading numbers…"
           : station
             ? `${station} saved. Fetching the next station…`
-            : "Another fetch owns a station right now. Retrying…"
+            : blocked
+              ? "One station is in flight (often from a fetch that is still running, or one that died when the tab was closed). Dead claims are retried in a few minutes; this page will keep trying."
+              : "Could not claim the next station yet. Retrying…"
       });
       startTransition(() => router.refresh());
       if (done) return false;
@@ -183,7 +211,7 @@ export function CiaNetworkClient({
       advancingRef.current = false;
       if (source === "manual") setRefreshingAll(false);
     }
-  }, [router]);
+  }, [router, progress?.id, progress?.status]);
 
   const ranked = useMemo(
     () => stations.map((row) => ({ ...row, severity: ciaSeverity(row) })),
@@ -261,6 +289,10 @@ export function CiaNetworkClient({
     let cancelled = false;
     void (async () => {
       while (!cancelled && !rowRefreshRef.current) {
+        if (advancingRef.current) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          continue;
+        }
         const keepGoing = await advanceNextStation("auto");
         if (cancelled || keepGoing === false) break;
       }
@@ -334,8 +366,16 @@ export function CiaNetworkClient({
             <p className="subtle" style={{ marginTop: 6 }}>
               {progress.stationsOk} of {progress.stationsTotal} stations attempted so far
               {refreshProgressDetail(progress)}.
-              Stations keep updating automatically while this page stays open (same path as Update numbers). Row Refresh still updates only that station.
+              {" "}
+              Fastest path: keep this tab open — it chains stations automatically.
+              If you close it, the worker cron still advances about one station every minute.
+              Row Refresh updates only that station.
             </p>
+            {formatBackgroundCron(backgroundCron) ? (
+              <p className="subtle" style={{ marginTop: 8 }}>
+                {formatBackgroundCron(backgroundCron)}
+              </p>
+            ) : null}
           </div>
         </section>
       ) : null}

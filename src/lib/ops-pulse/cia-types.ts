@@ -64,7 +64,33 @@ export type CiaNetworkPayload = {
   cached: boolean;
   runSource?: "running" | "completed" | string;
   refreshProgress?: CiaRefreshProgress | null;
+  backgroundCron?: CiaBackgroundCron | null;
 };
+
+export type CiaBackgroundCron = {
+  lastTickAt: string;
+  lastStationCode: string | null;
+  lastRunId: string | null;
+  outcome: "processed" | "skipped" | "idle" | "failed";
+  skipReason: string | null;
+  done: boolean;
+};
+
+export function mapCiaBackgroundCron(raw: unknown): CiaBackgroundCron | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  if (!row.lastTickAt) return null;
+  const outcome = String(row.outcome ?? "idle");
+  if (!["processed", "skipped", "idle", "failed"].includes(outcome)) return null;
+  return {
+    lastTickAt: String(row.lastTickAt),
+    lastStationCode: row.lastStationCode == null ? null : String(row.lastStationCode),
+    lastRunId: row.lastRunId == null ? null : String(row.lastRunId),
+    outcome: outcome as CiaBackgroundCron["outcome"],
+    skipReason: row.skipReason == null ? null : String(row.skipReason),
+    done: Boolean(row.done)
+  };
+}
 
 export function mapCiaRefreshProgress(raw: unknown): CiaRefreshProgress | null {
   if (!raw || typeof raw !== "object") return null;
