@@ -71,7 +71,21 @@ function previousDate(dateValue: string) {
   return date.toISOString().slice(0, 10);
 }
 
-async function saveExecutiveMappingRow(formData: FormData, index: number, createdBy: string, companyId: string) {
+function comparableProviderName(value: string) {
+  return value
+    .split("/")[0]
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}]+/gu, "")
+    .toLocaleUpperCase();
+}
+
+async function saveExecutiveMappingRow(
+  formData: FormData,
+  index: number,
+  createdBy: string,
+  companyId: string,
+  allowedLocationIds: Set<string> | null
+) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
   const id = rowRequired(formData, index, "id", "Field executive");
@@ -84,6 +98,9 @@ async function saveExecutiveMappingRow(formData: FormData, index: number, create
   const providerId = rowRequired(formData, index, "provider_id", "Provider");
   const providerMemberId = rowRequired(formData, index, "provider_member_id", "Provider Member ID");
   const stationId = rowRequired(formData, index, "station_id", "Location");
+  if (allowedLocationIds && !allowedLocationIds.has(stationId)) {
+    throw new Error(`Row ${index + 1}: This location is not allocated to your account.`);
+  }
   const effectiveFrom = rowRequired(formData, index, "effective_from", "Effective from");
   const effectiveTo = rowValue(formData, index, "effective_to");
   const paymentMethodId = rowRequired(formData, index, "payment_method_id", "Payment method");
@@ -102,7 +119,7 @@ async function saveExecutiveMappingRow(formData: FormData, index: number, create
     sourceType === "employee"
       ? supabaseAdmin
         .from("employees")
-        .select("id, designations!inner(is_field_operations)")
+        .select("id, full_name, designations!inner(is_field_operations)")
         .eq("id", id)
         .eq("company_id", companyId)
         .eq("is_active", true)
@@ -112,7 +129,7 @@ async function saveExecutiveMappingRow(formData: FormData, index: number, create
       : sourceType === "contractor"
         ? supabaseAdmin
           .from("contractors")
-          .select("id, designation")
+          .select("id, full_name, designation")
           .eq("id", id)
           .eq("company_id", companyId)
           .eq("is_active", true)
@@ -120,7 +137,7 @@ async function saveExecutiveMappingRow(formData: FormData, index: number, create
           .maybeSingle()
         : supabaseAdmin
         .from("field_executives")
-        .select("id")
+        .select("id, full_name")
         .eq("id", id)
         .eq("company_id", companyId)
         .eq("is_active", true)
@@ -134,6 +151,24 @@ async function saveExecutiveMappingRow(formData: FormData, index: number, create
   ]);
 
   if (!worker) throw new Error(`Row ${index + 1}: Field Operations worker was not found for this company.`);
+  const dropxName = String((worker as { full_name?: string | null }).full_name ?? "").trim();
+  const { data: uploadedMember, error: uploadedMemberError } = await supabaseAdmin
+    .from("cps_shipment_daily")
+    .select("provider_employee_name")
+    .eq("company_id", companyId)
+    .eq("provider_employee_id", providerMemberId)
+    .order("work_date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (uploadedMemberError) throw new Error(uploadedMemberError.message);
+  const uploadedHolderName = String(uploadedMember?.provider_employee_name ?? "").trim();
+  if (!uploadedHolderName) {
+    throw new Error(`Row ${index + 1}: No uploaded holder was found for this Provider Member ID.`);
+  }
+  if (!dropxName || comparableProviderName(uploadedHolderName) !== comparableProviderName(dropxName)) {
+    throw new Error(`Row ${index + 1}: Uploaded holder name does not match the DropX name.`);
+  }
   if (sourceType === "contractor") {
     const contractorDesignation = String((worker as { designation?: string | null }).designation ?? "").trim().toLowerCase();
     const { data: fieldOperationsDesignations } = await supabaseAdmin
@@ -321,7 +356,10 @@ export async function saveProviderMappingWorksheet(formData: FormData) {
         throw new Error("Invalid row selected.");
       }
       if (!nonEmptyRow(formData, index)) continue;
-      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId);
+      const allowedLocationIds = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER"
+        ? null
+        : new Set(authorization.locationScopeIds);
+      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds);
       savedRows += 1;
     }
 

@@ -91,15 +91,19 @@ function requestTypeLabel(request: PaymentReportRequest) {
 }
 
 function buildHistory(request: PaymentReportRequest) {
+  const hasCreatedLog = request.logs.some((log) => String(log.action).toLowerCase() === "created");
+  const hasSubmittedLog = request.logs.some((log) => String(log.action).toLowerCase() === "submitted");
+  const hasProcessingLog = request.logs.some((log) => String(log.action).toLowerCase() === "processing");
+  const hasProcessedLog = request.logs.some((log) => String(log.action).toLowerCase() === "processed");
   const history = [
-    {
+    ...(!hasCreatedLog ? [{
       id: `${request.id}-requested`,
       status: "requested",
       actor: request.requested_by_name ?? request.requested_by_email ?? "-",
       role: "Requester",
       comments: request.remarks || "-",
       created_at: request.created_at
-    },
+    }] : []),
     ...request.logs.map((log) => ({
       id: log.id,
       status: log.action,
@@ -110,7 +114,19 @@ function buildHistory(request: PaymentReportRequest) {
     }))
   ];
 
-  if (isProcessingStarted(request)) {
+  if (!hasSubmittedLog && String(request.category ?? "").toLowerCase() === "expense" && request.amount != null) {
+    const firstProcessingLog = request.logs.find((log) => String(log.action).toLowerCase() === "processing");
+    history.push({
+      id: `${request.id}-details-submitted`,
+      status: "submitted",
+      actor: request.requested_by_name ?? request.requested_by_email ?? "Requester",
+      role: "Requester",
+      comments: "Approved expense converted to payment request and payment details submitted.",
+      created_at: firstProcessingLog?.created_at ?? request.processing_started_at ?? request.updated_at
+    });
+  }
+
+  if (isProcessingStarted(request) && !hasProcessingLog) {
     history.push({
       id: `${request.id}-processing`,
       status: "processing",
@@ -121,7 +137,7 @@ function buildHistory(request: PaymentReportRequest) {
     });
   }
 
-  if (request.processed_at) {
+  if (request.processed_at && !hasProcessedLog) {
     history.push({
       id: `${request.id}-processed`,
       status: request.bank_status || "processed",

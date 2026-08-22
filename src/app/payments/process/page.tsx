@@ -70,6 +70,16 @@ type PaymentAnswerRow = {
   payment_head_questions?: { question_text: string; sort_order: number | null } | Array<{ question_text: string; sort_order: number | null }> | null;
 };
 
+const PROCESS_DETAIL_BATCH_SIZE = 50;
+
+function chunkValues<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
 function firstRelation<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
@@ -113,6 +123,7 @@ async function loadPaymentProcess(companyId: string, userId: string | null, role
   if (!roleId && !canSeeAllFinalApproved) {
     return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], error: "Payment process role is not available." };
   }
+  const admin = supabaseAdmin;
 
   let requestsQuery = supabaseAdmin
     .from("payment_requests")
@@ -140,19 +151,28 @@ async function loadPaymentProcess(companyId: string, userId: string | null, role
     .filter(isReadyForPaymentProcess)
     .filter((request) => String(request.approval_status ?? "").toUpperCase() !== "RE_APPROVED" || request.current_approver_user_id === userId);
   const requestIds = requestRows.map((request) => request.id);
-  const [answersResult, approvalsResult] = requestIds.length ? await Promise.all([
-    supabaseAdmin
+  const requestIdBatches = chunkValues(requestIds, PROCESS_DETAIL_BATCH_SIZE);
+  const [answerBatchResults, approvalBatchResults] = requestIds.length ? await Promise.all([
+    Promise.all(requestIdBatches.map((batch) => admin
       .from("payment_request_answers")
       .select("id, payment_request_id, answer_value, file_name, payment_head_questions ( question_text, sort_order )")
       .eq("company_id", companyId)
-      .in("payment_request_id", requestIds),
-    supabaseAdmin
+      .in("payment_request_id", batch))),
+    Promise.all(requestIdBatches.map((batch) => admin
       .from("payment_request_approvals")
       .select("id, payment_request_id, action, comments, created_at, approver_user_id, approver_role_id")
       .eq("company_id", companyId)
-      .in("payment_request_id", requestIds)
-      .order("created_at", { ascending: true })
-  ]) : [{ data: [], error: null }, { data: [], error: null }];
+      .in("payment_request_id", batch)
+      .order("created_at", { ascending: true })))
+  ]) : [[], []];
+  const answersResult = {
+    data: answerBatchResults.flatMap((result) => result.data ?? []),
+    error: answerBatchResults.find((result) => result.error)?.error ?? null
+  };
+  const approvalsResult = {
+    data: approvalBatchResults.flatMap((result) => result.data ?? []),
+    error: approvalBatchResults.find((result) => result.error)?.error ?? null
+  };
   const relatedError = answersResult.error?.message || approvalsResult.error?.message;
   if (relatedError) return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], error: relatedError };
   const detailsByRequest = new Map<string, PaymentRequestRow["payment_details"]>();
