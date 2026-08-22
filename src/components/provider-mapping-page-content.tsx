@@ -222,7 +222,12 @@ async function loadMappingData(authorization: AuthorizationContext) {
         type: component.component_type
       }))
   }));
-  const locationRows = (locationsResult.data ?? []) as LocationRow[];
+  const allocatedLocationIds = new Set(authorization.locationScopeIds);
+  const hasAllLocations = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER";
+  const isAllocatedLocation = (locationId: string | null | undefined) =>
+    hasAllLocations || Boolean(locationId && allocatedLocationIds.has(locationId));
+  const locationRows = ((locationsResult.data ?? []) as LocationRow[])
+    .filter((location) => isAllocatedLocation(location.id));
   const locationProviderById = new Map(locationRows.map((location) => [location.id, location.provider_id ?? ""]));
   const locations = locationRows.map((location) => ({
     id: location.id,
@@ -232,7 +237,9 @@ async function loadMappingData(authorization: AuthorizationContext) {
     providerId: location.provider_id ?? undefined
   }));
   const latestMappingByWorkerKey = new Map<string, MappingRow>();
-  ((mappingsResult.data ?? []) as MappingRow[]).forEach((mapping) => {
+  ((mappingsResult.data ?? []) as MappingRow[])
+    .filter((mapping) => isAllocatedLocation(mapping.station_id))
+    .forEach((mapping) => {
     const key = mapping.employee_id
       ? `employee:${mapping.employee_id}`
       : mapping.contractor_id
@@ -249,7 +256,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
       .map((value) => value.trim().toLowerCase())
   );
   const workers = [
-    ...((employeesResult.data ?? []) as unknown as EmployeeRow[]).map((employee) => ({
+    ...((employeesResult.data ?? []) as unknown as EmployeeRow[]).filter((employee) => isAllocatedLocation(employee.location_id)).map((employee) => ({
       id: employee.id,
       sourceType: "employee" as const,
       fullName: employee.full_name,
@@ -258,7 +265,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
       dropxId: employee.employee_code ?? ""
     })),
     ...((contractorsResult.data ?? []) as ContractorRow[])
-      .filter((contractor) => fieldOperationsDesignationKeys.has((contractor.designation ?? "").trim().toLowerCase()))
+      .filter((contractor) => isAllocatedLocation(contractor.location_id) && fieldOperationsDesignationKeys.has((contractor.designation ?? "").trim().toLowerCase()))
       .map((contractor) => ({
         id: contractor.id,
         sourceType: "contractor" as const,
@@ -267,7 +274,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
         locationId: contractor.location_id ?? "",
         dropxId: contractor.dropx_id ?? ""
       })),
-    ...((executivesResult.data ?? []) as ExecutiveRow[]).map((executive) => ({
+    ...((executivesResult.data ?? []) as ExecutiveRow[]).filter((executive) => isAllocatedLocation(executive.location_id)).map((executive) => ({
       id: executive.id,
       sourceType: "field_executive" as const,
       fullName: executive.full_name,
