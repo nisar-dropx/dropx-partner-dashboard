@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { saveProviderMappingWorksheet } from "@/app/provider-mapping/actions";
+import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 
 export type LocationOption = {
@@ -88,6 +89,63 @@ function RowSaveButton({ canEdit, dirty, index }: { canEdit: boolean; dirty: boo
   );
 }
 
+type ProviderMemberLookupResult = {
+  name: string | null;
+  workDate: string | null;
+};
+
+function ProviderMemberName({ enabled, providerMemberId }: { enabled: boolean; providerMemberId: string }) {
+  const [result, setResult] = useState<ProviderMemberLookupResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const normalizedId = providerMemberId.trim();
+
+  useEffect(() => {
+    if (!enabled || !normalizedId) {
+      setResult(null);
+      setLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(`/api/provider-mapping/member-lookup?providerMemberId=${encodeURIComponent(normalizedId)}`, {
+          cache: "no-store",
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          setResult({ name: null, workDate: null });
+          return;
+        }
+        setResult(await response.json() as ProviderMemberLookupResult);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setResult({ name: null, workDate: null });
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [enabled, normalizedId]);
+
+  if (!enabled || !normalizedId) return null;
+  if (loading) return <small className="mapping-provider-member-name pending">Checking uploaded data…</small>;
+  if (!result) return null;
+  if (!result.name) return <small className="mapping-provider-member-name missing">No uploaded holder found for this ID.</small>;
+
+  return (
+    <small className="mapping-provider-member-name matched">
+      Holder: <strong>{result.name}</strong>{result.workDate ? ` · Latest data ${result.workDate}` : ""}
+    </small>
+  );
+}
+
 export function ProviderMappingWorksheet({
   canEdit,
   locations,
@@ -103,6 +161,7 @@ export function ProviderMappingWorksheet({
   const initialSignatures = useMemo(() => initialRows.map(rowSignature), [initialRows]);
   const [rows, setRows] = useState(initialRows);
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
+  const [memberLookupRows, setMemberLookupRows] = useState<Set<number>>(() => new Set());
 
   function dismissSuccessMessage() {
     document.getElementById("provider-mapping-success")?.remove();
@@ -136,6 +195,9 @@ export function ProviderMappingWorksheet({
 
       return { ...row, [field]: value };
     }));
+    if (field === "providerMemberId") {
+      setMemberLookupRows((current) => new Set(current).add(index));
+    }
   }
 
   function updatePaymentValue(index: number, componentCode: string, value: string) {
@@ -197,8 +259,13 @@ export function ProviderMappingWorksheet({
 
   const dirtyRows = rows.map((row, index) => rowSignature(row) !== (initialSignatures[index] ?? ""));
   const hasDirtyRows = dirtyRows.some(Boolean);
-  const locationLabelById = new Map(locations.map((location) => [location.id, location.label]));
-  const paymentMethodById = new Map(paymentMethods.map((method) => [method.id, method]));
+  const locationLabelById = useMemo(() => new Map(locations.map((location) => [location.id, location.label])), [locations]);
+  const paymentMethodById = useMemo(() => new Map(paymentMethods.map((method) => [method.id, method])), [paymentMethods]);
+  const paymentMethodOptions = useMemo(() => paymentMethods.map((method) => ({
+    value: method.id,
+    label: method.name,
+    helper: method.code
+  })), [paymentMethods]);
 
   if (!rows.length) {
     return (
@@ -254,26 +321,26 @@ export function ProviderMappingWorksheet({
                     disabled={!canEdit}
                     name={`rows[${index}][provider_member_id]`}
                     onChange={(event) => updateRow(index, "providerMemberId", event.target.value)}
+                    onFocus={() => setMemberLookupRows((current) => new Set(current).add(index))}
                     value={row.providerMemberId}
                   />
+                  <ProviderMemberName enabled={memberLookupRows.has(index)} providerMemberId={row.providerMemberId} />
                 </label>
               </div>
 
               <div className="mapping-edit-grid">
-                <label>Payment method
-                  <select
-                    className="worksheet-select"
+                <div className="mapping-field mapping-payment-method-select">
+                  <span className="mapping-field-label">Payment method</span>
+                  <SearchableSelect
                     disabled={!canEdit}
                     name={`rows[${index}][payment_method_id]`}
-                    onChange={(event) => updateRow(index, "paymentMethodId", event.target.value)}
+                    onValueChange={(value) => updateRow(index, "paymentMethodId", value)}
+                    options={paymentMethodOptions}
+                    placeholder="Search payment method"
+                    required
                     value={row.paymentMethodId}
-                  >
-                    <option value="">Select payment method</option>
-                    {paymentMethods.map((method) => (
-                      <option key={method.id} value={method.id}>{method.name}</option>
-                    ))}
-                  </select>
-                </label>
+                  />
+                </div>
 
                 {(paymentMethodById.get(row.paymentMethodId)?.components ?? []).map((component) => (
                   <label key={component.code}>{component.label}
