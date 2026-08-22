@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { bulkImportFieldExecutives, createFieldExecutive, reviewFieldExecutiveProfile, updateFieldExecutive } from "@/app/field-executive/actions";
 import { AppShell } from "@/components/app-shell";
 import { CompensationBulkUpload } from "@/components/compensation-bulk-upload";
@@ -803,6 +804,7 @@ export async function FieldExecutivePageContent({
   pageCode = "delivery_associates",
   pageSubtitle = "Register and maintain field executives by location.",
   pageTitle = "Field Executive",
+  registerNavigation,
   returnPath = "/field-executive",
   viewId
 }: {
@@ -823,6 +825,7 @@ export async function FieldExecutivePageContent({
   pageCode?: FieldExecutivePageCode;
   pageSubtitle?: string;
   pageTitle?: string;
+  registerNavigation?: ReactNode;
   returnPath?: FieldExecutiveRoute;
   viewId?: string;
 }) {
@@ -868,8 +871,8 @@ export async function FieldExecutivePageContent({
     helper: designation.code,
     code: designation.code,
     modelIds: designation.model_ids ?? [],
-      canAdd: canAccessDesignationPortal(designation, accessSurface, "add", { isOwner: ownerAccess }),
-      canEdit: canAccessDesignationPortal(designation, accessSurface, "edit", { isOwner: ownerAccess }),
+      canAdd: canAccessDesignationPortal(designation, accessSurface, "add", { isOwner: accessSurface === "dashboard" && ownerAccess }),
+      canEdit: canAccessDesignationPortal(designation, accessSurface, "edit", { isOwner: accessSurface === "dashboard" && ownerAccess }),
     dashboardRules: (await loadWorkforceCategoryRules(
       requireCompanyId(authorization),
       workforceConfig.designationCategory,
@@ -894,6 +897,8 @@ export async function FieldExecutivePageContent({
         title={pageTitle}
         subtitle={pageSubtitle}
       />
+
+      {registerNavigation}
 
       {error || errorMessage || notice ? (
         <section className={`panel message-panel ${error || errorMessage ? "error" : "success"}`}>

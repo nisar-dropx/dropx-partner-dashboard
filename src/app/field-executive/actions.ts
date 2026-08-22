@@ -244,7 +244,8 @@ export async function createFieldExecutive(formData: FormData) {
     if (designationRuleResult.error) throw new Error(designationRuleResult.error.message);
     if (!designationRuleResult.data) throw new Error("Selected designation is not available.");
     requireDesignationOnboardingAccess(designationRuleResult.data, authorization);
-    requireDesignationPortalAccess(designationRuleResult.data, currentAccessSurface(), "add", { isOwner: isCompanyOwner(authorization) });
+    const accessSurface = currentAccessSurface();
+    requireDesignationPortalAccess(designationRuleResult.data, accessSurface, "add", { isOwner: accessSurface === "dashboard" && isCompanyOwner(authorization) });
     const dashboardRules = directActivate
       ? (await loadWorkforceCategoryRules(
         companyId,
@@ -488,7 +489,8 @@ export async function updateFieldExecutive(formData: FormData) {
       .maybeSingle();
     if (designationResult.error) throw new Error(designationResult.error.message);
     if (!designationResult.data) throw new Error("Selected designation is not available.");
-    requireDesignationPortalAccess(designationResult.data, currentAccessSurface(), "edit", { isOwner: isCompanyOwner(authorization) });
+    const accessSurface = currentAccessSurface();
+    requireDesignationPortalAccess(designationResult.data, accessSurface, "edit", { isOwner: accessSurface === "dashboard" && isCompanyOwner(authorization) });
     const dashboardRules = (await loadWorkforceCategoryRules(
       companyId,
       config.designationCategory,
@@ -665,7 +667,8 @@ export async function reviewFieldExecutiveProfile(formData: FormData) {
       .maybeSingle();
     if (reviewDesignation.error) throw new Error(reviewDesignation.error.message);
     if (!reviewDesignation.data) throw new Error("Selected designation is not available.");
-    requireDesignationPortalAccess(reviewDesignation.data, currentAccessSurface(), "edit", { isOwner: isCompanyOwner(authorization) });
+    const accessSurface = currentAccessSurface();
+    requireDesignationPortalAccess(reviewDesignation.data, accessSurface, "edit", { isOwner: accessSurface === "dashboard" && isCompanyOwner(authorization) });
     if (String(current.data.onboarding_status ?? "").toLowerCase() !== "under_review") {
       throw new Error("Only profiles under review can be approved or returned.");
     }
@@ -867,7 +870,8 @@ export async function bulkImportFieldExecutives(formData: FormData) {
       if (!locationId) throw new Error(`Row ${rowNumber}: Location ${row.locationCode} not found.`);
       if (!designation) throw new Error(`Row ${rowNumber}: Designation code ${row.designationCode} not found.`);
       requireDesignationOnboardingAccess(designation, authorization);
-      requireDesignationPortalAccess(designation, currentAccessSurface(), "add", { isOwner: isCompanyOwner(authorization) });
+      const accessSurface = currentAccessSurface();
+      requireDesignationPortalAccess(designation, accessSurface, "add", { isOwner: accessSurface === "dashboard" && isCompanyOwner(authorization) });
       await assertWorkerDesignationMappedToIdSeries({ companyId, designationId: designation.id });
       if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) {
         throw new Error(`Row ${rowNumber}: You do not have access to location ${row.locationCode}.`);
