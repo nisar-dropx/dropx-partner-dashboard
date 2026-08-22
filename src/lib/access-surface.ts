@@ -19,6 +19,7 @@ export const opsAccessPageCodes = [
   "cod_reports",
   "cod_portal_checks",
   "cod_cash_in_associate",
+  "edd_dashboard",
   "cps",
   "cps_overview",
   "cps_daily",

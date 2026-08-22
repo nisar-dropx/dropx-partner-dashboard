@@ -49,6 +49,13 @@ export function PendingLink({
     event.preventDefault();
     setLoading(true);
     router.push(href, { scroll });
+    // App Router's client-side segment cache can serve a stale prefetch for
+    // a searchParams-only navigation (e.g. a row of "Manage" links that
+    // differ only by ?editRole=<id> — every row gets auto-prefetched once
+    // visible). That shows the URL updating with no modal until a manual
+    // refresh. router.refresh() forces a fresh server render right after
+    // the push so the new searchParams-derived content always appears.
+    router.refresh();
   }
 
   return (
