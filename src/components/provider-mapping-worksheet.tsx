@@ -444,9 +444,11 @@ export function ProviderMappingWorksheet({
                     />
                   </label>
 
-                  <RowSaveButton canEdit={canEdit} dirty={dirtyRows[index]} index={index} lookupValid={lookupValidRows[index]} />
                 </div>
                 {rowErrors[index] ? <div className="mapping-row-error">{rowErrors[index]}</div> : null}
+              </div>
+              <div className="mapping-row-actions">
+                <RowSaveButton canEdit={canEdit} dirty={dirtyRows[index]} index={index} lookupValid={lookupValidRows[index]} />
               </div>
             </div>
           ))}
