@@ -7,6 +7,7 @@ import { addDaysYmd, formatCiaDisplayDate, todayIstYmd } from "@/lib/ops-pulse/c
 import type { EddBucketKey, EddPackage, EddStationPayload } from "@/lib/ops-pulse/edd-worker";
 import type { EddStationOption } from "./page";
 import { EddTrendChart } from "./edd-trend-chart";
+import { EddMultiSelect } from "./edd-multi-select";
 
 const BUCKET_META: Record<EddBucketKey, { label: string; hint: string }> = {
   overdue: { label: "Overdue", hint: "EAD already passed — highest priority" },
@@ -104,8 +105,8 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
   const [error, setError] = useState<string | null>(null);
   const [activeBucket, setActiveBucket] = useState<EddBucketKey | null>(null);
   const [search, setSearch] = useState("");
-  const [stateFilter, setStateFilter] = useState("");
-  const [paymentFilter, setPaymentFilter] = useState("");
+  const [stateFilters, setStateFilters] = useState<Set<string>>(new Set());
+  const [paymentFilters, setPaymentFilters] = useState<Set<string>>(new Set());
   const [sortColumn, setSortColumn] = useState<SortColumn>("ead");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0]);
@@ -122,8 +123,8 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
         if (cancelled) return;
         setPayload(result);
         setActiveBucket(null);
-        setStateFilter("");
-        setPaymentFilter("");
+        setStateFilters(new Set());
+        setPaymentFilters(new Set());
         setSearch("");
         setPage(1);
       })
@@ -144,7 +145,7 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
   const tomorrow = addDaysYmd(today, 1);
 
   const stateOptions = useMemo(() => {
-    const values = new Set((payload?.packages ?? []).map((pkg) => pkg.stateProvinceCode).filter((v): v is string => Boolean(v)));
+    const values = new Set((payload?.packages ?? []).map((pkg) => pkg.state).filter((v): v is string => Boolean(v)));
     return [...values].sort();
   }, [payload]);
 
@@ -158,13 +159,13 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
     const term = search.trim().toLowerCase();
     return rows.filter((pkg) => {
       if (activeBucket && pkg.bucket !== activeBucket) return false;
-      if (stateFilter && pkg.stateProvinceCode !== stateFilter) return false;
-      if (paymentFilter && pkg.paymentMethod !== paymentFilter) return false;
+      if (stateFilters.size && !stateFilters.has(pkg.state ?? "")) return false;
+      if (paymentFilters.size && !paymentFilters.has(pkg.paymentMethod ?? "")) return false;
       if (!term) return true;
       return [pkg.trackingId, pkg.lastScanBy, pkg.city, pkg.orderingOrderId, pkg.state]
         .some((field) => String(field ?? "").toLowerCase().includes(term));
     });
-  }, [payload, activeBucket, stateFilter, paymentFilter, search]);
+  }, [payload, activeBucket, stateFilters, paymentFilters, search]);
 
   const sortedPackages = useMemo(() => {
     return [...filteredPackages].sort((a, b) => compareValues(sortValue(a, sortColumn), sortValue(b, sortColumn), sortDir));
@@ -311,28 +312,18 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
                   />
                 </div>
 
-                <select className="edd-filter-select" value={stateFilter} onChange={(event) => resetToPageOne(setStateFilter)(event.target.value)}>
-                  <option value="">All states</option>
-                  {stateOptions.map((state) => (
-                    <option key={state} value={state}>{state}</option>
-                  ))}
-                </select>
+                <EddMultiSelect label="States" options={stateOptions} selected={stateFilters} onChange={resetToPageOne(setStateFilters)} />
 
-                <select className="edd-filter-select" value={paymentFilter} onChange={(event) => resetToPageOne(setPaymentFilter)(event.target.value)}>
-                  <option value="">All payment methods</option>
-                  {paymentOptions.map((paymentMethod) => (
-                    <option key={paymentMethod} value={paymentMethod}>{paymentMethod}</option>
-                  ))}
-                </select>
+                <EddMultiSelect label="payment methods" options={paymentOptions} selected={paymentFilters} onChange={resetToPageOne(setPaymentFilters)} />
 
-                {activeBucket || stateFilter || paymentFilter || search ? (
+                {activeBucket || stateFilters.size || paymentFilters.size || search ? (
                   <button
                     type="button"
                     className="button secondary"
                     onClick={() => {
                       setActiveBucket(null);
-                      setStateFilter("");
-                      setPaymentFilter("");
+                      setStateFilters(new Set());
+                      setPaymentFilters(new Set());
                       setSearch("");
                       setPage(1);
                     }}

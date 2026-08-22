@@ -11,13 +11,12 @@ type AppShellFrameProps = {
   desktopActions: ReactNode;
   mobileActions: ReactNode;
   sidebar: ReactNode;
-  topLeftActions?: ReactNode;
 };
 
 const flashQueryKeyPattern = /^(?:error|notice|success|sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 const compoundFlashQueryKeyPattern = /_(?:sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 
-export function AppShellFrame({ children, desktopActions, mobileActions, sidebar, topLeftActions }: AppShellFrameProps) {
+export function AppShellFrame({ children, desktopActions, mobileActions, sidebar }: AppShellFrameProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -82,7 +81,7 @@ export function AppShellFrame({ children, desktopActions, mobileActions, sidebar
 
       <main className="main">
         <header className="topbar">
-          <div className="top-left-actions">{topLeftActions}</div>
+          <div />
           <div className="top-actions">{desktopActions}</div>
         </header>
         <div className="content">{children}</div>

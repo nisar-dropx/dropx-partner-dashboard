@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
+import { TrackingIdSearch } from "@/components/tracking-id-search";
 import { requireCompanyId } from "@/lib/company-scope";
 import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
 import { isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
@@ -57,7 +58,12 @@ export default async function EddDashboardPage({
           eyebrow="Ops Pulse · Live tracking"
           title="EDD Dashboard"
           subtitle="Every live tracking ID at a station, bucketed by Estimated Delivery Date — pulled live from Amazon's station ageing dashboard."
-          action={<span className={`status-pill ${workerConfigured ? "good" : "warn"}`}>{workerConfigured ? "Live" : "Setup needed"}</span>}
+          action={(
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <TrackingIdSearch />
+              <span className={`status-pill ${workerConfigured ? "good" : "warn"}`}>{workerConfigured ? "Live" : "Setup needed"}</span>
+            </div>
+          )}
         />
 
         {!workerConfigured ? (

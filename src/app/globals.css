@@ -593,19 +593,11 @@ a {
   border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  justify-content: flex-end;
   padding: 0 22px;
   position: sticky;
   top: 0;
   z-index: 5;
-}
-
-.top-left-actions {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  flex: 1 1 auto;
 }
 
 .mobile-topbar,
@@ -17834,6 +17826,62 @@ td strong,
   font-size: 13px;
 }
 
+.edd-multiselect { position: relative; }
+
+.edd-multiselect-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 160px;
+  cursor: pointer;
+}
+.edd-multiselect-trigger span { flex: 1 1 auto; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.edd-multiselect-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: max(220px, 100%);
+  max-height: 260px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-soft);
+  padding: 8px;
+  z-index: 15;
+}
+
+.edd-multiselect-actions {
+  display: flex;
+  gap: 10px;
+  padding: 2px 6px 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.edd-multiselect-actions button {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--brand-dark);
+  cursor: pointer;
+}
+.edd-multiselect-actions button:disabled { color: var(--muted); cursor: default; }
+
+.edd-multiselect-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.edd-multiselect-option:hover { background: var(--surface-soft); }
+
 .edd-pagination {
   display: flex;
   align-items: center;
@@ -17871,7 +17919,7 @@ td strong,
 @keyframes edd-spin { to { transform: rotate(360deg); } }
 
 /* ---------------------------------------------------------------------- */
-/* Global tracking-ID search (OpsPulse top bar, left side)                */
+/* Tracking-ID search (EDD Dashboard page head) + result modal            */
 /* ---------------------------------------------------------------------- */
 
 .tracking-search {
@@ -17879,12 +17927,12 @@ td strong,
   display: flex;
   align-items: center;
   gap: 6px;
-  width: min(320px, 100%);
+  width: min(260px, 100%);
   height: 36px;
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--surface-soft);
+  background: #fff;
 }
 
 .tracking-search-icon { color: var(--muted); flex: none; }
@@ -17917,34 +17965,53 @@ td strong,
 
 .tracking-search-spin { animation: edd-spin 0.8s linear infinite; color: var(--muted); flex: none; }
 
-.tracking-search-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  width: max(380px, 100%);
-  max-height: min(70vh, 560px);
-  overflow-y: auto;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  box-shadow: var(--shadow-soft);
-  padding: 14px;
-  z-index: 20;
-}
-
-.tracking-search-panel-head {
+.tracking-search-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 24, 40, 0.45);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
+  justify-content: center;
+  padding: 24px;
+  z-index: 60;
 }
 
-.tracking-search-panel-head strong { font-size: 14px; }
+.tracking-search-modal {
+  width: min(640px, 100%);
+  max-height: min(84vh, 720px);
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(16, 24, 40, 0.28);
+  padding: 22px 24px 26px;
+}
+
+.tracking-search-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.tracking-search-modal-head h2 { margin: 0; font-size: 20px; }
+.tracking-search-modal-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+}
 
 .tracking-search-state-pill {
   display: inline-flex;
-  padding: 2px 9px;
+  padding: 3px 11px;
   border-radius: 999px;
   background: var(--surface-soft);
   color: var(--ink);
@@ -17957,43 +18024,39 @@ td strong,
 .tracking-search-detail {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 16px;
-  margin: 0;
+  gap: 14px 20px;
+  margin: 0 0 16px;
 }
 
 .tracking-search-detail dt { font-size: 11px; font-weight: 800; text-transform: uppercase; color: var(--muted); }
-.tracking-search-detail dd { margin: 2px 0 0; font-size: 13px; color: var(--ink); }
+.tracking-search-detail dd { margin: 3px 0 0; font-size: 14px; color: var(--ink); }
 
-.tracking-search-message { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.tracking-search-message { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.6; }
 .tracking-search-message.warn { color: var(--amber); }
 
 .tracking-search-address {
-  margin: 10px 0 0;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-  font-size: 12px;
-  color: var(--muted);
+  margin: 0 0 16px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+  font-size: 13px;
+  color: var(--ink);
   line-height: 1.5;
 }
 
-.tracking-search-toggle {
-  display: inline-flex;
-  margin-top: 10px;
-  border: none;
-  background: none;
-  padding: 0;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--brand-dark);
-  cursor: pointer;
+.tracking-search-section-head {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+  color: var(--muted);
 }
 
 .tracking-search-history {
   list-style: none;
-  margin: 8px 0 0;
+  margin: 0;
   padding: 0;
-  max-height: 220px;
-  overflow-y: auto;
   border-top: 1px solid var(--line);
 }
 
@@ -18001,11 +18064,11 @@ td strong,
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 2px 10px;
-  padding: 8px 0;
+  padding: 10px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .tracking-search-history-state { font-weight: 700; color: var(--ink); }
 .tracking-search-history-time { color: var(--muted); text-align: right; white-space: nowrap; }
-.tracking-search-history-by { grid-column: 1 / -1; color: var(--muted); }
+.tracking-search-history-by { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
