@@ -17459,3 +17459,143 @@ td strong,
   .ops-app-downloads { align-items: flex-start; padding: 0 5px; }
   .ops-app-downloads p { max-width: 150px; text-align: right; line-height: 1.35; }
 }
+
+/* ---------------------------------------------------------------------- */
+/* EDD Dashboard (Ops Pulse > EDD Dashboard)                              */
+/* ---------------------------------------------------------------------- */
+
+.edd-bucket-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  margin: 14px 0;
+}
+
+@media (max-width: 900px) {
+  .edd-bucket-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.edd-bucket-card {
+  display: grid;
+  gap: 6px;
+  min-height: 96px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow-soft);
+  border-left: 4px solid var(--line);
+  cursor: pointer;
+  text-align: left;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.edd-bucket-card:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(16, 24, 40, .1); }
+
+.edd-bucket-card.active { outline: 2px solid var(--brand-dark); outline-offset: -2px; }
+
+.edd-bucket-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.edd-bucket-card strong { color: var(--ink); font-size: 26px; line-height: 1; }
+.edd-bucket-card small { color: var(--muted); }
+
+.edd-bucket-card.overdue { border-left-color: var(--red); }
+.edd-bucket-card.overdue strong { color: var(--red); }
+.edd-bucket-card.dueToday { border-left-color: var(--amber); }
+.edd-bucket-card.dueToday strong { color: var(--amber); }
+.edd-bucket-card.dueTomorrow { border-left-color: var(--brand-dark); }
+.edd-bucket-card.dueTomorrow strong { color: var(--brand-dark); }
+.edd-bucket-card.future { border-left-color: var(--green); }
+.edd-bucket-card.future strong { color: var(--green); }
+.edd-bucket-card.unknown { border-left-color: var(--muted); }
+
+.edd-daybar-track {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 120px;
+  padding: 10px 4px 0;
+  overflow-x: auto;
+}
+
+.edd-daybar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 46px;
+}
+
+.edd-daybar-bar {
+  width: 26px;
+  border-radius: 4px 4px 0 0;
+  background: var(--brand-dark);
+  min-height: 3px;
+}
+
+.edd-daybar-bar.overdue { background: var(--red); }
+.edd-daybar-bar.today { background: var(--amber); }
+
+.edd-daybar-count { font-size: 12px; font-weight: 800; color: var(--ink); }
+.edd-daybar-date { font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+.edd-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.edd-toolbar input[type="search"] {
+  min-height: var(--control-height);
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  min-width: 220px;
+}
+
+.edd-table-wrap { overflow-x: auto; }
+
+.edd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.edd-table th {
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.edd-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.edd-table tr:hover td { background: var(--surface-soft); }
+
+.edd-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .01em;
+}
+.edd-pill.overdue { background: #fef3f2; color: var(--red); }
+.edd-pill.dueToday { background: #fffaeb; color: var(--amber); }
+.edd-pill.dueTomorrow { background: #fff1e8; color: var(--brand-dark); }
+.edd-pill.future { background: #ecfdf3; color: var(--green); }
+.edd-pill.unknown { background: var(--surface-soft); color: var(--muted); }
+
+.edd-spin { animation: edd-spin 0.8s linear infinite; }
+@keyframes edd-spin { to { transform: rotate(360deg); } }

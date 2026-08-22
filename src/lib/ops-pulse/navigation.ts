@@ -15,6 +15,7 @@ const commonStart: NavItem[] = [
       { code: "capacity_hiring", label: "Hiring Review", href: "/capacity/hiring" }
     ]
   },
+  { code: "edd_dashboard", label: "EDD Dashboard", href: "/ops-pulse/edd", icon: "E" },
   { code: "service_network", label: "Network Planning", href: "/service-network", icon: "N" },
   { code: "delivery_associates", label: "Workforce Onboarding", href: "/field-executive", icon: "+" }
 ];
