@@ -205,6 +205,10 @@ export function ProviderMappingWorksheet({
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
   const [memberLookupRows, setMemberLookupRows] = useState<Set<number>>(() => new Set());
   const [memberLookupStatuses, setMemberLookupStatuses] = useState<Record<number, ProviderMemberLookupStatus>>({});
+  const [searchQuery, setSearchQuery] = useState("");
+  const [locationFilter, setLocationFilter] = useState("");
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState("");
+  const [mappingStatusFilter, setMappingStatusFilter] = useState("");
 
   const handleLookupChange = useCallback((index: number, status: ProviderMemberLookupStatus) => {
     setMemberLookupStatuses((current) => ({ ...current, [index]: status }));
@@ -324,6 +328,29 @@ export function ProviderMappingWorksheet({
     label: method.name,
     helper: method.code
   })), [paymentMethods]);
+  const locationFilterOptions = useMemo(() => locations.map((location) => ({
+    value: location.id,
+    label: location.label
+  })), [locations]);
+  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
+  const visibleRows = rows.map((row, index) => {
+    const searchMatches = !normalizedSearchQuery || [
+      row.dropxId,
+      row.dropxName,
+      row.providerMemberId,
+      locationLabelById.get(row.stationId) ?? ""
+    ].some((value) => value.toLocaleLowerCase().includes(normalizedSearchQuery));
+    const locationMatches = !locationFilter || row.stationId === locationFilter;
+    const paymentMethodMatches = !paymentMethodFilter || row.paymentMethodId === paymentMethodFilter;
+    const isMapped = Boolean(row.mappingId || (row.providerMemberId && row.paymentMethodId));
+    const statusMatches = !mappingStatusFilter
+      || (mappingStatusFilter === "mapped" && isMapped)
+      || (mappingStatusFilter === "unmapped" && !isMapped)
+      || (mappingStatusFilter === "unsaved" && dirtyRows[index]);
+    return searchMatches && locationMatches && paymentMethodMatches && statusMatches;
+  });
+  const visibleRowCount = visibleRows.filter(Boolean).length;
+  const hasFilters = Boolean(searchQuery || locationFilter || paymentMethodFilter || mappingStatusFilter);
 
   if (!rows.length) {
     return (
@@ -350,14 +377,62 @@ export function ProviderMappingWorksheet({
             <h2>ID & pay mapping worksheet</h2>
             <p className="subtle">DropX ID, name, and location are read-only. Select a payment method to show only its configured fields.</p>
           </div>
-          <SubmitButton disabled={!canEdit || !hasDirtyRows || !allDirtyLookupsValid} disabledText={saveAllDisabledText}>
+          <SubmitButton disabled={!canEdit || !hasDirtyRows || !allDirtyLookupsValid} disabledText={saveAllDisabledText} className="button mapping-save-all">
             Save all
           </SubmitButton>
         </div>
 
+        <div className="mapping-filters">
+          <label className="mapping-filter-search">Search
+            <input
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="DropX ID, name or provider member ID"
+              type="search"
+              value={searchQuery}
+            />
+          </label>
+          <div className="mapping-filter-field">
+            <span className="mapping-field-label">Location</span>
+            <SearchableSelect
+              name="worksheet_location_filter"
+              onValueChange={setLocationFilter}
+              options={locationFilterOptions}
+              placeholder="All allocated locations"
+              value={locationFilter}
+            />
+          </div>
+          <div className="mapping-filter-field">
+            <span className="mapping-field-label">Payment method</span>
+            <SearchableSelect
+              name="worksheet_payment_method_filter"
+              onValueChange={setPaymentMethodFilter}
+              options={paymentMethodOptions}
+              placeholder="All payment methods"
+              value={paymentMethodFilter}
+            />
+          </div>
+          <label>Status
+            <select onChange={(event) => setMappingStatusFilter(event.target.value)} value={mappingStatusFilter}>
+              <option value="">All statuses</option>
+              <option value="mapped">Mapped</option>
+              <option value="unmapped">Unmapped</option>
+              <option value="unsaved">Unsaved</option>
+            </select>
+          </label>
+          <div className="mapping-filter-summary">
+            <span>{visibleRowCount} of {rows.length} records</span>
+            {hasFilters ? <button className="button secondary compact" onClick={() => {
+              setSearchQuery("");
+              setLocationFilter("");
+              setPaymentMethodFilter("");
+              setMappingStatusFilter("");
+            }} type="button">Clear</button> : null}
+          </div>
+        </div>
+
         <div className="mapping-rows">
           {rows.map((row, index) => (
-            <div className={`mapping-row-card ${dirtyRows[index] ? "unsaved-row" : ""}`} key={`${row.id || row.dropxId}-${index}`}>
+            <div className={`mapping-row-card ${dirtyRows[index] ? "unsaved-row" : ""}`} hidden={!visibleRows[index]} key={`${row.id || row.dropxId}-${index}`}>
               <input type="hidden" name={`rows[${index}][id]`} value={row.id} />
               <input type="hidden" name={`rows[${index}][source_type]`} value={row.sourceType} />
               <input type="hidden" name={`rows[${index}][mapping_id]`} value={row.mappingId} />
@@ -452,6 +527,12 @@ export function ProviderMappingWorksheet({
               </div>
             </div>
           ))}
+        </div>
+        <div className="mapping-bulk-actions">
+          <span>{hasDirtyRows ? `${dirtyRows.filter(Boolean).length} unsaved row${dirtyRows.filter(Boolean).length === 1 ? "" : "s"}` : "All changes saved"}</span>
+          <SubmitButton disabled={!canEdit || !hasDirtyRows || !allDirtyLookupsValid} disabledText={saveAllDisabledText} className="button mapping-save-all">
+            Save all
+          </SubmitButton>
         </div>
       </section>
     </form>

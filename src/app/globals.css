@@ -2299,6 +2299,73 @@ h3 {
   padding: 14px;
 }
 
+.mapping-save-all {
+  min-width: 132px;
+  min-height: 42px;
+  padding-inline: 24px;
+  font-weight: 800;
+}
+
+.mapping-filters {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.3fr) minmax(220px, 1fr) minmax(220px, 1fr) minmax(150px, .7fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+  background: #f8fafc;
+}
+
+.mapping-filters label,
+.mapping-filter-field {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.mapping-filters input,
+.mapping-filters select,
+.mapping-filters .searchable-control {
+  min-height: 40px;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.mapping-filter-summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 40px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.mapping-bulk-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 -8px 20px rgba(15, 23, 42, .06);
+  backdrop-filter: blur(8px);
+}
+
+.mapping-bulk-actions > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .mapping-row-card {
   position: relative;
   display: grid;
@@ -2486,6 +2553,14 @@ h3 {
 }
 
 @media (max-width: 1180px) {
+  .mapping-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mapping-filter-summary {
+    grid-column: 1 / -1;
+  }
+
   .mapping-row-card {
     grid-template-columns: 1fr;
   }
@@ -2500,6 +2575,24 @@ h3 {
 }
 
 @media (max-width: 760px) {
+  .mapping-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .mapping-filter-summary {
+    grid-column: auto;
+    justify-content: space-between;
+  }
+
+  .mapping-bulk-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mapping-save-all {
+    width: 100%;
+  }
+
   .mapping-edit-grid {
     grid-template-columns: 1fr;
   }

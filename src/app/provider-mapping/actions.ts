@@ -79,7 +79,13 @@ function comparableProviderName(value: string) {
     .toLocaleUpperCase();
 }
 
-async function saveExecutiveMappingRow(formData: FormData, index: number, createdBy: string, companyId: string) {
+async function saveExecutiveMappingRow(
+  formData: FormData,
+  index: number,
+  createdBy: string,
+  companyId: string,
+  allowedLocationIds: Set<string> | null
+) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
   const id = rowRequired(formData, index, "id", "Field executive");
@@ -92,6 +98,9 @@ async function saveExecutiveMappingRow(formData: FormData, index: number, create
   const providerId = rowRequired(formData, index, "provider_id", "Provider");
   const providerMemberId = rowRequired(formData, index, "provider_member_id", "Provider Member ID");
   const stationId = rowRequired(formData, index, "station_id", "Location");
+  if (allowedLocationIds && !allowedLocationIds.has(stationId)) {
+    throw new Error(`Row ${index + 1}: This location is not allocated to your account.`);
+  }
   const effectiveFrom = rowRequired(formData, index, "effective_from", "Effective from");
   const effectiveTo = rowValue(formData, index, "effective_to");
   const paymentMethodId = rowRequired(formData, index, "payment_method_id", "Payment method");
@@ -347,7 +356,10 @@ export async function saveProviderMappingWorksheet(formData: FormData) {
         throw new Error("Invalid row selected.");
       }
       if (!nonEmptyRow(formData, index)) continue;
-      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId);
+      const allowedLocationIds = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER"
+        ? null
+        : new Set(authorization.locationScopeIds);
+      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds);
       savedRows += 1;
     }
 
