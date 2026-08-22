@@ -8,7 +8,6 @@ const codSections = [
   { href: "/cod/submission", key: "submission", label: "COD Submission", visible: true },
   { href: "/cod/reports", key: "reports", label: "COD Reports", visible: true },
   { href: "/cod/cash-in-associate", key: "cash-in-associate", label: "Cash In Associate", visible: true },
-  { href: "/cod/edd", key: "edd", label: "EDD Dashboard", visible: true },
   { href: "/cod/validation", key: "validation", label: "Validation", visible: false },
   { href: "/cod/portal-checks", key: "portal-checks", label: "Portal Checks", visible: false }
 ] as const;

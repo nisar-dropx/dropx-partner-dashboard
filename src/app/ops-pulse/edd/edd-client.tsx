@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Loader2, RefreshCw, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
 import { addDaysYmd, formatCiaDisplayDate, todayIstYmd } from "@/lib/ops-pulse/cia-types";
 import type { EddBucketKey, EddPackage, EddStationPayload } from "@/lib/ops-pulse/edd-worker";
 import type { EddStationOption } from "./page";
+import { EddTrendChart } from "./edd-trend-chart";
 
 const BUCKET_META: Record<EddBucketKey, { label: string; hint: string }> = {
   overdue: { label: "Overdue", hint: "EAD already passed — highest priority" },
@@ -16,6 +17,23 @@ const BUCKET_META: Record<EddBucketKey, { label: string; hint: string }> = {
 };
 
 const BUCKET_ORDER: EddBucketKey[] = ["overdue", "dueToday", "dueTomorrow", "future", "unknown"];
+const BUCKET_PRIORITY: Record<EddBucketKey, number> = { overdue: 0, dueToday: 1, dueTomorrow: 2, future: 3, unknown: 4 };
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
+
+type SortColumn = "trackingId" | "ead" | "bucket" | "state" | "driver" | "payment" | "city" | "age" | "orderId";
+type SortDir = "asc" | "desc";
+
+const COLUMNS: Array<{ key: SortColumn; label: string }> = [
+  { key: "trackingId", label: "Tracking ID" },
+  { key: "ead", label: "EAD" },
+  { key: "bucket", label: "Bucket" },
+  { key: "state", label: "State" },
+  { key: "driver", label: "Driver" },
+  { key: "payment", label: "Payment" },
+  { key: "city", label: "City" },
+  { key: "age", label: "Age in state" },
+  { key: "orderId", label: "Order ID" }
+];
 
 function formatMinutes(minutes: number) {
   if (!Number.isFinite(minutes) || minutes <= 0) return "—";
@@ -30,6 +48,32 @@ function formatFetchedAt(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function sortValue(pkg: EddPackage, column: SortColumn): string | number {
+  switch (column) {
+    case "trackingId": return pkg.trackingId;
+    case "ead": return pkg.ead ?? "";
+    case "bucket": return BUCKET_PRIORITY[pkg.bucket];
+    case "state": return pkg.state ?? "";
+    case "driver": return pkg.lastScanBy || pkg.driverId || "";
+    case "payment": return pkg.paymentMethod ?? "";
+    case "city": return pkg.city ?? "";
+    case "age": return pkg.minutesInState;
+    case "orderId": return pkg.orderingOrderId ?? "";
+    default: return "";
+  }
+}
+
+function compareValues(a: string | number, b: string | number, dir: SortDir) {
+  const factor = dir === "asc" ? 1 : -1;
+  const aEmpty = a === "" || a == null;
+  const bEmpty = b === "" || b == null;
+  if (aEmpty && bEmpty) return 0;
+  if (aEmpty) return 1;
+  if (bEmpty) return -1;
+  if (typeof a === "number" && typeof b === "number") return (a - b) * factor;
+  return String(a).localeCompare(String(b)) * factor;
 }
 
 async function fetchEddClient(stationCode: string): Promise<EddStationPayload> {
@@ -60,6 +104,12 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
   const [error, setError] = useState<string | null>(null);
   const [activeBucket, setActiveBucket] = useState<EddBucketKey | null>(null);
   const [search, setSearch] = useState("");
+  const [stateFilter, setStateFilter] = useState("");
+  const [paymentFilter, setPaymentFilter] = useState("");
+  const [sortColumn, setSortColumn] = useState<SortColumn>("ead");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0]);
+  const [page, setPage] = useState(1);
   const [requestToken, setRequestToken] = useState(0);
 
   useEffect(() => {
@@ -72,6 +122,10 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
         if (cancelled) return;
         setPayload(result);
         setActiveBucket(null);
+        setStateFilter("");
+        setPaymentFilter("");
+        setSearch("");
+        setPage(1);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -89,25 +143,56 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
   const today = todayIstYmd();
   const tomorrow = addDaysYmd(today, 1);
 
+  const stateOptions = useMemo(() => {
+    const values = new Set((payload?.packages ?? []).map((pkg) => pkg.stateProvinceCode).filter((v): v is string => Boolean(v)));
+    return [...values].sort();
+  }, [payload]);
+
+  const paymentOptions = useMemo(() => {
+    const values = new Set((payload?.packages ?? []).map((pkg) => pkg.paymentMethod).filter((v): v is string => Boolean(v)));
+    return [...values].sort();
+  }, [payload]);
+
   const filteredPackages = useMemo(() => {
     const rows = payload?.packages ?? [];
     const term = search.trim().toLowerCase();
     return rows.filter((pkg) => {
       if (activeBucket && pkg.bucket !== activeBucket) return false;
+      if (stateFilter && pkg.stateProvinceCode !== stateFilter) return false;
+      if (paymentFilter && pkg.paymentMethod !== paymentFilter) return false;
       if (!term) return true;
       return [pkg.trackingId, pkg.lastScanBy, pkg.city, pkg.orderingOrderId, pkg.state]
         .some((field) => String(field ?? "").toLowerCase().includes(term));
     });
-  }, [payload, activeBucket, search]);
+  }, [payload, activeBucket, stateFilter, paymentFilter, search]);
 
   const sortedPackages = useMemo(() => {
-    return [...filteredPackages].sort((a, b) => {
-      const aKey = a.ead ?? "9999-99-99";
-      const bKey = b.ead ?? "9999-99-99";
-      if (aKey !== bKey) return aKey.localeCompare(bKey);
-      return b.minutesInState - a.minutesInState;
-    });
-  }, [filteredPackages]);
+    return [...filteredPackages].sort((a, b) => compareValues(sortValue(a, sortColumn), sortValue(b, sortColumn), sortDir));
+  }, [filteredPackages, sortColumn, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedPackages.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pagedPackages = useMemo(
+    () => sortedPackages.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [sortedPackages, currentPage, pageSize]
+  );
+
+  function toggleSort(column: SortColumn) {
+    setPage(1);
+    if (sortColumn !== column) {
+      setSortColumn(column);
+      setSortDir("asc");
+      return;
+    }
+    setSortDir((current) => (current === "asc" ? "desc" : "asc"));
+  }
+
+  function resetToPageOne<T>(setter: (value: T) => void) {
+    return (value: T) => {
+      setPage(1);
+      setter(value);
+    };
+  }
 
   function selectStation(nextCode: string) {
     setStationCode(nextCode);
@@ -116,8 +201,6 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
     });
   }
 
-  const maxDayCount = Math.max(1, ...(payload?.byDate ?? []).map((row) => row.count));
-
   return (
     <>
       <section className="panel">
@@ -125,7 +208,7 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
           <select
             value={stationCode}
             onChange={(event) => selectStation(event.target.value)}
-            style={{ minHeight: "var(--control-height)", padding: "0 10px", borderRadius: "var(--radius)", border: "1px solid var(--line)" }}
+            className="edd-filter-select"
           >
             {stations.map((station) => (
               <option key={station.code} value={station.code}>
@@ -183,7 +266,10 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
                   key={bucket}
                   type="button"
                   className={`edd-bucket-card ${bucket}${isActive ? " active" : ""}`}
-                  onClick={() => setActiveBucket(isActive ? null : bucket)}
+                  onClick={() => {
+                    setPage(1);
+                    setActiveBucket(isActive ? null : bucket);
+                  }}
                 >
                   <span>{meta.label}</span>
                   <strong>{count.toLocaleString("en-IN")}</strong>
@@ -197,20 +283,10 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
             <section className="panel">
               <div className="panel-head">
                 <h3>Day-level EAD trend</h3>
+                <p className="subtle">How many live tracking IDs fall on each EAD — colored by whether that day is already overdue, today, or upcoming.</p>
               </div>
               <div className="panel-body">
-                <div className="edd-daybar-track">
-                  {payload.byDate.map((row) => (
-                    <div key={row.date} className="edd-daybar-col">
-                      <span className="edd-daybar-count">{row.count}</span>
-                      <div
-                        className={`edd-daybar-bar${row.date < today ? " overdue" : row.date === today ? " today" : ""}`}
-                        style={{ height: `${Math.max(4, Math.round((row.count / maxDayCount) * 90))}px` }}
-                      />
-                      <span className="edd-daybar-date">{formatCiaDisplayDate(row.date).replace(/, \d{4}$/, "")}</span>
-                    </div>
-                  ))}
-                </div>
+                <EddTrendChart points={payload.byDate} todayYmd={today} />
               </div>
             </section>
           ) : null}
@@ -230,15 +306,41 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
                     type="search"
                     placeholder="Search tracking ID, driver, city, order ID…"
                     value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    style={{ paddingLeft: 30 }}
+                    onChange={(event) => resetToPageOne(setSearch)(event.target.value)}
+                    style={{ paddingLeft: 30, minWidth: 240 }}
                   />
                 </div>
-                {activeBucket ? (
-                  <button type="button" className="button secondary" onClick={() => setActiveBucket(null)}>
-                    Clear bucket filter
+
+                <select className="edd-filter-select" value={stateFilter} onChange={(event) => resetToPageOne(setStateFilter)(event.target.value)}>
+                  <option value="">All states</option>
+                  {stateOptions.map((state) => (
+                    <option key={state} value={state}>{state}</option>
+                  ))}
+                </select>
+
+                <select className="edd-filter-select" value={paymentFilter} onChange={(event) => resetToPageOne(setPaymentFilter)(event.target.value)}>
+                  <option value="">All payment methods</option>
+                  {paymentOptions.map((paymentMethod) => (
+                    <option key={paymentMethod} value={paymentMethod}>{paymentMethod}</option>
+                  ))}
+                </select>
+
+                {activeBucket || stateFilter || paymentFilter || search ? (
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => {
+                      setActiveBucket(null);
+                      setStateFilter("");
+                      setPaymentFilter("");
+                      setSearch("");
+                      setPage(1);
+                    }}
+                  >
+                    Clear filters
                   </button>
                 ) : null}
+
                 <span className="subtle" style={{ marginLeft: "auto" }}>
                   Showing {sortedPackages.length.toLocaleString("en-IN")} of {payload.totalCount.toLocaleString("en-IN")}
                 </span>
@@ -248,19 +350,25 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
                 <table className="edd-table">
                   <thead>
                     <tr>
-                      <th>Tracking ID</th>
-                      <th>EAD</th>
-                      <th>Bucket</th>
-                      <th>State</th>
-                      <th>Driver</th>
-                      <th>Payment</th>
-                      <th>City</th>
-                      <th>Age in state</th>
-                      <th>Order ID</th>
+                      {COLUMNS.map((column) => {
+                        const isActive = sortColumn === column.key;
+                        return (
+                          <th key={column.key}>
+                            <button type="button" className="edd-sort-btn" onClick={() => toggleSort(column.key)}>
+                              {column.label}
+                              {isActive ? (
+                                sortDir === "asc" ? <ArrowUp size={12} className="edd-sort-icon active" /> : <ArrowDown size={12} className="edd-sort-icon active" />
+                              ) : (
+                                <ArrowUpDown size={12} className="edd-sort-icon" />
+                              )}
+                            </button>
+                          </th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedPackages.slice(0, 500).map((pkg: EddPackage) => (
+                    {pagedPackages.map((pkg: EddPackage) => (
                       <tr key={pkg.trackingId}>
                         <td>{pkg.trackingId}</td>
                         <td>
@@ -281,13 +389,38 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
                     ))}
                   </tbody>
                 </table>
-                {sortedPackages.length > 500 ? (
-                  <p className="subtle" style={{ marginTop: 10 }}>
-                    Showing the first 500 of {sortedPackages.length.toLocaleString("en-IN")} matching rows. Narrow with the search box or a bucket filter to see the rest.
-                  </p>
-                ) : null}
-                {!sortedPackages.length ? <p className="subtle" style={{ marginTop: 10 }}>No tracking IDs match this filter.</p> : null}
+                {!pagedPackages.length ? <p className="subtle" style={{ marginTop: 10 }}>No tracking IDs match this filter.</p> : null}
               </div>
+
+              {sortedPackages.length ? (
+                <div className="edd-pagination">
+                  <label className="subtle" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    Rows per page
+                    <select
+                      className="edd-filter-select"
+                      value={pageSize}
+                      onChange={(event) => {
+                        setPageSize(Number(event.target.value));
+                        setPage(1);
+                      }}
+                    >
+                      {PAGE_SIZE_OPTIONS.map((size) => (
+                        <option key={size} value={size}>{size}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div className="edd-pagination-pages">
+                    <button type="button" className="button secondary" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} aria-label="Previous page">
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span className="subtle">Page {currentPage} of {totalPages}</span>
+                    <button type="button" className="button secondary" disabled={currentPage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))} aria-label="Next page">
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </section>
         </>

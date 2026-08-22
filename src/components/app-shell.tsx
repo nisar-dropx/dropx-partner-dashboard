@@ -9,6 +9,7 @@ import { PaymentNotificationProvider } from "@/components/payment-notification-p
 import { OpsContextSwitcher } from "@/components/ops-context-switcher";
 import { OpsAiChat } from "@/components/ops-ai-chat";
 import { SidebarNav } from "@/components/sidebar-nav";
+import { TrackingIdSearch } from "@/components/tracking-id-search";
 import { UserMenu } from "@/components/user-menu";
 import { redirect } from "next/navigation";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
@@ -117,6 +118,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
     <AppShellFrame
       desktopActions={topActions}
       mobileActions={topActions}
+      topLeftActions={isOpsHost ? <TrackingIdSearch /> : null}
       sidebar={(
         <aside className="sidebar">
           <div className="brand">

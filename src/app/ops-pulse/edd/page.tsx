@@ -1,4 +1,4 @@
-import { CodSectionTabs } from "@/components/cod-section-tabs";
+import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { requireCompanyId } from "@/lib/company-scope";
 import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
@@ -51,42 +51,43 @@ export default async function EddDashboardPage({
   const workerConfigured = isEddWorkerConfigured();
 
   return (
-    <>
-      <PageHead
-        eyebrow="Ops Pulse · Live tracking"
-        title="EDD Dashboard"
-        subtitle="Every live tracking ID at a station, bucketed by Estimated Delivery Date — pulled live from Amazon's station ageing dashboard."
-        action={<span className={`status-pill ${workerConfigured ? "good" : "warn"}`}>{workerConfigured ? "Live" : "Setup needed"}</span>}
-      />
-      <CodSectionTabs active="edd" />
+    <AppShell active="EDD Dashboard" pageCode="edd_dashboard">
+      <div className="ops-command-center">
+        <PageHead
+          eyebrow="Ops Pulse · Live tracking"
+          title="EDD Dashboard"
+          subtitle="Every live tracking ID at a station, bucketed by Estimated Delivery Date — pulled live from Amazon's station ageing dashboard."
+          action={<span className={`status-pill ${workerConfigured ? "good" : "warn"}`}>{workerConfigured ? "Live" : "Setup needed"}</span>}
+        />
 
-      {!workerConfigured ? (
-        <section className="panel message-panel error">
-          <div className="panel-body">
-            <strong>EDD worker is not configured</strong>
-            <p className="subtle" style={{ marginTop: 6 }}>
-              Set <code>EDD_WORKER_URL</code> and <code>EDD_WORKER_ADMIN_KEY</code> in this deployment&apos;s environment
-              variables, pointing at the amazon-edd-worker service, then reload this page.
-            </p>
-          </div>
-        </section>
-      ) : null}
+        {!workerConfigured ? (
+          <section className="panel message-panel error">
+            <div className="panel-body">
+              <strong>EDD worker is not configured</strong>
+              <p className="subtle" style={{ marginTop: 6 }}>
+                Set <code>EDD_WORKER_URL</code> and <code>EDD_WORKER_ADMIN_KEY</code> in this deployment&apos;s environment
+                variables, pointing at the amazon-edd-worker service, then reload this page.
+              </p>
+            </div>
+          </section>
+        ) : null}
 
-      {workerConfigured && !stations.length ? (
-        <section className="panel message-panel error">
-          <div className="panel-body">
-            <strong>No stations found</strong>
-            <p className="subtle" style={{ marginTop: 6 }}>
-              Add an active station under Ops Masters &gt; Station Master (optionally with a Portal Station Code in
-              COD Master if it differs from the internal station code) before using the EDD dashboard.
-            </p>
-          </div>
-        </section>
-      ) : null}
+        {workerConfigured && !stations.length ? (
+          <section className="panel message-panel error">
+            <div className="panel-body">
+              <strong>No stations found</strong>
+              <p className="subtle" style={{ marginTop: 6 }}>
+                Add an active station under Ops Masters &gt; Station Master (optionally with a Portal Station Code in
+                COD Master if it differs from the internal station code) before using the EDD dashboard.
+              </p>
+            </div>
+          </section>
+        ) : null}
 
-      {workerConfigured && stations.length ? (
-        <EddClient stations={stations} initialStation={initialStation} />
-      ) : null}
-    </>
+        {workerConfigured && stations.length ? (
+          <EddClient stations={stations} initialStation={initialStation} />
+        ) : null}
+      </div>
+    </AppShell>
   );
 }

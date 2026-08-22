@@ -114,14 +114,15 @@ function modelOperations(mode: OperatingMode): NavItem {
       { code: "cod_executive_reconciliation", label: "Executive Reconciliation", href: "/cod/executive-reconciliation?client=amazon" },
       { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=amazon" },
       { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=amazon" },
-      { code: "cod_cash_in_associate", label: "Cash In Associate", href: "/cod/cash-in-associate?client=amazon" },
-      { code: "edd_dashboard", label: "EDD Dashboard", href: "/cod/edd?client=amazon" }
+      { code: "cod_cash_in_associate", label: "Cash In Associate", href: "/cod/cash-in-associate?client=amazon" }
     ]
   };
 }
 
+const eddDashboard: NavItem = { code: "edd_dashboard", label: "EDD Dashboard", href: "/edd", icon: "E" };
+
 export function opsNavItemsForMode(mode: OperatingMode): NavItem[] {
-  return [...commonStart, modelOperations(mode), businessDocuments, payments, cps, fleetNavItem, reports, ...administration];
+  return [...commonStart, modelOperations(mode), eddDashboard, businessDocuments, payments, cps, fleetNavItem, reports, ...administration];
 }
 
 export function normalizeOpsClient(value: string | null | undefined) {
