@@ -2349,6 +2349,42 @@ h3 {
   font-weight: 800;
 }
 
+.mapping-provider-member-name {
+  display: block;
+  min-height: 15px;
+  text-transform: none;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.mapping-provider-member-name.matched {
+  color: #067647;
+}
+
+.mapping-provider-member-name.pending {
+  color: var(--muted);
+}
+
+.mapping-provider-member-name.missing {
+  color: #b42318;
+}
+
+.mapping-payment-method-select .searchable-control {
+  min-height: 31px;
+  border-radius: 5px;
+}
+
+.mapping-payment-method-select .searchable-input {
+  min-height: 29px;
+  padding: 0 56px 0 8px;
+  font-size: 12px;
+}
+
+.mapping-payment-method-select .searchable-menu {
+  min-width: 240px;
+}
+
 .mapping-edit-grid {
   grid-template-columns: repeat(5, minmax(120px, 180px));
   align-items: flex-end;
@@ -2356,13 +2392,18 @@ h3 {
 }
 
 .mapping-identity label,
-.mapping-edit-grid label {
+.mapping-edit-grid label,
+.mapping-field {
   display: grid;
   gap: 4px;
   color: var(--muted);
   font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.mapping-field-label {
+  display: block;
 }
 
 .mapping-edit-grid .wide-field {
