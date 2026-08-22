@@ -364,7 +364,7 @@ export function ProviderMappingWorksheet({
   }
 
   return (
-    <form action={saveProviderMappingWorksheet} className="worksheet-form" onSubmit={handleSubmit}>
+    <form action={saveProviderMappingWorksheet} autoComplete="off" className="worksheet-form" onSubmit={handleSubmit}>
       <input type="hidden" name="row_count" value={rows.length} />
       <input
         type="hidden"
@@ -385,6 +385,7 @@ export function ProviderMappingWorksheet({
         <div className="mapping-filters">
           <label className="mapping-filter-search">Search
             <input
+              autoComplete="off"
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="DropX ID, name or provider member ID"
               type="search"

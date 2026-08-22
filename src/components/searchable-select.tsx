@@ -96,6 +96,8 @@ export function SearchableSelect({ name, options, defaultValue, value: controlle
   }
 
   useEffect(() => {
+    if (!open) return;
+
     function closeOnOutsideClick(event: MouseEvent) {
       if (!wrapperRef.current?.contains(event.target as Node)) {
         syncExactMatch();
@@ -104,7 +106,7 @@ export function SearchableSelect({ name, options, defaultValue, value: controlle
 
     document.addEventListener("mousedown", closeOnOutsideClick);
     return () => document.removeEventListener("mousedown", closeOnOutsideClick);
-  });
+  }, [open]);
 
   useEffect(() => {
     inputRef.current?.setCustomValidity(required && !value ? "Select an option from the list." : "");
@@ -140,6 +142,7 @@ export function SearchableSelect({ name, options, defaultValue, value: controlle
       <div className={`searchable-control ${open ? "open" : ""} ${disabled ? "disabled" : ""}`}>
         <input
           aria-required={required}
+          autoComplete="off"
           className="searchable-input"
           disabled={disabled}
           onBlur={() => window.setTimeout(syncExactMatch, 180)}
