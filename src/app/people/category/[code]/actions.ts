@@ -4,10 +4,13 @@ import { createHash, randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { currentAccessSurface } from "@/lib/access-surface";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { cleanCountryCode } from "@/lib/country-codes";
 import { dynamicWorkforceTable, isCustomWorkforceCategoryCode, normalizeWorkforceCategoryCode, workforceCategoryPageCode } from "@/lib/dynamic-workforce";
 import { generateConfiguredBiometricId, generateConfiguredWorkerId } from "@/lib/dropx-id-generation";
+import { requireDesignationOnboardingAccess } from "@/lib/designation-onboarding-access";
+import { requireDesignationPortalAccess } from "@/lib/designation-portal-access";
 import { moveProfileDocumentToTrash, uploadProfileDocument } from "@/lib/profile-document-storage";
 import { normalizeCategoryProfileFieldRules } from "@/lib/profile-field-rules";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -58,6 +61,17 @@ function categoryPath(code: string, params?: Record<string, string>) {
   return `/people/category/${encodeURIComponent(code)}${query}`;
 }
 
+function categoryReturnPath(code: string, formData: FormData) {
+  const requested = String(formData.get("return_path") ?? "");
+  if (currentAccessSurface() === "ops" && code === "helpers" && requested === "/work-force-register/helpers") return requested;
+  return `/people/category/${encodeURIComponent(code)}`;
+}
+
+function returnPathWithParams(path: string, params?: Record<string, string>) {
+  const query = params ? `?${new URLSearchParams(params).toString()}` : "";
+  return `${path}${query}`;
+}
+
 function fallbackDropxId(code: string) {
   const prefix = code.replace(/[^a-z0-9]/gi, "").slice(0, 3).toUpperCase() || "WRK";
   return `${prefix}-${Date.now().toString(36).toUpperCase()}`;
@@ -68,7 +82,8 @@ export async function createDynamicWorkforceProfile(formData: FormData) {
   if (!isCustomWorkforceCategoryCode(code)) redirect("/people/all");
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
-  const pageCode = workforceCategoryPageCode(code);
+  const returnPath = categoryReturnPath(code, formData);
+  const pageCode = returnPath === "/work-force-register/helpers" ? "contractors" : workforceCategoryPageCode(code);
   if (!hasPermission(authorization, pageCode, "add")) redirect(`/unauthorized?page=${encodeURIComponent(pageCode)}&action=add`);
   const companyId = requireCompanyId(authorization);
 
@@ -121,7 +136,7 @@ export async function createDynamicWorkforceProfile(formData: FormData) {
 
     const [locationResult, designationResult] = await Promise.all([
       supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("id", locationId).eq("is_active", true).maybeSingle(),
-      supabaseAdmin.from("designations").select("id, onboarding_categories").eq("company_id", companyId).eq("name", designation).eq("is_active", true).maybeSingle()
+      supabaseAdmin.from("designations").select("id, onboarding_categories, onboarding_role_ids, portal_permissions").eq("company_id", companyId).eq("name", designation).eq("is_active", true).maybeSingle()
     ]);
     if (locationResult.error) throw new Error(locationResult.error.message);
     if (!locationResult.data) throw new Error("Selected location is unavailable.");
@@ -129,6 +144,8 @@ export async function createDynamicWorkforceProfile(formData: FormData) {
     if (!designationResult.data || !((designationResult.data.onboarding_categories ?? []) as string[]).includes(code)) {
       throw new Error("Selected designation is unavailable for this category.");
     }
+    requireDesignationOnboardingAccess(designationResult.data, authorization);
+    requireDesignationPortalAccess(designationResult.data, currentAccessSurface(), "add");
 
     const [dropxId, biometricId] = await Promise.all([
       generateConfiguredWorkerId({
@@ -189,10 +206,11 @@ export async function createDynamicWorkforceProfile(formData: FormData) {
       }
     }
     revalidatePath(`/people/category/${code}`);
+    revalidatePath(returnPath);
     revalidatePath("/people/all");
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to add profile.";
-    redirect(categoryPath(code, {
+    redirect(returnPathWithParams(returnPath, {
       error: message,
       full_name: String(formData.get("full_name") ?? ""),
       mobile_country_code: cleanCountryCode(formData.get("mobile_country_code")),
@@ -203,7 +221,7 @@ export async function createDynamicWorkforceProfile(formData: FormData) {
       designation: String(formData.get("designation") ?? "")
     }));
   }
-  redirect(categoryPath(code, { notice: "Profile added successfully." }));
+  redirect(returnPathWithParams(returnPath, { notice: "Profile added successfully." }));
 }
 
 export async function updateDynamicWorkforceProfile(formData: FormData) {

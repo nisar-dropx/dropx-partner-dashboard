@@ -14,7 +14,7 @@ const categoryConfig = {
   helpers: { addTitle: "Add helper", category: "workers" as const, detailSubtitle: "Complete helper profile", editTitle: "Edit helper", emptyLabel: "No helpers added yet.", entityLabel: "Helper", listTitle: "Helper register", returnPath: "/work-force-register/helpers" as const }
 };
 
-function RegisterNavigation({ active }: { active: RegisterCategory }) {
+export function RegisterNavigation({ active }: { active: RegisterCategory }) {
   return (
     <nav className="tabs" aria-label="Work force categories">
       <PendingLink className={`tab${active === "contractors" ? " active" : ""}`} href="/work-force-register">Independent Contractors</PendingLink>

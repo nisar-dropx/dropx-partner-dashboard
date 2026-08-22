@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import type { ReactNode } from "react";
 import { createDynamicWorkforceProfile, updateDynamicWorkforceProfile } from "@/app/people/category/[code]/actions";
 import { AppShell } from "@/components/app-shell";
 import { FieldExecutiveList, type FieldExecutiveListRow } from "@/components/field-executive-list";
@@ -12,11 +13,14 @@ import { normalizeCategoryProfileFieldRules } from "@/lib/profile-field-rules";
 import { workforceProfileFields } from "@/lib/profile-field-rules";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { currentAccessSurface, type AccessSurface } from "@/lib/access-surface";
 import { requireCompanyId } from "@/lib/company-scope";
 import { countryCodeOptions } from "@/lib/country-codes";
 import { formatDashboardDate } from "@/lib/date-format";
 import { dynamicWorkforceTable, isCustomWorkforceCategoryCode, normalizeWorkforceCategoryCode, singularCategoryLabel, workforceCategoryPageCode } from "@/lib/dynamic-workforce";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { canOnboardDesignation } from "@/lib/designation-onboarding-access";
+import { canAccessDesignationPortal } from "@/lib/designation-portal-access";
 
 type CategoryRow = {
   code: string;
@@ -42,6 +46,8 @@ type DesignationRow = {
   name: string;
   model_ids: string[] | null;
   onboarding_categories: string[] | null;
+  onboarding_role_ids?: string[] | null;
+  portal_permissions?: unknown;
 };
 
 type ProfileRow = {
@@ -123,16 +129,24 @@ const countryOptions = countryCodeOptions.map((country) => ({
 
 export const dynamic = "force-dynamic";
 
-export default async function DynamicWorkforceCategoryPage({
+export async function DynamicWorkforceCategoryPageContent({
   params,
-  searchParams
+  searchParams,
+  pageCodeOverride,
+  returnPathOverride,
+  registerNavigation
 }: {
   params: { code: string };
   searchParams?: Record<string, string | undefined>;
+  pageCodeOverride?: string;
+  returnPathOverride?: string;
+  registerNavigation?: ReactNode;
 }) {
   const code = normalizeWorkforceCategoryCode(params.code);
   if (!isCustomWorkforceCategoryCode(code)) notFound();
-  const pageCode = workforceCategoryPageCode(code);
+  const pageCode = pageCodeOverride ?? workforceCategoryPageCode(code);
+  const returnPath = returnPathOverride ?? `/people/category/${code}`;
+  const accessSurface: AccessSurface = currentAccessSurface();
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
   if (!hasPermission(authorization, pageCode, "access")) redirect(`/unauthorized?page=${encodeURIComponent(pageCode)}&action=access`);
@@ -162,7 +176,7 @@ export default async function DynamicWorkforceCategoryPage({
       .order("station_code"),
     supabaseAdmin
       .from("designations")
-      .select("id, code, name, model_ids, onboarding_categories")
+      .select("id, code, name, model_ids, onboarding_categories, onboarding_role_ids, portal_permissions")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("name")
@@ -177,15 +191,20 @@ export default async function DynamicWorkforceCategoryPage({
 
   const rawLocations = (locationsResult.data ?? []) as unknown as LocationRow[];
   const locations = filterOnboardingLocations(rawLocations, authorization);
+  const ownerAccess = authorization.isMasterOwner || authorization.roleCode === "OWNER";
   const designations = ((designationsResult.data ?? []) as unknown as DesignationRow[])
-    .filter((designation) => (designation.onboarding_categories ?? []).includes(code));
+    .filter((designation) => (designation.onboarding_categories ?? []).includes(code))
+    .filter((designation) => canAccessDesignationPortal(designation, accessSurface, "view", { isOwner: accessSurface === "dashboard" && ownerAccess }));
   const locationOptions = locations.map((location) => ({
     value: location.id,
     label: location.station_code,
     helper: first(location.providers)?.name || location.station_name || undefined,
     modelId: location.location_model_id
   }));
-  const designationOptions = designations.map((designation) => ({
+  const designationOptions = designations
+    .filter((designation) => canAccessDesignationPortal(designation, accessSurface, "add", { isOwner: accessSurface === "dashboard" && ownerAccess }))
+    .filter((designation) => canOnboardDesignation(designation, authorization))
+    .map((designation) => ({
     value: designation.name,
     label: designation.name,
     helper: designation.code,
@@ -225,6 +244,7 @@ export default async function DynamicWorkforceCategoryPage({
   return (
     <AppShell active={category.name} pageCode={pageCode}>
       <PageHead eyebrow="Workforce master" title={category.name} subtitle={`Register and maintain ${category.name.toLowerCase()} by location.`} />
+      {registerNavigation}
       {error || searchParams?.notice ? (
         <section className={`panel message-panel ${error ? "error" : "success"}`}>
           <div className="panel-body">
@@ -242,6 +262,7 @@ export default async function DynamicWorkforceCategoryPage({
           <div className="panel-head"><h2>{`Add ${entityLabel.toLowerCase()}`}</h2></div>
           <form action={createDynamicWorkforceProfile} className="form-grid three field-executive-add-form">
             <input name="category_code" type="hidden" value={code} />
+            <input name="return_path" type="hidden" value={returnPath} />
             <label>Full name<input className="field" defaultValue={searchParams?.full_name ?? ""} name="full_name" placeholder="Enter full name" required /></label>
             <label className="field-executive-mobile-group">Mobile number
               <div className="field-executive-mobile-row">
@@ -279,14 +300,14 @@ export default async function DynamicWorkforceCategoryPage({
         </section>
       ) : null}
 
-      <FieldExecutiveList basePath={`/people/category/${code}`} canEdit={canEdit} emptyLabel={`No ${category.name.toLowerCase()} added yet.`} rows={rows} title={`${category.name} register`} />
+      <FieldExecutiveList basePath={returnPath} canEdit={canEdit} emptyLabel={`No ${category.name.toLowerCase()} added yet.`} rows={rows} title={`${category.name} register`} />
 
       {searchParams?.view && selectedProfile ? (
         <div className="modal-backdrop">
           <section className="modal-panel wide" aria-label={`View ${entityLabel.toLowerCase()}`}>
             <div className="panel-head">
               <div><h2>{selectedProfile.full_name}</h2><p className="subtle">Complete {entityLabel.toLowerCase()} profile</p></div>
-              <PendingLink className="icon-button" href={`/people/category/${code}`} scroll={false} aria-label="Close profile details">x</PendingLink>
+              <PendingLink className="icon-button" href={returnPath} scroll={false} aria-label="Close profile details">x</PendingLink>
             </div>
             <div className="executive-details">
               <section><h3>Profile</h3><dl className="executive-detail-grid">
@@ -320,7 +341,7 @@ export default async function DynamicWorkforceCategoryPage({
           <section className="modal-panel wide" aria-label={`Edit ${entityLabel.toLowerCase()}`}>
             <div className="panel-head">
               <div><h2>Edit {entityLabel.toLowerCase()}</h2><p className="subtle">Maintain the complete registration profile.</p></div>
-              <PendingLink className="icon-button" href={`/people/category/${code}`} scroll={false} aria-label="Close profile editor">x</PendingLink>
+              <PendingLink className="icon-button" href={returnPath} scroll={false} aria-label="Close profile editor">x</PendingLink>
             </div>
             <form action={updateDynamicWorkforceProfile} className="form-grid three" encType="multipart/form-data">
               <input name="category_code" type="hidden" value={code} /><input name="id" type="hidden" value={selectedProfile.id} />
@@ -346,4 +367,11 @@ export default async function DynamicWorkforceCategoryPage({
       ) : null}
     </AppShell>
   );
+}
+
+export default async function DynamicWorkforceCategoryPage(props: {
+  params: { code: string };
+  searchParams?: Record<string, string | undefined>;
+}) {
+  return <DynamicWorkforceCategoryPageContent {...props} />;
 }
