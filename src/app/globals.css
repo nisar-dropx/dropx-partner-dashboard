@@ -2326,12 +2326,32 @@ h3 {
   text-transform: uppercase;
 }
 
-.mapping-filters input,
-.mapping-filters select,
+.mapping-filter-search > input,
+.mapping-filters > label > select,
 .mapping-filters .searchable-control {
   min-height: 40px;
   border-radius: 8px;
   background: #fff;
+}
+
+.mapping-multi-filter .multi-select-trigger {
+  width: 100%;
+  min-height: 40px;
+  background: #fff;
+}
+
+.mapping-filter-menu {
+  z-index: 60;
+  width: max(100%, 300px);
+  max-width: min(420px, 90vw);
+}
+
+.mapping-filter-menu .multi-select-search-field {
+  min-width: 0;
+}
+
+.mapping-filter-empty {
+  padding: 10px 12px;
 }
 
 .mapping-filter-summary {

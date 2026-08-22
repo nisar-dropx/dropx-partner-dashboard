@@ -1,1 +1,5 @@
-export { default } from "@/app/field-executive/page";
+import { redirect } from "next/navigation";
+
+export default function LegacyFieldExecutivePage() {
+  redirect("/work-force-register");
+}

@@ -319,7 +319,7 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
           </article>
 
           <article className="ops-module">
-            <header><div><span>DA ONBOARDING</span><h2>In-app completion</h2></div><Link href="/field-executive">Open onboarding →</Link></header>
+            <header><div><span>WORK FORCE REGISTER</span><h2>Contractor onboarding</h2></div><Link href="/work-force-register">Open register →</Link></header>
             <div className="ops-onboarding-figure">
               <div><strong>{onboardingPending}</strong><span>Pending</span></div>
               <div><strong>{onboardingActive}</strong><span>Completed</span></div>

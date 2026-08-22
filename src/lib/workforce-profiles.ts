@@ -11,6 +11,7 @@ export type NonEmployeeProfileType = Exclude<WorkforceProfileType, "employee">;
 
 export type NonEmployeeRoute =
   | "/field-executive"
+  | "/work-force-register"
   | "/contractors"
   | "/vendors"
   | "/workers";
@@ -78,6 +79,9 @@ export function nonEmployeeConfigForProfileType(value: unknown) {
 
 export function nonEmployeeConfigForRoute(value: unknown) {
   const route = String(value ?? "") as NonEmployeeRoute;
+  if (route === "/work-force-register") {
+    return { ...nonEmployeeProfileConfigs.contractor, route };
+  }
   return Object.values(nonEmployeeProfileConfigs).find((config) => config.route === route) ??
     nonEmployeeProfileConfigs.field_executive;
 }

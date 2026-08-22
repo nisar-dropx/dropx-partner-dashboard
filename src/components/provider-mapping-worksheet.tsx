@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { saveProviderMappingWorksheet } from "@/app/provider-mapping/actions";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -93,6 +93,82 @@ type ProviderMemberLookupResult = {
   name: string | null;
   workDate: string | null;
 };
+
+type FilterOption = { value: string; label: string };
+
+function MappingMultiFilter({
+  allLabel,
+  label,
+  options,
+  selected,
+  setSelected
+}: {
+  allLabel: string;
+  label: string;
+  options: FilterOption[];
+  selected: string[];
+  setSelected: (values: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const visibleOptions = query.trim()
+    ? options.filter((option) => option.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+    : options;
+  const optionByValue = new Map(options.map((option) => [option.value, option.label]));
+  const summary = selected.length === 0
+    ? allLabel
+    : selected.length <= 2
+      ? selected.map((value) => optionByValue.get(value) ?? value).join(", ")
+      : `${selected.length} selected`;
+
+  useEffect(() => {
+    if (!open) return;
+    function close(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  function toggle(value: string) {
+    setSelected(selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value]);
+  }
+
+  return (
+    <div className="mapping-filter-field mapping-multi-filter" ref={rootRef}>
+      <span className="mapping-field-label">{label}</span>
+      <div className="multi-select">
+        <button aria-expanded={open} className={`multi-select-trigger ${open ? "open" : ""}`} onClick={() => setOpen((current) => !current)} type="button">
+          <span className="multi-select-summary">{summary}</span><span aria-hidden="true">⌄</span>
+        </button>
+        {open ? <div className="multi-select-menu mapping-filter-menu">
+          <div className="multi-select-search">
+            <input autoFocus className="field multi-select-search-field" onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${label.toLocaleLowerCase()}`} type="search" value={query} />
+          </div>
+          <label className="multi-select-all">
+            <input checked={selected.length === 0} onChange={() => setSelected([])} type="checkbox" />
+            <span>{allLabel}</span>
+          </label>
+          <div className="multi-select-options">
+            {visibleOptions.map((option) => <label className="multi-select-option" key={option.value}>
+              <input checked={selected.includes(option.value)} onChange={() => toggle(option.value)} type="checkbox" />
+              <span>{option.label}</span>
+            </label>)}
+            {!visibleOptions.length ? <p className="subtle mapping-filter-empty">No matching options</p> : null}
+          </div>
+        </div> : null}
+      </div>
+    </div>
+  );
+}
 
 type ProviderMemberLookupStatus = {
   providerMemberId: string;
@@ -206,9 +282,9 @@ export function ProviderMappingWorksheet({
   const [memberLookupRows, setMemberLookupRows] = useState<Set<number>>(() => new Set());
   const [memberLookupStatuses, setMemberLookupStatuses] = useState<Record<number, ProviderMemberLookupStatus>>({});
   const [searchQuery, setSearchQuery] = useState("");
-  const [locationFilter, setLocationFilter] = useState("");
-  const [paymentMethodFilter, setPaymentMethodFilter] = useState("");
-  const [mappingStatusFilter, setMappingStatusFilter] = useState("");
+  const [locationFilters, setLocationFilters] = useState<string[]>([]);
+  const [paymentMethodFilters, setPaymentMethodFilters] = useState<string[]>([]);
+  const [mappingStatusFilters, setMappingStatusFilters] = useState<string[]>([]);
 
   const handleLookupChange = useCallback((index: number, status: ProviderMemberLookupStatus) => {
     setMemberLookupStatuses((current) => ({ ...current, [index]: status }));
@@ -340,17 +416,17 @@ export function ProviderMappingWorksheet({
       row.providerMemberId,
       locationLabelById.get(row.stationId) ?? ""
     ].some((value) => value.toLocaleLowerCase().includes(normalizedSearchQuery));
-    const locationMatches = !locationFilter || row.stationId === locationFilter;
-    const paymentMethodMatches = !paymentMethodFilter || row.paymentMethodId === paymentMethodFilter;
+    const locationMatches = !locationFilters.length || locationFilters.includes(row.stationId);
+    const paymentMethodMatches = !paymentMethodFilters.length || paymentMethodFilters.includes(row.paymentMethodId);
     const isMapped = Boolean(row.mappingId || (row.providerMemberId && row.paymentMethodId));
-    const statusMatches = !mappingStatusFilter
-      || (mappingStatusFilter === "mapped" && isMapped)
-      || (mappingStatusFilter === "unmapped" && !isMapped)
-      || (mappingStatusFilter === "unsaved" && dirtyRows[index]);
+    const statusMatches = !mappingStatusFilters.length
+      || (mappingStatusFilters.includes("mapped") && isMapped)
+      || (mappingStatusFilters.includes("unmapped") && !isMapped)
+      || (mappingStatusFilters.includes("unsaved") && dirtyRows[index]);
     return searchMatches && locationMatches && paymentMethodMatches && statusMatches;
   });
   const visibleRowCount = visibleRows.filter(Boolean).length;
-  const hasFilters = Boolean(searchQuery || locationFilter || paymentMethodFilter || mappingStatusFilter);
+  const hasFilters = Boolean(searchQuery || locationFilters.length || paymentMethodFilters.length || mappingStatusFilters.length);
 
   if (!rows.length) {
     return (
@@ -392,41 +468,20 @@ export function ProviderMappingWorksheet({
               value={searchQuery}
             />
           </label>
-          <div className="mapping-filter-field">
-            <span className="mapping-field-label">Location</span>
-            <SearchableSelect
-              name="worksheet_location_filter"
-              onValueChange={setLocationFilter}
-              options={locationFilterOptions}
-              placeholder="All allocated locations"
-              value={locationFilter}
-            />
-          </div>
-          <div className="mapping-filter-field">
-            <span className="mapping-field-label">Payment method</span>
-            <SearchableSelect
-              name="worksheet_payment_method_filter"
-              onValueChange={setPaymentMethodFilter}
-              options={paymentMethodOptions}
-              placeholder="All payment methods"
-              value={paymentMethodFilter}
-            />
-          </div>
-          <label>Status
-            <select onChange={(event) => setMappingStatusFilter(event.target.value)} value={mappingStatusFilter}>
-              <option value="">All statuses</option>
-              <option value="mapped">Mapped</option>
-              <option value="unmapped">Unmapped</option>
-              <option value="unsaved">Unsaved</option>
-            </select>
-          </label>
+          <MappingMultiFilter allLabel="All allocated locations" label="Location" options={locationFilterOptions} selected={locationFilters} setSelected={setLocationFilters} />
+          <MappingMultiFilter allLabel="All payment methods" label="Payment method" options={paymentMethodOptions.map(({ value, label }) => ({ value, label }))} selected={paymentMethodFilters} setSelected={setPaymentMethodFilters} />
+          <MappingMultiFilter allLabel="All statuses" label="Status" options={[
+            { value: "mapped", label: "Mapped" },
+            { value: "unmapped", label: "Unmapped" },
+            { value: "unsaved", label: "Unsaved" }
+          ]} selected={mappingStatusFilters} setSelected={setMappingStatusFilters} />
           <div className="mapping-filter-summary">
             <span>{visibleRowCount} of {rows.length} records</span>
             {hasFilters ? <button className="button secondary compact" onClick={() => {
               setSearchQuery("");
-              setLocationFilter("");
-              setPaymentMethodFilter("");
-              setMappingStatusFilter("");
+              setLocationFilters([]);
+              setPaymentMethodFilters([]);
+              setMappingStatusFilters([]);
             }} type="button">Clear</button> : null}
           </div>
         </div>
