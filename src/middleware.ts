@@ -195,7 +195,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.rewrite(rewriteUrl);
   }
 
-  if (isOpsHost && isCleanOpsPath(path)) {
+  if (isOpsHost && path !== "/unauthorized" && isCleanOpsPath(path)) {
     const rewriteUrl = request.nextUrl.clone();
     rewriteUrl.pathname = path === "/" ? "/ops-pulse" : `/ops-pulse${path}`;
     const rewriteResponse = NextResponse.rewrite(rewriteUrl);

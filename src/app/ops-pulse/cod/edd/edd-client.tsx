@@ -148,7 +148,7 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
           <span className="subtle" style={{ marginLeft: "auto" }}>
             {payload
               ? `${payload.totalCount.toLocaleString("en-IN")} live TIDs · ${formatCiaDisplayDate(payload.window.from)} - ${formatCiaDisplayDate(payload.window.to)} · fetched ${formatFetchedAt(payload.fetchedAt)}`
-              : " "}
+              : " "}
           </span>
         </div>
       </section>
@@ -235,7 +235,7 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
                   />
                 </div>
                 {activeBucket ? (
-                  <button type="button" className="btn-secondary" onClick={() => setActiveBucket(null)}>
+                  <button type="button" className="button secondary" onClick={() => setActiveBucket(null)}>
                     Clear bucket filter
                   </button>
                 ) : null}

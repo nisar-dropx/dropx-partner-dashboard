@@ -15,7 +15,6 @@ const commonStart: NavItem[] = [
       { code: "capacity_hiring", label: "Hiring Review", href: "/capacity/hiring" }
     ]
   },
-  { code: "edd_dashboard", label: "EDD Dashboard", href: "/ops-pulse/edd", icon: "E" },
   { code: "service_network", label: "Network Planning", href: "/service-network", icon: "N" },
   { code: "contractors", label: "Work Force Register", href: "/work-force-register", icon: "+" }
 ];
@@ -115,7 +114,8 @@ function modelOperations(mode: OperatingMode): NavItem {
       { code: "cod_executive_reconciliation", label: "Executive Reconciliation", href: "/cod/executive-reconciliation?client=amazon" },
       { code: "cod_submission", label: "COD Submission", href: "/cod/submission?client=amazon" },
       { code: "cod_reports", label: "COD Reports", href: "/cod/reports?client=amazon" },
-      { code: "cod_cash_in_associate", label: "Cash In Associate", href: "/cod/cash-in-associate?client=amazon" }
+      { code: "cod_cash_in_associate", label: "Cash In Associate", href: "/cod/cash-in-associate?client=amazon" },
+      { code: "edd_dashboard", label: "EDD Dashboard", href: "/cod/edd?client=amazon" }
     ]
   };
 }
