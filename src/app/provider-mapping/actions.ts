@@ -71,6 +71,14 @@ function previousDate(dateValue: string) {
   return date.toISOString().slice(0, 10);
 }
 
+function comparableProviderName(value: string) {
+  return value
+    .split("/")[0]
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}]+/gu, "")
+    .toLocaleUpperCase();
+}
+
 async function saveExecutiveMappingRow(formData: FormData, index: number, createdBy: string, companyId: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
@@ -102,7 +110,7 @@ async function saveExecutiveMappingRow(formData: FormData, index: number, create
     sourceType === "employee"
       ? supabaseAdmin
         .from("employees")
-        .select("id, designations!inner(is_field_operations)")
+        .select("id, full_name, designations!inner(is_field_operations)")
         .eq("id", id)
         .eq("company_id", companyId)
         .eq("is_active", true)
@@ -112,7 +120,7 @@ async function saveExecutiveMappingRow(formData: FormData, index: number, create
       : sourceType === "contractor"
         ? supabaseAdmin
           .from("contractors")
-          .select("id, designation")
+          .select("id, full_name, designation")
           .eq("id", id)
           .eq("company_id", companyId)
           .eq("is_active", true)
@@ -120,7 +128,7 @@ async function saveExecutiveMappingRow(formData: FormData, index: number, create
           .maybeSingle()
         : supabaseAdmin
         .from("field_executives")
-        .select("id")
+        .select("id, full_name")
         .eq("id", id)
         .eq("company_id", companyId)
         .eq("is_active", true)
@@ -134,6 +142,24 @@ async function saveExecutiveMappingRow(formData: FormData, index: number, create
   ]);
 
   if (!worker) throw new Error(`Row ${index + 1}: Field Operations worker was not found for this company.`);
+  const dropxName = String((worker as { full_name?: string | null }).full_name ?? "").trim();
+  const { data: uploadedMember, error: uploadedMemberError } = await supabaseAdmin
+    .from("cps_shipment_daily")
+    .select("provider_employee_name")
+    .eq("company_id", companyId)
+    .eq("provider_employee_id", providerMemberId)
+    .order("work_date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (uploadedMemberError) throw new Error(uploadedMemberError.message);
+  const uploadedHolderName = String(uploadedMember?.provider_employee_name ?? "").trim();
+  if (!uploadedHolderName) {
+    throw new Error(`Row ${index + 1}: No uploaded holder was found for this Provider Member ID.`);
+  }
+  if (!dropxName || comparableProviderName(uploadedHolderName) !== comparableProviderName(dropxName)) {
+    throw new Error(`Row ${index + 1}: Uploaded holder name does not match the DropX name.`);
+  }
   if (sourceType === "contractor") {
     const contractorDesignation = String((worker as { designation?: string | null }).designation ?? "").trim().toLowerCase();
     const { data: fieldOperationsDesignations } = await supabaseAdmin

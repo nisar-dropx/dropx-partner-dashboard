@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { saveProviderMappingWorksheet } from "@/app/provider-mapping/actions";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -72,13 +72,13 @@ function rowSignature(row: MappingWorksheetRow) {
   ].join("|");
 }
 
-function RowSaveButton({ canEdit, dirty, index }: { canEdit: boolean; dirty: boolean; index: number }) {
+function RowSaveButton({ canEdit, dirty, index, lookupValid }: { canEdit: boolean; dirty: boolean; index: number; lookupValid: boolean }) {
   const { pending } = useFormStatus();
 
   return (
     <button
       className={`button compact mapping-row-save${dirty ? "" : " secondary"}`}
-      disabled={pending || !canEdit || !dirty}
+      disabled={pending || !canEdit || !dirty || !lookupValid}
       name="save_row"
       type="submit"
       value={index}
@@ -94,7 +94,34 @@ type ProviderMemberLookupResult = {
   workDate: string | null;
 };
 
-function ProviderMemberName({ enabled, providerMemberId }: { enabled: boolean; providerMemberId: string }) {
+type ProviderMemberLookupStatus = {
+  providerMemberId: string;
+  name: string | null;
+  matches: boolean;
+  loading: boolean;
+};
+
+function comparableName(value: string) {
+  return value
+    .split("/")[0]
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}]+/gu, "")
+    .toLocaleUpperCase();
+}
+
+function ProviderMemberName({
+  dropxName,
+  enabled,
+  index,
+  onLookupChange,
+  providerMemberId
+}: {
+  dropxName: string;
+  enabled: boolean;
+  index: number;
+  onLookupChange: (index: number, status: ProviderMemberLookupStatus) => void;
+  providerMemberId: string;
+}) {
   const [result, setResult] = useState<ProviderMemberLookupResult | null>(null);
   const [loading, setLoading] = useState(false);
   const normalizedId = providerMemberId.trim();
@@ -103,12 +130,14 @@ function ProviderMemberName({ enabled, providerMemberId }: { enabled: boolean; p
     if (!enabled || !normalizedId) {
       setResult(null);
       setLoading(false);
+      onLookupChange(index, { providerMemberId: normalizedId, name: null, matches: false, loading: false });
       return;
     }
 
     const controller = new AbortController();
     const timeout = window.setTimeout(async () => {
       setLoading(true);
+      onLookupChange(index, { providerMemberId: normalizedId, name: null, matches: false, loading: true });
       try {
         const response = await fetch(`/api/provider-mapping/member-lookup?providerMemberId=${encodeURIComponent(normalizedId)}`, {
           cache: "no-store",
@@ -116,12 +145,21 @@ function ProviderMemberName({ enabled, providerMemberId }: { enabled: boolean; p
         });
         if (!response.ok) {
           setResult({ name: null, workDate: null });
+          onLookupChange(index, { providerMemberId: normalizedId, name: null, matches: false, loading: false });
           return;
         }
-        setResult(await response.json() as ProviderMemberLookupResult);
+        const nextResult = await response.json() as ProviderMemberLookupResult;
+        setResult(nextResult);
+        onLookupChange(index, {
+          providerMemberId: normalizedId,
+          name: nextResult.name,
+          matches: Boolean(nextResult.name) && comparableName(nextResult.name ?? "") === comparableName(dropxName),
+          loading: false
+        });
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
           setResult({ name: null, workDate: null });
+          onLookupChange(index, { providerMemberId: normalizedId, name: null, matches: false, loading: false });
         }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
@@ -132,16 +170,20 @@ function ProviderMemberName({ enabled, providerMemberId }: { enabled: boolean; p
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [enabled, normalizedId]);
+  }, [dropxName, enabled, index, normalizedId, onLookupChange]);
 
   if (!enabled || !normalizedId) return null;
   if (loading) return <small className="mapping-provider-member-name pending">Checking uploaded data…</small>;
   if (!result) return null;
   if (!result.name) return <small className="mapping-provider-member-name missing">No uploaded holder found for this ID.</small>;
 
+  const matches = comparableName(result.name) === comparableName(dropxName);
+  const holderName = result.name.split("/")[0].trim();
+
   return (
-    <small className="mapping-provider-member-name matched">
-      Holder: <strong>{result.name}</strong>{result.workDate ? ` · Latest data ${result.workDate}` : ""}
+    <small className={`mapping-provider-member-name ${matches ? "matched" : "missing"}`}>
+      Holder name: {holderName}
+      {!matches ? <span>Name does not match {dropxName}.</span> : null}
     </small>
   );
 }
@@ -162,6 +204,11 @@ export function ProviderMappingWorksheet({
   const [rows, setRows] = useState(initialRows);
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
   const [memberLookupRows, setMemberLookupRows] = useState<Set<number>>(() => new Set());
+  const [memberLookupStatuses, setMemberLookupStatuses] = useState<Record<number, ProviderMemberLookupStatus>>({});
+
+  const handleLookupChange = useCallback((index: number, status: ProviderMemberLookupStatus) => {
+    setMemberLookupStatuses((current) => ({ ...current, [index]: status }));
+  }, []);
 
   function dismissSuccessMessage() {
     document.getElementById("provider-mapping-success")?.remove();
@@ -195,9 +242,7 @@ export function ProviderMappingWorksheet({
 
       return { ...row, [field]: value };
     }));
-    if (field === "providerMemberId") {
-      setMemberLookupRows((current) => new Set(current).add(index));
-    }
+    setMemberLookupRows((current) => new Set(current).add(index));
   }
 
   function updatePaymentValue(index: number, componentCode: string, value: string) {
@@ -215,12 +260,19 @@ export function ProviderMappingWorksheet({
         [componentCode]: value
       }
     } : row));
+    setMemberLookupRows((current) => new Set(current).add(index));
   }
 
   function validateRow(row: MappingWorksheetRow, index: number) {
     const method = paymentMethodById.get(row.paymentMethodId);
 
     if (!row.providerMemberId.trim()) return `Row ${index + 1}: Provider Member ID is required.`;
+    const lookupStatus = memberLookupStatuses[index];
+    if (!lookupStatus || lookupStatus.providerMemberId !== row.providerMemberId.trim() || lookupStatus.loading) {
+      return `Row ${index + 1}: Wait for the Provider Member ID lookup to finish.`;
+    }
+    if (!lookupStatus.name) return `Row ${index + 1}: No uploaded holder was found for this Provider Member ID.`;
+    if (!lookupStatus.matches) return `Row ${index + 1}: Uploaded holder name does not match the DropX name.`;
     if (!row.providerId) return `Row ${index + 1}: Provider is missing from the selected location.`;
     if (!row.paymentMethodId) return `Row ${index + 1}: Payment method is required.`;
     if (!method) return `Row ${index + 1}: Selected payment method was not found.`;
@@ -259,6 +311,12 @@ export function ProviderMappingWorksheet({
 
   const dirtyRows = rows.map((row, index) => rowSignature(row) !== (initialSignatures[index] ?? ""));
   const hasDirtyRows = dirtyRows.some(Boolean);
+  const lookupValidRows = rows.map((row, index) => {
+    const status = memberLookupStatuses[index];
+    return Boolean(status && !status.loading && status.name && status.matches && status.providerMemberId === row.providerMemberId.trim());
+  });
+  const allDirtyLookupsValid = dirtyRows.every((dirty, index) => !dirty || lookupValidRows[index]);
+  const saveAllDisabledText = !canEdit ? "No edit access" : !hasDirtyRows ? "No edits" : "Verify holder names";
   const locationLabelById = useMemo(() => new Map(locations.map((location) => [location.id, location.label])), [locations]);
   const paymentMethodById = useMemo(() => new Map(paymentMethods.map((method) => [method.id, method])), [paymentMethods]);
   const paymentMethodOptions = useMemo(() => paymentMethods.map((method) => ({
@@ -292,7 +350,7 @@ export function ProviderMappingWorksheet({
             <h2>ID & pay mapping worksheet</h2>
             <p className="subtle">DropX ID, name, and location are read-only. Select a payment method to show only its configured fields.</p>
           </div>
-          <SubmitButton disabled={!canEdit || !hasDirtyRows} disabledText={canEdit ? "No edits" : "No edit access"}>
+          <SubmitButton disabled={!canEdit || !hasDirtyRows || !allDirtyLookupsValid} disabledText={saveAllDisabledText}>
             Save all
           </SubmitButton>
         </div>
@@ -324,7 +382,13 @@ export function ProviderMappingWorksheet({
                     onFocus={() => setMemberLookupRows((current) => new Set(current).add(index))}
                     value={row.providerMemberId}
                   />
-                  <ProviderMemberName enabled={memberLookupRows.has(index)} providerMemberId={row.providerMemberId} />
+                  <ProviderMemberName
+                    dropxName={row.dropxName}
+                    enabled={memberLookupRows.has(index)}
+                    index={index}
+                    onLookupChange={handleLookupChange}
+                    providerMemberId={row.providerMemberId}
+                  />
                 </label>
               </div>
 
@@ -380,7 +444,7 @@ export function ProviderMappingWorksheet({
                     />
                   </label>
 
-                  <RowSaveButton canEdit={canEdit} dirty={dirtyRows[index]} index={index} />
+                  <RowSaveButton canEdit={canEdit} dirty={dirtyRows[index]} index={index} lookupValid={lookupValidRows[index]} />
                 </div>
                 {rowErrors[index] ? <div className="mapping-row-error">{rowErrors[index]}</div> : null}
               </div>
