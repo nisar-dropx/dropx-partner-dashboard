@@ -993,7 +993,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
         amount: null,
         amount_requested: Number(amountText),
         remarks,
-        status: currentApprovalStep === 1 ? "re_pending" : "re_cluster_approved",
+        status: "resubmitted",
         approval_status: currentApprovalStep === 1 ? "RE_PENDING" : "RE_CLUSTER_APPROVED",
         approval_cycle: nextApprovalCycle,
         current_step_order: currentApprovalStep,
@@ -1178,7 +1178,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
     }
 
     const statusPayload = {
-        status: resubmittedApprovalStatus.toLowerCase(),
+        status: "resubmitted",
         approval_status: resubmittedApprovalStatus,
         approval_cycle: nextApprovalCycle,
         current_step_order: currentApprovalStep,
