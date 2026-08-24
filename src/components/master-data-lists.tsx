@@ -348,6 +348,7 @@ export function MasterDataLists({
   const [locationModels, setLocationModels] = useState<string[]>([]);
   const [locationStates, setLocationStates] = useState<string[]>([]);
   const [locationManagers, setLocationManagers] = useState<string[]>([]);
+  const [isExportingLocations, setIsExportingLocations] = useState(false);
   const [providersPage, setProvidersPage] = useState(1);
   const [modelsPage, setModelsPage] = useState(1);
   const [locationsPage, setLocationsPage] = useState(1);
@@ -460,6 +461,47 @@ export function MasterDataLists({
     setLocationsPage(1);
   }
 
+  async function exportFilteredLocations() {
+    if (!filteredLocations.length || isExportingLocations) return;
+    setIsExportingLocations(true);
+    try {
+      const XLSX = await import("xlsx");
+      const rows = filteredLocations.map((location) => ({
+        "Location Code": location.station_code,
+        "Location Name": location.station_name || "",
+        State: indiaStateCode(location.state) || location.state || "",
+        Manager: managerOptions.find((manager) => sameText(manager.value, location.station_manager_email))?.label || location.station_manager_email || "",
+        Provider: location.providers?.name || location.providers?.code || "",
+        Model: location.location_models?.code || location.location_models?.name || "",
+        "Parent Location": location.parent_station_id
+          ? locations.find((item) => item.id === location.parent_station_id)?.station_code || "Mapped"
+          : "",
+        "Address Line 1": location.address_line1 || location.address || "",
+        "Address Line 2": location.address_line2 || "",
+        City: location.city || "",
+        Region: location.region || "",
+        AOM: location.aom || "",
+        "Cluster Manager": location.cluster_manager || "",
+        "Postal Code": location.postal_code || "",
+        Latitude: location.latitude,
+        Longitude: location.longitude,
+        "Contact Email": location.station_email || "",
+        Status: location.is_active ? "Active" : "Inactive"
+      }));
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      worksheet["!cols"] = [
+        { wch: 15 }, { wch: 24 }, { wch: 10 }, { wch: 28 }, { wch: 18 }, { wch: 14 },
+        { wch: 18 }, { wch: 38 }, { wch: 30 }, { wch: 20 }, { wch: 18 }, { wch: 24 },
+        { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 12 }
+      ];
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Locations");
+      XLSX.writeFile(workbook, `locations-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } finally {
+      setIsExportingLocations(false);
+    }
+  }
+
   return (
     <>
       {showLocations ? <section className="panel">
@@ -474,6 +516,14 @@ export function MasterDataLists({
             <MultiCheckFilter allLabel="All models" label="Model" onChange={updateLocationModels} options={locationModelOptions} selected={locationModels} />
             <MultiCheckFilter allLabel="All states" label="State" onChange={updateLocationStates} options={locationStateOptions} selected={locationStates} />
             <MultiCheckFilter allLabel="All managers" label="Manager" onChange={updateLocationManagers} options={locationManagerOptions} selected={locationManagers} />
+            <button
+              className="button secondary"
+              disabled={!filteredLocations.length || isExportingLocations}
+              onClick={exportFilteredLocations}
+              type="button"
+            >
+              Export
+            </button>
             {canAdd ? <Link className="button" href="/master/location?add=location" scroll={false}>Add location</Link> : null}
           </div>
         </div>
