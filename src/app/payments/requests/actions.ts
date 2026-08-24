@@ -8,7 +8,7 @@ import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { canAccessPaymentLocation } from "@/lib/payment-approval-scope";
 import { validatePaymentFile } from "@/lib/payment-file-types";
-import { normalizePaymentModes, type PaymentMode } from "@/lib/payment-modes";
+import { normalizePaymentModes, paymentModeLabel, type PaymentMode } from "@/lib/payment-modes";
 import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 import { validatePaymentQuestionDate } from "@/lib/payment-question-date-rules";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -680,7 +680,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
 
     const { data: request, error: requestError } = await admin
       .from("payment_requests")
-      .select("id, location_id, payment_head_id, requested_by, status, approval_status, amount, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, current_approver_user_id, current_approver_role_id, current_approver_role_ids")
+      .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, category, amount, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, current_approver_user_id, current_approver_role_id, current_approver_role_ids")
       .eq("id", requestId)
       .eq("company_id", companyId)
       .single();
@@ -833,6 +833,18 @@ export async function submitPaymentBankDetails(formData: FormData) {
       .eq("id", request.id)
       .eq("company_id", companyId);
     if (updateError) throw new Error(updateError.message);
+
+    await insertPaymentApprovalLog(withCompany({
+      payment_request_id: request.id,
+      request_id: request.id,
+      approver_user_id: authorization.userId,
+      approver_role_id: authorization.roleId,
+      approval_cycle: request.approval_cycle,
+      action: "submitted",
+      comments: String(request.category ?? "").toLowerCase() === "expense" || returnToExpense
+        ? `Approved expense payment details submitted via ${paymentModeLabel(paymentMode)}.`
+        : `Payment details submitted via ${paymentModeLabel(paymentMode)}.`
+    }, companyId), companyId);
 
     revalidatePath("/payments/requests");
     revalidatePath("/payments/expense-request");
