@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
 import { addDaysYmd, formatCiaDisplayDate, todayIstYmd } from "@/lib/ops-pulse/cia-types";
 import type { EddBucketKey, EddPackage, EddStationPayload } from "@/lib/ops-pulse/edd-worker";
-import type { EddStationOption } from "./page";
-import { EddTrendChart } from "./edd-trend-chart";
-import { EddMultiSelect } from "./edd-multi-select";
+import { TrackingDetailModal } from "@/components/tracking-detail-modal";
+import { EddTrendChart } from "../edd-trend-chart";
+import { EddMultiSelect } from "../edd-multi-select";
 
 const BUCKET_META: Record<EddBucketKey, { label: string; hint: string }> = {
   overdue: { label: "Overdue", hint: "EAD already passed — highest priority" },
@@ -114,12 +113,7 @@ async function refreshEddClient(stationCode: string): Promise<EddStationPayload>
   return raw as unknown as EddStationPayload;
 }
 
-export function EddClient({ stations, initialStation }: { stations: EddStationOption[]; initialStation: string }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const [, startTransition] = useTransition();
-
-  const [stationCode, setStationCode] = useState(initialStation);
+export function EddClient({ stationCode }: { stationCode: string }) {
   const [payload, setPayload] = useState<EddStationPayload | null>(null);
   const [noSnapshot, setNoSnapshot] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -133,6 +127,7 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0]);
   const [page, setPage] = useState(1);
+  const [openTrackingId, setOpenTrackingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!stationCode) return;
@@ -236,29 +231,10 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
     };
   }
 
-  function selectStation(nextCode: string) {
-    setStationCode(nextCode);
-    startTransition(() => {
-      router.replace(`${pathname}?station=${encodeURIComponent(nextCode)}`);
-    });
-  }
-
   return (
     <>
       <section className="panel">
         <div className="panel-body edd-toolbar">
-          <select
-            value={stationCode}
-            onChange={(event) => selectStation(event.target.value)}
-            className="edd-filter-select"
-          >
-            {stations.map((station) => (
-              <option key={station.code} value={station.code}>
-                {station.label}
-              </option>
-            ))}
-          </select>
-
           <button
             type="button"
             className="button secondary"
@@ -416,7 +392,11 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
                   <tbody>
                     {pagedPackages.map((pkg: EddPackage) => (
                       <tr key={pkg.trackingId}>
-                        <td>{pkg.trackingId}</td>
+                        <td>
+                          <button type="button" className="edd-table-tid-btn" onClick={() => setOpenTrackingId(pkg.trackingId)}>
+                            {pkg.trackingId}
+                          </button>
+                        </td>
                         <td>
                           {pkg.ead
                             ? `${formatCiaDisplayDate(pkg.ead)}${pkg.ead === today ? " (today)" : pkg.ead === tomorrow ? " (tomorrow)" : ""}`
@@ -471,6 +451,8 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
           </section>
         </>
       ) : null}
+
+      <TrackingDetailModal trackingId={openTrackingId} stationHint={stationCode} onClose={() => setOpenTrackingId(null)} />
     </>
   );
 }

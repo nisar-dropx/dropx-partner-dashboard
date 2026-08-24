@@ -41,6 +41,20 @@ export type EddStationResult =
   | { status: "ok"; payload: EddStationPayload }
   | { status: "no_snapshot"; stationCode: string };
 
+/** One row of the network overview table — station + its latest cached totals. */
+export type EddNetworkStation = {
+  stationCode: string;
+  hasSnapshot: boolean;
+  fetchedAt: string | null;
+  totalCount: number;
+  buckets: Record<EddBucketKey, number>;
+};
+
+export type EddNetworkPayload = {
+  asOf: string;
+  stations: EddNetworkStation[];
+};
+
 export class EddWorkerError extends Error {
   readonly code: string | null;
   constructor(message: string, options: { code?: string | null } = {}) {
@@ -173,6 +187,47 @@ export async function fetchEddStation(params: { stationCode: string }): Promise<
     return { status: "no_snapshot", stationCode };
   }
   return { status: "ok", payload: normalizePayload(raw, stationCode) };
+}
+
+/**
+ * Network overview — every allowed station with its latest cached totals
+ * (or hasSnapshot: false if it's never been refreshed). Always instant, this
+ * is the EDD Dashboard's landing page, mirroring fetchCiaNetwork().
+ */
+export async function fetchEddNetwork(): Promise<EddNetworkPayload> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+
+  const response = await fetch(`${baseUrl}/api/admin/executive/edd/network`, {
+    method: "GET",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
+  });
+  const raw = await readJson(response);
+
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+
+  const stations = Array.isArray(raw.stations)
+    ? raw.stations.map((row) => {
+        const entry = (row ?? {}) as Record<string, unknown>;
+        return {
+          stationCode: String(entry.stationCode ?? "").toUpperCase(),
+          hasSnapshot: Boolean(entry.hasSnapshot),
+          fetchedAt: entry.fetchedAt == null ? null : String(entry.fetchedAt),
+          totalCount: Number(entry.totalCount ?? 0) || 0,
+          buckets: normalizeBuckets(entry.buckets)
+        };
+      })
+    : [];
+
+  return { asOf: String(raw.asOf ?? new Date().toISOString()), stations };
 }
 
 /**

@@ -14,12 +14,14 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const trackingId = url.searchParams.get("trackingId")?.trim() ?? "";
     if (!trackingId) return NextResponse.json({ error: "trackingId is required." }, { status: 400 });
+    const stationHint = url.searchParams.get("stationCode")?.trim() ?? undefined;
 
     const result = await lookupTrackingId({
       companyId,
       trackingId,
       locationScopeIds: authorization.locationScopeIds,
-      hasAllLocationAccess: authorization.hasAllLocationAccess
+      hasAllLocationAccess: authorization.hasAllLocationAccess,
+      stationHint
     });
     return NextResponse.json(result);
   } catch (error) {

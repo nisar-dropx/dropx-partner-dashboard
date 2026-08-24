@@ -3,23 +3,20 @@ import { PageHead } from "@/components/page-head";
 import { TrackingIdSearch } from "@/components/tracking-id-search";
 import { requireCompanyId } from "@/lib/company-scope";
 import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
-import { isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
+import { fetchEddNetwork, isEddWorkerConfigured, type EddNetworkStation } from "@/lib/ops-pulse/edd-worker";
 import { loadCodLocations, loadCodStationSettings } from "@/lib/ops-pulse/cod";
-import { EddClient } from "./edd-client";
+import { EddNetworkClient } from "./edd-network-client";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 export type EddStationOption = {
   code: string;
   label: string;
+  name: string;
 };
 
-export default async function EddDashboardPage({
-  searchParams
-}: {
-  searchParams: { station?: string };
-}) {
+export default async function EddDashboardPage() {
   const authorization = await requireEddAccess();
   const companyId = requireCompanyId(authorization);
 
@@ -38,18 +35,31 @@ export default async function EddDashboardPage({
     .map((location) => {
       const amazonCode = portalCodeByLocation.get(location.id) || String(location.station_code ?? "").trim().toUpperCase();
       if (!amazonCode) return null;
-      return {
-        code: amazonCode,
-        label: location.station_name ? `${amazonCode} — ${location.station_name}` : amazonCode
-      };
+      const name = location.station_name ? String(location.station_name) : "";
+      return { code: amazonCode, label: name ? `${amazonCode} — ${name}` : amazonCode, name };
     })
     .filter((row): row is EddStationOption => Boolean(row))
     .sort((a, b) => a.code.localeCompare(b.code));
 
-  const requestedStation = String(searchParams.station ?? "").trim().toUpperCase();
-  const initialStation = stations.find((row) => row.code === requestedStation)?.code || stations[0]?.code || "";
-
   const workerConfigured = isEddWorkerConfigured();
+
+  let error: string | null = null;
+  let network: EddNetworkStation[] = [];
+  if (workerConfigured && stations.length) {
+    try {
+      const payload = await fetchEddNetwork();
+      const byCode = new Map(payload.stations.map((row) => [row.stationCode, row]));
+      network = stations.map((station) => byCode.get(station.code) ?? {
+        stationCode: station.code,
+        hasSnapshot: false,
+        fetchedAt: null,
+        totalCount: 0,
+        buckets: { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0 }
+      });
+    } catch (err) {
+      error = err instanceof Error ? err.message : "Unable to load the EDD network overview.";
+    }
+  }
 
   return (
     <AppShell active="EDD Dashboard" pageCode="edd_dashboard">
@@ -57,7 +67,7 @@ export default async function EddDashboardPage({
         <PageHead
           eyebrow="Ops Pulse · Live tracking"
           title="EDD Dashboard"
-          subtitle="Every live tracking ID at a station, bucketed by Estimated Delivery Date — pulled live from Amazon's station ageing dashboard."
+          subtitle="Every station's live tracking IDs, bucketed by Estimated Delivery Date — pulled live from Amazon's station ageing dashboard. Open a station for the full breakdown."
           action={(
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <TrackingIdSearch />
@@ -90,8 +100,17 @@ export default async function EddDashboardPage({
           </section>
         ) : null}
 
+        {error ? (
+          <section className="panel message-panel error">
+            <div className="panel-body">
+              <strong>Unable to load the network overview</strong>
+              <p className="subtle" style={{ marginTop: 6 }}>{error}</p>
+            </div>
+          </section>
+        ) : null}
+
         {workerConfigured && stations.length ? (
-          <EddClient stations={stations} initialStation={initialStation} />
+          <EddNetworkClient stations={stations} initialNetwork={network} />
         ) : null}
       </div>
     </AppShell>

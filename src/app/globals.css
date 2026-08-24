@@ -17684,6 +17684,8 @@ td strong,
 .edd-bucket-card:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(16, 24, 40, .1); }
 
 .edd-bucket-card.active { outline: 2px solid var(--brand-dark); outline-offset: -2px; }
+.edd-bucket-card.static { cursor: default; }
+.edd-bucket-card.static:hover { transform: none; box-shadow: var(--shadow-soft); }
 
 .edd-bucket-card span {
   color: var(--muted);
@@ -17917,6 +17919,62 @@ td strong,
 
 .edd-spin { animation: edd-spin 0.8s linear infinite; }
 @keyframes edd-spin { to { transform: rotate(360deg); } }
+
+/* ---------------------------------------------------------------------- */
+/* EDD network overview (station list) + station detail back-link        */
+/* ---------------------------------------------------------------------- */
+
+.edd-table th.num, .edd-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.edd-station-link {
+  display: grid;
+  gap: 2px;
+  color: inherit;
+  text-decoration: none;
+}
+.edd-station-link:hover strong { color: var(--brand-dark); }
+.edd-station-link small { color: var(--muted); font-size: 11px; }
+
+.edd-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.edd-icon-btn {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.edd-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  margin-bottom: 4px;
+}
+.edd-back-link:hover { color: var(--brand-dark); }
+
+.edd-table-tid-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--brand-dark);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.edd-table-tid-btn:hover { text-decoration: underline; }
 
 /* ---------------------------------------------------------------------- */
 /* Tracking-ID search (EDD Dashboard page head) + result modal            */

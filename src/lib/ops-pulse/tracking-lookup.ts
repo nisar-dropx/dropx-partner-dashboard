@@ -111,6 +111,10 @@ export async function lookupTrackingId(params: {
   trackingId: string;
   locationScopeIds: string[];
   hasAllLocationAccess: boolean;
+  /** When the caller already knows which station this TID likely belongs to
+   * (e.g. clicked from that station's own EDD table), try it first — saves
+   * the usual round-robin across MAX_SESSION_ATTEMPTS stations. */
+  stationHint?: string;
 }): Promise<TrackingLookupResult> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) return { status: "not_configured" };
@@ -127,8 +131,13 @@ export async function lookupTrackingId(params: {
   const ownStationCodes = [...byStationCode.keys()];
   if (!ownStationCodes.length) return { status: "not_found" };
 
+  const hint = params.stationHint?.trim().toUpperCase();
+  const orderedStationCodes = hint && byStationCode.has(hint)
+    ? [hint, ...ownStationCodes.filter((code) => code !== hint)]
+    : ownStationCodes;
+
   let found: WorkerLookupResponse | null = null;
-  for (const stationCode of ownStationCodes.slice(0, MAX_SESSION_ATTEMPTS)) {
+  for (const stationCode of orderedStationCodes.slice(0, MAX_SESSION_ATTEMPTS)) {
     found = await lookupViaStationSession(baseUrl, adminKey, stationCode, trackingId);
     if (found) break;
   }
