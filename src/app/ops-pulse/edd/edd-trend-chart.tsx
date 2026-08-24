@@ -54,7 +54,18 @@ function pickLabelIndices(count: number, slot: number): Set<number> {
   return new Set(indices);
 }
 
-export function EddTrendChart({ points: rawPoints, todayYmd }: { points: EddTrendPoint[]; todayYmd: string }) {
+export function EddTrendChart({
+  points: rawPoints,
+  todayYmd,
+  selectedDate,
+  onSelectDate
+}: {
+  points: EddTrendPoint[];
+  todayYmd: string;
+  /** When set, that bar is highlighted — click a bar to drive this (or the "Filter to one day" select) from the caller. */
+  selectedDate?: string;
+  onSelectDate?: (date: string) => void;
+}) {
   const [hovered, setHovered] = useState<number | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -126,9 +137,11 @@ export function EddTrendChart({ points: rawPoints, todayYmd }: { points: EddTren
                       width={barWidth}
                       height={barHeight}
                       rx={3}
-                      className={`edd-chart-bar ${bucket}${hovered === index ? " hovered" : ""}`}
+                      className={`edd-chart-bar ${bucket}${hovered === index ? " hovered" : ""}${selectedDate === point.date ? " selected" : ""}`}
+                      style={onSelectDate ? { cursor: "pointer" } : undefined}
                       onMouseEnter={() => setHovered(index)}
                       onMouseLeave={() => setHovered((current) => (current === index ? null : current))}
+                      onClick={() => onSelectDate?.(point.date)}
                     />
                     {labelIndices.has(index) ? (
                       <text x={x + barWidth / 2} y={PLOT_HEIGHT + 18} textAnchor="middle" className="edd-chart-xlabel">

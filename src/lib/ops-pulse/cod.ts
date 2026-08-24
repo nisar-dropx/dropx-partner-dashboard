@@ -225,6 +225,13 @@ export type CodExecutiveReconciliationRow = {
   cash_20_count: number | string | null;
   cash_10_count: number | string | null;
   cash_other_amount: number | string | null;
+  return_cash_500_count: number | string | null;
+  return_cash_200_count: number | string | null;
+  return_cash_100_count: number | string | null;
+  return_cash_50_count: number | string | null;
+  return_cash_20_count: number | string | null;
+  return_cash_10_count: number | string | null;
+  return_cash_other_amount: number | string | null;
   collected_amount: number | string | null;
   difference_amount: number | string | null;
   remarks: string | null;
@@ -258,6 +265,13 @@ export type ExecutiveReconciliationViewRow = {
   cash_20_count: number | string | null;
   cash_10_count: number | string | null;
   cash_other_amount: number | string | null;
+  return_cash_500_count: number | string | null;
+  return_cash_200_count: number | string | null;
+  return_cash_100_count: number | string | null;
+  return_cash_50_count: number | string | null;
+  return_cash_20_count: number | string | null;
+  return_cash_10_count: number | string | null;
+  return_cash_other_amount: number | string | null;
   collected_amount: number | string | null;
   difference_amount: number | string | null;
   remarks: string | null;
@@ -549,7 +563,7 @@ export async function loadCodStationSettings(companyId: string, locationScopeIds
 }
 
 export function codSetupMessage(error?: string | null) {
-  return `${error ? `${error} ` : ""}Run scripts/cod_station_settings_portal_columns_patch_v1.sql, scripts/ops_pulse_cod_portal_checks_v1.sql, and scripts/cod_driver_reconciliation_roster_v1.sql in Supabase SQL Editor, then refresh this page.`;
+  return `${error ? `${error} ` : ""}Run scripts/cod_station_settings_portal_columns_patch_v1.sql, scripts/ops_pulse_cod_portal_checks_v1.sql, scripts/cod_driver_reconciliation_roster_v1.sql, and scripts/cod_executive_reconciliation_return_denominations_v3.sql in Supabase SQL Editor, then refresh this page.`;
 }
 
 export async function loadPortalCheckRuns(
@@ -694,7 +708,7 @@ export async function loadExecutiveReconciliationRows(
 
   let reconciliationQuery = supabaseAdmin
     .from("cod_executive_reconciliations")
-    .select("id, business_date, location_id, station_code, provider_employee_id, source_associate_name, manual_associate_name, shipment_type, total_delivery, total_activity, reconciliation_status, pending_amount, expected_amount, cash_500_count, cash_200_count, cash_100_count, cash_50_count, cash_20_count, cash_10_count, cash_other_amount, collected_amount, difference_amount, remarks, created_at, updated_at, stations (id, station_code, station_name, state)")
+    .select("id, business_date, location_id, station_code, provider_employee_id, source_associate_name, manual_associate_name, shipment_type, total_delivery, total_activity, reconciliation_status, pending_amount, expected_amount, cash_500_count, cash_200_count, cash_100_count, cash_50_count, cash_20_count, cash_10_count, cash_other_amount, return_cash_500_count, return_cash_200_count, return_cash_100_count, return_cash_50_count, return_cash_20_count, return_cash_10_count, return_cash_other_amount, collected_amount, difference_amount, remarks, created_at, updated_at, stations (id, station_code, station_name, state)")
     .eq("company_id", companyId)
     .eq("business_date", businessDate);
   if (params.locationId) reconciliationQuery = reconciliationQuery.eq("location_id", params.locationId);
@@ -739,6 +753,13 @@ export async function loadExecutiveReconciliationRows(
       cash_20_count: reconciliation?.cash_20_count ?? 0,
       cash_10_count: reconciliation?.cash_10_count ?? 0,
       cash_other_amount: reconciliation?.cash_other_amount ?? 0,
+      return_cash_500_count: reconciliation?.return_cash_500_count ?? 0,
+      return_cash_200_count: reconciliation?.return_cash_200_count ?? 0,
+      return_cash_100_count: reconciliation?.return_cash_100_count ?? 0,
+      return_cash_50_count: reconciliation?.return_cash_50_count ?? 0,
+      return_cash_20_count: reconciliation?.return_cash_20_count ?? 0,
+      return_cash_10_count: reconciliation?.return_cash_10_count ?? 0,
+      return_cash_other_amount: reconciliation?.return_cash_other_amount ?? 0,
       collected_amount: reconciliation?.collected_amount ?? 0,
       difference_amount: reconciliation?.difference_amount ?? 0,
       remarks: reconciliation?.remarks ?? null,
@@ -873,6 +894,13 @@ export async function loadExecutiveReconciliationRows(
       cash_20_count: reconciliation?.cash_20_count ?? 0,
       cash_10_count: reconciliation?.cash_10_count ?? 0,
       cash_other_amount: reconciliation?.cash_other_amount ?? 0,
+      return_cash_500_count: reconciliation?.return_cash_500_count ?? 0,
+      return_cash_200_count: reconciliation?.return_cash_200_count ?? 0,
+      return_cash_100_count: reconciliation?.return_cash_100_count ?? 0,
+      return_cash_50_count: reconciliation?.return_cash_50_count ?? 0,
+      return_cash_20_count: reconciliation?.return_cash_20_count ?? 0,
+      return_cash_10_count: reconciliation?.return_cash_10_count ?? 0,
+      return_cash_other_amount: reconciliation?.return_cash_other_amount ?? 0,
       collected_amount: reconciliation?.collected_amount ?? 0,
       difference_amount: reconciliation?.difference_amount ?? 0,
       remarks: reconciliation?.remarks ?? null,
@@ -915,6 +943,13 @@ export async function loadExecutiveReconciliationRows(
       cash_20_count: reconciliation.cash_20_count,
       cash_10_count: reconciliation.cash_10_count,
       cash_other_amount: reconciliation.cash_other_amount,
+      return_cash_500_count: reconciliation.return_cash_500_count,
+      return_cash_200_count: reconciliation.return_cash_200_count,
+      return_cash_100_count: reconciliation.return_cash_100_count,
+      return_cash_50_count: reconciliation.return_cash_50_count,
+      return_cash_20_count: reconciliation.return_cash_20_count,
+      return_cash_10_count: reconciliation.return_cash_10_count,
+      return_cash_other_amount: reconciliation.return_cash_other_amount,
       collected_amount: reconciliation.collected_amount,
       difference_amount: reconciliation.difference_amount,
       remarks: reconciliation.remarks,

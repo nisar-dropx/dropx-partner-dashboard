@@ -221,6 +221,13 @@ async function savePayload(
   const cash20Input = optionalCount(formData.get("cash_20_count"), "Rs 20 note count");
   const cash10Input = optionalCount(formData.get("cash_10_count"), "Rs 10 note count");
   const cashOtherInput = optionalAmount(formData.get("cash_other_amount"), "Other cash amount");
+  const returnCash500Input = optionalCount(formData.get("return_cash_500_count"), "Returned Rs 500 note count");
+  const returnCash200Input = optionalCount(formData.get("return_cash_200_count"), "Returned Rs 200 note count");
+  const returnCash100Input = optionalCount(formData.get("return_cash_100_count"), "Returned Rs 100 note count");
+  const returnCash50Input = optionalCount(formData.get("return_cash_50_count"), "Returned Rs 50 note count");
+  const returnCash20Input = optionalCount(formData.get("return_cash_20_count"), "Returned Rs 20 note count");
+  const returnCash10Input = optionalCount(formData.get("return_cash_10_count"), "Returned Rs 10 note count");
+  const returnCashOtherInput = optionalAmount(formData.get("return_cash_other_amount"), "Returned other cash amount");
   const accumulateExisting = String(formData.get("accumulate_existing") ?? "").trim() === "1";
 
   const existing = await supabaseAdmin
@@ -244,7 +251,16 @@ async function savePayload(
   const cashOther = Number((
     cashOtherInput + (prior ? Number(prior.cash_other_amount ?? 0) : 0)
   ).toFixed(2));
-  const thisTripCollected = Number((
+  const returnCash500 = returnCash500Input + (prior ? Number(prior.return_cash_500_count ?? 0) : 0);
+  const returnCash200 = returnCash200Input + (prior ? Number(prior.return_cash_200_count ?? 0) : 0);
+  const returnCash100 = returnCash100Input + (prior ? Number(prior.return_cash_100_count ?? 0) : 0);
+  const returnCash50 = returnCash50Input + (prior ? Number(prior.return_cash_50_count ?? 0) : 0);
+  const returnCash20 = returnCash20Input + (prior ? Number(prior.return_cash_20_count ?? 0) : 0);
+  const returnCash10 = returnCash10Input + (prior ? Number(prior.return_cash_10_count ?? 0) : 0);
+  const returnCashOther = Number((
+    returnCashOtherInput + (prior ? Number(prior.return_cash_other_amount ?? 0) : 0)
+  ).toFixed(2));
+  const thisTripReceived = Number((
     cash500Input * 500 +
     cash200Input * 200 +
     cash100Input * 100 +
@@ -253,7 +269,19 @@ async function savePayload(
     cash10Input * 10 +
     cashOtherInput
   ).toFixed(2));
-  const collectedAmount = Number((
+  const thisTripReturned = Number((
+    returnCash500Input * 500 +
+    returnCash200Input * 200 +
+    returnCash100Input * 100 +
+    returnCash50Input * 50 +
+    returnCash20Input * 20 +
+    returnCash10Input * 10 +
+    returnCashOtherInput
+  ).toFixed(2));
+  if (thisTripReturned - thisTripReceived > 0.009) {
+    throw new Error("Returned amount cannot be greater than received cash for this entry.");
+  }
+  const receivedAmount = Number((
     cash500 * 500 +
     cash200 * 200 +
     cash100 * 100 +
@@ -262,6 +290,19 @@ async function savePayload(
     cash10 * 10 +
     cashOther
   ).toFixed(2));
+  const returnedAmount = Number((
+    returnCash500 * 500 +
+    returnCash200 * 200 +
+    returnCash100 * 100 +
+    returnCash50 * 50 +
+    returnCash20 * 20 +
+    returnCash10 * 10 +
+    returnCashOther
+  ).toFixed(2));
+  const collectedAmount = Number((receivedAmount - returnedAmount).toFixed(2));
+  if (collectedAmount < -0.009) {
+    throw new Error("Net collected amount cannot be negative.");
+  }
   const storedExpected = addToExisting && prior
     ? Number(prior.expected_amount ?? 0)
     : expectedAmount;
@@ -275,7 +316,7 @@ async function savePayload(
     expectedEdited && !addToExisting ? `Expected edited from ₹${expectedOriginal.toFixed(2)} to ₹${expectedAmount.toFixed(2)}.` : null,
     pendingOverrideRemarks ? `Pending recon override: ${pendingOverrideRemarks}` : null,
     addToExisting
-      ? `Second cash delivery ₹${thisTripCollected.toFixed(2)} added to saved cash.`
+      ? `Additional received ₹${thisTripReceived.toFixed(2)}${thisTripReturned > 0 ? ` with ₹${thisTripReturned.toFixed(2)} returned` : ""} added to saved cash.`
       : null
   ].filter(Boolean);
   const remarks = remarkParts.length ? remarkParts.join(" ") : null;
@@ -300,6 +341,13 @@ async function savePayload(
     cash_20_count: cash20,
     cash_10_count: cash10,
     cash_other_amount: cashOther,
+    return_cash_500_count: returnCash500,
+    return_cash_200_count: returnCash200,
+    return_cash_100_count: returnCash100,
+    return_cash_50_count: returnCash50,
+    return_cash_20_count: returnCash20,
+    return_cash_10_count: returnCash10,
+    return_cash_other_amount: returnCashOther,
     collected_amount: collectedAmount,
     difference_amount: differenceAmount,
     remarks,

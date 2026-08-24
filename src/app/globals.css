@@ -976,6 +976,7 @@ a {
 .content {
   padding: 10px 22px 30px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   min-width: 0;
   max-width: 100%;
@@ -1266,6 +1267,7 @@ h3 {
 
 .panel-body {
   padding: 14px;
+  min-width: 0;
 }
 
 .panel-head-actions {
@@ -17744,6 +17746,7 @@ td strong,
 .edd-chart-bar.today { fill: var(--amber); }
 .edd-chart-bar.future { fill: var(--green); }
 .edd-chart-bar.hovered { opacity: 0.72; }
+.edd-chart-bar.selected { stroke: var(--ink); stroke-width: 2; }
 
 .edd-chart-tooltip {
   position: absolute;
@@ -17781,7 +17784,16 @@ td strong,
   min-width: 220px;
 }
 
-.edd-table-wrap { overflow-x: auto; }
+.edd-table-wrap { overflow-x: auto; max-width: 100%; }
+
+.edd-focus-day {
+  display: grid;
+  gap: 6px;
+  min-width: 200px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
 
 .edd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .edd-table th {

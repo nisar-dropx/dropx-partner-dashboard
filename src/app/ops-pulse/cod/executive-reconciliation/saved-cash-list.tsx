@@ -25,8 +25,28 @@ const denominations = [
 ] as const;
 
 type DenominationField = typeof denominations[number][0];
+type ReturnDenominationField =
+  | "return_cash_500_count"
+  | "return_cash_200_count"
+  | "return_cash_100_count"
+  | "return_cash_50_count"
+  | "return_cash_20_count"
+  | "return_cash_10_count";
+
+const returnDenominationFieldMap: Record<DenominationField, ReturnDenominationField> = {
+  cash_500_count: "return_cash_500_count",
+  cash_200_count: "return_cash_200_count",
+  cash_100_count: "return_cash_100_count",
+  cash_50_count: "return_cash_50_count",
+  cash_20_count: "return_cash_20_count",
+  cash_10_count: "return_cash_10_count"
+};
 
 function denominationValue(row: ExecutiveReconciliationViewRow, field: DenominationField) {
+  return row[field] ?? 0;
+}
+
+function returnDenominationValue(row: ExecutiveReconciliationViewRow, field: ReturnDenominationField) {
   return row[field] ?? 0;
 }
 
@@ -177,6 +197,20 @@ export function SavedCashList({
       return {
         ...serverRow,
         expected_amount: overlay.expected_amount,
+        cash_500_count: overlay.cash_500_count,
+        cash_200_count: overlay.cash_200_count,
+        cash_100_count: overlay.cash_100_count,
+        cash_50_count: overlay.cash_50_count,
+        cash_20_count: overlay.cash_20_count,
+        cash_10_count: overlay.cash_10_count,
+        cash_other_amount: overlay.cash_other_amount,
+        return_cash_500_count: overlay.return_cash_500_count,
+        return_cash_200_count: overlay.return_cash_200_count,
+        return_cash_100_count: overlay.return_cash_100_count,
+        return_cash_50_count: overlay.return_cash_50_count,
+        return_cash_20_count: overlay.return_cash_20_count,
+        return_cash_10_count: overlay.return_cash_10_count,
+        return_cash_other_amount: overlay.return_cash_other_amount,
         collected_amount: overlay.collected_amount,
         pending_amount: overlay.pending_amount,
         difference_amount: overlay.difference_amount,
@@ -190,6 +224,14 @@ export function SavedCashList({
     <div className="reconciliation-entry-list reconciliation-saved-list" aria-label="Executive reconciliation sheet">
       {displayRows.length ? displayRows.map((row) => {
         const difference = amountValue(row.difference_amount);
+        const returnedAmount =
+          amountValue(row.return_cash_500_count) * 500
+          + amountValue(row.return_cash_200_count) * 200
+          + amountValue(row.return_cash_100_count) * 100
+          + amountValue(row.return_cash_50_count) * 50
+          + amountValue(row.return_cash_20_count) * 20
+          + amountValue(row.return_cash_10_count) * 10
+          + amountValue(row.return_cash_other_amount);
         const rowPending = activeKey === row.key;
         const rowError = errorByKey[row.key];
         return (
@@ -301,6 +343,9 @@ export function SavedCashList({
               <details className="cash-breakdown">
                 <summary>Cash denomination count</summary>
                 <div className="cash-breakdown-grid">
+                  <div className="cash-breakdown-section">
+                    <strong>Received from associate</strong>
+                  </div>
                   {denominations.map(([name, label]) => (
                     <label key={`${row.key}-${name}`}>₹{label}
                       <input className="field" name={name} defaultValue={String(denominationValue(row, name))} inputMode="numeric" />
@@ -309,10 +354,27 @@ export function SavedCashList({
                   <label>Other / coins
                     <input className="field" name="cash_other_amount" defaultValue={String(row.cash_other_amount ?? 0)} inputMode="decimal" />
                   </label>
+                  <div className="cash-breakdown-section" style={{ marginTop: 10 }}>
+                    <strong>Returned to associate</strong>
+                  </div>
+                  {denominations.map(([name, label]) => (
+                    <label key={`${row.key}-return-${name}`}>₹{label} returned
+                      <input
+                        className="field"
+                        name={returnDenominationFieldMap[name]}
+                        defaultValue={String(returnDenominationValue(row, returnDenominationFieldMap[name]))}
+                        inputMode="numeric"
+                      />
+                    </label>
+                  ))}
+                  <label>Other / coins returned
+                    <input className="field" name="return_cash_other_amount" defaultValue={String(row.return_cash_other_amount ?? 0)} inputMode="decimal" />
+                  </label>
                 </div>
               </details>
               <div className={`cash-live-status ${difference < -0.005 ? "short" : difference > 0.005 ? "excess" : "matched"}`}>
                 <span>Collected <strong>{formatAmount(row.collected_amount)}</strong></span>
+                <span>Returned <strong>{formatAmount(returnedAmount)}</strong></span>
                 <span>Expected <strong>{formatAmount(row.expected_amount)}</strong></span>
                 <span className="cash-live-result">
                   <StatusPill status={row.reconciliation_status} />{" "}

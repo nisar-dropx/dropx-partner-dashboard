@@ -37,10 +37,11 @@ const COLUMNS: Array<{ key: SortColumn; label: string }> = [
 
 function formatMinutes(minutes: number) {
   if (!Number.isFinite(minutes) || minutes <= 0) return "—";
-  const hours = Math.floor(minutes / 60);
-  const rest = Math.round(minutes % 60);
-  if (hours <= 0) return `${rest}m`;
-  return `${hours}h ${rest}m`;
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${Math.round(minutes % 60)}m`;
+  return `${Math.round(minutes)}m`;
 }
 
 function formatFetchedAt(value: string) {
@@ -123,6 +124,7 @@ export function EddClient({ stationCode }: { stationCode: string }) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeBucket, setActiveBucket] = useState<EddBucketKey | null>(null);
+  const [selectedDate, setSelectedDate] = useState("");
   const [search, setSearch] = useState("");
   const [stateFilters, setStateFilters] = useState<Set<string>>(new Set());
   const [paymentFilters, setPaymentFilters] = useState<Set<string>>(new Set());
@@ -148,6 +150,7 @@ export function EddClient({ stationCode }: { stationCode: string }) {
           setNoSnapshot(false);
         }
         setActiveBucket(null);
+        setSelectedDate("");
         setStateFilters(new Set());
         setPaymentFilters(new Set());
         setSearch("");
@@ -193,18 +196,36 @@ export function EddClient({ stationCode }: { stationCode: string }) {
     return [...values].sort();
   }, [payload]);
 
-  const filteredPackages = useMemo(() => {
+  const dateOptions = Array.isArray(payload?.byDate) ? payload.byDate : [];
+
+  // Everything except the bucket itself — this is what the bucket cards'
+  // own counts are based on, so picking a date/state/payment filter updates
+  // the cards too (a card only ever narrows further, on top of this).
+  const filteredPackagesBeforeBucket = useMemo(() => {
     const rows = Array.isArray(payload?.packages) ? payload.packages : [];
     const term = search.trim().toLowerCase();
     return rows.filter((pkg) => {
-      if (activeBucket && pkg.bucket !== activeBucket) return false;
+      if (selectedDate && pkg.ead !== selectedDate) return false;
       if (stateFilters.size && !stateFilters.has(pkg.state ?? "")) return false;
       if (paymentFilters.size && !paymentFilters.has(pkg.paymentMethod ?? "")) return false;
       if (!term) return true;
       return [pkg.trackingId, pkg.lastScanBy, pkg.city, pkg.orderingOrderId, pkg.state]
         .some((field) => String(field ?? "").toLowerCase().includes(term));
     });
-  }, [payload, activeBucket, stateFilters, paymentFilters, search]);
+  }, [payload, selectedDate, stateFilters, paymentFilters, search]);
+
+  const cardBucketCounts = useMemo(() => {
+    const counts: Record<EddBucketKey, number> = { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0 };
+    for (const pkg of filteredPackagesBeforeBucket) counts[pkg.bucket] = (counts[pkg.bucket] ?? 0) + 1;
+    return counts;
+  }, [filteredPackagesBeforeBucket]);
+
+  const filteredPackages = useMemo(() => {
+    return filteredPackagesBeforeBucket.filter((pkg) => {
+      if (activeBucket && pkg.bucket !== activeBucket) return false;
+      return true;
+    });
+  }, [filteredPackagesBeforeBucket, activeBucket]);
 
   const sortedPackages = useMemo(() => {
     return [...filteredPackages].sort((a, b) => compareValues(sortValue(a, sortColumn), sortValue(b, sortColumn), sortDir));
@@ -294,7 +315,7 @@ export function EddClient({ stationCode }: { stationCode: string }) {
           <section className="edd-bucket-grid">
             {BUCKET_ORDER.map((bucket) => {
               const meta = BUCKET_META[bucket];
-              const count = payload.buckets[bucket] ?? 0;
+              const count = cardBucketCounts[bucket] ?? 0;
               const isActive = activeBucket === bucket;
               return (
                 <button
@@ -321,7 +342,12 @@ export function EddClient({ stationCode }: { stationCode: string }) {
                 <p className="subtle">How many live tracking IDs fall on each EAD — colored by whether that day is already overdue, today, or upcoming.</p>
               </div>
               <div className="panel-body">
-                <EddTrendChart points={payload.byDate} todayYmd={today} />
+                <EddTrendChart
+                  points={payload.byDate}
+                  todayYmd={today}
+                  selectedDate={selectedDate}
+                  onSelectDate={(date) => resetToPageOne(setSelectedDate)(date === selectedDate ? "" : date)}
+                />
               </div>
             </section>
           ) : null}
@@ -331,6 +357,7 @@ export function EddClient({ stationCode }: { stationCode: string }) {
               <h3>
                 Live tracking IDs
                 {activeBucket ? ` · ${BUCKET_META[activeBucket].label}` : ""}
+                {selectedDate ? ` · ${formatCiaDisplayDate(selectedDate)}` : ""}
               </h3>
             </div>
             <div className="panel-body">
@@ -346,16 +373,35 @@ export function EddClient({ stationCode }: { stationCode: string }) {
                   />
                 </div>
 
+                {dateOptions.length ? (
+                  <label className="edd-focus-day">
+                    <span>Filter to one day</span>
+                    <select
+                      className="field"
+                      value={selectedDate}
+                      onChange={(event) => resetToPageOne(setSelectedDate)(event.target.value)}
+                    >
+                      <option value="">All days ({dateOptions.length})</option>
+                      {dateOptions.map((point) => (
+                        <option key={point.date} value={point.date}>
+                          {formatCiaDisplayDate(point.date)} · {point.count.toLocaleString("en-IN")}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+
                 <EddMultiSelect label="States" options={stateOptions} selected={stateFilters} onChange={resetToPageOne(setStateFilters)} />
 
                 <EddMultiSelect label="payment methods" options={paymentOptions} selected={paymentFilters} onChange={resetToPageOne(setPaymentFilters)} />
 
-                {activeBucket || stateFilters.size || paymentFilters.size || search ? (
+                {activeBucket || selectedDate || stateFilters.size || paymentFilters.size || search ? (
                   <button
                     type="button"
                     className="button secondary"
                     onClick={() => {
                       setActiveBucket(null);
+                      setSelectedDate("");
                       setStateFilters(new Set());
                       setPaymentFilters(new Set());
                       setSearch("");

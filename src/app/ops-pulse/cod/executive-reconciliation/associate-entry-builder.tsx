@@ -36,10 +36,12 @@ type EntryRow = {
   expectedAmount: string;
   expectedOriginal: string;
   cashOtherAmount: string;
+  returnCashOtherAmount: string;
   remarks: string;
   pendingOverrideRemarks: string;
   denominationUnlocked: boolean;
   denominationCounts: Record<DenominationName, string>;
+  returnDenominationCounts: Record<DenominationName, string>;
 };
 
 const denominations = [
@@ -62,6 +64,16 @@ function emptyDenominations(): Record<DenominationName, string> {
     cash_20_count: "",
     cash_10_count: ""
   };
+}
+
+function denominationTotal(
+  counts: Record<DenominationName, string>,
+  otherAmount: string
+) {
+  return denominations.reduce(
+    (total, [name, , amount]) => total + numberValue(counts[name]) * amount,
+    numberValue(otherAmount)
+  );
 }
 
 function numberValue(value: string) {
@@ -135,10 +147,12 @@ export function AssociateEntryBuilder({
     expectedAmount: "",
     expectedOriginal: "",
     cashOtherAmount: "",
+    returnCashOtherAmount: "",
     remarks: "",
     pendingOverrideRemarks: "",
     denominationUnlocked: true,
-    denominationCounts: emptyDenominations()
+    denominationCounts: emptyDenominations(),
+    returnDenominationCounts: emptyDenominations()
   }]);
   const [pendingModalKey, setPendingModalKey] = useState<number | null>(null);
   const [submittingKey, setSubmittingKey] = useState<number | null>(null);
@@ -171,10 +185,12 @@ export function AssociateEntryBuilder({
           expectedAmount: "",
           expectedOriginal: "",
           cashOtherAmount: "",
+          returnCashOtherAmount: "",
           remarks: "",
           pendingOverrideRemarks: "",
           denominationUnlocked: true,
-          denominationCounts: emptyDenominations()
+          denominationCounts: emptyDenominations(),
+          returnDenominationCounts: emptyDenominations()
         } : row);
       }
       return current.filter((row) => row.key !== key);
@@ -191,10 +207,12 @@ export function AssociateEntryBuilder({
         expectedAmount: "",
         expectedOriginal: "",
         cashOtherAmount: "",
+        returnCashOtherAmount: "",
         remarks: "",
         pendingOverrideRemarks: "",
         denominationUnlocked: true,
-        denominationCounts: emptyDenominations()
+        denominationCounts: emptyDenominations(),
+        returnDenominationCounts: emptyDenominations()
       }
     ]);
   }
@@ -212,10 +230,12 @@ export function AssociateEntryBuilder({
         expectedAmount: expectedPrefill(associate),
         expectedOriginal: String(associate.expectedAmount ?? associate.pendingAmount ?? 0),
         cashOtherAmount: "",
+        returnCashOtherAmount: "",
         remarks: "",
         pendingOverrideRemarks: "",
         denominationUnlocked: !pending,
-        denominationCounts: emptyDenominations()
+        denominationCounts: emptyDenominations(),
+        returnDenominationCounts: emptyDenominations()
       };
     }));
   }
@@ -246,7 +266,9 @@ export function AssociateEntryBuilder({
       pendingOverrideRemarks: "",
       denominationUnlocked: requiresManualName && isOther ? true : Boolean(associate) && !pending,
       denominationCounts: emptyDenominations(),
-      cashOtherAmount: ""
+      returnDenominationCounts: emptyDenominations(),
+      cashOtherAmount: "",
+      returnCashOtherAmount: ""
     } : row));
     if (!isOther && pending) setPendingModalKey(key);
     else setPendingModalKey((current) => current === key ? null : current);
@@ -302,10 +324,13 @@ export function AssociateEntryBuilder({
           (total, [name, , amount]) => total + numberValue(entry.denominationCounts[name]) * amount,
           numberValue(entry.cashOtherAmount)
         );
+        const returnAmount = denominationTotal(entry.returnDenominationCounts, entry.returnCashOtherAmount);
+        const netCollectedAmount = Number((collectedAmount - returnAmount).toFixed(2));
         const expectedAmount = numberValue(entry.expectedAmount);
         const expectedOriginal = numberValue(entry.expectedOriginal);
         const expectedEdited = Math.abs(expectedAmount - expectedOriginal) >= 0.01;
-        const difference = collectedAmount - expectedAmount;
+        const difference = netCollectedAmount - expectedAmount;
+        const invalidReturn = returnAmount - collectedAmount > 0.009;
         const cashState = expectedAmount === 0 && collectedAmount === 0
           ? { className: "waiting", label: "Enter amounts", amount: "" }
           : Math.abs(difference) < 0.005
@@ -319,6 +344,7 @@ export function AssociateEntryBuilder({
         const savedEntry = savedCash[entry.providerEmployeeId.trim().toUpperCase()];
         const canSave = Boolean(entry.providerEmployeeId)
           && entry.denominationUnlocked
+          && !invalidReturn
           && (!expectedEdited || entry.remarks.trim())
           && (!requiresManualName || entry.manualAssociateName.trim());
         const rowPending = submittingKey === entry.key;
@@ -344,7 +370,7 @@ export function AssociateEntryBuilder({
                         ? entry.manualAssociateName.trim()
                         : (associate?.name ?? "").trim();
                       const originalExpected = savedEntry?.expectedAmount ?? expectedAmount;
-                      const combinedCollected = Number(((savedEntry?.collectedAmount ?? 0) + collectedAmount).toFixed(2));
+                      const combinedCollected = Number(((savedEntry?.collectedAmount ?? 0) + netCollectedAmount).toFixed(2));
                       const combinedDifference = Number((combinedCollected - originalExpected).toFixed(2));
                       window.dispatchEvent(new CustomEvent("executive-reconciliation:saved", {
                         detail: {
@@ -369,6 +395,13 @@ export function AssociateEntryBuilder({
                           cash_20_count: numberValue(entry.denominationCounts.cash_20_count),
                           cash_10_count: numberValue(entry.denominationCounts.cash_10_count),
                           cash_other_amount: numberValue(entry.cashOtherAmount),
+                          return_cash_500_count: numberValue(entry.returnDenominationCounts.cash_500_count),
+                          return_cash_200_count: numberValue(entry.returnDenominationCounts.cash_200_count),
+                          return_cash_100_count: numberValue(entry.returnDenominationCounts.cash_100_count),
+                          return_cash_50_count: numberValue(entry.returnDenominationCounts.cash_50_count),
+                          return_cash_20_count: numberValue(entry.returnDenominationCounts.cash_20_count),
+                          return_cash_10_count: numberValue(entry.returnDenominationCounts.cash_10_count),
+                          return_cash_other_amount: numberValue(entry.returnCashOtherAmount),
                           collected_amount: combinedCollected,
                           difference_amount: combinedDifference,
                           remarks: entry.remarks || null,
@@ -500,6 +533,10 @@ export function AssociateEntryBuilder({
                 <details className="cash-breakdown" open={Boolean(entry.providerEmployeeId)}>
                   <summary>Cash denomination count</summary>
                   <div className="cash-breakdown-grid">
+                    <div className="cash-breakdown-section">
+                      <strong>Received from associate</strong>
+                      <span className="subtle">Count what was handed over before giving back change.</span>
+                    </div>
                     {denominations.map(([name, label]) => (
                       <label key={`${entry.key}-${name}`}>{label}
                         <input
@@ -524,14 +561,52 @@ export function AssociateEntryBuilder({
                         disabled={!canEdit}
                       />
                     </label>
+                    <div className="cash-breakdown-section" style={{ marginTop: 10 }}>
+                      <strong>Returned to associate</strong>
+                      <span className="subtle">Optional. Use this when you return excess cash or change.</span>
+                    </div>
+                    {denominations.map(([name, label]) => (
+                      <label key={`${entry.key}-return-${name}`}>{label} returned
+                        <input
+                          className="field"
+                          name={`return_${name}`}
+                          value={entry.returnDenominationCounts[name]}
+                          onChange={(event) => setRows((current) => current.map((row) => row.key === entry.key ? {
+                            ...row,
+                            returnDenominationCounts: { ...row.returnDenominationCounts, [name]: event.target.value }
+                          } : row))}
+                          inputMode="numeric"
+                          placeholder="0"
+                          disabled={!canEdit}
+                        />
+                      </label>
+                    ))}
+                    <label>Other / coins returned
+                      <input
+                        className="field"
+                        name="return_cash_other_amount"
+                        value={entry.returnCashOtherAmount}
+                        onChange={(event) => updateRow(entry.key, { returnCashOtherAmount: event.target.value })}
+                        inputMode="decimal"
+                        placeholder="0"
+                        disabled={!canEdit}
+                      />
+                    </label>
                   </div>
                 </details>
               )}
               <div className={`cash-live-status ${cashState.className}`} aria-live="polite">
-                <span>This delivery <strong>₹{currency(collectedAmount)}</strong></span>
+                <span>Received <strong>₹{currency(collectedAmount)}</strong></span>
+                <span>Returned <strong>₹{currency(returnAmount)}</strong></span>
+                <span>Net kept <strong>₹{currency(netCollectedAmount)}</strong></span>
                 <span>{alreadySaved ? "Remaining" : "Expected"} <strong>₹{currency(expectedAmount)}</strong></span>
                 <span className="cash-live-result">{cashState.label} {cashState.amount ? <strong>{cashState.amount}</strong> : null}</span>
               </div>
+              {invalidReturn ? (
+                <p className="field-error" style={{ marginTop: 8 }}>
+                  Returned amount cannot be greater than received cash.
+                </p>
+              ) : null}
               {alreadySaved && savedEntry ? (
                 <p className="subtle" style={{ marginTop: 8 }}>
                   Already collected ₹{currency(savedEntry.collectedAmount)} of ₹{currency(savedEntry.expectedAmount)}.
