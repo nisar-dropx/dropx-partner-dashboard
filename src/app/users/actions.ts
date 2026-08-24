@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
-import { currentAccessSurface, pageBelongsToSurface } from "@/lib/access-surface";
+import { pageBelongsToSurface, type AccessSurface } from "@/lib/access-surface";
 import { isCompanyOwner, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { cleanCountryCode } from "@/lib/country-codes";
@@ -39,6 +39,10 @@ function locationScopeFromForm(formData: FormData) {
 
 function locationAccessMode(value: FormDataEntryValue | null) {
   return clean(value) === "all_locations" ? "all_locations" : "role_based";
+}
+
+function accessSurfaceFromForm(value: FormDataEntryValue | null): AccessSurface {
+  return clean(value) === "ops" ? "ops" : "dashboard";
 }
 
 function appBaseUrl() {
@@ -307,7 +311,7 @@ export async function createUserRole(formData: FormData) {
     const mode = locationAccessMode(required(formData.get("location_access_mode"), "Location access"));
 
     await ensureAccessPages(supabaseAdmin, companyId);
-    const surface = currentAccessSurface();
+    const surface = accessSurfaceFromForm(formData.get("surface"));
 
     const { data: role, error: roleError } = await supabaseAdmin
       .from("user_roles")
@@ -377,7 +381,7 @@ export async function updateUserRole(formData: FormData) {
     }
 
     const roleId = required(formData.get("id"), "Role ID");
-    const surface = currentAccessSurface();
+    const surface = accessSurfaceFromForm(formData.get("surface"));
 
     const { data: existingRole, error: existingRoleError } = await supabaseAdmin
       .from("user_roles")
