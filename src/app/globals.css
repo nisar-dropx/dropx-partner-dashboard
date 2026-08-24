@@ -17976,6 +17976,26 @@ td strong,
 }
 .edd-table-tid-btn:hover { text-decoration: underline; }
 
+.edd-network-chart-label { font-size: 12px; font-weight: 700; fill: var(--ink); }
+.edd-network-chart-value { font-size: 12px; font-variant-numeric: tabular-nums; fill: var(--muted); }
+.edd-network-chart-bar { fill: var(--red); transition: opacity 120ms ease; }
+.edd-network-chart-bar.hovered { opacity: 0.75; }
+.edd-network-chart-row:hover .edd-network-chart-label { fill: var(--brand-dark); }
+
+.edd-sweep-status { padding-top: 0; display: grid; gap: 8px; }
+.edd-sweep-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  overflow: hidden;
+}
+.edd-sweep-bar-fill {
+  height: 100%;
+  background: var(--brand-dark);
+  border-radius: 999px;
+  transition: width 400ms ease;
+}
+
 /* ---------------------------------------------------------------------- */
 /* Tracking-ID search (EDD Dashboard page head) + result modal            */
 /* ---------------------------------------------------------------------- */

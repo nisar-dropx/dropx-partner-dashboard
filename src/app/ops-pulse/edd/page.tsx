@@ -3,7 +3,7 @@ import { PageHead } from "@/components/page-head";
 import { TrackingIdSearch } from "@/components/tracking-id-search";
 import { requireCompanyId } from "@/lib/company-scope";
 import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
-import { fetchEddNetwork, isEddWorkerConfigured, type EddNetworkStation } from "@/lib/ops-pulse/edd-worker";
+import { fetchEddNetwork, isEddWorkerConfigured, type EddNetworkRunStatus, type EddNetworkStation } from "@/lib/ops-pulse/edd-worker";
 import { loadCodLocations, loadCodStationSettings } from "@/lib/ops-pulse/cod";
 import { EddNetworkClient } from "./edd-network-client";
 
@@ -45,6 +45,7 @@ export default async function EddDashboardPage() {
 
   let error: string | null = null;
   let network: EddNetworkStation[] = [];
+  let run: EddNetworkRunStatus | null = null;
   if (workerConfigured && stations.length) {
     try {
       const payload = await fetchEddNetwork();
@@ -56,6 +57,7 @@ export default async function EddDashboardPage() {
         totalCount: 0,
         buckets: { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0 }
       });
+      run = payload.run;
     } catch (err) {
       error = err instanceof Error ? err.message : "Unable to load the EDD network overview.";
     }
@@ -110,7 +112,7 @@ export default async function EddDashboardPage() {
         ) : null}
 
         {workerConfigured && stations.length ? (
-          <EddNetworkClient stations={stations} initialNetwork={network} />
+          <EddNetworkClient stations={stations} initialNetwork={network} initialRun={run} />
         ) : null}
       </div>
     </AppShell>

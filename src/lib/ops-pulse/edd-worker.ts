@@ -50,10 +50,39 @@ export type EddNetworkStation = {
   buckets: Record<EddBucketKey, number>;
 };
 
+export type EddNetworkRunStatus = {
+  id: string;
+  status: "running" | "completed" | "failed";
+  stationsTotal: number;
+  stationsDone: number;
+  stationsOk: number;
+  stationsFailed: number;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
 export type EddNetworkPayload = {
   asOf: string;
   stations: EddNetworkStation[];
+  run: EddNetworkRunStatus | null;
 };
+
+function normalizeRun(raw: unknown): EddNetworkRunStatus | null {
+  if (!raw || typeof raw !== "object") return null;
+  const entry = raw as Record<string, unknown>;
+  const status = String(entry.status ?? "");
+  if (status !== "running" && status !== "completed" && status !== "failed") return null;
+  return {
+    id: String(entry.id ?? ""),
+    status,
+    stationsTotal: Number(entry.stationsTotal ?? 0) || 0,
+    stationsDone: Number(entry.stationsDone ?? 0) || 0,
+    stationsOk: Number(entry.stationsOk ?? 0) || 0,
+    stationsFailed: Number(entry.stationsFailed ?? 0) || 0,
+    startedAt: String(entry.startedAt ?? ""),
+    finishedAt: entry.finishedAt == null ? null : String(entry.finishedAt)
+  };
+}
 
 export class EddWorkerError extends Error {
   readonly code: string | null;
@@ -227,7 +256,35 @@ export async function fetchEddNetwork(): Promise<EddNetworkPayload> {
       })
     : [];
 
-  return { asOf: String(raw.asOf ?? new Date().toISOString()), stations };
+  return { asOf: String(raw.asOf ?? new Date().toISOString()), stations, run: normalizeRun(raw.run) };
+}
+
+/**
+ * Starts (or reports the progress of) a network-wide background sweep —
+ * idempotent, since the worker leaves an already-running sweep alone. The
+ * sweep advances one station roughly every minute (the per-minute cron), so
+ * this never blocks: it just kicks the sweep off and hands back its status.
+ */
+export async function refreshAllEddNetwork(): Promise<EddNetworkRunStatus | null> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+
+  const response = await fetch(`${baseUrl}/api/admin/executive/edd/network/refresh-all`, {
+    method: "POST",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
+  });
+  const raw = await readJson(response);
+
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  return normalizeRun(raw.run);
 }
 
 /**

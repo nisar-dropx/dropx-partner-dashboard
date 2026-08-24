@@ -1,13 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, ArrowUpDown, Loader2, RefreshCw, Search } from "lucide-react";
-import type { EddBucketKey, EddNetworkStation } from "@/lib/ops-pulse/edd-worker";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
+import type { EddBucketKey, EddNetworkRunStatus, EddNetworkStation } from "@/lib/ops-pulse/edd-worker";
 import type { EddStationOption } from "./page";
+import { EddNetworkChart } from "./edd-network-chart";
 
 type SortColumn = "stationCode" | "totalCount" | "overdue" | "dueToday" | "dueTomorrow" | "future" | "fetchedAt";
 type SortDir = "asc" | "desc";
+const PAGE_SIZE = 12;
+/** Poll the network endpoint at this cadence while a background sweep is running, to move the progress bar. */
+const RUN_POLL_MS = 15000;
 
 const COLUMNS: Array<{ key: SortColumn; label: string; align?: "num" }> = [
   { key: "stationCode", label: "Station" },
@@ -50,10 +54,12 @@ function compareValues(a: string | number, b: string | number, dir: SortDir) {
   return String(a).localeCompare(String(b)) * factor;
 }
 
-async function refreshStation(stationCode: string) {
-  const url = new URL("/api/ops-pulse/edd/refresh", window.location.origin);
-  url.searchParams.set("stationCode", stationCode);
-  const response = await fetch(url.toString(), { method: "POST", headers: { Accept: "application/json" }, cache: "no-store" });
+async function postJson<T>(path: string): Promise<T> {
+  const response = await fetch(new URL(path, window.location.origin).toString(), {
+    method: "POST",
+    headers: { Accept: "application/json" },
+    cache: "no-store"
+  });
   const text = await response.text();
   let raw: Record<string, unknown> = {};
   try {
@@ -62,25 +68,47 @@ async function refreshStation(stationCode: string) {
     raw = {};
   }
   if (!response.ok) {
-    throw new Error(String(raw.error ?? `Unable to refresh ${stationCode} (${response.status}).`));
+    throw new Error(String(raw.error ?? `Request failed (${response.status}).`));
   }
-  return raw as unknown as { fetchedAt: string; totalCount: number; buckets: Record<EddBucketKey, number> };
+  return raw as T;
+}
+
+async function refreshStation(stationCode: string) {
+  return postJson<{ fetchedAt: string; totalCount: number; buckets: Record<EddBucketKey, number> }>(
+    `/api/ops-pulse/edd/refresh?stationCode=${encodeURIComponent(stationCode)}`
+  );
+}
+
+async function fetchNetwork(): Promise<{ stations: EddNetworkStation[]; run: EddNetworkRunStatus | null }> {
+  const response = await fetch(new URL("/api/ops-pulse/edd/network", window.location.origin).toString(), {
+    headers: { Accept: "application/json" },
+    cache: "no-store"
+  });
+  const raw = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(String(raw.error ?? "Unable to refresh the network overview."));
+  return { stations: raw.stations ?? [], run: raw.run ?? null };
 }
 
 export function EddNetworkClient({
   stations,
-  initialNetwork
+  initialNetwork,
+  initialRun
 }: {
   stations: EddStationOption[];
   initialNetwork: EddNetworkStation[];
+  initialRun: EddNetworkRunStatus | null;
 }) {
   const nameByCode = useMemo(() => new Map(stations.map((s) => [s.code, s.name])), [stations]);
   const [rows, setRows] = useState<EddNetworkStation[]>(initialNetwork);
+  const [run, setRun] = useState<EddNetworkRunStatus | null>(initialRun);
   const [search, setSearch] = useState("");
   const [sortColumn, setSortColumn] = useState<SortColumn>("overdue");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [page, setPage] = useState(1);
   const [refreshingCode, setRefreshingCode] = useState<string | null>(null);
+  const [startingSweep, setStartingSweep] = useState(false);
   const [rowError, setRowError] = useState<{ code: string; message: string } | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const totals = useMemo(() => {
     return rows.reduce(
@@ -109,7 +137,40 @@ export function EddNetworkClient({
     [filteredRows, sortColumn, sortDir]
   );
 
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedRows = useMemo(
+    () => sortedRows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [sortedRows, currentPage]
+  );
+
+  // While a background sweep is running, poll the (instant, cache-only)
+  // network endpoint so the progress bar and table move on their own.
+  useEffect(() => {
+    if (run?.status !== "running") {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+      return;
+    }
+    pollRef.current = setInterval(() => {
+      void fetchNetwork()
+        .then((next) => {
+          setRows(next.stations);
+          setRun(next.run);
+        })
+        .catch(() => {
+          // Transient poll failure — keep showing the last known state and try again next tick.
+        });
+    }, RUN_POLL_MS);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [run?.status]);
+
   function toggleSort(column: SortColumn) {
+    setPage(1);
     if (sortColumn !== column) {
       setSortColumn(column);
       setSortDir(column === "stationCode" ? "asc" : "desc");
@@ -136,6 +197,20 @@ export function EddNetworkClient({
       })
       .finally(() => setRefreshingCode(null));
   }
+
+  function handleRefreshAll() {
+    setStartingSweep(true);
+    setRowError(null);
+    void postJson<{ run: EddNetworkRunStatus | null }>("/api/ops-pulse/edd/refresh-all")
+      .then((result) => setRun(result.run))
+      .catch((err) => {
+        setRowError({ code: "Network sweep", message: err instanceof Error ? err.message : "Unable to start the network refresh." });
+      })
+      .finally(() => setStartingSweep(false));
+  }
+
+  const sweepRunning = run?.status === "running";
+  const sweepPct = run && run.stationsTotal ? Math.round((run.stationsDone / run.stationsTotal) * 100) : 0;
 
   return (
     <>
@@ -164,9 +239,47 @@ export function EddNetworkClient({
 
       <section className="panel">
         <div className="panel-head">
-          <h3>Stations</h3>
-          <p className="subtle">Open a station for its full bucket breakdown, EAD trend, and live tracking ID table.</p>
+          <div>
+            <h3>Top stations by overdue backlog</h3>
+            <p className="subtle">Where to send help first — click a bar to open that station.</p>
+          </div>
         </div>
+        <div className="panel-body">
+          <EddNetworkChart stations={rows} />
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h3>Stations</h3>
+            <p className="subtle">Open a station for its full bucket breakdown, EAD trend, and live tracking ID table.</p>
+          </div>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={handleRefreshAll}
+            disabled={startingSweep || sweepRunning}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            {startingSweep ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />}
+            {sweepRunning ? "Sweep running…" : startingSweep ? "Starting…" : "Refresh all"}
+          </button>
+        </div>
+
+        {run ? (
+          <div className="panel-body edd-sweep-status">
+            <div className="edd-sweep-bar">
+              <div className="edd-sweep-bar-fill" style={{ width: `${sweepRunning ? sweepPct : 100}%` }} />
+            </div>
+            <span className="subtle">
+              {sweepRunning
+                ? `Background sweep in progress — ${run.stationsDone}/${run.stationsTotal} stations (${run.stationsOk} ok${run.stationsFailed ? `, ${run.stationsFailed} failed` : ""}). Roughly one station a minute — this keeps Amazon's session healthy, so a full sweep takes a while. Refresh a single station above for something you need right now.`
+                : `Last full sweep: ${run.stationsOk}/${run.stationsTotal} ok${run.stationsFailed ? `, ${run.stationsFailed} failed` : ""}${run.finishedAt ? ` · finished ${formatFetchedAt(run.finishedAt)}` : ""}.`}
+            </span>
+          </div>
+        ) : null}
+
         <div className="panel-body">
           <div className="edd-toolbar">
             <div style={{ position: "relative" }}>
@@ -175,7 +288,10 @@ export function EddNetworkClient({
                 type="search"
                 placeholder="Search station code or name…"
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => {
+                  setPage(1);
+                  setSearch(event.target.value);
+                }}
                 style={{ paddingLeft: 30, minWidth: 240 }}
               />
             </div>
@@ -213,7 +329,7 @@ export function EddNetworkClient({
                 </tr>
               </thead>
               <tbody>
-                {sortedRows.map((row) => {
+                {pagedRows.map((row) => {
                   const isRefreshing = refreshingCode === row.stationCode;
                   const name = nameByCode.get(row.stationCode);
                   return (
@@ -256,8 +372,23 @@ export function EddNetworkClient({
                 })}
               </tbody>
             </table>
-            {!sortedRows.length ? <p className="subtle" style={{ marginTop: 10 }}>No stations match this search.</p> : null}
+            {!pagedRows.length ? <p className="subtle" style={{ marginTop: 10 }}>No stations match this search.</p> : null}
           </div>
+
+          {sortedRows.length ? (
+            <div className="edd-pagination">
+              <span className="subtle">{sortedRows.length.toLocaleString("en-IN")} stations</span>
+              <div className="edd-pagination-pages">
+                <button type="button" className="button secondary" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} aria-label="Previous page">
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="subtle">Page {currentPage} of {totalPages}</span>
+                <button type="button" className="button secondary" disabled={currentPage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))} aria-label="Next page">
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </section>
     </>

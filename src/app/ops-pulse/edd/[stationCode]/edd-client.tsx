@@ -181,17 +181,17 @@ export function EddClient({ stationCode }: { stationCode: string }) {
   const tomorrow = addDaysYmd(today, 1);
 
   const stateOptions = useMemo(() => {
-    const values = new Set((payload?.packages ?? []).map((pkg) => pkg.state).filter((v): v is string => Boolean(v)));
+    const values = new Set((Array.isArray(payload?.packages) ? payload.packages : []).map((pkg) => pkg.state).filter((v): v is string => Boolean(v)));
     return [...values].sort();
   }, [payload]);
 
   const paymentOptions = useMemo(() => {
-    const values = new Set((payload?.packages ?? []).map((pkg) => pkg.paymentMethod).filter((v): v is string => Boolean(v)));
+    const values = new Set((Array.isArray(payload?.packages) ? payload.packages : []).map((pkg) => pkg.paymentMethod).filter((v): v is string => Boolean(v)));
     return [...values].sort();
   }, [payload]);
 
   const filteredPackages = useMemo(() => {
-    const rows = payload?.packages ?? [];
+    const rows = Array.isArray(payload?.packages) ? payload.packages : [];
     const term = search.trim().toLowerCase();
     return rows.filter((pkg) => {
       if (activeBucket && pkg.bucket !== activeBucket) return false;
@@ -311,7 +311,7 @@ export function EddClient({ stationCode }: { stationCode: string }) {
             })}
           </section>
 
-          {payload.byDate.length ? (
+          {Array.isArray(payload.byDate) && payload.byDate.length ? (
             <section className="panel">
               <div className="panel-head">
                 <h3>Day-level EAD trend</h3>

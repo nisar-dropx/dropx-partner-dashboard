@@ -54,7 +54,7 @@ function pickLabelIndices(count: number, slot: number): Set<number> {
   return new Set(indices);
 }
 
-export function EddTrendChart({ points, todayYmd }: { points: EddTrendPoint[]; todayYmd: string }) {
+export function EddTrendChart({ points: rawPoints, todayYmd }: { points: EddTrendPoint[]; todayYmd: string }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -70,7 +70,12 @@ export function EddTrendChart({ points, todayYmd }: { points: EddTrendPoint[]; t
     return () => observer.disconnect();
   }, []);
 
-  const maxCount = Math.max(1, ...points.map((point) => point.count));
+  // Defensive: tolerate a malformed cached snapshot (missing dates / non-finite
+  // counts) instead of throwing mid-render.
+  const points = Array.isArray(rawPoints)
+    ? rawPoints.filter((point) => point && typeof point.date === "string" && Number.isFinite(point.count))
+    : [];
+  const maxCount = points.reduce((max, point) => Math.max(max, point.count), 1);
   // Fill the available width when there's room for generous bars; fall back
   // to a fixed minimum slot (with horizontal scroll) once the day count
   // would otherwise squeeze bars past legibility.
