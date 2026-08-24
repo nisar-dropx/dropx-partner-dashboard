@@ -59,6 +59,7 @@ function isReadyForPaymentProcess(request: RequestRow) {
     status === "OWNER_APPROVED" ||
     approvalStatus === "PROCESSING" ||
     approvalStatus === "OWNER_APPROVED" ||
+    approvalStatus === "RE_APPROVED" ||
     (approvalStatus.endsWith("_APPROVED") && !hasCurrentApprover);
 }
 
@@ -198,6 +199,7 @@ export async function GET(request: Request) {
 
     const requests = ((data ?? []) as unknown as RequestRow[])
       .filter(isReadyForPaymentProcess)
+      .filter((item) => String(item.approval_status ?? "").toUpperCase() !== "RE_APPROVED" || item.current_approver_user_id === authorization.userId)
       .map((row) => ({
         ...row,
         payment_heads: firstRelation(row.payment_heads)
