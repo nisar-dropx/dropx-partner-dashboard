@@ -343,33 +343,47 @@ export function SavedCashList({
               <details className="cash-breakdown">
                 <summary>Cash denomination count</summary>
                 <div className="cash-breakdown-grid">
-                  <div className="cash-breakdown-section">
-                    <strong>Received from associate</strong>
+                  <div className="cash-breakdown-section received">
+                    <div className="cash-breakdown-section-head">
+                      <strong>Received from associate</strong>
+                      <span className="cash-breakdown-subtotal">{formatAmount(row.collected_amount)}</span>
+                    </div>
+                    <div className="denomination-grid">
+                      {denominations.map(([name, label]) => (
+                        <label className="denomination-chip" key={`${row.key}-${name}`}>
+                          ₹{label}
+                          <input className="field" name={name} defaultValue={String(denominationValue(row, name))} inputMode="numeric" />
+                        </label>
+                      ))}
+                      <label className="denomination-chip other">
+                        Coins / other
+                        <input className="field" name="cash_other_amount" defaultValue={String(row.cash_other_amount ?? 0)} inputMode="decimal" />
+                      </label>
+                    </div>
                   </div>
-                  {denominations.map(([name, label]) => (
-                    <label key={`${row.key}-${name}`}>₹{label}
-                      <input className="field" name={name} defaultValue={String(denominationValue(row, name))} inputMode="numeric" />
-                    </label>
-                  ))}
-                  <label>Other / coins
-                    <input className="field" name="cash_other_amount" defaultValue={String(row.cash_other_amount ?? 0)} inputMode="decimal" />
-                  </label>
-                  <div className="cash-breakdown-section" style={{ marginTop: 10 }}>
-                    <strong>Returned to associate</strong>
+                  <div className="cash-breakdown-section returned">
+                    <div className="cash-breakdown-section-head">
+                      <strong>Returned to associate</strong>
+                      <span className="cash-breakdown-subtotal">{formatAmount(returnedAmount)}</span>
+                    </div>
+                    <div className="denomination-grid">
+                      {denominations.map(([name, label]) => (
+                        <label className="denomination-chip" key={`${row.key}-return-${name}`} aria-label={`₹${label} returned`}>
+                          ₹{label}
+                          <input
+                            className="field"
+                            name={returnDenominationFieldMap[name]}
+                            defaultValue={String(returnDenominationValue(row, returnDenominationFieldMap[name]))}
+                            inputMode="numeric"
+                          />
+                        </label>
+                      ))}
+                      <label className="denomination-chip other" aria-label="Coins or other returned">
+                        Coins / other
+                        <input className="field" name="return_cash_other_amount" defaultValue={String(row.return_cash_other_amount ?? 0)} inputMode="decimal" />
+                      </label>
+                    </div>
                   </div>
-                  {denominations.map(([name, label]) => (
-                    <label key={`${row.key}-return-${name}`}>₹{label} returned
-                      <input
-                        className="field"
-                        name={returnDenominationFieldMap[name]}
-                        defaultValue={String(returnDenominationValue(row, returnDenominationFieldMap[name]))}
-                        inputMode="numeric"
-                      />
-                    </label>
-                  ))}
-                  <label>Other / coins returned
-                    <input className="field" name="return_cash_other_amount" defaultValue={String(row.return_cash_other_amount ?? 0)} inputMode="decimal" />
-                  </label>
                 </div>
               </details>
               <div className={`cash-live-status ${difference < -0.005 ? "short" : difference > 0.005 ? "excess" : "matched"}`}>

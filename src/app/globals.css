@@ -11865,12 +11865,8 @@ tbody tr:hover td {
 
 .cash-breakdown-grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(70px, 1fr));
-  gap: 8px;
-  margin-top: 8px;
-  padding: 10px;
-  border-radius: 10px;
-  background: #f8fafc;
+  gap: 12px;
+  margin-top: 10px;
 }
 
 .cash-breakdown.inline {
@@ -11886,6 +11882,98 @@ tbody tr:hover td {
 
 .cash-breakdown-grid .cash-remarks {
   grid-column: 1 / -1;
+}
+
+.cash-breakdown-section {
+  padding: 12px 14px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.cash-breakdown-section.received {
+  border-color: #bfe8d2;
+  background: #f2faf6;
+}
+
+.cash-breakdown-section.returned {
+  border-color: #fbdfad;
+  background: #fdf8ee;
+}
+
+.cash-breakdown-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.cash-breakdown-section-head strong {
+  display: block;
+  color: #172033;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.cash-breakdown-section-head .subtle {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.cash-breakdown-subtotal {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #fff;
+  color: #172033;
+  font-size: 12px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.denomination-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(74px, 1fr));
+  gap: 8px;
+}
+
+.cash-breakdown-section .denomination-chip {
+  display: grid;
+  gap: 5px;
+  padding: 8px 6px 7px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  color: #344054;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.cash-breakdown-section .denomination-chip:focus-within {
+  border-color: #f79009;
+  box-shadow: 0 0 0 3px rgba(247, 144, 9, .14);
+}
+
+.cash-breakdown-section .denomination-chip input {
+  height: 30px;
+  padding-inline: 4px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.cash-breakdown-section .denomination-chip.other {
+  grid-column: span 2;
 }
 
 .cash-live-status {
@@ -11993,7 +12081,7 @@ tbody tr:hover td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .cash-breakdown-grid {
+  .denomination-grid {
     grid-template-columns: repeat(4, minmax(70px, 1fr));
   }
 }
@@ -12044,8 +12132,16 @@ tbody tr:hover td {
     grid-template-columns: 1fr;
   }
 
-  .cash-breakdown-grid {
+  .denomination-grid {
     grid-template-columns: repeat(2, minmax(70px, 1fr));
+  }
+
+  .cash-breakdown-section .denomination-chip.other {
+    grid-column: span 2;
+  }
+
+  .cash-breakdown-section-head {
+    flex-direction: column;
   }
 
   .cash-live-status {

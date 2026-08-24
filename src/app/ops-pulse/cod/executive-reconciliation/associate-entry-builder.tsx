@@ -533,65 +533,83 @@ export function AssociateEntryBuilder({
                 <details className="cash-breakdown" open={Boolean(entry.providerEmployeeId)}>
                   <summary>Cash denomination count</summary>
                   <div className="cash-breakdown-grid">
-                    <div className="cash-breakdown-section">
-                      <strong>Received from associate</strong>
-                      <span className="subtle">Count what was handed over before giving back change.</span>
+                    <div className="cash-breakdown-section received">
+                      <div className="cash-breakdown-section-head">
+                        <div>
+                          <strong>Received from associate</strong>
+                          <span className="subtle">Count what was handed over before giving back change.</span>
+                        </div>
+                        <span className="cash-breakdown-subtotal">₹{currency(collectedAmount)}</span>
+                      </div>
+                      <div className="denomination-grid">
+                        {denominations.map(([name, label]) => (
+                          <label className="denomination-chip" key={`${entry.key}-${name}`}>
+                            {label}
+                            <input
+                              className="field"
+                              name={name}
+                              value={entry.denominationCounts[name]}
+                              onChange={(event) => updateDenomination(entry.key, name, event.target.value)}
+                              inputMode="numeric"
+                              placeholder="0"
+                              disabled={!canEdit}
+                            />
+                          </label>
+                        ))}
+                        <label className="denomination-chip other">
+                          Coins / other
+                          <input
+                            className="field"
+                            name="cash_other_amount"
+                            value={entry.cashOtherAmount}
+                            onChange={(event) => updateRow(entry.key, { cashOtherAmount: event.target.value })}
+                            inputMode="decimal"
+                            placeholder="0"
+                            disabled={!canEdit}
+                          />
+                        </label>
+                      </div>
                     </div>
-                    {denominations.map(([name, label]) => (
-                      <label key={`${entry.key}-${name}`}>{label}
-                        <input
-                          className="field"
-                          name={name}
-                          value={entry.denominationCounts[name]}
-                          onChange={(event) => updateDenomination(entry.key, name, event.target.value)}
-                          inputMode="numeric"
-                          placeholder="0"
-                          disabled={!canEdit}
-                        />
-                      </label>
-                    ))}
-                    <label>Other / coins
-                      <input
-                        className="field"
-                        name="cash_other_amount"
-                        value={entry.cashOtherAmount}
-                        onChange={(event) => updateRow(entry.key, { cashOtherAmount: event.target.value })}
-                        inputMode="decimal"
-                        placeholder="0"
-                        disabled={!canEdit}
-                      />
-                    </label>
-                    <div className="cash-breakdown-section" style={{ marginTop: 10 }}>
-                      <strong>Returned to associate</strong>
-                      <span className="subtle">Optional. Use this when you return excess cash or change.</span>
+                    <div className="cash-breakdown-section returned">
+                      <div className="cash-breakdown-section-head">
+                        <div>
+                          <strong>Returned to associate</strong>
+                          <span className="subtle">Optional. Use this when you return excess cash or change.</span>
+                        </div>
+                        <span className="cash-breakdown-subtotal">₹{currency(returnAmount)}</span>
+                      </div>
+                      <div className="denomination-grid">
+                        {denominations.map(([name, label]) => (
+                          <label className="denomination-chip" key={`${entry.key}-return-${name}`} aria-label={`${label} returned`}>
+                            {label}
+                            <input
+                              className="field"
+                              name={`return_${name}`}
+                              value={entry.returnDenominationCounts[name]}
+                              onChange={(event) => setRows((current) => current.map((row) => row.key === entry.key ? {
+                                ...row,
+                                returnDenominationCounts: { ...row.returnDenominationCounts, [name]: event.target.value }
+                              } : row))}
+                              inputMode="numeric"
+                              placeholder="0"
+                              disabled={!canEdit}
+                            />
+                          </label>
+                        ))}
+                        <label className="denomination-chip other" aria-label="Coins or other returned">
+                          Coins / other
+                          <input
+                            className="field"
+                            name="return_cash_other_amount"
+                            value={entry.returnCashOtherAmount}
+                            onChange={(event) => updateRow(entry.key, { returnCashOtherAmount: event.target.value })}
+                            inputMode="decimal"
+                            placeholder="0"
+                            disabled={!canEdit}
+                          />
+                        </label>
+                      </div>
                     </div>
-                    {denominations.map(([name, label]) => (
-                      <label key={`${entry.key}-return-${name}`}>{label} returned
-                        <input
-                          className="field"
-                          name={`return_${name}`}
-                          value={entry.returnDenominationCounts[name]}
-                          onChange={(event) => setRows((current) => current.map((row) => row.key === entry.key ? {
-                            ...row,
-                            returnDenominationCounts: { ...row.returnDenominationCounts, [name]: event.target.value }
-                          } : row))}
-                          inputMode="numeric"
-                          placeholder="0"
-                          disabled={!canEdit}
-                        />
-                      </label>
-                    ))}
-                    <label>Other / coins returned
-                      <input
-                        className="field"
-                        name="return_cash_other_amount"
-                        value={entry.returnCashOtherAmount}
-                        onChange={(event) => updateRow(entry.key, { returnCashOtherAmount: event.target.value })}
-                        inputMode="decimal"
-                        placeholder="0"
-                        disabled={!canEdit}
-                      />
-                    </label>
                   </div>
                 </details>
               )}
