@@ -5,6 +5,7 @@ import {
   istDate,
   loadAttendanceReportRows
 } from "@/lib/biometric/attendance";
+import { filterAttendanceReportRows } from "@/lib/biometric/attendance-report-filters";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -12,7 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 export const dynamic = "force-dynamic";
 
 type ReportMode = "daily" | "monthly" | "periodic";
-type SortMode = "department" | "designation" | "location";
+type SortMode = "workforce_type" | "designation" | "location";
 
 type ReportBuild = {
   aoa: string[][];
@@ -37,7 +38,7 @@ function safeMode(value: string | null): ReportMode {
 }
 
 function safeSort(value: string | null): SortMode {
-  return value === "designation" || value === "location" ? value : "department";
+  return value === "designation" || value === "location" ? value : "workforce_type";
 }
 
 function safeReportType(value: string | null): AttendanceReportType {
@@ -113,13 +114,13 @@ function groupBy<T>(items: T[], keyer: (item: T) => string) {
 function groupLabel(sort: SortMode) {
   if (sort === "designation") return "Desg. Name";
   if (sort === "location") return "Location";
-  return "Location";
+  return "Workforce Type";
 }
 
 function groupKey(row: AttendanceReportRow, sort: SortMode) {
   if (sort === "designation") return row.designation || "-";
   if (sort === "location") return row.location || "-";
-  return row.location || row.designation || "-";
+  return row.workerType || "-";
 }
 
 function totals(rows: AttendanceReportRow[]) {
@@ -403,7 +404,10 @@ export async function GET(request: Request) {
   try {
     const authorization = await getAuthorization();
     if (!authorization) return Response.json({ error: "Unauthorized" }, { status: 401 });
-    if (!hasPermission(authorization, "attendance_reports", "access")) return Response.json({ error: "Permission required" }, { status: 403 });
+    const forwardedHost = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? new URL(request.url).hostname;
+    const isOps = forwardedHost.toLowerCase().split(":")[0] === "ops.dropxlogistics.com" || forwardedHost.toLowerCase().startsWith("ops-");
+    const pageCode = isOps ? "ops_attendance_reports" : "attendance_reports";
+    if (!hasPermission(authorization, pageCode, "access")) return Response.json({ error: "Permission required" }, { status: 403 });
     if (!supabaseAdmin) return Response.json({ error: "Supabase service role key is not configured." }, { status: 500 });
 
     const companyId = requireCompanyId(authorization);
@@ -418,6 +422,9 @@ export async function GET(request: Request) {
     const sort = safeSort(params.get("sort"));
     const reportType = safeReportType(params.get("report"));
     const locationId = params.get("location_id");
+    const search = params.get("search") ?? "";
+    const designation = params.get("designation") ?? "";
+    const workerType = params.get("worker_type") ?? "";
     const format = params.get("format") === "pdf" ? "pdf" : "xlsx";
     const range = mode === "monthly"
       ? monthBounds(month)
@@ -425,13 +432,27 @@ export async function GET(request: Request) {
         ? { ...periodicRange, label: `${periodicRange.fromDate}-to-${periodicRange.toDate}` }
         : { fromDate: date, toDate: date, label: date };
 
-    const rows = await loadAttendanceReportRows({
+    const stationResult = await supabaseAdmin
+      .from("stations")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("is_active", true);
+    if (stationResult.error) throw new Error(stationResult.error.message);
+    const companyLocationIds = (stationResult.data ?? []).map((row) => String(row.id));
+    const allowedLocationIds = authorization.hasAllLocationAccess
+      ? companyLocationIds
+      : companyLocationIds.filter((id) => authorization.locationScopeIds.includes(id));
+    if (locationId && !allowedLocationIds.includes(locationId)) {
+      return Response.json({ error: "Location is outside your allocated scope." }, { status: 403 });
+    }
+    const scopedRows = await loadAttendanceReportRows({
       companyId,
       fromDate: range.fromDate,
-      locationIds: locationId ? [locationId] : undefined,
+      locationIds: locationId ? [locationId] : allowedLocationIds,
       reportType,
       toDate: range.toDate
     });
+    const rows = filterAttendanceReportRows(scopedRows, { designation, search, workerType });
     const build = buildReport(mode, reportType, range.label, range.fromDate, range.toDate, rows, sort, companyName);
     const filenameBase = `${reportTitle(mode, reportType).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${range.label}`;
 

@@ -14,6 +14,7 @@ export type AttendanceReportRow = {
   workerCode: string;
   workerName: string;
   workerType: string;
+  locationId: string | null;
   location: string;
   designation: string;
   punchDate: string;
@@ -535,6 +536,7 @@ export async function loadAttendanceReportRows({
   toDate?: string;
 }) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  if (Array.isArray(locationIds) && locationIds.length === 0) return [];
   const admin = supabaseAdmin;
 
   const baseSelect = `
@@ -730,6 +732,7 @@ export async function loadAttendanceReportRows({
       workerCode: employee?.employee_code ?? executive?.dropx_id ?? biometricWorker?.employee_code ?? biometricWorker?.dropx_id ?? row.employee_code ?? row.enrolment_id,
       workerName: employee?.full_name ?? executive?.full_name ?? biometricWorker?.full_name ?? row.worker_name ?? "Unknown",
       workerType: row.worker_type === "employee" || biometricWorker?.profileType === "employee" ? "Employee" : "Individual Contract",
+      locationId: row.location_id ?? biometricWorker?.location_id ?? null,
       location: station?.station_code ?? row.station_code ?? "-",
       designation: designation?.code ?? executive?.designation ?? biometricDesignation?.code ?? biometricWorker?.designation ?? "-",
       punchDate: row.punch_date,
@@ -744,5 +747,5 @@ export async function loadAttendanceReportRows({
       labels
     };
     return reportRow;
-  }).filter((row) => reportMatchesType(row, reportType));
+  }).filter((row) => (locationIds === undefined || (row.locationId !== null && locationIds.includes(row.locationId))) && reportMatchesType(row, reportType));
 }

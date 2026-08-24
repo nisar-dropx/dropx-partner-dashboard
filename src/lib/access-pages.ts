@@ -27,6 +27,7 @@ export const accessPages = [
   { code: "capacity_delivery", name: "Delivery Data", sort_order: 84 },
   { code: "capacity_hiring", name: "Hiring Review", sort_order: 84 },
   { code: "ops_reports", name: "Ops Reports", sort_order: 84 },
+  { code: "ops_attendance_reports", name: "Attendance Reports", sort_order: 85 },
   { code: "service_network", name: "Network Planning", sort_order: 92 },
   { code: "service_network_master", name: "Network Planning Master", sort_order: 93 },
   { code: "daily_submission", name: "Daily Submission", sort_order: 85 },
@@ -493,6 +494,7 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity_delivery");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity_hiring");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_reports"], "ops_reports");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["ops_attendance_reports"], "ops_reports");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_master"], "performance_master");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_master"], "capacity_master");
     await seedTargetPermissionsFromSources(supabase, companyId, ["designations"], "workforce_categories");
