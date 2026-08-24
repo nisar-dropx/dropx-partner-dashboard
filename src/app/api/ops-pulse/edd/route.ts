@@ -3,8 +3,9 @@ import { requireEddApi } from "@/lib/ops-pulse/edd-access";
 import { fetchEddStation } from "@/lib/ops-pulse/edd-worker";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 30;
 
+/** Fast cached read — see src/app/api/ops-pulse/edd/refresh for the live pull. */
 export async function GET(request: Request) {
   try {
     const denied = await requireEddApi();
@@ -12,17 +13,11 @@ export async function GET(request: Request) {
 
     const url = new URL(request.url);
     const stationCode = url.searchParams.get("stationCode")?.trim().toUpperCase() ?? "";
-    const fromDate = url.searchParams.get("fromDate")?.trim() ?? "";
-    const toDate = url.searchParams.get("toDate")?.trim() ?? "";
     if (!stationCode) {
       return NextResponse.json({ error: "stationCode is required." }, { status: 400 });
     }
 
-    const result = await fetchEddStation({
-      stationCode,
-      ...(fromDate ? { fromDate } : {}),
-      ...(toDate ? { toDate } : {})
-    });
+    const result = await fetchEddStation({ stationCode });
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load the EDD dashboard.";

@@ -77,21 +77,41 @@ function compareValues(a: string | number, b: string | number, dir: SortDir) {
   return String(a).localeCompare(String(b)) * factor;
 }
 
-async function fetchEddClient(stationCode: string): Promise<EddStationPayload> {
+type FetchOutcome = { status: "ok"; payload: EddStationPayload } | { status: "no_snapshot" };
+
+async function fetchEddClient(stationCode: string): Promise<FetchOutcome> {
   const url = new URL("/api/ops-pulse/edd", window.location.origin);
   url.searchParams.set("stationCode", stationCode);
   const response = await fetch(url.toString(), { headers: { Accept: "application/json" }, cache: "no-store" });
   const text = await response.text();
-  let payload: Record<string, unknown> = {};
+  let raw: Record<string, unknown> = {};
   try {
-    payload = text ? JSON.parse(text) : {};
+    raw = text ? JSON.parse(text) : {};
   } catch {
-    payload = {};
+    raw = {};
   }
   if (!response.ok) {
-    throw new Error(String(payload.error ?? `Unable to load EDD data (${response.status}).`));
+    throw new Error(String(raw.error ?? `Unable to load EDD data (${response.status}).`));
   }
-  return payload as unknown as EddStationPayload;
+  if (raw.status === "no_snapshot") return { status: "no_snapshot" };
+  return { status: "ok", payload: raw as unknown as EddStationPayload };
+}
+
+async function refreshEddClient(stationCode: string): Promise<EddStationPayload> {
+  const url = new URL("/api/ops-pulse/edd/refresh", window.location.origin);
+  url.searchParams.set("stationCode", stationCode);
+  const response = await fetch(url.toString(), { method: "POST", headers: { Accept: "application/json" }, cache: "no-store" });
+  const text = await response.text();
+  let raw: Record<string, unknown> = {};
+  try {
+    raw = text ? JSON.parse(text) : {};
+  } catch {
+    raw = {};
+  }
+  if (!response.ok) {
+    throw new Error(String(raw.error ?? `Unable to refresh live data (${response.status}).`));
+  }
+  return raw as unknown as EddStationPayload;
 }
 
 export function EddClient({ stations, initialStation }: { stations: EddStationOption[]; initialStation: string }) {
@@ -101,7 +121,9 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
 
   const [stationCode, setStationCode] = useState(initialStation);
   const [payload, setPayload] = useState<EddStationPayload | null>(null);
+  const [noSnapshot, setNoSnapshot] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeBucket, setActiveBucket] = useState<EddBucketKey | null>(null);
   const [search, setSearch] = useState("");
@@ -111,7 +133,6 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0]);
   const [page, setPage] = useState(1);
-  const [requestToken, setRequestToken] = useState(0);
 
   useEffect(() => {
     if (!stationCode) return;
@@ -119,9 +140,15 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
     setLoading(true);
     setError(null);
     void fetchEddClient(stationCode)
-      .then((result) => {
+      .then((outcome) => {
         if (cancelled) return;
-        setPayload(result);
+        if (outcome.status === "no_snapshot") {
+          setPayload(null);
+          setNoSnapshot(true);
+        } else {
+          setPayload(outcome.payload);
+          setNoSnapshot(false);
+        }
         setActiveBucket(null);
         setStateFilters(new Set());
         setPaymentFilters(new Set());
@@ -139,7 +166,21 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
     return () => {
       cancelled = true;
     };
-  }, [stationCode, requestToken]);
+  }, [stationCode]);
+
+  function runRefresh() {
+    setRefreshing(true);
+    setError(null);
+    void refreshEddClient(stationCode)
+      .then((fresh) => {
+        setPayload(fresh);
+        setNoSnapshot(false);
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Unable to refresh live data.");
+      })
+      .finally(() => setRefreshing(false));
+  }
 
   const today = todayIstYmd();
   const tomorrow = addDaysYmd(today, 1);
@@ -221,18 +262,20 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
           <button
             type="button"
             className="button secondary"
-            onClick={() => setRequestToken((value) => value + 1)}
-            disabled={loading}
+            onClick={runRefresh}
+            disabled={refreshing || loading}
             style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
           >
-            {loading ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />}
-            {loading ? "Loading live…" : "Refresh live"}
+            {refreshing ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />}
+            {refreshing ? "Refreshing live…" : "Refresh live"}
           </button>
 
           <span className="subtle" style={{ marginLeft: "auto" }}>
-            {payload
-              ? `${payload.totalCount.toLocaleString("en-IN")} live TIDs · ${formatCiaDisplayDate(payload.window.from)} - ${formatCiaDisplayDate(payload.window.to)} · fetched ${formatFetchedAt(payload.fetchedAt)}`
-              : " "}
+            {refreshing
+              ? "Pulling every tracking ID live from Amazon — this can take up to a minute…"
+              : payload
+                ? `${payload.totalCount.toLocaleString("en-IN")} live TIDs · ${formatCiaDisplayDate(payload.window.from)} - ${formatCiaDisplayDate(payload.window.to)} · fetched ${formatFetchedAt(payload.fetchedAt)}`
+                : " "}
           </span>
         </div>
       </section>
@@ -246,11 +289,23 @@ export function EddClient({ stations, initialStation }: { stations: EddStationOp
         </section>
       ) : null}
 
-      {loading && !payload ? (
+      {loading ? (
         <section className="panel">
           <div className="panel-body" style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <Loader2 size={18} className="edd-spin" />
-            <span className="subtle">Loading live EDD backlog for {stationCode}…</span>
+            <span className="subtle">Loading the saved EDD snapshot for {stationCode}…</span>
+          </div>
+        </section>
+      ) : null}
+
+      {!loading && noSnapshot && !payload ? (
+        <section className="panel message-panel info">
+          <div className="panel-body">
+            <strong>No live snapshot yet for {stationCode}</strong>
+            <p className="subtle" style={{ marginTop: 6 }}>
+              The nightly refresh (08:00 IST) hasn&apos;t run for this station yet. Click &ldquo;Refresh live&rdquo; above to
+              pull it now — a full station backlog takes up to a minute.
+            </p>
           </div>
         </section>
       ) : null}

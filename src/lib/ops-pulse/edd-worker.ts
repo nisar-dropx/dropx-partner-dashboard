@@ -36,6 +36,11 @@ export type EddStationPayload = {
   accountKey: string | null;
 };
 
+/** GET result: either a cached snapshot, or nothing has ever been saved for this station yet. */
+export type EddStationResult =
+  | { status: "ok"; payload: EddStationPayload }
+  | { status: "no_snapshot"; stationCode: string };
+
 export class EddWorkerError extends Error {
   readonly code: string | null;
   constructor(message: string, options: { code?: string | null } = {}) {
@@ -97,50 +102,7 @@ function normalizePackage(raw: Record<string, unknown>): EddPackage {
   };
 }
 
-/**
- * Calls amazon-edd-worker (a Cloudflare Worker, sibling of cash-recon-worker)
- * for one station's live (undelivered) backlog, bucketed by day-level EAD.
- * The worker reads its Amazon session from the same Supabase
- * `amazon_sessions` table cash-recon-worker maintains, so there is no
- * separate login/credentials to configure here — only the worker's own URL
- * and its `x-admin-key`.
- */
-export async function fetchEddStation(params: {
-  stationCode: string;
-  fromDate?: string;
-  toDate?: string;
-}): Promise<EddStationPayload> {
-  const { baseUrl, adminKey } = workerConfig();
-  if (!baseUrl || !adminKey) {
-    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
-  }
-
-  const stationCode = params.stationCode.trim().toUpperCase();
-  const url = new URL(`${baseUrl}/api/admin/executive/edd`);
-  url.searchParams.set("stationCode", stationCode);
-  if (params.fromDate) url.searchParams.set("fromDate", params.fromDate);
-  if (params.toDate) url.searchParams.set("toDate", params.toDate);
-
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    headers: { "x-admin-key": adminKey, Accept: "application/json" },
-    cache: "no-store",
-    signal: AbortSignal.timeout(60000)
-  });
-
-  const text = await response.text();
-  let raw: Record<string, unknown> = {};
-  try {
-    raw = text ? JSON.parse(text) : {};
-  } catch {
-    raw = {};
-  }
-
-  if (!response.ok || raw.status !== "ok") {
-    const message = String(raw.error ?? `EDD worker returned HTTP ${response.status}.`);
-    throw new EddWorkerError(message, { code: raw.code == null ? null : String(raw.code) });
-  }
-
+function normalizePayload(raw: Record<string, unknown>, stationCode: string): EddStationPayload {
   const packages = Array.isArray(raw.packages)
     ? raw.packages.map((row) => normalizePackage((row ?? {}) as Record<string, unknown>))
     : [];
@@ -167,4 +129,79 @@ export async function fetchEddStation(params: {
     sessionSource: raw.sessionSource == null ? null : String(raw.sessionSource),
     accountKey: raw.accountKey == null ? null : String(raw.accountKey)
   };
+}
+
+async function readJson(response: Response): Promise<Record<string, unknown>> {
+  const text = await response.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Reads the cached EDD snapshot for a station — instant, no live Amazon
+ * calls. amazon-edd-worker's full bulk-enrichment pass takes ~60-90s, far
+ * too slow for a page load, so this only ever reads what the daily cron or
+ * a manual "Refresh live" (see refreshEddStation) last saved.
+ */
+export async function fetchEddStation(params: { stationCode: string }): Promise<EddStationResult> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+
+  const stationCode = params.stationCode.trim().toUpperCase();
+  const url = new URL(`${baseUrl}/api/admin/executive/edd`);
+  url.searchParams.set("stationCode", stationCode);
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
+  });
+  const raw = await readJson(response);
+
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  if (raw.status === "no_snapshot") {
+    return { status: "no_snapshot", stationCode };
+  }
+  return { status: "ok", payload: normalizePayload(raw, stationCode) };
+}
+
+/**
+ * Triggers the slow (~60-90s) live pull + bulk enrichment for one station
+ * and saves it as the new cached snapshot — what the dashboard's manual
+ * "Refresh live" button calls.
+ */
+export async function refreshEddStation(params: { stationCode: string }): Promise<EddStationPayload> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+
+  const stationCode = params.stationCode.trim().toUpperCase();
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/refresh`);
+  url.searchParams.set("stationCode", stationCode);
+
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(170000)
+  });
+  const raw = await readJson(response);
+
+  if (!response.ok || raw.status !== "ok") {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  return normalizePayload(raw, stationCode);
 }
