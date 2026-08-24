@@ -93,7 +93,10 @@ async function fetchEddClient(stationCode: string): Promise<FetchOutcome> {
     throw new Error(String(raw.error ?? `Unable to load EDD data (${response.status}).`));
   }
   if (raw.status === "no_snapshot") return { status: "no_snapshot" };
-  return { status: "ok", payload: raw as unknown as EddStationPayload };
+  // The GET route returns { status: "ok", payload: EddStationPayload } —
+  // unwrap it here (unlike refreshEddClient below, whose POST route returns
+  // the station payload directly).
+  return { status: "ok", payload: raw.payload as unknown as EddStationPayload };
 }
 
 async function refreshEddClient(stationCode: string): Promise<EddStationPayload> {
