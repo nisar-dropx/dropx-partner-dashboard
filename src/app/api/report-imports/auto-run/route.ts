@@ -29,6 +29,13 @@ function ymdOrNull(value: unknown): string | undefined {
   return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : undefined;
 }
 
+function addDaysYmd(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 type ImportOutcome = {
   imported?: number;
   skipped?: number;
@@ -114,13 +121,15 @@ export async function POST(request: Request) {
     );
   }
 
-  // IOCL/BPCL fuel data only ever exists through yesterday (the portals report
-  // D-1). If the uploader's date field resolves to today (its default offset,
-  // or a manual pick), fetching "today" returns nothing — force D-1 for these
-  // two sources regardless of what was requested.
+  // IOCL/BPCL portals only ever have the PRIOR day's transactions ready —
+  // whatever date the uploader sends is what the user is trying to look at,
+  // and the portal's actual data for that calendar day always lands one day
+  // later. So always shift back one day from whatever was sent, not only
+  // when "today" was picked — picking a past date for backfill must shift
+  // too, or it silently fetches the wrong (one-day-late) data.
   const isFuelPortalSource = sourceType === "iocl_fuel" || sourceType === "bpcl_fuel";
   const requestedDate = ymdOrNull(body.report_date) || yesterdayIst();
-  const reportDate = isFuelPortalSource && requestedDate >= todayIst() ? yesterdayIst() : requestedDate;
+  const reportDate = isFuelPortalSource ? addDaysYmd(requestedDate, -1) : requestedDate;
 
   try {
     if (isWorkforceAutoSource(sourceType)) {
