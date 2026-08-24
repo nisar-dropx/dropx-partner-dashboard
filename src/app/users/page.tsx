@@ -126,8 +126,11 @@ function isMissingColumnError(error: unknown) {
     (normalized.includes("does not exist") || normalized.includes("schema cache"));
 }
 
-function permissionText(role: UserRoleRow, permissions: RolePermissionRow[]) {
-  const rolePermissions = permissions.filter((permission) => permission.role_id === role.id);
+function permissionText(role: UserRoleRow, permissions: RolePermissionRow[], pages: AppPageRow[]) {
+  const surfacePageIds = new Set(pages.map((page) => page.id));
+  const rolePermissions = permissions.filter(
+    (permission) => permission.role_id === role.id && surfacePageIds.has(permission.page_id)
+  );
   const viewCount = rolePermissions.filter((permission) => permission.can_view).length;
   const addCount = rolePermissions.filter((permission) => permission.can_add).length;
   const editCount = rolePermissions.filter((permission) => permission.can_edit).length;
@@ -550,7 +553,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
         canEdit={pagePermission.canEdit}
         roles={roles.map((role) => ({
           ...role,
-          permissionSummary: permissionText(role, permissions)
+          permissionSummary: permissionText(role, permissions, pages)
         }))}
       />
       ) : null}
@@ -673,7 +676,12 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                       </select>
                     </label>
                   </div>
-                  <PermissionMatrix pages={pages} initialPermissions={editRolePermissions} surface={accessSurface} />
+                  <PermissionMatrix
+                    key={`${accessSurface}:${editRole.id}`}
+                    pages={pages}
+                    initialPermissions={editRolePermissions}
+                    surface={accessSurface}
+                  />
                   <div className="form-actions modal-actions">
                     <SubmitButton>Save role</SubmitButton>
                     <DismissModalButton className="button secondary">Cancel</DismissModalButton>
