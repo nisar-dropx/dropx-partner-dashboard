@@ -174,18 +174,23 @@ export function PermissionMatrix({
     const partiallyChecked = !fullyChecked && somePermissionChecked(pageIds);
     return (
       <>
-        <td><input aria-checked={partiallyChecked ? "mixed" : fullyChecked} checked={fullyChecked} className={checkboxClass(partiallyChecked)} onChange={(event) => setAllForPages(pageIds, event.target.checked)} type="checkbox" /></td>
-        {actions.map((action) => (
-          <td key={`${keyPrefix}-${action.key}`}>
-            <input
-              checked={allPagesChecked(pageIds, action.key)}
-              className={checkboxClass(!allPagesChecked(pageIds, action.key) && somePagesChecked(pageIds, action.key))}
-              disabled={action.key === "view" && pageIds.some((pageId) => Boolean(permissions[pageId]?.edit))}
-              onChange={(event) => updatePages(pageIds, action.key, event.target.checked)}
-              type="checkbox"
-            />
-          </td>
-        ))}
+        <td><input aria-checked={partiallyChecked ? "mixed" : fullyChecked} checked={fullyChecked || partiallyChecked} className={checkboxClass(partiallyChecked)} onChange={(event) => setAllForPages(pageIds, event.target.checked)} type="checkbox" /></td>
+        {actions.map((action) => {
+          const allChecked = allPagesChecked(pageIds, action.key);
+          const someChecked = !allChecked && somePagesChecked(pageIds, action.key);
+          return (
+            <td key={`${keyPrefix}-${action.key}`}>
+              <input
+                aria-checked={someChecked ? "mixed" : allChecked}
+                checked={allChecked || someChecked}
+                className={checkboxClass(someChecked)}
+                disabled={action.key === "view" && pageIds.length === 1 && Boolean(permissions[pageIds[0]]?.edit)}
+                onChange={(event) => updatePages(pageIds, action.key, event.target.checked)}
+                type="checkbox"
+              />
+            </td>
+          );
+        })}
       </>
     );
   }
