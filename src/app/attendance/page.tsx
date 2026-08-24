@@ -7,6 +7,8 @@ import {
   istDate,
   loadAttendanceReportRows
 } from "@/lib/biometric/attendance";
+import { attendanceReportFilterOptions, filterAttendanceReportRows } from "@/lib/biometric/attendance-report-filters";
+import { currentAccessSurface } from "@/lib/access-surface";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
@@ -19,7 +21,7 @@ type LocationRow = {
 };
 
 type ReportMode = "daily" | "monthly" | "periodic";
-type SortMode = "department" | "designation" | "location";
+type SortMode = "workforce_type" | "designation" | "location";
 
 const dailyReportOptions: Array<{ value: AttendanceReportType; label: string }> = [
   { value: "performance", label: "Daily Performance" },
@@ -58,7 +60,7 @@ const modeOptions = [
 ];
 
 const sortingOptions = [
-  { value: "department", label: "By Department Wise" },
+  { value: "workforce_type", label: "By Workforce Type" },
   { value: "designation", label: "By Designation Wise" },
   { value: "location", label: "By Location Wise" }
 ];
@@ -70,7 +72,7 @@ function safeMode(value: string | undefined): ReportMode {
 }
 
 function safeSort(value: string | undefined): SortMode {
-  return value === "designation" || value === "location" ? value : "department";
+  return value === "designation" || value === "location" ? value : "workforce_type";
 }
 
 function normalizedRange(fromDate: string, toDate: string) {
@@ -142,10 +144,14 @@ export default async function AttendanceReportsPage({
     month?: string;
     report?: string;
     sort?: string;
+    search?: string;
+    designation?: string;
+    worker_type?: string;
     to_date?: string;
   };
 }) {
-  const authorization = await requirePagePermission("attendance_reports", "access");
+  const pageCode = currentAccessSurface() === "ops" ? "ops_attendance_reports" : "attendance_reports";
+  const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
   const mode = safeMode(searchParams?.mode);
   const date = safeDate(searchParams?.date);
@@ -157,6 +163,9 @@ export default async function AttendanceReportsPage({
   const reportMeta = reportOptions.find((option) => option.value === reportType) ?? reportOptions[0];
   const sort = safeSort(searchParams?.sort);
   const locationId = String(searchParams?.location_id ?? "");
+  const search = String(searchParams?.search ?? "").trim();
+  const designation = String(searchParams?.designation ?? "");
+  const workerType = String(searchParams?.worker_type ?? "");
   const activeRange = mode === "monthly"
     ? monthBounds(month)
     : mode === "periodic"
@@ -165,19 +174,24 @@ export default async function AttendanceReportsPage({
 
   let rows: Awaited<ReturnType<typeof loadAttendanceReportRows>> = [];
   let locations: LocationRow[] = [];
+  let filterOptions = { designations: [] as string[], workerTypes: [] as string[] };
   let error: string | null = null;
 
   try {
     locations = await loadLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
     const allowedLocationIds = new Set(locations.map((location) => location.id));
-    const selectedLocationIds = locationId && allowedLocationIds.has(locationId) ? [locationId] : undefined;
-    rows = await loadAttendanceReportRows({
+    const selectedLocationIds = locationId && allowedLocationIds.has(locationId)
+      ? [locationId]
+      : authorization.hasAllLocationAccess ? undefined : locations.map((location) => location.id);
+    const scopedRows = await loadAttendanceReportRows({
       companyId,
       fromDate: activeRange.fromDate,
       locationIds: selectedLocationIds,
       reportType,
       toDate: activeRange.toDate
     });
+    filterOptions = attendanceReportFilterOptions(scopedRows);
+    rows = filterAttendanceReportRows(scopedRows, { designation, search, workerType });
   } catch (loadError) {
     error = loadError instanceof Error ? loadError.message : "Unable to load attendance reports.";
   }
@@ -200,7 +214,7 @@ export default async function AttendanceReportsPage({
   ];
 
   return (
-    <AppShell active="Attendance" pageCode="attendance_reports">
+    <AppShell active="Attendance" pageCode={pageCode}>
       <PageHead
         eyebrow="Reports"
         title="Attendance"
@@ -237,8 +251,17 @@ export default async function AttendanceReportsPage({
           <label>Sorting
             <SearchableSelect name="sort" options={sortingOptions} defaultValue={sort} placeholder="Select sorting" required />
           </label>
-          <label className="span-3">Location
+          <label>Location
             <SearchableSelect name="location_id" options={locationOptions} defaultValue={locationId} placeholder="All locations" />
+          </label>
+          <label>Designation
+            <SearchableSelect name="designation" options={[{ value: "", label: "All designations" }, ...filterOptions.designations.map((value) => ({ value, label: value }))]} defaultValue={designation} placeholder="All designations" />
+          </label>
+          <label>Workforce type
+            <SearchableSelect name="worker_type" options={[{ value: "", label: "All workforce types" }, ...filterOptions.workerTypes.map((value) => ({ value, label: value }))]} defaultValue={workerType} placeholder="All workforce types" />
+          </label>
+          <label className="span-3">Search
+            <input className="field" name="search" defaultValue={search} placeholder="Name, DropX ID, biometric ID, location or designation" />
           </label>
 
           <fieldset className="span-3 report-choice-panel">
