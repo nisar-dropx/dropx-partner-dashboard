@@ -17,3 +17,4 @@ deploy-output.txt
 .vercel
 .env*
 /docs/CASH_RECON_EXECUTIVE_RECONCILIATION_MIGRATION.md
+*/node_modules
