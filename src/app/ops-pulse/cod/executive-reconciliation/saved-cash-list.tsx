@@ -356,7 +356,7 @@ export function SavedCashList({
                         </label>
                       ))}
                       <label className="denomination-chip other">
-                        <span className="denomination-chip-label">Coins / other</span>
+                        <span className="denomination-chip-label">Other</span>
                         <input className="field" name="cash_other_amount" defaultValue={String(row.cash_other_amount ?? 0)} inputMode="decimal" />
                       </label>
                     </div>
@@ -379,7 +379,7 @@ export function SavedCashList({
                         </label>
                       ))}
                       <label className="denomination-chip other" aria-label="Coins or other returned">
-                        <span className="denomination-chip-label">Coins / other</span>
+                        <span className="denomination-chip-label">Other</span>
                         <input className="field" name="return_cash_other_amount" defaultValue={String(row.return_cash_other_amount ?? 0)} inputMode="decimal" />
                       </label>
                     </div>

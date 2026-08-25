@@ -11968,10 +11968,6 @@ tbody tr:hover td {
   transition: border-color .15s ease, box-shadow .15s ease;
 }
 
-.cash-breakdown-section .denomination-chip.other {
-  width: 82px;
-}
-
 .cash-breakdown-section .denomination-chip:focus-within {
   border-color: #f79009;
   box-shadow: 0 0 0 3px rgba(247, 144, 9, .14);
