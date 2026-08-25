@@ -244,7 +244,11 @@ export function DriverReconCashPanel({
     try {
       const result = await confirmDriverReconForDeposit(formData);
       if (result?.ok) {
-        startTransition(() => router.refresh());
+        const nextHref = result.nextHref || returnHref;
+        startTransition(() => {
+          router.push(nextHref);
+          router.refresh();
+        });
         return;
       }
       setSubmitError(result?.error ?? "Unable to confirm driver validation.");

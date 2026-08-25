@@ -1275,8 +1275,9 @@ export async function confirmDriverReconForDeposit(formData: FormData) {
     const notice = stillPending
       ? "Feedback recorded. Deposit & summary is unlocked; pending Cash In Associate stays visible."
       : "Driver validation cleared. Continue to Deposit & summary.";
-    if (clientResponse) return { ok: true, notice } satisfies CashEntryActionResult;
-    redirectWithFlash({ notice }, withStep(returnHref, 3));
+    const nextHref = withStep(returnHref, 3);
+    if (clientResponse) return { ok: true, notice, nextHref } satisfies CashEntryActionResult;
+    redirectWithFlash({ notice }, nextHref);
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "Unable to confirm driver validation.";
