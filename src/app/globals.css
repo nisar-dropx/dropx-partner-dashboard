@@ -11863,6 +11863,8 @@ tbody tr:hover td {
 
 .cash-breakdown-grid {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 12px;
   margin-top: 10px;
 }
@@ -11969,7 +11971,10 @@ tbody tr:hover td {
 }
 
 .cash-breakdown-section .denomination-chip input {
+  /* .field sets height/min-height to --control-height (38px) — override both, or
+     min-height wins and the chip renders tall and mostly-empty despite height:22px. */
   height: 22px;
+  min-height: 22px;
   padding-inline: 2px;
   text-align: center;
   font-size: 12px;
@@ -12129,6 +12134,10 @@ tbody tr:hover td {
   }
 
   .reconciliation-entry-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cash-breakdown-grid {
     grid-template-columns: 1fr;
   }
 
