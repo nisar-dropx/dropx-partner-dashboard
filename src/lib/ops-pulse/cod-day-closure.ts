@@ -387,11 +387,17 @@ export async function finalizeCodClosure({
   return { collectedCod, difference };
 }
 
-/** Final-submitted day closures in a date window (for COD Reports). */
+/**
+ * Day closures in a date window (for COD Reports).
+ * By default returns only final-submitted closures (`finalOnly: true`), which is what
+ * "deposit vs collected" reporting needs. Pass `finalOnly: false` to also include
+ * in-progress drafts (cash submitted but still mid-pipeline) — needed so stations that
+ * haven't reached final close are still visible in reports instead of silently vanishing.
+ */
 export async function loadFinalCodDayClosures(
   companyId: string,
   locationIds: string[],
-  params: { fromDate?: string; toDate?: string; locationId?: string }
+  params: { fromDate?: string; toDate?: string; locationId?: string; finalOnly?: boolean }
 ) {
   if (!supabaseAdmin || !locationIds.length) {
     return { rows: [] as CodDayClosure[], error: null as string | null };
@@ -401,11 +407,11 @@ export async function loadFinalCodDayClosures(
     .from("cod_day_closures")
     .select("id, business_date, location_id, station_code, collected_cod, amazon_open_remittance_expected, amazon_open_remittance_count, difference_amount, driver_reconciliation_pending, no_deposit_liability, validation_status, submission_status, manager_status, override_reason, validation_snapshot, submitted_at, driver_check_status, driver_exception_reason, driver_exception_manager_remarks, deposit_check_status, deposit_exception_reason, deposit_exception_manager_remarks, is_final_submitted, final_submitted_at")
     .eq("company_id", companyId)
-    .eq("is_final_submitted", true)
     .in("location_id", locationIds)
     .order("business_date", { ascending: false })
     .order("station_code");
 
+  if (params.finalOnly !== false) query = query.eq("is_final_submitted", true);
   if (params.fromDate) query = query.gte("business_date", params.fromDate);
   if (params.toDate) query = query.lte("business_date", params.toDate);
   if (params.locationId) query = query.eq("location_id", params.locationId);
@@ -413,6 +419,18 @@ export async function loadFinalCodDayClosures(
   const { data, error } = await query.limit(500);
   if (error) return { rows: [] as CodDayClosure[], error: error.message };
   return { rows: (data ?? []) as CodDayClosure[], error: null };
+}
+
+/** Human-readable pipeline stage for a closure that hasn't reached final submit yet. */
+export function codClosureStageLabel(closure: Pick<CodDayClosure, "is_final_submitted" | "driver_check_status" | "deposit_check_status">) {
+  if (closure.is_final_submitted) return "Final submitted";
+  const driverPassed = closure.driver_check_status === "Passed" || closure.driver_check_status === "Exception approved";
+  const depositPassed = closure.deposit_check_status === "Passed" || closure.deposit_check_status === "Exception approved";
+  if (driverPassed && depositPassed) return "Ready to finalize";
+  if (closure.driver_check_status === "Exception requested") return "Driver exception — manager review pending";
+  if (!driverPassed) return "Driver check pending";
+  if (closure.deposit_check_status === "Exception requested") return "Deposit exception — manager review pending";
+  return "Deposit check pending";
 }
 
 export function remittanceExpectedFromClosure(closure: Pick<CodDayClosure, "amazon_open_remittance_expected" | "collected_cod" | "validation_snapshot">) {

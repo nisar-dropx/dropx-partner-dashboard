@@ -17,13 +17,16 @@ import {
   formTypeLabel,
   inferFormTypeFromLocation,
   isMissingCodSetup,
+  loadCodCashActivity,
   loadCodLocations,
   loadCodSubmissions,
   locationLabel,
+  type CodCashActivitySummary,
   type CodLocationRow,
   type CodSubmissionRow
 } from "@/lib/ops-pulse/cod";
 import {
+  codClosureStageLabel,
   daysBetweenYmd,
   loadFinalCodDayClosures,
   remittanceCodesFromClosure,
@@ -59,6 +62,80 @@ type StationDayRow = {
   submissionId: string | null;
 };
 
+type StationFocusRow = {
+  key: string;
+  locationId: string;
+  stationLabel: string;
+  stationCode: string;
+  status: string;
+  collected: number | null;
+  entryCount: number;
+  actionHref: string;
+};
+
+/** Pipeline status for one station on the focus date, whether or not it ever reached a closure row. */
+function buildStationFocusRow(
+  location: CodLocationRow,
+  closure: CodDayClosure | null,
+  activity: CodCashActivitySummary | null,
+  focusDate: string
+): StationFocusRow {
+  const stationLabel = locationLabel(location) || location.station_code || "-";
+  const hrefFor = (step: number) =>
+    `/ops-pulse/cod/executive-reconciliation?date=${encodeURIComponent(focusDate)}&location=${encodeURIComponent(location.id)}&step=${step}`;
+  if (closure) {
+    const status = closure.is_final_submitted ? "Final submitted" : codClosureStageLabel(closure);
+    const step = closure.is_final_submitted
+      ? 3
+      : closure.driver_check_status === "Passed" || closure.driver_check_status === "Exception approved"
+        ? 3
+        : 2;
+    return {
+      key: `closure:${closure.id}`,
+      locationId: location.id,
+      stationLabel,
+      stationCode: location.station_code,
+      status,
+      collected: amountValue(closure.collected_cod),
+      entryCount: 0,
+      actionHref: closure.is_final_submitted ? "" : hrefFor(step)
+    };
+  }
+  if (activity && activity.entryCount > 0) {
+    return {
+      key: `activity:${location.id}`,
+      locationId: location.id,
+      stationLabel,
+      stationCode: location.station_code,
+      status: "Cash entered — submission pending",
+      collected: activity.collectedTotal,
+      entryCount: activity.entryCount,
+      actionHref: hrefFor(1)
+    };
+  }
+  return {
+    key: `none:${location.id}`,
+    locationId: location.id,
+    stationLabel,
+    stationCode: location.station_code,
+    status: "Missing — cash sheet not started",
+    collected: null,
+    entryCount: 0,
+    actionHref: hrefFor(1)
+  };
+}
+
+/** Sort order for the focus-date table: most actionable (nothing done yet) first, closed days last. */
+function statusUrgency(status: string) {
+  if (status === "Missing — cash sheet not started") return 0;
+  if (status === "Cash entered — submission pending") return 1;
+  if (status.includes("exception")) return 2;
+  if (status === "Driver check pending") return 3;
+  if (status === "Deposit check pending") return 4;
+  if (status === "Ready to finalize") return 5;
+  return 6; // Final submitted
+}
+
 function submissionMatchesClosure(submission: CodSubmissionRow, closure: CodDayClosure) {
   if (submission.location_id !== closure.location_id) return false;
   const deposit = String(submission.deposit_date ?? "").slice(0, 10);
@@ -71,17 +148,20 @@ function submissionMatchesClosure(submission: CodSubmissionRow, closure: CodDayC
 }
 
 function stationDayStatus(params: {
-  hasClosure: boolean;
+  closure: CodDayClosure | null;
   submission: CodSubmissionRow | null;
-  erCollected: number | null;
-  submittedAmount: number | null;
 }): string {
-  if (params.hasClosure && !params.submission) return "Pending submission";
-  if (!params.submission) return "No data";
-  const validation = String(params.submission.validation_status ?? "Pending");
+  const { closure, submission } = params;
+  // Closure exists but the station hasn't finished the reconciliation pipeline yet
+  // (submit → driver check → deposit check → final close) — show exactly where it's stuck
+  // instead of hiding the row until it happens to reach final submit.
+  if (closure && !closure.is_final_submitted) return codClosureStageLabel(closure);
+  if (closure && !submission) return "Pending submission";
+  if (!submission) return "No data";
+  const validation = String(submission.validation_status ?? "Pending");
   if (validation === "Matched") return "Verified";
   if (["Short", "Excess", "Rejected"].includes(validation)) return validation;
-  if (params.hasClosure) return "Submitted";
+  if (closure) return "Submitted";
   return validation || "Submitted";
 }
 
@@ -110,18 +190,14 @@ function buildStationDayRows(
     const slips = match ? depositAttachmentsFor(match) : [];
     const variance =
       submittedAmount != null ? Number((submittedAmount - erCollected).toFixed(2)) : null;
-    const status = stationDayStatus({
-      hasClosure: true,
-      submission: match,
-      erCollected,
-      submittedAmount
-    });
+    const status = stationDayStatus({ closure, submission: match });
 
     if (statusFilter) {
       const needle = statusFilter.toLowerCase();
       const ok =
         status.toLowerCase().includes(needle) ||
         (needle === "pending" && status === "Pending submission") ||
+        (needle === "in_progress" && !closure.is_final_submitted) ||
         (match && String(match.validation_status).toLowerCase() === needle);
       if (!ok) continue;
     }
@@ -152,12 +228,7 @@ function buildStationDayRows(
     const date = String(submission.deposit_date || submission.cod_period_from || submission.cod_date || "").slice(0, 10);
     const submittedAmount = amountValue(submission.deposited_amount ?? submission.remittance_amount);
     const slips = depositAttachmentsFor(submission);
-    const status = stationDayStatus({
-      hasClosure: false,
-      submission,
-      erCollected: null,
-      submittedAmount
-    });
+    const status = stationDayStatus({ closure: null, submission });
     if (statusFilter) {
       const needle = statusFilter.toLowerCase();
       const ok =
@@ -228,22 +299,31 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
     ? clientLocations.filter((location) => location.id === locationFilter)
     : clientLocations
   ).map((location) => location.id);
+  // Single-day snapshot used by "Station reconciliation status" below — anchors on the
+  // To date filter when set, otherwise yesterday (the latest day that should be fully closed).
+  const focusDate = toDate || yesterday;
 
-  const closuresResult = selectedClient === "flipkart"
-    ? { rows: [] as CodDayClosure[], error: null as string | null }
-    : await loadFinalCodDayClosures(companyId, scopedLocationIds, {
-        fromDate,
-        // Pending COD looks through yesterday; station-day register uses filter toDate or all finals
-        toDate: toDate || undefined,
-        locationId: locationFilter || undefined
-      });
+  const [closuresResult, cashActivityResult] = await Promise.all([
+    selectedClient === "flipkart"
+      ? Promise.resolve({ rows: [] as CodDayClosure[], error: null as string | null })
+      // finalOnly: false — station-day register needs to show in-progress stations too,
+      // not just ones that reached final submit (see codClosureStageLabel below).
+      : loadFinalCodDayClosures(companyId, scopedLocationIds, {
+          fromDate,
+          toDate: toDate || undefined,
+          locationId: locationFilter || undefined,
+          finalOnly: false
+        }),
+    loadCodCashActivity(companyId, scopedLocationIds, focusDate)
+  ]);
 
   const setupError = submissionsResult.error && isMissingCodSetup({ message: submissionsResult.error })
     ? submissionsResult.error
     : null;
   const locationById = new Map(locations.map((location) => [location.id, location]));
+  const finalClosureRows = closuresResult.rows.filter((closure) => closure.is_final_submitted);
 
-  const pendingClosures = closuresResult.rows.filter((closure) => {
+  const pendingClosures = finalClosureRows.filter((closure) => {
     if (closure.business_date > yesterday) return false;
     if (fromDate && closure.business_date < fromDate) return false;
     if (toDate && closure.business_date > toDate) return false;
@@ -258,10 +338,25 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
     statusFilter
   );
 
+  // Every permitted station's reconciliation status for the focus date — surfaces stations
+  // that never opened the cash sheet, or opened it but never pushed it through submit,
+  // which loadFinalCodDayClosures alone would render completely invisible.
+  const closureByLocationForFocus = new Map(
+    closuresResult.rows.filter((closure) => closure.business_date === focusDate).map((closure) => [closure.location_id, closure])
+  );
+  const activityByLocation = new Map(cashActivityResult.rows.map((row) => [row.locationId, row]));
+  const focusLocations = locationFilter ? clientLocations.filter((location) => location.id === locationFilter) : clientLocations;
+  const stationFocusRows = focusLocations.map((location) => {
+    const closure = closureByLocationForFocus.get(location.id) ?? null;
+    const activity = activityByLocation.get(location.id) ?? null;
+    return buildStationFocusRow(location, closure, activity, focusDate);
+  }).sort((a, b) => statusUrgency(a.status) - statusUrgency(b.status) || a.stationLabel.localeCompare(b.stationLabel));
+  const notStartedCount = stationFocusRows.filter((row) => row.status === "Missing — cash sheet not started").length;
+
   const deposited = submissionsResult.rows.reduce((sum, row) => sum + amountValue(row.deposited_amount), 0);
   const verified = submissionsResult.rows.filter((row) => row.validation_status === "Matched").length;
   const issues = submissionsResult.rows.filter((row) => ["Short", "Excess", "Rejected"].includes(row.validation_status)).length;
-  const erCollectedTotal = closuresResult.rows.reduce((sum, row) => sum + amountValue(row.collected_cod), 0);
+  const erCollectedTotal = finalClosureRows.reduce((sum, row) => sum + amountValue(row.collected_cod), 0);
   const varianceTotal = deposited - erCollectedTotal;
 
   return (
@@ -311,6 +406,7 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
                 <label>Status
                   <select className="field" name="status" defaultValue={statusFilter}>
                     <option value="">All statuses</option>
+                    <option value="in_progress">In progress (not finalized)</option>
                     <option value="Pending">Pending submission</option>
                     <option value="Submitted">Submitted</option>
                     <option value="Matched">Verified</option>
@@ -325,6 +421,45 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
               </form>
             </div>
           </section>
+
+          {selectedClient !== "flipkart" ? (
+            <section className="panel">
+              <div className="panel-head">
+                <div>
+                  <h2>Station reconciliation status — {formatDate(focusDate)}</h2>
+                  <p className="subtle">
+                    Every permitted station for this date, including ones that haven&apos;t reached Final Submit yet — those never
+                    appear in the tables below, which only include closed days. Use the To date filter above to check a different day.
+                  </p>
+                </div>
+                <span className="count-badge">{notStartedCount} not started · {stationFocusRows.length} stations</span>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Station</th>
+                      <th>Status</th>
+                      <th>Cash entered</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stationFocusRows.length ? stationFocusRows.map((row) => (
+                      <tr key={row.key}>
+                        <td><strong>{row.stationLabel}</strong></td>
+                        <td><StatusPill status={row.status} /></td>
+                        <td>{row.collected == null ? "-" : `${formatAmount(row.collected)}${row.entryCount ? ` · ${row.entryCount} associate${row.entryCount === 1 ? "" : "s"}` : ""}`}</td>
+                        <td>{row.actionHref ? <Link href={row.actionHref} prefetch={false}>Open reconciliation</Link> : <span className="subtle">Closed</span>}</td>
+                      </tr>
+                    )) : (
+                      <tr><td className="empty-cell" colSpan={4}>No stations in scope for this filter.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ) : null}
 
           {selectedClient !== "flipkart" ? (
             <section className="panel">
@@ -374,7 +509,7 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
 
           <section className="summary-grid">
             <div className="metric-card"><span>Pending COD</span><strong>{pendingClosures.length}</strong><small>ER done, slip missing</small></div>
-            <div className="metric-card"><span>ER closed days</span><strong>{closuresResult.rows.length}</strong><small>Final submitted</small></div>
+            <div className="metric-card"><span>ER closed days</span><strong>{finalClosureRows.length}</strong><small>Final submitted</small></div>
             <div className="metric-card"><span>Submissions</span><strong>{submissionsResult.rows.length}</strong><small>Deposit slips filed</small></div>
             <div className="metric-card"><span>Deposited</span><strong>{formatAmount(deposited)}</strong><small>Station submitted value</small></div>
             <div className="metric-card"><span>Verified</span><strong>{verified}</strong><small>Matched / portal verified</small></div>
@@ -386,7 +521,7 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
             <div className="panel-head">
               <div>
                 <h2>Station-day register</h2>
-                <p className="subtle">Executive Reconciliation cash joined with COD Submission deposit proof.</p>
+                <p className="subtle">Executive Reconciliation cash joined with COD Submission deposit proof. Includes in-progress days — check Status for the pipeline stage.</p>
               </div>
               <span className="count-badge">{stationDayRows.length} rows</span>
             </div>

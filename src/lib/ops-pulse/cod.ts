@@ -664,6 +664,46 @@ export async function loadDailySubmissions(
   return { rows: (data ?? []) as OpsDailySubmissionRow[], error: null };
 }
 
+export type CodCashActivitySummary = {
+  locationId: string;
+  entryCount: number;
+  collectedTotal: number;
+  expectedTotal: number;
+};
+
+/**
+ * Whether a station has *any* saved cash sheet entries for a business date, aggregated
+ * per location — independent of whether the day was ever submitted or finally closed.
+ * Used to tell "station never opened the cash sheet" apart from "station entered cash
+ * but never pushed it through submit / driver check / deposit check / final close" —
+ * both look identical (absent) if you only look at cod_day_closures.
+ */
+export async function loadCodCashActivity(companyId: string, locationIds: string[], businessDate: string) {
+  if (!supabaseAdmin || !locationIds.length || !businessDate) {
+    return { rows: [] as CodCashActivitySummary[], error: null as string | null };
+  }
+  const { data, error } = await supabaseAdmin
+    .from("cod_executive_reconciliations")
+    .select("location_id, collected_amount, expected_amount")
+    .eq("company_id", companyId)
+    .eq("business_date", businessDate)
+    .in("location_id", locationIds)
+    .limit(5000);
+  if (error) return { rows: [] as CodCashActivitySummary[], error: error.message };
+
+  const byLocation = new Map<string, CodCashActivitySummary>();
+  for (const row of (data ?? []) as { location_id: string | null; collected_amount: number | string | null; expected_amount: number | string | null }[]) {
+    const locationId = row.location_id;
+    if (!locationId) continue;
+    const existing = byLocation.get(locationId) ?? { locationId, entryCount: 0, collectedTotal: 0, expectedTotal: 0 };
+    existing.entryCount += 1;
+    existing.collectedTotal = Number((existing.collectedTotal + amountValue(row.collected_amount)).toFixed(2));
+    existing.expectedTotal = Number((existing.expectedTotal + amountValue(row.expected_amount)).toFixed(2));
+    byLocation.set(locationId, existing);
+  }
+  return { rows: Array.from(byLocation.values()), error: null };
+}
+
 export async function loadExecutiveReconciliationRows(
   companyId: string,
   locationScopeIds: string[],
