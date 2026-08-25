@@ -17,6 +17,9 @@ import { fetchLiabilitySummary, fetchRemittance, isCashReconWorkerConfigured } f
 
 const pagePath = "/ops-pulse/cod/executive-reconciliation";
 const publicPagePath = "/cod/executive-reconciliation";
+// Keep in sync with DIFFERENCE_REMARKS_RUPEES in deposit-remittance-panel.tsx and
+// the final-submit gate in cod-day-closure.ts — small variance needs no explanation.
+const DIFFERENCE_REMARKS_RUPEES = 5;
 
 export type CashEntryActionResult = {
   ok: boolean;
@@ -1449,9 +1452,9 @@ export async function validateCodRemittanceDeposit(formData: FormData): Promise<
     const difference = Number((collected - remittance.remittanceTotalCash).toFixed(2));
     // Short > ₹10 is confirmed on final Submit via override popup — allow validate without remarks.
     const isShortOverLimit = difference < -10;
-    const needsRemarks = !isShortOverLimit && (Math.abs(difference) >= 0.01 || remittance.createdCount > 0);
+    const needsRemarks = !isShortOverLimit && (Math.abs(difference) > DIFFERENCE_REMARKS_RUPEES || remittance.createdCount > 0);
     if (needsRemarks && !overrideRemarks) {
-      throw new Error("Remarks are required when cash differs from remittance total or remittance is still pending.");
+      throw new Error(`Remarks are required when cash differs from remittance total by more than ₹${DIFFERENCE_REMARKS_RUPEES} or remittance is still pending.`);
     }
 
     const now = new Date().toISOString();

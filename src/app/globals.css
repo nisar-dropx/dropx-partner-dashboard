@@ -11883,7 +11883,7 @@ tbody tr:hover td {
 }
 
 .cash-breakdown-section {
-  padding: 12px 14px 14px;
+  padding: 10px 12px 11px;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   background: #f8fafc;
@@ -11904,7 +11904,7 @@ tbody tr:hover td {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .cash-breakdown-section-head strong {
@@ -11938,22 +11938,27 @@ tbody tr:hover td {
 }
 
 .denomination-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(74px, 1fr));
-  gap: 8px;
+  /* Fixed-width flex chips instead of a stretching grid — keeps each note compact
+     (content-sized) no matter how wide the panel is, rather than ballooning to fill it. */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .cash-breakdown-section .denomination-chip {
   display: grid;
-  gap: 5px;
-  padding: 8px 6px 7px;
+  gap: 2px;
+  width: 52px;
+  flex: 0 0 auto;
+  padding: 4px 3px 3px;
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #fff;
   color: #344054;
   text-align: center;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 800;
+  line-height: 1.15;
   text-transform: none;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
@@ -11964,14 +11969,15 @@ tbody tr:hover td {
 }
 
 .cash-breakdown-section .denomination-chip input {
-  height: 30px;
-  padding-inline: 4px;
+  height: 22px;
+  padding-inline: 2px;
   text-align: center;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .cash-breakdown-section .denomination-chip.other {
-  grid-column: span 2;
+  width: 74px;
 }
 
 .cash-live-status {
@@ -12078,10 +12084,6 @@ tbody tr:hover td {
   .reconciliation-entry-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  .denomination-grid {
-    grid-template-columns: repeat(4, minmax(70px, 1fr));
-  }
 }
 
 @media (max-width: 760px) {
@@ -12128,14 +12130,6 @@ tbody tr:hover td {
 
   .reconciliation-entry-grid {
     grid-template-columns: 1fr;
-  }
-
-  .denomination-grid {
-    grid-template-columns: repeat(2, minmax(70px, 1fr));
-  }
-
-  .cash-breakdown-section .denomination-chip.other {
-    grid-column: span 2;
   }
 
   .cash-breakdown-section-head {

@@ -2,6 +2,10 @@ import { sendEmail } from "@/lib/email";
 import { fetchDriverReconciliation, fetchLiabilitySummary, fetchRemittance, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
+// Keep in sync with DIFFERENCE_REMARKS_RUPEES in deposit-remittance-panel.tsx and actions.ts —
+// small cash-vs-remittance variance is auto-validated without needing an explanation.
+const DIFFERENCE_REMARKS_RUPEES = 5;
+
 export type CodGateStatus =
   | "Not run" | "Locked" | "Queued" | "Running" | "Passed" | "Pending"
   | "Manual Review" | "Exception requested" | "Exception approved" | "Exception rejected" | "Error";
@@ -322,9 +326,9 @@ export async function finalizeCodClosure({
         `SCC cash liability is not clear (expected ₹${cash.expectedAmount.toFixed(2)}, actual ₹${cash.actualAmount.toFixed(2)}, short/excess ₹${cash.shortExcessAmount.toFixed(2)}). Complete liability before submitting COD.`
       );
     }
-    if (Math.abs(difference) >= 0.01 && !overrideRemarks) {
+    if (Math.abs(difference) > DIFFERENCE_REMARKS_RUPEES && !overrideRemarks) {
       throw new Error(
-        `Cash vs remittance difference is ₹${difference.toFixed(2)}. Provide remittance remarks before final submission.`
+        `Cash vs remittance difference is ₹${difference.toFixed(2)}, beyond the ₹${DIFFERENCE_REMARKS_RUPEES} auto-validate limit. Provide remittance remarks before final submission.`
       );
     }
     if (remittance.createdCount > 0 && !overrideRemarks) {

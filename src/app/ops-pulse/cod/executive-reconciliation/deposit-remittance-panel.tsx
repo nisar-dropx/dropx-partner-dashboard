@@ -13,6 +13,8 @@ import { submitCodDayClosure, validateCodRemittanceDeposit } from "./actions";
 const SHORT_BLOCK_RUPEES = 10;
 const VALIDATE_COOLDOWN_MS = 10_000;
 const MATCH_EPSILON = 0.01;
+// Small change/rounding variance is auto-validated without remarks; only a difference beyond this needs an explanation.
+const DIFFERENCE_REMARKS_RUPEES = 5;
 
 function currency(value: number) {
   return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -468,7 +470,7 @@ export function DepositRemittancePanel({
       )
     )
   );
-  const needsDifferenceRemarks = pageVsRemittance != null && Math.abs(pageVsRemittance) >= MATCH_EPSILON;
+  const needsDifferenceRemarks = pageVsRemittance != null && Math.abs(pageVsRemittance) > DIFFERENCE_REMARKS_RUPEES;
   const hasPendingCreated = Boolean(remittance && remittance.createdCount > 0);
   const submitBlocked = isShortOverLimit || expectedCashMismatch;
   const validateBusy = checking || savingValidation;
@@ -552,7 +554,7 @@ export function DepositRemittancePanel({
         && matchSummary.mode === "sameDay"
         && matchSummary.sameDayShortAmount > SHORT_BLOCK_RUPEES
       );
-      const needsRemarks = (Math.abs(diff) >= MATCH_EPSILON || summary.createdCount > 0) && !shortBlocked;
+      const needsRemarks = (Math.abs(diff) > DIFFERENCE_REMARKS_RUPEES || summary.createdCount > 0) && !shortBlocked;
 
       if (shortBlocked || pendingBlocked || sameDayBlocked) {
         await persistValidation(summary, validateRemarks.trim());
@@ -796,7 +798,7 @@ export function DepositRemittancePanel({
               <div className="alert remittance-alert">
                 <strong>Cash difference noted</strong>
                 <span>
-                  Variance of {money(pageVsRemittance ?? 0)} requires remarks when validating remittance.
+                  Variance of {money(pageVsRemittance ?? 0)} is beyond ₹{DIFFERENCE_REMARKS_RUPEES} and requires remarks when validating remittance.
                 </span>
               </div>
             ) : null}
