@@ -83,6 +83,12 @@ export type ExpectedCashByDriver = {
   mappedToActiveDriver?: boolean | null;
   /** True when name was resolved from workforce for a driver not in getDrivers. */
   mappedFromWorkforce?: boolean | null;
+  /**
+   * True when this row is a store / access point (locker pickup), not a driver — driverId
+   * is empty or meaningless on these ageing rows, so tasId holds the raw accessPointId and
+   * driverName holds the cleaned store name instead.
+   */
+  isAccessPoint?: boolean | null;
   totalReceived?: number | null;
   shipmentCount?: number | null;
   shipments?: ExpectedCashShipment[] | null;
@@ -521,6 +527,9 @@ function appendUnmappedExpectedCash(
           already.shipmentType = "Ageing cash (workforce)";
         }
       }
+      if (cashRow.isAccessPoint === true && !already.shipmentType.toLowerCase().includes("access point")) {
+        already.shipmentType = "Access point (store)";
+      }
       continue;
     }
 
@@ -533,8 +542,10 @@ function appendUnmappedExpectedCash(
       || tasId
       || "__unassigned_cash__";
     const mappedFromWorkforce = cashRow.mappedFromWorkforce === true;
+    const isAccessPoint = cashRow.isAccessPoint === true;
+    // Access points are a store/locker, not a driver — never label them "Unmapped driver".
     const fullName = String(cashRow.driverName ?? "").trim()
-      || (tasId ? `Unmapped driver (${tasId})` : "Unassigned driver");
+      || (isAccessPoint ? "Access point" : tasId ? `Unmapped driver (${tasId})` : "Unassigned driver");
 
     const row: CashReconAssociate = {
       providerEmployeeId,
@@ -545,9 +556,11 @@ function appendUnmappedExpectedCash(
       pendingRecon: 0,
       breakdown: [],
       source: "extra",
-      shipmentType: mappedFromWorkforce
-        ? "Ageing cash (workforce)"
-        : "Ageing cash (unmapped driver)",
+      shipmentType: isAccessPoint
+        ? "Access point (store)"
+        : mappedFromWorkforce
+          ? "Ageing cash (workforce)"
+          : "Ageing cash (unmapped driver)",
       mappedFromWorkforce
     };
     missingFromDer.push(row);
@@ -802,8 +815,9 @@ export function buildRequiredCashAssociates(
         || (tasId && String(item.tasId ?? "").trim().toUpperCase() === tasId.toUpperCase())
       );
       const mappedFromWorkforce = cashRow.mappedFromWorkforce === true;
+      const isAccessPoint = cashRow.isAccessPoint === true;
       const fullName = String(driver?.driverName ?? cashRow.driverName ?? "").trim()
-        || (tasId ? `Unmapped driver (${tasId})` : "Unassigned driver");
+        || (isAccessPoint ? "Access point" : tasId ? `Unmapped driver (${tasId})` : "Unassigned driver");
       upsert({
         providerEmployeeId: employeeId || tasId || fullName,
         name: fullName,
@@ -813,9 +827,11 @@ export function buildRequiredCashAssociates(
         pendingRecon: 0,
         breakdown: [],
         source: "extra",
-        shipmentType: cashRow.mappedToActiveDriver === false
-          ? (mappedFromWorkforce ? "Ageing cash (workforce)" : "Ageing cash (unmapped driver)")
-          : "Cash recon worker",
+        shipmentType: isAccessPoint
+          ? "Access point (store)"
+          : cashRow.mappedToActiveDriver === false
+            ? (mappedFromWorkforce ? "Ageing cash (workforce)" : "Ageing cash (unmapped driver)")
+            : "Cash recon worker",
         mappedFromWorkforce
       });
     }
