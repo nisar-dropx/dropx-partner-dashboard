@@ -351,12 +351,12 @@ export function SavedCashList({
                     <div className="denomination-grid">
                       {denominations.map(([name, label]) => (
                         <label className="denomination-chip" key={`${row.key}-${name}`}>
-                          ₹{label}
+                          <span className="denomination-chip-label">₹{label}</span>
                           <input className="field" name={name} defaultValue={String(denominationValue(row, name))} inputMode="numeric" />
                         </label>
                       ))}
                       <label className="denomination-chip other">
-                        Coins / other
+                        <span className="denomination-chip-label">Coins / other</span>
                         <input className="field" name="cash_other_amount" defaultValue={String(row.cash_other_amount ?? 0)} inputMode="decimal" />
                       </label>
                     </div>
@@ -369,7 +369,7 @@ export function SavedCashList({
                     <div className="denomination-grid">
                       {denominations.map(([name, label]) => (
                         <label className="denomination-chip" key={`${row.key}-return-${name}`} aria-label={`₹${label} returned`}>
-                          ₹{label}
+                          <span className="denomination-chip-label">₹{label}</span>
                           <input
                             className="field"
                             name={returnDenominationFieldMap[name]}
@@ -379,7 +379,7 @@ export function SavedCashList({
                         </label>
                       ))}
                       <label className="denomination-chip other" aria-label="Coins or other returned">
-                        Coins / other
+                        <span className="denomination-chip-label">Coins / other</span>
                         <input className="field" name="return_cash_other_amount" defaultValue={String(row.return_cash_other_amount ?? 0)} inputMode="decimal" />
                       </label>
                     </div>

@@ -11947,22 +11947,29 @@ tbody tr:hover td {
   gap: 6px;
 }
 
+/*
+ * Chip layout uses explicit flexbox + a dedicated label span (not a bare text node)
+ * so it never depends on grid auto-placement or on beating the pre-existing generic
+ * ".cash-breakdown-grid label" rule's specificity — the label text lives in its own
+ * child element that rule can't reach at all, so there is no cascade ambiguity.
+ */
 .cash-breakdown-section .denomination-chip {
-  display: grid;
-  gap: 2px;
-  width: 52px;
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 58px;
   flex: 0 0 auto;
-  padding: 4px 3px 3px;
+  box-sizing: border-box;
+  padding: 5px 4px 4px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #fff;
-  color: #344054;
-  text-align: center;
-  font-size: 10px;
-  font-weight: 800;
-  line-height: 1.15;
-  text-transform: none;
   transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.cash-breakdown-section .denomination-chip.other {
+  width: 82px;
 }
 
 .cash-breakdown-section .denomination-chip:focus-within {
@@ -11970,19 +11977,38 @@ tbody tr:hover td {
   box-shadow: 0 0 0 3px rgba(247, 144, 9, .14);
 }
 
+.cash-breakdown-section .denomination-chip-label {
+  display: block;
+  color: #344054;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: center;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .cash-breakdown-section .denomination-chip input {
-  /* .field sets height/min-height to --control-height (38px) — override both, or
-     min-height wins and the chip renders tall and mostly-empty despite height:22px. */
-  height: 22px;
-  min-height: 22px;
-  padding-inline: 2px;
+  /*
+   * !important throughout: .field is declared with a min-width:150px / min-height:38px
+   * combo in more than one place in this stylesheet (global .field rules elsewhere), and
+   * a min-* value silently wins over a smaller explicit width/height from any rule that
+   * doesn't also override the min-*. That's what broke this chip twice before — pin every
+   * sizing property here so it can never again be re-broken by an unrelated .field edit.
+   */
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 26px !important;
+  min-height: 26px !important;
+  box-sizing: border-box !important;
+  padding: 0 2px !important;
+  border: 1px solid #d9dee7 !important;
+  border-radius: 6px !important;
   text-align: center;
   font-size: 12px;
   font-weight: 700;
-}
-
-.cash-breakdown-section .denomination-chip.other {
-  width: 74px;
 }
 
 .cash-live-status {

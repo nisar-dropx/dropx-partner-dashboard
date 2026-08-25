@@ -544,7 +544,7 @@ export function AssociateEntryBuilder({
                       <div className="denomination-grid">
                         {denominations.map(([name, label]) => (
                           <label className="denomination-chip" key={`${entry.key}-${name}`}>
-                            {label}
+                            <span className="denomination-chip-label">{label}</span>
                             <input
                               className="field"
                               name={name}
@@ -557,7 +557,7 @@ export function AssociateEntryBuilder({
                           </label>
                         ))}
                         <label className="denomination-chip other">
-                          Coins / other
+                          <span className="denomination-chip-label">Coins / other</span>
                           <input
                             className="field"
                             name="cash_other_amount"
@@ -581,7 +581,7 @@ export function AssociateEntryBuilder({
                       <div className="denomination-grid">
                         {denominations.map(([name, label]) => (
                           <label className="denomination-chip" key={`${entry.key}-return-${name}`} aria-label={`${label} returned`}>
-                            {label}
+                            <span className="denomination-chip-label">{label}</span>
                             <input
                               className="field"
                               name={`return_${name}`}
@@ -597,7 +597,7 @@ export function AssociateEntryBuilder({
                           </label>
                         ))}
                         <label className="denomination-chip other" aria-label="Coins or other returned">
-                          Coins / other
+                          <span className="denomination-chip-label">Coins / other</span>
                           <input
                             className="field"
                             name="return_cash_other_amount"
