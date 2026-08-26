@@ -9,13 +9,14 @@ SQL: `scripts/attendance_gps_integrity_v1.sql`
 ## Product rules (already implemented on web)
 
 1. App GPS punch **coexists** with biometric device punches.
-2. Punch requires **selfie + lat/lng**; **server timestamp** is authoritative (never trust editable client time).
-3. Outside station geofence (default **50m**, admin-only on stations) → allow punch, **auto-flag**, employee attaches support selfie+location for manager/HR review.
+2. Punch requires **live selfie matched to profile photo on device** (selfie is **not** uploaded for normal punch) + **lat/lng**; **server timestamp** is authoritative (never trust editable client time).
+3. Outside station geofence (default **50m**, admin-only on stations) → **block punch** with a warning (no punch saved). Must be inside the allocated zone.
 4. In-shift heartbeats only (after punch-in until punch-out).
 5. Continuous outside zone **> 10 minutes** → flag `outside_geofence_gt_2h` (legacy type name; threshold is 10 minutes).
 6. Reminders at **9.5h** and **10h** after punch-in if no punch-out.
 7. Biometric punch + recent phone sample outside zone → flag `biometric_phone_mismatch`.
 8. Employees **cannot** edit punch lat/lng/time from website or app.
+9. Support selfie upload is only for **flagged** review cases, not normal GPS punch.
 
 ## REST contracts (reuse exactly)
 
@@ -33,15 +34,16 @@ Fields:
 - `lat`, `lng`, `accuracyM`, `altitudeM` (optional)
 - `clientCapturedAt` (ISO, advisory only)
 - `integritySignals` (JSON string)
-- `selfie` (image file, required)
+- `faceMatched` = `true` (required; selfie is matched to profile photo on device and **not** uploaded)
 
-Response includes `isFlagged`, `supportRequired`, `flagIds`, `geofence`, `integrity`.
+Server **rejects** punch when geofence status is not `inside`. Response includes `geofence`, `integrity` (no selfie path).
 
 ### `POST /api/connect/attendance/location-heartbeat` (multipart)
 Same location fields + `sessionId`. Only accepted while shift is open. Rate-limited (~2 min).
 
 ### `POST /api/connect/attendance/support-evidence` (multipart)
 - `flagId`, `punchDate`, `lat`, `lng`, `accuracyM`, `selfie`, `remarks`
+  (Support selfie is stored only for flagged review cases.)
 
 ## Web limitations → Flutter must implement
 
@@ -53,7 +55,7 @@ Same location fields + `sessionId`. Only accepted while shift is open. Rate-limi
 | Background location | Only while browser tab open | Foreground service + periodic updates while on shift |
 | Always-on internet/location UX | Soft messaging | Persist notification: “Location + internet required for attendance” |
 | Device integrity | None | **Google Play Integrity API** attestation token on every punch |
-| Selfie liveness | Still photo | Prefer liveness / face presence check if available |
+| Selfie / face match | Match selfie to profile photo in browser (not uploaded) | Prefer on-device face match / liveness vs profile photo; do not upload selfie for normal punch |
 
 ## Flutter implementation checklist
 

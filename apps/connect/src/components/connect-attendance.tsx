@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clock3,
   Fingerprint,
+  MapPin,
   LogIn,
   LogOut,
   Paperclip,
@@ -16,8 +17,10 @@ import {
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { matchSelfieToProfile } from "@/lib/face-match";
+import { SelfieCapturePanel } from "./selfie-capture-panel";
 
-type Account = { id: string; profileType: string };
+type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
 type Regularization = {
   id: string;
   requestedInTime: string;
@@ -174,9 +177,15 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const [requestError, setRequestError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [punchStatus, setPunchStatus] = useState<PunchStatus | null>(null);
+  const [liveLocation, setLiveLocation] = useState<LiveLocation | null>(null);
   const [locationError, setLocationError] = useState("");
+  const [punchBusy, setPunchBusy] = useState(false);
   const [punchError, setPunchError] = useState("");
   const [punchMessage, setPunchMessage] = useState("");
+  const [selfieFile, setSelfieFile] = useState<File | null>(null);
+  const [selfiePreview, setSelfiePreview] = useState("");
+  const [faceMatchLabel, setFaceMatchLabel] = useState("Selfie required · matched to profile photo");
+  const [selfiePanelOpen, setSelfiePanelOpen] = useState(false);
   const [supportFlag, setSupportFlag] = useState<OpenFlag | null>(null);
   const [reminderText, setReminderText] = useState("");
   const sessionId = useRef(`web-${Date.now()}`);
@@ -227,6 +236,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
         distanceM,
         inside
       };
+      setLiveLocation(live);
       setLocationError("");
       return live;
     } catch (reason) {
@@ -260,6 +270,10 @@ export function ConnectAttendance({ account }: { account: Account }) {
   }, [loadPunchStatus, refreshKey]);
 
   useEffect(() => {
+    refreshLocation().catch(() => undefined);
+  }, [refreshLocation]);
+
+  useEffect(() => {
     if (!punchStatus?.shift.open) {
       setReminderText("");
       return;
@@ -287,6 +301,12 @@ export function ConnectAttendance({ account }: { account: Account }) {
     };
   }, [punchStatus?.shift.open, punchStatus?.shift.inTime, refreshLocation, sendHeartbeat, loadPunchStatus]);
 
+  useEffect(() => {
+    return () => {
+      if (selfiePreview) URL.revokeObjectURL(selfiePreview);
+    };
+  }, [selfiePreview]);
+
   const rowsByDay = useMemo(() => new Map((data?.rows ?? []).map((row) => [Number(row.date.slice(-2)), row])), [data]);
   const [year, monthNumber] = month.split("-").map(Number);
   const days = new Date(year, monthNumber, 0).getDate();
@@ -294,7 +314,60 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const total = (data?.rows ?? []).reduce((sum, row) => sum + minutes(row.workHours), 0);
   const futureMonth = month >= currentMonth;
   const openFlags = punchStatus?.openFlags ?? [];
-  const showFlaggedGps = openFlags.length > 0;
+  const outsideZone = liveLocation?.inside === false;
+  const zoneUnknown = liveLocation != null && liveLocation.inside == null;
+
+  function onSelfieChange(file: File | null) {
+    if (selfiePreview) URL.revokeObjectURL(selfiePreview);
+    setSelfieFile(file);
+    setSelfiePreview(file ? URL.createObjectURL(file) : "");
+    setFaceMatchLabel(file ? "Selfie ready · will match to profile on punch" : "Selfie required · matched to profile photo");
+  }
+
+  async function submitPunch(action: "in" | "out") {
+    setPunchBusy(true);
+    setPunchError("");
+    setPunchMessage("");
+    try {
+      if (!navigator.onLine) throw new Error("Internet is required to punch.");
+      if (!account.profilePhotoUrl) throw new Error("Add a profile photo first, then capture a selfie to punch.");
+      if (!selfieFile) throw new Error("Capture a selfie before punching.");
+      const live = (await refreshLocation()) ?? liveLocation;
+      if (!live) throw new Error("Allow location access to punch.");
+      if (live.inside !== true) {
+        throw new Error(
+          live.inside === false
+            ? `You are outside the allocated station zone${live.distanceM != null ? ` (${live.distanceM}m away)` : ""}. Move inside to punch.`
+            : "Station geofence is not configured. Contact admin before punching."
+        );
+      }
+      const face = await matchSelfieToProfile(selfieFile, account.profilePhotoUrl);
+      if (!face.ok) throw new Error(face.reason || "Selfie does not match your profile photo.");
+      setFaceMatchLabel("Face matched · selfie is not uploaded");
+
+      const form = new FormData();
+      form.set("accountId", account.id);
+      form.set("profileType", account.profileType);
+      form.set("action", action);
+      form.set("lat", String(live.lat));
+      form.set("lng", String(live.lng));
+      if (live.accuracyM != null) form.set("accuracyM", String(live.accuracyM));
+      if (live.altitudeM != null) form.set("altitudeM", String(live.altitudeM));
+      form.set("clientCapturedAt", live.capturedAt);
+      form.set("integritySignals", JSON.stringify(integrityPayload()));
+      form.set("faceMatched", "true");
+      const response = await fetch("/api/connect/attendance/punch", { method: "POST", body: form });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to record punch.");
+      setPunchMessage(`Punch ${action.toUpperCase()} saved.`);
+      onSelfieChange(null);
+      setRefreshKey((value) => value + 1);
+    } catch (reason) {
+      setPunchError(reason instanceof Error ? reason.message : "Unable to record punch.");
+    } finally {
+      setPunchBusy(false);
+    }
+  }
 
   return (
     <section className="dx-attendance">
@@ -307,24 +380,66 @@ export function ConnectAttendance({ account }: { account: Account }) {
         </div>
       </div>
 
-      {reminderText ? <div className="dx-alert warn"><Clock3 /> {reminderText}</div> : null}
-      {punchError && !showFlaggedGps ? <div className="dx-alert error">{punchError}</div> : null}
-
-      {showFlaggedGps ? (
-        <div className="dx-gps-flag-card">
-          <header>
-            <ShieldAlert />
-            <div>
-              <strong>Attendance flagged</strong>
-              <small>Attach a selfie + live location for manager / HR review. Location and time are captured automatically.</small>
-            </div>
-          </header>
-          {locationError ? <div className="dx-alert error">{locationError}</div> : null}
-          {punchError ? <div className="dx-alert error">{punchError}</div> : null}
-          {punchMessage ? <div className="dx-alert ok">{punchMessage}</div> : null}
+      <div className="dx-gps-punch-card">
+        <header>
+          <div>
+            <strong>GPS Punch</strong>
+            <small>Match selfie to profile photo + be inside the station zone. Time is set by the server.</small>
+          </div>
+          <button type="button" onClick={() => refreshLocation()}><MapPin /> Refresh</button>
+        </header>
+        {reminderText ? <div className="dx-alert warn"><Clock3 /> {reminderText}</div> : null}
+        {locationError ? <div className="dx-alert error">{locationError}</div> : null}
+        {outsideZone ? (
+          <div className="dx-alert error">
+            You are outside the allocated zone{liveLocation?.distanceM != null ? ` (${liveLocation.distanceM}m away)` : ""}. Punch will not be allowed until you move inside.
+          </div>
+        ) : null}
+        {zoneUnknown ? <div className="dx-alert warn">Station geofence is not configured. Punch is blocked until Master Location has coordinates and radius.</div> : null}
+        {punchError ? <div className="dx-alert error">{punchError}</div> : null}
+        {punchMessage ? <div className="dx-alert ok">{punchMessage}</div> : null}
+        <div className="dx-gps-meta">
+          <span><small>STATUS</small><strong>{punchStatus?.shift.open ? "On shift" : "Off shift"}</strong></span>
+          <span><small>ZONE</small><strong>{liveLocation?.inside == null ? "Unknown" : liveLocation.inside ? "Inside" : "Outside"}</strong></span>
+          <span><small>DISTANCE</small><strong>{liveLocation?.distanceM == null ? "--" : `${liveLocation.distanceM} m`}</strong></span>
+          <span><small>ACCURACY</small><strong>{liveLocation?.accuracyM == null ? "--" : `${Math.round(liveLocation.accuracyM)} m`}</strong></span>
+        </div>
+        {punchStatus?.station ? (
+          <p className="dx-gps-station">
+            Station {punchStatus.station.code || punchStatus.station.name || "assigned"}
+            {punchStatus.station.radiusM != null ? ` · allowed ${punchStatus.station.radiusM}m` : " · geofence radius not set in Master Location"}
+          </p>
+        ) : (
+          <p className="dx-gps-station">No station coordinates configured — punch is blocked until location is set.</p>
+        )}
+        <div className="dx-selfie-row">
+          <button type="button" className="secondary" onClick={() => setSelfiePanelOpen(true)}>
+            <Camera /> {selfieFile ? "Retake selfie" : "Capture selfie"}
+          </button>
+          {selfiePreview ? <img alt="Selfie preview" className="dx-selfie-preview" src={selfiePreview} /> : null}
+          <em>{faceMatchLabel}</em>
+        </div>
+        <div className="dx-gps-actions">
+          <button
+            disabled={punchBusy || Boolean(punchStatus?.shift.open) || outsideZone || zoneUnknown}
+            onClick={() => submitPunch("in")}
+            type="button"
+          >
+            <LogIn /> {punchBusy ? "Saving..." : "Punch In"}
+          </button>
+          <button
+            disabled={punchBusy || !punchStatus?.shift.open || outsideZone || zoneUnknown}
+            onClick={() => submitPunch("out")}
+            type="button"
+          >
+            <LogOut /> {punchBusy ? "Saving..." : "Punch Out"}
+          </button>
+        </div>
+        {openFlags.length ? (
           <div className="dx-flag-list">
             {openFlags.map((flag) => (
               <div key={flag.id}>
+                <ShieldAlert />
                 <div>
                   <strong>{flag.flag_type.replaceAll("_", " ")}</strong>
                   <small>{flag.message}</small>
@@ -333,8 +448,8 @@ export function ConnectAttendance({ account }: { account: Account }) {
               </div>
             ))}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       {error ? <div className="dx-alert error">{error}<button onClick={() => setMonth((value) => `${value}`)}>Retry</button></div> : null}
       {!data && !error ? <div className="dx-loader"><span /><small>Loading attendance...</small></div> : null}
@@ -399,6 +514,15 @@ export function ConnectAttendance({ account }: { account: Account }) {
         error={requestError}
         setError={setRequestError}
       /> : null}
+      {selfiePanelOpen ? (
+        <SelfieCapturePanel
+          onClose={() => setSelfiePanelOpen(false)}
+          onCapture={(file) => {
+            onSelfieChange(file);
+            setSelfiePanelOpen(false);
+          }}
+        />
+      ) : null}
       {supportFlag ? <SupportEvidenceSheet
         account={account}
         flag={supportFlag}
@@ -426,9 +550,16 @@ function SupportEvidenceSheet({
 }) {
   const [remarks, setRemarks] = useState("");
   const [selfie, setSelfie] = useState<File | null>(null);
+  const [selfiePreview, setSelfiePreview] = useState("");
+  const [selfiePanelOpen, setSelfiePanelOpen] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (selfiePreview) URL.revokeObjectURL(selfiePreview);
+    };
+  }, [selfiePreview]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -476,8 +607,12 @@ function SupportEvidenceSheet({
           <em>{flag.punch_date.split("-").reverse().join("/")}</em>
         </div>
         <p className="dx-form-hint">{flag.message}</p>
-        <button type="button" className="secondary" onClick={() => inputRef.current?.click()}><Camera /> {selfie ? "Retake selfie" : "Capture selfie"}</button>
-        <input accept="image/*" capture="user" hidden ref={inputRef} type="file" onChange={(event) => setSelfie(event.target.files?.[0] ?? null)} />
+        <div className="dx-selfie-row">
+          <button type="button" className="secondary" onClick={() => setSelfiePanelOpen(true)}>
+            <Camera /> {selfie ? "Retake selfie" : "Capture selfie"}
+          </button>
+          {selfiePreview ? <img alt="Support selfie preview" className="dx-selfie-preview" src={selfiePreview} /> : null}
+        </div>
         <label>Remarks<textarea placeholder="Optional notes for your manager" rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
         {error ? <p className="dx-form-error">{error}</p> : null}
         <div className="dx-sheet-actions">
@@ -486,6 +621,19 @@ function SupportEvidenceSheet({
         </div>
       </form>
     </aside>
+    {selfiePanelOpen ? (
+      <SelfieCapturePanel
+        title="Support selfie"
+        hint="Center your face in the circle for manager / HR review."
+        onClose={() => setSelfiePanelOpen(false)}
+        onCapture={(file) => {
+          if (selfiePreview) URL.revokeObjectURL(selfiePreview);
+          setSelfie(file);
+          setSelfiePreview(URL.createObjectURL(file));
+          setSelfiePanelOpen(false);
+        }}
+      />
+    ) : null}
   </>;
 }
 

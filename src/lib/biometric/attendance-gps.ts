@@ -398,11 +398,12 @@ export async function insertAppGpsPunch({
   lng,
   accuracyM,
   altitudeM,
-  selfiePath,
+  selfiePath = null,
   clientCapturedAt,
   integritySignals,
   geofence,
-  integrity
+  integrity,
+  faceMatched = false
 }: {
   companyId: string;
   enrolmentId: string;
@@ -416,13 +417,25 @@ export async function insertAppGpsPunch({
   lng: number;
   accuracyM: number | null;
   altitudeM: number | null;
-  selfiePath: string;
+  selfiePath?: string | null;
   clientCapturedAt: string | null;
   integritySignals: IntegritySignals;
   geofence: GeofenceEvaluation;
   integrity: ReturnType<typeof evaluateIntegrity>;
+  faceMatched?: boolean;
 }) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  if (geofence.status !== "inside") {
+    throw new Error(
+      geofence.status === "unknown"
+        ? "Station geofence is not configured. Contact admin before punching."
+        : `You are outside the allocated station zone (${geofence.distanceM}m away, allowed ${geofence.radiusM}m). Move inside to punch.`
+    );
+  }
+  if (!faceMatched) {
+    throw new Error("Selfie must match your profile photo before punching.");
+  }
+
   const serverReceivedAt = new Date();
   const punchDate = istDate(serverReceivedAt);
   const existing = await supabaseAdmin
@@ -434,7 +447,7 @@ export async function insertAppGpsPunch({
     .eq("calculated", true);
   if (existing.error) throw new Error(existing.error.message);
   const nextOrder = (existing.data?.length ?? 0) + 1;
-  const isFlagged = geofence.status === "outside" || geofence.status === "unknown" || integrity.isRisk;
+  const isFlagged = integrity.isRisk;
 
   const insert = await supabaseAdmin
     .from("attendance_punches")
@@ -467,7 +480,8 @@ export async function insertAppGpsPunch({
       integrity_score: integrity.score,
       integrity_signals: {
         ...integritySignals,
-        reasons: integrity.reasons
+        reasons: integrity.reasons,
+        faceMatched: true
       },
       geofence_status: geofence.status,
       distance_m: geofence.distanceM,
@@ -480,29 +494,6 @@ export async function insertAppGpsPunch({
   await rebuildAttendanceDay(companyId, enrolmentId, punchDate);
 
   const flagIds: string[] = [];
-  if (geofence.status === "outside" || geofence.status === "unknown") {
-    const flag = await openIntegrityFlag({
-      companyId,
-      enrolmentId,
-      profileType,
-      profileId,
-      punchId: insert.data.id as string,
-      locationId,
-      punchDate,
-      flagType: "outside_geofence_punch",
-      severity: "high",
-      message:
-        geofence.status === "unknown"
-          ? "App GPS punch recorded without a configured station geofence."
-          : `App GPS punch is ${geofence.distanceM}m from station (allowed ${geofence.radiusM}m).`,
-      details: {
-        distanceM: geofence.distanceM,
-        radiusM: geofence.radiusM,
-        status: geofence.status
-      }
-    });
-    flagIds.push(flag.id);
-  }
   if (integrity.isRisk) {
     const flag = await openIntegrityFlag({
       companyId,

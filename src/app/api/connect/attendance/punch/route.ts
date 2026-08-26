@@ -9,7 +9,6 @@ import {
 } from "@/lib/biometric/attendance-gps";
 import { createAttendancePunchNotification, createAppNotification } from "@/lib/app-notifications";
 import {
-  fileExtension,
   parseClientSignals,
   parseCoordinate,
   parseOptionalNumber,
@@ -89,14 +88,9 @@ export async function POST(request: NextRequest) {
     const altitudeM = parseOptionalNumber(formData.get("altitudeM"));
     const clientCapturedAt = String(formData.get("clientCapturedAt") ?? "").trim() || null;
     const integritySignals = parseIntegritySignals(parseClientSignals(formData.get("integritySignals")));
-
-    const selfie = formData.get("selfie");
-    if (!(selfie instanceof File) || selfie.size <= 0) {
-      throw new Error("Selfie is required for app GPS punch.");
-    }
-    if (selfie.size > 8 * 1024 * 1024) throw new Error("Selfie must be 8 MB or smaller.");
-    if (!navigatorOnlineHint(formData)) {
-      // Client must confirm online; server still accepts if request arrived.
+    const faceMatched = String(formData.get("faceMatched") ?? "").trim().toLowerCase() === "true";
+    if (!faceMatched) {
+      throw new Error("Selfie must match your profile photo before punching.");
     }
 
     const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
@@ -122,16 +116,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const safeName = selfie.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "selfie.jpg";
-    const selfiePath = `${worker.companyId}/${worker.profileId}/attendance-selfie-${Date.now()}${fileExtension(safeName) || ".jpg"}`;
-    const uploadResult = await supabaseAdmin.storage
-      .from("employee-profile-documents")
-      .upload(selfiePath, Buffer.from(await selfie.arrayBuffer()), {
-        contentType: selfie.type || "image/jpeg",
-        upsert: false
-      });
-    if (uploadResult.error) throw new Error(uploadResult.error.message);
-
     const result = await insertAppGpsPunch({
       companyId: worker.companyId,
       enrolmentId: worker.enrolmentId,
@@ -145,11 +129,12 @@ export async function POST(request: NextRequest) {
       lng,
       accuracyM,
       altitudeM,
-      selfiePath,
+      selfiePath: null,
       clientCapturedAt,
       integritySignals,
       geofence,
-      integrity
+      integrity,
+      faceMatched: true
     });
 
     const punchOrder = Number(result.punch.punch_order ?? 1);
@@ -202,8 +187,4 @@ export async function POST(request: NextRequest) {
     const status = message.includes("Login") ? 401 : 400;
     return NextResponse.json({ error: message }, { status });
   }
-}
-
-function navigatorOnlineHint(_formData: FormData) {
-  return true;
 }
