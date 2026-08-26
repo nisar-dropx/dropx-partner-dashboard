@@ -226,7 +226,6 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       if (!providerId) { skipped("The worker's location has no provider configured."); continue; }
       const holderName = memberNameById.get(uploadRow.providerMemberId);
       if (!holderName) { skipped("Provider Member ID was not found in uploaded provider data."); continue; }
-      if (!providerHolderMatches(holderName, worker.fullName)) { skipped(`Holder name '${holderName.split("/")[0].trim()}' does not match '${worker.fullName}'.`); continue; }
       const workerColumn = worker.sourceType === "employee" ? "employee_id" : worker.sourceType === "contractor" ? "contractor_id" : "field_executive_id";
       const { data: existing, error: existingError } = await supabaseAdmin.from("field_executive_provider_mappings")
         .select("id")
