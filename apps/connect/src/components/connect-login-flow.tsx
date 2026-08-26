@@ -1,15 +1,16 @@
 "use client";
 
 import Image from "next/image";
-import { Bell, CalendarDays, CheckCheck, ChevronRight, Fingerprint, Gauge, LogOut, Menu, Settings, SwitchCamera, UserRound, UsersRound, X } from "lucide-react";
+import { Bell, CalendarDays, CheckCheck, ChevronRight, CreditCard, Fingerprint, Gauge, LogOut, Menu, Settings, SwitchCamera, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
 import { ConnectDashboard } from "./connect-dashboard";
 import { ConnectLeave } from "./connect-leave";
+import { ConnectAdvances } from "./connect-advances";
 import { AppAccount, ConnectProfileApp } from "./connect-profile-app";
 import { countryCodeOptions } from "@/lib/country-codes";
 
-type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "attendance" | "leave" | "settings";
+type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "payments" | "advances" | "attendance" | "leave" | "settings";
 type ConnectNotification = {
   id: string;
   title: string;
@@ -242,7 +243,7 @@ export function ConnectLoginFlow() {
       }
     }
     const destination = notification.route as Step | null | undefined;
-    if (destination && ["dashboard", "profile", "attendance", "leave", "settings"].includes(destination)) {
+    if (destination && ["dashboard", "profile", "advances", "attendance", "leave", "settings"].includes(destination)) {
       setNotificationMenu(false);
       open(destination);
     } else if (destination) {
@@ -390,7 +391,7 @@ export function ConnectLoginFlow() {
     setStep(refreshed ? landingPage(refreshed) : "accounts");
   }
 
-  const loggedIn = ["accounts","dashboard","profile","attendance","leave","settings"].includes(step);
+  const loggedIn = ["accounts","dashboard","profile","payments","advances","attendance","leave","settings"].includes(step);
   if (checking) return <div className="dx-auth"><Loader text="" /></div>;
 
   return <div className={`dx-app ${loggedIn ? "logged-in" : ""}`}>
@@ -435,6 +436,8 @@ export function ConnectLoginFlow() {
       <nav>
         {allowed(account, "dashboard") ? <button onClick={() => open("dashboard")}><Gauge />Dashboard<ChevronRight /></button> : null}
         <button onClick={() => open("profile")}><UserRound />My Profile<ChevronRight /></button>
+        <button onClick={() => open("payments")}><CreditCard />Payments<ChevronRight /></button>
+        {step === "payments" || step === "advances" ? <button className="subitem" onClick={() => open("advances")}><span />Advances<ChevronRight /></button> : null}
         {allowed(account, "attendance") ? <button onClick={() => open("attendance")}><Fingerprint />Attendance<ChevronRight /></button> : null}
         {allowed(account, "leave") ? <button onClick={() => open("leave")}><CalendarDays />Leave<ChevronRight /></button> : null}
         <button onClick={() => open("settings")}><Settings />Settings<ChevronRight /></button>
@@ -456,6 +459,8 @@ export function ConnectLoginFlow() {
       {step === "accounts" ? <section className="dx-accounts"><h1>Choose account</h1>{accounts.map((row) => <button key={accountKey(row)} onClick={() => choose(row)}><i>{row.profilePhotoUrl ? <img alt="" src={row.profilePhotoUrl} /> : <UsersRound />}</i><span><strong>{row.companyName}</strong><em>{row.name || row.reference}</em><small>{row.reference} {row.biometricId ? ` | ${row.biometricId}` : ""}</small></span><ChevronRight /></button>)}</section> : null}
       {step === "dashboard" && account ? <ConnectDashboard account={account} onAttendance={() => open("attendance")} onProfile={() => open("profile")} /> : null}
       {step === "profile" && account ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
+      {step === "payments" && account ? <section className="dx-payments-menu"><small>Payments</small><h1>Payments</h1><button onClick={() => open("advances")}><CreditCard /><span><strong>Advances</strong><small>Request an advance and track its status.</small></span><ChevronRight /></button></section> : null}
+      {step === "advances" && account ? <ConnectAdvances account={account} /> : null}
       {step === "attendance" && account ? <ConnectAttendance account={account} /> : null}
       {step === "leave" && account ? <ConnectLeave account={account} /> : null}
       {step === "settings" ? <section className="dx-settings"><h1>Settings</h1><label>Default account<select disabled={pending} value={defaultKey} onChange={(e) => saveDefaultAccount(e.target.value)}><option value="">Select default account</option>{accounts.map((row) => <option key={accountKey(row)} value={accountKey(row)}>{row.companyName} - {row.reference || row.name}</option>)}</select></label><label className="toggle"><span><strong>Enable biometric login</strong><small>Use Face ID or device authentication when available.</small></span><input defaultChecked={localStorage.getItem(biometricKey) === "true"} onChange={(e) => enrollBiometric(e.target.checked)} type="checkbox" /></label><button onClick={resetPin}>Change PIN</button></section> : null}
