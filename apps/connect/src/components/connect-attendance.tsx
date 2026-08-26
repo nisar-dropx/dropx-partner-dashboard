@@ -17,7 +17,7 @@ import {
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { matchSelfieToProfile, type FaceMatchResult } from "@/lib/face-match";
+import { matchSelfieToProfile, type FaceMatchResult } from "../lib/face-match";
 import { SelfieCapturePanel } from "./selfie-capture-panel";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };

@@ -105,8 +105,8 @@ function decodeImage(url: string) {
 }
 
 function mirrorCanvas(image: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement) {
-  const width = "videoWidth" in image ? image.videoWidth || (image as HTMLImageElement).width : image.width;
-  const height = "videoHeight" in image ? image.videoHeight || (image as HTMLImageElement).height : image.height;
+  const width = image instanceof HTMLVideoElement ? image.videoWidth || image.clientWidth : image.width;
+  const height = image instanceof HTMLVideoElement ? image.videoHeight || image.clientHeight : image.height;
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, width);
   canvas.height = Math.max(1, height);

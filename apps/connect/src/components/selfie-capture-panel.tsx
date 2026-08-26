@@ -7,7 +7,7 @@ import {
   ensureFaceModels,
   matchLiveFrameToProfile,
   type FaceMatchResult
-} from "@/lib/face-match";
+} from "../lib/face-match";
 
 type SelfieCapturePanelProps = {
   title?: string;
