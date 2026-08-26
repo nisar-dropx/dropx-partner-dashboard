@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   continuousOutsideMs,
+  evaluateGeofence,
   evaluateIntegrity,
   HEARTBEAT_MIN_INTERVAL_MS,
   loadOpenShift,
-  LOCATION_TRACKING_MS,
+  loadOutsideStationPolicy,
+  loadStationGeofence,
   maybeNotifyForgotPunchOut,
   openIntegrityFlag,
-  OUTSIDE_CONTINUOUS_MS,
-  parseIntegritySignals,
-  resolveCompanyPunchGeofence
+  parseIntegritySignals
 } from "@/lib/biometric/attendance-gps";
 import {
   parseClientSignals,
@@ -37,41 +37,32 @@ export async function POST(request: NextRequest) {
     const sessionId = String(formData.get("sessionId") ?? "").trim() || null;
     const integritySignals = parseIntegritySignals(parseClientSignals(formData.get("integritySignals")));
 
-    const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
+    const worker = await resolveConnectAttendanceWorker({ accountId, profileType, requirePeopleScope: true });
+    if (!worker.locationId) {
+      return NextResponse.json({ ok: true, skipped: true, reason: "assigned_station_missing" });
+    }
     const shift = await loadOpenShift({
       companyId: worker.companyId,
       enrolmentId: worker.enrolmentId
     });
-
-    const shiftElapsedMs =
-      shift.open && shift.inTime ? Date.now() - shift.inTime.getTime() : null;
-    const withinTrackingWindow =
-      shift.open && shift.inTime != null && shiftElapsedMs != null && shiftElapsedMs <= LOCATION_TRACKING_MS;
-
-    // After punch-in we only track for 9 hours. Past that, remind about punch-out but stop sampling.
-    if (shift.open && shift.inTime && !withinTrackingWindow) {
-      await maybeNotifyForgotPunchOut({
-        accountId: worker.profileId,
-        companyId: worker.companyId,
-        profileType: worker.profileType,
-        enrolmentId: worker.enrolmentId,
-        punchDate: shift.punchDate,
-        inTime: shift.inTime
-      });
+    if (!shift.open || !shift.inTime) {
       return NextResponse.json({
         ok: true,
         skipped: true,
-        reason: "tracking_window_ended",
-        trackingWindowMs: LOCATION_TRACKING_MS,
-        shift: {
-          punchDate: shift.punchDate,
-          inTime: shift.inTime.toISOString(),
-          open: true
-        }
+        reason: "no_open_shift"
       });
     }
+    const policy = await loadOutsideStationPolicy({
+      companyId: worker.companyId,
+      profileType: worker.profileType,
+      profileId: worker.profileId,
+      punchDate: shift.punchDate
+    });
+    if (!policy.enabled) {
+      return NextResponse.json({ ok: true, skipped: true, reason: "outside_station_tracking_disabled" });
+    }
 
-    // Rate-limit heartbeats (presence + in-shift).
+    // Rate-limit heartbeats.
     const recent = await supabaseAdmin
       .from("attendance_location_samples")
       .select("id, server_received_at")
@@ -90,22 +81,15 @@ export async function POST(request: NextRequest) {
           ok: true,
           skipped: true,
           reason: "rate_limited",
-          retryAfterMs: HEARTBEAT_MIN_INTERVAL_MS - elapsed,
-          mode: withinTrackingWindow ? "shift" : "presence"
+          retryAfterMs: HEARTBEAT_MIN_INTERVAL_MS - elapsed
         });
       }
     }
 
-    const geofence = await resolveCompanyPunchGeofence({
-      companyId: worker.companyId,
-      lat,
-      lng,
-      preferredLocationId: worker.locationId ?? shift.locationId
-    });
+    const station = await loadStationGeofence(worker.locationId);
+    const geofence = evaluateGeofence(lat, lng, station);
     const integrity = evaluateIntegrity(integritySignals, accuracyM);
     const serverReceivedAt = new Date().toISOString();
-    const sampleLocationId = geofence.station?.id ?? worker.locationId;
-    const mode = withinTrackingWindow ? "shift" : "presence";
 
     const sampleInsert = await supabaseAdmin
       .from("attendance_location_samples")
@@ -114,7 +98,7 @@ export async function POST(request: NextRequest) {
         enrolment_id: worker.enrolmentId,
         profile_type: worker.profileType,
         profile_id: worker.profileId,
-        location_id: sampleLocationId,
+        location_id: station?.id ?? worker.locationId,
         session_id: sessionId,
         lat,
         lng,
@@ -125,8 +109,7 @@ export async function POST(request: NextRequest) {
         integrity_signals: {
           ...integritySignals,
           reasons: integrity.reasons,
-          score: integrity.score,
-          mode
+          score: integrity.score
         },
         client_captured_at: clientCapturedAt,
         server_received_at: serverReceivedAt
@@ -140,64 +123,51 @@ export async function POST(request: NextRequest) {
       throw new Error(sampleInsert.error.message);
     }
 
-    // Presence samples prove where the phone is before/without a shift; continuous flags only in-shift.
-    let outsideMs = 0;
+    const outsideMs = await continuousOutsideMs({
+      companyId: worker.companyId,
+      enrolmentId: worker.enrolmentId,
+      sinceIso: shift.inTime.toISOString()
+    });
+
     let outsideFlagId: string | null = null;
-    if (withinTrackingWindow && shift.inTime) {
-      outsideMs = await continuousOutsideMs({
+    if (outsideMs >= policy.thresholdMs) {
+      const flag = await openIntegrityFlag({
         companyId: worker.companyId,
         enrolmentId: worker.enrolmentId,
-        sinceIso: shift.inTime.toISOString()
-      });
-
-      if (outsideMs >= OUTSIDE_CONTINUOUS_MS) {
-        const outsideMinutes = Math.round(outsideMs / 60000);
-        const stationLabel =
-          geofence.station?.stationCode || geofence.station?.stationName || "station";
-        const distanceLabel = geofence.distanceM != null ? `${Math.round(geofence.distanceM)}m` : "unknown distance";
-        const allowedLabel = geofence.radiusM != null ? `${geofence.radiusM}m` : "50m";
-        const flag = await openIntegrityFlag({
-          companyId: worker.companyId,
-          enrolmentId: worker.enrolmentId,
-          profileType: worker.profileType,
-          profileId: worker.profileId,
-          locationId: sampleLocationId,
-          punchDate: shift.punchDate,
-          flagType: "outside_geofence_gt_2h",
-          severity: "high",
-          message: `Outside ${stationLabel} for ${outsideMinutes} min · device ${distanceLabel} away (allowed ${allowedLabel}).`,
-          details: {
-            outsideMs,
-            outsideMinutes,
-            thresholdMs: OUTSIDE_CONTINUOUS_MS,
-            thresholdMinutes: 30,
-            distanceM: geofence.distanceM,
-            radiusM: geofence.radiusM,
-            lat,
-            lng,
-            accuracyM,
-            stationId: geofence.station?.id ?? sampleLocationId,
-            stationCode: geofence.station?.stationCode ?? null,
-            stationName: geofence.station?.stationName ?? null,
-            reason: "continuous_outside_geofence"
-          }
-        });
-        outsideFlagId = flag.id;
-      }
-
-      await maybeNotifyForgotPunchOut({
-        accountId: worker.profileId,
-        companyId: worker.companyId,
         profileType: worker.profileType,
-        enrolmentId: worker.enrolmentId,
+        profileId: worker.profileId,
+        locationId: station?.id ?? worker.locationId,
         punchDate: shift.punchDate,
-        inTime: shift.inTime
+        flagType: "outside_station_over_limit",
+        severity: "high",
+        message: `${worker.fullName || worker.dropxId} stayed outside the assigned station beyond the allowed ${policy.effectiveAllowanceMinutes} minutes.`,
+        details: {
+          outsideMs,
+          thresholdMs: policy.thresholdMs,
+          companyAllowanceMinutes: policy.companyAllowanceMinutes,
+          shiftBreakMinutes: policy.shiftBreakMinutes,
+          effectiveAllowanceMinutes: policy.effectiveAllowanceMinutes,
+          distanceM: geofence.distanceM,
+          radiusM: geofence.radiusM,
+          assignedStationId: station?.id ?? worker.locationId,
+          assignedStationCode: station?.stationCode ?? null,
+          assignedStationName: station?.stationName ?? null
+        }
       });
+      outsideFlagId = flag.id;
     }
+
+    await maybeNotifyForgotPunchOut({
+      accountId: worker.profileId,
+      companyId: worker.companyId,
+      profileType: worker.profileType,
+      enrolmentId: worker.enrolmentId,
+      punchDate: shift.punchDate,
+      inTime: shift.inTime
+    });
 
     return NextResponse.json({
       ok: true,
-      mode,
       sampleId: sampleInsert.data.id,
       geofence: {
         status: geofence.status,
@@ -205,12 +175,12 @@ export async function POST(request: NextRequest) {
         radiusM: geofence.radiusM
       },
       outsideMs,
+      outsidePolicy: policy,
       outsideFlagId,
-      trackingWindowMs: LOCATION_TRACKING_MS,
       shift: {
         punchDate: shift.punchDate,
-        inTime: shift.inTime?.toISOString() ?? null,
-        open: shift.open
+        inTime: shift.inTime.toISOString(),
+        open: true
       }
     });
   } catch (error) {

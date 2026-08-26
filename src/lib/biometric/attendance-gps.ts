@@ -1,6 +1,10 @@
 import "server-only";
 
 import { istDate, punchLabel, rebuildAttendanceDay, resolveAttendanceWorkDate } from "@/lib/biometric/attendance";
+import {
+  normalizeOutsideStationMinutes,
+  outsideStationThresholdMinutes
+} from "@/lib/biometric/attendance-outside-policy";
 import { createAppNotification } from "@/lib/app-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -46,9 +50,75 @@ export type GeofenceEvaluation = {
   station: StationGeofence | null;
 };
 
+export type OutsideStationPolicy = {
+  enabled: boolean;
+  companyAllowanceMinutes: number;
+  shiftBreakMinutes: number;
+  effectiveAllowanceMinutes: number;
+  thresholdMs: number;
+};
+
 function toNumber(value: unknown) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+}
+
+export async function loadOutsideStationPolicy({
+  companyId,
+  profileType,
+  profileId,
+  punchDate
+}: {
+  companyId: string;
+  profileType: string;
+  profileId: string;
+  punchDate: string;
+}): Promise<OutsideStationPolicy> {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const settings = await supabaseAdmin
+    .from("hr_company_settings")
+    .select("outside_station_tracking_enabled, outside_station_allowance_minutes")
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (settings.error) throw new Error(settings.error.message);
+
+  const assignmentTable = profileType === "employee"
+    ? "hr_employee_shift_assignments"
+    : "hr_contractor_shift_assignments";
+  const profileColumn = profileType === "employee" ? "employee_id" : "contractor_id";
+  const assignment = await supabaseAdmin
+    .from(assignmentTable)
+    .select("hr_shifts(break_minutes)")
+    .eq("company_id", companyId)
+    .eq(profileColumn, profileId)
+    .lte("effective_from", punchDate)
+    .or(`effective_to.is.null,effective_to.gte.${punchDate}`)
+    .order("effective_from", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (assignment.error) throw new Error(assignment.error.message);
+
+  const companyAllowanceMinutes = normalizeOutsideStationMinutes(
+    settings.data?.outside_station_allowance_minutes
+  );
+  const joinedShift = assignment.data?.hr_shifts as
+    | { break_minutes?: unknown }
+    | { break_minutes?: unknown }[]
+    | null
+    | undefined;
+  const shift = Array.isArray(joinedShift) ? joinedShift[0] : joinedShift;
+  const shiftBreakMinutes = Math.max(0, Math.round(Number(shift?.break_minutes ?? 0)) || 0);
+  const effectiveAllowanceMinutes = outsideStationThresholdMinutes(
+    companyAllowanceMinutes,
+    shiftBreakMinutes
+  );
+  return {
+    enabled: settings.data?.outside_station_tracking_enabled !== false,
+    companyAllowanceMinutes,
+    shiftBreakMinutes,
+    effectiveAllowanceMinutes,
+    thresholdMs: effectiveAllowanceMinutes * 60 * 1000
+  };
 }
 
 /** Haversine distance in meters between two WGS84 points. */
@@ -294,6 +364,7 @@ export async function openIntegrityFlag({
   flagType:
     | "outside_geofence_punch"
     | "outside_geofence_gt_2h"
+    | "outside_station_over_limit"
     | "biometric_phone_mismatch"
     | "integrity_risk"
     | "forgot_punch_out"

@@ -49,10 +49,12 @@ export type ConnectAttendanceWorker = {
 
 export async function resolveConnectAttendanceWorker({
   accountId,
-  profileType
+  profileType,
+  requirePeopleScope = false
 }: {
   accountId: string;
   profileType: string;
+  requirePeopleScope?: boolean;
 }): Promise<ConnectAttendanceWorker> {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const session = await activeConnectSession();
@@ -61,11 +63,15 @@ export async function resolveConnectAttendanceWorker({
     throw new Error("Attendance is available for workforce accounts only.");
   }
   const resolvedProfileType = profileType as WorkforceProfileType;
+  if (requirePeopleScope && !["employee", "contractor"].includes(resolvedProfileType)) {
+    throw new Error("Location continuity applies only to People-designated employees and individual contractors.");
+  }
   const table = workforceTable(resolvedProfileType);
   const idColumn = resolvedProfileType === "employee" ? "employee_code" : "dropx_id";
+  const designationColumn = resolvedProfileType === "employee" ? "designation_id" : "designation";
   const result = await supabaseAdmin
     .from(table)
-    .select(`id, company_id, mobile, mobile_country_code, biometric_id, full_name, location_id, ${idColumn}`)
+    .select(`id, company_id, mobile, mobile_country_code, biometric_id, full_name, location_id, ${idColumn}, ${designationColumn}`)
     .eq("id", accountId)
     .maybeSingle();
   if (result.error) throw new Error(result.error.message);
@@ -75,6 +81,25 @@ export async function resolveConnectAttendanceWorker({
   const rowCountryCode = String(row.mobile_country_code ?? countryCode).replace(/\D/g, "") || countryCode;
   if (rowCountryCode !== countryCode || (rowMobile !== mobile && rowMobile !== localMobile)) {
     throw new Error("This attendance is not available for the signed-in account.");
+  }
+  if (requirePeopleScope) {
+    const designationResult = await supabaseAdmin
+      .from("designations")
+      .select("id, name, code, portal_scopes, is_active")
+      .eq("company_id", row.company_id)
+      .eq("is_active", true);
+    if (designationResult.error) throw new Error(designationResult.error.message);
+    const profileDesignation = String(row[designationColumn as keyof typeof row] ?? "").trim().toLowerCase();
+    const designation = (designationResult.data ?? []).find((candidate) => {
+      if (resolvedProfileType === "employee") return String(candidate.id).toLowerCase() === profileDesignation;
+      return [candidate.name, candidate.code].some((value) => String(value ?? "").trim().toLowerCase() === profileDesignation);
+    });
+    const scopes = Array.isArray(designation?.portal_scopes)
+      ? designation.portal_scopes.map((scope) => String(scope).trim().toLowerCase())
+      : [];
+    if (!designation || !scopes.includes("people")) {
+      throw new Error("Location continuity is not enabled for this workforce designation.");
+    }
   }
   const biometricId = String(row.biometric_id ?? "");
   const enrolmentId = cleanEnrolmentId(biometricId) || String(row.id).replace(/-/g, "").slice(0, 16);
