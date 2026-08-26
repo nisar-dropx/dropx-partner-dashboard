@@ -9179,6 +9179,8 @@ body {
 
 .dx-drawer nav button.subitem { padding-left: 52px; font-size: 14px; }
 .dx-drawer nav button.subitem > span { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.dx-drawer nav button.payments-toggle > svg:last-child { transition: transform .2s ease; }
+.dx-drawer nav button.payments-toggle.expanded > svg:last-child { transform: rotate(90deg); }
 .dx-payments-menu > small, .dx-advances header small { color: #ca426c; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
 .dx-payments-menu h1, .dx-advances h1 { margin: 4px 0 20px; }
 .dx-payments-menu > button { width: 100%; display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px solid #e7e2da; border-radius: 16px; background: #fff; color: #202124; text-align: left; }

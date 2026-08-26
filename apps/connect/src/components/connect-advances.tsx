@@ -14,8 +14,6 @@ type AdvanceRequest = {
   requested_at: string;
   updated_at: string;
 };
-type AccountSnapshot = { accountCode: string; name: string; station: string; designation: string };
-
 function money(value: number | null | undefined) {
   return value == null ? "—" : new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 }).format(value);
 }
@@ -26,7 +24,6 @@ function label(value: string) {
 
 export function ConnectAdvances({ account }: { account: Account }) {
   const [rows, setRows] = useState<AdvanceRequest[]>([]);
-  const [snapshot, setSnapshot] = useState<AccountSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -42,7 +39,7 @@ export function ConnectAdvances({ account }: { account: Account }) {
       const response = await fetch(`/api/connect/advances?${query}`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to load advance requests.");
-      setRows(payload.requests ?? []); setSnapshot(payload.account ?? null);
+      setRows(payload.requests ?? []);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load advance requests."); }
     finally { setLoading(false); }
   }, [account.id, account.profileType]);
@@ -75,6 +72,6 @@ export function ConnectAdvances({ account }: { account: Account }) {
         <dl><div><dt>Requested on</dt><dd>{new Date(row.requested_at).toLocaleString("en-IN")}</dd></div>{row.approved_amount != null ? <div><dt>Approved amount</dt><dd>{money(Number(row.approved_amount))}</dd></div> : null}{row.decision_comment ? <div><dt>Comment</dt><dd>{row.decision_comment}</dd></div> : null}<div><dt>Updated on</dt><dd>{new Date(row.updated_at).toLocaleString("en-IN")}</dd></div></dl>
       </article>)}
     </div> : <div className="dx-advance-empty"><IndianRupee /><strong>No advance requests yet</strong><small>Your submitted requests will appear here.</small></div>}
-    {showForm ? <div className="dx-advance-modal"><button aria-label="Close" className="backdrop" onClick={() => setShowForm(false)} /><form onSubmit={submit}><header><div><small>Payments</small><h2>Advance request</h2></div><button aria-label="Close" onClick={() => setShowForm(false)} type="button"><X /></button></header><label>Employee code<input disabled value={snapshot?.accountCode || account.reference || "—"} /></label><label>Name<input disabled value={snapshot?.name || account.name || "—"} /></label><label>Station<input disabled value={snapshot?.station || "—"} /></label><label>Designation<input disabled value={snapshot?.designation || account.role || "—"} /></label><label>Required amount<input autoFocus inputMode="decimal" min="1" onChange={(event) => setAmount(event.target.value)} placeholder="0.00" required step="0.01" type="number" value={amount} /></label><label>Purpose<textarea maxLength={500} minLength={3} onChange={(event) => setPurpose(event.target.value)} required rows={4} value={purpose} /></label><button className="submit" disabled={saving} type="submit">{saving ? "Submitting..." : "Submit request"}</button></form></div> : null}
+    {showForm ? <div className="dx-advance-modal"><button aria-label="Close" className="backdrop" onClick={() => setShowForm(false)} /><form onSubmit={submit}><header><div><small>Payments</small><h2>Advance request</h2></div><button aria-label="Close" onClick={() => setShowForm(false)} type="button"><X /></button></header><label>Required amount<input autoFocus inputMode="decimal" min="1" onChange={(event) => setAmount(event.target.value)} placeholder="0.00" required step="0.01" type="number" value={amount} /></label><label>Purpose<textarea maxLength={500} minLength={3} onChange={(event) => setPurpose(event.target.value)} required rows={4} value={purpose} /></label><button className="submit" disabled={saving} type="submit">{saving ? "Submitting..." : "Submit request"}</button></form></div> : null}
   </section>;
 }
