@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import * as XLSX from "xlsx";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -77,6 +78,168 @@ function comparableProviderName(value: string) {
     .normalize("NFKD")
     .replace(/[^\p{L}\p{N}]+/gu, "")
     .toLocaleUpperCase();
+}
+
+function normalizedHeader(value: unknown) {
+  return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function bulkCell(row: Record<string, unknown>, aliases: string[]) {
+  for (const [key, value] of Object.entries(row)) {
+    if (aliases.includes(normalizedHeader(key))) return String(value ?? "").trim();
+  }
+  return "";
+}
+
+type BulkWorker = {
+  id: string;
+  sourceType: "employee" | "contractor" | "field_executive";
+  dropxId: string;
+  fullName: string;
+  stationId: string;
+  effectiveFrom: string;
+};
+
+export async function bulkUploadProviderIds(formData: FormData) {
+  const authorization = await getAuthorization();
+  if (!authorization) redirect("/login");
+  const companyId = requireCompanyId(authorization);
+  if (!hasPermission(authorization, "provider_mapping", "add") && !hasPermission(authorization, "provider_mapping", "edit")) {
+    redirect("/unauthorized?page=provider_mapping&action=edit");
+  }
+
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const file = formData.get("mapping_file");
+    if (!(file instanceof File) || !file.size) throw new Error("Select an Excel or CSV file to upload.");
+    if (file.size > 10 * 1024 * 1024) throw new Error("The upload file must be 10 MB or smaller.");
+
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", raw: false });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    if (!sheet) throw new Error("The uploaded file does not contain a worksheet.");
+    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false });
+    const uploadRows = rawRows.map((row, index) => ({
+      rowNumber: index + 2,
+      dropxId: bulkCell(row, ["DROPX_ID", "DROPXID", "DROPX_ID_CODE"]).toUpperCase(),
+      providerMemberId: bulkCell(row, ["PROVIDER_MEMBER_ID", "PROVIDER_ID", "MEMBER_ID", "PROVIDER_EMPLOYEE_ID"])
+    })).filter((row) => row.dropxId || row.providerMemberId);
+    const completeRows = uploadRows.filter((row) => row.dropxId && row.providerMemberId);
+    const skippedRows = uploadRows.length - completeRows.length;
+    if (!completeRows.length) throw new Error("No complete DropX ID and Provider Member ID pairs were found.");
+
+    const duplicateDropxIds = completeRows.map((row) => row.dropxId).filter((id, index, ids) => ids.indexOf(id) !== index);
+    if (duplicateDropxIds.length) throw new Error(`Duplicate DropX ID in upload: ${Array.from(new Set(duplicateDropxIds)).slice(0, 5).join(", ")}.`);
+
+    const dropxIds = completeRows.map((row) => row.dropxId);
+    const [{ data: employees, error: employeeError }, { data: contractors, error: contractorError }, { data: executives, error: executiveError }] = await Promise.all([
+      supabaseAdmin.from("employees").select("id, employee_code, full_name, location_id, date_of_join").eq("company_id", companyId).is("deleted_at", null).in("employee_code", dropxIds),
+      supabaseAdmin.from("contractors").select("id, dropx_id, full_name, location_id, date_of_join").eq("company_id", companyId).is("deleted_at", null).in("dropx_id", dropxIds),
+      supabaseAdmin.from("field_executives").select("id, dropx_id, full_name, location_id, date_of_join").eq("company_id", companyId).in("dropx_id", dropxIds)
+    ]);
+    if (employeeError) throw new Error(employeeError.message);
+    if (contractorError) throw new Error(contractorError.message);
+    if (executiveError) throw new Error(executiveError.message);
+
+    const workers = new Map<string, BulkWorker>();
+    (employees ?? []).forEach((row) => workers.set(String(row.employee_code ?? "").toUpperCase(), {
+      id: row.id, sourceType: "employee", dropxId: String(row.employee_code ?? "").toUpperCase(), fullName: String(row.full_name ?? ""), stationId: String(row.location_id ?? ""), effectiveFrom: String(row.date_of_join ?? "")
+    }));
+    (contractors ?? []).forEach((row) => workers.set(String(row.dropx_id ?? "").toUpperCase(), {
+      id: row.id, sourceType: "contractor", dropxId: String(row.dropx_id ?? "").toUpperCase(), fullName: String(row.full_name ?? ""), stationId: String(row.location_id ?? ""), effectiveFrom: String(row.date_of_join ?? "")
+    }));
+    (executives ?? []).forEach((row) => workers.set(String(row.dropx_id ?? "").toUpperCase(), {
+      id: row.id, sourceType: "field_executive", dropxId: String(row.dropx_id ?? "").toUpperCase(), fullName: String(row.full_name ?? ""), stationId: String(row.location_id ?? ""), effectiveFrom: String(row.date_of_join ?? "")
+    }));
+
+    const missingWorkers = completeRows.filter((row) => !workers.has(row.dropxId));
+    if (missingWorkers.length) throw new Error(`DropX ID not found: ${missingWorkers.slice(0, 5).map((row) => row.dropxId).join(", ")}.`);
+    const allowedLocationIds = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER"
+      ? null
+      : new Set(authorization.locationScopeIds);
+    const outOfScope = completeRows.filter((row) => {
+      const worker = workers.get(row.dropxId);
+      return worker && allowedLocationIds && !allowedLocationIds.has(worker.stationId);
+    });
+    if (outOfScope.length) throw new Error(`Location access is not allocated for: ${outOfScope.slice(0, 5).map((row) => row.dropxId).join(", ")}.`);
+
+    const stationIds = Array.from(new Set(completeRows.map((row) => workers.get(row.dropxId)?.stationId).filter(Boolean))) as string[];
+    const { data: stations, error: stationsError } = await supabaseAdmin.from("stations").select("id, provider_id").eq("company_id", companyId).in("id", stationIds);
+    if (stationsError) throw new Error(stationsError.message);
+    const providerByStation = new Map((stations ?? []).map((station) => [station.id, String(station.provider_id ?? "")]));
+    const missingProviders = completeRows.filter((row) => !providerByStation.get(workers.get(row.dropxId)?.stationId ?? ""));
+    if (missingProviders.length) throw new Error(`Location provider is not configured for: ${missingProviders.slice(0, 5).map((row) => row.dropxId).join(", ")}.`);
+
+    const memberIds = Array.from(new Set(completeRows.map((row) => row.providerMemberId)));
+    const memberNameById = new Map<string, string>();
+    for (let offset = 0; offset < memberIds.length; offset += 200) {
+      const { data, error } = await supabaseAdmin.from("cps_shipment_daily")
+        .select("provider_employee_id, provider_employee_name, work_date, created_at")
+        .eq("company_id", companyId)
+        .in("provider_employee_id", memberIds.slice(offset, offset + 200))
+        .order("work_date", { ascending: false })
+        .order("created_at", { ascending: false });
+      if (error) throw new Error(error.message);
+      (data ?? []).forEach((row) => {
+        const memberId = String(row.provider_employee_id ?? "").trim();
+        if (memberId && !memberNameById.has(memberId)) memberNameById.set(memberId, String(row.provider_employee_name ?? "").trim());
+      });
+    }
+    const invalidNames = completeRows.filter((row) => {
+      const holderName = memberNameById.get(row.providerMemberId);
+      return !holderName || comparableProviderName(holderName) !== comparableProviderName(workers.get(row.dropxId)?.fullName ?? "");
+    });
+    if (invalidNames.length) throw new Error(`Provider holder not found or name mismatch for: ${invalidNames.slice(0, 5).map((row) => row.dropxId).join(", ")}.`);
+
+    let saved = 0;
+    for (const uploadRow of completeRows) {
+      const worker = workers.get(uploadRow.dropxId)!;
+      const providerId = providerByStation.get(worker.stationId)!;
+      const workerColumn = worker.sourceType === "employee" ? "employee_id" : worker.sourceType === "contractor" ? "contractor_id" : "field_executive_id";
+      const { data: existing, error: existingError } = await supabaseAdmin.from("field_executive_provider_mappings")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq(workerColumn, worker.id)
+        .is("effective_to", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (existingError) throw new Error(existingError.message);
+
+      if (existing) {
+        const { error } = await supabaseAdmin.from("field_executive_provider_mappings").update({
+          provider_id: providerId,
+          provider_member_id: uploadRow.providerMemberId,
+          station_id: worker.stationId,
+          updated_at: new Date().toISOString()
+        }).eq("id", existing.id).eq("company_id", companyId);
+        if (error) throw new Error(`Row ${uploadRow.rowNumber}: ${error.message}`);
+      } else {
+        const { error } = await supabaseAdmin.from("field_executive_provider_mappings").insert(withCompany({
+          field_executive_id: worker.sourceType === "field_executive" ? worker.id : null,
+          employee_id: worker.sourceType === "employee" ? worker.id : null,
+          contractor_id: worker.sourceType === "contractor" ? worker.id : null,
+          provider_id: providerId,
+          provider_member_id: uploadRow.providerMemberId,
+          station_id: worker.stationId,
+          effective_from: /^\d{4}-\d{2}-\d{2}$/.test(worker.effectiveFrom) ? worker.effectiveFrom : new Date().toISOString().slice(0, 10),
+          effective_to: null,
+          payment_method_id: null,
+          payment_values: {},
+          pay_type: "UNALLOCATED",
+          status: "active",
+          created_by: authorization.userId,
+          updated_at: new Date().toISOString()
+        }, companyId));
+        if (error) throw new Error(`Row ${uploadRow.rowNumber}: ${error.message}`);
+      }
+      saved += 1;
+    }
+
+    revalidatePath("/provider-mapping");
+    mappingRedirect({ notice: `${saved} ID mapping${saved === 1 ? "" : "s"} uploaded${skippedRows ? `; ${skippedRows} incomplete row${skippedRows === 1 ? "" : "s"} skipped` : ""}. Payment allocation can be added later.` });
+  } catch (error) {
+    mappingRedirect({ error: error instanceof Error ? error.message : "Unable to upload ID mappings." });
+  }
 }
 
 async function saveExecutiveMappingRow(

@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { saveProviderMappingWorksheet } from "@/app/provider-mapping/actions";
+import { bulkUploadProviderIds, saveProviderMappingWorksheet } from "@/app/provider-mapping/actions";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 
@@ -454,6 +454,20 @@ export function ProviderMappingWorksheet({
   }
 
   return (
+    <>
+    <section className="panel mapping-id-upload-panel">
+      <div>
+        <h2>Bulk ID mapping</h2>
+        <p className="subtle">Upload only DropX ID and Provider Member ID now. Payment method, rates and effective dates can be allocated later.</p>
+      </div>
+      <form action={bulkUploadProviderIds} className="mapping-id-upload-form">
+        <label>Excel / CSV file
+          <input accept=".xlsx,.xls,.csv" disabled={!canEdit} name="mapping_file" type="file" />
+        </label>
+        <SubmitButton disabled={!canEdit}>Upload IDs</SubmitButton>
+      </form>
+      <small className="subtle">Accepted headers: DROPX_ID and PROVIDER_MEMBER_ID. Empty or incomplete rows are skipped.</small>
+    </section>
     <form action={saveProviderMappingWorksheet} autoComplete="off" className="worksheet-form" onSubmit={handleSubmit}>
       <input type="hidden" name="row_count" value={rows.length} />
       <input
@@ -624,5 +638,6 @@ export function ProviderMappingWorksheet({
         </div>
       </section>
     </form>
+    </>
   );
 }
