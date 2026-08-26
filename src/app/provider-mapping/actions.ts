@@ -100,7 +100,21 @@ type BulkWorker = {
   effectiveFrom: string;
 };
 
-export async function bulkUploadProviderIds(formData: FormData) {
+export type BulkUploadReportRow = {
+  rowNumber: number;
+  dropxId: string;
+  providerMemberId: string;
+  result: "Mapped" | "Skipped";
+  reason: string;
+};
+
+export type BulkUploadResult = {
+  ok: boolean;
+  message: string;
+  rows: BulkUploadReportRow[];
+};
+
+export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUploadResult> {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
   const companyId = requireCompanyId(authorization);
@@ -123,53 +137,42 @@ export async function bulkUploadProviderIds(formData: FormData) {
       dropxId: bulkCell(row, ["DROPX_ID", "DROPXID", "DROPX_ID_CODE"]).toUpperCase(),
       providerMemberId: bulkCell(row, ["PROVIDER_MEMBER_ID", "PROVIDER_ID", "MEMBER_ID", "PROVIDER_EMPLOYEE_ID"])
     })).filter((row) => row.dropxId || row.providerMemberId);
-    const completeRows = uploadRows.filter((row) => row.dropxId && row.providerMemberId);
-    const skippedRows = uploadRows.length - completeRows.length;
-    if (!completeRows.length) throw new Error("No complete DropX ID and Provider Member ID pairs were found.");
+    if (!uploadRows.length) throw new Error("No DropX ID or Provider Member ID rows were found.");
 
-    const duplicateDropxIds = completeRows.map((row) => row.dropxId).filter((id, index, ids) => ids.indexOf(id) !== index);
-    if (duplicateDropxIds.length) throw new Error(`Duplicate DropX ID in upload: ${Array.from(new Set(duplicateDropxIds)).slice(0, 5).join(", ")}.`);
-
-    const dropxIds = completeRows.map((row) => row.dropxId);
-    const [{ data: employees, error: employeeError }, { data: contractors, error: contractorError }, { data: executives, error: executiveError }] = await Promise.all([
-      supabaseAdmin.from("employees").select("id, employee_code, full_name, location_id, date_of_join").eq("company_id", companyId).is("deleted_at", null).in("employee_code", dropxIds),
-      supabaseAdmin.from("contractors").select("id, dropx_id, full_name, location_id, date_of_join").eq("company_id", companyId).is("deleted_at", null).in("dropx_id", dropxIds),
-      supabaseAdmin.from("field_executives").select("id, dropx_id, full_name, location_id, date_of_join").eq("company_id", companyId).in("dropx_id", dropxIds)
+    const dropxIds = Array.from(new Set(uploadRows.map((row) => row.dropxId).filter(Boolean)));
+    const [{ data: employees, error: employeeError }, { data: contractors, error: contractorError }, { data: executives, error: executiveError }, { data: designations, error: designationError }] = await Promise.all([
+      supabaseAdmin.from("employees").select("id, employee_code, full_name, location_id, date_of_join, designations!inner(is_field_operations)").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).eq("designations.is_field_operations", true).in("employee_code", dropxIds),
+      supabaseAdmin.from("contractors").select("id, dropx_id, full_name, location_id, date_of_join, designation").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).in("dropx_id", dropxIds),
+      supabaseAdmin.from("field_executives").select("id, dropx_id, full_name, location_id, date_of_join").eq("company_id", companyId).eq("is_active", true).in("dropx_id", dropxIds),
+      supabaseAdmin.from("designations").select("code, name").eq("company_id", companyId).eq("is_active", true).eq("is_field_operations", true)
     ]);
     if (employeeError) throw new Error(employeeError.message);
     if (contractorError) throw new Error(contractorError.message);
     if (executiveError) throw new Error(executiveError.message);
+    if (designationError) throw new Error(designationError.message);
+
+    const fieldOperationsDesignations = new Set((designations ?? []).flatMap((row) => [row.code, row.name]).map((value) => String(value ?? "").trim().toLowerCase()));
 
     const workers = new Map<string, BulkWorker>();
     (employees ?? []).forEach((row) => workers.set(String(row.employee_code ?? "").toUpperCase(), {
       id: row.id, sourceType: "employee", dropxId: String(row.employee_code ?? "").toUpperCase(), fullName: String(row.full_name ?? ""), stationId: String(row.location_id ?? ""), effectiveFrom: String(row.date_of_join ?? "")
     }));
-    (contractors ?? []).forEach((row) => workers.set(String(row.dropx_id ?? "").toUpperCase(), {
+    (contractors ?? []).filter((row) => fieldOperationsDesignations.has(String(row.designation ?? "").trim().toLowerCase())).forEach((row) => workers.set(String(row.dropx_id ?? "").toUpperCase(), {
       id: row.id, sourceType: "contractor", dropxId: String(row.dropx_id ?? "").toUpperCase(), fullName: String(row.full_name ?? ""), stationId: String(row.location_id ?? ""), effectiveFrom: String(row.date_of_join ?? "")
     }));
     (executives ?? []).forEach((row) => workers.set(String(row.dropx_id ?? "").toUpperCase(), {
       id: row.id, sourceType: "field_executive", dropxId: String(row.dropx_id ?? "").toUpperCase(), fullName: String(row.full_name ?? ""), stationId: String(row.location_id ?? ""), effectiveFrom: String(row.date_of_join ?? "")
     }));
 
-    const missingWorkers = completeRows.filter((row) => !workers.has(row.dropxId));
-    if (missingWorkers.length) throw new Error(`DropX ID not found: ${missingWorkers.slice(0, 5).map((row) => row.dropxId).join(", ")}.`);
     const allowedLocationIds = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER"
       ? null
       : new Set(authorization.locationScopeIds);
-    const outOfScope = completeRows.filter((row) => {
-      const worker = workers.get(row.dropxId);
-      return worker && allowedLocationIds && !allowedLocationIds.has(worker.stationId);
-    });
-    if (outOfScope.length) throw new Error(`Location access is not allocated for: ${outOfScope.slice(0, 5).map((row) => row.dropxId).join(", ")}.`);
-
-    const stationIds = Array.from(new Set(completeRows.map((row) => workers.get(row.dropxId)?.stationId).filter(Boolean))) as string[];
+    const eligibleWorkers = new Map(Array.from(workers.entries()).filter(([, worker]) => !allowedLocationIds || allowedLocationIds.has(worker.stationId)));
+    const stationIds = Array.from(new Set(Array.from(eligibleWorkers.values()).map((worker) => worker.stationId).filter(Boolean))) as string[];
     const { data: stations, error: stationsError } = await supabaseAdmin.from("stations").select("id, provider_id").eq("company_id", companyId).in("id", stationIds);
     if (stationsError) throw new Error(stationsError.message);
     const providerByStation = new Map((stations ?? []).map((station) => [station.id, String(station.provider_id ?? "")]));
-    const missingProviders = completeRows.filter((row) => !providerByStation.get(workers.get(row.dropxId)?.stationId ?? ""));
-    if (missingProviders.length) throw new Error(`Location provider is not configured for: ${missingProviders.slice(0, 5).map((row) => row.dropxId).join(", ")}.`);
-
-    const memberIds = Array.from(new Set(completeRows.map((row) => row.providerMemberId)));
+    const memberIds = Array.from(new Set(uploadRows.map((row) => row.providerMemberId).filter(Boolean)));
     const memberNameById = new Map<string, string>();
     for (let offset = 0; offset < memberIds.length; offset += 200) {
       const { data, error } = await supabaseAdmin.from("cps_shipment_daily")
@@ -184,16 +187,21 @@ export async function bulkUploadProviderIds(formData: FormData) {
         if (memberId && !memberNameById.has(memberId)) memberNameById.set(memberId, String(row.provider_employee_name ?? "").trim());
       });
     }
-    const invalidNames = completeRows.filter((row) => {
-      const holderName = memberNameById.get(row.providerMemberId);
-      return !holderName || comparableProviderName(holderName) !== comparableProviderName(workers.get(row.dropxId)?.fullName ?? "");
-    });
-    if (invalidNames.length) throw new Error(`Provider holder not found or name mismatch for: ${invalidNames.slice(0, 5).map((row) => row.dropxId).join(", ")}.`);
-
     let saved = 0;
-    for (const uploadRow of completeRows) {
-      const worker = workers.get(uploadRow.dropxId)!;
-      const providerId = providerByStation.get(worker.stationId)!;
+    const seenDropxIds = new Set<string>();
+    const reportRows: BulkUploadReportRow[] = [];
+    for (const uploadRow of uploadRows) {
+      const skipped = (reason: string) => reportRows.push({ ...uploadRow, result: "Skipped", reason });
+      if (!uploadRow.dropxId || !uploadRow.providerMemberId) { skipped("DropX ID or Provider Member ID is blank."); continue; }
+      if (seenDropxIds.has(uploadRow.dropxId)) { skipped("Duplicate DropX ID in this upload."); continue; }
+      seenDropxIds.add(uploadRow.dropxId);
+      const worker = eligibleWorkers.get(uploadRow.dropxId);
+      if (!worker) { skipped("DropX ID is not available in the current mapping list."); continue; }
+      const providerId = providerByStation.get(worker.stationId);
+      if (!providerId) { skipped("The worker's location has no provider configured."); continue; }
+      const holderName = memberNameById.get(uploadRow.providerMemberId);
+      if (!holderName) { skipped("Provider Member ID was not found in uploaded provider data."); continue; }
+      if (comparableProviderName(holderName) !== comparableProviderName(worker.fullName)) { skipped(`Holder name '${holderName.split("/")[0].trim()}' does not match '${worker.fullName}'.`); continue; }
       const workerColumn = worker.sourceType === "employee" ? "employee_id" : worker.sourceType === "contractor" ? "contractor_id" : "field_executive_id";
       const { data: existing, error: existingError } = await supabaseAdmin.from("field_executive_provider_mappings")
         .select("id")
@@ -212,7 +220,7 @@ export async function bulkUploadProviderIds(formData: FormData) {
           station_id: worker.stationId,
           updated_at: new Date().toISOString()
         }).eq("id", existing.id).eq("company_id", companyId);
-        if (error) throw new Error(`Row ${uploadRow.rowNumber}: ${error.message}`);
+        if (error) { skipped(error.message); continue; }
       } else {
         const { error } = await supabaseAdmin.from("field_executive_provider_mappings").insert(withCompany({
           field_executive_id: worker.sourceType === "field_executive" ? worker.id : null,
@@ -230,15 +238,17 @@ export async function bulkUploadProviderIds(formData: FormData) {
           created_by: authorization.userId,
           updated_at: new Date().toISOString()
         }, companyId));
-        if (error) throw new Error(`Row ${uploadRow.rowNumber}: ${error.message}`);
+        if (error) { skipped(error.message); continue; }
       }
       saved += 1;
+      reportRows.push({ ...uploadRow, result: "Mapped", reason: existing ? "Existing mapping updated." : "New ID mapping created." });
     }
 
     revalidatePath("/provider-mapping");
-    mappingRedirect({ notice: `${saved} ID mapping${saved === 1 ? "" : "s"} uploaded${skippedRows ? `; ${skippedRows} incomplete row${skippedRows === 1 ? "" : "s"} skipped` : ""}. Payment allocation can be added later.` });
+    const skippedCount = reportRows.length - saved;
+    return { ok: true, message: `${saved} mapped; ${skippedCount} skipped.`, rows: reportRows };
   } catch (error) {
-    mappingRedirect({ error: error instanceof Error ? error.message : "Unable to upload ID mappings." });
+    return { ok: false, message: error instanceof Error ? error.message : "Unable to upload ID mappings.", rows: [] };
   }
 }
 

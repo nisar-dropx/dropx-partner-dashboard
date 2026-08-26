@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useFormStatus } from "react-dom";
 import { bulkUploadProviderIds, saveProviderMappingWorksheet } from "@/app/provider-mapping/actions";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -86,6 +87,60 @@ function RowSaveButton({ canEdit, dirty, index, lookupValid }: { canEdit: boolea
       {pending ? <span className="button-spinner" aria-hidden="true" /> : null}
       <span>{pending ? "Saving" : "Save"}</span>
     </button>
+  );
+}
+
+function csvCell(value: string | number) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+function BulkIdUpload({ canEdit }: { canEdit: boolean }) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState(false);
+  const [reportUrl, setReportUrl] = useState("");
+
+  useEffect(() => () => {
+    if (reportUrl) URL.revokeObjectURL(reportUrl);
+  }, [reportUrl]);
+
+  async function upload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setMessage("");
+    setError(false);
+    if (reportUrl) URL.revokeObjectURL(reportUrl);
+    setReportUrl("");
+    try {
+      const result = await bulkUploadProviderIds(new FormData(event.currentTarget));
+      setMessage(result.message);
+      setError(!result.ok);
+      if (result.rows.length) {
+        const csv = [
+          ["ROW", "DROPX_ID", "PROVIDER_MEMBER_ID", "RESULT", "REASON"].map(csvCell).join(","),
+          ...result.rows.map((row) => [row.rowNumber, row.dropxId, row.providerMemberId, row.result, row.reason].map(csvCell).join(","))
+        ].join("\r\n");
+        setReportUrl(URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" })));
+      }
+      if (result.ok) router.refresh();
+    } catch (uploadError) {
+      setError(true);
+      setMessage(uploadError instanceof Error ? uploadError.message : "Unable to upload ID mappings.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form className="mapping-id-upload-form" onSubmit={upload}>
+      <label>Excel / CSV file
+        <input accept=".xlsx,.xls,.csv" disabled={!canEdit || pending} name="mapping_file" type="file" />
+      </label>
+      <button className="button" disabled={!canEdit || pending} type="submit">{pending ? "Uploading..." : "Upload IDs"}</button>
+      {reportUrl ? <a className="button secondary" download={`provider-id-upload-report-${new Date().toISOString().slice(0, 10)}.csv`} href={reportUrl}>Download report</a> : null}
+      {message ? <span className={error ? "mapping-upload-error" : "mapping-upload-success"}>{message}</span> : null}
+    </form>
   );
 }
 
@@ -460,12 +515,7 @@ export function ProviderMappingWorksheet({
         <h2>Bulk ID mapping</h2>
         <p className="subtle">Upload only DropX ID and Provider Member ID now. Payment method, rates and effective dates can be allocated later.</p>
       </div>
-      <form action={bulkUploadProviderIds} className="mapping-id-upload-form">
-        <label>Excel / CSV file
-          <input accept=".xlsx,.xls,.csv" disabled={!canEdit} name="mapping_file" type="file" />
-        </label>
-        <SubmitButton disabled={!canEdit}>Upload IDs</SubmitButton>
-      </form>
+      <BulkIdUpload canEdit={canEdit} />
       <small className="subtle">Accepted headers: DROPX_ID and PROVIDER_MEMBER_ID. Empty or incomplete rows are skipped.</small>
     </section>
     <form action={saveProviderMappingWorksheet} autoComplete="off" className="worksheet-form" onSubmit={handleSubmit}>
