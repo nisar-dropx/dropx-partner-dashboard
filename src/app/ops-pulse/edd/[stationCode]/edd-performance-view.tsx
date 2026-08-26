@@ -2,22 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { addDaysYmd, formatCiaDisplayDate, todayIstYmd } from "@/lib/ops-pulse/cia-types";
+import { formatCiaDisplayDate, todayIstYmd } from "@/lib/ops-pulse/cia-types";
 import type { EddPerformancePayload } from "@/lib/ops-pulse/edd-worker";
-
-/** Same lookback ceiling CIA's own date-range picker uses. */
-const MAX_LOOKBACK_DAYS = 90;
-
-function validYmd(value: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
-
-function clampYmd(value: string, min: string, max: string) {
-  if (!validYmd(value)) return min;
-  if (value < min) return min;
-  if (value > max) return max;
-  return value;
-}
+import { EddDateRangePicker } from "../edd-date-range-picker";
 
 async function fetchPerformance(stationCode: string, from: string, to: string): Promise<EddPerformancePayload> {
   const url = new URL("/api/ops-pulse/edd/performance", window.location.origin);
@@ -38,14 +25,8 @@ async function fetchPerformance(stationCode: string, from: string, to: string): 
  */
 export function EddPerformanceView({ stationCode }: { stationCode: string }) {
   const today = todayIstYmd();
-  const yesterday = addDaysYmd(today, -1);
-  const earliestAllowed = addDaysYmd(today, -(MAX_LOOKBACK_DAYS - 1));
-
   const [appliedFrom, setAppliedFrom] = useState(today);
   const [appliedTo, setAppliedTo] = useState(today);
-  const [draftFrom, setDraftFrom] = useState(today);
-  const [draftTo, setDraftTo] = useState(today);
-  const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [payload, setPayload] = useState<EddPerformancePayload | null>(null);
@@ -69,41 +50,6 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
     };
   }, [stationCode, appliedFrom, appliedTo]);
 
-  const dirty = draftFrom !== appliedFrom || draftTo !== appliedTo;
-  const todaySelected = appliedFrom === today && appliedTo === today;
-  const yesterdaySelected = appliedFrom === yesterday && appliedTo === yesterday;
-
-  function applySingleDay(day: string) {
-    const next = clampYmd(day, earliestAllowed, today);
-    setDraftFrom(next);
-    setDraftTo(next);
-    setAppliedFrom(next);
-    setAppliedTo(next);
-    setFormError(null);
-  }
-
-  function applyPreset(days: number) {
-    const to = today;
-    const from = clampYmd(addDaysYmd(to, -(days - 1)), earliestAllowed, today);
-    setDraftFrom(from);
-    setDraftTo(to);
-    setAppliedFrom(from);
-    setAppliedTo(to);
-    setFormError(null);
-  }
-
-  function applyRange() {
-    const from = clampYmd(draftFrom, earliestAllowed, today);
-    const to = clampYmd(draftTo, earliestAllowed, today);
-    if (from > to) {
-      setFormError("From date must be on or before To date.");
-      return;
-    }
-    setFormError(null);
-    setAppliedFrom(from);
-    setAppliedTo(to);
-  }
-
   const assigned = payload?.assigned ?? 0;
 
   return (
@@ -115,76 +61,17 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
             Assigned, delivered, returned, and held packages for {stationCode} — defaults to today. Always pulled live
             from Amazon, so a wide range can take a little longer.
           </p>
-
-          <div className="edd-preset-row" style={{ marginTop: 12 }}>
-            <button type="button" className={`button secondary edd-chip edd-chip-today${todaySelected ? " active" : ""}`} onClick={() => applySingleDay(today)}>
-              Today
-            </button>
-            <button type="button" className={`button secondary edd-chip${yesterdaySelected ? " active" : ""}`} onClick={() => applySingleDay(yesterday)}>
-              Yesterday
-            </button>
-            <button type="button" className="button secondary edd-chip" onClick={() => applyPreset(7)}>
-              Last 7 days
-            </button>
-            <button type="button" className="button secondary edd-chip" onClick={() => applyPreset(30)}>
-              Last 30 days
-            </button>
+          <div style={{ marginTop: 12 }}>
+            <EddDateRangePicker
+              from={appliedFrom}
+              to={appliedTo}
+              loading={loading}
+              onApply={(from, to) => {
+                setAppliedFrom(from);
+                setAppliedTo(to);
+              }}
+            />
           </div>
-
-          <div className="edd-range-form" style={{ marginTop: 12 }}>
-            <label className="edd-range-field">
-              <span>From date</span>
-              <input
-                type="date"
-                className="field"
-                min={earliestAllowed}
-                max={today}
-                value={draftFrom}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  if (!validYmd(next)) return;
-                  setDraftFrom(clampYmd(next, earliestAllowed, today));
-                  setFormError(null);
-                }}
-              />
-            </label>
-            <label className="edd-range-field">
-              <span>To date</span>
-              <input
-                type="date"
-                className="field"
-                min={earliestAllowed}
-                max={today}
-                value={draftTo}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  if (!validYmd(next)) return;
-                  setDraftTo(clampYmd(next, earliestAllowed, today));
-                  setFormError(null);
-                }}
-              />
-            </label>
-            <div className="edd-range-actions">
-              <button type="button" className="button" disabled={loading || !dirty} onClick={applyRange}>
-                {loading ? <Loader2 size={16} className="edd-spin" /> : null}
-                {loading ? "Loading…" : "Show results"}
-              </button>
-              {dirty ? (
-                <button
-                  type="button"
-                  className="button secondary"
-                  onClick={() => {
-                    setDraftFrom(appliedFrom);
-                    setDraftTo(appliedTo);
-                    setFormError(null);
-                  }}
-                >
-                  Reset
-                </button>
-              ) : null}
-            </div>
-          </div>
-          {formError ? <p className="edd-range-error">{formError}</p> : null}
         </div>
       </section>
 

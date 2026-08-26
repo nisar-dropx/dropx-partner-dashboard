@@ -5,7 +5,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
 import { fetchEddNetwork, isEddWorkerConfigured, type EddNetworkRunStatus, type EddNetworkStation } from "@/lib/ops-pulse/edd-worker";
 import { loadCodLocations, loadCodStationSettings } from "@/lib/ops-pulse/cod";
-import { EddNetworkClient } from "./edd-network-client";
+import { EddNetworkTabs } from "./edd-network-tabs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -112,7 +112,7 @@ export default async function EddDashboardPage() {
         ) : null}
 
         {workerConfigured && stations.length ? (
-          <EddNetworkClient stations={stations} initialNetwork={network} initialRun={run} />
+          <EddNetworkTabs stations={stations} initialNetwork={network} initialRun={run} />
         ) : null}
       </div>
     </AppShell>
