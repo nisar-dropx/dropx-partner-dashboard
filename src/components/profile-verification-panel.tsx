@@ -48,6 +48,31 @@ function inputKey(parts: string[]) {
   return parts.map((part) => part.trim().toUpperCase()).join("|");
 }
 
+function verificationDateKey(value: string) {
+  const raw = value.trim();
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) return `${isoMatch[3]}-${isoMatch[2]}-${isoMatch[1]}`;
+  return raw.replace(/\//g, "-");
+}
+
+function comparableKey(target: VerificationKind, value?: string) {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (target !== "dl") return raw;
+  const [license = "", date = ""] = raw.split("|");
+  const isoMatch = date.match(/^(\d{4})[-/](\d{2})[-/](\d{2})$/);
+  const localMatch = date.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+  const normalizedDate = isoMatch
+    ? `${isoMatch[1]}${isoMatch[2]}${isoMatch[3]}`
+    : localMatch
+      ? `${localMatch[3]}${localMatch[2]}${localMatch[1]}`
+      : date.replace(/\D/g, "");
+  return `${license}|${normalizedDate}`;
+}
+
+function keysMatch(target: VerificationKind, left?: string, right?: string) {
+  return comparableKey(target, left) === comparableKey(target, right);
+}
+
 function displayDateToInput(value?: string) {
   const raw = String(value ?? "").trim();
   const match = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
@@ -89,9 +114,11 @@ function isElectric(result?: VerificationResult) {
 
 export function ProfileVerificationPanel({ accountId, kind, profileType, pageCode = "employees" }: ProfileVerificationPanelProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const initialInputKeyRef = useRef("");
   const [results, setResults] = useState<Partial<Record<VerificationKind, VerificationResult>>>({});
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
+  const [isDirty, setIsDirty] = useState(false);
 
   function form() {
     return hostRef.current?.closest("form") ?? null;
@@ -116,10 +143,14 @@ export function ProfileVerificationPanel({ accountId, kind, profileType, pageCod
   function keyFor(target: VerificationKind, fields = currentFields()) {
     if (target === "pan") return inputKey([fields.panNumber]);
     if (target === "pan_aadhaar") return inputKey([fields.panNumber, fields.aadhaarNumber]);
-    if (target === "dl") return inputKey([fields.drivingLicenseNo, fields.dateOfBirth.replace(/\//g, "-")]);
+    if (target === "dl") return inputKey([fields.drivingLicenseNo, verificationDateKey(fields.dateOfBirth)]);
     if (target === "vehicle") return inputKey([fields.vehicleRegNo]);
     if (target === "pf_uan") return inputKey([fields.pfUan]);
     return inputKey([fields.bankAccountNo, fields.ifsc]);
+  }
+
+  function editKey(fields = currentFields()) {
+    return kind === "pan" ? keyFor("pan_aadhaar", fields) : keyFor(kind, fields);
   }
 
   function setFieldValue(name: string, value?: string) {
@@ -186,6 +217,8 @@ export function ProfileVerificationPanel({ accountId, kind, profileType, pageCod
         }
       }
       setResults(next);
+      initialInputKeyRef.current = editKey(fields);
+      setIsDirty(false);
       window.dispatchEvent(new CustomEvent("dropx-profile-verification", { detail: { kind, result } }));
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Unable to verify.");
@@ -208,6 +241,9 @@ export function ProfileVerificationPanel({ accountId, kind, profileType, pageCod
             kind: row.kind,
             inputKey: row.inputKey,
             verified: row.verified,
+            manualReview: row.manualReview,
+            blockSubmit: row.blockSubmit,
+            name: row.name ?? details.name,
             message: row.message ?? ""
           };
         }
@@ -222,11 +258,14 @@ export function ProfileVerificationPanel({ accountId, kind, profileType, pageCod
   useEffect(() => {
     const currentForm = form();
     if (!currentForm) return;
+    initialInputKeyRef.current = editKey();
+    setIsDirty(false);
     const reconcile = () => {
+      setIsDirty(editKey() !== initialInputKeyRef.current);
       setResults((current) => {
         const fields = currentFields();
         const next = { ...current };
-        if (next[kind]?.inputKey && next[kind]?.inputKey !== keyFor(kind, fields)) delete next[kind];
+        if (next[kind]?.inputKey && !keysMatch(kind, next[kind]?.inputKey, keyFor(kind, fields))) delete next[kind];
         if (kind === "pan" && next.pan_aadhaar?.inputKey && next.pan_aadhaar.inputKey !== keyFor("pan_aadhaar", fields)) delete next.pan_aadhaar;
         if (kind === "pan_aadhaar" && next.pan?.inputKey && next.pan.inputKey !== keyFor("pan", fields)) delete next.pan;
         return next;
@@ -250,7 +289,7 @@ export function ProfileVerificationPanel({ accountId, kind, profileType, pageCod
   const fields = currentFields();
   const storedResult = results[kind];
   const storedPanAadhaarResult = results.pan_aadhaar;
-  const result = storedResult?.inputKey === keyFor(kind, fields) ? storedResult : undefined;
+  const result = keysMatch(kind, storedResult?.inputKey, keyFor(kind, fields)) ? storedResult : undefined;
   const panAadhaarResult = storedPanAadhaarResult?.inputKey === keyFor("pan_aadhaar", fields) ? storedPanAadhaarResult : undefined;
   const isVerified = kind === "pan" ? Boolean(result?.verified && panAadhaarResult?.verified) : Boolean(result?.verified);
   const missing = missingMessage(kind, fields);
@@ -258,11 +297,11 @@ export function ProfileVerificationPanel({ accountId, kind, profileType, pageCod
   const hiddenResults = kind === "pan" ? [result, panAadhaarResult].filter(Boolean) : [result].filter(Boolean);
   const resultTone = isVerified ? "ok" : result?.manualReview ? "warn" : result ? "error" : "";
   return (
-    <div className={`profile-verification-inline ${resultTone} ${isVerified ? "" : "needs-button"}`} ref={hostRef}>
+    <div className={`profile-verification-inline ${resultTone} ${!isVerified && isDirty ? "needs-button" : ""}`} ref={hostRef}>
       {hiddenResults.length ? (
         <input name="profile_verification_results" type="hidden" value={JSON.stringify(hiddenResults)} />
       ) : null}
-      {!isVerified ? (
+      {!isVerified && isDirty ? (
         <button className="button secondary profile-verification-button" disabled={running || Boolean(missing)} onClick={verify} type="button">
           {running ? "Verifying" : "Verify"}
         </button>
