@@ -394,10 +394,29 @@ export function ConnectLoginFlow() {
   if (checking) return <div className="dx-auth"><Loader text="" /></div>;
 
   return <div className={`dx-app ${loggedIn ? "logged-in" : ""}`}>
+    {loggedIn && account ? <aside className="dx-desktop-nav" aria-label="DropX One navigation">
+      <div className="dx-desktop-brand">
+        <Image alt="DropX" height={44} priority src="/dropx-logo.png" width={126} />
+        <span>ONE</span>
+      </div>
+      <div className="dx-desktop-account">
+        <i>{avatar ? <img alt="" src={avatar} /> : <b>{(account.name || "U")[0]}</b>}</i>
+        <span><strong>{account.name || account.reference}</strong><small>{account.role || account.reference}</small></span>
+        {accounts.length > 1 ? <button aria-label="Switch accounts" onClick={() => open("accounts")}><SwitchCamera /></button> : null}
+      </div>
+      <nav>
+        {allowed(account, "dashboard") ? <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Gauge />Dashboard</button> : null}
+        <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />My Profile</button>
+        {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint />Attendance</button> : null}
+        {allowed(account, "leave") ? <button aria-current={step === "leave" ? "page" : undefined} className={step === "leave" ? "active" : ""} onClick={() => open("leave")}><CalendarDays />Leave</button> : null}
+        <button aria-current={step === "settings" ? "page" : undefined} className={step === "settings" ? "active" : ""} onClick={() => open("settings")}><Settings />Settings</button>
+      </nav>
+      <button className="dx-desktop-signout" onClick={logout}><LogOut />Sign out</button>
+    </aside> : null}
     {loggedIn ? <header className="dx-header">
       <button aria-label="Menu" className={!account ? "dx-menu-unavailable" : ""} disabled={!account} onClick={() => { setDrawer(true); setProfileMenu(false); }}><Menu /></button>
       <Image alt="DropX" height={42} priority src="/dropx-logo.png" width={120} />
-      <span />
+      <span className="dx-header-context"><b>DropX One</b><small>Your work, in one place</small></span>
       <button aria-label="Notifications" className="dx-notification-trigger" disabled={!account} onClick={() => void loadNotifications()}><Bell />{unreadNotifications ? <b>{unreadNotifications > 99 ? "99+" : unreadNotifications}</b> : null}</button>
       <button className="avatar" onClick={() => { setProfileMenu((v) => !v); setNotificationMenu(false); setDrawer(false); }}>{avatar ? <img alt="" src={avatar} /> : <b>{(account?.name || "U")[0]}</b>}</button>
       {notificationMenu ? <aside className="dx-notification-pop">

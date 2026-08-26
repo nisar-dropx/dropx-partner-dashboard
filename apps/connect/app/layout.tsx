@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     default: "DropX One",
     template: "%s"
   },
-  description: "DropX One mobile workspace for employees and field teams.",
+  description: "DropX One workspace for employees and field teams across web, tablet and mobile.",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
