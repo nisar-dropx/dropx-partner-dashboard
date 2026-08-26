@@ -531,8 +531,18 @@ function appendUnmappedExpectedCash(
           already.shipmentType = "Ageing cash (workforce)";
         }
       }
-      if (cashRow.isAccessPoint === true && !already.shipmentType.toLowerCase().includes("access point")) {
+      if (cashRow.isAccessPoint === true) {
         already.shipmentType = "Access point (store)";
+        // The ageing feed's parsed store name ("Reliance Pets") is authoritative over
+        // whatever raw underscore-joined id another feed (e.g. SCC's own driver
+        // reconciliation) already stamped this pool entry with ("Store_Reliance Pets_SO")
+        // — the name match above is what found "already" in the first place, so this
+        // row and that one are confirmed to be the same store.
+        const cleanName = String(cashRow.driverName ?? "").trim();
+        if (cleanName) {
+          already.name = cleanName;
+          already.displayName = cleanName;
+        }
       }
       continue;
     }
