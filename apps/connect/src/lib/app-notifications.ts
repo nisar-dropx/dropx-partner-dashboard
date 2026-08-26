@@ -4,13 +4,18 @@ import { deliverNotificationPush } from "./firebase-push";
 import { supabaseAdmin } from "./supabase-admin";
 import { isWorkforceProfileType } from "./workforce-profiles";
 
-type AppNotificationEvent = "profile_submitted";
+type AppNotificationEvent = "profile_submitted" | "exit_request_raised";
 
 const defaults = {
   profile_submitted: {
     body: "Your profile has been submitted successfully.",
     route: "profile",
     title: "Profile submitted"
+  },
+  exit_request_raised: {
+    body: "Your exit request has been submitted for review.",
+    route: "profile",
+    title: "Exit request raised"
   }
 } satisfies Record<AppNotificationEvent, { body: string; route: string; title: string }>;
 
@@ -22,20 +27,21 @@ function isMissingNotificationSchema(error: { code?: string; message?: string } 
     message.includes("does not exist");
 }
 
-export async function createProfileSubmittedNotification({
+export async function createAppNotification({
   accountId,
   companyId,
+  eventCode,
   profileType,
   sourceKey
 }: {
   accountId: string;
   companyId: string;
+  eventCode: AppNotificationEvent;
   profileType: string;
   sourceKey: string;
 }) {
   if (!supabaseAdmin || !isWorkforceProfileType(profileType)) return;
 
-  const eventCode: AppNotificationEvent = "profile_submitted";
   const eventDefaults = defaults[eventCode];
   const ruleResult = await supabaseAdmin
     .from("mob_app_notification_rules")
@@ -85,4 +91,13 @@ export async function createProfileSubmittedNotification({
       data: {}
     });
   }
+}
+
+export async function createProfileSubmittedNotification(input: {
+  accountId: string;
+  companyId: string;
+  profileType: string;
+  sourceKey: string;
+}) {
+  return createAppNotification({ ...input, eventCode: "profile_submitted" });
 }

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
 import { requireCompanyId } from "@/lib/company-scope";
+import { createAppNotification } from "@/lib/app-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function lifecycleRedirect(params: { error?: string; notice?: string; tab?: string }): never {
@@ -227,6 +228,13 @@ export async function startWorkforceExit(formData: FormData) {
       remarks: reasonDetails || reasonCode
     });
     if (event.error) throw new Error(event.error.message);
+    await createAppNotification({
+      accountId: id,
+      companyId,
+      eventCode: "exit_request_raised",
+      profileType: "field_executive",
+      sourceKey: String(created.data.id)
+    });
     revalidatePath("/people/workforce-lifecycle");
     lifecycleRedirect({ notice: `${caseType === "resignation" ? "Resignation" : "Termination"} case created.`, tab: "exits" });
   } catch (error) {
@@ -272,6 +280,14 @@ export async function reviewWorkforceExit(formData: FormData) {
       updated_at: now
     }).eq("company_id", companyId).eq("id", current.data.field_executive_id);
     if (profileUpdate.error) throw new Error(profileUpdate.error.message);
+    await createAppNotification({
+      accountId: String(current.data.field_executive_id),
+      companyId,
+      eventCode: action === "approve" ? "exit_request_approved" : "exit_request_rejected",
+      profileType: "field_executive",
+      sourceKey: caseId,
+      variables: { remarks }
+    });
     revalidatePath("/people/workforce-lifecycle");
     lifecycleRedirect({ notice: action === "approve" ? "Exit approved for settlement." : "Exit request rejected.", tab: "exits" });
   } catch (error) {
