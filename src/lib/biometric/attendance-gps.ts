@@ -1,6 +1,6 @@
 import "server-only";
 
-import { istDate, punchLabel, rebuildAttendanceDay } from "@/lib/biometric/attendance";
+import { istDate, punchLabel, rebuildAttendanceDay, resolveAttendanceWorkDate } from "@/lib/biometric/attendance";
 import { createAppNotification } from "@/lib/app-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -514,35 +514,72 @@ export async function loadOpenShift({
 }) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const date = punchDate ?? istDate(new Date());
+  const previousDateValue = new Date(`${date}T00:00:00Z`);
+  previousDateValue.setUTCDate(previousDateValue.getUTCDate() - 1);
+  const previousDate = previousDateValue.toISOString().slice(0, 10);
+  const dates = punchDate ? [date] : [date, previousDate];
 
-  // Duty status uses calculated punches + held flagged punches (pending manager approval).
-  // Calendar / attendance_daily only reflects calculated=true punches.
+  // Duty status includes calculated punches and held flagged punches awaiting
+  // manager approval. The calendar remains based on calculated punches only.
   const dutyResult = await supabaseAdmin
     .from("attendance_punches")
-    .select("id, punch_time, calculated, is_flagged, location_id")
+    .select("id, punch_time, punch_date, calculated, is_flagged, location_id")
     .eq("company_id", companyId)
     .eq("enrolment_id", enrolmentId)
-    .eq("punch_date", date)
+    .in("punch_date", dates)
     .or("calculated.eq.true,is_flagged.eq.true")
     .order("punch_time", { ascending: true });
   if (dutyResult.error && !/does not exist|schema cache|is_flagged/i.test(dutyResult.error.message)) {
     throw new Error(dutyResult.error.message);
   }
 
-  const dutyPunches = dutyResult.data ?? [];
-  const pendingApproval = dutyPunches.some((row) => row.calculated === false);
-  const inTime = dutyPunches[0]?.punch_time ? new Date(String(dutyPunches[0].punch_time)) : null;
-  const open = dutyPunches.length > 0 && dutyPunches.length % 2 === 1;
-  const outTime =
-    !open && dutyPunches.length > 1
-      ? new Date(String(dutyPunches[dutyPunches.length - 1].punch_time))
-      : null;
-  const locationId =
-    (dutyPunches[dutyPunches.length - 1]?.location_id as string | null | undefined) ?? null;
+  const dutyByDate = new Map<string, typeof dutyResult.data>();
+  for (const row of dutyResult.data ?? []) {
+    const rowDate = String(row.punch_date ?? date);
+    const rows = dutyByDate.get(rowDate) ?? [];
+    rows.push(row);
+    dutyByDate.set(rowDate, rows);
+  }
+
+  let selectedDate = date;
+  let dutyPunches = dutyByDate.get(date) ?? [];
+  if (!dutyPunches.length && !punchDate) {
+    const priorPunches = dutyByDate.get(previousDate) ?? [];
+    if (priorPunches.length % 2 === 1 && priorPunches[0]?.punch_time) {
+      const settings = await supabaseAdmin
+        .from("hr_company_settings")
+        .select("overnight_shift_pairing_enabled, maximum_daily_minutes")
+        .eq("company_id", companyId)
+        .maybeSingle();
+      if (settings.error) throw new Error(settings.error.message);
+      const elapsedMinutes =
+        (Date.now() - new Date(String(priorPunches[0].punch_time)).getTime()) / 60_000;
+      const maximumDailyMinutes = Math.max(1, Number(settings.data?.maximum_daily_minutes ?? 960));
+      if (
+        settings.data?.overnight_shift_pairing_enabled !== false &&
+        elapsedMinutes > 0 &&
+        elapsedMinutes <= maximumDailyMinutes
+      ) {
+        selectedDate = previousDate;
+        dutyPunches = priorPunches;
+      }
+    }
+  }
 
   if (dutyPunches.length || dutyResult.error) {
+    const pendingApproval = dutyPunches.some((row) => row.calculated === false);
+    const inTime = dutyPunches[0]?.punch_time
+      ? new Date(String(dutyPunches[0].punch_time))
+      : null;
+    const open = dutyPunches.length % 2 === 1;
+    const outTime =
+      !open && dutyPunches.length > 1
+        ? new Date(String(dutyPunches[dutyPunches.length - 1].punch_time))
+        : null;
+    const locationId =
+      (dutyPunches[dutyPunches.length - 1]?.location_id as string | null | undefined) ?? null;
     return {
-      punchDate: date,
+      punchDate: selectedDate,
       inTime,
       outTime,
       open,
@@ -555,21 +592,43 @@ export async function loadOpenShift({
 
   const daily = await supabaseAdmin
     .from("attendance_daily")
-    .select("in_time, out_time, punch_count, status, location_id")
+    .select("punch_date, in_time, out_time, punch_count, status, location_id")
     .eq("company_id", companyId)
     .eq("enrolment_id", enrolmentId)
-    .eq("punch_date", date)
-    .maybeSingle();
+    .in("punch_date", dates)
+    .order("punch_date", { ascending: false });
   if (daily.error) throw new Error(daily.error.message);
-  const dailyIn = daily.data?.in_time ? new Date(daily.data.in_time) : null;
-  const dailyOut = daily.data?.out_time ? new Date(daily.data.out_time) : null;
+  const openRows = (daily.data ?? []).filter((row) => row.in_time && Number(row.punch_count ?? 0) % 2 === 1);
+  let selected = openRows.find((row) => row.punch_date === date) ?? null;
+
+  if (!selected && !punchDate) {
+    const prior = openRows.find((row) => row.punch_date === previousDate) ?? null;
+    if (prior?.in_time) {
+      const settings = await supabaseAdmin
+        .from("hr_company_settings")
+        .select("overnight_shift_pairing_enabled, maximum_daily_minutes")
+        .eq("company_id", companyId)
+        .maybeSingle();
+      if (settings.error) throw new Error(settings.error.message);
+      const elapsedMinutes = (Date.now() - new Date(prior.in_time).getTime()) / 60_000;
+      const maximumDailyMinutes = Math.max(1, Number(settings.data?.maximum_daily_minutes ?? 960));
+      if (settings.data?.overnight_shift_pairing_enabled !== false && elapsedMinutes > 0 && elapsedMinutes <= maximumDailyMinutes) {
+        selected = prior;
+      }
+    }
+  }
+
+  const inTime = selected?.in_time ? new Date(selected.in_time) : null;
+  const outTime = selected?.out_time ? new Date(selected.out_time) : null;
+  const punchCount = Number(selected?.punch_count ?? 0);
+  const open = Boolean(inTime && punchCount % 2 === 1);
   return {
-    punchDate: date,
-    inTime: dailyIn,
-    outTime: dailyOut,
-    open: Boolean(dailyIn && !dailyOut),
-    punchCount: Number(daily.data?.punch_count ?? 0),
-    locationId: (daily.data?.location_id as string | null) ?? null,
+    punchDate: String(selected?.punch_date ?? date),
+    inTime,
+    outTime,
+    open,
+    punchCount,
+    locationId: (selected?.location_id as string | null) ?? null,
     pendingApproval: false,
     dutyOnly: false
   };
@@ -671,9 +730,17 @@ export async function insertAppGpsPunch({
   }
 
   const serverReceivedAt = new Date();
-  const punchDate = istDate(serverReceivedAt);
   // Count all punches for ordering (held + calculated). Held selfie punches do not
   // write attendance_daily until a manager approves the support package.
+  const punchDate = await resolveAttendanceWorkDate({
+    accountId: profileId,
+    companyId,
+    employeeId,
+    enrolmentId,
+    fieldExecutiveId,
+    profileType,
+    punchTime: serverReceivedAt
+  });
   const existing = await supabaseAdmin
     .from("attendance_punches")
     .select("id")

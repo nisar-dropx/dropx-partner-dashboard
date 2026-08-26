@@ -31,6 +31,7 @@ export type AttendanceReportRow = {
 
 type PunchRow = {
   enrolment_id: string;
+  punch_date: string;
   punch_time: string;
   punch_label: string;
   device_serial: string | null;
@@ -151,6 +152,163 @@ export function istDate(value: Date) {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
+function addIsoDateDays(date: string, days: number) {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function istDateTime(date: string, time: string) {
+  const normalizedTime = String(time || "00:00:00").slice(0, 8);
+  return new Date(`${date}T${normalizedTime}+05:30`);
+}
+
+type ShiftWindow = {
+  startTime: string;
+  endTime: string;
+};
+
+async function loadWorkerShiftWindow({
+  accountId,
+  companyId,
+  employeeId,
+  fieldExecutiveId,
+  profileType,
+  workDate
+}: {
+  accountId?: string | null;
+  companyId: string;
+  employeeId?: string | null;
+  fieldExecutiveId?: string | null;
+  profileType?: string | null;
+  workDate: string;
+}): Promise<ShiftWindow | null> {
+  if (!supabaseAdmin) return null;
+  const isEmployee = profileType === "employee" || Boolean(employeeId);
+  const workerId = isEmployee ? employeeId : (accountId ?? fieldExecutiveId);
+  if (!workerId) return null;
+
+  const roster = await supabaseAdmin
+    .from("hr_roster_entries")
+    .select("day_type, hr_shifts(start_time, end_time), hr_roster_plans(status)")
+    .eq("company_id", companyId)
+    .eq("worker_id", workerId)
+    .eq("roster_date", workDate)
+    .limit(5);
+  if (!roster.error) {
+    for (const row of roster.data ?? []) {
+      const planValue = row.hr_roster_plans as { status?: string | null } | { status?: string | null }[] | null;
+      const plan = Array.isArray(planValue) ? planValue[0] : planValue;
+      const shiftValue = row.hr_shifts as { start_time?: string | null; end_time?: string | null } | { start_time?: string | null; end_time?: string | null }[] | null;
+      const shift = Array.isArray(shiftValue) ? shiftValue[0] : shiftValue;
+      if (plan?.status === "approved" && row.day_type === "working" && shift?.start_time && shift.end_time) {
+        return { startTime: shift.start_time, endTime: shift.end_time };
+      }
+    }
+  }
+
+  const assignmentTable = isEmployee
+    ? "hr_employee_shift_assignments"
+    : "hr_contractor_shift_assignments";
+  const profileColumn = isEmployee ? "employee_id" : "contractor_id";
+  const assignment = await supabaseAdmin
+    .from(assignmentTable)
+    .select("hr_shifts(start_time, end_time)")
+    .eq("company_id", companyId)
+    .eq(profileColumn, workerId)
+    .lte("effective_from", workDate)
+    .or(`effective_to.is.null,effective_to.gte.${workDate}`)
+    .order("effective_from", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (assignment.error) return null;
+  const shiftValue = assignment.data?.hr_shifts as { start_time?: string | null; end_time?: string | null } | { start_time?: string | null; end_time?: string | null }[] | null | undefined;
+  const shift = Array.isArray(shiftValue) ? shiftValue[0] : shiftValue;
+  return shift?.start_time && shift.end_time
+    ? { startTime: shift.start_time, endTime: shift.end_time }
+    : null;
+}
+
+/**
+ * Resolves the logical attendance workday for a punch. A post-midnight punch
+ * is kept with the prior open shift only while the company's configurable
+ * overnight and maximum-work-span limits both allow it.
+ */
+export async function resolveAttendanceWorkDate({
+  accountId,
+  companyId,
+  employeeId,
+  enrolmentId,
+  fieldExecutiveId,
+  profileType,
+  punchTime
+}: {
+  accountId?: string | null;
+  companyId: string;
+  employeeId?: string | null;
+  enrolmentId: string;
+  fieldExecutiveId?: string | null;
+  profileType?: string | null;
+  punchTime: Date;
+}) {
+  if (!supabaseAdmin) return istDate(punchTime);
+  const calendarDate = istDate(punchTime);
+  const previousDate = addIsoDateDays(calendarDate, -1);
+  const settings = await supabaseAdmin
+    .from("hr_company_settings")
+    .select("overnight_shift_pairing_enabled, overnight_pairing_window_minutes, maximum_daily_minutes")
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (settings.error || settings.data?.overnight_shift_pairing_enabled === false) return calendarDate;
+
+  const currentDayPunches = await supabaseAdmin
+    .from("attendance_punches")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("enrolment_id", enrolmentId)
+    .eq("punch_date", calendarDate)
+    .eq("calculated", true)
+    .limit(1);
+  if (currentDayPunches.error || (currentDayPunches.data?.length ?? 0) > 0) return calendarDate;
+
+  const previousPunches = await supabaseAdmin
+    .from("attendance_punches")
+    .select("punch_time")
+    .eq("company_id", companyId)
+    .eq("enrolment_id", enrolmentId)
+    .eq("punch_date", previousDate)
+    .eq("calculated", true)
+    .order("punch_time", { ascending: true });
+  if (previousPunches.error || !previousPunches.data?.length) {
+    return calendarDate;
+  }
+
+  const firstPunch = new Date(previousPunches.data[0].punch_time);
+  const elapsedMinutes = (punchTime.getTime() - firstPunch.getTime()) / 60000;
+  const maximumDailyMinutes = Math.max(1, Number(settings.data?.maximum_daily_minutes ?? 960));
+  if (elapsedMinutes <= 0 || elapsedMinutes > maximumDailyMinutes) return calendarDate;
+
+  const shift = await loadWorkerShiftWindow({
+    accountId,
+    companyId,
+    employeeId,
+    fieldExecutiveId,
+    profileType,
+    workDate: previousDate
+  });
+  // Without a shift, only an unmatched prior punch is safe to pair. With a
+  // shift, every scan inside the configured workday window belongs together,
+  // including post-midnight break scans and duplicate device reads.
+  if (!shift) return previousPunches.data.length % 2 === 1 ? previousDate : calendarDate;
+
+  const shiftStart = istDateTime(previousDate, shift.startTime);
+  let shiftEnd = istDateTime(previousDate, shift.endTime);
+  if (shiftEnd <= shiftStart) shiftEnd = istDateTime(calendarDate, shift.endTime);
+  const pairingWindowMinutes = Math.max(0, Number(settings.data?.overnight_pairing_window_minutes ?? 180));
+  const latestScheduledCheckout = shiftEnd.getTime() + pairingWindowMinutes * 60000;
+  return punchTime.getTime() <= latestScheduledCheckout ? previousDate : calendarDate;
+}
+
 export function formatTime(value: string | Date | null | undefined) {
   if (!value) return "--:--";
   const date = value instanceof Date ? value : new Date(value);
@@ -171,7 +329,9 @@ export function formatDuration(minutes: number | null | undefined) {
 }
 
 export function punchLabel(position: number) {
-  return position === 1 ? "In1" : `Out${position - 1}`;
+  const safePosition = Math.max(1, Math.trunc(position));
+  const pair = Math.ceil(safePosition / 2);
+  return safePosition % 2 === 1 ? `In${pair}` : `Out${pair}`;
 }
 
 function summarizeFirstInLastOut(punchTimes: string[]) {
@@ -721,7 +881,7 @@ export async function loadAttendanceReportRows({
   if (enrolmentIds.length && punchFilterDates.length) {
     let punchQuery = supabaseAdmin
       .from("attendance_punches")
-      .select("enrolment_id, punch_time, punch_label, device_serial, calculated")
+      .select("enrolment_id, punch_date, punch_time, punch_label, device_serial, calculated")
       .eq("company_id", companyId)
       .eq("calculated", true)
       .in("enrolment_id", enrolmentIds)
@@ -731,7 +891,7 @@ export async function loadAttendanceReportRows({
     const punchResult = await punchQuery;
     if (punchResult.error && !isMissingColumnError(punchResult.error)) throw new Error(punchResult.error.message);
     punchesByKey = ((punchResult.data ?? []) as PunchRow[]).reduce((map, punch) => {
-      const key = `${punch.enrolment_id}:${istDate(new Date(punch.punch_time))}`;
+      const key = `${punch.enrolment_id}:${punch.punch_date}`;
       const rows = map.get(key) ?? [];
       rows.push(punch);
       map.set(key, rows);
