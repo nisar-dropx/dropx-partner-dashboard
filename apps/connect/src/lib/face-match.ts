@@ -105,8 +105,14 @@ function decodeImage(url: string) {
 }
 
 function mirrorCanvas(image: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement) {
-  const width = "videoWidth" in image ? image.videoWidth || (image as HTMLImageElement).width : image.width;
-  const height = "videoHeight" in image ? image.videoHeight || (image as HTMLImageElement).height : image.height;
+  const width =
+    image instanceof HTMLVideoElement
+      ? image.videoWidth || image.clientWidth
+      : image.width;
+  const height =
+    image instanceof HTMLVideoElement
+      ? image.videoHeight || image.clientHeight
+      : image.height;
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, width);
   canvas.height = Math.max(1, height);
@@ -114,7 +120,7 @@ function mirrorCanvas(image: HTMLImageElement | HTMLCanvasElement | HTMLVideoEle
   if (!ctx) throw new Error("Unable to process selfie frame.");
   ctx.translate(canvas.width, 0);
   ctx.scale(-1, 1);
-  ctx.drawImage(image as CanvasImageSource, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
   return canvas;
 }
 
