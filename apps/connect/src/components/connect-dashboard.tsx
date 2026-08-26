@@ -198,6 +198,11 @@ export function ConnectDashboard({
     .sort((left, right) => right.date.localeCompare(left.date))[0];
   const hour = now.getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const todayLabel = new Intl.DateTimeFormat("en-IN", {
+    weekday: "long",
+    day: "numeric",
+    month: "short"
+  }).format(now);
   const firstNameRaw = (account.name || account.reference || "there").trim().split(/\s+/)[0];
   const firstName = firstNameRaw.charAt(0).toUpperCase() + firstNameRaw.slice(1).toLowerCase();
   const profileStatus = profile.status || account.status || "active";
@@ -205,11 +210,13 @@ export function ConnectDashboard({
 
   return <section className="dx-dashboard">
     <header className="dx-dashboard-greeting">
+      <p>{todayLabel}</p>
       <h1>{greeting}, {firstName}</h1>
+      <span>Here&apos;s your work overview.</span>
     </header>
 
     <section className="dx-dashboard-card today">
-      <header><h2>Today&apos;s attendance</h2><Pill text={todayStatus} tone={statusTone} /></header>
+      <header><div><small>Today</small><h2>Attendance</h2></div><Pill text={todayStatus} tone={statusTone} /></header>
       <div className="dx-dashboard-metrics">
         <Metric icon={<LogIn />} label="IN" value={today?.inTime || "--:--"} tone="green" />
         <Metric icon={<LogOut />} label="OUT" value={today?.outTime || "--:--"} tone="red" />
@@ -220,7 +227,7 @@ export function ConnectDashboard({
     </section>
 
     <section className="dx-dashboard-card">
-      <h2>Monthly summary</h2>
+      <header><div><small>This month</small><h2>Summary</h2></div></header>
       <div className="dx-dashboard-metrics">
         <Metric icon={<PersonStanding />} label="PRESENT" value={attendance.summary.present} tone="green" />
         <Metric icon={<UserRoundX />} label="ABSENT" value={attendance.summary.absent} tone="red" />
