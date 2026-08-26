@@ -198,7 +198,8 @@ export function ConnectDashboard({
     .sort((left, right) => right.date.localeCompare(left.date))[0];
   const hour = now.getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-  const firstName = (account.name || account.reference || "there").trim().split(/\s+/)[0];
+  const firstNameRaw = (account.name || account.reference || "there").trim().split(/\s+/)[0];
+  const firstName = firstNameRaw.charAt(0).toUpperCase() + firstNameRaw.slice(1).toLowerCase();
   const profileStatus = profile.status || account.status || "active";
   const attendanceAllowed = (account.pageAccess ?? ["dashboard", "attendance", "settings"]).includes("attendance");
 

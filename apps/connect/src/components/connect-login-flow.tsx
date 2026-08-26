@@ -457,7 +457,7 @@ export function ConnectLoginFlow() {
       {step === "dashboard" && account ? <ConnectDashboard account={account} onAttendance={() => open("attendance")} onProfile={() => open("profile")} /> : null}
       {step === "profile" && account ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "attendance" && account ? <ConnectAttendance account={account} /> : null}
-      {step === "leave" && account ? <ConnectLeave /> : null}
+      {step === "leave" && account ? <ConnectLeave account={account} /> : null}
       {step === "settings" ? <section className="dx-settings"><h1>Settings</h1><label>Default account<select disabled={pending} value={defaultKey} onChange={(e) => saveDefaultAccount(e.target.value)}><option value="">Select default account</option>{accounts.map((row) => <option key={accountKey(row)} value={accountKey(row)}>{row.companyName} - {row.reference || row.name}</option>)}</select></label><label className="toggle"><span><strong>Enable biometric login</strong><small>Use Face ID or device authentication when available.</small></span><input defaultChecked={localStorage.getItem(biometricKey) === "true"} onChange={(e) => enrollBiometric(e.target.checked)} type="checkbox" /></label><button onClick={resetPin}>Change PIN</button></section> : null}
     </main>}
   </div>;

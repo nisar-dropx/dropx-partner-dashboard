@@ -59,6 +59,7 @@ a {
 .dx-header{top:0;height:76px}
 .dx-content{padding:18px 14px 36px}
 .dx-leave{display:grid;gap:14px}.dx-leave>h1{margin:0;font-size:26px;font-weight:600;letter-spacing:0}.dx-leave-summary{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.dx-leave-summary>div{display:flex;align-items:center;gap:10px;padding:14px;background:#fff;border:1px solid #e4dfd7;border-radius:8px}.dx-leave-summary i{display:grid;place-items:center;width:38px;height:38px;color:#16885d;background:#eaf8f2;border-radius:8px}.dx-leave-summary>div:nth-child(2) i{color:#df8210;background:#fff5e5}.dx-leave-summary svg{width:20px}.dx-leave-summary span{display:grid}.dx-leave-summary small{color:#77736d;font-size:11px}.dx-leave-summary strong{font-size:20px}.dx-leave-card{overflow:hidden;background:#fff;border:1px solid #e4dfd7;border-radius:8px;box-shadow:0 5px 16px #0000000a}.dx-leave-card>nav{display:grid;grid-template-columns:repeat(2,1fr);height:50px;border-bottom:1px solid #ebe6df}.dx-leave-card>nav button{position:relative;color:#77736d;background:none;border:0;font-size:13px}.dx-leave-card>nav button.active{color:#e7660c;font-weight:600}.dx-leave-card>nav button.active:after{position:absolute;right:0;bottom:0;left:0;height:3px;background:#f07512;content:""}.dx-leave-card form{display:grid;gap:14px;padding:18px}.dx-leave-card label{display:grid;gap:6px;color:#68645e;font-size:11px;text-transform:uppercase}.dx-leave-card select,.dx-leave-card input,.dx-leave-card textarea{width:100%;padding:0 13px;color:#202124;background:#fff;border:1px solid #ded9d1;border-radius:8px;font-size:14px;text-transform:none}.dx-leave-card select,.dx-leave-card input{height:48px}.dx-leave-card textarea{padding-block:12px;resize:vertical}.dx-leave-card select:disabled{color:#8a857e;background:#f6f5f3}.dx-leave-card form>p{margin:-7px 0 0;color:#77736d;font-size:11px}.dx-leave-dates{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.dx-leave-card .dx-save:disabled{opacity:.45}.dx-leave-empty{display:grid;place-items:center;gap:6px;padding:42px 18px;color:#77736d;text-align:center}.dx-leave-empty svg{width:34px;height:34px}.dx-leave-empty strong{color:#202124;font-size:14px;font-weight:500}.dx-leave-empty small{font-size:12px}
+.dx-leave-balance{color:var(--one-muted)!important}.dx-leave-history{display:grid;gap:0;padding:4px 16px 12px}.dx-leave-history article{display:grid;gap:7px;padding:13px 2px;border-bottom:1px solid var(--one-line)}.dx-leave-history article:last-child{border-bottom:0}.dx-leave-history header,.dx-leave-history article>div{display:flex;align-items:center;justify-content:space-between;gap:10px}.dx-leave-history strong{font-size:13px;font-weight:650}.dx-leave-history em{padding:3px 7px;border-radius:99px;background:#f0f2f5;color:#667085;font-size:9px;font-style:normal;font-weight:750;text-transform:uppercase}.dx-leave-history em.approved{color:#117251;background:#e7f7ef}.dx-leave-history em.pending{color:#9a5a08;background:#fff4df}.dx-leave-history em.rejected{color:#b42318;background:#feeceb}.dx-leave-history article>div{color:var(--one-muted);font-size:11px}.dx-leave-history b{color:var(--one-ink);font-weight:650}.dx-leave-history p,.dx-leave-history small{margin:0;color:var(--one-muted);font-size:11px}.dx-leave-card>.dx-loader,.dx-leave-card>.dx-alert{margin:14px 16px}
 .dx-profile-form{gap:11px;padding-bottom:8px}
 .dx-company{margin-bottom:8px;font-size:11px}
 .dx-form-section{padding:14px}
@@ -8172,21 +8173,21 @@ tr:last-child td {
 
 /* DropX One responsive experience — shared across phone, tablet and desktop */
 :root {
-  --one-bg: #f4f6fb;
+  --one-bg: #f6f7f9;
   --one-surface: #ffffff;
-  --one-surface-soft: #f8f9fc;
-  --one-ink: #182033;
-  --one-muted: #667085;
-  --one-line: #e4e8f0;
-  --one-brand: #f36b21;
-  --one-brand-strong: #dc2757;
-  --one-navy: #171d35;
+  --one-surface-soft: #fafbfc;
+  --one-ink: #202631;
+  --one-muted: #6b7280;
+  --one-line: #e3e6eb;
+  --one-brand: #e9651b;
+  --one-brand-strong: #c84e12;
+  --one-navy: #253044;
   --one-green: #168661;
-  --one-radius-sm: 10px;
-  --one-radius: 16px;
-  --one-radius-lg: 22px;
-  --one-shadow: 0 10px 32px rgba(24, 32, 51, 0.07);
-  --one-shadow-hover: 0 16px 40px rgba(24, 32, 51, 0.11);
+  --one-radius-sm: 8px;
+  --one-radius: 11px;
+  --one-radius-lg: 15px;
+  --one-shadow: 0 1px 2px rgba(20, 27, 40, 0.035), 0 4px 12px rgba(20, 27, 40, 0.035);
+  --one-shadow-hover: 0 7px 18px rgba(20, 27, 40, 0.075);
 }
 
 html {
@@ -8205,10 +8206,7 @@ body {
   display: block;
   min-height: 100dvh;
   padding: 0;
-  background:
-    radial-gradient(circle at 8% -10%, rgba(255, 145, 62, 0.11), transparent 29rem),
-    radial-gradient(circle at 96% 2%, rgba(216, 32, 91, 0.07), transparent 27rem),
-    var(--one-bg);
+  background: var(--one-bg);
 }
 
 .dx-web-page .connect-shell {
@@ -8262,10 +8260,9 @@ body {
   padding: env(safe-area-inset-top) 14px 0;
   grid-template-columns: 44px 108px minmax(0, 1fr) 44px 44px;
   gap: 8px;
-  border-bottom: 1px solid rgba(228, 232, 240, 0.92);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 4px 20px rgba(24, 32, 51, 0.035);
-  backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--one-line);
+  background: #fff;
+  box-shadow: none;
 }
 
 .dx-header > img {
@@ -8304,7 +8301,7 @@ body {
 .dx-drawer {
   width: min(88vw, 340px);
   padding: calc(env(safe-area-inset-top) + 22px) 20px 24px;
-  border-radius: 0 22px 22px 0;
+  border-radius: 0 16px 16px 0;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 20px 0 60px rgba(24, 32, 51, 0.18);
 }
@@ -8378,7 +8375,7 @@ body {
 .dx-profile-view section {
   border-color: var(--one-line);
   border-radius: var(--one-radius);
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--one-surface);
   box-shadow: var(--one-shadow);
 }
 
@@ -8421,15 +8418,15 @@ body {
 .dx-confirm-submit {
   min-height: 46px;
   border-radius: var(--one-radius-sm);
-  background: linear-gradient(115deg, var(--one-brand), var(--one-brand-strong));
-  box-shadow: 0 9px 22px rgba(220, 39, 87, 0.17);
+  background: var(--one-brand);
+  box-shadow: 0 4px 12px rgba(233, 101, 27, 0.18);
 }
 
 .dx-auth form > button:not(.text):not(:disabled):hover,
 .dx-save:not(:disabled):hover,
 .dx-sheet-actions button:not(.secondary):not(:disabled):hover {
   transform: translateY(-1px);
-  box-shadow: 0 13px 28px rgba(220, 39, 87, 0.24);
+  box-shadow: 0 7px 16px rgba(233, 101, 27, 0.22);
 }
 
 .dx-dashboard,
@@ -8449,26 +8446,66 @@ body {
 .dx-settings h1,
 .dx-accounts h1 {
   color: var(--one-ink);
-  font-size: clamp(25px, 6vw, 34px);
-  font-weight: 750;
-  line-height: 1.1;
-  letter-spacing: -0.035em;
+  font-size: clamp(22px, 3.4vw, 28px);
+  font-weight: 680;
+  line-height: 1.16;
+  letter-spacing: -0.022em;
 }
 
 .dx-dashboard-card,
 .dx-dashboard-profile {
-  padding: 17px;
+  padding: 15px;
 }
 
 .dx-dashboard-card h2 {
   color: var(--one-ink);
-  font-size: 16px;
-  font-weight: 650;
+  font-size: 15px;
+  font-weight: 620;
 }
 
 .dx-dashboard-metric {
-  min-height: 66px;
+  min-height: 54px;
   border-color: var(--one-line);
+}
+
+.dx-dashboard-metrics {
+  margin-top: 10px;
+}
+
+.dx-dashboard-metric svg {
+  width: 20px;
+  height: 20px;
+}
+
+.dx-dashboard-metric small {
+  font-size: 8.5px;
+}
+
+.dx-dashboard-metric strong {
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.dx-dashboard-link {
+  height: 32px;
+  margin-top: 9px;
+  padding-top: 7px;
+  font-size: 11px;
+}
+
+.dx-dashboard-profile {
+  grid-template-columns: 36px minmax(0, 1fr) 18px;
+  min-height: 66px;
+}
+
+.dx-dashboard-profile > i {
+  width: 36px;
+  height: 36px;
+}
+
+.dx-dashboard-profile strong {
+  font-size: 13px;
+  font-weight: 620;
 }
 
 .dx-dashboard-link {
@@ -8499,10 +8536,8 @@ body {
   padding: 18px 14px 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--one-radius);
-  background:
-    radial-gradient(circle at 92% 10%, rgba(243, 107, 33, 0.45), transparent 52%),
-    linear-gradient(145deg, #1b2441, #2b2741 66%, #5f2347);
-  box-shadow: 0 16px 34px rgba(23, 29, 53, 0.16);
+  background: linear-gradient(145deg, #273246, #202938);
+  box-shadow: 0 6px 18px rgba(23, 29, 53, 0.12);
 }
 
 .dx-attendance-summary i {
@@ -8527,7 +8562,7 @@ body {
   left: 18%;
   height: 3px;
   border-radius: 99px 99px 0 0;
-  background: linear-gradient(90deg, var(--one-brand), var(--one-brand-strong));
+  background: var(--one-brand);
 }
 
 .dx-calendar {
@@ -8555,10 +8590,8 @@ body {
   padding: 26px 22px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--one-radius-lg);
-  background:
-    radial-gradient(circle at 86% 18%, rgba(243, 107, 33, 0.55), transparent 30%),
-    linear-gradient(135deg, #171d35 0%, #282640 62%, #5b2348 100%);
-  box-shadow: 0 18px 42px rgba(23, 29, 53, 0.18);
+  background: linear-gradient(135deg, #253044, #1f2937);
+  box-shadow: 0 7px 20px rgba(23, 29, 53, 0.13);
 }
 
 .dx-profile-hero::after {
@@ -8573,15 +8606,15 @@ body {
 }
 
 .dx-profile-hero small {
-  color: #ffc5a5;
+  color: #ffb887;
   font-weight: 750;
   letter-spacing: 0.08em;
 }
 
 .dx-profile-hero h1 {
-  font-size: clamp(27px, 7vw, 40px);
-  font-weight: 750;
-  letter-spacing: -0.035em;
+  font-size: clamp(24px, 5vw, 32px);
+  font-weight: 680;
+  letter-spacing: -0.025em;
 }
 
 .dx-profile-hero i {
@@ -8613,7 +8646,7 @@ body {
   height: 3px;
   margin-top: 8px;
   border-radius: 99px;
-  background: linear-gradient(90deg, var(--one-brand), var(--one-brand-strong));
+  background: var(--one-brand);
   content: "";
 }
 
@@ -8687,7 +8720,7 @@ body {
 
 @media (min-width: 720px) {
   .dx-header {
-    height: 72px;
+    height: 64px;
     padding-inline: 28px;
     grid-template-columns: 44px 118px minmax(0, 1fr) 44px 44px;
   }
@@ -8718,8 +8751,8 @@ body {
   }
 
   .dx-content {
-    width: min(100%, 980px);
-    padding: 28px 28px 54px;
+    width: min(100%, 960px);
+    padding: 22px 26px 48px;
   }
 
   .dx-auth {
@@ -8740,7 +8773,7 @@ body {
 
   .dx-auth-brand h1 {
     max-width: 330px;
-    font-size: 38px;
+    font-size: 32px;
   }
 
   .dx-auth form {
@@ -8752,7 +8785,7 @@ body {
 
   .dx-dashboard {
     grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 18px;
+    gap: 12px;
   }
 
   .dx-dashboard-greeting,
@@ -8774,7 +8807,7 @@ body {
 
   .dx-dashboard-card,
   .dx-dashboard-profile {
-    padding: 20px;
+    padding: 16px;
   }
 
   .dx-attendance {
@@ -8836,7 +8869,7 @@ body {
 
   .dx-profile-view {
     grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 18px;
+    gap: 14px;
   }
 
   .dx-profile-view > .dx-alert,
@@ -8859,15 +8892,15 @@ body {
   }
 
   .dx-profile-hero {
-    min-height: 150px;
-    padding: 34px 36px;
+    min-height: 124px;
+    padding: 26px 28px;
   }
 
   .dx-profile-hero i {
-    top: 35px;
-    right: 36px;
-    width: 74px;
-    height: 74px;
+    top: 26px;
+    right: 28px;
+    width: 60px;
+    height: 60px;
   }
 
   .dx-regularization-sheet {
@@ -8883,8 +8916,8 @@ body {
 @media (min-width: 1100px) {
   .dx-app.logged-in {
     display: grid;
-    grid-template-columns: 246px minmax(0, 1fr);
-    grid-template-rows: 72px minmax(0, 1fr);
+    grid-template-columns: 216px minmax(0, 1fr);
+    grid-template-rows: 60px minmax(0, 1fr);
   }
 
   .dx-desktop-nav {
@@ -8896,30 +8929,29 @@ body {
     display: flex;
     flex-direction: column;
     height: 100dvh;
-    padding: 20px 16px 18px;
+    padding: 14px 12px 14px;
     border-right: 1px solid var(--one-line);
-    background: rgba(255, 255, 255, 0.94);
-    box-shadow: 8px 0 34px rgba(24, 32, 51, 0.035);
-    backdrop-filter: blur(20px);
+    background: #fff;
+    box-shadow: none;
   }
 
   .dx-desktop-brand {
     display: flex;
     align-items: center;
     gap: 9px;
-    min-height: 44px;
-    padding: 0 8px;
+    min-height: 38px;
+    padding: 0 6px;
   }
 
   .dx-desktop-brand img {
-    width: 116px;
+    width: 102px;
     height: auto;
   }
 
   .dx-desktop-brand > span {
     padding: 3px 6px;
     color: var(--one-brand-strong);
-    background: #fff0f3;
+    background: #fff2e9;
     border-radius: 6px;
     font-size: 9px;
     font-weight: 800;
@@ -8928,13 +8960,13 @@ body {
 
   .dx-desktop-account {
     display: grid;
-    grid-template-columns: 38px minmax(0, 1fr) 30px;
-    gap: 10px;
+    grid-template-columns: 32px minmax(0, 1fr) 28px;
+    gap: 8px;
     align-items: center;
-    margin: 22px 0 18px;
-    padding: 12px;
+    margin: 16px 0 13px;
+    padding: 9px;
     border: 1px solid var(--one-line);
-    border-radius: 14px;
+    border-radius: 10px;
     background: var(--one-surface-soft);
   }
 
@@ -8942,11 +8974,11 @@ body {
     display: grid;
     overflow: hidden;
     place-items: center;
-    width: 38px;
-    height: 38px;
+    width: 32px;
+    height: 32px;
     color: #fff;
-    border-radius: 11px;
-    background: linear-gradient(135deg, var(--one-brand), var(--one-brand-strong));
+    border-radius: 8px;
+    background: var(--one-brand);
     font-style: normal;
   }
 
@@ -9001,29 +9033,29 @@ body {
 
   .dx-desktop-nav nav {
     display: grid;
-    gap: 6px;
+    gap: 2px;
   }
 
   .dx-desktop-nav nav button,
   .dx-desktop-signout {
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr);
-    gap: 11px;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 9px;
     align-items: center;
-    min-height: 46px;
-    padding: 0 13px;
+    min-height: 40px;
+    padding: 0 10px;
     color: #4c5568;
     border: 0;
-    border-radius: 11px;
+    border-radius: 8px;
     background: transparent;
     text-align: left;
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 580;
   }
 
   .dx-desktop-nav nav button svg,
   .dx-desktop-signout svg {
-    width: 19px;
+    width: 17px;
   }
 
   .dx-desktop-nav nav button:hover {
@@ -9033,7 +9065,7 @@ body {
 
   .dx-desktop-nav nav button.active {
     color: var(--one-brand-strong);
-    background: linear-gradient(90deg, #fff0e9, #fff1f5);
+    background: #fff2e9;
     box-shadow: inset 3px 0 0 var(--one-brand);
   }
 
@@ -9050,7 +9082,8 @@ body {
     grid-column: 2;
     grid-row: 1;
     grid-template-columns: 1fr 44px 44px;
-    padding-inline: 34px;
+    height: 60px;
+    padding-inline: 24px;
   }
 
   .dx-header > button:first-child,
@@ -9070,9 +9103,9 @@ body {
   .dx-content {
     grid-column: 2;
     grid-row: 2;
-    width: min(100%, 1340px);
+    width: min(100%, 1180px);
     margin: 0 auto;
-    padding: 32px clamp(30px, 4vw, 56px) 64px;
+    padding: 24px clamp(24px, 3vw, 38px) 48px;
   }
 
   .dx-notification-pop,
@@ -9088,11 +9121,11 @@ body {
 
 @media (min-width: 1440px) {
   .dx-app.logged-in {
-    grid-template-columns: 264px minmax(0, 1fr);
+    grid-template-columns: 220px minmax(0, 1fr);
   }
 
   .dx-content {
-    padding-inline: 64px;
+    padding-inline: 40px;
   }
 
   .dx-profile-view > section:not(.primary) {
