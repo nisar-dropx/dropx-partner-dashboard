@@ -116,6 +116,18 @@ function bulkCell(row: Record<string, unknown>, aliases: string[]) {
   return "";
 }
 
+function bulkDate(value: string) {
+  const text = value.trim();
+  if (!text) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const match = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (!match) return null;
+  const [, day, month, year] = match;
+  const normalized = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  const parsed = new Date(`${normalized}T00:00:00.000Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== normalized ? null : normalized;
+}
+
 type BulkWorker = {
   id: string;
   sourceType: "employee" | "contractor" | "field_executive";
@@ -129,6 +141,7 @@ export type BulkUploadReportRow = {
   rowNumber: number;
   dropxId: string;
   providerMemberId: string;
+  paymentMethodCode: string;
   result: "Mapped" | "Skipped";
   reason: string;
 };
@@ -160,21 +173,34 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
     const uploadRows = rawRows.map((row, index) => ({
       rowNumber: index + 2,
       dropxId: bulkCell(row, ["DROPX_ID", "DROPXID", "DROPX_ID_CODE"]).toUpperCase(),
-      providerMemberId: bulkCell(row, ["PROVIDER_MEMBER_ID", "PROVIDER_ID", "MEMBER_ID", "PROVIDER_EMPLOYEE_ID"])
-    })).filter((row) => row.dropxId || row.providerMemberId);
+      providerMemberId: bulkCell(row, ["PROVIDER_MEMBER_ID", "PROVIDER_ID", "MEMBER_ID", "PROVIDER_EMPLOYEE_ID"]),
+      paymentMethodCode: bulkCell(row, ["PAYMENT_METHOD_CODE", "PAYMENT_METHOD", "METHOD_CODE"]).toUpperCase(),
+      effectiveFromRaw: bulkCell(row, ["EFFECTIVE_FROM", "FROM_DATE"]),
+      effectiveToRaw: bulkCell(row, ["EFFECTIVE_TO", "TO_DATE"]),
+      cells: Object.fromEntries(Object.entries(row).map(([key, value]) => [normalizedHeader(key), String(value ?? "").trim()]))
+    })).filter((row) => row.dropxId || row.providerMemberId || row.paymentMethodCode);
     if (!uploadRows.length) throw new Error("No DropX ID or Provider Member ID rows were found.");
 
     const dropxIds = Array.from(new Set(uploadRows.map((row) => row.dropxId).filter(Boolean)));
-    const [{ data: employees, error: employeeError }, { data: contractors, error: contractorError }, { data: executives, error: executiveError }, { data: designations, error: designationError }] = await Promise.all([
+    const [{ data: employees, error: employeeError }, { data: contractors, error: contractorError }, { data: executives, error: executiveError }, { data: designations, error: designationError }, { data: paymentMethods, error: paymentMethodsError }] = await Promise.all([
       supabaseAdmin.from("employees").select("id, employee_code, full_name, location_id, date_of_join, designations!inner(is_field_operations)").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).eq("designations.is_field_operations", true).in("employee_code", dropxIds),
       supabaseAdmin.from("contractors").select("id, dropx_id, full_name, location_id, date_of_join, designation").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).in("dropx_id", dropxIds),
       supabaseAdmin.from("field_executives").select("id, dropx_id, full_name, location_id, date_of_join").eq("company_id", companyId).eq("is_active", true).in("dropx_id", dropxIds),
-      supabaseAdmin.from("designations").select("code, name").eq("company_id", companyId).eq("is_active", true).eq("is_field_operations", true)
+      supabaseAdmin.from("designations").select("code, name").eq("company_id", companyId).eq("is_active", true).eq("is_field_operations", true),
+      supabaseAdmin.from("payment_methods").select("id, code, payment_method_components(component_code, label)").eq("company_id", companyId).eq("is_active", true)
     ]);
     if (employeeError) throw new Error(employeeError.message);
     if (contractorError) throw new Error(contractorError.message);
     if (executiveError) throw new Error(executiveError.message);
     if (designationError) throw new Error(designationError.message);
+    if (paymentMethodsError) throw new Error(paymentMethodsError.message);
+
+    const paymentMethodByCode = new Map((paymentMethods ?? []).map((method) => [String(method.code ?? "").trim().toUpperCase(), {
+      id: String(method.id),
+      code: String(method.code ?? "").trim(),
+      components: (method.payment_method_components ?? []) as Array<{ component_code: string; label: string }>
+    }]));
+    const allPaymentFieldCodes = new Set(Array.from(paymentMethodByCode.values()).flatMap((method) => method.components.map((component) => normalizedHeader(component.component_code))));
 
     const fieldOperationsDesignations = new Set((designations ?? []).flatMap((row) => [row.code, row.name]).map((value) => String(value ?? "").trim().toLowerCase()));
 
@@ -216,7 +242,8 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
     const seenDropxIds = new Set<string>();
     const reportRows: BulkUploadReportRow[] = [];
     for (const uploadRow of uploadRows) {
-      const skipped = (reason: string) => reportRows.push({ ...uploadRow, result: "Skipped", reason });
+      const reportRow = { rowNumber: uploadRow.rowNumber, dropxId: uploadRow.dropxId, providerMemberId: uploadRow.providerMemberId, paymentMethodCode: uploadRow.paymentMethodCode };
+      const skipped = (reason: string) => reportRows.push({ ...reportRow, result: "Skipped", reason });
       if (!uploadRow.dropxId || !uploadRow.providerMemberId) { skipped("DropX ID or Provider Member ID is blank."); continue; }
       if (seenDropxIds.has(uploadRow.dropxId)) { skipped("Duplicate DropX ID in this upload."); continue; }
       seenDropxIds.add(uploadRow.dropxId);
@@ -226,9 +253,32 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       if (!providerId) { skipped("The worker's location has no provider configured."); continue; }
       const holderName = memberNameById.get(uploadRow.providerMemberId);
       if (!holderName) { skipped("Provider Member ID was not found in uploaded provider data."); continue; }
+      const suppliedPaymentValues = Array.from(allPaymentFieldCodes).some((code) => String(uploadRow.cells[code] ?? "").trim() !== "");
+      const hasAllocationData = Boolean(uploadRow.paymentMethodCode || uploadRow.effectiveFromRaw || uploadRow.effectiveToRaw || suppliedPaymentValues);
+      const paymentMethod = uploadRow.paymentMethodCode ? paymentMethodByCode.get(uploadRow.paymentMethodCode) : null;
+      if (hasAllocationData && !uploadRow.paymentMethodCode) { skipped("Payment Method Code is required when payment allocation data is supplied."); continue; }
+      if (uploadRow.paymentMethodCode && !paymentMethod) { skipped("Payment Method Code is not active or does not exist."); continue; }
+      const effectiveFrom = bulkDate(uploadRow.effectiveFromRaw);
+      const effectiveTo = bulkDate(uploadRow.effectiveToRaw);
+      if (effectiveFrom === null) { skipped("Effective From must be YYYY-MM-DD or DD/MM/YYYY."); continue; }
+      if (effectiveTo === null) { skipped("Effective To must be YYYY-MM-DD or DD/MM/YYYY."); continue; }
+      if (effectiveFrom && effectiveTo && effectiveTo < effectiveFrom) { skipped("Effective To cannot be before Effective From."); continue; }
+      const paymentValues: Record<string, number> = {};
+      let invalidPaymentValue = "";
+      for (const component of paymentMethod?.components ?? []) {
+        const rawValue = String(uploadRow.cells[normalizedHeader(component.component_code)] ?? "").trim();
+        if (!rawValue) continue;
+        const number = Number(rawValue.replace(/,/g, ""));
+        if (!Number.isFinite(number) || number < 0) {
+          invalidPaymentValue = `${component.label} must be a valid non-negative number.`;
+          break;
+        }
+        paymentValues[component.component_code] = number;
+      }
+      if (invalidPaymentValue) { skipped(invalidPaymentValue); continue; }
       const workerColumn = worker.sourceType === "employee" ? "employee_id" : worker.sourceType === "contractor" ? "contractor_id" : "field_executive_id";
       const { data: existing, error: existingError } = await supabaseAdmin.from("field_executive_provider_mappings")
-        .select("id")
+        .select("id, effective_from")
         .eq("company_id", companyId)
         .eq(workerColumn, worker.id)
         .is("effective_to", null)
@@ -237,11 +287,43 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
         .maybeSingle();
       if (existingError) throw new Error(existingError.message);
 
-      if (existing) {
+      const fallbackEffectiveFrom = /^\d{4}-\d{2}-\d{2}$/.test(worker.effectiveFrom) ? worker.effectiveFrom : new Date().toISOString().slice(0, 10);
+      const allocationPayload = paymentMethod ? {
+        payment_method_id: paymentMethod.id,
+        payment_values: paymentValues,
+        pay_type: paymentMethod.code
+      } : {};
+      const requestedEffectiveFrom = effectiveFrom || String(existing?.effective_from ?? fallbackEffectiveFrom);
+
+      if (existing && paymentMethod && effectiveFrom && effectiveFrom > String(existing.effective_from)) {
+        const closingDate = previousDate(effectiveFrom);
+        const { error: closeError } = await supabaseAdmin.from("field_executive_provider_mappings").update({ effective_to: closingDate, status: "closed", updated_at: new Date().toISOString() }).eq("id", existing.id).eq("company_id", companyId);
+        if (closeError) { skipped(closeError.message); continue; }
+        const { error: insertError } = await supabaseAdmin.from("field_executive_provider_mappings").insert(withCompany({
+          field_executive_id: worker.sourceType === "field_executive" ? worker.id : null,
+          employee_id: worker.sourceType === "employee" ? worker.id : null,
+          contractor_id: worker.sourceType === "contractor" ? worker.id : null,
+          provider_id: providerId,
+          provider_member_id: uploadRow.providerMemberId,
+          station_id: worker.stationId,
+          effective_from: effectiveFrom,
+          effective_to: effectiveTo || null,
+          payment_method_id: paymentMethod.id,
+          payment_values: paymentValues,
+          pay_type: paymentMethod.code,
+          status: effectiveTo ? "closed" : "active",
+          created_by: authorization.userId,
+          updated_at: new Date().toISOString()
+        }, companyId));
+        if (insertError) { skipped(insertError.message); continue; }
+      } else if (existing) {
         const { error } = await supabaseAdmin.from("field_executive_provider_mappings").update({
           provider_id: providerId,
           provider_member_id: uploadRow.providerMemberId,
           station_id: worker.stationId,
+          ...(effectiveFrom ? { effective_from: effectiveFrom } : {}),
+          ...(effectiveTo ? { effective_to: effectiveTo, status: "closed" } : {}),
+          ...allocationPayload,
           updated_at: new Date().toISOString()
         }).eq("id", existing.id).eq("company_id", companyId);
         if (error) { skipped(error.message); continue; }
@@ -253,19 +335,19 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
           provider_id: providerId,
           provider_member_id: uploadRow.providerMemberId,
           station_id: worker.stationId,
-          effective_from: /^\d{4}-\d{2}-\d{2}$/.test(worker.effectiveFrom) ? worker.effectiveFrom : new Date().toISOString().slice(0, 10),
-          effective_to: null,
-          payment_method_id: null,
-          payment_values: {},
-          pay_type: "UNALLOCATED",
-          status: "active",
+          effective_from: requestedEffectiveFrom,
+          effective_to: effectiveTo || null,
+          payment_method_id: paymentMethod?.id ?? null,
+          payment_values: paymentMethod ? paymentValues : {},
+          pay_type: paymentMethod?.code ?? "UNALLOCATED",
+          status: effectiveTo ? "closed" : "active",
           created_by: authorization.userId,
           updated_at: new Date().toISOString()
         }, companyId));
         if (error) { skipped(error.message); continue; }
       }
       saved += 1;
-      reportRows.push({ ...uploadRow, result: "Mapped", reason: existing ? "Existing mapping updated." : "New ID mapping created." });
+      reportRows.push({ ...reportRow, result: "Mapped", reason: paymentMethod ? "ID and payment allocation mapped." : existing ? "Existing ID mapping updated." : "New ID mapping created." });
     }
 
     revalidatePath("/provider-mapping");

@@ -118,8 +118,8 @@ function BulkIdUpload({ canEdit }: { canEdit: boolean }) {
       setError(!result.ok);
       if (result.rows.length) {
         const csv = [
-          ["ROW", "DROPX_ID", "PROVIDER_MEMBER_ID", "RESULT", "REASON"].map(csvCell).join(","),
-          ...result.rows.map((row) => [row.rowNumber, row.dropxId, row.providerMemberId, row.result, row.reason].map(csvCell).join(","))
+          ["ROW", "DROPX_ID", "PROVIDER_MEMBER_ID", "PAYMENT_METHOD_CODE", "RESULT", "REASON"].map(csvCell).join(","),
+          ...result.rows.map((row) => [row.rowNumber, row.dropxId, row.providerMemberId, row.paymentMethodCode, row.result, row.reason].map(csvCell).join(","))
         ].join("\r\n");
         setReportUrl(URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" })));
       }
@@ -137,7 +137,7 @@ function BulkIdUpload({ canEdit }: { canEdit: boolean }) {
       <label>Excel / CSV file
         <input accept=".xlsx,.xls,.csv" disabled={!canEdit || pending} name="mapping_file" type="file" />
       </label>
-      <button className="button" disabled={!canEdit || pending} type="submit">{pending ? "Uploading..." : "Upload IDs"}</button>
+      <button className="button" disabled={!canEdit || pending} type="submit">{pending ? "Uploading..." : "Upload mappings"}</button>
       {reportUrl ? <a className="button secondary" download={`provider-id-upload-report-${new Date().toISOString().slice(0, 10)}.csv`} href={reportUrl}>Download report</a> : null}
       {message ? <span className={error ? "mapping-upload-error" : "mapping-upload-success"}>{message}</span> : null}
     </form>
