@@ -8,7 +8,7 @@ import {
   parseIntegritySignals,
   resolveCompanyPunchGeofence
 } from "@/lib/biometric/attendance-gps";
-import { createAttendancePunchNotification, createAppNotification } from "@/lib/app-notifications";
+import { createAppNotification } from "@/lib/app-notifications";
 import {
   parseClientSignals,
   parseCoordinate,
@@ -91,7 +91,9 @@ export async function GET(request: NextRequest) {
         open: shift.open,
         inTime: shift.inTime?.toISOString() ?? null,
         outTime: shift.outTime?.toISOString() ?? null,
-        punchCount: shift.punchCount
+        punchCount: shift.punchCount,
+        pendingApproval: shift.pendingApproval === true,
+        dutyOnly: shift.dutyOnly === true
       },
       station: assignedStation
         ? {
@@ -192,34 +194,21 @@ export async function POST(request: NextRequest) {
       faceMatched: true
     });
 
-    const punchOrder = Number(result.punch.punch_order ?? 1);
-    const punchTime = new Date(String(result.punch.punch_time));
-    await createAttendancePunchNotification({
+    // Do not notify "attendance punched" — punch is held until manager approve.
+    await createAppNotification({
       accountId: worker.profileId,
       companyId: worker.companyId,
-      firstPunchTime: shift.inTime ?? punchTime,
+      data: {
+        punchId: result.punch.id,
+        flagIds: result.flagIds,
+        geofenceStatus: geofence.status,
+        pendingApproval: true
+      },
+      eventCode: "attendance_location_flagged",
       profileType: worker.profileType,
-      punchDate: String(result.punch.punch_date),
-      punchId: String(result.punch.id),
-      punchOrder,
-      punchTime
+      sourceKey: `gps-pending:${result.punch.id}`,
+      variables: { date: String(result.punch.punch_date).split("-").reverse().join("/") }
     }).catch(() => undefined);
-
-    if (result.isFlagged) {
-      await createAppNotification({
-        accountId: worker.profileId,
-        companyId: worker.companyId,
-        data: {
-          punchId: result.punch.id,
-          flagIds: result.flagIds,
-          geofenceStatus: geofence.status
-        },
-        eventCode: "attendance_location_flagged",
-        profileType: worker.profileType,
-        sourceKey: `gps-flag:${result.punch.id}`,
-        variables: { date: String(result.punch.punch_date).split("-").reverse().join("/") }
-      }).catch(() => undefined);
-    }
 
     return NextResponse.json({
       ok: true,
@@ -236,9 +225,12 @@ export async function POST(request: NextRequest) {
         score: integrity.score,
         reasons: integrity.reasons
       },
-      isFlagged: result.isFlagged,
-      supportRequired: result.supportRequired,
-      flagIds: result.flagIds
+      isFlagged: true,
+      supportRequired: true,
+      pendingApproval: true,
+      flagIds: result.flagIds,
+      message:
+        "Duty status updated. Attendance is pending manager approval — submit support selfie if prompted."
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to record GPS punch.";

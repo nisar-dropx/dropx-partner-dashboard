@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     if (flagId) {
       const flagResult = await supabaseAdmin
         .from("attendance_integrity_flags")
-        .select("id, enrolment_id, status, punch_date")
+        .select("id, enrolment_id, status, punch_date, punch_id")
         .eq("id", flagId)
         .eq("company_id", worker.companyId)
         .maybeSingle();
@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
       throw new Error("A support package is already pending review for this date.");
     }
 
+    // Support selfie is review-only: never insert attendance punches or rebuild daily.
     const payload = {
       company_id: worker.companyId,
       flag_id: flagId,
@@ -103,12 +104,12 @@ export async function POST(request: NextRequest) {
           .from("attendance_location_reviews")
           .update(payload)
           .eq("id", existingResult.data.id)
-          .select("id, status, punch_date")
+          .select("id, status, punch_date, flag_id")
           .single()
       : await supabaseAdmin
           .from("attendance_location_reviews")
           .insert(payload)
-          .select("id, status, punch_date")
+          .select("id, status, punch_date, flag_id")
           .single();
     if (saveResult.error) {
       if (String(saveResult.error.message).toLowerCase().includes("does not exist")) {
@@ -117,9 +118,28 @@ export async function POST(request: NextRequest) {
       throw new Error(saveResult.error.message);
     }
 
+    // Notify manager/HR in People only — do not mark attendance.
+    const notifyFlagId = flagId || String(saveResult.data.flag_id || "");
+    if (notifyFlagId) {
+      const { notifyAttendanceFlagReviewers } = await import("@/lib/attendance-flag-notifications");
+      await notifyAttendanceFlagReviewers({
+        companyId: worker.companyId,
+        profileType: worker.profileType,
+        profileId: worker.profileId,
+        punchDate,
+        flagType: "support_selfie",
+        message: "Support selfie submitted for flag approval — attendance unchanged until you approve.",
+        flagId: notifyFlagId
+      }).catch((error) => {
+        console.error("Unable to notify reviewers of support selfie:", error);
+      });
+    }
+
     return NextResponse.json({
       ok: true,
-      review: saveResult.data
+      review: saveResult.data,
+      attendanceMarked: false,
+      message: "Sent to manager for flag approval. Attendance was not marked."
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to submit support evidence.";

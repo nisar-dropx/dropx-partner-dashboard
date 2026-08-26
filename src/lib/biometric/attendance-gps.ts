@@ -296,7 +296,8 @@ export async function openIntegrityFlag({
     | "outside_geofence_gt_2h"
     | "biometric_phone_mismatch"
     | "integrity_risk"
-    | "forgot_punch_out";
+    | "forgot_punch_out"
+    | "pending_selfie_punch";
   message: string;
   details?: Record<string, unknown>;
   severity?: "low" | "medium" | "high";
@@ -378,9 +379,67 @@ export async function openIntegrityFlag({
   return { id: flagId, created: true, flagType };
 }
 
+/** Hold a punch out of attendance_daily until a manager approves the related flag/package. */
+export async function holdAttendancePunch(punchId: string) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const punch = await supabaseAdmin
+    .from("attendance_punches")
+    .select("id, company_id, enrolment_id, punch_date, calculated")
+    .eq("id", punchId)
+    .maybeSingle();
+  if (punch.error) throw new Error(punch.error.message);
+  if (!punch.data) return false;
+
+  const update = await supabaseAdmin
+    .from("attendance_punches")
+    .update({ calculated: false, is_flagged: true })
+    .eq("id", punchId);
+  if (update.error) throw new Error(update.error.message);
+
+  await rebuildAttendanceDay(
+    String(punch.data.company_id),
+    String(punch.data.enrolment_id),
+    String(punch.data.punch_date)
+  );
+  return true;
+}
+
+/** After manager approve: count the held punch toward attendance calendar/daily. */
+export async function activateHeldAttendancePunch(punchId: string) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const punch = await supabaseAdmin
+    .from("attendance_punches")
+    .select("id, company_id, enrolment_id, punch_date, calculated")
+    .eq("id", punchId)
+    .maybeSingle();
+  if (punch.error) throw new Error(punch.error.message);
+  if (!punch.data) return false;
+  if (punch.data.calculated === true) return false;
+
+  const update = await supabaseAdmin
+    .from("attendance_punches")
+    .update({ calculated: true, is_flagged: false })
+    .eq("id", punchId);
+  if (update.error) throw new Error(update.error.message);
+
+  await rebuildAttendanceDay(
+    String(punch.data.company_id),
+    String(punch.data.enrolment_id),
+    String(punch.data.punch_date)
+  );
+  return true;
+}
+
 export async function resolveIntegrityFlag(flagId: string, resolvedBy: string | null) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const now = new Date().toISOString();
+  const existing = await supabaseAdmin
+    .from("attendance_integrity_flags")
+    .select("id, punch_id")
+    .eq("id", flagId)
+    .maybeSingle();
+  if (existing.error) throw new Error(existing.error.message);
+
   const result = await supabaseAdmin
     .from("attendance_integrity_flags")
     .update({
@@ -393,6 +452,10 @@ export async function resolveIntegrityFlag(flagId: string, resolvedBy: string | 
     .select("id")
     .single();
   if (result.error) throw new Error(result.error.message);
+
+  if (existing.data?.punch_id) {
+    await activateHeldAttendancePunch(String(existing.data.punch_id));
+  }
 }
 
 export async function continuousOutsideMs({
@@ -451,6 +514,45 @@ export async function loadOpenShift({
 }) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const date = punchDate ?? istDate(new Date());
+
+  // Duty status uses calculated punches + held flagged punches (pending manager approval).
+  // Calendar / attendance_daily only reflects calculated=true punches.
+  const dutyResult = await supabaseAdmin
+    .from("attendance_punches")
+    .select("id, punch_time, calculated, is_flagged, location_id")
+    .eq("company_id", companyId)
+    .eq("enrolment_id", enrolmentId)
+    .eq("punch_date", date)
+    .or("calculated.eq.true,is_flagged.eq.true")
+    .order("punch_time", { ascending: true });
+  if (dutyResult.error && !/does not exist|schema cache|is_flagged/i.test(dutyResult.error.message)) {
+    throw new Error(dutyResult.error.message);
+  }
+
+  const dutyPunches = dutyResult.data ?? [];
+  const pendingApproval = dutyPunches.some((row) => row.calculated === false);
+  const inTime = dutyPunches[0]?.punch_time ? new Date(String(dutyPunches[0].punch_time)) : null;
+  const open = dutyPunches.length > 0 && dutyPunches.length % 2 === 1;
+  const outTime =
+    !open && dutyPunches.length > 1
+      ? new Date(String(dutyPunches[dutyPunches.length - 1].punch_time))
+      : null;
+  const locationId =
+    (dutyPunches[dutyPunches.length - 1]?.location_id as string | null | undefined) ?? null;
+
+  if (dutyPunches.length || dutyResult.error) {
+    return {
+      punchDate: date,
+      inTime,
+      outTime,
+      open,
+      punchCount: dutyPunches.length,
+      locationId,
+      pendingApproval,
+      dutyOnly: pendingApproval
+    };
+  }
+
   const daily = await supabaseAdmin
     .from("attendance_daily")
     .select("in_time, out_time, punch_count, status, location_id")
@@ -459,16 +561,17 @@ export async function loadOpenShift({
     .eq("punch_date", date)
     .maybeSingle();
   if (daily.error) throw new Error(daily.error.message);
-  const inTime = daily.data?.in_time ? new Date(daily.data.in_time) : null;
-  const outTime = daily.data?.out_time ? new Date(daily.data.out_time) : null;
-  const open = Boolean(inTime && !outTime);
+  const dailyIn = daily.data?.in_time ? new Date(daily.data.in_time) : null;
+  const dailyOut = daily.data?.out_time ? new Date(daily.data.out_time) : null;
   return {
     punchDate: date,
-    inTime,
-    outTime,
-    open,
+    inTime: dailyIn,
+    outTime: dailyOut,
+    open: Boolean(dailyIn && !dailyOut),
     punchCount: Number(daily.data?.punch_count ?? 0),
-    locationId: (daily.data?.location_id as string | null) ?? null
+    locationId: (daily.data?.location_id as string | null) ?? null,
+    pendingApproval: false,
+    dutyOnly: false
   };
 }
 
@@ -569,16 +672,16 @@ export async function insertAppGpsPunch({
 
   const serverReceivedAt = new Date();
   const punchDate = istDate(serverReceivedAt);
+  // Count all punches for ordering (held + calculated). Held selfie punches do not
+  // write attendance_daily until a manager approves the support package.
   const existing = await supabaseAdmin
     .from("attendance_punches")
     .select("id")
     .eq("company_id", companyId)
     .eq("enrolment_id", enrolmentId)
-    .eq("punch_date", punchDate)
-    .eq("calculated", true);
+    .eq("punch_date", punchDate);
   if (existing.error) throw new Error(existing.error.message);
   const nextOrder = (existing.data?.length ?? 0) + 1;
-  const isFlagged = integrity.isRisk;
 
   const insert = await supabaseAdmin
     .from("attendance_punches")
@@ -599,7 +702,8 @@ export async function insertAppGpsPunch({
       punch_order: nextOrder,
       punch_label: punchLabel(nextOrder),
       worker_status: "Active",
-      calculated: true,
+      // Held until People/manager approve — never Present on calendar before that.
+      calculated: false,
       source: "app_gps",
       lat,
       lng,
@@ -616,15 +720,39 @@ export async function insertAppGpsPunch({
       },
       geofence_status: geofence.status,
       distance_m: geofence.distanceM,
-      is_flagged: isFlagged
+      is_flagged: true
     })
-    .select("id, punch_time, punch_date, punch_order, punch_label, is_flagged, geofence_status, distance_m, integrity_score")
+    .select("id, punch_time, punch_date, punch_order, punch_label, is_flagged, geofence_status, distance_m, integrity_score, calculated")
     .single();
   if (insert.error) throw new Error(insert.error.message);
 
-  await rebuildAttendanceDay(companyId, enrolmentId, punchDate);
-
   const flagIds: string[] = [];
+  const pendingFlag = await openIntegrityFlag({
+    companyId,
+    enrolmentId,
+    profileType,
+    profileId,
+    punchId: insert.data.id as string,
+    locationId,
+    punchDate,
+    flagType: "pending_selfie_punch",
+    severity: integrity.isRisk ? "high" : "medium",
+    message: integrity.isRisk
+      ? `Selfie punch pending manager approval (integrity risk: ${integrity.reasons.join(", ")}).`
+      : "Selfie punch pending manager approval — attendance will update only after approve.",
+    details: {
+      reasons: integrity.reasons,
+      signals: integritySignals,
+      score: integrity.score,
+      lat,
+      lng,
+      distanceM: geofence.distanceM,
+      radiusM: geofence.radiusM,
+      pendingAttendance: true
+    }
+  });
+  flagIds.push(pendingFlag.id);
+
   if (integrity.isRisk) {
     const flag = await openIntegrityFlag({
       companyId,
@@ -644,9 +772,10 @@ export async function insertAppGpsPunch({
 
   return {
     punch: insert.data,
-    isFlagged,
+    isFlagged: true,
     flagIds,
-    supportRequired: isFlagged
+    supportRequired: true,
+    pendingApproval: true
   };
 }
 
@@ -704,8 +833,13 @@ export async function checkBiometricPhoneMismatch({
       details: {
         reason: "phone_location_missing",
         windowMs: BIOMETRIC_SAMPLE_WINDOW_MS,
-        punchId
+        punchId,
+        pendingAttendance: true
       }
+    });
+    // Hold punch off calendar until manager approves support package.
+    await holdAttendancePunch(punchId).catch((error) => {
+      console.error("Unable to hold biometric punch for mismatch:", error);
     });
     if (flag.created && (accountId || profileId)) {
       await createAppNotification({
@@ -782,8 +916,14 @@ export async function checkBiometricPhoneMismatch({
       geofenceStatus,
       stationCode,
       stationName,
-      punchId
+      punchId,
+      pendingAttendance: true
     }
+  });
+
+  // First flagged punch stays off calendar until manager resolves/approves.
+  await holdAttendancePunch(punchId).catch((error) => {
+    console.error("Unable to hold biometric punch for mismatch:", error);
   });
 
   if (flag.created && (accountId || profileId)) {

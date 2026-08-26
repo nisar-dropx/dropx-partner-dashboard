@@ -60,7 +60,7 @@ export async function reviewAttendanceLocationPackage(formData: FormData) {
 
   const existing = await supabaseAdmin
     .from("attendance_location_reviews")
-    .select("id, status, flag_id, company_id, profile_id")
+    .select("id, status, flag_id, punch_id, company_id, profile_id")
     .eq("id", reviewId)
     .eq("company_id", companyId)
     .maybeSingle();
@@ -88,6 +88,7 @@ export async function reviewAttendanceLocationPackage(formData: FormData) {
   if (update.error) throw new Error(update.error.message);
 
   if (action === "approve" && existing.data.flag_id) {
+    // resolveIntegrityFlag also activates any held punch linked to the flag.
     await resolveIntegrityFlag(String(existing.data.flag_id), authorization.userId);
   }
 

@@ -64,6 +64,8 @@ type PunchStatus = {
     inTime: string | null;
     outTime: string | null;
     punchCount: number;
+    pendingApproval?: boolean;
+    dutyOnly?: boolean;
   };
   openFlags: OpenFlag[];
 };
@@ -199,12 +201,20 @@ export function ConnectAttendance({ account }: { account: Account }) {
 
       {supportNotice ? <div className="dx-alert ok">{supportNotice}</div> : null}
 
+      {punchStatus?.shift.pendingApproval ? (
+        <div className="dx-alert" role="status">
+          Duty status is on (pending manager approval). Calendar / attendance will update only after your flag is approved.
+        </div>
+      ) : null}
+
       {openFlags.length ? (
         <div className="dx-gps-punch-card">
           <header>
             <div>
               <strong>Location review needed</strong>
-              <small>A location integrity flag was raised. Submit a support selfie with live GPS for manager / HR review.</small>
+              <small>
+                Submit a support selfie with live GPS for manager approval only — this does not mark attendance until approved.
+              </small>
             </div>
           </header>
           <div className="dx-flag-list">

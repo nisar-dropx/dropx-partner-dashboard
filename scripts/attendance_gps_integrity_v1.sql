@@ -133,7 +133,8 @@ create table if not exists public.attendance_integrity_flags (
       'outside_geofence_gt_2h',
       'biometric_phone_mismatch',
       'integrity_risk',
-      'forgot_punch_out'
+      'forgot_punch_out',
+      'pending_selfie_punch'
     )
   ),
   constraint attendance_integrity_flags_status_check check (
