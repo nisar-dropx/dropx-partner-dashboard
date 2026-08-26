@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Bell, CalendarDays, CheckCheck, ChevronRight, CreditCard, Fingerprint, Gauge, LogOut, Menu, Settings, SwitchCamera, UserRound, UsersRound, X } from "lucide-react";
+import { Bell, CalendarDays, CheckCheck, ChevronRight, CreditCard, Fingerprint, Gauge, IndianRupee, LogOut, Menu, Settings, SwitchCamera, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
 import { ConnectDashboard } from "./connect-dashboard";
@@ -409,6 +409,8 @@ export function ConnectLoginFlow() {
       <nav>
         {allowed(account, "dashboard") ? <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Gauge />Dashboard</button> : null}
         <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />My Profile</button>
+        <button aria-expanded={paymentsExpanded} className={`payments-toggle${step === "advances" ? " active" : ""}${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard /><span>Payments</span><ChevronRight /></button>
+        {paymentsExpanded ? <button aria-current={step === "advances" ? "page" : undefined} className={`desktop-subitem${step === "advances" ? " active" : ""}`} onClick={() => open("advances")}><IndianRupee />Advances</button> : null}
         {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint />Attendance</button> : null}
         {allowed(account, "leave") ? <button aria-current={step === "leave" ? "page" : undefined} className={step === "leave" ? "active" : ""} onClick={() => open("leave")}><CalendarDays />Leave</button> : null}
         <button aria-current={step === "settings" ? "page" : undefined} className={step === "settings" ? "active" : ""} onClick={() => open("settings")}><Settings />Settings</button>

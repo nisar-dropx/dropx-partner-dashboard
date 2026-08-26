@@ -9068,6 +9068,24 @@ body {
     box-shadow: inset 3px 0 0 var(--one-brand);
   }
 
+  .dx-desktop-nav nav button.payments-toggle {
+    grid-template-columns: 20px minmax(0, 1fr) 16px;
+  }
+
+  .dx-desktop-nav nav button.payments-toggle > svg:last-child {
+    transition: transform .2s ease;
+  }
+
+  .dx-desktop-nav nav button.payments-toggle.expanded > svg:last-child {
+    transform: rotate(90deg);
+  }
+
+  .dx-desktop-nav nav button.desktop-subitem {
+    min-height: 36px;
+    padding-left: 34px;
+    font-size: 11px;
+  }
+
   .dx-desktop-signout {
     margin-top: auto;
     color: #bd334a;
