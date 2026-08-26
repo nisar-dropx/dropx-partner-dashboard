@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -58,10 +57,6 @@ export default async function EddStationPerformancePage({
   return (
     <AppShell active="Delivery Performance" pageCode="edd_dashboard">
       <div className="ops-command-center">
-        <Link className="edd-back-link" href="/edd" prefetch={false}>
-          <ArrowLeft size={14} /> All stations
-        </Link>
-
         <PageHead
           eyebrow="Ops Pulse · Station drill-down"
           title={stationCode || "Station"}
@@ -88,9 +83,11 @@ export default async function EddStationPerformancePage({
             <div className="panel-body">
               <strong>Station not available</strong>
               <p className="subtle" style={{ marginTop: 6 }}>
-                {stationCode
-                  ? `${stationCode} isn't in your assigned stations. Go back to All stations to pick one you have access to.`
-                  : "No station code was given."}
+                {stationCode ? (
+                  <>{stationCode} isn&apos;t in your assigned stations. <Link href="/edd/performance" prefetch={false}>Go back to All stations</Link> to pick one you have access to.</>
+                ) : (
+                  <>No station code was given. <Link href="/edd/performance" prefetch={false}>Go back to All stations</Link>.</>
+                )}
               </p>
             </div>
           </section>
