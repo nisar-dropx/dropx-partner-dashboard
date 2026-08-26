@@ -1,153 +1,84 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { SubmitButton } from "@/components/submit-button";
 
-type ComponentRow = {
-  id: number;
-  databaseId: string;
-  type: "amount" | "production" | "";
+export type PaymentFieldOption = {
+  id: string;
   code: string;
+  field_type: "amount" | "production";
   label: string;
-  paySchedule: "per_hour" | "per_day" | "per_month" | "";
+  pay_schedule: "per_hour" | "per_day" | "per_month" | null;
 };
 
 type InitialPaymentMethod = {
   id: string;
   code: string;
   name: string;
-  components: Array<{
-    id: string;
-    component_code: string;
-    component_type: "amount" | "production";
-    label: string;
-    pay_schedule: "per_hour" | "per_day" | "per_month" | null;
-  }>;
+  components: Array<{ payment_field_id: string | null }>;
 };
 
-export function PaymentMethodForm({
-  action,
-  initialMethod,
-  submitLabel = "Create payment method"
-}: {
+function scheduleLabel(value: PaymentFieldOption["pay_schedule"]) {
+  if (value === "per_hour") return "Per Hour";
+  if (value === "per_day") return "Per Day";
+  if (value === "per_month") return "Per Month";
+  return null;
+}
+
+export function PaymentMethodForm({ action, availableFields, initialMethod, submitLabel = "Create payment method" }: {
   action: (formData: FormData) => Promise<void>;
+  availableFields: PaymentFieldOption[];
   initialMethod?: InitialPaymentMethod;
   submitLabel?: string;
 }) {
-  const initialRows: ComponentRow[] = initialMethod?.components.length ? initialMethod.components.map((component, index) => ({
-      id: index + 1,
-      databaseId: component.id,
-      type: component.component_type,
-      code: component.component_code,
-      label: component.label,
-      paySchedule: component.pay_schedule ?? ""
-    })) : [{ id: 1, databaseId: "", type: "", code: "", label: "", paySchedule: "" }];
-  const [rows, setRows] = useState<ComponentRow[]>(initialRows);
+  const initialIds = useMemo(() => new Set(
+    (initialMethod?.components ?? []).map((component) => component.payment_field_id).filter(Boolean) as string[]
+  ), [initialMethod]);
+  const [selectedIds, setSelectedIds] = useState(initialIds);
+  const [search, setSearch] = useState("");
+  const visibleFields = availableFields.filter((field) =>
+    `${field.code} ${field.label}`.toLowerCase().includes(search.trim().toLowerCase())
+  );
 
-  function updateRow(id: number, patch: Partial<ComponentRow>) {
-    setRows((current) => current.map((row) => row.id === id ? { ...row, ...patch } : row));
-  }
-
-  function addRow() {
-    setRows((current) => [
-      ...current,
-      { id: Math.max(...current.map((row) => row.id)) + 1, databaseId: "", type: "", code: "", label: "", paySchedule: "" }
-    ]);
-  }
-
-  function removeRow(id: number) {
-    setRows((current) => current.length > 1 ? current.filter((row) => row.id !== id) : current);
+  function toggleField(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   return (
     <form action={action} className="payment-method-form">
       {initialMethod ? <input type="hidden" name="id" value={initialMethod.id} /> : null}
-      <input type="hidden" name="component_count" value={rows.length} />
       <div className="payment-method-layout">
         <div className="payment-method-fields">
-          <label>Method ID
-            <input className="field" defaultValue={initialMethod?.code} name="code" required />
-          </label>
-          <label>Method name
-            <input className="field" defaultValue={initialMethod?.name} name="name" required />
-          </label>
+          <label>Method ID<input className="field" defaultValue={initialMethod?.code} name="code" required /></label>
+          <label>Method name<input className="field" defaultValue={initialMethod?.name} name="name" required /></label>
         </div>
 
-        <div className="payment-component-list">
+        <div className="payment-field-picker">
           <div className="payment-component-head">
-            <strong>Payment fields</strong>
-            <button className="button secondary compact" onClick={addRow} type="button">Add field</button>
+            <div><strong>Payment fields</strong><p className="subtle">Select reusable fields for this payment method.</p></div>
+            <span className="selection-count">{selectedIds.size} selected</span>
           </div>
-
-          {rows.map((row, index) => (
-            <div className="payment-component-row" key={row.id}>
-              <input type="hidden" name={`components[${index}][id]`} value={row.databaseId} />
-              <label>Type
-                <select
-                  className="select"
-                  name={`components[${index}][type]`}
-                  onChange={(event) => {
-                    const type = event.target.value as ComponentRow["type"];
-                    updateRow(row.id, { type, paySchedule: type === "amount" ? row.paySchedule : "" });
-                  }}
-                  required
-                  value={row.type}
-                >
-                  <option value="">Select type</option>
-                  <option value="amount">Amount</option>
-                  <option value="production">Production</option>
-                </select>
-              </label>
-              <label>Field ID
-                <input
-                  className="field mono"
-                  name={`components[${index}][code]`}
-                  onChange={(event) => updateRow(row.id, { code: event.target.value })}
-                  required
-                  value={row.code}
-                />
-              </label>
-              <label>Field label
-                <input
-                  className="field"
-                  name={`components[${index}][label]`}
-                  onChange={(event) => updateRow(row.id, { label: event.target.value })}
-                  required
-                  value={row.label}
-                />
-              </label>
-              {row.type === "amount" ? (
-                <label>Pay Schedule
-                  <select
-                    className="select"
-                    name={`components[${index}][pay_schedule]`}
-                    onChange={(event) => updateRow(row.id, { paySchedule: event.target.value as ComponentRow["paySchedule"] })}
-                    required
-                    value={row.paySchedule}
-                  >
-                    <option value="">Select schedule</option>
-                    <option value="per_hour">Per Hour</option>
-                    <option value="per_day">Per Day</option>
-                    <option value="per_month">Per Month</option>
-                  </select>
+          {availableFields.length ? <>
+            <input aria-label="Search payment fields" className="field" onChange={(event) => setSearch(event.target.value)} placeholder="Search field ID or label" type="search" value={search} />
+            <div className="payment-field-options">
+              {visibleFields.map((field) => (
+                <label className={`payment-field-option ${selectedIds.has(field.id) ? "selected" : ""}`} key={field.id}>
+                  <input checked={selectedIds.has(field.id)} name="field_ids" onChange={() => toggleField(field.id)} type="checkbox" value={field.id} />
+                  <span><strong>{field.label}</strong><small>{field.code} · {field.field_type === "amount" ? "Amount" : "Production"}{scheduleLabel(field.pay_schedule) ? ` · ${scheduleLabel(field.pay_schedule)}` : ""}</small></span>
                 </label>
-              ) : <span className="payment-schedule-placeholder" aria-hidden="true" />}
-              <button
-                className="icon-button"
-                disabled={rows.length <= 1}
-                onClick={() => removeRow(row.id)}
-                title="Remove field"
-                type="button"
-              >
-                x
-              </button>
+              ))}
+              {!visibleFields.length ? <p className="empty-cell">No matching payment fields.</p> : null}
             </div>
-          ))}
+          </> : <p className="empty-cell">Create a reusable payment field before adding a payment method.</p>}
         </div>
       </div>
-
       <div className="form-actions">
-        <SubmitButton>{submitLabel}</SubmitButton>
+        <SubmitButton confirmationBlocked={!selectedIds.size} confirmMessage="Select at least one payment field.">{submitLabel}</SubmitButton>
       </div>
     </form>
   );

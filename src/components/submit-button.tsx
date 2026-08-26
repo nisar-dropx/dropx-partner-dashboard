@@ -83,7 +83,6 @@ export function SubmitButton({
         disabled={pending || disabled}
         form={form}
         name={name}
-        value={value}
         onClick={(event) => {
           if (confirmMessage) {
             const form = event.currentTarget.form;
@@ -93,6 +92,7 @@ export function SubmitButton({
           }
         }}
         type={confirmMessage ? "button" : "submit"}
+        value={value}
       >
         {pending ? <span className="button-spinner" aria-hidden="true" /> : null}
         <span>{pending ? pendingText : disabled && disabledText ? disabledText : children}</span>

@@ -46,8 +46,8 @@ async function decideAdvanceRequest(formData: FormData, decision: "approved" | "
     .select("id, account_id, profile_type, approved_amount")
     .maybeSingle();
 
-  if (result.error) finish({ error: result.error.message });
-  if (!result.data) finish({ error: "This request has already been decided or no longer exists." });
+  if (result.error) return finish({ error: result.error.message });
+  if (!result.data) return finish({ error: "This request has already been decided or no longer exists." });
 
   await createAppNotification({
     accountId: String(result.data.account_id),

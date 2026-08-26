@@ -9,9 +9,28 @@ create table if not exists public.payment_methods (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.payment_fields (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id),
+  code text not null,
+  field_type text not null check (field_type in ('amount', 'production')),
+  label text not null,
+  pay_schedule text check (pay_schedule is null or pay_schedule in ('per_hour', 'per_day', 'per_month')),
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists payment_fields_company_code_unique
+  on public.payment_fields (company_id, code);
+
+alter table public.payment_fields enable row level security;
+revoke all on table public.payment_fields from anon, authenticated;
+
 create table if not exists public.payment_method_components (
   id uuid primary key default gen_random_uuid(),
   payment_method_id uuid not null references public.payment_methods(id) on delete cascade,
+  payment_field_id uuid references public.payment_fields(id),
   component_code text not null,
   component_type text not null check (component_type in ('amount', 'production')),
   label text not null,
