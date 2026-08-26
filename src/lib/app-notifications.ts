@@ -15,14 +15,20 @@ export const appNotificationEvents = [
   "profile_returned",
   "attendance_regularization_submitted",
   "attendance_location_flagged",
-  "attendance_forgot_punch_out"
+  "attendance_forgot_punch_out",
+  "advance_request_raised",
+  "advance_request_approved",
+  "advance_request_rejected",
+  "exit_request_raised",
+  "exit_request_approved",
+  "exit_request_rejected"
 ] as const;
 export type AppNotificationEvent = typeof appNotificationEvents[number];
 
 export const appNotificationDefaults: Record<AppNotificationEvent, {
   bodyTemplate: string;
   label: string;
-  route: "attendance" | "profile";
+  route: "advances" | "attendance" | "profile";
   titleTemplate: string;
 }> = {
   attendance_punch_in: {
@@ -72,6 +78,42 @@ export const appNotificationDefaults: Record<AppNotificationEvent, {
     route: "attendance",
     titleTemplate: "Punch-out reminder",
     bodyTemplate: "You have been punched in for {hours} hours on {date}. Please punch out."
+  },
+  advance_request_raised: {
+    label: "Advance request raised",
+    route: "advances",
+    titleTemplate: "Advance request raised",
+    bodyTemplate: "Your advance request for Rs {amount} has been submitted for approval."
+  },
+  advance_request_approved: {
+    label: "Advance request approved",
+    route: "advances",
+    titleTemplate: "Advance request approved",
+    bodyTemplate: "Your advance request has been approved for Rs {amount}."
+  },
+  advance_request_rejected: {
+    label: "Advance request rejected",
+    route: "advances",
+    titleTemplate: "Advance request rejected",
+    bodyTemplate: "Your advance request was rejected. {remarks}"
+  },
+  exit_request_raised: {
+    label: "Exit request raised",
+    route: "profile",
+    titleTemplate: "Exit request raised",
+    bodyTemplate: "Your exit request has been submitted for review."
+  },
+  exit_request_approved: {
+    label: "Exit request approved",
+    route: "profile",
+    titleTemplate: "Exit request approved",
+    bodyTemplate: "Your exit request has been approved. {remarks}"
+  },
+  exit_request_rejected: {
+    label: "Exit request rejected",
+    route: "profile",
+    titleTemplate: "Exit request rejected",
+    bodyTemplate: "Your exit request was rejected. {remarks}"
   }
 };
 

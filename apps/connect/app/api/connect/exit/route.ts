@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { notifyEmployeeExitSubmitted, notifyEmployeeExitWithdrawal } from "../../../../src/lib/connect-exit-notifications";
+import { createAppNotification } from "../../../../src/lib/app-notifications";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 type PeopleProfileType = "employee" | "user" | "contractor";
@@ -362,6 +363,13 @@ export async function POST(request: Request) {
     }
     await db().from("hr_exit_events").insert({ company_id: context.account.companyId, case_id: exitCase.id, event_code: "CASE_SUBMITTED", title: "Resignation submitted", actor_name: context.account.name ?? context.worker.full_name, details: { requested_last_working_date: requestedDate } });
     await notifyEmployeeExitSubmitted({ companyId: context.account.companyId, caseId: exitCase.id, employee: context.worker, requestedDate });
+    await createAppNotification({
+      accountId: context.workerId,
+      companyId: context.account.companyId,
+      eventCode: "exit_request_raised",
+      profileType: context.workerType,
+      sourceKey: String(exitCase.id)
+    });
     return NextResponse.json({ ok: true, notice: `Resignation submitted successfully. Case ${caseNumber} has been sent for review.` });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to submit exit request." }, { status: 400 });

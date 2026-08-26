@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { createAppNotification } from "@/lib/app-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function value(formData: FormData, key: string) {
@@ -42,11 +43,23 @@ async function decideAdvanceRequest(formData: FormData, decision: "approved" | "
     .eq("company_id", companyId)
     .eq("id", requestId)
     .in("status", ["submitted", "in_review"])
-    .select("id")
+    .select("id, account_id, profile_type, approved_amount")
     .maybeSingle();
 
   if (result.error) finish({ error: result.error.message });
   if (!result.data) finish({ error: "This request has already been decided or no longer exists." });
+
+  await createAppNotification({
+    accountId: String(result.data.account_id),
+    companyId,
+    eventCode: decision === "approved" ? "advance_request_approved" : "advance_request_rejected",
+    profileType: String(result.data.profile_type),
+    sourceKey: requestId,
+    variables: {
+      amount: Number(result.data.approved_amount ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 }),
+      remarks: comment
+    }
+  });
 
   revalidatePath("/payments/advance-request");
   finish({ notice: `Advance request ${decision}.` });

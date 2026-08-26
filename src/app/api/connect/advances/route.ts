@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
+import { createAppNotification } from "@/lib/app-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
 
@@ -122,6 +123,14 @@ export async function POST(request: NextRequest) {
       .select("id, amount, purpose, status, approved_amount, decision_comment, requested_at, updated_at")
       .single();
     if (result.error) throw new Error(result.error.message);
+    await createAppNotification({
+      accountId: account.accountId,
+      companyId: account.companyId,
+      eventCode: "advance_request_raised",
+      profileType: account.profileType,
+      sourceKey: String(result.data.id),
+      variables: { amount: amount.toLocaleString("en-IN", { maximumFractionDigits: 2 }) }
+    });
     return NextResponse.json({ ok: true, request: result.data }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to submit advance request.";

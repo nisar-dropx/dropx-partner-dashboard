@@ -256,12 +256,18 @@ begin
       'profile_returned',
       'attendance_regularization_submitted',
       'attendance_location_flagged',
-      'attendance_forgot_punch_out'
+      'attendance_forgot_punch_out',
+      'advance_request_raised',
+      'advance_request_approved',
+      'advance_request_rejected',
+      'exit_request_raised',
+      'exit_request_approved',
+      'exit_request_rejected'
     ])
   ) codes;
 
   if allowed is null or btrim(allowed) = '' then
-    allowed := '''attendance_punch_in'', ''attendance_punch_out'', ''profile_submitted'', ''profile_approved'', ''profile_returned'', ''attendance_regularization_submitted'', ''attendance_location_flagged'', ''attendance_forgot_punch_out''';
+    allowed := '''attendance_punch_in'', ''attendance_punch_out'', ''profile_submitted'', ''profile_approved'', ''profile_returned'', ''attendance_regularization_submitted'', ''attendance_location_flagged'', ''attendance_forgot_punch_out'', ''advance_request_raised'', ''advance_request_approved'', ''advance_request_rejected'', ''exit_request_raised'', ''exit_request_approved'', ''exit_request_rejected''';
   end if;
 
   alter table public.mob_app_notification_rules
