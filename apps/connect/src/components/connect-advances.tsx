@@ -24,6 +24,7 @@ function label(value: string) {
 
 export function ConnectAdvances({ account }: { account: Account }) {
   const [rows, setRows] = useState<AdvanceRequest[]>([]);
+  const [eligibleForAdvance, setEligibleForAdvance] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -40,6 +41,7 @@ export function ConnectAdvances({ account }: { account: Account }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to load advance requests.");
       setRows(payload.requests ?? []);
+      setEligibleForAdvance(payload.account?.eligibleForAdvance === true);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load advance requests."); }
     finally { setLoading(false); }
   }, [account.id, account.profileType]);
@@ -62,9 +64,10 @@ export function ConnectAdvances({ account }: { account: Account }) {
   }
 
   return <section className="dx-advances">
-    <header><div className="dx-advance-title"><i><IndianRupee /></i><h1>Advances</h1></div><button onClick={() => setShowForm(true)}><Plus />New request</button></header>
+    <header><div className="dx-advance-title"><i><IndianRupee /></i><h1>Advances</h1></div><button disabled={!eligibleForAdvance || loading} onClick={() => setShowForm(true)}><Plus />New request</button></header>
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
+    {!loading && !eligibleForAdvance ? <div className="dx-alert info">Advance requests are available only when Profile status is Active.</div> : null}
     {loading ? <div className="dx-loader"><span /><small>Loading advances...</small></div> : rows.length ? <div className="dx-advance-list">
       {rows.map((row) => <article key={row.id}>
         <div><strong>{money(Number(row.amount))}</strong><span className={`status ${row.status}`}>{label(row.status)}</span></div>

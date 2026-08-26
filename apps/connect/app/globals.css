@@ -9210,6 +9210,8 @@ body {
 .dx-advance-title svg { width: 24px; height: 24px; }
 .dx-advance-title h1 { margin: 0; font-size: 25px; line-height: 1.15; }
 .dx-advances > header button { display: flex; align-items: center; gap: 7px; padding: 11px 15px; border: 0; border-radius: 12px; background: #df2f2f; color: #fff; font-weight: 700; }
+.dx-advances > header button:disabled { cursor: not-allowed; opacity: .45; }
+.dx-advances .dx-alert.info { color: #7a5300; background: #fff7df; border: 1px solid #efd99e; }
 .dx-advance-list { display: grid; gap: 14px; }
 .dx-advance-list article { padding: 18px; border: 1px solid #e7e2da; border-radius: 16px; background: #fff; box-shadow: 0 5px 18px rgba(32,33,36,.05); }
 .dx-advance-list article > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

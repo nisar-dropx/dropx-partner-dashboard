@@ -40,6 +40,9 @@ async function resolveAccount(accountId: string, profileType: string) {
   if (rowCountryCode !== normalized.countryCode || (rowMobile !== normalized.mobile && rowMobile !== normalized.localMobile)) {
     throw new Error("Advances are not available for this signed-in account.");
   }
+  const profileStatusColumn = resolvedType === "employee" ? "profile_completion_status" : "onboarding_status";
+  const profileStatus = String(row[profileStatusColumn] ?? "").trim().toLowerCase();
+  const eligibleForAdvance = row.is_active === true && profileStatus === "active";
 
   let station = "";
   if (row.location_id) {
@@ -54,12 +57,15 @@ async function resolveAccount(accountId: string, profileType: string) {
     accountCode: String(row[codeColumn as keyof typeof row] ?? ""),
     name: String(row.full_name ?? ""),
     station,
-    designation: String("designation" in row ? row.designation ?? "" : "Employee")
+    designation: String("designation" in row ? row.designation ?? "" : "Employee"),
+    eligibleForAdvance
   };
 }
 
 function statusCode(message: string) {
-  return message.includes("Login") ? 401 : 400;
+  if (message.includes("Login")) return 401;
+  if (message.includes("Profile status is Active")) return 403;
+  return 400;
 }
 
 export async function GET(request: NextRequest) {
@@ -89,6 +95,9 @@ export async function POST(request: NextRequest) {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const body = await request.json() as { accountId?: unknown; profileType?: unknown; amount?: unknown; purpose?: unknown };
     const account = await resolveAccount(String(body.accountId ?? ""), String(body.profileType ?? ""));
+    if (!account.eligibleForAdvance) {
+      throw new Error("Advance requests are available only when Profile status is Active.");
+    }
     const amount = Number(body.amount);
     const purpose = String(body.purpose ?? "").trim();
     if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a valid advance amount.");
