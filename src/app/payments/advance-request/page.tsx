@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
-import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
 import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -11,7 +10,6 @@ import { approveAdvanceRequest, rejectAdvanceRequest } from "./actions";
 
 type AdvanceRequestRow = {
   id: string;
-  profile_type: string;
   account_code: string | null;
   requester_name: string | null;
   station_code: string | null;
@@ -27,10 +25,6 @@ type AdvanceRequestRow = {
 
 const openStatuses = new Set(["submitted", "in_review"]);
 
-function profileLabel(value: string) {
-  return value.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
-}
-
 function statusLabel(value: string) {
   return value.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }
@@ -40,7 +34,7 @@ export const dynamic = "force-dynamic";
 export default async function AdvanceRequestPage({
   searchParams
 }: {
-  searchParams?: { status?: string; manage?: string; error?: string; notice?: string };
+  searchParams?: { status?: string; error?: string; notice?: string };
 }) {
   const authorization = await requirePagePermission("advance_requests", "access");
   if (!isCompanyOwner(authorization)) redirect("/unauthorized?page=advance_requests&action=owner");
@@ -56,7 +50,7 @@ export default async function AdvanceRequestPage({
   } else {
     let query = supabaseAdmin
       .from("payment_advance_requests")
-      .select("id, profile_type, account_code, requester_name, station_code, designation, amount, purpose, status, approved_amount, decision_comment, requested_at, updated_at")
+      .select("id, account_code, requester_name, station_code, designation, amount, purpose, status, approved_amount, decision_comment, requested_at, updated_at")
       .eq("company_id", companyId)
       .order("requested_at", { ascending: false });
     if (status === "pending") query = query.in("status", ["submitted", "in_review"]);
@@ -65,11 +59,6 @@ export default async function AdvanceRequestPage({
     requests = (result.data ?? []) as AdvanceRequestRow[];
     error = result.error?.message ?? null;
   }
-
-  const selectedRequest = searchParams?.manage
-    ? requests.find((request) => request.id === searchParams.manage) ?? null
-    : null;
-  const baseParams = new URLSearchParams(status === "pending" ? {} : { status });
 
   return (
     <AppShell active="Advance Request" pageCode="advance_requests">
@@ -87,40 +76,26 @@ export default async function AdvanceRequestPage({
         <div className="panel-head">
           <div><h2>Advance requests</h2><p className="subtle">{requests.length} records</p></div>
           <div className="button-row">
-            {["pending", "approved", "rejected", "all"].map((filter) => <PendingLink key={filter} className={`button compact ${status === filter ? "" : "secondary"}`} href={`/payments/advance-request${filter === "pending" ? "" : `?status=${filter}`}`}>{filter.charAt(0).toUpperCase() + filter.slice(1)}</PendingLink>)}
+            {["pending", "approved", "rejected", "all"].map((filter) => <a key={filter} className={`button compact ${status === filter ? "" : "secondary"}`} href={`/payments/advance-request${filter === "pending" ? "" : `?status=${filter}`}`}>{filter.charAt(0).toUpperCase() + filter.slice(1)}</a>)}
           </div>
         </div>
-        <div className="table-wrap"><table><thead><tr><th>Requester</th><th>Type</th><th>Station</th><th>Amount</th><th>Purpose</th><th>Status</th><th>Requested</th><th>Action</th></tr></thead>
+        <div className="table-wrap"><table className="advance-request-table"><thead><tr><th>Requester</th><th>Designation</th><th>Station</th><th>Requested Amt</th><th>Purpose</th><th>Status</th><th>Requested</th><th>Approved Amt</th><th>Remarks</th><th>Action</th></tr></thead>
           <tbody>{requests.length ? requests.map((request) => <tr key={request.id}>
             <td><strong>{request.requester_name || request.account_code || "-"}</strong>{request.requester_name && request.account_code ? <div className="subtle">{request.account_code}</div> : null}</td>
-            <td>{profileLabel(request.profile_type)}{request.designation ? <div className="subtle">{request.designation}</div> : null}</td>
+            <td>{request.designation || "-"}</td>
             <td>{request.station_code || "-"}</td><td>Rs {Number(request.amount).toLocaleString("en-IN")}</td><td>{request.purpose}</td>
             <td><StatusPill status={statusLabel(request.status)} /></td><td>{formatDashboardDateTime(request.requested_at)}</td>
-            <td><PendingLink className="button secondary compact" href={`/payments/advance-request?${new URLSearchParams({ ...Object.fromEntries(baseParams), manage: request.id }).toString()}`} scroll={false}>{openStatuses.has(request.status) ? "Review" : "View"}</PendingLink></td>
-          </tr>) : <tr><td className="empty-cell" colSpan={8}>No advance requests found.</td></tr>}</tbody>
+            {openStatuses.has(request.status) ? <>
+              <td colSpan={3} className="advance-request-inline-cell"><form className="advance-request-inline-form">
+                <input name="requestId" type="hidden" value={request.id} />
+                <input aria-label={`Approved amount for ${request.requester_name || request.account_code || "request"}`} className="field" defaultValue={request.amount} min="0.01" name="approvedAmount" placeholder="Approved amt" step="0.01" type="number" />
+                <input aria-label={`Remarks for ${request.requester_name || request.account_code || "request"}`} className="field" maxLength={500} name="comment" placeholder="Remarks (required to reject)" />
+                <div className="advance-request-inline-actions"><button className="button compact payment-approve-button" formAction={approveAdvanceRequest}>Approve</button><button className="button compact danger" formAction={rejectAdvanceRequest}>Reject</button></div>
+              </form></td>
+            </> : <><td>{request.approved_amount == null ? "-" : `Rs ${Number(request.approved_amount).toLocaleString("en-IN")}`}</td><td>{request.decision_comment || "-"}</td><td>-</td></>}
+          </tr>) : <tr><td className="empty-cell" colSpan={10}>No advance requests found.</td></tr>}</tbody>
         </table></div>
       </section> : null}
-
-      {selectedRequest ? <div className="modal-backdrop"><section className="modal-panel wide" aria-label="Review advance request">
-        <div className="panel-head"><div><h2>Advance request</h2><p className="subtle">{selectedRequest.requester_name || selectedRequest.account_code || "Requester"}</p></div><PendingLink className="icon-button" href={`/payments/advance-request${baseParams.size ? `?${baseParams}` : ""}`} scroll={false} aria-label="Close">x</PendingLink></div>
-        <div className="panel-body">
-          <div className="form-grid three">
-            <label>Requester<input className="field" readOnly value={selectedRequest.requester_name || "-"} /></label>
-            <label>Account ID<input className="field" readOnly value={selectedRequest.account_code || "-"} /></label>
-            <label>Station<input className="field" readOnly value={selectedRequest.station_code || "-"} /></label>
-            <label>Profile type<input className="field" readOnly value={profileLabel(selectedRequest.profile_type)} /></label>
-            <label>Designation<input className="field" readOnly value={selectedRequest.designation || "-"} /></label>
-            <label>Requested amount<input className="field" readOnly value={`Rs ${Number(selectedRequest.amount).toLocaleString("en-IN")}`} /></label>
-          </div>
-          <label style={{ display: "grid", gap: 8, marginTop: 16 }}>Purpose<textarea className="field" readOnly rows={4} value={selectedRequest.purpose} /></label>
-          {openStatuses.has(selectedRequest.status) ? <form className="payment-approval-action-form" style={{ marginTop: 20 }}>
-            <input name="requestId" type="hidden" value={selectedRequest.id} />
-            <label>Approved amount<input className="field" defaultValue={selectedRequest.amount} min="0.01" name="approvedAmount" step="0.01" type="number" /></label>
-            <label>Decision comment<textarea className="field" maxLength={500} name="comment" placeholder="Required when rejecting" rows={3} /></label>
-            <div className="payment-approval-action-buttons"><button className="button payment-approve-button" formAction={approveAdvanceRequest}>Approve</button><button className="button danger" formAction={rejectAdvanceRequest}>Reject</button></div>
-          </form> : <div style={{ marginTop: 20 }}><StatusPill status={statusLabel(selectedRequest.status)} />{selectedRequest.approved_amount != null ? <p>Approved amount: <strong>Rs {Number(selectedRequest.approved_amount).toLocaleString("en-IN")}</strong></p> : null}{selectedRequest.decision_comment ? <p className="subtle">{selectedRequest.decision_comment}</p> : null}</div>}
-        </div>
-      </section></div> : null}
     </AppShell>
   );
 }
