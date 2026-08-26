@@ -33,7 +33,9 @@ export function SubmitButton({
   confirmationSelect,
   confirmationCheckboxes,
   confirmationBlocked = false,
-  form
+  form,
+  name,
+  value
 }: {
   children: ReactNode;
   className?: string;
@@ -49,6 +51,9 @@ export function SubmitButton({
   confirmationCheckboxes?: ConfirmationCheckbox[];
   confirmationBlocked?: boolean;
   form?: string;
+  /** Set both to distinguish which of several submit buttons in one form was clicked (native button name/value semantics). */
+  name?: string;
+  value?: string;
 }) {
   const { pending } = useFormStatus();
   const [confirmationOpen, setConfirmationOpen] = useState(false);
@@ -77,6 +82,8 @@ export function SubmitButton({
         className={className}
         disabled={pending || disabled}
         form={form}
+        name={name}
+        value={value}
         onClick={(event) => {
           if (confirmMessage) {
             const form = event.currentTarget.form;
@@ -153,6 +160,8 @@ export function SubmitButton({
                 className={className}
                 disabled={pending || confirmationBlocked || Boolean(confirmationSelect && !confirmationSelection)}
                 form={form}
+                name={name}
+                value={value}
                 type="submit"
               >
                 {pending ? <span className="button-spinner" aria-hidden="true" /> : null}
