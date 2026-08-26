@@ -39,45 +39,7 @@ export async function createPaymentMethod(formData: FormData) {
 
   const code = required(formData.get("code"), "Method ID").toUpperCase();
   const name = required(formData.get("name"), "Method name");
-  const componentCount = Number(formData.get("component_count") ?? 0);
-  const components = Array.from({ length: componentCount }, (_, index) => {
-    const type = clean(formData.get(`components[${index}][type]`));
-    const componentCode = clean(formData.get(`components[${index}][code]`))?.toUpperCase();
-    const label = clean(formData.get(`components[${index}][label]`));
-    const paySchedule = clean(formData.get(`components[${index}][pay_schedule]`));
-    if (!type && !componentCode && !label) return null;
-    if (type !== "amount" && type !== "production") {
-      throw new Error("Each component must be Amount or Production.");
-    }
-    if (!componentCode) {
-      throw new Error("Each component needs a Field ID.");
-    }
-    if (!label) {
-      throw new Error("Each component needs a field label.");
-    }
-    if (type === "amount" && !["per_hour", "per_day", "per_month"].includes(paySchedule ?? "")) {
-      throw new Error(`${label} needs a Pay Schedule.`);
-    }
-    return {
-      component_code: componentCode,
-      component_type: type,
-      label,
-      pay_schedule: type === "amount" ? paySchedule : null,
-      sort_order: index + 1,
-      is_active: true
-    };
-  }).filter(Boolean) as Array<{
-    component_code: string;
-    component_type: "amount" | "production";
-    label: string;
-    pay_schedule: string | null;
-    sort_order: number;
-    is_active: boolean;
-  }>;
-
-  if (!components.length) {
-    throw new Error("Add at least one payment field.");
-  }
+  const components = await selectedPaymentFields(formData, companyId);
 
   const { data: method, error } = await supabaseAdmin
     .from("payment_methods")
@@ -99,32 +61,32 @@ export async function createPaymentMethod(formData: FormData) {
   revalidatePath("/master/payment-methods");
 }
 
-function parseComponents(formData: FormData) {
-  const componentCount = Number(formData.get("component_count") ?? 0);
-  const components = Array.from({ length: componentCount }, (_, index) => {
-    const id = clean(formData.get(`components[${index}][id]`));
-    const type = clean(formData.get(`components[${index}][type]`));
-    const componentCode = clean(formData.get(`components[${index}][code]`))?.toUpperCase();
-    const label = clean(formData.get(`components[${index}][label]`));
-    const paySchedule = clean(formData.get(`components[${index}][pay_schedule]`));
-    if (type !== "amount" && type !== "production") throw new Error("Each component must be Amount or Production.");
-    if (!componentCode) throw new Error("Each component needs a Field ID.");
-    if (!label) throw new Error("Each component needs a field label.");
-    if (type === "amount" && !["per_hour", "per_day", "per_month"].includes(paySchedule ?? "")) {
-      throw new Error(`${label} needs a Pay Schedule.`);
-    }
+async function selectedPaymentFields(formData: FormData, companyId: string) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  const ids = [...new Set(formData.getAll("field_ids").map((entry) => String(entry).trim()).filter(Boolean))];
+  if (!ids.length) throw new Error("Select at least one payment field.");
+  const result = await supabaseAdmin
+    .from("payment_fields")
+    .select("id, code, field_type, label, pay_schedule")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .in("id", ids);
+  if (result.error) throw new Error(result.error.message);
+  if ((result.data ?? []).length !== ids.length) throw new Error("One or more selected payment fields are unavailable.");
+  const byId = new Map((result.data ?? []).map((field) => [String(field.id), field]));
+  return ids.map((id, index) => {
+    const field = byId.get(id)!;
     return {
-      id,
-      component_code: componentCode,
-      component_type: type,
-      label,
-      pay_schedule: type === "amount" ? paySchedule : null,
+      payment_field_id: field.id,
+      component_code: field.code,
+      component_type: field.field_type,
+      label: field.label,
+      pay_schedule: field.pay_schedule,
       sort_order: index + 1,
-      is_active: true
+      is_active: true,
+      company_id: companyId
     };
   });
-  if (!components.length) throw new Error("Add at least one payment field.");
-  return components;
 }
 
 export async function updatePaymentMethod(formData: FormData) {
@@ -136,7 +98,7 @@ export async function updatePaymentMethod(formData: FormData) {
   const id = required(formData.get("id"), "Payment method");
   const code = required(formData.get("code"), "Method ID").toUpperCase();
   const name = required(formData.get("name"), "Method name");
-  const components = parseComponents(formData);
+  const components = await selectedPaymentFields(formData, companyId);
 
   const existingMethod = await admin
     .from("payment_methods")
@@ -153,40 +115,90 @@ export async function updatePaymentMethod(formData: FormData) {
     .eq("company_id", companyId);
   if (methodError) throw new Error(methodError.message);
 
-  const retainedIds = await Promise.all(components.map(async (component) => {
-    const payload = {
-      payment_method_id: id,
-      component_code: component.component_code,
-      component_type: component.component_type,
-      label: component.label,
-      pay_schedule: component.pay_schedule,
-      sort_order: component.sort_order,
-      is_active: true,
-      updated_at: new Date().toISOString()
-    };
-
-    if (component.id) {
-      const { error } = await admin.from("payment_method_components").update(payload).eq("id", component.id).eq("payment_method_id", id);
-      if (error) throw new Error(error.message);
-      return component.id;
-    } else {
-      const { data, error } = await admin.from("payment_method_components").insert(payload).select("id").single();
-      if (error) throw new Error(error.message);
-      return data.id as string;
-    }
-  }));
-
-  const existing = await admin.from("payment_method_components").select("id").eq("payment_method_id", id);
-  if (existing.error) throw new Error(existing.error.message);
-  const removedIds = (existing.data ?? []).map((item) => item.id).filter((componentId) => !retainedIds.includes(componentId));
+  const existingComponents = await admin.from("payment_method_components")
+    .select("id, payment_field_id").eq("payment_method_id", id).eq("company_id", companyId);
+  if (existingComponents.error) throw new Error(existingComponents.error.message);
+  const existingByField = new Map((existingComponents.data ?? []).map((component) => [String(component.payment_field_id), component.id]));
+  for (const component of components) {
+    const existingId = existingByField.get(String(component.payment_field_id));
+    const payload = { ...component, payment_method_id: id, updated_at: new Date().toISOString() };
+    const result = existingId
+      ? await admin.from("payment_method_components").update(payload).eq("id", existingId).eq("company_id", companyId)
+      : await admin.from("payment_method_components").insert(payload);
+    if (result.error) throw new Error(result.error.message);
+  }
+  const selectedIds = new Set(components.map((component) => String(component.payment_field_id)));
+  const removedIds = (existingComponents.data ?? [])
+    .filter((component) => !selectedIds.has(String(component.payment_field_id)))
+    .map((component) => component.id);
   if (removedIds.length) {
-    const { error } = await admin.from("payment_method_components").delete().in("id", removedIds);
-    if (error) throw new Error(error.message);
+    const removed = await admin.from("payment_method_components").delete().in("id", removedIds).eq("company_id", companyId);
+    if (removed.error) throw new Error(removed.error.message);
   }
 
   revalidatePath("/master/payment-methods");
   revalidatePath("/provider-mapping");
   redirect("/master/payment-methods");
+}
+
+function parsePaymentField(formData: FormData) {
+  const code = required(formData.get("field_code"), "Field ID").toUpperCase();
+  const label = required(formData.get("field_label"), "Field label");
+  const fieldType = required(formData.get("field_type"), "Field type");
+  const paySchedule = clean(formData.get("pay_schedule"));
+  if (!["amount", "production"].includes(fieldType)) throw new Error("Field type must be Amount or Production.");
+  if (fieldType === "amount" && !["per_hour", "per_day", "per_month"].includes(paySchedule ?? "")) {
+    throw new Error("Amount fields need a pay schedule.");
+  }
+  return { code, label, field_type: fieldType, pay_schedule: fieldType === "amount" ? paySchedule : null };
+}
+
+export async function createPaymentField(formData: FormData) {
+  const authorization = await requirePagePermission("payment_methods", "add");
+  const companyId = requireCompanyId(authorization);
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  const payload = parsePaymentField(formData);
+  const result = await supabaseAdmin.from("payment_fields").insert(withCompany({ ...payload, is_active: true }, companyId));
+  if (result.error) throw new Error(result.error.message);
+  revalidatePath("/master/payment-methods");
+  redirect("/master/payment-methods?fields=1");
+}
+
+export async function updatePaymentField(formData: FormData) {
+  const authorization = await requirePagePermission("payment_methods", "edit");
+  const companyId = requireCompanyId(authorization);
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  const id = required(formData.get("field_id"), "Payment field");
+  const payload = parsePaymentField(formData);
+  const update = await supabaseAdmin.from("payment_fields").update({ ...payload, updated_at: new Date().toISOString() })
+    .eq("id", id).eq("company_id", companyId);
+  if (update.error) throw new Error(update.error.message);
+  const sync = await supabaseAdmin.from("payment_method_components").update({
+    component_code: payload.code,
+    component_type: payload.field_type,
+    label: payload.label,
+    pay_schedule: payload.pay_schedule,
+    updated_at: new Date().toISOString()
+  }).eq("payment_field_id", id).eq("company_id", companyId);
+  if (sync.error) throw new Error(sync.error.message);
+  revalidatePath("/master/payment-methods");
+  revalidatePath("/provider-mapping");
+  redirect("/master/payment-methods?fields=1");
+}
+
+export async function deletePaymentField(formData: FormData) {
+  const authorization = await requirePagePermission("payment_methods", "edit");
+  const companyId = requireCompanyId(authorization);
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  const id = required(formData.get("field_id"), "Payment field");
+  const usage = await supabaseAdmin.from("payment_method_components").select("id", { count: "exact", head: true })
+    .eq("payment_field_id", id).eq("company_id", companyId);
+  if (usage.error) throw new Error(usage.error.message);
+  if ((usage.count ?? 0) > 0) throw new Error("This payment field is assigned to a payment method and cannot be deleted.");
+  const result = await supabaseAdmin.from("payment_fields").delete().eq("id", id).eq("company_id", companyId);
+  if (result.error) throw new Error(result.error.message);
+  revalidatePath("/master/payment-methods");
+  redirect("/master/payment-methods?fields=1");
 }
 
 export async function deletePaymentMethod(formData: FormData) {

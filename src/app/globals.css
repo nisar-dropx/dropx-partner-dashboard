@@ -4060,6 +4060,114 @@ h3 {
   gap: 8px;
 }
 
+.page-head-actions,
+.payment-component-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.payment-field-picker,
+.payment-field-create {
+  display: grid;
+  gap: 10px;
+}
+
+.payment-field-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 310px;
+  overflow: auto;
+}
+
+.payment-field-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.payment-field-option.selected {
+  border-color: #ef6c32;
+  background: #fff8f3;
+}
+
+.payment-field-option span,
+.payment-field-option small {
+  display: grid;
+  gap: 3px;
+}
+
+.payment-field-option small {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.selection-count {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.payment-fields-modal {
+  max-width: 1180px;
+}
+
+.payment-field-create {
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.payment-field-master-list {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.payment-field-master-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 130px auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.payment-field-form {
+  display: grid;
+  grid-template-columns: minmax(130px, .8fr) minmax(180px, 1.25fr) minmax(130px, .8fr) minmax(130px, .8fr) auto;
+  align-items: end;
+  gap: 9px;
+}
+
+.payment-field-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+@media (max-width: 860px) {
+  .payment-field-options,
+  .payment-field-form,
+  .payment-field-master-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .payment-component-head,
 .payment-component-row {
   display: grid;
