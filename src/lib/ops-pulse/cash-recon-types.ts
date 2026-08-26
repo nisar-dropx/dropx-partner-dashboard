@@ -286,15 +286,25 @@ export function nearlyZero(value: number, epsilon = 0.01) {
 }
 
 export function normalizeAssociateName(name: string) {
-  return String(name ?? "")
-    .split("/")[0]
+  const raw = String(name ?? "").trim();
+  if (!raw) return "";
+  // Two incompatible "/"-delimited conventions collide here:
+  //   driver names          "ADISH KUMAR PV / DROP / 205759164"        -> real name is segment 0
+  //   store/access-point id "Store/IN-673005-18/High_Mark_Express"     -> real name is the LAST segment
+  // ("Store" itself is never a name.) Route on the "Store" marker so a store's baseline
+  // roster name and its raw SCC/ageing feed name normalize to the same tokens regardless
+  // of which shape either feed happened to use — otherwise the same store shows up twice.
+  const isStoreId = /^store[\s/_-]/i.test(raw);
+  const parts = raw.split("/").filter(Boolean);
+  const segment = (isStoreId ? parts[parts.length - 1] : parts[0]) ?? raw;
+  return segment
+    .replace(/^store[\s/_-]+/i, "")
     // Underscore-joined codes are common in raw Amazon names — "BB_Noufal Thottiyil",
     // "Store_Reliance Pets_SO" — fold them into spaces before tokenizing, or
-    // associateNamesMatch never sees "reliance"/"pets" as separate tokens and two rows
-    // for the same person/store (one raw, one cleaned) never merge.
-    ?.replace(/[_\s]+/g, " ")
+    // associateNamesMatch never sees "reliance"/"pets" as separate tokens.
+    .replace(/[_\s]+/g, " ")
     .trim()
-    .toLowerCase() ?? "";
+    .toLowerCase();
 }
 
 /** True when names match exactly, or one contains all tokens of the other (handles "RANJEET NAG" vs "RANJEET KUMAR NAG"). */
