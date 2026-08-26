@@ -126,8 +126,7 @@ function isReadyForPaymentProcess(request: PaymentNotificationRequest) {
 
 function canProcessPayment(request: PaymentNotificationRequest, authorization: AuthorizationContext) {
   if (isCompanyOwner(authorization) || authorization.isMasterOwner) return true;
-  if (!authorization.roleId) return false;
-  return (request.payment_process_role_ids ?? []).includes(authorization.roleId);
+  return (request.payment_process_role_ids ?? []).some((roleId) => authorization.effectiveRoleIds.includes(roleId));
 }
 
 function addItem(items: PaymentNotificationItem[], key: string, label: string, detail: string, href: string, count: number) {
@@ -138,9 +137,8 @@ function addItem(items: PaymentNotificationItem[], key: string, label: string, d
 function isAssignedToCurrentUser(request: PaymentNotificationRequest, authorization: AuthorizationContext) {
   if (!canAccessPaymentLocation(authorization, request.location_id)) return false;
   if (request.current_approver_user_id === authorization.userId) return true;
-  if (!authorization.roleId) return false;
-  return request.current_approver_role_id === authorization.roleId ||
-    (request.current_approver_role_ids ?? []).includes(authorization.roleId);
+  return Boolean(request.current_approver_role_id && authorization.effectiveRoleIds.includes(request.current_approver_role_id)) ||
+    (request.current_approver_role_ids ?? []).some((roleId) => authorization.effectiveRoleIds.includes(roleId));
 }
 
 async function loadPeopleReviewCount(authorization: AuthorizationContext) {

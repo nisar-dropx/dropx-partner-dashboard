@@ -12,6 +12,7 @@ import { normalizePaymentModes, paymentModeLabel, type PaymentMode } from "@/lib
 import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 import { validatePaymentQuestionDate } from "@/lib/payment-question-date-rules";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { findPositionApprover } from "@/lib/position-access";
 import { insertPaymentApprovalLog } from "../approvals/actions";
 
 function clean(value: FormDataEntryValue | null) {
@@ -132,9 +133,12 @@ async function nextPaymentRequestNo(companyId: string) {
   throw new Error("Unable to generate a unique payment request ID.");
 }
 
-async function approverForRoles(companyId: string, roleIds: string[], label: string): Promise<ApproverTarget> {
+async function approverForRoles(companyId: string, roleIds: string[], label: string, locationId?: string | null): Promise<ApproverTarget> {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
   if (!roleIds.length) throw new Error(`${label} is not configured.`);
+
+  const positionApprover = await findPositionApprover(companyId, roleIds, locationId);
+  if (positionApprover) return positionApprover;
 
   const { data: approver, error } = await supabaseAdmin
     .from("profiles")
@@ -211,15 +215,14 @@ export async function createExpenseRequest(formData: FormData) {
 
     const requestNo = await nextPaymentRequestNo(companyId);
     const workDate = new Date().toISOString().slice(0, 10);
-    const requesterIsInitialApprover = Boolean(
-      authorization.roleId && initialApprovalRoleIds.includes(authorization.roleId)
-    );
+    const requesterIsInitialApprover = authorization.effectiveRoleIds.some((roleId) => initialApprovalRoleIds.includes(roleId));
     const startsWithFinalApproval = !initialApprovalRoleIds.length || requesterIsInitialApprover;
     const currentApprovalRoleIds = startsWithFinalApproval ? finalApprovalRoleIds : initialApprovalRoleIds;
     const approver = await approverForRoles(
       companyId,
       currentApprovalRoleIds,
-      startsWithFinalApproval ? "final approver roles" : "initial approver roles"
+      startsWithFinalApproval ? "final approver roles" : "initial approver roles",
+      locationResult.data.id
     );
 
     const { data: request, error: requestError } = await admin
@@ -429,15 +432,14 @@ export async function createPaymentRequest(formData: FormData) {
     const legacyAccountValue = bankAccountNo ?? paymentReference ?? paymentPortal ?? locationResult.data.station_code;
     const legacyIfscValue = ifsc ?? (isUpiPayment ? "UPI" : "ONLINE");
     const legacyHolderValue = accountHolderName ?? verifiedUpiHolderName ?? submittedUpiHolderName ?? paymentPortal ?? "Online Payment";
-    const requesterIsInitialApprover = Boolean(
-      authorization.roleId && initialApprovalRoleIds.includes(authorization.roleId)
-    );
+    const requesterIsInitialApprover = authorization.effectiveRoleIds.some((roleId) => initialApprovalRoleIds.includes(roleId));
     const startsWithFinalApproval = !initialApprovalRoleIds.length || requesterIsInitialApprover;
     const currentApprovalRoleIds = startsWithFinalApproval ? finalApprovalRoleIds : initialApprovalRoleIds;
     const approver = await approverForRoles(
       companyId,
       currentApprovalRoleIds,
-      startsWithFinalApproval ? "final approver roles" : "initial approver roles"
+      startsWithFinalApproval ? "final approver roles" : "initial approver roles",
+      locationResult.data.id
     );
     const paymentQuestions = questionsForStage(headResult.data.payment_head_questions, "payment");
     validateQuestionDates(formData, paymentQuestions);
@@ -940,7 +942,8 @@ export async function resubmitExpenseRequest(formData: FormData) {
       approver = await approverForRoles(
         companyId,
         currentApprovalRoleIds,
-        startsWithFinalApproval ? "final approver roles" : "initial approver roles"
+        startsWithFinalApproval ? "final approver roles" : "initial approver roles",
+        request.location_id
       );
     }
 
@@ -1132,7 +1135,8 @@ export async function resubmitPaymentRequest(formData: FormData) {
       approver = await approverForRoles(
         companyId,
         currentApprovalRoleIds,
-        startsWithFinalApproval ? "final approver roles" : "initial approver roles"
+        startsWithFinalApproval ? "final approver roles" : "initial approver roles",
+        request.location_id
       );
       resubmittedApprovalStatus = startsWithFinalApproval ? "RE_CLUSTER_APPROVED" : "RE_PENDING";
     }

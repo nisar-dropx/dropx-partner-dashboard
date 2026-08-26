@@ -35,12 +35,12 @@ export async function getPaymentApprovalEligibility(companyId: string, authoriza
       continue;
     }
 
-    if (request.current_approver_role_id && request.current_approver_role_id === authorization.roleId) {
+    if (request.current_approver_role_id && authorization.effectiveRoleIds.includes(request.current_approver_role_id)) {
       eligibleIds.add(request.id);
       continue;
     }
 
-    if (authorization.roleId && (request.current_approver_role_ids ?? []).includes(authorization.roleId)) {
+    if ((request.current_approver_role_ids ?? []).some((roleId) => authorization.effectiveRoleIds.includes(roleId))) {
       eligibleIds.add(request.id);
       continue;
     }

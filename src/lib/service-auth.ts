@@ -65,6 +65,7 @@ export async function getServiceAuthorization(request: Request): Promise<Authori
     companyId: company.id,
     companyName: company.name,
     email: profile.email,
+    effectiveRoleIds: profile.role_id ? [profile.role_id] : [],
     fullName: profile.full_name,
     hasAllLocationAccess: true,
     isMasterCompany: Boolean(company.is_master),

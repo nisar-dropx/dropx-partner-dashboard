@@ -1,5 +1,6 @@
 import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { findPositionApprover } from "@/lib/position-access";
 
 export type PaymentEmailEventType = "payment_request" | "payment_approve" | "payment_return" | "payment_reject";
 
@@ -230,6 +231,7 @@ async function resolveHierarchyFinalApprovers({
   companyId,
   currentApproverUserId,
   finalRoleIds,
+  locationId,
   locationManagerEmail,
   requesterUserId
 }: {
@@ -237,12 +239,15 @@ async function resolveHierarchyFinalApprovers({
   companyId: string;
   currentApproverUserId?: string | null;
   finalRoleIds: string[];
+  locationId?: string | null;
   locationManagerEmail?: string | null;
   requesterUserId?: string | null;
 }) {
   if (!supabaseAdmin || !finalRoleIds.length) return [];
   const finalRoles = new Set(finalRoleIds);
+  const positionApprover = await findPositionApprover(companyId, finalRoleIds, locationId);
   const startProfiles = [
+    await profileById(companyId, positionApprover?.userId),
     await profileById(companyId, currentApproverUserId),
     await profileById(companyId, actorUserId),
     await profileByEmail(companyId, locationManagerEmail),
@@ -361,6 +366,7 @@ export async function sendPaymentNotification({
       companyId,
       currentApproverUserId: request.current_approver_user_id,
       finalRoleIds,
+      locationId: request.location_id,
       locationManagerEmail: locationResult.data?.station_manager_email,
       requesterUserId: request.requested_by
     });

@@ -7,6 +7,7 @@ import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { canActOnPaymentRequest } from "@/lib/payment-approval-scope";
 import { sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { findPositionApprover } from "@/lib/position-access";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -19,8 +20,10 @@ function required(value: FormDataEntryValue | null, field: string) {
   return text;
 }
 
-async function nextApprover(companyId: string, finalRoleIds: string[]) {
+async function nextApprover(companyId: string, finalRoleIds: string[], locationId?: string | null) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  const positionApprover = await findPositionApprover(companyId, finalRoleIds, locationId);
+  if (positionApprover) return positionApprover;
   const { data: finalUser, error } = await supabaseAdmin
     .from("profiles")
     .select("id, role_id")
@@ -387,7 +390,7 @@ export async function approvePaymentRequest(formData: FormData) {
         updated_at: new Date().toISOString()
       });
   } else {
-    const target = await nextApprover(companyId, finalRoleIds);
+    const target = await nextApprover(companyId, finalRoleIds, request.location_id);
     await updatePaymentRequest(request.id, companyId, {
         status: `${roleCode}_APPROVED`,
         approval_status: `${roleCode}_APPROVED`,

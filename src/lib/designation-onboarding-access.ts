@@ -6,18 +6,18 @@ export type DesignationOnboardingAccess = {
 
 export function canOnboardDesignation(
   designation: DesignationOnboardingAccess,
-  authorization: Pick<AuthorizationContext, "isMasterOwner" | "roleCode" | "roleId">
+  authorization: Pick<AuthorizationContext, "effectiveRoleIds" | "isMasterOwner" | "roleCode" | "roleId">
 ) {
   if (authorization.isMasterOwner || authorization.roleCode === "OWNER") return true;
   const allowedRoleIds = Array.isArray(designation.onboarding_role_ids)
     ? designation.onboarding_role_ids.filter(Boolean)
     : [];
-  return Boolean(authorization.roleId && allowedRoleIds.includes(authorization.roleId));
+  return authorization.effectiveRoleIds.some((roleId) => allowedRoleIds.includes(roleId));
 }
 
 export function requireDesignationOnboardingAccess(
   designation: DesignationOnboardingAccess,
-  authorization: Pick<AuthorizationContext, "isMasterOwner" | "roleCode" | "roleId">
+  authorization: Pick<AuthorizationContext, "effectiveRoleIds" | "isMasterOwner" | "roleCode" | "roleId">
 ) {
   if (!canOnboardDesignation(designation, authorization)) {
     throw new Error("Your user role is not allowed to onboard this designation.");

@@ -13,6 +13,7 @@ import { normalizeDesignationCategories } from "@/lib/designation-categories";
 import { canOnboardDesignation } from "@/lib/designation-onboarding-access";
 import { canAccessDesignationPortal } from "@/lib/designation-portal-access";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
+import { isMissingPositionAccessSchema } from "@/lib/position-access";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules, loadWorkforceCategoryStatutoryEnabled } from "@/lib/workforce-category-rules";
 import { bulkImportEmployees, createEmployee, reviewEmployeeProfile, updateEmployee } from "./actions";
@@ -48,6 +49,7 @@ type EmployeeRow = {
   date_of_join: string;
   location_id?: string | null;
   designation_id?: string | null;
+  org_position_id?: string | null;
   gender?: string | null;
   date_of_birth?: string | null;
   father_name?: string | null;
@@ -328,14 +330,15 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
       employees: [] as EmployeeRow[],
       locations: [] as LocationRow[],
       designations: [] as DesignationRow[],
+      positions: [] as Array<{ id: string; code: string; name: string; designation_id: string | null; location_access_mode: string; location_scope_ids: string[] | null }>,
       error: "Supabase service role key is not configured."
     };
   }
 
-  const [initialEmployeesResult, locationsResult, designationsResult] = await Promise.all([
+  const [initialEmployeesResult, locationsResult, designationsResult, positionsResult] = await Promise.all([
     supabaseAdmin
       .from("employees")
-      .select("id, employee_code, biometric_id, full_name, mobile_country_code, mobile, email, date_of_join, location_id, designation_id, statutory_applicability, profile_completion_status, profile_return_remarks, profile_completed_at, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, father_name, blood_group, is_handicapped, address, state_code, pincode, landmark, emergency_contact_name, emergency_contact_number, emergency_contact_relation, bank_account_no, ifsc, pf_uan, pf_account_no, esi_no, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, is_active, stations (station_code, station_name, providers (name), location_models (code, name)), designations (code, name)")
+      .select("id, employee_code, biometric_id, full_name, mobile_country_code, mobile, email, date_of_join, location_id, designation_id, org_position_id, statutory_applicability, profile_completion_status, profile_return_remarks, profile_completed_at, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, father_name, blood_group, is_handicapped, address, state_code, pincode, landmark, emergency_contact_name, emergency_contact_number, emergency_contact_relation, bank_account_no, ifsc, pf_uan, pf_account_no, esi_no, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, is_active, stations (station_code, station_name, providers (name), location_models (code, name)), designations (code, name)")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false }),
     supabaseAdmin
@@ -347,6 +350,12 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
     supabaseAdmin
       .from("designations")
       .select("id, code, name, model_ids, onboarding_categories, profile_field_rules, onboarding_role_ids, portal_permissions, is_active")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .order("name"),
+    supabaseAdmin
+      .from("org_positions")
+      .select("id, code, name, designation_id, location_access_mode, location_scope_ids")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("name")
@@ -365,10 +374,10 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
   }
 
   if (employeesResult.error) {
-    return { employees: [], locations: [], designations: [], error: employeesResult.error.message };
+    return { employees: [], locations: [], designations: [], positions: [], error: employeesResult.error.message };
   }
   if (locationsResult.error) {
-    return { employees: [], locations: [], designations: [], error: locationsResult.error.message };
+    return { employees: [], locations: [], designations: [], positions: [], error: locationsResult.error.message };
   }
   let designationRows = designationsResult.data ?? [];
   let designationError = designationsResult.error;
@@ -384,7 +393,10 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
   }
 
   if (designationError) {
-    return { employees: [], locations: [], designations: [], error: designationError.message };
+    return { employees: [], locations: [], designations: [], positions: [], error: designationError.message };
+  }
+  if (positionsResult.error && !isMissingPositionAccessSchema(positionsResult.error)) {
+    return { employees: [], locations: [], designations: [], positions: [], error: positionsResult.error.message };
   }
 
   const allowedLocations = filterOnboardingLocations(locationsResult.data ?? [], authorization);
@@ -421,6 +433,7 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
     locations: allowedLocations as LocationRow[],
     designations: (designationRows as DesignationRow[])
       .filter((designation) => normalizeDesignationCategories(designation.onboarding_categories).includes("employees")),
+    positions: positionsResult.error && isMissingPositionAccessSchema(positionsResult.error) ? [] : (positionsResult.data ?? []),
     error: null
   };
 }
@@ -436,7 +449,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams?: {
     canAdd: false,
     canEdit: false
   };
-  const { employees, editEmployee, locations, designations, error, viewEmployee } = await loadEmployees(companyId, authorization, searchParams?.edit, searchParams?.view);
+  const { employees, editEmployee, locations, designations, positions, error, viewEmployee } = await loadEmployees(companyId, authorization, searchParams?.edit, searchParams?.view);
   const flash = loadFlash();
   const locationOptions = locations.map((location) => ({
     value: location.id,
@@ -472,6 +485,14 @@ export default async function EmployeesPage({ searchParams }: { searchParams?: {
       : false;
   });
   const editDesignationOptions = designationOptions.filter((option) => option.canEdit);
+  const positionOptions = positions.map((position) => ({
+    value: position.id,
+    label: position.name,
+    helper: position.code,
+    designationId: position.designation_id,
+    allLocations: position.location_access_mode === "all_locations",
+    locationScopeIds: position.location_scope_ids ?? []
+  }));
   const viewRules = designationOptions.find((option) => option.value === viewEmployee?.designation_id)?.dashboardRules
     ?? employeeCategoryRules.dashboard;
 
@@ -507,7 +528,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams?: {
       {!error && pagePermission.canAdd ? (
         <section className="panel">
           <div className="panel-head"><h2>Add employee</h2></div>
-          <EmployeeForm action={createEmployee} dashboardRules={employeeCategoryRules.dashboard} designationOptions={onboardingDesignationOptions} directActivate={employeeDirectActivate} locationOptions={locationOptions} statutoryEnabled={employeeStatutoryEnabled} />
+          <EmployeeForm action={createEmployee} dashboardRules={employeeCategoryRules.dashboard} designationOptions={onboardingDesignationOptions} directActivate={employeeDirectActivate} locationOptions={locationOptions} positionOptions={positionOptions} statutoryEnabled={employeeStatutoryEnabled} />
         </section>
       ) : null}
 
@@ -568,7 +589,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams?: {
               </div>
               <PendingLink className="icon-button" href="/employees" scroll={false} aria-label="Close edit employee">x</PendingLink>
             </div>
-            <EmployeeForm action={updateEmployee} dashboardRules={employeeCategoryRules.dashboard} designationOptions={editDesignationOptions} employee={editEmployee} locationOptions={locationOptions} mode="edit" statutoryEnabled={employeeStatutoryEnabled} />
+            <EmployeeForm action={updateEmployee} dashboardRules={employeeCategoryRules.dashboard} designationOptions={editDesignationOptions} employee={editEmployee} locationOptions={locationOptions} mode="edit" positionOptions={positionOptions} statutoryEnabled={employeeStatutoryEnabled} />
             {editEmployee.profile_completion_status === "under_review" ? (
               <section className="profile-review-panel">
                 <div className="profile-review-head">
