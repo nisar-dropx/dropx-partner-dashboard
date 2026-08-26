@@ -62,7 +62,7 @@ export function ConnectAdvances({ account }: { account: Account }) {
   }
 
   return <section className="dx-advances">
-    <header><span><IndianRupee /><small>Payments</small><h1>Advances</h1></span><button onClick={() => setShowForm(true)}><Plus />New request</button></header>
+    <header><div className="dx-advance-title"><i><IndianRupee /></i><h1>Advances</h1></div><button onClick={() => setShowForm(true)}><Plus />New request</button></header>
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
     {loading ? <div className="dx-loader"><span /><small>Loading advances...</small></div> : rows.length ? <div className="dx-advance-list">
@@ -72,6 +72,6 @@ export function ConnectAdvances({ account }: { account: Account }) {
         <dl><div><dt>Requested on</dt><dd>{new Date(row.requested_at).toLocaleString("en-IN")}</dd></div>{row.approved_amount != null ? <div><dt>Approved amount</dt><dd>{money(Number(row.approved_amount))}</dd></div> : null}{row.decision_comment ? <div><dt>Comment</dt><dd>{row.decision_comment}</dd></div> : null}<div><dt>Updated on</dt><dd>{new Date(row.updated_at).toLocaleString("en-IN")}</dd></div></dl>
       </article>)}
     </div> : <div className="dx-advance-empty"><IndianRupee /><strong>No advance requests yet</strong><small>Your submitted requests will appear here.</small></div>}
-    {showForm ? <div className="dx-advance-modal"><button aria-label="Close" className="backdrop" onClick={() => setShowForm(false)} /><form onSubmit={submit}><header><div><small>Payments</small><h2>Advance request</h2></div><button aria-label="Close" onClick={() => setShowForm(false)} type="button"><X /></button></header><label>Required amount<input autoFocus inputMode="decimal" min="1" onChange={(event) => setAmount(event.target.value)} placeholder="0.00" required step="0.01" type="number" value={amount} /></label><label>Purpose<textarea maxLength={500} minLength={3} onChange={(event) => setPurpose(event.target.value)} required rows={4} value={purpose} /></label><button className="submit" disabled={saving} type="submit">{saving ? "Submitting..." : "Submit request"}</button></form></div> : null}
+    {showForm ? <div className="dx-advance-modal"><button aria-label="Close" className="backdrop" onClick={() => setShowForm(false)} /><form onSubmit={submit}><header><h2>Advance request</h2><button aria-label="Close" onClick={() => setShowForm(false)} type="button"><X /></button></header><label>Required amount<input autoFocus inputMode="decimal" min="1" onChange={(event) => setAmount(event.target.value)} placeholder="0.00" required step="0.01" type="number" value={amount} /></label><label>Purpose<textarea maxLength={500} minLength={3} onChange={(event) => setPurpose(event.target.value)} required rows={4} value={purpose} /></label><button className="submit" disabled={saving} type="submit">{saving ? "Submitting..." : "Submit request"}</button></form></div> : null}
   </section>;
 }
