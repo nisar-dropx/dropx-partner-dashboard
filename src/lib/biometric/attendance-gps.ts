@@ -354,7 +354,24 @@ export async function openIntegrityFlag({
     }
     throw new Error(insert.error.message);
   }
-  return { id: insert.data.id as string, created: true, flagType };
+
+  const flagId = insert.data.id as string;
+  if (profileId) {
+    const { notifyAttendanceFlagReviewers } = await import("@/lib/attendance-flag-notifications");
+    await notifyAttendanceFlagReviewers({
+      companyId,
+      profileType,
+      profileId,
+      punchDate,
+      flagType,
+      message,
+      flagId
+    }).catch((error) => {
+      console.error("Unable to notify attendance flag reviewers:", error);
+    });
+  }
+
+  return { id: flagId, created: true, flagType };
 }
 
 export async function resolveIntegrityFlag(flagId: string, resolvedBy: string | null) {

@@ -2,9 +2,10 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
-import { requirePagePermission } from "@/lib/authorization";
+import { getAuthorization, hasPermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
+import { redirect } from "next/navigation";
 import {
   dismissAttendanceIntegrityFlag,
   reviewAttendanceLocationPackage
@@ -54,15 +55,67 @@ function formatWhen(value: string | null | undefined) {
   }).format(new Date(value));
 }
 
+async function loadManagedEmployeeProfileIds(companyId: string, managerUserId: string) {
+  if (!supabaseAdmin) return [] as string[];
+  const reports = await supabaseAdmin
+    .from("profiles")
+    .select("employee_id")
+    .eq("company_id", companyId)
+    .eq("reports_to_user_id", managerUserId)
+    .not("employee_id", "is", null);
+  if (reports.error || !reports.data?.length) return [];
+  const codes = reports.data.map((row) => String(row.employee_id)).filter(Boolean);
+  if (!codes.length) return [];
+  const employees = await supabaseAdmin
+    .from("employees")
+    .select("id")
+    .eq("company_id", companyId)
+    .in("employee_code", codes);
+  if (employees.error) return [];
+  return (employees.data ?? []).map((row) => String(row.id));
+}
+
+async function resolveIntegrityAccess(): Promise<{
+  authorization: AuthorizationContext;
+  companyId: string;
+  canEdit: boolean;
+  managedProfileIds: string[] | null;
+}> {
+  const authorization = await getAuthorization();
+  if (!authorization) redirect("/login");
+  const companyId = requireCompanyId(authorization);
+  const canViewAll = hasPermission(authorization, "attendance_integrity", "view");
+  const canEdit = hasPermission(authorization, "attendance_integrity", "edit");
+
+  if (canViewAll) {
+    return {
+      authorization,
+      companyId,
+      canEdit,
+      managedProfileIds: null
+    };
+  }
+
+  const managedProfileIds = await loadManagedEmployeeProfileIds(companyId, authorization.userId);
+  if (!managedProfileIds.length) {
+    redirect("/unauthorized?page=attendance_integrity&action=view");
+  }
+  return {
+    authorization,
+    companyId,
+    canEdit: true,
+    managedProfileIds
+  };
+}
+
 export default async function AttendanceIntegrityPage({
   searchParams
 }: {
-  searchParams?: { tab?: string };
+  searchParams?: { tab?: string; flagId?: string };
 }) {
-  const authorization = await requirePagePermission("attendance_integrity", "view");
-  const companyId = requireCompanyId(authorization);
-  const canEdit = Boolean(authorization.permissions.attendance_integrity?.canEdit);
+  const { companyId, canEdit, managedProfileIds } = await resolveIntegrityAccess();
   const tab = searchParams?.tab === "flags" ? "flags" : "reviews";
+  const highlightFlagId = searchParams?.flagId ?? "";
 
   let flags: FlagRow[] = [];
   let reviews: ReviewRow[] = [];
@@ -95,6 +148,11 @@ export default async function AttendanceIntegrityPage({
     } else {
       flags = (flagsResult.data ?? []) as FlagRow[];
       reviews = (reviewsResult.data ?? []) as ReviewRow[];
+      if (managedProfileIds) {
+        const allowed = new Set(managedProfileIds);
+        flags = flags.filter((row) => row.profile_id && allowed.has(row.profile_id));
+        reviews = reviews.filter((row) => allowed.has(row.profile_id));
+      }
     }
   }
 
@@ -102,14 +160,22 @@ export default async function AttendanceIntegrityPage({
     <AppShell active="reports" pageCode="attendance_integrity">
       <PageHead
         title="Attendance Integrity"
-        subtitle="Review flagged GPS / biometric location mismatches and support selfie packages. Punch coordinates and server times are not editable."
+        subtitle={
+          managedProfileIds
+            ? "Review location flags for your team. Check punch GPS and support evidence before approving."
+            : "Review flagged GPS / biometric location mismatches and support selfie packages. Punch coordinates and server times are not editable."
+        }
       />
       {loadError ? <div className="panel"><p className="subtle">{loadError}</p></div> : null}
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>Queue</h2>
-            <p className="subtle">Managers and HR with Attendance Integrity edit access can approve support evidence.</p>
+            <h2>{managedProfileIds ? "My team flags" : "Queue"}</h2>
+            <p className="subtle">
+              {managedProfileIds
+                ? "You receive email when a reportee is flagged. Open a flag to check their location."
+                : "Managers and HR with Attendance Integrity edit access can approve support evidence."}
+            </p>
           </div>
           <div className="button-row">
             <a className={`button ${tab === "reviews" ? "" : "secondary"}`} href="/attendance/integrity?tab=reviews">
@@ -158,18 +224,13 @@ export default async function AttendanceIntegrityPage({
                         <form action={reviewAttendanceLocationPackage} className="form-grid" style={{ minWidth: 220 }}>
                           <input type="hidden" name="review_id" value={row.id} />
                           <label>
-                            Action
-                            <select className="select" name="review_action" defaultValue="approve" required>
-                              <option value="approve">Approve</option>
-                              <option value="return">Return</option>
-                              <option value="reject">Reject</option>
-                            </select>
-                          </label>
-                          <label>
                             Remarks
-                            <input className="field" name="review_remarks" placeholder="Optional for approve" />
+                            <textarea name="review_remarks" rows={2} placeholder="Optional notes" />
                           </label>
-                          <SubmitButton>Save decision</SubmitButton>
+                          <div className="button-row">
+                            <SubmitButton name="decision" value="approved">Approve</SubmitButton>
+                            <SubmitButton className="secondary" name="decision" value="rejected">Reject</SubmitButton>
+                          </div>
                         </form>
                       ) : (
                         <span className="subtle">View only</span>
@@ -177,7 +238,7 @@ export default async function AttendanceIntegrityPage({
                     </td>
                   </tr>
                 )) : (
-                  <tr><td colSpan={7} className="subtle">No pending support packages.</td></tr>
+                  <tr><td colSpan={7} className="empty-cell">No pending support packages.</td></tr>
                 )}
               </tbody>
             </table>
@@ -187,40 +248,36 @@ export default async function AttendanceIntegrityPage({
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Created</th>
                   <th>Date</th>
                   <th>Type</th>
-                  <th>Enrolment</th>
-                  <th>Message</th>
                   <th>Severity</th>
-                  <th>Action</th>
+                  <th>Message</th>
+                  <th>Status</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
-                {flags.length ? flags.map((flag) => (
-                  <tr key={flag.id}>
-                    <td>{formatWhen(flag.created_at)}</td>
-                    <td>{flag.punch_date}</td>
-                    <td>{flag.flag_type.replaceAll("_", " ")}</td>
+                {flags.length ? flags.map((row) => (
+                  <tr key={row.id} className={highlightFlagId === row.id ? "is-selected" : undefined}>
                     <td>
-                      <strong>{flag.enrolment_id}</strong>
-                      <div className="subtle">{flag.profile_type || "--"}</div>
+                      <strong>{row.punch_date}</strong>
+                      <div className="subtle">{formatWhen(row.created_at)}</div>
                     </td>
-                    <td>{flag.message}</td>
-                    <td><StatusPill status={flag.severity} /></td>
+                    <td>{row.flag_type.replaceAll("_", " ")}</td>
+                    <td><StatusPill status={row.severity} /></td>
+                    <td>{row.message}</td>
+                    <td><StatusPill status={row.status} /></td>
                     <td>
                       {canEdit ? (
                         <form action={dismissAttendanceIntegrityFlag}>
-                          <input type="hidden" name="flag_id" value={flag.id} />
-                          <SubmitButton className="button secondary">Dismiss</SubmitButton>
+                          <input type="hidden" name="flag_id" value={row.id} />
+                          <SubmitButton className="secondary">Dismiss</SubmitButton>
                         </form>
-                      ) : (
-                        <span className="subtle">View only</span>
-                      )}
+                      ) : null}
                     </td>
                   </tr>
                 )) : (
-                  <tr><td colSpan={7} className="subtle">No open integrity flags.</td></tr>
+                  <tr><td colSpan={6} className="empty-cell">No open flags.</td></tr>
                 )}
               </tbody>
             </table>

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requirePagePermission } from "@/lib/authorization";
+import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { resolveIntegrityFlag } from "@/lib/biometric/attendance-gps";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -10,13 +10,47 @@ function clean(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
 }
 
+async function assertCanReviewTeamOrIntegrity(companyId: string, userId: string, profileId: string | null) {
+  const authorization = await getAuthorization();
+  if (!authorization) throw new Error("Login required.");
+  if (hasPermission(authorization, "attendance_integrity", "edit")) {
+    return authorization;
+  }
+  if (!profileId || !supabaseAdmin) throw new Error("Not allowed.");
+  const employee = await supabaseAdmin
+    .from("employees")
+    .select("employee_code")
+    .eq("company_id", companyId)
+    .eq("id", profileId)
+    .maybeSingle();
+  const code = employee.data?.employee_code;
+  if (!code) throw new Error("Not allowed.");
+  const linked = await supabaseAdmin
+    .from("profiles")
+    .select("reports_to_user_id")
+    .eq("company_id", companyId)
+    .eq("employee_id", code)
+    .maybeSingle();
+  if (linked.data?.reports_to_user_id !== userId) throw new Error("Not allowed to review this employee.");
+  return authorization;
+}
+
 export async function reviewAttendanceLocationPackage(formData: FormData) {
-  const authorization = await requirePagePermission("attendance_integrity", "edit");
+  const authorization = await getAuthorization();
+  if (!authorization) throw new Error("Login required.");
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
   const reviewId = clean(formData.get("review_id"));
-  const action = clean(formData.get("review_action")).toLowerCase();
+  const actionRaw = clean(formData.get("review_action") || formData.get("decision")).toLowerCase();
+  const action =
+    actionRaw === "approved" || actionRaw === "approve"
+      ? "approve"
+      : actionRaw === "returned" || actionRaw === "return"
+        ? "return"
+        : actionRaw === "rejected" || actionRaw === "reject"
+          ? "reject"
+          : "";
   const remarks = clean(formData.get("review_remarks"));
   if (!reviewId) throw new Error("Review id is required.");
   if (!["approve", "return", "reject"].includes(action)) throw new Error("Choose a valid review action.");
@@ -26,7 +60,7 @@ export async function reviewAttendanceLocationPackage(formData: FormData) {
 
   const existing = await supabaseAdmin
     .from("attendance_location_reviews")
-    .select("id, status, flag_id, company_id")
+    .select("id, status, flag_id, company_id, profile_id")
     .eq("id", reviewId)
     .eq("company_id", companyId)
     .maybeSingle();
@@ -35,6 +69,8 @@ export async function reviewAttendanceLocationPackage(formData: FormData) {
   if (!["pending", "returned"].includes(String(existing.data.status))) {
     throw new Error("This support package has already been decided.");
   }
+
+  await assertCanReviewTeamOrIntegrity(companyId, authorization.userId, existing.data.profile_id as string | null);
 
   const now = new Date().toISOString();
   const status = action === "approve" ? "approved" : action === "return" ? "returned" : "rejected";
@@ -59,12 +95,24 @@ export async function reviewAttendanceLocationPackage(formData: FormData) {
 }
 
 export async function dismissAttendanceIntegrityFlag(formData: FormData) {
-  const authorization = await requirePagePermission("attendance_integrity", "edit");
+  const authorization = await getAuthorization();
+  if (!authorization) throw new Error("Login required.");
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
   const flagId = clean(formData.get("flag_id"));
   if (!flagId) throw new Error("Flag id is required.");
+
+  const flag = await supabaseAdmin
+    .from("attendance_integrity_flags")
+    .select("id, profile_id")
+    .eq("id", flagId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (flag.error) throw new Error(flag.error.message);
+  if (!flag.data) throw new Error("Flag not found.");
+  await assertCanReviewTeamOrIntegrity(companyId, authorization.userId, flag.data.profile_id as string | null);
+
   const now = new Date().toISOString();
   const result = await supabaseAdmin
     .from("attendance_integrity_flags")

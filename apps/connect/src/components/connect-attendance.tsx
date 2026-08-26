@@ -388,18 +388,22 @@ export function ConnectAttendance({ account }: { account: Account }) {
       }
       // Face already verified in the selfie panel — do not rematch on punch (scores can flicker).
 
-      const form = new FormData();
-      form.set("accountId", account.id);
-      form.set("profileType", account.profileType);
-      form.set("action", action);
-      form.set("lat", String(live.lat));
-      form.set("lng", String(live.lng));
-      if (live.accuracyM != null) form.set("accuracyM", String(live.accuracyM));
-      if (live.altitudeM != null) form.set("altitudeM", String(live.altitudeM));
-      form.set("clientCapturedAt", live.capturedAt);
-      form.set("integritySignals", JSON.stringify(integrityPayload()));
-      form.set("faceMatched", "true");
-      const response = await fetch("/api/connect/attendance/punch", { method: "POST", body: form });
+      const response = await fetch("/api/connect/attendance/punch", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          accountId: account.id,
+          profileType: account.profileType,
+          action,
+          lat: live.lat,
+          lng: live.lng,
+          accuracyM: live.accuracyM,
+          altitudeM: live.altitudeM,
+          clientCapturedAt: live.capturedAt,
+          integritySignals: integrityPayload(),
+          faceMatched: true
+        })
+      });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to record punch.");
       setPunchMessage(

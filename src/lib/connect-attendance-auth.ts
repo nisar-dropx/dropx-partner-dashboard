@@ -93,20 +93,24 @@ export async function resolveConnectAttendanceWorker({
   };
 }
 
-export function parseCoordinate(value: FormDataEntryValue | null, label: string) {
+export function parseCoordinate(value: FormDataEntryValue | string | number | null | undefined, label: string) {
   const num = Number(String(value ?? "").trim());
   if (!Number.isFinite(num)) throw new Error(`${label} is required.`);
   return num;
 }
 
-export function parseOptionalNumber(value: FormDataEntryValue | null) {
-  const text = String(value ?? "").trim();
+export function parseOptionalNumber(value: FormDataEntryValue | string | number | null | undefined) {
+  if (value == null || value === "") return null;
+  const text = String(value).trim();
   if (!text) return null;
   const num = Number(text);
   return Number.isFinite(num) ? num : null;
 }
 
-export function parseClientSignals(raw: FormDataEntryValue | null) {
+export function parseClientSignals(raw: FormDataEntryValue | string | Record<string, unknown> | null | undefined) {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
   const text = String(raw ?? "").trim();
   if (!text) return {};
   try {

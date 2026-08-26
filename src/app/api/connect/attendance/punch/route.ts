@@ -19,6 +19,41 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
+type PunchBody = {
+  accountId?: string;
+  profileType?: string;
+  action?: string;
+  lat?: unknown;
+  lng?: unknown;
+  accuracyM?: unknown;
+  altitudeM?: unknown;
+  clientCapturedAt?: unknown;
+  integritySignals?: unknown;
+  faceMatched?: unknown;
+};
+
+async function readPunchBody(request: NextRequest): Promise<PunchBody> {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    const json = (await request.json()) as PunchBody;
+    return json ?? {};
+  }
+  const formData = await request.formData();
+  return {
+    accountId: String(formData.get("accountId") ?? ""),
+    profileType: String(formData.get("profileType") ?? ""),
+    action: String(formData.get("action") ?? ""),
+    lat: formData.get("lat"),
+    lng: formData.get("lng"),
+    accuracyM: formData.get("accuracyM"),
+    altitudeM: formData.get("altitudeM"),
+    clientCapturedAt: formData.get("clientCapturedAt"),
+    integritySignals: formData.get("integritySignals"),
+    faceMatched: formData.get("faceMatched")
+    // selfie file is intentionally ignored — face match happens on device only
+  };
+}
+
 export async function GET(request: NextRequest) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
@@ -88,24 +123,24 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-    const formData = await request.formData();
-    const accountId = String(formData.get("accountId") ?? "").trim();
-    const profileType = String(formData.get("profileType") ?? "").trim();
-    const action = String(formData.get("action") ?? "").trim().toLowerCase();
+    const body = await readPunchBody(request);
+    const accountId = String(body.accountId ?? "").trim();
+    const profileType = String(body.profileType ?? "").trim();
+    const action = String(body.action ?? "").trim().toLowerCase();
     if (!accountId) throw new Error("Account is required.");
     if (action !== "in" && action !== "out") throw new Error("Punch action must be in or out.");
 
-    const lat = parseCoordinate(formData.get("lat"), "Latitude");
-    const lng = parseCoordinate(formData.get("lng"), "Longitude");
+    const lat = parseCoordinate(body.lat as never, "Latitude");
+    const lng = parseCoordinate(body.lng as never, "Longitude");
     if (lat < -90 || lat > 90) throw new Error("Latitude is out of range.");
     if (lng < -180 || lng > 180) throw new Error("Longitude is out of range.");
-    const accuracyM = parseOptionalNumber(formData.get("accuracyM"));
-    const altitudeM = parseOptionalNumber(formData.get("altitudeM"));
-    const clientCapturedAt = String(formData.get("clientCapturedAt") ?? "").trim() || null;
-    const integritySignals = parseIntegritySignals(parseClientSignals(formData.get("integritySignals")));
-    const faceMatched = String(formData.get("faceMatched") ?? "").trim().toLowerCase() === "true";
+    const accuracyM = parseOptionalNumber(body.accuracyM as never);
+    const altitudeM = parseOptionalNumber(body.altitudeM as never);
+    const clientCapturedAt = String(body.clientCapturedAt ?? "").trim() || null;
+    const integritySignals = parseIntegritySignals(parseClientSignals(body.integritySignals as never));
+    const faceMatched = String(body.faceMatched ?? "").trim().toLowerCase() === "true";
     if (!faceMatched) {
-      throw new Error("Selfie must match your profile photo before punching.");
+      throw new Error("Face match required before punching. Capture a selfie in the app circle until match is 60%+.");
     }
 
     const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
@@ -128,7 +163,6 @@ export async function POST(request: NextRequest) {
     });
     const integrity = evaluateIntegrity(integritySignals, accuracyM);
 
-    // Soft-block strong spoof signals on web when client reports them (Flutter will hard-block).
     if (integritySignals.mockLocation === true || integritySignals.developerMode === true) {
       throw new Error(
         "Turn off mock location / developer options before punching. Fake GPS is not allowed."
@@ -192,7 +226,10 @@ export async function POST(request: NextRequest) {
       geofence: {
         status: geofence.status,
         distanceM: geofence.distanceM,
-        radiusM: geofence.radiusM
+        radiusM: geofence.radiusM,
+        stationId: geofence.station?.id ?? null,
+        stationCode: geofence.station?.stationCode ?? null,
+        stationName: geofence.station?.stationName ?? null
       },
       integrity: {
         score: integrity.score,
