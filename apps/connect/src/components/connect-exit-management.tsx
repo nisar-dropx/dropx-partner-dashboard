@@ -70,6 +70,12 @@ function endpoint(account: Account) {
   return peopleFlow ? "/api/connect/exit" : "/api/connect/workforce-resignation";
 }
 
+function timelineState(items: ExitTimelineItem[], index: number) {
+  if (items[index]?.status === "completed") return "complete";
+  const firstOpenIndex = items.findIndex((item) => item.status !== "completed");
+  return index === firstOpenIndex ? "current" : "upcoming";
+}
+
 export function ConnectExitManagement({ account, onBack }: { account: Account; onBack: () => void }) {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState("");
@@ -194,7 +200,10 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
 
       <article className="connect-exit-card">
         <div className="dx-exit-card-heading"><span className="connect-exit-eyebrow">Live tracker</span><h3>Request progress</h3><p>Updates appear here as managers and teams complete their actions.</p></div>
-        <div className="dx-exit-timeline">{exitCase.timeline.length ? exitCase.timeline.map((item, index) => <div className={item.status === "completed" || index < exitCase.timeline.length - 1 ? "complete" : "current"} key={item.id}><i>{item.status === "completed" || index < exitCase.timeline.length - 1 ? <Check /> : <Circle />}</i><span><strong>{item.title}</strong><small>{item.actorName ? `${item.actorName} · ` : ""}{item.createdAt ? new Date(item.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : label(item.status)}</small>{item.note ? <em>{item.note}</em> : null}</span></div>) : <div className="current"><i><Route /></i><span><strong>Submitted for review</strong><small>The receiving team will update this request.</small></span></div>}</div>
+        <div className="dx-exit-timeline">{exitCase.timeline.length ? exitCase.timeline.map((item, index) => {
+          const state = timelineState(exitCase.timeline, index);
+          return <div className={state} key={item.id}><i>{state === "complete" ? <Check /> : <Circle />}</i><span><strong>{item.title}</strong><small>{item.actorName ? `${item.actorName} · ` : ""}{item.createdAt ? new Date(item.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : label(item.status)}</small>{item.note ? <em>{item.note}</em> : null}</span></div>;
+        }) : <div className="current"><i><Route /></i><span><strong>Submitted for review</strong><small>The receiving team will update this request.</small></span></div>}</div>
       </article>
 
       {exitCase.tasks.length ? <article className="connect-exit-card"><div className="dx-exit-card-heading"><span className="connect-exit-eyebrow">Checklist</span><h3>Handover and clearance</h3></div><div className="connect-exit-list">{exitCase.tasks.map((task) => <div key={task.id}><span className={`connect-task-dot ${task.status}`} /><div><strong>{task.name}</strong><small>{task.category} · due {task.due_date ?? "not set"}</small></div><em>{label(task.status)}</em></div>)}</div></article> : null}
