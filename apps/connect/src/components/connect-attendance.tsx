@@ -410,6 +410,8 @@ export function ConnectAttendance({ account }: { account: Account }) {
         `Punch ${action.toUpperCase()} saved${live.stationLabel ? ` at ${live.stationLabel}` : ""}.`
       );
       await onSelfieChange(null);
+      // Refresh shift state immediately so Punch Out unlocks after Punch In.
+      await loadPunchStatus().catch(() => undefined);
       setRefreshKey((value) => value + 1);
     } catch (reason) {
       setPunchError(reason instanceof Error ? reason.message : "Unable to record punch.");
@@ -479,21 +481,31 @@ export function ConnectAttendance({ account }: { account: Account }) {
           <em>{faceMatchLabel}</em>
         </div>
         <div className="dx-gps-actions">
-          <button
-            disabled={punchBusy || Boolean(punchStatus?.shift.open) || outsideZone || zoneUnknown || !faceMatchOk}
-            onClick={() => submitPunch("in")}
-            type="button"
-          >
-            <LogIn /> {punchBusy ? "Saving..." : "Punch In"}
-          </button>
-          <button
-            disabled={punchBusy || !punchStatus?.shift.open || outsideZone || zoneUnknown || !faceMatchOk}
-            onClick={() => submitPunch("out")}
-            type="button"
-          >
-            <LogOut /> {punchBusy ? "Saving..." : "Punch Out"}
-          </button>
+          {punchStatus?.shift.open ? (
+            <button
+              className="dx-gps-primary"
+              disabled={punchBusy || outsideZone || zoneUnknown || !faceMatchOk}
+              onClick={() => submitPunch("out")}
+              type="button"
+            >
+              <LogOut /> {punchBusy ? "Saving..." : "Punch Out"}
+            </button>
+          ) : (
+            <button
+              className="dx-gps-primary"
+              disabled={punchBusy || outsideZone || zoneUnknown || !faceMatchOk}
+              onClick={() => submitPunch("in")}
+              type="button"
+            >
+              <LogIn /> {punchBusy ? "Saving..." : "Punch In"}
+            </button>
+          )}
         </div>
+        <p className="dx-form-hint">
+          {punchStatus?.shift.open
+            ? "You are on shift — capture selfie, then Punch Out."
+            : "Capture selfie first, then Punch In. Punch Out appears after you are on shift."}
+        </p>
         {openFlags.length ? (
           <div className="dx-flag-list">
             {openFlags.map((flag) => (

@@ -3,9 +3,8 @@ import "server-only";
 import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-function peopleOrDashboardReviewUrl() {
-  const people = process.env.PEOPLE_APP_URL?.replace(/\/$/, "");
-  if (people) return `${people}/attendance/integrity`;
+function integrityReviewUrl() {
+  // Flags live on the partner dashboard (Reports → Attendance Integrity), not Connect/People mobile.
   const dashboard = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") || "https://dashboard.dropxlogistics.com";
   return `${dashboard}/attendance/integrity`;
 }
@@ -85,7 +84,7 @@ export async function notifyAttendanceFlagReviewers({
     }
   }
 
-  const reviewUrl = `${peopleOrDashboardReviewUrl()}?tab=flags&flagId=${encodeURIComponent(flagId)}`;
+  const reviewUrl = `${integrityReviewUrl()}?tab=flags&flagId=${encodeURIComponent(flagId)}`;
   const subject = `Attendance location flag · ${workerName}`;
   const body = [
     `${workerName}${workerCode ? ` (${workerCode})` : ""} has an attendance location flag.`,

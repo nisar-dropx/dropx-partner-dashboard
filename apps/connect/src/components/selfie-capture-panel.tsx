@@ -134,7 +134,7 @@ export function SelfieCapturePanel({
     tick().catch(() => undefined);
     const timer = window.setInterval(() => {
       tick().catch(() => undefined);
-    }, 1200);
+    }, 700);
     return () => {
       cancelled = true;
       window.clearInterval(timer);

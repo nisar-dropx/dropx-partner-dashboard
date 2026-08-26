@@ -9289,6 +9289,12 @@ body {
   letter-spacing: -0.006em;
 }
 
+.dx-web-page,
+.connect-page.dx-web-page,
+.dx-web-page .connect-shell {
+  background: var(--one-bg) !important;
+}
+
 .dx-app {
   color: var(--one-ink);
   background:
@@ -9643,10 +9649,15 @@ body {
 .dx-attendance-summary,
 .dx-profile-hero {
   border: 1px solid rgba(255, 255, 255, 0.09);
+  color: #fff;
   background:
-    radial-gradient(circle at 90% 12%, rgba(241, 102, 34, 0.2), transparent 32%),
-    linear-gradient(145deg, var(--one-navy), #101828);
-  box-shadow: 0 16px 40px rgba(16, 24, 40, 0.14);
+    radial-gradient(circle at 90% 12%, rgba(241, 102, 34, 0.22), transparent 32%),
+    linear-gradient(145deg, #121826, #0b1020 55%, #17122a);
+  box-shadow: 0 16px 40px rgba(16, 24, 40, 0.22);
+}
+
+.dx-attendance-summary i {
+  background: #fff;
 }
 
 .dx-attendance-summary span strong,
@@ -10619,10 +10630,11 @@ img.dx-selfie-live {
 }
 .dx-gps-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 10px;
 }
-.dx-gps-actions > button {
+.dx-gps-actions > button,
+.dx-gps-primary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -10635,10 +10647,12 @@ img.dx-selfie-live {
   font-size: 13px;
   font-weight: 700;
 }
-.dx-gps-actions > button:disabled {
+.dx-gps-actions > button:disabled,
+.dx-gps-primary:disabled {
   opacity: 0.45;
 }
-.dx-gps-actions > button svg {
+.dx-gps-actions > button svg,
+.dx-gps-primary svg {
   width: 16px;
   height: 16px;
 }

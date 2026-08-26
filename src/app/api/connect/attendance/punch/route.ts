@@ -138,7 +138,8 @@ export async function POST(request: NextRequest) {
     const altitudeM = parseOptionalNumber(body.altitudeM as never);
     const clientCapturedAt = String(body.clientCapturedAt ?? "").trim() || null;
     const integritySignals = parseIntegritySignals(parseClientSignals(body.integritySignals as never));
-    const faceMatched = String(body.faceMatched ?? "").trim().toLowerCase() === "true";
+    const faceMatched =
+      body.faceMatched === true || String(body.faceMatched ?? "").trim().toLowerCase() === "true";
     if (!faceMatched) {
       throw new Error("Face match required before punching. Capture a selfie in the app circle until match is 60%+.");
     }

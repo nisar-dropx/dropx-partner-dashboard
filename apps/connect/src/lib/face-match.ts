@@ -25,8 +25,13 @@ type FaceApi = {
 };
 
 const MATCH_PERCENT_REQUIRED = 60;
-/** Euclidean distance mapped to % — 0 → 100%, 0.85 → 0%. Same person is often < 0.45. */
-const MAX_DISTANCE_FOR_0 = 0.85;
+/**
+ * face-api Euclidean distance: same person is commonly 0.3–0.55.
+ * Map so a typical same-face distance (~0.55) lands at the 60% pass line,
+ * 0 → 100%, and weaker matches fall below 60%.
+ */
+const DISTANCE_AT_PASS = 0.55;
+const DISTANCE_AT_ZERO = 0.95;
 const MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/model";
 const SCRIPT_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/dist/face-api.min.js";
 
@@ -34,8 +39,15 @@ let modelsReady: Promise<FaceApi> | null = null;
 const profileDescriptorCache = new Map<string, Float32Array>();
 
 function toPercentFromDistance(distance: number) {
-  const raw = ((MAX_DISTANCE_FOR_0 - distance) / MAX_DISTANCE_FOR_0) * 100;
-  return Math.max(0, Math.min(100, Math.round(raw)));
+  if (distance <= DISTANCE_AT_PASS) {
+    // 0 → 100%, DISTANCE_AT_PASS → 60%
+    const raw = 100 - (distance / DISTANCE_AT_PASS) * (100 - MATCH_PERCENT_REQUIRED);
+    return Math.max(MATCH_PERCENT_REQUIRED, Math.min(100, Math.round(raw)));
+  }
+  // DISTANCE_AT_PASS → 60%, DISTANCE_AT_ZERO → 0%
+  const span = DISTANCE_AT_ZERO - DISTANCE_AT_PASS;
+  const raw = MATCH_PERCENT_REQUIRED - ((distance - DISTANCE_AT_PASS) / span) * MATCH_PERCENT_REQUIRED;
+  return Math.max(0, Math.min(MATCH_PERCENT_REQUIRED, Math.round(raw)));
 }
 
 function loadScript(src: string) {
@@ -126,9 +138,10 @@ function mirrorCanvas(image: HTMLImageElement | HTMLCanvasElement | HTMLVideoEle
 
 async function descriptorFrom(
   faceapi: FaceApi,
-  input: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement
+  input: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement,
+  inputSize = 320
 ) {
-  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.35 });
+  const options = new faceapi.TinyFaceDetectorOptions({ inputSize, scoreThreshold: 0.3 });
   const detection = await faceapi
     .detectSingleFace(input, options)
     .withFaceLandmarks()
@@ -139,13 +152,18 @@ async function descriptorFrom(
 async function bestDistance(
   faceapi: FaceApi,
   profileDesc: Float32Array,
-  live: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement
+  live: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement,
+  { quick = false }: { quick?: boolean } = {}
 ) {
-  const direct = await descriptorFrom(faceapi, live);
-  const mirrored = await descriptorFrom(faceapi, mirrorCanvas(live));
+  const inputSize = quick ? 224 : 320;
+  const direct = await descriptorFrom(faceapi, live, inputSize);
   let best = Number.POSITIVE_INFINITY;
   if (direct) best = Math.min(best, faceapi.euclideanDistance(profileDesc, direct));
-  if (mirrored) best = Math.min(best, faceapi.euclideanDistance(profileDesc, mirrored));
+  // Mirror only when needed — doubles work and made live % feel stuck.
+  if (!Number.isFinite(best) || best > DISTANCE_AT_PASS) {
+    const mirrored = await descriptorFrom(faceapi, mirrorCanvas(live), inputSize);
+    if (mirrored) best = Math.min(best, faceapi.euclideanDistance(profileDesc, mirrored));
+  }
   return best;
 }
 
@@ -187,7 +205,8 @@ export async function matchLiveFrameToProfile(
         engine: "face-api"
       };
     }
-    const distance = await bestDistance(faceapi, profileDesc, input);
+    const quick = "readyState" in input; // live video preview — faster path
+    const distance = await bestDistance(faceapi, profileDesc, input, { quick });
     if (!Number.isFinite(distance)) {
       return {
         ok: false,
@@ -201,12 +220,12 @@ export async function matchLiveFrameToProfile(
     const ok = percent >= MATCH_PERCENT_REQUIRED;
     return {
       ok,
-      score: Math.max(0, 1 - distance / MAX_DISTANCE_FOR_0),
+      score: Math.max(0, Math.min(1, 1 - distance / DISTANCE_AT_ZERO)),
       percent,
       engine: "face-api",
       reason: ok
         ? `Face match ${percent}%`
-        : `Face match ${percent}% (need ${MATCH_PERCENT_REQUIRED}%+). Hold steady and face the camera.`
+        : `Face match ${percent}% (need ${MATCH_PERCENT_REQUIRED}%+). Update an old profile photo if stuck, or hold steady facing the camera.`
     };
   } catch (error) {
     return {
