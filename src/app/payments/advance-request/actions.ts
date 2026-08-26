@@ -11,7 +11,7 @@ function value(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
 }
 
-function finish(params: { error?: string; notice?: string }) {
+function finish(params: { error?: string; notice?: string }): never {
   redirect(`/payments/advance-request?${new URLSearchParams(params).toString()}`);
 }
 
