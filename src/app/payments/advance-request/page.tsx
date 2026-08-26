@@ -1,15 +1,18 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
+import { AdvanceRequestInlineActions } from "@/components/advance-request-inline-actions";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
 import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDateTime } from "@/lib/date-format";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
-import { approveAdvanceRequest, rejectAdvanceRequest } from "./actions";
+import { workforceTable, type WorkforceProfileType } from "@/lib/workforce-profiles";
 
 type AdvanceRequestRow = {
   id: string;
+  profile_type: WorkforceProfileType;
+  account_id: string;
   account_code: string | null;
   requester_name: string | null;
   station_code: string | null;
@@ -23,10 +26,59 @@ type AdvanceRequestRow = {
   updated_at: string;
 };
 
+type EmployeeDesignationRow = {
+  id: string;
+  designations?: { name: string | null } | Array<{ name: string | null }> | null;
+};
+
 const openStatuses = new Set(["submitted", "in_review"]);
 
 function statusLabel(value: string) {
   return value.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+}
+
+function firstRelation<T>(value: T | T[] | null | undefined) {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+async function loadExactDesignations(companyId: string, requests: AdvanceRequestRow[]) {
+  const designations = new Map<string, string>();
+  if (!supabaseAdmin) return designations;
+
+  const employeeIds = requests.filter((request) => request.profile_type === "employee").map((request) => request.account_id);
+  if (employeeIds.length) {
+    const result = await supabaseAdmin
+      .from("employees")
+      .select("id, designations ( name )")
+      .eq("company_id", companyId)
+      .in("id", employeeIds);
+    if (!result.error) {
+      ((result.data ?? []) as unknown as EmployeeDesignationRow[]).forEach((row) => {
+        const name = firstRelation(row.designations)?.name?.trim();
+        if (name) designations.set(`employee:${row.id}`, name);
+      });
+    }
+  }
+
+  const profileTypes = Array.from(new Set(requests.map((request) => request.profile_type).filter((type) => type !== "employee")));
+  const results = await Promise.all(profileTypes.map(async (profileType) => {
+    const accountIds = requests.filter((request) => request.profile_type === profileType).map((request) => request.account_id);
+    const result = await supabaseAdmin!
+      .from(workforceTable(profileType))
+      .select("id, designation")
+      .eq("company_id", companyId)
+      .in("id", accountIds);
+    return { profileType, result };
+  }));
+  results.forEach(({ profileType, result }) => {
+    if (result.error) return;
+    ((result.data ?? []) as Array<{ id: string; designation: string | null }>).forEach((row) => {
+      const designation = row.designation?.trim();
+      if (designation) designations.set(`${profileType}:${row.id}`, designation);
+    });
+  });
+
+  return designations;
 }
 
 export const dynamic = "force-dynamic";
@@ -50,7 +102,7 @@ export default async function AdvanceRequestPage({
   } else {
     let query = supabaseAdmin
       .from("payment_advance_requests")
-      .select("id, account_code, requester_name, station_code, designation, amount, purpose, status, approved_amount, decision_comment, requested_at, updated_at")
+      .select("id, profile_type, account_id, account_code, requester_name, station_code, designation, amount, purpose, status, approved_amount, decision_comment, requested_at, updated_at")
       .eq("company_id", companyId)
       .order("requested_at", { ascending: false });
     if (status === "pending") query = query.in("status", ["submitted", "in_review"]);
@@ -59,6 +111,7 @@ export default async function AdvanceRequestPage({
     requests = (result.data ?? []) as AdvanceRequestRow[];
     error = result.error?.message ?? null;
   }
+  const exactDesignations = await loadExactDesignations(companyId, requests);
 
   return (
     <AppShell active="Advance Request" pageCode="advance_requests">
@@ -82,16 +135,11 @@ export default async function AdvanceRequestPage({
         <div className="table-wrap"><table className="advance-request-table"><thead><tr><th>Requester</th><th>Designation</th><th>Station</th><th>Requested Amt</th><th>Purpose</th><th>Status</th><th>Requested</th><th>Approved Amt</th><th>Remarks</th><th>Action</th></tr></thead>
           <tbody>{requests.length ? requests.map((request) => <tr key={request.id}>
             <td><strong>{request.requester_name || request.account_code || "-"}</strong>{request.requester_name && request.account_code ? <div className="subtle">{request.account_code}</div> : null}</td>
-            <td>{request.designation || "-"}</td>
+            <td>{exactDesignations.get(`${request.profile_type}:${request.account_id}`) || request.designation || "-"}</td>
             <td>{request.station_code || "-"}</td><td>Rs {Number(request.amount).toLocaleString("en-IN")}</td><td>{request.purpose}</td>
             <td><StatusPill status={statusLabel(request.status)} /></td><td>{formatDashboardDateTime(request.requested_at)}</td>
             {openStatuses.has(request.status) ? <>
-              <td colSpan={3} className="advance-request-inline-cell"><form className="advance-request-inline-form">
-                <input name="requestId" type="hidden" value={request.id} />
-                <input aria-label={`Approved amount for ${request.requester_name || request.account_code || "request"}`} className="field" defaultValue={request.amount} min="0.01" name="approvedAmount" placeholder="Approved amt" step="0.01" type="number" />
-                <input aria-label={`Remarks for ${request.requester_name || request.account_code || "request"}`} className="field" maxLength={500} name="comment" placeholder="Remarks (required to reject)" />
-                <div className="advance-request-inline-actions"><button className="button compact payment-approve-button" formAction={approveAdvanceRequest}>Approve</button><button className="button compact danger" formAction={rejectAdvanceRequest}>Reject</button></div>
-              </form></td>
+              <td colSpan={3} className="advance-request-inline-cell"><AdvanceRequestInlineActions requestId={request.id} requestedAmount={Number(request.amount)} requesterLabel={request.requester_name || request.account_code || "request"} /></td>
             </> : <><td>{request.approved_amount == null ? "-" : `Rs ${Number(request.approved_amount).toLocaleString("en-IN")}`}</td><td>{request.decision_comment || "-"}</td><td>-</td></>}
           </tr>) : <tr><td className="empty-cell" colSpan={10}>No advance requests found.</td></tr>}</tbody>
         </table></div>

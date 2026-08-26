@@ -13736,6 +13736,26 @@ tbody tr:hover td {
   min-width: 0;
 }
 
+.advance-request-amount-control {
+  display: grid;
+  gap: 5px;
+}
+
+.advance-request-full-amount {
+  align-items: center;
+  color: #475569;
+  cursor: pointer;
+  display: flex;
+  font-size: 11px;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.advance-request-full-amount input {
+  accent-color: #16a34a;
+  margin: 0;
+}
+
 .advance-request-inline-actions {
   display: flex;
   gap: 6px;
