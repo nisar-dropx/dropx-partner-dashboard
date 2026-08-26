@@ -1,6 +1,7 @@
 import "server-only";
 
 import { supabaseAdmin } from "./supabase-admin";
+import { canUseAvailableManagerChain } from "./leave-approval-chain";
 
 export type LeaveWorkerType = "employee" | "contractor";
 export type LeaveApprovalStep = {
@@ -15,6 +16,10 @@ export type WorkforceLeaveEntitlement = {
   code: string;
   color: string;
   annual_allowance: number;
+  is_paid: boolean;
+  balance_mode: "annual_balance" | "unlimited_unpaid";
+  attendance_code: string;
+  attendance_label: string;
   rule_id: string;
   scope_type: "company" | "location" | "designation" | "location_designation";
 };
@@ -156,7 +161,13 @@ export async function resolveWorkforceLeaveApproval({ companyId, workerId, worke
       .eq("relationship_type", "solid_line").eq("is_primary", true)
       .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`)
       .order("effective_from", { ascending: false }).limit(1).maybeSingle();
-    if (relationshipResult.error || !relationshipResult.data) throw new Error(`Reporting manager level ${level} is not configured for your profile.`);
+    if (relationshipResult.error) throw new Error(relationshipResult.error.message);
+    if (!relationshipResult.data) {
+      // Policies define the maximum approval depth. A valid shorter hierarchy uses
+      // every available manager instead of blocking the worker at a missing upper level.
+      if (canUseAvailableManagerChain(level, steps.length)) break;
+      throw new Error(`Reporting manager level ${level} is not configured for your profile.`);
+    }
     const managerAssignment = await db().from("hr_work_assignments")
       .select("id,engagement_id,position_title,effective_from,effective_to")
       .eq("company_id", companyId).eq("id", relationshipResult.data.manager_assignment_id).maybeSingle();

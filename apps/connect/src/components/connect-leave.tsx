@@ -5,7 +5,17 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { AppAccount } from "./connect-profile-app";
 
 type LeaveTab = "request" | "history";
-type LeaveType = { id: string; name: string; code: string; allowance: number; used: number; pending: number; available: number };
+type LeaveType = {
+  id: string;
+  name: string;
+  code: string;
+  allowance: number | null;
+  used: number;
+  pending: number;
+  available: number | null;
+  isPaid: boolean;
+  balanceMode: "annual_balance" | "unlimited_unpaid";
+};
 type LeaveRequest = { id: string; leaveType: string; fromDate: string; toDate: string; days: number; reason: string; status: string; reviewerNote?: string | null };
 type LeaveData = { year: number; types: LeaveType[]; requests: LeaveRequest[]; summary: { available: number; pending: number } };
 
@@ -71,7 +81,11 @@ export function ConnectLeave({ account }: { account: AppAccount }) {
 
   return (
     <section className="dx-leave">
-      <h1>Leave</h1>
+      <header className="dx-page-intro">
+        <small>Time off</small>
+        <h1>Leave</h1>
+        <p>Plan time away and follow every request.</p>
+      </header>
       <div className="dx-leave-summary">
         <div><i><CalendarDays /></i><span><small>Available</small><strong>{loading ? "—" : data?.summary.available ?? 0}</strong></span></div>
         <div><i><Clock3 /></i><span><small>Pending</small><strong>{loading ? "—" : data?.summary.pending ?? 0}</strong></span></div>
@@ -91,10 +105,12 @@ export function ConnectLeave({ account }: { account: AppAccount }) {
             Leave type
             <select disabled={!leaveMasterReady || submitting} onChange={(event) => setLeaveTypeId(event.target.value)} value={leaveTypeId}>
               <option value="">{leaveMasterReady ? "Select leave type" : "No active leave types"}</option>
-              {(data?.types ?? []).map((type) => <option key={type.id} value={type.id}>{type.name} · {type.available} available</option>)}
+              {(data?.types ?? []).map((type) => <option key={type.id} value={type.id}>{type.name} · {type.balanceMode === "unlimited_unpaid" ? "Unpaid" : `${type.available} available`}</option>)}
             </select>
           </label>
-          {selectedType ? <p className="dx-leave-balance">{selectedType.allowance} yearly · {selectedType.used} used · {selectedType.pending} pending</p> : null}
+          {selectedType ? <p className="dx-leave-balance">{selectedType.balanceMode === "unlimited_unpaid"
+            ? `Unpaid leave · No balance limit · ${selectedType.pending} pending`
+            : `${selectedType.allowance} yearly · ${selectedType.used} used · ${selectedType.pending} pending`}</p> : null}
           {!leaveMasterReady ? <p>No active leave type is available. HR can enable one in Leave Policy.</p> : null}
           <div className="dx-leave-dates">
             <label>From date<input min={minimumDate} onChange={(event) => setFromDate(event.target.value)} type="date" value={fromDate} /></label>

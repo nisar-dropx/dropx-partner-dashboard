@@ -64,7 +64,7 @@ export function ConnectAdvances({ account }: { account: Account }) {
   }
 
   return <section className="dx-advances">
-    <header><div className="dx-advance-title"><i><IndianRupee /></i><h1>Advances</h1></div><button disabled={!eligibleForAdvance || loading} onClick={() => setShowForm(true)}><Plus />New request</button></header>
+    <header><div className="dx-advance-title"><i><IndianRupee /></i><span><small className="dx-page-eyebrow">My pay</small><h1>Advances</h1><p>Request and track salary advances.</p></span></div><button disabled={!eligibleForAdvance || loading} onClick={() => setShowForm(true)}><Plus />New request</button></header>
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
     {!loading && !eligibleForAdvance ? <div className="dx-alert info">Advance requests are available only when Profile status is Active.</div> : null}

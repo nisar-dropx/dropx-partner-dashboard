@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { resolveWorkforceLeaveApproval, resolveWorkforceLeaveEntitlements, type LeaveWorkerType } from "../../../../src/lib/connect-leave-data";
+import { notifyConnectLeaveSubmitted } from "../../../../src/lib/connect-leave-notifications";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
@@ -59,9 +60,29 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType) {
       .reduce((total, request) => total + overlapDays(request.start_date, request.end_date, yearStart, yearEnd), 0);
     const pending = (requestResult.data ?? []).filter((request) => request.leave_type_id === leaveType.leave_type_id && request.status === "pending")
       .reduce((total, request) => total + overlapDays(request.start_date, request.end_date, yearStart, yearEnd), 0);
-    return { id: leaveType.leave_type_id, name: leaveType.name, code: leaveType.code, allowance: leaveType.annual_allowance, color: leaveType.color, used: approved, pending, available: Math.max(0, leaveType.annual_allowance - approved) };
+    const tracksBalance = leaveType.balance_mode === "annual_balance";
+    return {
+      id: leaveType.leave_type_id,
+      name: leaveType.name,
+      code: leaveType.code,
+      allowance: tracksBalance ? leaveType.annual_allowance : null,
+      color: leaveType.color,
+      used: approved,
+      pending,
+      available: tracksBalance ? Math.max(0, leaveType.annual_allowance - approved) : null,
+      isPaid: leaveType.is_paid,
+      balanceMode: leaveType.balance_mode
+    };
   });
-  return { year, types, requests, summary: { available: types.reduce((total, leaveType) => total + leaveType.available, 0), pending: requests.filter((request) => request.status === "pending").length } };
+  return {
+    year,
+    types,
+    requests,
+    summary: {
+      available: types.reduce((total, leaveType) => total + (leaveType.available ?? 0), 0),
+      pending: requests.filter((request) => request.status === "pending").length
+    }
+  };
 }
 
 export async function GET(request: Request) {
@@ -102,8 +123,10 @@ export async function POST(request: Request) {
     if (overlapResult.error || balanceResult.error) throw new Error(overlapResult.error?.message ?? balanceResult.error?.message ?? "Unable to validate leave.");
     if (overlapResult.data?.length) throw new Error("A pending or approved request already overlaps these dates.");
     const committedDays = (balanceResult.data ?? []).reduce((total, item) => total + overlapDays(item.start_date, item.end_date, `${fromDate.slice(0, 4)}-01-01`, `${fromDate.slice(0, 4)}-12-31`), 0);
-    const availableDays = Math.max(0, leaveType.annual_allowance - committedDays);
-    if (days > availableDays) throw new Error(`Only ${availableDays} ${leaveType.name} day(s) are available.`);
+    if (leaveType.balance_mode === "annual_balance") {
+      const availableDays = Math.max(0, leaveType.annual_allowance - committedDays);
+      if (days > availableDays) throw new Error(`Only ${availableDays} ${leaveType.name} day(s) are available.`);
+    }
 
     const approval = await resolveWorkforceLeaveApproval({ companyId: account.companyId, workerId: account.id, workerType: type, days });
     let requestId = "";
@@ -141,10 +164,17 @@ export async function POST(request: Request) {
       if (createResult.error) throw new Error(createResult.error.message);
       requestId = String(createResult.data ?? "");
     }
+    let notification: Awaited<ReturnType<typeof notifyConnectLeaveSubmitted>> | null = null;
+    if (!approval.direct) {
+      try { notification = await notifyConnectLeaveSubmitted({ companyId: account.companyId, requestId }); }
+      catch (error) { notification = { status: "failed", error: error instanceof Error ? error.message : "Email delivery failed." }; }
+    }
     return NextResponse.json({
       ok: true,
       requestId,
-      notice: approval.direct ? "Time off recorded. No approval is required for this top-level assignment." : `Request submitted through ${approval.policyName}.`
+      notice: approval.direct
+        ? "Time off recorded. No approval is required for this top-level assignment."
+        : `${`Request submitted through ${approval.policyName}.`}${notification?.status === "sent" ? " Your manager was notified by email." : notification?.error ? ` Email warning: ${notification.error}` : ""}`
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to submit time off." }, { status: 400 });

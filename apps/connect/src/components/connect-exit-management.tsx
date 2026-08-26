@@ -50,6 +50,9 @@ type Payload = {
   destination: string;
   policy: { resignation_notice_days: number; withdrawal_allowed: boolean };
   reasons: Array<{ id: string; name: string; comment_required: boolean }>;
+  approvalRoute: Array<{ stepOrder: number; stepName: string; approverName: string; detail: string }>;
+  approvalRouteReady: boolean;
+  approvalRouteError: string;
   exitCase: ExitCase | null;
 };
 
@@ -71,8 +74,9 @@ function endpoint(account: Account) {
 }
 
 function timelineState(items: ExitTimelineItem[], index: number) {
-  if (items[index]?.status === "completed") return "complete";
-  const firstOpenIndex = items.findIndex((item) => item.status !== "completed");
+  if (["completed", "approved", "skipped"].includes(items[index]?.status)) return "complete";
+  if (items[index]?.status === "rejected") return "rejected";
+  const firstOpenIndex = items.findIndex((item) => !["completed", "approved", "skipped"].includes(item.status));
   return index === firstOpenIndex ? "current" : "upcoming";
 }
 
@@ -187,8 +191,12 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
       <label>Requested last working date *<input name="requested_last_working_date" type="date" min={minDate} max={new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10)} defaultValue={suggested.toISOString().slice(0, 10)} required />{data.policy.resignation_notice_days ? <small>Configured notice period: {data.policy.resignation_notice_days} days</small> : null}</label>
       {data.flow === "people" ? <label>Comments<textarea name="comments" placeholder="Share any details the reviewers should know" /></label> : <label>Reason *<textarea minLength={5} name="reason_details" placeholder="Briefly explain your reason" required /></label>}
       {data.flow === "people" ? <div className="dx-exit-contact-grid"><label>Personal email<input name="personal_email" type="email" defaultValue={account.email ?? ""} placeholder="For exit communication" /></label><label>Personal mobile<input name="personal_mobile" inputMode="tel" placeholder="For exit communication" /></label></div> : null}
+      {data.flow === "people" ? <div className="dx-exit-route-preview" aria-label="Configured approval route">
+        <div><span className="connect-exit-eyebrow">Approval route</span><strong>{data.approvalRouteReady ? `${data.approvalRoute.length} stage${data.approvalRoute.length === 1 ? "" : "s"}` : "Setup required"}</strong></div>
+        {data.approvalRouteReady ? <ol>{data.approvalRoute.map((step) => <li key={`${step.stepOrder}-${step.stepName}`}><i>{step.stepOrder}</i><span><strong>{step.stepName}</strong><small>{step.approverName} · {step.detail}</small></span></li>)}</ol> : <p role="alert">{data.approvalRouteError || "No approver could be resolved for this profile. Ask the People team to review the reporting hierarchy or Offboarding Masters."}</p>}
+      </div> : null}
       <div className="connect-exit-warning"><strong>Before submitting</strong><span>Your requested date becomes final only after the configured approval and clearance stages are complete.</span></div>
-      <button className="connect-primary" disabled={pending || (data.flow === "people" && !data.reasons.length)} type="submit">{pending ? "Submitting..." : "Submit resignation"}</button>
+      <button className="connect-primary" disabled={pending || (data.flow === "people" && (!data.reasons.length || !data.approvalRouteReady))} type="submit">{pending ? "Submitting..." : "Submit resignation"}</button>
     </form> : null}
 
     {exitCase && !canStart ? <div className="connect-exit-stack">

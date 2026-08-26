@@ -33,3 +33,55 @@ async function notifyEmployeeExit(input: EmployeeExitNotice, eventCode: "CASE_SU
 
 export async function notifyEmployeeExitSubmitted(input: EmployeeExitNotice) { return notifyEmployeeExit(input, "CASE_SUBMITTED"); }
 export async function notifyEmployeeExitWithdrawal(input: EmployeeExitNotice) { return notifyEmployeeExit(input, "WITHDRAWAL_REQUESTED"); }
+
+export async function notifyExitApprovalRequired(input: { companyId: string; caseId: string; approvalStepId: string }) {
+  if (!supabaseAdmin) return;
+  const [{ data: template }, { data: exitCase }, { data: approval }] = await Promise.all([
+    supabaseAdmin.from("hr_exit_notification_templates").select("*").eq("company_id", input.companyId).eq("event_code", "APPROVAL_REQUIRED").eq("is_enabled", true).maybeSingle(),
+    supabaseAdmin.from("hr_exit_cases").select("case_number, requested_last_working_date, personal_email, employees(employee_code, full_name, email)").eq("company_id", input.companyId).eq("id", input.caseId).maybeSingle(),
+    supabaseAdmin.from("hr_exit_approvals").select("id, step_name, assigned_user_id, approver_role_id").eq("company_id", input.companyId).eq("case_id", input.caseId).eq("workflow_step_id", input.approvalStepId).eq("status", "pending").maybeSingle()
+  ]);
+  if (!template || !exitCase || !approval) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const roleQueries = approval.approver_role_id ? await Promise.all([
+    supabaseAdmin.from("hr_access_grants").select("user_id").eq("company_id", input.companyId).eq("role_id", approval.approver_role_id).eq("is_active", true).lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`),
+    supabaseAdmin.from("hr_user_access").select("user_id").eq("company_id", input.companyId).eq("role_id", approval.approver_role_id).eq("is_active", true)
+  ]) : [];
+  const ownerIds = [...new Set([
+    approval.assigned_user_id,
+    ...roleQueries.flatMap((result) => (result.data ?? []).map((row) => row.user_id))
+  ].filter((id): id is string => Boolean(id)))];
+  const { data: owners } = ownerIds.length
+    ? await supabaseAdmin.from("profiles").select("email").eq("company_id", input.companyId).eq("is_active", true).in("id", ownerIds)
+    : { data: [] };
+  const employee = Array.isArray(exitCase.employees) ? exitCase.employees[0] : exitCase.employees;
+  const groups: Record<string, string[]> = {
+    APPROVAL_OWNER: (owners ?? []).map((row) => row.email).filter(Boolean),
+    EMPLOYEE: [exitCase.personal_email, employee?.email].map(String).filter(Boolean),
+    REPORTING_MANAGER: [], HR_TEAM: [], HR_OWNER: [], TASK_OWNER: []
+  };
+  const resolve = (keys: string[], custom: string[]) => Array.from(new Set([...keys.flatMap((key) => groups[key] ?? []), ...custom].map((email) => email.trim().toLowerCase()).filter(Boolean)));
+  const to = resolve(template.to_recipients ?? [], template.custom_to_emails ?? []);
+  const cc = resolve(template.cc_recipients ?? [], template.custom_cc_emails ?? []).filter((email) => !to.includes(email));
+  const values = {
+    case_number: exitCase.case_number,
+    employee_name: employee?.full_name ?? "Employee",
+    employee_code: employee?.employee_code ?? "",
+    requested_last_working_date: exitCase.requested_last_working_date ?? "",
+    last_working_date: exitCase.requested_last_working_date ?? "",
+    approval_step: approval.step_name,
+    approval_decision: "pending"
+  };
+  const subject = fill(template.subject_template, values);
+  const body = fill(template.body_template, values);
+  let status = "sent";
+  let errorMessage: string | null = null;
+  try {
+    if (!to.length) { status = "skipped"; errorMessage = "No active approval owner resolved."; }
+    else await sendConnectEmail({ companyId: input.companyId, to, cc, subject, body });
+  } catch (error) {
+    status = "failed";
+    errorMessage = error instanceof Error ? error.message : "Email failed.";
+  }
+  await supabaseAdmin.from("hr_exit_notification_log").insert({ company_id: input.companyId, case_id: input.caseId, event_code: "APPROVAL_REQUIRED", to_emails: to, cc_emails: cc, subject, status, error_message: errorMessage });
+}

@@ -2,10 +2,12 @@
 
 import {
   AlertTriangle,
+  CalendarDays,
   CalendarClock,
   ChevronRight,
   Clock3,
   Fingerprint,
+  IndianRupee,
   LogIn,
   LogOut,
   PersonStanding,
@@ -34,6 +36,8 @@ type Regularization = {
 type AttendanceRow = {
   date: string;
   status: string;
+  statusLabel?: string | null;
+  statusKind?: "attendance" | "leave";
   inTime: string;
   outTime: string;
   punches: string[];
@@ -104,10 +108,14 @@ function Metric({
 export function ConnectDashboard({
   account,
   onAttendance,
+  onAdvances,
+  onLeave,
   onProfile
 }: {
   account: AppAccount;
   onAttendance: () => void;
+  onAdvances: () => void;
+  onLeave: () => void;
   onProfile: () => void;
 }) {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -188,8 +196,9 @@ export function ConnectDashboard({
 
   const now = new Date();
   const today = attendance.rows.find((row) => row.date === localIsoDate());
-  const present = today?.status.toUpperCase() === "P";
-  const todayStatus = !today ? "No punch" : present ? "Present" : today.status.toUpperCase() === "A" ? "Absent" : "Mis Punch";
+  const todayCode = today?.status.toUpperCase();
+  const present = todayCode === "P";
+  const todayStatus = !today ? "No punch" : today.statusLabel || (present ? "Present" : todayCode === "A" ? "Absent" : "Mis Punch");
   const statusTone = present ? "green" : todayStatus === "Absent" ? "red" : "amber";
   const totalMinutes = attendance.rows.reduce((total, row) => total + workMinutes(row.workHours), 0);
   const totalHours = `${Math.floor(totalMinutes / 60)}:${String(totalMinutes % 60).padStart(2, "0")}`;
@@ -207,12 +216,18 @@ export function ConnectDashboard({
   const firstName = firstNameRaw.charAt(0).toUpperCase() + firstNameRaw.slice(1).toLowerCase();
   const profileStatus = profile.status || account.status || "active";
   const attendanceAllowed = (account.pageAccess ?? ["dashboard", "attendance", "settings"]).includes("attendance");
+  const leaveAllowed = (account.pageAccess ?? ["dashboard", "attendance", "leave", "settings"]).includes("leave");
+  const trackedDays = attendance.summary.present + attendance.summary.absent + attendance.summary.misPunch;
+  const attendanceRate = trackedDays ? Math.round((attendance.summary.present / trackedDays) * 100) : 0;
 
   return <section className="dx-dashboard">
     <header className="dx-dashboard-greeting">
-      <p>{todayLabel}</p>
-      <h1>{greeting}, {firstName}</h1>
-      <span>Here&apos;s your work overview.</span>
+      <div>
+        <small className="dx-page-eyebrow">Today · {todayLabel}</small>
+        <h1>{greeting}, {firstName}</h1>
+        <p>Your workday at a glance.</p>
+      </div>
+      <span className="dx-live-chip"><i /> Live</span>
     </header>
 
     <section className="dx-dashboard-card today">
@@ -226,13 +241,27 @@ export function ConnectDashboard({
       {attendanceAllowed ? <button className="dx-dashboard-link" onClick={onAttendance}>View attendance <ChevronRight /></button> : null}
     </section>
 
-    <section className="dx-dashboard-card">
+    <section className="dx-dashboard-card dx-dashboard-summary-card">
       <header><div><small>This month</small><h2>Summary</h2></div></header>
       <div className="dx-dashboard-metrics">
         <Metric icon={<PersonStanding />} label="PRESENT" value={attendance.summary.present} tone="green" />
         <Metric icon={<UserRoundX />} label="ABSENT" value={attendance.summary.absent} tone="red" />
         <Metric icon={<Clock3 />} label="MIS PUNCH" value={attendance.summary.misPunch} tone="orange" />
         <Metric icon={<Clock3 />} label="TOTAL" value={totalHours} tone="purple" />
+      </div>
+      <div className="dx-month-progress">
+        <span><b>{attendanceRate}%</b><small>Attendance rate</small></span>
+        <i aria-label={`${attendanceRate}% attendance rate`}><b style={{ width: `${attendanceRate}%` }} /></i>
+      </div>
+    </section>
+
+    <section className="dx-dashboard-card dx-dashboard-actions">
+      <header><div><small>Shortcuts</small><h2>Quick actions</h2></div></header>
+      <div>
+        {attendanceAllowed ? <button onClick={onAttendance}><i className="blue"><Fingerprint /></i><span><strong>Attendance</strong><small>View punches</small></span><ChevronRight /></button> : null}
+        {leaveAllowed ? <button onClick={onLeave}><i className="pink"><CalendarDays /></i><span><strong>Time off</strong><small>Request leave</small></span><ChevronRight /></button> : null}
+        <button onClick={onAdvances}><i className="amber"><IndianRupee /></i><span><strong>My pay</strong><small>Advances</small></span><ChevronRight /></button>
+        <button onClick={onProfile}><i className="green"><UserRound /></i><span><strong>Profile</strong><small>Personal details</small></span><ChevronRight /></button>
       </div>
     </section>
 
@@ -260,7 +289,7 @@ export function ConnectDashboard({
       </button>
     </section> : null}
 
-    <button className="dx-dashboard-profile" onClick={onProfile}>
+    <button className="dx-dashboard-profile dx-dashboard-profile-status" onClick={onProfile}>
       <i><UserRound /></i>
       <span><strong>My profile</strong><small><Pill text={profileStatus} tone={profileStatus === "active" ? "green" : "amber"} /> {profileStatus === "active" ? "100% completed" : "View profile status"}</small></span>
       <ChevronRight />

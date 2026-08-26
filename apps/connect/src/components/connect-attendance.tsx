@@ -33,6 +33,8 @@ type Regularization = {
 type Row = {
   date: string;
   status: string;
+  statusLabel?: string | null;
+  statusKind?: "attendance" | "leave";
   inTime: string;
   outTime: string;
   punches: string[];
@@ -93,14 +95,28 @@ function minutes(value: string) {
 function dayStatus(row: Row | undefined, future: boolean) {
   if (future || !row) return "off";
   if (row.status === "A") return "absent";
+  if (row.statusKind === "leave") return "leave";
   if (row.remark.toLowerCase().match(/single|missing/)) return "miss";
   return row.status === "P" ? "present" : "off";
+}
+
+function attendanceLabel(row: Row | undefined) {
+  if (!row) return "No record";
+  if (row.statusLabel) return row.statusLabel;
+  const status = row.status.toUpperCase();
+  if (status === "P") return "Present";
+  if (status === "A") return "Absent";
+  if (status === "WO") return "Weekly off";
+  if (status === "HD") return "Half day";
+  return row.status || "No punch";
 }
 
 function emptyAttendanceRow(date: string): Row {
   return {
     date,
     status: "",
+    statusLabel: null,
+    statusKind: "attendance",
     inTime: "",
     outTime: "",
     punches: [],
@@ -191,7 +207,11 @@ export function ConnectAttendance({ account }: { account: Account }) {
   return (
     <section className="dx-attendance">
       <div className="dx-title-row">
-        <h1>Attendance</h1>
+        <div>
+          <small className="dx-page-eyebrow">My work record</small>
+          <h1>Attendance</h1>
+          <p>Review your shifts, punches and regularization.</p>
+        </div>
         <div className="dx-month-control">
           <button aria-label="Previous month" onClick={() => setMonth(shiftMonth(month, -1))}><ChevronLeft /></button>
           <strong>{monthLabel(month)}</strong>
@@ -266,11 +286,11 @@ export function ConnectAttendance({ account }: { account: Account }) {
                 return <button className={`${dayStatus(row, future)} ${selected?.date === date ? "selected" : ""}`} disabled={future} key={day} onClick={() => !future && setSelected(row ?? emptyAttendanceRow(date))}>{day}</button>;
               })}
             </div>
-            <div className="dx-legend"><span className="present">Present</span><span className="absent">Absent</span><span className="miss">Mis Punch</span><span className="off">Off / Future</span></div>
+            <div className="dx-legend"><span className="present">Present</span><span className="leave">Approved leave</span><span className="absent">Absent</span><span className="miss">Mis Punch</span><span className="off">Off / Future</span></div>
           </div> : null}
           {tab === "list" ? <div className="dx-attendance-list">
             {[...data.rows].sort((left, right) => right.date.localeCompare(left.date)).map((row) => <button key={row.date} onClick={() => { setSelected(row); setTab("calendar"); }}>
-              <header><strong>{row.date.split("-").reverse().join("/")}</strong><em className={dayStatus(row, false)}>{row.status === "P" ? "Present" : row.status === "A" ? "Absent" : row.status}</em></header>
+              <header><strong>{row.date.split("-").reverse().join("/")}</strong><em className={dayStatus(row, false)}>{attendanceLabel(row)}</em></header>
               <span><small>IN</small>{row.inTime || "--:--"}</span><span><small>OUT</small>{row.outTime || "--:--"}</span><span><small>HRS</small>{row.workHours || "00:00"}</span>
             </button>)}
           </div> : null}
@@ -282,11 +302,12 @@ export function ConnectAttendance({ account }: { account: Account }) {
           </div> : null}
         </div>
         {tab === "calendar" && selected ? <div className="dx-selected-day">
-          <header><div><CalendarDays /><strong>{selected.date.split("-").reverse().join("/")}</strong></div><em className={dayStatus(selected, false)}>{selected.status === "P" ? "Present" : selected.status === "A" ? "Absent" : "No punch"}</em></header>
+          <header><div><CalendarDays /><strong>{selected.date.split("-").reverse().join("/")}</strong></div><em className={dayStatus(selected, false)}>{attendanceLabel(selected)}</em></header>
           <div><span><LogIn /><small>IN</small><strong>{selected.inTime || "--:--"}</strong></span><span><LogOut /><small>OUT</small><strong>{selected.outTime || "--:--"}</strong></span><span><Clock3 /><small>WORK</small><strong>{selected.workHours || "00:00"}</strong></span><span><Fingerprint /><small>PUNCHES</small><strong>{selected.punchCount}</strong></span></div>
+          {selected.remark ? <p className="dx-attendance-day-note">{selected.remark}</p> : null}
           <footer>
             {selected.regularization ? <span className={`dx-request-status ${selected.regularization.status}`}>Regularization {selected.regularization.status}</span> : null}
-            {selected.regularization?.status !== "pending" ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>Regularize</button> : null}
+            {selected.regularization?.status !== "pending" && selected.statusKind !== "leave" ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>Regularize</button> : null}
           </footer>
         </div> : null}
       </> : null}
@@ -475,7 +496,7 @@ function RegularizationSheet({
       <form onSubmit={submit}>
         <div className="dx-regularization-day">
           <span><small>DATE</small><strong>{row.date.split("-").reverse().join("/")}</strong></span>
-          <em>{row.status === "P" ? "Present" : row.status === "A" ? "Absent" : "No punch"}</em>
+          <em>{attendanceLabel(row)}</em>
         </div>
         <div className="dx-time-grid">
           <label>Requested IN<input required type="time" value={inTime} onChange={(event) => setInTime(event.target.value)} /></label>

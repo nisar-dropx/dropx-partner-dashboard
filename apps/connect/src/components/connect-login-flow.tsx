@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Bell, CalendarDays, CheckCheck, ChevronRight, CreditCard, Fingerprint, Gauge, IndianRupee, LogOut, Menu, Settings, SwitchCamera, UserRound, UsersRound, X } from "lucide-react";
+import { Bell, CalendarDays, CheckCheck, ChevronRight, CreditCard, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, Settings, ShieldCheck, Sparkles, SwitchCamera, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
 import { AttendanceLocationMonitor } from "./attendance-location-monitor";
@@ -394,6 +394,16 @@ export function ConnectLoginFlow() {
   }
 
   const loggedIn = ["accounts","dashboard","profile","payments","advances","attendance","leave","settings"].includes(step);
+  const screenLabel: Partial<Record<Step, string>> = {
+    accounts: "Accounts",
+    dashboard: "Today",
+    profile: "My profile",
+    payments: "Payments",
+    advances: "Pay advances",
+    attendance: "Attendance",
+    leave: "Time off",
+    settings: "Settings"
+  };
   if (checking) return <div className="dx-auth"><Loader text="" /></div>;
 
   return <div className={`dx-app ${loggedIn ? "logged-in" : ""}`}>
@@ -408,6 +418,7 @@ export function ConnectLoginFlow() {
         {accounts.length > 1 ? <button aria-label="Switch accounts" onClick={() => open("accounts")}><SwitchCamera /></button> : null}
       </div>
       <nav>
+        <small className="dx-nav-label">Workspace</small>
         {allowed(account, "dashboard") ? <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Gauge />Dashboard</button> : null}
         <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />My Profile</button>
         <button aria-expanded={paymentsExpanded} className={`payments-toggle${step === "advances" || step === "earnings" ? " active" : ""}${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard /><span>Payments</span><ChevronRight /></button>
@@ -415,6 +426,7 @@ export function ConnectLoginFlow() {
         {paymentsExpanded ? <button aria-current={step === "earnings" ? "page" : undefined} className={`desktop-subitem${step === "earnings" ? " active" : ""}`} onClick={() => open("earnings")}><IndianRupee />My Earnings</button> : null}
         {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint />Attendance</button> : null}
         {allowed(account, "leave") ? <button aria-current={step === "leave" ? "page" : undefined} className={step === "leave" ? "active" : ""} onClick={() => open("leave")}><CalendarDays />Leave</button> : null}
+        <small className="dx-nav-label">Account</small>
         <button aria-current={step === "settings" ? "page" : undefined} className={step === "settings" ? "active" : ""} onClick={() => open("settings")}><Settings />Settings</button>
       </nav>
       <button className="dx-desktop-signout" onClick={logout}><LogOut />Sign out</button>
@@ -422,7 +434,7 @@ export function ConnectLoginFlow() {
     {loggedIn ? <header className="dx-header">
       <button aria-label="Menu" className={!account ? "dx-menu-unavailable" : ""} disabled={!account} onClick={() => { setDrawer(true); setProfileMenu(false); }}><Menu /></button>
       <Image alt="DropX" height={42} priority src="/dropx-logo.png" width={120} />
-      <span className="dx-header-context"><b>DropX One</b><small>Your work, in one place</small></span>
+      <span className="dx-header-context"><small>DropX One</small><b>{screenLabel[step] || "Workspace"}</b></span>
       <button aria-label="Notifications" className="dx-notification-trigger" disabled={!account} onClick={() => void loadNotifications()}><Bell />{unreadNotifications ? <b>{unreadNotifications > 99 ? "99+" : unreadNotifications}</b> : null}</button>
       <button className="avatar" onClick={() => { setProfileMenu((v) => !v); setNotificationMenu(false); setDrawer(false); }}>{avatar ? <img alt="" src={avatar} /> : <b>{(account?.name || "U")[0]}</b>}</button>
       {notificationMenu ? <aside className="dx-notification-pop">
@@ -438,6 +450,7 @@ export function ConnectLoginFlow() {
     </header> : null}
     {drawer && account ? <><button aria-label="Close menu" className="dx-scrim" onClick={() => setDrawer(false)} /><aside className="dx-drawer">
       <div><Image alt="DropX" height={44} src="/dropx-logo.png" width={126} /><button aria-label="Switch accounts" onClick={() => open("accounts")}><SwitchCamera /></button><button aria-label="Close" onClick={() => setDrawer(false)}><X /></button></div>
+      <section className="dx-drawer-account"><i>{avatar ? <img alt="" src={avatar} /> : <b>{(account.name || "U")[0]}</b>}</i><span><strong>{account.name || account.reference}</strong><small>{account.role || account.reference}</small></span></section>
       <nav>
         {allowed(account, "dashboard") ? <button onClick={() => open("dashboard")}><Gauge />Dashboard<ChevronRight /></button> : null}
         <button onClick={() => open("profile")}><UserRound />My Profile<ChevronRight /></button>
@@ -452,27 +465,54 @@ export function ConnectLoginFlow() {
     </aside></> : null}
 
     {!loggedIn ? <div className="dx-auth">
-      <div className="dx-auth-brand"><Image alt="DropX" height={82} priority src="/dropx-logo.png" width={232} /><h1>Sign in with your mobile number</h1></div>
-      {error ? <div className="dx-alert error">{error}</div> : null}{notice ? <div className="dx-alert success">{notice}</div> : null}
-      {step === "mobile" ? <form autoComplete="off" onSubmit={start}><label>Country code<select value={countryCode} onChange={(e) => setCountryCode(e.target.value)}>{countryCodeOptions.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}</select></label><label>Mobile number<input autoComplete="off" inputMode="tel" name="dropx-mobile-login" onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 15))} placeholder="Enter registered mobile number" value={mobile} /></label><button disabled={pending || mobile.length < 6}>{pending ? "Checking..." : "Continue"}</button></form> : null}
-      {step === "pin" ? <form autoComplete="off" onSubmit={verifyPin}><label>App PIN<input autoComplete="new-password" inputMode="numeric" maxLength={6} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} type="password" value={pin} /></label><button disabled={pending || pin.length !== 6}>{pending ? "Signing in..." : "Sign in"}</button><button className="text" onClick={resetPin} type="button">Reset PIN</button><button className="text" onClick={() => setStep("mobile")} type="button">Change mobile number</button></form> : null}
-      {step === "otp" ? <form onSubmit={(e) => { e.preventDefault(); if (otp.length === 6) setStep("createPin"); }}><label>WhatsApp OTP<input inputMode="numeric" maxLength={6} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} value={otp} /></label><button disabled={otp.length !== 6}>Continue</button></form> : null}
-      {step === "createPin" ? <form onSubmit={savePin}><label>Create app PIN<input inputMode="numeric" maxLength={6} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} type="password" value={pin} /></label><label>Re-enter app PIN<input inputMode="numeric" maxLength={6} onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ""))} type="password" value={confirmPin} /></label><button disabled={pending || pin.length !== 6}>Save PIN</button></form> : null}
-      {step === "unlock" ? <form onSubmit={(e) => { e.preventDefault(); unlock(); }}><div className="dx-unlock"><Fingerprint /><strong>Unlock DropX One</strong><small>Use Face ID or your device security to continue.</small></div><button disabled={pending}>{pending ? "Unlocking..." : "Unlock"}</button><button className="text" onClick={() => { setPin(""); setStep("pin"); }} type="button">Use PIN</button></form> : null}
-    </div> : <main className="dx-content">
+      <section className="dx-auth-brand">
+        <span className="dx-auth-eyebrow"><Sparkles /> One workspace</span>
+        <div className="dx-auth-lockup"><Image alt="DropX" height={82} priority src="/dropx-logo.png" width={232} /><b>ONE</b></div>
+        <h1>Your workday.<br />Beautifully simple.</h1>
+        <p>Attendance, leave, pay and profile—together in one secure place.</p>
+        <div className="dx-auth-highlights">
+          <span><Fingerprint /><b>Live attendance</b></span>
+          <span><ShieldCheck /><b>Secure by design</b></span>
+        </div>
+      </section>
+      <section className="dx-auth-panel">
+        <header><small>DropX One</small><h2>{step === "mobile" ? "Welcome back" : step === "unlock" ? "Good to see you" : "Secure sign in"}</h2><p>{step === "mobile" ? "Continue with your registered mobile number." : "Complete this step to access your workspace."}</p></header>
+        {error ? <div className="dx-alert error">{error}</div> : null}{notice ? <div className="dx-alert success">{notice}</div> : null}
+        {step === "mobile" ? <form autoComplete="off" onSubmit={start}><label>Country code<select value={countryCode} onChange={(e) => setCountryCode(e.target.value)}>{countryCodeOptions.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}</select></label><label>Mobile number<input autoComplete="off" inputMode="tel" name="dropx-mobile-login" onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 15))} placeholder="Enter registered mobile number" value={mobile} /></label><button disabled={pending || mobile.length < 6}>{pending ? "Checking..." : "Continue"}</button></form> : null}
+        {step === "pin" ? <form autoComplete="off" onSubmit={verifyPin}><label>App PIN<input autoComplete="new-password" inputMode="numeric" maxLength={6} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} type="password" value={pin} /></label><button disabled={pending || pin.length !== 6}>{pending ? "Signing in..." : "Sign in"}</button><button className="text" onClick={resetPin} type="button">Reset PIN</button><button className="text" onClick={() => setStep("mobile")} type="button">Change mobile number</button></form> : null}
+        {step === "otp" ? <form onSubmit={(e) => { e.preventDefault(); if (otp.length === 6) setStep("createPin"); }}><label>WhatsApp OTP<input inputMode="numeric" maxLength={6} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} value={otp} /></label><button disabled={otp.length !== 6}>Continue</button></form> : null}
+        {step === "createPin" ? <form onSubmit={savePin}><label>Create app PIN<input inputMode="numeric" maxLength={6} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} type="password" value={pin} /></label><label>Re-enter app PIN<input inputMode="numeric" maxLength={6} onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ""))} type="password" value={confirmPin} /></label><button disabled={pending || pin.length !== 6}>Save PIN</button></form> : null}
+        {step === "unlock" ? <form onSubmit={(e) => { e.preventDefault(); unlock(); }}><div className="dx-unlock"><Fingerprint /><strong>Unlock DropX One</strong><small>Use Face ID or your device security to continue.</small></div><button disabled={pending}>{pending ? "Unlocking..." : "Unlock"}</button><button className="text" onClick={() => { setPin(""); setStep("pin"); }} type="button">Use PIN</button></form> : null}
+        <footer><ShieldCheck /><span>Protected workspace access</span></footer>
+      </section>
+    </div> : <main className="dx-content" data-screen={step}>
       {notice ? <div className="dx-alert success">{notice}<button onClick={() => setNotice("")}><X /></button></div> : null}
       {error ? <div className="dx-alert error">{error}<button onClick={() => setError("")}><X /></button></div> : null}
-      {step === "accounts" ? <section className="dx-accounts"><h1>Choose account</h1>{accounts.map((row) => <button key={accountKey(row)} onClick={() => choose(row)}><i>{row.profilePhotoUrl ? <img alt="" src={row.profilePhotoUrl} /> : <UsersRound />}</i><span><strong>{row.companyName}</strong><em>{row.name || row.reference}</em><small>{row.reference} {row.biometricId ? ` | ${row.biometricId}` : ""}</small></span><ChevronRight /></button>)}</section> : null}
+      {step === "accounts" ? <section className="dx-accounts"><header className="dx-page-intro"><small>Workspace</small><h1>Choose account</h1><p>Continue with the profile you want to use.</p></header>{accounts.map((row) => <button key={accountKey(row)} onClick={() => choose(row)}><i>{row.profilePhotoUrl ? <img alt="" src={row.profilePhotoUrl} /> : <UsersRound />}</i><span><strong>{row.companyName}</strong><em>{row.name || row.reference}</em><small>{row.reference} {row.biometricId ? ` | ${row.biometricId}` : ""}</small></span><ChevronRight /></button>)}</section> : null}
       {account && active(account) && allowed(account, "attendance") ? (
         <AttendanceLocationMonitor account={account} />
       ) : null}
-      {step === "dashboard" && account ? <ConnectDashboard account={account} onAttendance={() => open("attendance")} onProfile={() => open("profile")} /> : null}
+      {step === "dashboard" && account ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onLeave={() => open("leave")} onProfile={() => open("profile")} /> : null}
       {step === "profile" && account ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "advances" && account ? <ConnectAdvances account={account} /> : null}
       {step === "earnings" && account ? <section className="dx-earnings"><header><div className="dx-advance-title"><i><IndianRupee /></i><h1>My Earnings</h1></div></header></section> : null}
       {step === "attendance" && account ? <ConnectAttendance account={account} /> : null}
       {step === "leave" && account ? <ConnectLeave account={account} /> : null}
-      {step === "settings" ? <section className="dx-settings"><h1>Settings</h1><label>Default account<select disabled={pending} value={defaultKey} onChange={(e) => saveDefaultAccount(e.target.value)}><option value="">Select default account</option>{accounts.map((row) => <option key={accountKey(row)} value={accountKey(row)}>{row.companyName} - {row.reference || row.name}</option>)}</select></label><label className="toggle"><span><strong>Enable biometric login</strong><small>Use Face ID or device authentication when available.</small></span><input defaultChecked={localStorage.getItem(biometricKey) === "true"} onChange={(e) => enrollBiometric(e.target.checked)} type="checkbox" /></label><button onClick={resetPin}>Change PIN</button></section> : null}
+      {step === "settings" ? <section className="dx-settings">
+        <header className="dx-page-intro"><small>Personalisation</small><h1>Settings</h1><p>Control sign-in and the account you open first.</p></header>
+        <div className="dx-settings-grid">
+          <section className="dx-setting-card"><i><SwitchCamera /></i><span><strong>Default account</strong><small>Choose the workspace shown after sign in.</small></span><label><span className="sr-only">Default account</span><select disabled={pending} value={defaultKey} onChange={(e) => saveDefaultAccount(e.target.value)}><option value="">Ask me every time</option>{accounts.map((row) => <option key={accountKey(row)} value={accountKey(row)}>{row.companyName} - {row.reference || row.name}</option>)}</select></label></section>
+          <section className="dx-setting-card"><i><Fingerprint /></i><span><strong>Biometric login</strong><small>Use Face ID or device security on this device.</small></span><label className="toggle"><span>Enable biometric login</span><input aria-label="Enable biometric login" defaultChecked={localStorage.getItem(biometricKey) === "true"} onChange={(e) => enrollBiometric(e.target.checked)} type="checkbox" /></label></section>
+          <section className="dx-setting-card security"><i><LockKeyhole /></i><span><strong>App PIN</strong><small>Change your six-digit sign-in PIN securely.</small></span><button onClick={resetPin}>Change PIN <ChevronRight /></button></section>
+        </div>
+      </section> : null}
     </main>}
+    {loggedIn && account ? <nav aria-label="Primary navigation" className="dx-mobile-nav">
+      {allowed(account, "dashboard") ? <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Home /><span>Home</span></button> : null}
+      {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint /><span>Attendance</span></button> : null}
+      {allowed(account, "leave") ? <button aria-current={step === "leave" ? "page" : undefined} className={step === "leave" ? "active" : ""} onClick={() => open("leave")}><CalendarDays /><span>Leave</span></button> : null}
+      <button aria-current={step === "advances" ? "page" : undefined} className={step === "advances" ? "active" : ""} onClick={() => open("advances")}><IndianRupee /><span>Pay</span></button>
+      <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound /><span>Profile</span></button>
+    </nav> : null}
   </div>;
 }
