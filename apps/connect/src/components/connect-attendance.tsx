@@ -317,11 +317,25 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const outsideZone = liveLocation?.inside === false;
   const zoneUnknown = liveLocation != null && liveLocation.inside == null;
 
-  function onSelfieChange(file: File | null) {
+  async function onSelfieChange(file: File | null) {
     if (selfiePreview) URL.revokeObjectURL(selfiePreview);
     setSelfieFile(file);
     setSelfiePreview(file ? URL.createObjectURL(file) : "");
-    setFaceMatchLabel(file ? "Selfie ready · will match to profile on punch" : "Selfie required · matched to profile photo");
+    if (!file) {
+      setFaceMatchLabel("Selfie required · matched to profile photo");
+      return;
+    }
+    setFaceMatchLabel("Checking face match...");
+    const face = await matchSelfieToProfile(file, account.profilePhotoUrl);
+    if (!face.ok && face.percent === 0 && face.reason && !face.reason.includes("Face match")) {
+      setFaceMatchLabel(face.reason);
+      return;
+    }
+    setFaceMatchLabel(
+      face.ok
+        ? `Face match ${face.percent}% · ready to punch`
+        : `Face match ${face.percent}% · need 60%+ (retake)`
+    );
   }
 
   async function submitPunch(action: "in" | "out") {
@@ -342,8 +356,11 @@ export function ConnectAttendance({ account }: { account: Account }) {
         );
       }
       const face = await matchSelfieToProfile(selfieFile, account.profilePhotoUrl);
-      if (!face.ok) throw new Error(face.reason || "Selfie does not match your profile photo.");
-      setFaceMatchLabel("Face matched · selfie is not uploaded");
+      if (!face.ok) {
+        setFaceMatchLabel(`Match ${face.percent}% · need 60%+`);
+        throw new Error(face.reason || `Selfie match ${face.percent}% — below 60%. Retake selfie.`);
+      }
+      setFaceMatchLabel(`Face matched ${face.percent}% · selfie is not uploaded`);
 
       const form = new FormData();
       form.set("accountId", account.id);
@@ -518,7 +535,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
         <SelfieCapturePanel
           onClose={() => setSelfiePanelOpen(false)}
           onCapture={(file) => {
-            onSelfieChange(file);
+            void onSelfieChange(file);
             setSelfiePanelOpen(false);
           }}
         />
