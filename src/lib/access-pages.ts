@@ -54,6 +54,7 @@ export const accessPages = [
   { code: "inbox", name: "Inbox", sort_order: 102 },
   { code: "business_documents", name: "Business Documents", sort_order: 103 },
   { code: "payments", name: "Payments", sort_order: 104 },
+  { code: "advance_requests", name: "Advance Request", sort_order: 105 },
   { code: "expense_requests", name: "Expense Request", sort_order: 105 },
   { code: "payment_requests", name: "Payment Requests", sort_order: 106 },
   { code: "payment_approvals", name: "Payment Approvals", sort_order: 107 },

@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
+    "geist": "1.7.0",
     "lucide-react": "^0.468.0",
     "next": "^14.2.5",
     "nodemailer": "^9.0.3",
