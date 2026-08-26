@@ -26,28 +26,28 @@ type FaceApi = {
 
 const MATCH_PERCENT_REQUIRED = 60;
 /**
- * face-api Euclidean distance: same person is commonly 0.3–0.55.
- * Map so a typical same-face distance (~0.55) lands at the 60% pass line,
- * 0 → 100%, and weaker matches fall below 60%.
+ * face-api descriptor distance (euclidean):
+ * - same person typically ~0.25–0.40
+ * - different people typically > ~0.50–0.60
+ * Pass only when distance is at or under this cap (stricter than the old 0.55 which let friends through).
  */
-const DISTANCE_AT_PASS = 0.55;
-const DISTANCE_AT_ZERO = 0.95;
+const MATCH_DISTANCE_MAX = 0.42;
+/** Distances at/above this map to 0% on the UI meter. */
+const DISTANCE_AT_ZERO = 0.9;
 const MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/model";
 const SCRIPT_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/dist/face-api.min.js";
 
 let modelsReady: Promise<FaceApi> | null = null;
 const profileDescriptorCache = new Map<string, Float32Array>();
 
+/** Honest meter: 0 → 100%, MATCH_DISTANCE_MAX → 60%, DISTANCE_AT_ZERO → 0%. Never floor failed matches to 60%. */
 function toPercentFromDistance(distance: number) {
-  if (distance <= DISTANCE_AT_PASS) {
-    // 0 → 100%, DISTANCE_AT_PASS → 60%
-    const raw = 100 - (distance / DISTANCE_AT_PASS) * (100 - MATCH_PERCENT_REQUIRED);
-    return Math.max(MATCH_PERCENT_REQUIRED, Math.min(100, Math.round(raw)));
+  if (distance <= MATCH_DISTANCE_MAX) {
+    return Math.round(100 - (distance / MATCH_DISTANCE_MAX) * (100 - MATCH_PERCENT_REQUIRED));
   }
-  // DISTANCE_AT_PASS → 60%, DISTANCE_AT_ZERO → 0%
-  const span = DISTANCE_AT_ZERO - DISTANCE_AT_PASS;
-  const raw = MATCH_PERCENT_REQUIRED - ((distance - DISTANCE_AT_PASS) / span) * MATCH_PERCENT_REQUIRED;
-  return Math.max(0, Math.min(MATCH_PERCENT_REQUIRED, Math.round(raw)));
+  const span = DISTANCE_AT_ZERO - MATCH_DISTANCE_MAX;
+  const raw = MATCH_PERCENT_REQUIRED * (1 - (distance - MATCH_DISTANCE_MAX) / span);
+  return Math.max(0, Math.min(MATCH_PERCENT_REQUIRED - 1, Math.round(raw)));
 }
 
 function loadScript(src: string) {
@@ -139,9 +139,9 @@ function mirrorCanvas(image: HTMLImageElement | HTMLCanvasElement | HTMLVideoEle
 async function descriptorFrom(
   faceapi: FaceApi,
   input: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement,
-  inputSize = 320
+  inputSize = 416
 ) {
-  const options = new faceapi.TinyFaceDetectorOptions({ inputSize, scoreThreshold: 0.3 });
+  const options = new faceapi.TinyFaceDetectorOptions({ inputSize, scoreThreshold: 0.4 });
   const detection = await faceapi
     .detectSingleFace(input, options)
     .withFaceLandmarks()
@@ -155,12 +155,14 @@ async function bestDistance(
   live: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement,
   { quick = false }: { quick?: boolean } = {}
 ) {
-  const inputSize = quick ? 224 : 320;
+  // Live preview can be slightly lighter; final capture uses full size.
+  const inputSize = quick ? 320 : 416;
   const direct = await descriptorFrom(faceapi, live, inputSize);
   let best = Number.POSITIVE_INFINITY;
   if (direct) best = Math.min(best, faceapi.euclideanDistance(profileDesc, direct));
-  // Mirror only when needed — doubles work and made live % feel stuck.
-  if (!Number.isFinite(best) || best > DISTANCE_AT_PASS) {
+
+  // Try mirrored frame only if direct is missing or clearly failing — picks correct selfie orientation.
+  if (!Number.isFinite(best) || best > MATCH_DISTANCE_MAX) {
     const mirrored = await descriptorFrom(faceapi, mirrorCanvas(live), inputSize);
     if (mirrored) best = Math.min(best, faceapi.euclideanDistance(profileDesc, mirrored));
   }
@@ -172,7 +174,7 @@ export async function getProfileDescriptor(profilePhotoUrl: string) {
   if (cached) return cached;
   const faceapi = await ensureFaceModels();
   const image = await blobOrUrlToImage(profilePhotoUrl);
-  const descriptor = await descriptorFrom(faceapi, image);
+  const descriptor = await descriptorFrom(faceapi, image, 416);
   if (!descriptor) throw new Error("No face found in your profile photo. Update your profile photo and try again.");
   profileDescriptorCache.set(profilePhotoUrl, descriptor);
   return descriptor;
@@ -205,7 +207,8 @@ export async function matchLiveFrameToProfile(
         engine: "face-api"
       };
     }
-    const quick = "readyState" in input; // live video preview — faster path
+    // Video = live preview; canvas/image/blob = final capture (stricter detector size).
+    const quick = input instanceof HTMLVideoElement;
     const distance = await bestDistance(faceapi, profileDesc, input, { quick });
     if (!Number.isFinite(distance)) {
       return {
@@ -217,7 +220,8 @@ export async function matchLiveFrameToProfile(
       };
     }
     const percent = toPercentFromDistance(distance);
-    const ok = percent >= MATCH_PERCENT_REQUIRED;
+    // Gate on real descriptor distance — not a padded percentage.
+    const ok = distance <= MATCH_DISTANCE_MAX && percent >= MATCH_PERCENT_REQUIRED;
     return {
       ok,
       score: Math.max(0, Math.min(1, 1 - distance / DISTANCE_AT_ZERO)),
@@ -225,7 +229,7 @@ export async function matchLiveFrameToProfile(
       engine: "face-api",
       reason: ok
         ? `Face match ${percent}%`
-        : `Face match ${percent}% (need ${MATCH_PERCENT_REQUIRED}%+). Update an old profile photo if stuck, or hold steady facing the camera.`
+        : `Face match ${percent}% (need ${MATCH_PERCENT_REQUIRED}%+). Only your profile photo should pass — hold steady, face the camera, or update an outdated profile photo.`
     };
   } catch (error) {
     return {
