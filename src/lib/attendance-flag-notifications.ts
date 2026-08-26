@@ -3,10 +3,11 @@ import "server-only";
 import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-function integrityReviewUrl() {
-  // Flags live on the partner dashboard (Reports → Attendance Integrity), not Connect/People mobile.
-  const dashboard = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") || "https://dashboard.dropxlogistics.com";
-  return `${dashboard}/attendance/integrity`;
+function peopleIntegrityReviewUrl() {
+  // Managers review flags on the People surface, not dashboard.dropxlogistics.com.
+  const people = process.env.PEOPLE_APP_URL?.replace(/\/$/, "");
+  if (people) return `${people}/attendance/integrity`;
+  return "https://people.dropxlogistics.com/attendance/integrity";
 }
 
 /** Resolve reporting manager + HR recipients for an attendance integrity flag. */
@@ -84,7 +85,7 @@ export async function notifyAttendanceFlagReviewers({
     }
   }
 
-  const reviewUrl = `${integrityReviewUrl()}?tab=flags&flagId=${encodeURIComponent(flagId)}`;
+  const reviewUrl = `${peopleIntegrityReviewUrl()}?tab=flags&flagId=${encodeURIComponent(flagId)}`;
   const subject = `Attendance location flag · ${workerName}`;
   const body = [
     `${workerName}${workerCode ? ` (${workerCode})` : ""} has an attendance location flag.`,
@@ -93,9 +94,10 @@ export async function notifyAttendanceFlagReviewers({
     `Type: ${flagType.replaceAll("_", " ")}`,
     `Details: ${message}`,
     "",
-    `Review location / support evidence: ${reviewUrl}`,
+    `Open on People to check device location, distance from station, and why they were flagged:`,
+    reviewUrl,
     "",
-    "Please check their punch location and approve or follow up."
+    "Please review and follow up."
   ].join("\n");
 
   const recipients = new Set<string>();

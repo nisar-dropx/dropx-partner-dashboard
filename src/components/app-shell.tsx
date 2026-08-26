@@ -73,7 +73,8 @@ export async function AppShell({ children, active, pageCode }: { children: React
         ...categoryChildren,
         { code: "people_review", label: "Under Review", href: "/people/review" },
         { code: "people_exceptions", label: "Exception", href: "/people/exceptions" },
-        { code: "people_review", label: "Workforce Lifecycle", href: "/people/workforce-lifecycle" }
+        { code: "people_review", label: "Workforce Lifecycle", href: "/people/workforce-lifecycle" },
+        { code: "attendance_integrity", label: "Attendance Integrity", href: "/attendance/integrity" }
       ]
     };
   });

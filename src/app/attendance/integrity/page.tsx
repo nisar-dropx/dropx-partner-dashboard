@@ -25,6 +25,7 @@ type FlagRow = {
   status: string;
   created_at: string;
   details: Record<string, unknown> | null;
+  location_id?: string | null;
 };
 
 type ReviewRow = {
@@ -53,6 +54,61 @@ function formatWhen(value: string | null | undefined) {
     timeStyle: "short",
     timeZone: "Asia/Kolkata"
   }).format(new Date(value));
+}
+
+function asNumber(value: unknown) {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function asText(value: unknown) {
+  if (value == null) return "";
+  const text = String(value).trim();
+  return text || "";
+}
+
+function mapsUrl(lat: number, lng: number) {
+  return `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}`;
+}
+
+function FlagLocationDetails({ details }: { details: Record<string, unknown> | null }) {
+  if (!details) return <span className="subtle">No location details stored on this flag.</span>;
+  const lat = asNumber(details.lat);
+  const lng = asNumber(details.lng);
+  const distanceM = asNumber(details.distanceM);
+  const radiusM = asNumber(details.radiusM);
+  const outsideMinutes = asNumber(details.outsideMinutes) ?? (asNumber(details.outsideMs) != null ? Math.round((asNumber(details.outsideMs) as number) / 60000) : null);
+  const station =
+    asText(details.stationCode) ||
+    asText(details.stationName) ||
+    asText(details.stationLabel) ||
+    "Station";
+  const accuracyM = asNumber(details.accuracyM);
+  const reason = asText(details.reason) || asText(details.flagReason);
+
+  return (
+    <div className="form-grid" style={{ gap: 6 }}>
+      <div>
+        <strong>{station}</strong>
+        <div className="subtle">
+          {distanceM != null ? `${Math.round(distanceM)}m from station` : "Distance unknown"}
+          {radiusM != null ? ` · allowed ${Math.round(radiusM)}m` : " · allowed 50m"}
+          {outsideMinutes != null ? ` · outside ${outsideMinutes} min` : ""}
+        </div>
+      </div>
+      {lat != null && lng != null ? (
+        <div>
+          <div className="subtle">Device GPS {lat.toFixed(5)}, {lng.toFixed(5)}{accuracyM != null ? ` ±${Math.round(accuracyM)}m` : ""}</div>
+          <a href={mapsUrl(lat, lng)} target="_blank" rel="noreferrer">
+            Open device location on map
+          </a>
+        </div>
+      ) : (
+        <div className="subtle">Device coordinates were not captured on this flag.</div>
+      )}
+      {reason ? <div className="subtle">Why flagged: {reason.replaceAll("_", " ")}</div> : null}
+    </div>
+  );
 }
 
 async function loadManagedEmployeeProfileIds(companyId: string, managerUserId: string) {
@@ -114,7 +170,7 @@ export default async function AttendanceIntegrityPage({
   searchParams?: { tab?: string; flagId?: string };
 }) {
   const { companyId, canEdit, managedProfileIds } = await resolveIntegrityAccess();
-  const tab = searchParams?.tab === "flags" ? "flags" : "reviews";
+  const tab = searchParams?.tab === "flags" || searchParams?.flagId ? "flags" : searchParams?.tab === "reviews" ? "reviews" : "flags";
   const highlightFlagId = searchParams?.flagId ?? "";
 
   let flags: FlagRow[] = [];
@@ -127,7 +183,7 @@ export default async function AttendanceIntegrityPage({
     const [flagsResult, reviewsResult] = await Promise.all([
       supabaseAdmin
         .from("attendance_integrity_flags")
-        .select("id, enrolment_id, profile_type, profile_id, punch_date, flag_type, severity, message, status, created_at, details")
+        .select("id, enrolment_id, profile_type, profile_id, punch_date, flag_type, severity, message, status, created_at, details, location_id")
         .eq("company_id", companyId)
         .eq("status", "open")
         .order("created_at", { ascending: false })
@@ -157,32 +213,30 @@ export default async function AttendanceIntegrityPage({
   }
 
   return (
-    <AppShell active="reports" pageCode="attendance_integrity">
+    <AppShell active="onboard" pageCode="attendance_integrity">
       <PageHead
         title="Attendance Integrity"
         subtitle={
           managedProfileIds
-            ? "Review location flags for your team. Check punch GPS and support evidence before approving."
-            : "Review flagged GPS / biometric location mismatches and support selfie packages. Punch coordinates and server times are not editable."
+            ? "People review for your team: see why they were flagged, how far from the station, and open device GPS on the map."
+            : "People review queue for GPS / outside-zone flags and support selfie packages. Check device location and distance from site."
         }
       />
       {loadError ? <div className="panel"><p className="subtle">{loadError}</p></div> : null}
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>{managedProfileIds ? "My team flags" : "Queue"}</h2>
+            <h2>{managedProfileIds ? "My team flags" : "People location flags"}</h2>
             <p className="subtle">
-              {managedProfileIds
-                ? "You receive email when a reportee is flagged. Open a flag to check their location."
-                : "Managers and HR with Attendance Integrity edit access can approve support evidence."}
+              Outside-zone flags open after the phone stays beyond the station radius (default 50m) for more than 30 minutes during a shift.
             </p>
           </div>
           <div className="button-row">
-            <a className={`button ${tab === "reviews" ? "" : "secondary"}`} href="/attendance/integrity?tab=reviews">
-              Support packages ({reviews.length})
-            </a>
             <a className={`button ${tab === "flags" ? "" : "secondary"}`} href="/attendance/integrity?tab=flags">
               Open flags ({flags.length})
+            </a>
+            <a className={`button ${tab === "reviews" ? "" : "secondary"}`} href="/attendance/integrity?tab=reviews">
+              Support packages ({reviews.length})
             </a>
           </div>
         </div>
@@ -194,7 +248,7 @@ export default async function AttendanceIntegrityPage({
                 <tr>
                   <th>Date</th>
                   <th>Enrolment</th>
-                  <th>Location</th>
+                  <th>Device location</th>
                   <th>Selfie</th>
                   <th>Remarks</th>
                   <th>Status</th>
@@ -215,6 +269,9 @@ export default async function AttendanceIntegrityPage({
                     <td>
                       {Number(row.lat).toFixed(5)}, {Number(row.lng).toFixed(5)}
                       <div className="subtle">±{row.accuracy_m == null ? "--" : `${Math.round(Number(row.accuracy_m))}m`}</div>
+                      <a href={mapsUrl(Number(row.lat), Number(row.lng))} target="_blank" rel="noreferrer">
+                        Open map
+                      </a>
                     </td>
                     <td><code>{row.selfie_path.split("/").slice(-1)[0]}</code></td>
                     <td>{row.remarks || "--"}</td>
@@ -249,23 +306,32 @@ export default async function AttendanceIntegrityPage({
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Type</th>
-                  <th>Severity</th>
-                  <th>Message</th>
+                  <th>Person</th>
+                  <th>Why flagged</th>
+                  <th>Device vs station</th>
                   <th>Status</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
                 {flags.length ? flags.map((row) => (
-                  <tr key={row.id} className={highlightFlagId === row.id ? "is-selected" : undefined}>
+                  <tr key={row.id} className={highlightFlagId === row.id ? "is-selected" : undefined} id={row.id}>
                     <td>
                       <strong>{row.punch_date}</strong>
                       <div className="subtle">{formatWhen(row.created_at)}</div>
+                      <div className="subtle">{row.flag_type.replaceAll("_", " ")}</div>
                     </td>
-                    <td>{row.flag_type.replaceAll("_", " ")}</td>
-                    <td><StatusPill status={row.severity} /></td>
-                    <td>{row.message}</td>
+                    <td>
+                      <strong>{row.enrolment_id}</strong>
+                      <div className="subtle">{row.profile_type || "--"}</div>
+                    </td>
+                    <td>
+                      <div>{row.message}</div>
+                      <div className="subtle"><StatusPill status={row.severity} /></div>
+                    </td>
+                    <td>
+                      <FlagLocationDetails details={row.details} />
+                    </td>
                     <td><StatusPill status={row.status} /></td>
                     <td>
                       {canEdit ? (

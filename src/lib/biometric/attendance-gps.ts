@@ -8,7 +8,7 @@ export const APP_GPS_DEVICE_SERIAL = "APP_GPS";
 /** Only used when a station has no radius configured yet (admin should set per station). */
 export const FALLBACK_GEOFENCE_RADIUS_M = 50;
 export const ACCURACY_FLAG_THRESHOLD_M = 100;
-export const OUTSIDE_CONTINUOUS_MS = 10 * 60 * 1000;
+export const OUTSIDE_CONTINUOUS_MS = 30 * 60 * 1000;
 export const SHIFT_REMINDER_MS = [9.5 * 60 * 60 * 1000, 10 * 60 * 60 * 1000] as const;
 export const BIOMETRIC_SAMPLE_WINDOW_MS = 15 * 60 * 1000;
 export const HEARTBEAT_MIN_INTERVAL_MS = 2 * 60 * 1000;

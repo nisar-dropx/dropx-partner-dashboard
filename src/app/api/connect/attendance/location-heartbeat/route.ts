@@ -123,6 +123,11 @@ export async function POST(request: NextRequest) {
 
     let outsideFlagId: string | null = null;
     if (outsideMs >= OUTSIDE_CONTINUOUS_MS) {
+      const outsideMinutes = Math.round(outsideMs / 60000);
+      const stationLabel =
+        geofence.station?.stationCode || geofence.station?.stationName || "station";
+      const distanceLabel = geofence.distanceM != null ? `${Math.round(geofence.distanceM)}m` : "unknown distance";
+      const allowedLabel = geofence.radiusM != null ? `${geofence.radiusM}m` : "50m";
       const flag = await openIntegrityFlag({
         companyId: worker.companyId,
         enrolmentId: worker.enrolmentId,
@@ -132,12 +137,21 @@ export async function POST(request: NextRequest) {
         punchDate: shift.punchDate,
         flagType: "outside_geofence_gt_2h",
         severity: "high",
-        message: `Phone stayed outside the station geofence for more than 10 minutes during the shift.`,
+        message: `Outside ${stationLabel} for ${outsideMinutes} min · device ${distanceLabel} away (allowed ${allowedLabel}).`,
         details: {
           outsideMs,
+          outsideMinutes,
           thresholdMs: OUTSIDE_CONTINUOUS_MS,
+          thresholdMinutes: 30,
           distanceM: geofence.distanceM,
-          radiusM: geofence.radiusM
+          radiusM: geofence.radiusM,
+          lat,
+          lng,
+          accuracyM,
+          stationId: geofence.station?.id ?? sampleLocationId,
+          stationCode: geofence.station?.stationCode ?? null,
+          stationName: geofence.station?.stationName ?? null,
+          reason: "continuous_outside_geofence"
         }
       });
       outsideFlagId = flag.id;
