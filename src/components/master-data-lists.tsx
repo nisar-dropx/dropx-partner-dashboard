@@ -38,6 +38,7 @@ type LocationRow = {
   postal_code: string | null;
   latitude: number | null;
   longitude: number | null;
+  geofence_radius_m?: number | null;
   station_email: string | null;
   station_manager_email: string | null;
   parent_station_id?: string | null;
@@ -485,6 +486,7 @@ export function MasterDataLists({
         "Postal Code": location.postal_code || "",
         Latitude: location.latitude,
         Longitude: location.longitude,
+        "Geofence radius (m)": location.geofence_radius_m ?? "",
         "Contact Email": location.station_email || "",
         Status: location.is_active ? "Active" : "Inactive"
       }));
@@ -492,7 +494,7 @@ export function MasterDataLists({
       worksheet["!cols"] = [
         { wch: 15 }, { wch: 24 }, { wch: 10 }, { wch: 28 }, { wch: 18 }, { wch: 14 },
         { wch: 18 }, { wch: 38 }, { wch: 30 }, { wch: 20 }, { wch: 18 }, { wch: 24 },
-        { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 30 }, { wch: 12 }
+        { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 30 }, { wch: 12 }
       ];
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "Locations");
@@ -567,6 +569,7 @@ export function MasterDataLists({
                         {row.address_line2 ? <span>{row.address_line2}</span> : null}
                         <span className="subtle">{[row.city, row.state, row.postal_code].filter(Boolean).join(", ") || "-"}</span>
                         <span className="subtle">{row.latitude}, {row.longitude}</span>
+                        <span className="subtle">Geofence: {row.geofence_radius_m != null ? `${row.geofence_radius_m} m` : "not set"}</span>
                       </a>
                     ) : (
                       <>
@@ -574,6 +577,8 @@ export function MasterDataLists({
                         {row.address_line2 ? <><br /><span>{row.address_line2}</span></> : null}
                         <br />
                         <span className="subtle">{[row.city, row.state, row.postal_code].filter(Boolean).join(", ") || "-"}</span>
+                        <br />
+                        <span className="subtle">Geofence: {row.geofence_radius_m != null ? `${row.geofence_radius_m} m` : "not set"}</span>
                       </>
                     )}
                   </td>

@@ -62,6 +62,7 @@ export const navItems: NavItem[] = [
     icon: "R",
     children: [
       { code: "attendance_reports", label: "Attendance", href: "/attendance" },
+      { code: "attendance_integrity", label: "Attendance Integrity", href: "/attendance/integrity" },
       { code: "raw_punch_reports", label: "Raw Punches", href: "/reports/raw-punches" },
       { code: "verification_api_reports", label: "Verification API", href: "/reports/verification-api" },
       { code: "event_log_reports", label: "Event Log", href: "/reports/event-log" }

@@ -50,6 +50,7 @@ type LocationRow = {
   postal_code: string | null;
   latitude: number | null;
   longitude: number | null;
+  geofence_radius_m?: number | null;
   station_email: string | null;
   station_manager_email: string | null;
   parent_station_id: string | null;
@@ -165,6 +166,7 @@ async function loadMasterData(companyId: string) {
     postal_code,
     latitude,
     longitude,
+    geofence_radius_m,
     station_email,
     station_manager_email,
     parent_station_id,
@@ -187,6 +189,7 @@ async function loadMasterData(companyId: string) {
     postal_code,
     latitude,
     longitude,
+    geofence_radius_m,
     station_email,
     station_manager_email,
     is_active,
@@ -386,6 +389,10 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               <label>Postal code<input className="field" name="postal_code" placeholder="Enter postal code" /></label>
               <label>Latitude<input className="field" name="latitude" placeholder="Enter latitude" step="any" type="number" min="-90" max="90" /></label>
               <label>Longitude<input className="field" name="longitude" placeholder="Enter longitude" step="any" type="number" min="-180" max="180" /></label>
+              <label>Attendance geofence radius (m)
+                <input className="field" name="geofence_radius_m" placeholder="e.g. 50, 100, 200" step="1" type="number" min="10" max="5000" defaultValue={50} required />
+                <span className="subtle" style={{ marginTop: 4, textTransform: "none", fontSize: 11 }}>Used by DropX One GPS punch. Editable per location — not hardcoded in the app.</span>
+              </label>
               <label>Location email<input className="field" name="station_email" placeholder="Enter location email" /></label>
               <label>Parent Location<SearchableSelect name="parent_station_id" options={parentStationOptions} placeholder="Select parent location" /></label>
               <label className="check-row span-3">
@@ -424,6 +431,10 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               <label>Postal code<input className="field" name="postal_code" defaultValue={editLocation.postal_code ?? ""} /></label>
               <label>Latitude<input className="field" name="latitude" defaultValue={editLocation.latitude ?? ""} step="any" type="number" min="-90" max="90" /></label>
               <label>Longitude<input className="field" name="longitude" defaultValue={editLocation.longitude ?? ""} step="any" type="number" min="-180" max="180" /></label>
+              <label>Attendance geofence radius (m)
+                <input className="field" name="geofence_radius_m" defaultValue={editLocation.geofence_radius_m ?? 50} step="1" type="number" min="10" max="5000" required />
+                <span className="subtle" style={{ marginTop: 4, textTransform: "none", fontSize: 11 }}>Used by DropX One GPS punch. Change anytime from this screen.</span>
+              </label>
               <label>Location email<input className="field" name="station_email" defaultValue={editLocation.station_email ?? ""} /></label>
               <label>Parent Location<SearchableSelect name="parent_station_id" options={parentStationOptions} defaultValue={editLocation.parent_station_id ?? ""} placeholder="Select parent location" /></label>
               <label>Status

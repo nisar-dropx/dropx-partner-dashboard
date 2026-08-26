@@ -1,0 +1,119 @@
+import { createHash } from "crypto";
+import { cookies } from "next/headers";
+import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
+
+export function cleanEnrolmentId(value: unknown) {
+  const digits = String(value ?? "").trim().replace(/\D/g, "");
+  if (!digits) return "";
+  return digits.replace(/^0+/, "") || "0";
+}
+
+export function fileExtension(name: string) {
+  const match = name.toLowerCase().match(/\.[a-z0-9]{1,8}$/);
+  return match?.[0] ?? "";
+}
+
+export async function activeConnectSession() {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const token = cookies().get(connectSessionCookieName)?.value;
+  if (!token) throw new Error("Login required.");
+  const sessionHash = createHash("sha256").update(token).digest("hex");
+  const sessionResult = await supabaseAdmin
+    .from("connect_login_sessions")
+    .select("id, country_code, mobile_number, expires_at, revoked_at")
+    .eq("session_hash", sessionHash)
+    .maybeSingle();
+  if (sessionResult.error) throw new Error(sessionResult.error.message);
+  const session = sessionResult.data;
+  if (!session || session.revoked_at || new Date(session.expires_at).getTime() < Date.now()) {
+    throw new Error("Login expired.");
+  }
+  return session;
+}
+
+export type ConnectAttendanceWorker = {
+  companyId: string;
+  profileId: string;
+  profileType: WorkforceProfileType;
+  dropxId: string;
+  biometricId: string;
+  enrolmentId: string;
+  fullName: string;
+  locationId: string | null;
+  workerType: "employee" | "individual_contract";
+  employeeId: string | null;
+  fieldExecutiveId: string | null;
+};
+
+export async function resolveConnectAttendanceWorker({
+  accountId,
+  profileType
+}: {
+  accountId: string;
+  profileType: string;
+}): Promise<ConnectAttendanceWorker> {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const session = await activeConnectSession();
+  const { countryCode, mobile, localMobile } = normalizeConnectMobile(session.mobile_number, session.country_code);
+  if (!isWorkforceProfileType(profileType)) {
+    throw new Error("Attendance is available for workforce accounts only.");
+  }
+  const resolvedProfileType = profileType as WorkforceProfileType;
+  const table = workforceTable(resolvedProfileType);
+  const idColumn = resolvedProfileType === "employee" ? "employee_code" : "dropx_id";
+  const result = await supabaseAdmin
+    .from(table)
+    .select(`id, company_id, mobile, mobile_country_code, biometric_id, full_name, location_id, ${idColumn}`)
+    .eq("id", accountId)
+    .maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  const row = result.data;
+  if (!row) throw new Error("Workforce account not found.");
+  const rowMobile = String(row.mobile ?? "").replace(/\D/g, "");
+  const rowCountryCode = String(row.mobile_country_code ?? countryCode).replace(/\D/g, "") || countryCode;
+  if (rowCountryCode !== countryCode || (rowMobile !== mobile && rowMobile !== localMobile)) {
+    throw new Error("This attendance is not available for the signed-in account.");
+  }
+  const biometricId = String(row.biometric_id ?? "");
+  const enrolmentId = cleanEnrolmentId(biometricId) || String(row.id).replace(/-/g, "").slice(0, 16);
+  return {
+    companyId: row.company_id as string,
+    profileId: row.id as string,
+    profileType: resolvedProfileType,
+    dropxId: String(row[idColumn as keyof typeof row] ?? ""),
+    biometricId,
+    enrolmentId,
+    fullName: String(row.full_name ?? ""),
+    locationId: (row.location_id as string | null) ?? null,
+    workerType: resolvedProfileType === "employee" ? "employee" : "individual_contract",
+    employeeId: resolvedProfileType === "employee" ? (row.id as string) : null,
+    fieldExecutiveId: resolvedProfileType === "field_executive" ? (row.id as string) : null
+  };
+}
+
+export function parseCoordinate(value: FormDataEntryValue | null, label: string) {
+  const num = Number(String(value ?? "").trim());
+  if (!Number.isFinite(num)) throw new Error(`${label} is required.`);
+  return num;
+}
+
+export function parseOptionalNumber(value: FormDataEntryValue | null) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const num = Number(text);
+  return Number.isFinite(num) ? num : null;
+}
+
+export function parseClientSignals(raw: FormDataEntryValue | null) {
+  const text = String(raw ?? "").trim();
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}

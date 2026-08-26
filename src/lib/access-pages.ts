@@ -83,6 +83,7 @@ export const accessPages = [
   { code: "master_imports", name: "Import Master", sort_order: 132 },
   { code: "reports", name: "Reports", sort_order: 130 },
   { code: "attendance_reports", name: "Attendance Reports", sort_order: 131 },
+  { code: "attendance_integrity", name: "Attendance Integrity", sort_order: 131 },
   { code: "raw_punch_reports", name: "Raw Punches", sort_order: 132 },
   { code: "verification_api_reports", name: "Verification API Reports", sort_order: 133 },
   { code: "event_log_reports", name: "Event Log", sort_order: 134 },

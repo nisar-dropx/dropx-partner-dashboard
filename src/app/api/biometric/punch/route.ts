@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { createAttendancePunchNotification } from "@/lib/app-notifications";
 import { istDate, punchLabel, rebuildAttendanceDay } from "@/lib/biometric/attendance";
+import { checkBiometricPhoneMismatch } from "@/lib/biometric/attendance-gps";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -525,29 +526,42 @@ export async function POST(request: NextRequest) {
     );
     const nextOrder = (existingPunches.data?.length ?? 0) + 1;
 
-    const punchResult = await supabaseAdmin
+    const punchPayload = {
+      company_id: device.company_id,
+      raw_event_id: rawEventId,
+      device_id: device.id,
+      enrolment_id: canonicalEnrolmentId,
+      worker_type: enrolment.worker_type,
+      profile_type: enrolment.profile_type,
+      account_id: enrolment.account_id,
+      employee_id: enrolment.employee_id,
+      field_executive_id: enrolment.field_executive_id,
+      location_id: enrolment.location_id ?? device.location_id,
+      device_serial: deviceSerial,
+      punch_time: punchTime.toISOString(),
+      punch_date: punchDate,
+      punch_order: nextOrder,
+      punch_label: punchLabel(nextOrder),
+      worker_status: enrolment.status,
+      calculated: active,
+      source: "biometric",
+      server_received_at: new Date().toISOString()
+    };
+    let punchResult = await supabaseAdmin
       .from("attendance_punches")
-      .upsert({
-        company_id: device.company_id,
-        raw_event_id: rawEventId,
-        device_id: device.id,
-        enrolment_id: canonicalEnrolmentId,
-        worker_type: enrolment.worker_type,
-        profile_type: enrolment.profile_type,
-        account_id: enrolment.account_id,
-        employee_id: enrolment.employee_id,
-        field_executive_id: enrolment.field_executive_id,
-        location_id: enrolment.location_id ?? device.location_id,
-        device_serial: deviceSerial,
-        punch_time: punchTime.toISOString(),
-        punch_date: punchDate,
-        punch_order: nextOrder,
-        punch_label: punchLabel(nextOrder),
-        worker_status: enrolment.status,
-        calculated: active
-      }, { onConflict: "company_id,device_serial,enrolment_id,punch_time" })
+      .upsert(punchPayload, { onConflict: "company_id,device_serial,enrolment_id,punch_time" })
       .select("id")
       .single();
+    if (punchResult.error && /source|server_received_at|does not exist|schema cache/i.test(punchResult.error.message)) {
+      const legacyPayload = { ...punchPayload } as Record<string, unknown>;
+      delete legacyPayload.source;
+      delete legacyPayload.server_received_at;
+      punchResult = await supabaseAdmin
+        .from("attendance_punches")
+        .upsert(legacyPayload, { onConflict: "company_id,device_serial,enrolment_id,punch_time" })
+        .select("id")
+        .single();
+    }
     if (punchResult.error) throw new Error(punchResult.error.message);
 
     if (!active) {
@@ -565,6 +579,21 @@ export async function POST(request: NextRequest) {
     }
 
     await rebuildAttendanceDay(device.company_id, canonicalEnrolmentId, punchDate);
+
+    try {
+      await checkBiometricPhoneMismatch({
+        companyId: device.company_id,
+        enrolmentId: canonicalEnrolmentId,
+        punchId: String(punchResult.data.id),
+        punchDate,
+        locationId: enrolment.location_id ?? device.location_id,
+        profileType: enrolment.profile_type,
+        profileId: enrolment.account_id,
+        accountId: enrolment.account_id ?? enrolment.employee_id ?? enrolment.field_executive_id
+      });
+    } catch (mismatchError) {
+      console.error("Biometric phone geofence check failed:", mismatchError);
+    }
 
     const profileType = enrolment.profile_type ??
       (enrolment.worker_type === "employee" ? "employee" : "contractor");

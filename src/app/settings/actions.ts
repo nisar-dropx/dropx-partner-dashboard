@@ -32,6 +32,16 @@ function optionalCoordinate(value: FormDataEntryValue | null, field: string, min
   return numberValue;
 }
 
+function optionalGeofenceRadius(value: FormDataEntryValue | null) {
+  const text = clean(value);
+  if (!text) return 50;
+  const numberValue = Number(text);
+  if (!Number.isFinite(numberValue) || numberValue < 10 || numberValue > 5000) {
+    throw new Error("Geofence radius must be between 10 and 5000 meters");
+  }
+  return Math.round(numberValue);
+}
+
 function normalizeEmail(value: string | null | undefined) {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -535,6 +545,7 @@ export async function createLocation(formData: FormData) {
   const postalCode = clean(formData.get("postal_code"));
   const latitude = optionalCoordinate(formData.get("latitude"), "Latitude", -90, 90);
   const longitude = optionalCoordinate(formData.get("longitude"), "Longitude", -180, 180);
+  const geofenceRadiusM = optionalGeofenceRadius(formData.get("geofence_radius_m"));
   const stationEmail = clean(formData.get("station_email"));
   const parentStationId = clean(formData.get("parent_station_id"));
   const stationManagerEmail = required(formData.get("station_manager_email"), "Manager").toLowerCase();
@@ -543,7 +554,7 @@ export async function createLocation(formData: FormData) {
   const address = [addressLine1, addressLine2, city, state, postalCode].filter(Boolean).join(", ");
   const accessProfiles = await locationAccessProfiles(stationReportingEmail, companyId);
 
-  const { data: location, error } = await supabaseAdmin.from("stations").insert(withCompany({
+  const payload = withCompany({
     station_code: stationCode,
     station_name: stationName,
     provider_id: providerId,
@@ -557,14 +568,23 @@ export async function createLocation(formData: FormData) {
     postal_code: postalCode,
     latitude,
     longitude,
+    geofence_radius_m: geofenceRadiusM,
     station_email: stationEmail,
     station_manager_email: stationManagerEmail,
     parent_station_id: parentStationId,
     hide_from_location_list: hideFromLocationList,
     is_active: true
-  }, companyId)).select("id").single();
+  }, companyId);
+  let { data: location, error } = await supabaseAdmin.from("stations").insert(payload).select("id").single();
+  if (error && /geofence_radius_m|does not exist|schema cache/i.test(error.message)) {
+    const { geofence_radius_m: _radius, ...legacyPayload } = payload as Record<string, unknown>;
+    const fallback = await supabaseAdmin.from("stations").insert(legacyPayload).select("id").single();
+    location = fallback.data;
+    error = fallback.error;
+  }
 
   if (error) throw new Error(error.message);
+  if (!location) throw new Error("Unable to create location.");
   await addLocationAccess(location.id, accessProfiles, companyId);
   const syncError = await trySyncLocationEmailProfile(location.id, stationEmail, stationName, stationReportingEmail, companyId);
   revalidatePath("/master/location");
@@ -594,6 +614,7 @@ export async function updateLocation(formData: FormData) {
   const postalCode = clean(formData.get("postal_code"));
   const latitude = optionalCoordinate(formData.get("latitude"), "Latitude", -90, 90);
   const longitude = optionalCoordinate(formData.get("longitude"), "Longitude", -180, 180);
+  const geofenceRadiusM = optionalGeofenceRadius(formData.get("geofence_radius_m"));
   const stationEmail = clean(formData.get("station_email"));
   const parentStationId = clean(formData.get("parent_station_id"));
   const stationManagerEmail = required(formData.get("station_manager_email"), "Manager").toLowerCase();
@@ -610,9 +631,7 @@ export async function updateLocation(formData: FormData) {
     .maybeSingle();
   if (existingLocationError) throw new Error(existingLocationError.message);
 
-  const { error } = await supabaseAdmin
-    .from("stations")
-    .update({
+  const updatePayload = {
       station_code: stationCode,
       station_name: stationName,
       provider_id: providerId,
@@ -626,14 +645,27 @@ export async function updateLocation(formData: FormData) {
       postal_code: postalCode,
       latitude,
       longitude,
+      geofence_radius_m: geofenceRadiusM,
       station_email: stationEmail,
       station_manager_email: stationManagerEmail,
       parent_station_id: parentStationId,
       hide_from_location_list: hideFromLocationList,
       is_active: isActive
-    })
+    };
+  let { error } = await supabaseAdmin
+    .from("stations")
+    .update(updatePayload)
     .eq("id", id)
     .eq("company_id", companyId);
+  if (error && /geofence_radius_m|does not exist|schema cache/i.test(error.message)) {
+    const { geofence_radius_m: _radius, ...legacyPayload } = updatePayload;
+    const fallback = await supabaseAdmin
+      .from("stations")
+      .update(legacyPayload)
+      .eq("id", id)
+      .eq("company_id", companyId);
+    error = fallback.error;
+  }
 
   if (error) throw new Error(error.message);
   await addLocationAccess(id, accessProfiles, companyId);

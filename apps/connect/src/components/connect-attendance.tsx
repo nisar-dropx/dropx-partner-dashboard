@@ -1,7 +1,22 @@
 "use client";
 
-import { CalendarDays, ChevronLeft, ChevronRight, Clock3, Fingerprint, LogIn, LogOut, Paperclip, UserCheck, UserX, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  Camera,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Fingerprint,
+  MapPin,
+  LogIn,
+  LogOut,
+  Paperclip,
+  ShieldAlert,
+  UserCheck,
+  UserX,
+  X
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 type Account = { id: string; profileType: string };
 type Regularization = {
@@ -31,6 +46,47 @@ type Attendance = {
   summary: { present: number; absent: number; misPunch: number };
   rows: Row[];
 };
+type OpenFlag = {
+  id: string;
+  flag_type: string;
+  severity: string;
+  message: string;
+  status: string;
+  punch_date: string;
+  created_at: string;
+};
+type PunchStatus = {
+  enrolmentId: string;
+  locationId: string | null;
+  shift: {
+    punchDate: string;
+    open: boolean;
+    inTime: string | null;
+    outTime: string | null;
+    punchCount: number;
+  };
+  station: {
+    id: string;
+    code: string | null;
+    name: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    radiusM: number | null;
+  } | null;
+  openFlags: OpenFlag[];
+};
+type LiveLocation = {
+  lat: number;
+  lng: number;
+  accuracyM: number | null;
+  altitudeM: number | null;
+  capturedAt: string;
+  distanceM: number | null;
+  inside: boolean | null;
+};
+
+const HEARTBEAT_MS = 3 * 60 * 1000;
+const REMINDER_MS = [9.5 * 60 * 60 * 1000, 10 * 60 * 60 * 1000] as const;
 
 function monthLabel(value: string) {
   const [year, month] = value.split("-").map(Number);
@@ -71,6 +127,42 @@ function emptyAttendanceRow(date: string): Row {
   };
 }
 
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function readPosition(): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Location is not supported on this device."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, (error) => {
+      reject(new Error(error.message || "Unable to read device location. Allow location access."));
+    }, {
+      enableHighAccuracy: true,
+      maximumAge: 10_000,
+      timeout: 20_000
+    });
+  });
+}
+
+function integrityPayload() {
+  return {
+    clientPlatform: "web",
+    clientUserAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+    vpnSuspected: false,
+    mockLocation: false,
+    developerMode: false
+  };
+}
+
 export function ConnectAttendance({ account }: { account: Account }) {
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -82,6 +174,18 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const [regularizing, setRegularizing] = useState(false);
   const [requestError, setRequestError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [punchStatus, setPunchStatus] = useState<PunchStatus | null>(null);
+  const [liveLocation, setLiveLocation] = useState<LiveLocation | null>(null);
+  const [locationError, setLocationError] = useState("");
+  const [punchBusy, setPunchBusy] = useState(false);
+  const [punchError, setPunchError] = useState("");
+  const [punchMessage, setPunchMessage] = useState("");
+  const [selfieFile, setSelfieFile] = useState<File | null>(null);
+  const [selfiePreview, setSelfiePreview] = useState("");
+  const [supportFlag, setSupportFlag] = useState<OpenFlag | null>(null);
+  const [reminderText, setReminderText] = useState("");
+  const sessionId = useRef(`web-${Date.now()}`);
+  const selfieInputRef = useRef<HTMLInputElement>(null);
 
   const loadAttendance = useCallback(() => {
     setData(null);
@@ -96,9 +200,109 @@ export function ConnectAttendance({ account }: { account: Account }) {
       .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load attendance."));
   }, [account.id, account.profileType, month]);
 
+  const loadPunchStatus = useCallback(async () => {
+    const response = await fetch(
+      `/api/connect/attendance/punch?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`
+    );
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Unable to load punch status.");
+    setPunchStatus(payload);
+    return payload as PunchStatus;
+  }, [account.id, account.profileType]);
+
+  const refreshLocation = useCallback(async () => {
+    if (!navigator.onLine) {
+      setLocationError("Internet is required for attendance location.");
+      return null;
+    }
+    try {
+      const position = await readPosition();
+      const station = punchStatus?.station;
+      let distanceM: number | null = null;
+      let inside: boolean | null = null;
+      if (station?.latitude != null && station?.longitude != null) {
+        distanceM = Math.round(haversineMeters(position.coords.latitude, position.coords.longitude, station.latitude, station.longitude));
+        inside = station.radiusM != null ? distanceM <= station.radiusM : null;
+      }
+      const live: LiveLocation = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracyM: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : null,
+        altitudeM: Number.isFinite(position.coords.altitude ?? NaN) ? Number(position.coords.altitude) : null,
+        capturedAt: new Date().toISOString(),
+        distanceM,
+        inside
+      };
+      setLiveLocation(live);
+      setLocationError("");
+      return live;
+    } catch (reason) {
+      setLocationError(reason instanceof Error ? reason.message : "Unable to read location.");
+      return null;
+    }
+  }, [punchStatus?.station]);
+
+  const sendHeartbeat = useCallback(async (live: LiveLocation) => {
+    const form = new FormData();
+    form.set("accountId", account.id);
+    form.set("profileType", account.profileType);
+    form.set("lat", String(live.lat));
+    form.set("lng", String(live.lng));
+    if (live.accuracyM != null) form.set("accuracyM", String(live.accuracyM));
+    if (live.altitudeM != null) form.set("altitudeM", String(live.altitudeM));
+    form.set("clientCapturedAt", live.capturedAt);
+    form.set("sessionId", sessionId.current);
+    form.set("integritySignals", JSON.stringify(integrityPayload()));
+    await fetch("/api/connect/attendance/location-heartbeat", { method: "POST", body: form });
+  }, [account.id, account.profileType]);
+
   useEffect(() => {
     loadAttendance();
   }, [loadAttendance, refreshKey]);
+
+  useEffect(() => {
+    loadPunchStatus().catch((reason) => {
+      setPunchError(reason instanceof Error ? reason.message : "Unable to load punch status.");
+    });
+  }, [loadPunchStatus, refreshKey]);
+
+  useEffect(() => {
+    refreshLocation().catch(() => undefined);
+  }, [refreshLocation]);
+
+  useEffect(() => {
+    if (!punchStatus?.shift.open) {
+      setReminderText("");
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      const live = await refreshLocation();
+      if (cancelled || !live) return;
+      await sendHeartbeat(live).catch(() => undefined);
+      await loadPunchStatus().catch(() => undefined);
+      if (punchStatus.shift.inTime) {
+        const elapsed = Date.now() - new Date(punchStatus.shift.inTime).getTime();
+        if (elapsed >= REMINDER_MS[1]) setReminderText("You have been punched in for 10 hours. Please punch out.");
+        else if (elapsed >= REMINDER_MS[0]) setReminderText("You have been punched in for 9.5 hours. Please punch out soon.");
+        else setReminderText("");
+      }
+    };
+    tick().catch(() => undefined);
+    const timer = window.setInterval(() => {
+      tick().catch(() => undefined);
+    }, HEARTBEAT_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [punchStatus?.shift.open, punchStatus?.shift.inTime, refreshLocation, sendHeartbeat, loadPunchStatus]);
+
+  useEffect(() => {
+    return () => {
+      if (selfiePreview) URL.revokeObjectURL(selfiePreview);
+    };
+  }, [selfiePreview]);
 
   const rowsByDay = useMemo(() => new Map((data?.rows ?? []).map((row) => [Number(row.date.slice(-2)), row])), [data]);
   const [year, monthNumber] = month.split("-").map(Number);
@@ -106,6 +310,50 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const leading = (new Date(year, monthNumber - 1, 1).getDay() + 6) % 7;
   const total = (data?.rows ?? []).reduce((sum, row) => sum + minutes(row.workHours), 0);
   const futureMonth = month >= currentMonth;
+  const openFlags = punchStatus?.openFlags ?? [];
+
+  function onSelfieChange(file: File | null) {
+    if (selfiePreview) URL.revokeObjectURL(selfiePreview);
+    setSelfieFile(file);
+    setSelfiePreview(file ? URL.createObjectURL(file) : "");
+  }
+
+  async function submitPunch(action: "in" | "out") {
+    setPunchBusy(true);
+    setPunchError("");
+    setPunchMessage("");
+    try {
+      if (!navigator.onLine) throw new Error("Internet is required to punch.");
+      if (!selfieFile) throw new Error("Capture a selfie before punching.");
+      const live = (await refreshLocation()) ?? liveLocation;
+      if (!live) throw new Error("Allow location access to punch.");
+      const form = new FormData();
+      form.set("accountId", account.id);
+      form.set("profileType", account.profileType);
+      form.set("action", action);
+      form.set("lat", String(live.lat));
+      form.set("lng", String(live.lng));
+      if (live.accuracyM != null) form.set("accuracyM", String(live.accuracyM));
+      if (live.altitudeM != null) form.set("altitudeM", String(live.altitudeM));
+      form.set("clientCapturedAt", live.capturedAt);
+      form.set("integritySignals", JSON.stringify(integrityPayload()));
+      form.set("selfie", selfieFile);
+      const response = await fetch("/api/connect/attendance/punch", { method: "POST", body: form });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to record punch.");
+      setPunchMessage(
+        payload.isFlagged
+          ? `Punch ${action.toUpperCase()} saved and flagged for review. Attach support evidence if needed.`
+          : `Punch ${action.toUpperCase()} saved.`
+      );
+      onSelfieChange(null);
+      setRefreshKey((value) => value + 1);
+    } catch (reason) {
+      setPunchError(reason instanceof Error ? reason.message : "Unable to record punch.");
+    } finally {
+      setPunchBusy(false);
+    }
+  }
 
   return (
     <section className="dx-attendance">
@@ -116,6 +364,70 @@ export function ConnectAttendance({ account }: { account: Account }) {
           <strong>{monthLabel(month)}</strong>
           <button aria-label="Next month" disabled={futureMonth} onClick={() => setMonth(shiftMonth(month, 1))}><ChevronRight /></button>
         </div>
+      </div>
+
+      <div className="dx-gps-punch-card">
+        <header>
+          <div>
+            <strong>GPS Punch</strong>
+            <small>Selfie + live location required. Times are set by the server and cannot be edited.</small>
+          </div>
+          <button type="button" onClick={() => refreshLocation()}><MapPin /> Refresh</button>
+        </header>
+        {reminderText ? <div className="dx-alert warn"><Clock3 /> {reminderText}</div> : null}
+        {locationError ? <div className="dx-alert error">{locationError}</div> : null}
+        {punchError ? <div className="dx-alert error">{punchError}</div> : null}
+        {punchMessage ? <div className="dx-alert ok">{punchMessage}</div> : null}
+        <div className="dx-gps-meta">
+          <span><small>STATUS</small><strong>{punchStatus?.shift.open ? "On shift" : "Off shift"}</strong></span>
+          <span><small>ZONE</small><strong>{liveLocation?.inside == null ? "Unknown" : liveLocation.inside ? "Inside" : "Outside"}</strong></span>
+          <span><small>DISTANCE</small><strong>{liveLocation?.distanceM == null ? "--" : `${liveLocation.distanceM} m`}</strong></span>
+          <span><small>ACCURACY</small><strong>{liveLocation?.accuracyM == null ? "--" : `${Math.round(liveLocation.accuracyM)} m`}</strong></span>
+        </div>
+        {punchStatus?.station ? (
+          <p className="dx-gps-station">
+            Station {punchStatus.station.code || punchStatus.station.name || "assigned"}
+            {punchStatus.station.radiusM != null ? ` · allowed ${punchStatus.station.radiusM}m` : " · geofence radius not set in Master Location"}
+          </p>
+        ) : (
+          <p className="dx-gps-station">No station coordinates configured — punches will be flagged for review.</p>
+        )}
+        <div className="dx-selfie-row">
+          <button type="button" className="secondary" onClick={() => selfieInputRef.current?.click()}>
+            <Camera /> {selfieFile ? "Retake selfie" : "Capture selfie"}
+          </button>
+          <input
+            accept="image/*"
+            capture="user"
+            hidden
+            ref={selfieInputRef}
+            type="file"
+            onChange={(event) => onSelfieChange(event.target.files?.[0] ?? null)}
+          />
+          {selfiePreview ? <img alt="Selfie preview" className="dx-selfie-preview" src={selfiePreview} /> : <em>Selfie required</em>}
+        </div>
+        <div className="dx-gps-actions">
+          <button disabled={punchBusy || Boolean(punchStatus?.shift.open)} onClick={() => submitPunch("in")} type="button">
+            <LogIn /> {punchBusy ? "Saving..." : "Punch In"}
+          </button>
+          <button disabled={punchBusy || !punchStatus?.shift.open} onClick={() => submitPunch("out")} type="button">
+            <LogOut /> {punchBusy ? "Saving..." : "Punch Out"}
+          </button>
+        </div>
+        {openFlags.length ? (
+          <div className="dx-flag-list">
+            {openFlags.map((flag) => (
+              <div key={flag.id}>
+                <ShieldAlert />
+                <div>
+                  <strong>{flag.flag_type.replaceAll("_", " ")}</strong>
+                  <small>{flag.message}</small>
+                </div>
+                <button type="button" onClick={() => setSupportFlag(flag)}>Support selfie</button>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {error ? <div className="dx-alert error">{error}<button onClick={() => setMonth((value) => `${value}`)}>Retry</button></div> : null}
@@ -181,8 +493,93 @@ export function ConnectAttendance({ account }: { account: Account }) {
         error={requestError}
         setError={setRequestError}
       /> : null}
+      {supportFlag ? <SupportEvidenceSheet
+        account={account}
+        flag={supportFlag}
+        onClose={() => setSupportFlag(null)}
+        onSubmitted={() => {
+          setSupportFlag(null);
+          setRefreshKey((value) => value + 1);
+        }}
+      /> : null}
     </section>
   );
+}
+
+function SupportEvidenceSheet({
+  account,
+  flag,
+  onClose,
+  onSubmitted
+}: {
+  account: Account;
+  flag: OpenFlag;
+  onClose: () => void;
+  onSubmitted: () => void;
+}) {
+  const [remarks, setRemarks] = useState("");
+  const [selfie, setSelfie] = useState<File | null>(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      if (!selfie) throw new Error("Capture a support selfie.");
+      if (!navigator.onLine) throw new Error("Internet is required.");
+      const position = await readPosition();
+      const form = new FormData();
+      form.set("accountId", account.id);
+      form.set("profileType", account.profileType);
+      form.set("flagId", flag.id);
+      form.set("punchDate", flag.punch_date);
+      form.set("lat", String(position.coords.latitude));
+      form.set("lng", String(position.coords.longitude));
+      if (Number.isFinite(position.coords.accuracy)) form.set("accuracyM", String(position.coords.accuracy));
+      form.set("clientCapturedAt", new Date().toISOString());
+      form.set("remarks", remarks);
+      form.set("selfie", selfie);
+      const response = await fetch("/api/connect/attendance/support-evidence", { method: "POST", body: form });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to submit support evidence.");
+      onSubmitted();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to submit support evidence.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <>
+    <button aria-label="Close support sheet" className="dx-sheet-scrim" onClick={onClose} />
+    <aside className="dx-regularization-sheet" role="dialog" aria-modal="true">
+      <header>
+        <div>
+          <strong>Support selfie + location</strong>
+          <small>Attach evidence for manager / HR review. Location and time are captured automatically.</small>
+        </div>
+        <button aria-label="Close" onClick={onClose}><X /></button>
+      </header>
+      <form onSubmit={submit}>
+        <div className="dx-regularization-day">
+          <span><small>FLAG</small><strong>{flag.flag_type.replaceAll("_", " ")}</strong></span>
+          <em>{flag.punch_date.split("-").reverse().join("/")}</em>
+        </div>
+        <p className="dx-form-hint">{flag.message}</p>
+        <button type="button" className="secondary" onClick={() => inputRef.current?.click()}><Camera /> {selfie ? "Retake selfie" : "Capture selfie"}</button>
+        <input accept="image/*" capture="user" hidden ref={inputRef} type="file" onChange={(event) => setSelfie(event.target.files?.[0] ?? null)} />
+        <label>Remarks<textarea placeholder="Optional notes for your manager" rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
+        {error ? <p className="dx-form-error">{error}</p> : null}
+        <div className="dx-sheet-actions">
+          <button className="secondary" onClick={onClose} type="button">Cancel</button>
+          <button disabled={saving} type="submit">{saving ? "Submitting..." : "Submit for review"}</button>
+        </div>
+      </form>
+    </aside>
+  </>;
 }
 
 function RegularizationSheet({

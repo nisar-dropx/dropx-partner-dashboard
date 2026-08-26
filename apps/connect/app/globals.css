@@ -9221,3 +9221,35 @@ body {
   .dx-advance-modal { align-items: end; padding: 0; }
   .dx-advance-modal form { max-height: 92vh; border-radius: 22px 22px 0 0; }
 }
+
+/* GPS punch + integrity support */
+.dx-gps-punch-card{margin:0 0 16px;padding:16px;background:#fff;border:1px solid #e5dfd7;border-radius:10px;box-shadow:0 6px 18px #1118270a;display:grid;gap:12px}
+.dx-gps-punch-card>header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.dx-gps-punch-card>header strong{display:block;font-size:16px}
+.dx-gps-punch-card>header small{display:block;margin-top:3px;color:#746f68;font-size:11px;line-height:1.35}
+.dx-gps-punch-card>header>button{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 10px;background:#fff;border:1px solid #e2ddd5;border-radius:8px;font-size:12px;font-weight:600}
+.dx-gps-punch-card>header svg{width:15px;height:15px}
+.dx-gps-meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.dx-gps-meta>span{display:grid;gap:3px;padding:10px 8px;background:#f7f5f1;border-radius:8px}
+.dx-gps-meta small{color:#746f68;font-size:9px;letter-spacing:.04em}
+.dx-gps-meta strong{font-size:13px}
+.dx-gps-station{margin:0;color:#746f68;font-size:12px}
+.dx-selfie-row{display:flex;align-items:center;gap:12px}
+.dx-selfie-row>button{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 12px;background:#fff;border:1px solid #e2ddd5;border-radius:8px;font-size:12px;font-weight:600}
+.dx-selfie-row>button svg{width:16px;height:16px}
+.dx-selfie-row>em{color:#9a948c;font-size:12px;font-style:normal}
+.dx-selfie-preview{width:54px;height:54px;object-fit:cover;border-radius:10px;border:1px solid #e2ddd5}
+.dx-gps-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dx-gps-actions>button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:46px;color:#fff;background:linear-gradient(115deg,#ff940b,#f44332);border:0;border-radius:10px;font-size:13px;font-weight:700}
+.dx-gps-actions>button:disabled{opacity:.45}
+.dx-gps-actions>button svg{width:16px;height:16px}
+.dx-flag-list{display:grid;gap:8px}
+.dx-flag-list>div{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px;background:#fff6f0;border:1px solid #f3d7c4;border-radius:8px}
+.dx-flag-list strong{display:block;text-transform:capitalize;font-size:12px}
+.dx-flag-list small{display:block;color:#7a6a5d;font-size:11px;line-height:1.35}
+.dx-flag-list>div>button{height:32px;padding:0 10px;background:#fff;border:1px solid #e2ddd5;border-radius:7px;font-size:11px;font-weight:600}
+.dx-flag-list svg{width:18px;height:18px;color:#d25512}
+.dx-alert.warn{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#fff6df;border:1px solid #f0dfa0;border-radius:8px;color:#8a6500;font-size:12px}
+.dx-alert.ok{padding:10px 12px;background:#e8f8ef;border:1px solid #b7e4c7;border-radius:8px;color:#0f7a4a;font-size:12px}
+.dx-form-hint{margin:0;color:#746f68;font-size:12px;line-height:1.4}
+@media(max-width:420px){.dx-gps-meta{grid-template-columns:1fr 1fr}}

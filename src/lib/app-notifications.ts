@@ -13,7 +13,9 @@ export const appNotificationEvents = [
   "profile_submitted",
   "profile_approved",
   "profile_returned",
-  "attendance_regularization_submitted"
+  "attendance_regularization_submitted",
+  "attendance_location_flagged",
+  "attendance_forgot_punch_out"
 ] as const;
 export type AppNotificationEvent = typeof appNotificationEvents[number];
 
@@ -58,6 +60,18 @@ export const appNotificationDefaults: Record<AppNotificationEvent, {
     route: "attendance",
     titleTemplate: "Regularization submitted",
     bodyTemplate: "Your attendance regularization request for {date} has been submitted."
+  },
+  attendance_location_flagged: {
+    label: "Location flagged",
+    route: "attendance",
+    titleTemplate: "Attendance flagged for review",
+    bodyTemplate: "Your attendance for {date} was flagged. Attach a selfie + location support package."
+  },
+  attendance_forgot_punch_out: {
+    label: "Forgot punch-out",
+    route: "attendance",
+    titleTemplate: "Punch-out reminder",
+    bodyTemplate: "You have been punched in for {hours} hours on {date}. Please punch out."
   }
 };
 
