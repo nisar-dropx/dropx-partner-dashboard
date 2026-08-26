@@ -10,7 +10,7 @@ import { ConnectAdvances } from "./connect-advances";
 import { AppAccount, ConnectProfileApp } from "./connect-profile-app";
 import { countryCodeOptions } from "@/lib/country-codes";
 
-type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "payments" | "advances" | "attendance" | "leave" | "settings";
+type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "payments" | "advances" | "earnings" | "attendance" | "leave" | "settings";
 type ConnectNotification = {
   id: string;
   title: string;
@@ -409,8 +409,9 @@ export function ConnectLoginFlow() {
       <nav>
         {allowed(account, "dashboard") ? <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Gauge />Dashboard</button> : null}
         <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />My Profile</button>
-        <button aria-expanded={paymentsExpanded} className={`payments-toggle${step === "advances" ? " active" : ""}${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard /><span>Payments</span><ChevronRight /></button>
+        <button aria-expanded={paymentsExpanded} className={`payments-toggle${step === "advances" || step === "earnings" ? " active" : ""}${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard /><span>Payments</span><ChevronRight /></button>
         {paymentsExpanded ? <button aria-current={step === "advances" ? "page" : undefined} className={`desktop-subitem${step === "advances" ? " active" : ""}`} onClick={() => open("advances")}><IndianRupee />Advances</button> : null}
+        {paymentsExpanded ? <button aria-current={step === "earnings" ? "page" : undefined} className={`desktop-subitem${step === "earnings" ? " active" : ""}`} onClick={() => open("earnings")}><IndianRupee />My Earnings</button> : null}
         {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint />Attendance</button> : null}
         {allowed(account, "leave") ? <button aria-current={step === "leave" ? "page" : undefined} className={step === "leave" ? "active" : ""} onClick={() => open("leave")}><CalendarDays />Leave</button> : null}
         <button aria-current={step === "settings" ? "page" : undefined} className={step === "settings" ? "active" : ""} onClick={() => open("settings")}><Settings />Settings</button>
@@ -441,6 +442,7 @@ export function ConnectLoginFlow() {
         <button onClick={() => open("profile")}><UserRound />My Profile<ChevronRight /></button>
         <button aria-expanded={paymentsExpanded} className={`payments-toggle${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard />Payments<ChevronRight /></button>
         {paymentsExpanded ? <button className="subitem" onClick={() => open("advances")}><span />Advances<ChevronRight /></button> : null}
+        {paymentsExpanded ? <button className="subitem" onClick={() => open("earnings")}><span />My Earnings<ChevronRight /></button> : null}
         {allowed(account, "attendance") ? <button onClick={() => open("attendance")}><Fingerprint />Attendance<ChevronRight /></button> : null}
         {allowed(account, "leave") ? <button onClick={() => open("leave")}><CalendarDays />Leave<ChevronRight /></button> : null}
         <button onClick={() => open("settings")}><Settings />Settings<ChevronRight /></button>
@@ -463,6 +465,7 @@ export function ConnectLoginFlow() {
       {step === "dashboard" && account ? <ConnectDashboard account={account} onAttendance={() => open("attendance")} onProfile={() => open("profile")} /> : null}
       {step === "profile" && account ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "advances" && account ? <ConnectAdvances account={account} /> : null}
+      {step === "earnings" && account ? <section className="dx-earnings"><header><div className="dx-advance-title"><i><IndianRupee /></i><h1>My Earnings</h1></div></header></section> : null}
       {step === "attendance" && account ? <ConnectAttendance account={account} /> : null}
       {step === "leave" && account ? <ConnectLeave account={account} /> : null}
       {step === "settings" ? <section className="dx-settings"><h1>Settings</h1><label>Default account<select disabled={pending} value={defaultKey} onChange={(e) => saveDefaultAccount(e.target.value)}><option value="">Select default account</option>{accounts.map((row) => <option key={accountKey(row)} value={accountKey(row)}>{row.companyName} - {row.reference || row.name}</option>)}</select></label><label className="toggle"><span><strong>Enable biometric login</strong><small>Use Face ID or device authentication when available.</small></span><input defaultChecked={localStorage.getItem(biometricKey) === "true"} onChange={(e) => enrollBiometric(e.target.checked)} type="checkbox" /></label><button onClick={resetPin}>Change PIN</button></section> : null}
