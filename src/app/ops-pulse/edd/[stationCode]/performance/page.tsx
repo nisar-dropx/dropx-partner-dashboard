@@ -6,13 +6,13 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
 import { fetchEddAllowedStations, isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
 import { loadCodLocations, loadCodStationSettings } from "@/lib/ops-pulse/cod";
-import { EddStationSectionTabs } from "./edd-station-section-tabs";
-import { EddClient } from "./edd-client";
+import { EddStationSectionTabs } from "../edd-station-section-tabs";
+import { EddPerformanceView } from "../edd-performance-view";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 30;
 
-export default async function EddStationPage({
+export default async function EddStationPerformancePage({
   params
 }: {
   params: { stationCode: string };
@@ -48,7 +48,7 @@ export default async function EddStationPage({
     try {
       workerAllowed = (await fetchEddAllowedStations()).has(stationCode);
     } catch {
-      workerAllowed = true; // fail open — don't block the page just because the allowed-list call failed
+      workerAllowed = true;
     }
   }
   const authorized = allowedCodes.has(stationCode) && workerAllowed;
@@ -67,8 +67,8 @@ export default async function EddStationPage({
           title={stationCode || "Station"}
           subtitle={
             stationName
-              ? `${stationName}${placeBits ? ` · ${placeBits}` : ""} · Live tracking IDs bucketed by Estimated Delivery Date`
-              : "Every live tracking ID at this station, bucketed by Estimated Delivery Date — pulled live from Amazon's station ageing dashboard."
+              ? `${stationName}${placeBits ? ` · ${placeBits}` : ""} · Assigned/delivered/returned/held performance`
+              : "Assigned/delivered/returned/held performance for this station, refreshed every 15 minutes."
           }
           action={<span className={`status-pill ${workerConfigured ? "good" : "warn"}`}>{workerConfigured ? "Live" : "Setup needed"}</span>}
         />
@@ -96,8 +96,8 @@ export default async function EddStationPage({
           </section>
         ) : (
           <>
-            <EddStationSectionTabs stationCode={stationCode} active="ageing" />
-            <EddClient stationCode={stationCode} />
+            <EddStationSectionTabs stationCode={stationCode} active="performance" />
+            <EddPerformanceView stationCode={stationCode} />
           </>
         )}
       </div>

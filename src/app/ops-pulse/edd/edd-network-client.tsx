@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
 import type { EddBucketKey, EddNetworkRunStatus, EddNetworkStation } from "@/lib/ops-pulse/edd-worker";
-import type { EddStationOption } from "./page";
+import type { EddStationOption } from "@/lib/ops-pulse/edd-stations";
 import { EddNetworkChart } from "./edd-network-chart";
 
 type SortColumn = "stationCode" | "totalCount" | "overdue" | "dueToday" | "dueTomorrow" | "future" | "fetchedAt";

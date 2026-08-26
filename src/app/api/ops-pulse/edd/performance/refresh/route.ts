@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { requireEddApi } from "@/lib/ops-pulse/edd-access";
-import { fetchEddPerformanceStation } from "@/lib/ops-pulse/edd-worker";
+import { refreshEddPerformanceStation } from "@/lib/ops-pulse/edd-worker";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+// Much faster than the ageing refresh (a single-day pull, no bulk enrichment) — still generous in case Amazon is slow.
+export const maxDuration = 60;
 
-/** Fast cached read — see ./refresh for the manual per-station refresh. */
-export async function GET(request: Request) {
+export async function POST(request: Request) {
   try {
     const denied = await requireEddApi();
     if (denied) return denied;
@@ -17,10 +17,10 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "stationCode is required." }, { status: 400 });
     }
 
-    const result = await fetchEddPerformanceStation({ stationCode });
-    return NextResponse.json(result);
+    const payload = await refreshEddPerformanceStation({ stationCode });
+    return NextResponse.json(payload);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to load the performance report.";
+    const message = error instanceof Error ? error.message : "Unable to refresh the performance report.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

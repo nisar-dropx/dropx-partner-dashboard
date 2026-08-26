@@ -318,7 +318,7 @@ export async function refreshEddStation(params: { stationCode: string }): Promis
   return normalizePayload(raw, stationCode);
 }
 
-/** Assigned / delivered / returned / held for one station over a window — see the worker's PERFORMANCE_* config for exactly what counts as each bucket. */
+/** Assigned / delivered / returned / held for one station, always "today" (IST) — see the worker's PERFORMANCE_* config for exactly what counts as each bucket. */
 export type EddPerformancePayload = {
   stationCode: string;
   window: { from: string; to: string };
@@ -332,42 +332,35 @@ export type EddPerformancePayload = {
   heldPct: number;
 };
 
-/**
- * Live (never cached) — mirrors Amazon's own ageing dashboard's combined
- * status query (adds "Delivered" on top of the live-only EDD statuses), so
- * "assigned" matches what station staff see natively. Can take a while for
- * a wide date range since it's a real Amazon fetch on every call.
- */
-export async function fetchEddPerformance(params: { stationCode: string; from: string; to: string }): Promise<EddPerformancePayload> {
-  const { baseUrl, adminKey } = workerConfig();
-  if (!baseUrl || !adminKey) {
-    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
-  }
+/** GET result: either a cached snapshot, or nothing has ever been saved for this station yet today. */
+export type EddPerformanceResult =
+  | { status: "ok"; payload: EddPerformancePayload }
+  | { status: "no_snapshot"; stationCode: string };
 
-  const stationCode = params.stationCode.trim().toUpperCase();
-  const url = new URL(`${baseUrl}/api/admin/executive/edd/performance`);
-  url.searchParams.set("stationCode", stationCode);
-  url.searchParams.set("from", params.from);
-  url.searchParams.set("to", params.to);
+export type EddPerformanceNetworkStation = {
+  stationCode: string;
+  hasSnapshot: boolean;
+  fetchedAt: string | null;
+  assigned: number;
+  delivered: number;
+  returned: number;
+  held: number;
+  deliveredPct: number;
+  returnedPct: number;
+  heldPct: number;
+};
 
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    headers: { "x-admin-key": adminKey, Accept: "application/json" },
-    cache: "no-store",
-    signal: AbortSignal.timeout(90000)
-  });
-  const raw = await readJson(response);
+export type EddPerformanceNetworkPayload = {
+  asOf: string;
+  stations: EddPerformanceNetworkStation[];
+  run: EddNetworkRunStatus | null;
+};
 
-  if (!response.ok || raw.status !== "ok") {
-    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
-      code: raw.code == null ? null : String(raw.code)
-    });
-  }
-
+function normalizePerformancePayload(raw: Record<string, unknown>, stationCode: string): EddPerformancePayload {
   const windowRaw = raw.window && typeof raw.window === "object" ? (raw.window as Record<string, unknown>) : {};
   return {
     stationCode: String(raw.stationCode ?? stationCode).toUpperCase(),
-    window: { from: String(windowRaw.from ?? params.from), to: String(windowRaw.to ?? params.to) },
+    window: { from: String(windowRaw.from ?? ""), to: String(windowRaw.to ?? "") },
     fetchedAt: String(raw.fetchedAt ?? new Date().toISOString()),
     assigned: Number(raw.assigned ?? 0) || 0,
     delivered: Number(raw.delivered ?? 0) || 0,
@@ -377,4 +370,147 @@ export async function fetchEddPerformance(params: { stationCode: string; from: s
     returnedPct: Number(raw.returnedPct ?? 0) || 0,
     heldPct: Number(raw.heldPct ?? 0) || 0
   };
+}
+
+/** Reads today's cached performance snapshot for a station — instant, no live Amazon calls. Kept current by the 15-minute sweep and refreshEddPerformanceStation. */
+export async function fetchEddPerformanceStation(params: { stationCode: string }): Promise<EddPerformanceResult> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+
+  const stationCode = params.stationCode.trim().toUpperCase();
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/performance`);
+  url.searchParams.set("stationCode", stationCode);
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
+  });
+  const raw = await readJson(response);
+
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  if (raw.status === "no_snapshot") {
+    return { status: "no_snapshot", stationCode };
+  }
+  return { status: "ok", payload: normalizePerformancePayload(raw, stationCode) };
+}
+
+/** Recomputes and saves today's performance snapshot for one station — the dashboard's per-station "Refresh" button. */
+export async function refreshEddPerformanceStation(params: { stationCode: string }): Promise<EddPerformancePayload> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+
+  const stationCode = params.stationCode.trim().toUpperCase();
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/performance/refresh`);
+  url.searchParams.set("stationCode", stationCode);
+
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(30000)
+  });
+  const raw = await readJson(response);
+
+  if (!response.ok || raw.status !== "ok") {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  return normalizePerformancePayload(raw, stationCode);
+}
+
+/** Every allowed station's latest cached performance snapshot, plus the active sweep's progress if one is running. Always instant. */
+export async function fetchEddPerformanceNetwork(): Promise<EddPerformanceNetworkPayload> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+
+  const response = await fetch(`${baseUrl}/api/admin/executive/edd/performance/network`, {
+    method: "GET",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
+  });
+  const raw = await readJson(response);
+
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+
+  const stations = Array.isArray(raw.stations)
+    ? raw.stations.map((row) => {
+        const entry = (row ?? {}) as Record<string, unknown>;
+        return {
+          stationCode: String(entry.stationCode ?? "").toUpperCase(),
+          hasSnapshot: Boolean(entry.hasSnapshot),
+          fetchedAt: entry.fetchedAt == null ? null : String(entry.fetchedAt),
+          assigned: Number(entry.assigned ?? 0) || 0,
+          delivered: Number(entry.delivered ?? 0) || 0,
+          returned: Number(entry.returned ?? 0) || 0,
+          held: Number(entry.held ?? 0) || 0,
+          deliveredPct: Number(entry.deliveredPct ?? 0) || 0,
+          returnedPct: Number(entry.returnedPct ?? 0) || 0,
+          heldPct: Number(entry.heldPct ?? 0) || 0
+        };
+      })
+    : [];
+
+  return { asOf: String(raw.asOf ?? new Date().toISOString()), stations, run: normalizeRun(raw.run) };
+}
+
+/** Starts (or reports the progress of) a network-wide performance sweep — idempotent, runs in the background on the worker side. */
+export async function refreshAllEddPerformanceNetwork(): Promise<EddNetworkRunStatus | null> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+
+  const response = await fetch(`${baseUrl}/api/admin/executive/edd/performance/network/refresh-all`, {
+    method: "POST",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
+  });
+  const raw = await readJson(response);
+
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  return normalizeRun(raw.run);
+}
+
+/** The worker's own recognized station codes (its ALLOWED_STATIONS) — used to filter out master-data rows that aren't real Amazon-tracked stations. Public, unauthenticated. */
+export async function fetchEddAllowedStations(): Promise<Set<string>> {
+  const { baseUrl } = workerConfig();
+  if (!baseUrl) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL.");
+  }
+
+  const response = await fetch(`${baseUrl}/api/stations`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(10000)
+  });
+  const raw = await readJson(response);
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`));
+  }
+  const stations = Array.isArray(raw.stations) ? raw.stations.map((code) => String(code).trim().toUpperCase()) : [];
+  return new Set(stations);
 }

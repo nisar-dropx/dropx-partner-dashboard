@@ -1,22 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Loader2 } from "lucide-react";
-import { formatCiaDisplayDate, todayIstYmd } from "@/lib/ops-pulse/cia-types";
-import type { EddPerformancePayload } from "@/lib/ops-pulse/edd-worker";
-import type { EddStationOption } from "./page";
-import { EddDateRangePicker } from "./edd-date-range-picker";
-
-/** How many stations to fetch performance for at once — each is a real live Amazon pull, so this stays modest. */
-const CONCURRENCY = 4;
-
-type RowState =
-  | { status: "pending" }
-  | { status: "ok"; data: EddPerformancePayload }
-  | { status: "error"; message: string };
+import Link from "next/link";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
+import type { EddNetworkRunStatus, EddPerformanceNetworkStation } from "@/lib/ops-pulse/edd-worker";
+import type { EddStationOption } from "@/lib/ops-pulse/edd-stations";
 
 type SortColumn = "stationCode" | "assigned" | "delivered" | "returned" | "held";
 type SortDir = "asc" | "desc";
+const PAGE_SIZE = 12;
+/** While a sweep is running, poll the (instant, cache-only) network endpoint at this cadence. */
+const RUN_POLL_MS = 15000;
 
 const COLUMNS: Array<{ key: SortColumn; label: string; align?: "num" }> = [
   { key: "stationCode", label: "Station" },
@@ -26,15 +20,22 @@ const COLUMNS: Array<{ key: SortColumn; label: string; align?: "num" }> = [
   { key: "held", label: "Held", align: "num" }
 ];
 
-async function fetchPerformance(stationCode: string, from: string, to: string): Promise<EddPerformancePayload> {
-  const url = new URL("/api/ops-pulse/edd/performance", window.location.origin);
-  url.searchParams.set("stationCode", stationCode);
-  url.searchParams.set("from", from);
-  url.searchParams.set("to", to);
-  const response = await fetch(url.toString(), { headers: { Accept: "application/json" }, cache: "no-store" });
-  const raw = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(String(raw.error ?? `Unable to load performance (${response.status}).`));
-  return raw as EddPerformancePayload;
+function formatFetchedAt(value: string | null) {
+  if (!value) return "Never refreshed";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function sortValue(row: EddPerformanceNetworkStation, column: SortColumn): string | number {
+  switch (column) {
+    case "stationCode": return row.stationCode;
+    case "assigned": return row.assigned;
+    case "delivered": return row.delivered;
+    case "returned": return row.returned;
+    case "held": return row.held;
+    default: return "";
+  }
 }
 
 function compareValues(a: string | number, b: string | number, dir: SortDir) {
@@ -43,74 +44,127 @@ function compareValues(a: string | number, b: string | number, dir: SortDir) {
   return String(a).localeCompare(String(b)) * factor;
 }
 
+async function postJson<T>(path: string): Promise<T> {
+  const response = await fetch(new URL(path, window.location.origin).toString(), {
+    method: "POST",
+    headers: { Accept: "application/json" },
+    cache: "no-store"
+  });
+  const text = await response.text();
+  let raw: Record<string, unknown> = {};
+  try {
+    raw = text ? JSON.parse(text) : {};
+  } catch {
+    raw = {};
+  }
+  if (!response.ok) throw new Error(String(raw.error ?? `Request failed (${response.status}).`));
+  return raw as T;
+}
+
+async function refreshStation(stationCode: string) {
+  return postJson<{ fetchedAt: string; assigned: number; delivered: number; returned: number; held: number; deliveredPct: number; returnedPct: number; heldPct: number }>(
+    `/api/ops-pulse/edd/performance/refresh?stationCode=${encodeURIComponent(stationCode)}`
+  );
+}
+
+async function fetchNetwork(): Promise<{ stations: EddPerformanceNetworkStation[]; run: EddNetworkRunStatus | null }> {
+  const response = await fetch(new URL("/api/ops-pulse/edd/performance/network", window.location.origin).toString(), {
+    headers: { Accept: "application/json" },
+    cache: "no-store"
+  });
+  const raw = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(String(raw.error ?? "Unable to refresh the network performance overview."));
+  return { stations: raw.stations ?? [], run: raw.run ?? null };
+}
+
 /**
- * Network-wide assigned/delivered/returned/held — one live Amazon fetch per
- * station (reusing the same /api/ops-pulse/edd/performance the station page
- * uses), run with limited concurrency rather than one big worker-side call:
- * 38 stations' worth of live pulls in a single request risks a timeout, and
- * this way rows fill in as they complete instead of an all-or-nothing wait.
+ * Snapshot-only network performance overview — mirrors EddNetworkClient
+ * (Ageing) exactly: cached reads, per-row refresh, a network-wide
+ * "Refresh all" that kicks off the worker's sweep in the background, and a
+ * progress poll while one is running. No per-page live Amazon calls.
  */
-export function EddNetworkPerformanceView({ stations }: { stations: EddStationOption[] }) {
-  const today = todayIstYmd();
-  const [appliedFrom, setAppliedFrom] = useState(today);
-  const [appliedTo, setAppliedTo] = useState(today);
-  const [rows, setRows] = useState<Record<string, RowState>>({});
+export function EddNetworkPerformanceView({
+  stations,
+  initialNetwork,
+  initialRun
+}: {
+  stations: EddStationOption[];
+  initialNetwork: EddPerformanceNetworkStation[];
+  initialRun: EddNetworkRunStatus | null;
+}) {
+  const nameByCode = useMemo(() => new Map(stations.map((s) => [s.code, s.name])), [stations]);
+  const [rows, setRows] = useState<EddPerformanceNetworkStation[]>(initialNetwork);
+  const [run, setRun] = useState<EddNetworkRunStatus | null>(initialRun);
+  const [search, setSearch] = useState("");
   const [sortColumn, setSortColumn] = useState<SortColumn>("assigned");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const requestId = useRef(0);
-
-  useEffect(() => {
-    const thisRequest = ++requestId.current;
-    setRows(Object.fromEntries(stations.map((station) => [station.code, { status: "pending" } as RowState])));
-
-    let cursor = 0;
-    async function worker() {
-      while (cursor < stations.length) {
-        if (thisRequest !== requestId.current) return;
-        const station = stations[cursor];
-        cursor += 1;
-        try {
-          const data = await fetchPerformance(station.code, appliedFrom, appliedTo);
-          if (thisRequest !== requestId.current) return;
-          setRows((current) => ({ ...current, [station.code]: { status: "ok", data } }));
-        } catch (err) {
-          if (thisRequest !== requestId.current) return;
-          setRows((current) => ({
-            ...current,
-            [station.code]: { status: "error", message: err instanceof Error ? err.message : "Unable to load." }
-          }));
-        }
-      }
-    }
-
-    const workers = Array.from({ length: Math.min(CONCURRENCY, stations.length) }, () => worker());
-    void Promise.all(workers);
-
-    return () => {
-      requestId.current += 1;
-    };
-  }, [stations, appliedFrom, appliedTo]);
-
-  const rowList = useMemo(() => stations.map((station) => ({ station, state: rows[station.code] ?? { status: "pending" as const } })), [stations, rows]);
-  const doneCount = rowList.filter((row) => row.state.status !== "pending").length;
-  const allDone = doneCount === stations.length && stations.length > 0;
+  const [page, setPage] = useState(1);
+  const [refreshingCode, setRefreshingCode] = useState<string | null>(null);
+  const [startingSweep, setStartingSweep] = useState(false);
+  const [rowError, setRowError] = useState<{ code: string; message: string } | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const totals = useMemo(() => {
-    return rowList.reduce(
+    return rows.reduce(
       (acc, row) => {
-        if (row.state.status !== "ok") return acc;
-        acc.assigned += row.state.data.assigned;
-        acc.delivered += row.state.data.delivered;
-        acc.returned += row.state.data.returned;
-        acc.held += row.state.data.held;
+        acc.assigned += row.assigned;
+        acc.delivered += row.delivered;
+        acc.returned += row.returned;
+        acc.held += row.held;
+        acc.stationsWithData += row.hasSnapshot ? 1 : 0;
         return acc;
       },
-      { assigned: 0, delivered: 0, returned: 0, held: 0 }
+      { assigned: 0, delivered: 0, returned: 0, held: 0, stationsWithData: 0 }
     );
-  }, [rowList]);
+  }, [rows]);
   const pct = (value: number) => (totals.assigned > 0 ? Math.round((value / totals.assigned) * 1000) / 10 : 0);
 
+  const filteredRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter((row) => {
+      const name = nameByCode.get(row.stationCode) ?? "";
+      return row.stationCode.toLowerCase().includes(term) || name.toLowerCase().includes(term);
+    });
+  }, [rows, search, nameByCode]);
+
+  const sortedRows = useMemo(
+    () => [...filteredRows].sort((a, b) => compareValues(sortValue(a, sortColumn), sortValue(b, sortColumn), sortDir)),
+    [filteredRows, sortColumn, sortDir]
+  );
+
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedRows = useMemo(
+    () => sortedRows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [sortedRows, currentPage]
+  );
+
+  useEffect(() => {
+    if (run?.status !== "running") {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+      return;
+    }
+    pollRef.current = setInterval(() => {
+      void fetchNetwork()
+        .then((next) => {
+          setRows(next.stations);
+          setRun(next.run);
+        })
+        .catch(() => {
+          // Transient poll failure — keep showing the last known state and try again next tick.
+        });
+    }, RUN_POLL_MS);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [run?.status]);
+
   function toggleSort(column: SortColumn) {
+    setPage(1);
     if (sortColumn !== column) {
       setSortColumn(column);
       setSortDir(column === "stationCode" ? "asc" : "desc");
@@ -119,85 +173,133 @@ export function EddNetworkPerformanceView({ stations }: { stations: EddStationOp
     setSortDir((current) => (current === "asc" ? "desc" : "asc"));
   }
 
-  function sortValue(row: (typeof rowList)[number]): string | number {
-    if (row.state.status !== "ok") return sortColumn === "stationCode" ? row.station.code : -1;
-    switch (sortColumn) {
-      case "stationCode": return row.station.code;
-      case "assigned": return row.state.data.assigned;
-      case "delivered": return row.state.data.delivered;
-      case "returned": return row.state.data.returned;
-      case "held": return row.state.data.held;
-      default: return 0;
-    }
+  function handleRefresh(stationCode: string) {
+    setRefreshingCode(stationCode);
+    setRowError(null);
+    void refreshStation(stationCode)
+      .then((fresh) => {
+        setRows((current) =>
+          current.map((row) =>
+            row.stationCode === stationCode
+              ? {
+                  ...row,
+                  hasSnapshot: true,
+                  fetchedAt: fresh.fetchedAt,
+                  assigned: fresh.assigned,
+                  delivered: fresh.delivered,
+                  returned: fresh.returned,
+                  held: fresh.held,
+                  deliveredPct: fresh.deliveredPct,
+                  returnedPct: fresh.returnedPct,
+                  heldPct: fresh.heldPct
+                }
+              : row
+          )
+        );
+      })
+      .catch((err) => {
+        setRowError({ code: stationCode, message: err instanceof Error ? err.message : "Unable to refresh this station." });
+      })
+      .finally(() => setRefreshingCode(null));
   }
 
-  const sortedRows = useMemo(
-    () => [...rowList].sort((a, b) => compareValues(sortValue(a), sortValue(b), sortDir)),
-    [rowList, sortColumn, sortDir]
-  );
+  function handleRefreshAll() {
+    setStartingSweep(true);
+    setRowError(null);
+    void postJson<{ run: EddNetworkRunStatus | null }>("/api/ops-pulse/edd/performance/network/refresh-all")
+      .then((result) => setRun(result.run))
+      .catch((err) => {
+        setRowError({ code: "Network sweep", message: err instanceof Error ? err.message : "Unable to start the network sweep." });
+      })
+      .finally(() => setStartingSweep(false));
+  }
+
+  const sweepRunning = run?.status === "running";
+  const sweepPct = run && run.stationsTotal ? Math.round((run.stationsDone / run.stationsTotal) * 100) : 0;
 
   return (
     <>
-      <section className="panel">
-        <div className="panel-body">
-          <h3 style={{ margin: 0 }}>Check network performance for a date range</h3>
-          <p className="subtle" style={{ marginTop: 4 }}>
-            Assigned, delivered, returned, and held packages across every station — defaults to today. Pulled live
-            from Amazon one station at a time, so a wide range across the whole network can take a while.
-          </p>
-          <div style={{ marginTop: 12 }}>
-            <EddDateRangePicker
-              from={appliedFrom}
-              to={appliedTo}
-              loading={!allDone}
-              onApply={(from, to) => {
-                setAppliedFrom(from);
-                setAppliedTo(to);
-              }}
-            />
-          </div>
+      <section className="edd-bucket-grid">
+        <div className="edd-bucket-card static">
+          <span>Assigned</span>
+          <strong>{totals.assigned.toLocaleString("en-IN")}</strong>
+          <small>{totals.stationsWithData.toLocaleString("en-IN")}/{rows.length} stations with data today</small>
+        </div>
+        <div className="edd-bucket-card static future">
+          <span>Delivered</span>
+          <strong>{totals.delivered.toLocaleString("en-IN")}</strong>
+          <small>{pct(totals.delivered)}% · reached the customer</small>
+        </div>
+        <div className="edd-bucket-card static dueToday">
+          <span>Held</span>
+          <strong>{totals.held.toLocaleString("en-IN")}</strong>
+          <small>{pct(totals.held)}% · still moving through the station</small>
+        </div>
+        <div className="edd-bucket-card static overdue">
+          <span>Returned</span>
+          <strong>{totals.returned.toLocaleString("en-IN")}</strong>
+          <small>{pct(totals.returned)}% · failed, rejected, or undeliverable</small>
         </div>
       </section>
 
       <section className="panel">
         <div className="panel-head">
           <div>
-            <h3>
-              {formatCiaDisplayDate(appliedFrom)}{appliedFrom !== appliedTo ? ` – ${formatCiaDisplayDate(appliedTo)}` : ""}
-            </h3>
-            <p className="subtle">
-              {allDone
-                ? `${totals.assigned.toLocaleString("en-IN")} packages assigned network-wide in this window.`
-                : `Loading ${doneCount}/${stations.length} stations…`}
-            </p>
+            <h3>Stations</h3>
+            <p className="subtle">Today's assigned/delivered/returned/held, refreshed every 15 minutes. Open a station for its own Performance tab.</p>
           </div>
-          {!allDone ? <Loader2 size={18} className="edd-spin" /> : null}
+          <button
+            type="button"
+            className="button secondary"
+            onClick={handleRefreshAll}
+            disabled={startingSweep || sweepRunning}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            {startingSweep ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />}
+            {sweepRunning ? "Sweep running…" : startingSweep ? "Starting…" : "Refresh all"}
+          </button>
         </div>
+
+        {run ? (
+          <div className="panel-body edd-sweep-status">
+            <div className="edd-sweep-bar">
+              <div className="edd-sweep-bar-fill" style={{ width: `${sweepRunning ? sweepPct : 100}%` }} />
+            </div>
+            <span className="subtle">
+              {sweepRunning
+                ? `Sweep in progress — ${run.stationsDone}/${run.stationsTotal} stations (${run.stationsOk} ok${run.stationsFailed ? `, ${run.stationsFailed} failed` : ""}).`
+                : `Last sweep: ${run.stationsOk}/${run.stationsTotal} ok${run.stationsFailed ? `, ${run.stationsFailed} failed` : ""}${run.finishedAt ? ` · finished ${formatFetchedAt(run.finishedAt)}` : ""}.`}
+            </span>
+          </div>
+        ) : null}
+
         <div className="panel-body">
-          <div className="edd-performance-grid">
-            <div className="edd-bucket-card static">
-              <span>Assigned</span>
-              <strong>{totals.assigned.toLocaleString("en-IN")}</strong>
-              <small>{doneCount}/{stations.length} stations loaded</small>
+          <div className="edd-toolbar">
+            <div style={{ position: "relative" }}>
+              <Search size={15} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--muted)" }} />
+              <input
+                type="search"
+                placeholder="Search station code or name…"
+                value={search}
+                onChange={(event) => {
+                  setPage(1);
+                  setSearch(event.target.value);
+                }}
+                style={{ paddingLeft: 30, minWidth: 240 }}
+              />
             </div>
-            <div className="edd-bucket-card static future">
-              <span>Delivered</span>
-              <strong>{totals.delivered.toLocaleString("en-IN")}</strong>
-              <small>{pct(totals.delivered)}% · reached the customer</small>
-            </div>
-            <div className="edd-bucket-card static dueToday">
-              <span>Held</span>
-              <strong>{totals.held.toLocaleString("en-IN")}</strong>
-              <small>{pct(totals.held)}% · still moving through the station</small>
-            </div>
-            <div className="edd-bucket-card static overdue">
-              <span>Returned</span>
-              <strong>{totals.returned.toLocaleString("en-IN")}</strong>
-              <small>{pct(totals.returned)}% · failed, rejected, or undeliverable</small>
-            </div>
+            <span className="subtle" style={{ marginLeft: "auto" }}>
+              Showing {sortedRows.length.toLocaleString("en-IN")} of {rows.length.toLocaleString("en-IN")}
+            </span>
           </div>
 
-          <div className="edd-table-wrap" style={{ marginTop: 14 }}>
+          {rowError ? (
+            <p className="subtle" style={{ color: "var(--red)", marginTop: 8 }}>
+              {rowError.code}: {rowError.message}
+            </p>
+          ) : null}
+
+          <div className="edd-table-wrap">
             <table className="edd-table">
               <thead>
                 <tr>
@@ -216,29 +318,66 @@ export function EddNetworkPerformanceView({ stations }: { stations: EddStationOp
                       </th>
                     );
                   })}
+                  <th>Last refreshed</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {sortedRows.map(({ station, state }) => (
-                  <tr key={station.code}>
-                    <td><strong>{station.code}</strong>{station.name ? <small style={{ display: "block", color: "var(--muted)" }}>{station.name}</small> : null}</td>
-                    {state.status === "pending" ? (
-                      <td colSpan={4} className="subtle"><Loader2 size={13} className="edd-spin" style={{ marginRight: 6, verticalAlign: "middle" }} />Loading…</td>
-                    ) : state.status === "error" ? (
-                      <td colSpan={4} className="subtle" style={{ color: "var(--red)" }}>{state.message}</td>
-                    ) : (
-                      <>
-                        <td className="num">{state.data.assigned.toLocaleString("en-IN")}</td>
-                        <td className="num">{state.data.delivered.toLocaleString("en-IN")} <span className="subtle">({state.data.deliveredPct}%)</span></td>
-                        <td className="num">{state.data.returned.toLocaleString("en-IN")} <span className="subtle">({state.data.returnedPct}%)</span></td>
-                        <td className="num">{state.data.held.toLocaleString("en-IN")} <span className="subtle">({state.data.heldPct}%)</span></td>
-                      </>
-                    )}
-                  </tr>
-                ))}
+                {pagedRows.map((row) => {
+                  const isRefreshing = refreshingCode === row.stationCode;
+                  const name = nameByCode.get(row.stationCode);
+                  return (
+                    <tr key={row.stationCode}>
+                      <td>
+                        <Link className="edd-station-link" href={`/edd/${encodeURIComponent(row.stationCode)}/performance`} prefetch={false}>
+                          <strong>{row.stationCode}</strong>
+                          {name ? <small>{name}</small> : null}
+                        </Link>
+                      </td>
+                      <td className="num">{row.assigned.toLocaleString("en-IN")}</td>
+                      <td className="num">{row.delivered.toLocaleString("en-IN")} <span className="subtle">({row.deliveredPct}%)</span></td>
+                      <td className="num">{row.returned ? <span className="edd-pill overdue">{row.returned.toLocaleString("en-IN")} ({row.returnedPct}%)</span> : "—"}</td>
+                      <td className="num">{row.held.toLocaleString("en-IN")} <span className="subtle">({row.heldPct}%)</span></td>
+                      <td>{row.hasSnapshot ? formatFetchedAt(row.fetchedAt) : <span className="subtle">Never refreshed</span>}</td>
+                      <td>
+                        <div className="edd-row-actions">
+                          <button
+                            type="button"
+                            className="button secondary edd-icon-btn"
+                            title={`Refresh ${row.stationCode}`}
+                            disabled={isRefreshing}
+                            onClick={() => handleRefresh(row.stationCode)}
+                          >
+                            {isRefreshing ? <Loader2 size={14} className="edd-spin" /> : <RefreshCw size={14} />}
+                            <span>{isRefreshing ? "Refreshing…" : "Refresh"}</span>
+                          </button>
+                          <Link className="button secondary" href={`/edd/${encodeURIComponent(row.stationCode)}/performance`} prefetch={false}>
+                            Open
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+            {!pagedRows.length ? <p className="subtle" style={{ marginTop: 10 }}>No stations match this search.</p> : null}
           </div>
+
+          {sortedRows.length ? (
+            <div className="edd-pagination">
+              <span className="subtle">{sortedRows.length.toLocaleString("en-IN")} stations</span>
+              <div className="edd-pagination-pages">
+                <button type="button" className="button secondary" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))} aria-label="Previous page">
+                  <ChevronLeft size={16} />
+                </button>
+                <span className="subtle">Page {currentPage} of {totalPages}</span>
+                <button type="button" className="button secondary" disabled={currentPage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))} aria-label="Next page">
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </section>
     </>
