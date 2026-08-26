@@ -80,6 +80,31 @@ function comparableProviderName(value: string) {
     .toLocaleUpperCase();
 }
 
+function providerNameTokens(value: string) {
+  return value
+    .split("/")[0]
+    .normalize("NFKD")
+    .toLocaleUpperCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+function providerHolderMatches(holderName: string, workerName: string) {
+  if (comparableProviderName(holderName) === comparableProviderName(workerName)) return true;
+
+  const holderTokens = new Set(providerNameTokens(holderName));
+  const workerTokens = new Set(providerNameTokens(workerName));
+  if (!holderTokens.size || !workerTokens.size) return false;
+  const matchingTokens = Array.from(holderTokens).filter((token) => workerTokens.has(token)).length;
+  const smallerNameSize = Math.min(holderTokens.size, workerTokens.size);
+  const largerNameSize = Math.max(holderTokens.size, workerTokens.size);
+
+  return matchingTokens >= 2
+    && matchingTokens === smallerNameSize
+    && matchingTokens / largerNameSize >= 2 / 3;
+}
+
 function normalizedHeader(value: unknown) {
   return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
@@ -201,7 +226,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       if (!providerId) { skipped("The worker's location has no provider configured."); continue; }
       const holderName = memberNameById.get(uploadRow.providerMemberId);
       if (!holderName) { skipped("Provider Member ID was not found in uploaded provider data."); continue; }
-      if (comparableProviderName(holderName) !== comparableProviderName(worker.fullName)) { skipped(`Holder name '${holderName.split("/")[0].trim()}' does not match '${worker.fullName}'.`); continue; }
+      if (!providerHolderMatches(holderName, worker.fullName)) { skipped(`Holder name '${holderName.split("/")[0].trim()}' does not match '${worker.fullName}'.`); continue; }
       const workerColumn = worker.sourceType === "employee" ? "employee_id" : worker.sourceType === "contractor" ? "contractor_id" : "field_executive_id";
       const { data: existing, error: existingError } = await supabaseAdmin.from("field_executive_provider_mappings")
         .select("id")
@@ -339,7 +364,7 @@ async function saveExecutiveMappingRow(
   if (!uploadedHolderName) {
     throw new Error(`Row ${index + 1}: No uploaded holder was found for this Provider Member ID.`);
   }
-  if (!dropxName || comparableProviderName(uploadedHolderName) !== comparableProviderName(dropxName)) {
+  if (!dropxName || !providerHolderMatches(uploadedHolderName, dropxName)) {
     throw new Error(`Row ${index + 1}: Uploaded holder name does not match the DropX name.`);
   }
   if (sourceType === "contractor") {
