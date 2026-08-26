@@ -10340,13 +10340,23 @@ body {
 .dx-selfie-panel>header>button{display:grid;place-items:center;width:36px;height:36px;background:#1c212b;border:1px solid #2c3340;border-radius:8px;color:#fff;flex-shrink:0}
 .dx-selfie-panel>header svg{width:18px;height:18px}
 .dx-selfie-stage{display:grid;place-items:center;gap:14px;align-content:center}
-.dx-selfie-frame{position:relative;width:min(78vw,340px);aspect-ratio:1;border-radius:50%;overflow:hidden;background:#000;box-shadow:0 0 0 2px #ff940b,0 0 0 10px #ff940b22}
+.dx-selfie-frame{position:relative;width:min(78vw,340px);aspect-ratio:1;border-radius:50%;overflow:hidden;background:#000;box-shadow:0 0 0 2px #ff940b,0 0 0 10px #ff940b22;transition:box-shadow .2s ease}
+.dx-selfie-frame.ok{box-shadow:0 0 0 2px #22c55e,0 0 0 10px #22c55e33}
+.dx-selfie-frame.warn{box-shadow:0 0 0 2px #f59e0b,0 0 0 10px #f59e0b33}
 .dx-selfie-live{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 video.dx-selfie-live{transform:scaleX(-1)}
 img.dx-selfie-live{transform:none}
 .dx-selfie-mask{position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle closest-side,transparent 69%,rgba(15,18,24,.55) 70%,rgba(15,18,24,.72) 100%)}
 .dx-selfie-circle{position:absolute;inset:8%;border:2px dashed rgba(255,255,255,.55);border-radius:50%}
 .dx-selfie-guide{margin:0;text-align:center;color:#cfc9c0;font-size:13px}
+.dx-selfie-guide.ok{color:#86efac}
+.dx-selfie-score{display:inline-flex;align-items:baseline;gap:8px;padding:8px 14px;background:#1c212b;border:1px solid #2c3340;border-radius:999px}
+.dx-selfie-score strong{font-size:22px;line-height:1}
+.dx-selfie-score span{font-size:12px;color:#b7b2aa}
+.dx-selfie-score.ok{border-color:#22c55e66;background:#14532d55}
+.dx-selfie-score.ok strong{color:#86efac}
+.dx-selfie-score.warn{border-color:#f59e0b66;background:#78350f44}
+.dx-selfie-score.warn strong{color:#fbbf24}
 .dx-selfie-panel .dx-form-error{margin:0;color:#ffb4b4;font-size:12px;text-align:center}
 .dx-selfie-panel-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .dx-selfie-panel-actions>button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;border:0;border-radius:10px;font-size:13px;font-weight:700}

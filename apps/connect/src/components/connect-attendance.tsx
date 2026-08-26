@@ -17,7 +17,7 @@ import {
   X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { matchSelfieToProfile } from "@/lib/face-match";
+import { matchSelfieToProfile, type FaceMatchResult } from "@/lib/face-match";
 import { SelfieCapturePanel } from "./selfie-capture-panel";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
@@ -185,6 +185,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const [selfieFile, setSelfieFile] = useState<File | null>(null);
   const [selfiePreview, setSelfiePreview] = useState("");
   const [faceMatchLabel, setFaceMatchLabel] = useState("Selfie required · matched to profile photo");
+  const [faceMatchOk, setFaceMatchOk] = useState(false);
   const [selfiePanelOpen, setSelfiePanelOpen] = useState(false);
   const [supportFlag, setSupportFlag] = useState<OpenFlag | null>(null);
   const [reminderText, setReminderText] = useState("");
@@ -317,20 +318,27 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const outsideZone = liveLocation?.inside === false;
   const zoneUnknown = liveLocation != null && liveLocation.inside == null;
 
-  async function onSelfieChange(file: File | null) {
+  async function onSelfieChange(file: File | null, match: FaceMatchResult | null = null) {
     if (selfiePreview) URL.revokeObjectURL(selfiePreview);
     setSelfieFile(file);
     setSelfiePreview(file ? URL.createObjectURL(file) : "");
     if (!file) {
+      setFaceMatchOk(false);
       setFaceMatchLabel("Selfie required · matched to profile photo");
+      return;
+    }
+    if (match) {
+      setFaceMatchOk(match.ok);
+      setFaceMatchLabel(
+        match.ok
+          ? `Face match ${match.percent}% · ready to punch`
+          : `Face match ${match.percent}% · need 60%+ (retake)`
+      );
       return;
     }
     setFaceMatchLabel("Checking face match...");
     const face = await matchSelfieToProfile(file, account.profilePhotoUrl);
-    if (!face.ok && face.percent === 0 && face.reason && !face.reason.includes("Face match")) {
-      setFaceMatchLabel(face.reason);
-      return;
-    }
+    setFaceMatchOk(face.ok);
     setFaceMatchLabel(
       face.ok
         ? `Face match ${face.percent}% · ready to punch`
@@ -438,14 +446,14 @@ export function ConnectAttendance({ account }: { account: Account }) {
         </div>
         <div className="dx-gps-actions">
           <button
-            disabled={punchBusy || Boolean(punchStatus?.shift.open) || outsideZone || zoneUnknown}
+            disabled={punchBusy || Boolean(punchStatus?.shift.open) || outsideZone || zoneUnknown || !faceMatchOk}
             onClick={() => submitPunch("in")}
             type="button"
           >
             <LogIn /> {punchBusy ? "Saving..." : "Punch In"}
           </button>
           <button
-            disabled={punchBusy || !punchStatus?.shift.open || outsideZone || zoneUnknown}
+            disabled={punchBusy || !punchStatus?.shift.open || outsideZone || zoneUnknown || !faceMatchOk}
             onClick={() => submitPunch("out")}
             type="button"
           >
@@ -533,9 +541,11 @@ export function ConnectAttendance({ account }: { account: Account }) {
       /> : null}
       {selfiePanelOpen ? (
         <SelfieCapturePanel
+          profilePhotoUrl={account.profilePhotoUrl}
+          requireFaceMatch
           onClose={() => setSelfiePanelOpen(false)}
-          onCapture={(file) => {
-            void onSelfieChange(file);
+          onCapture={(file, match) => {
+            void onSelfieChange(file, match);
             setSelfiePanelOpen(false);
           }}
         />

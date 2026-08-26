@@ -1,177 +1,223 @@
-type FaceMatchResult = {
+export type FaceMatchResult = {
   ok: boolean;
-  /** Cosine similarity 0–1 (clamped). */
   score: number;
-  /** Display percent 0–100. */
   percent: number;
   reason?: string;
+  engine?: "face-api";
 };
 
-type FaceBox = { x: number; y: number; width: number; height: number };
-
-const FACE_SIZE = 72;
-/** Accept punches from 60% similarity upward (lighting/angle tolerant). */
-const MATCH_THRESHOLD = 0.6;
-
-function toPercent(score: number) {
-  return Math.max(0, Math.min(100, Math.round(score * 100)));
-}
-
-async function loadBitmap(source: string | Blob): Promise<ImageBitmap> {
-  if (typeof source !== "string") return createImageBitmap(source);
-  const response = await fetch(source, { mode: "cors", credentials: "omit" });
-  if (!response.ok) throw new Error("Unable to load profile photo for face match.");
-  return createImageBitmap(await response.blob());
-}
-
-async function detectFaceBox(bitmap: ImageBitmap): Promise<FaceBox | null> {
-  const FaceDetectorCtor = typeof window !== "undefined"
-    ? (window as Window & { FaceDetector?: new (options?: { fastMode?: boolean; maxDetectedFaces?: number }) => { detect: (source: ImageBitmap) => Promise<Array<{ boundingBox: DOMRectReadOnly }>> } }).FaceDetector
-    : undefined;
-  if (FaceDetectorCtor) {
-    try {
-      const detector = new FaceDetectorCtor({ fastMode: false, maxDetectedFaces: 1 });
-      const faces = await detector.detect(bitmap);
-      const box = faces[0]?.boundingBox;
-      if (box && box.width > 20 && box.height > 20) {
-        return { x: box.x, y: box.y, width: box.width, height: box.height };
-      }
-    } catch {
-      // Fall through to center crop.
-    }
-  }
-  return null;
-}
-
-function portraitBox(bitmap: ImageBitmap, scale = 0.62): FaceBox {
-  const size = Math.min(bitmap.width, bitmap.height) * scale;
-  return {
-    x: (bitmap.width - size) / 2,
-    y: Math.max(0, bitmap.height * 0.1),
-    width: size,
-    height: size
+type FaceApi = {
+  nets: {
+    tinyFaceDetector: { loadFromUri: (url: string) => Promise<unknown> };
+    faceLandmark68Net: { loadFromUri: (url: string) => Promise<unknown> };
+    faceRecognitionNet: { loadFromUri: (url: string) => Promise<unknown> };
   };
+  TinyFaceDetectorOptions: new (options?: { inputSize?: number; scoreThreshold?: number }) => unknown;
+  detectSingleFace: (
+    input: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement,
+    options?: unknown
+  ) => {
+    withFaceLandmarks: () => {
+      withFaceDescriptor: () => Promise<{ descriptor: Float32Array } | undefined>;
+    };
+  };
+  euclideanDistance: (a: Float32Array, b: Float32Array) => number;
+};
+
+const MATCH_PERCENT_REQUIRED = 60;
+/** Euclidean distance mapped to % — 0 → 100%, 0.85 → 0%. Same person is often < 0.45. */
+const MAX_DISTANCE_FOR_0 = 0.85;
+const MODEL_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/model";
+const SCRIPT_URL = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/dist/face-api.min.js";
+
+let modelsReady: Promise<FaceApi> | null = null;
+const profileDescriptorCache = new Map<string, Float32Array>();
+
+function toPercentFromDistance(distance: number) {
+  const raw = ((MAX_DISTANCE_FOR_0 - distance) / MAX_DISTANCE_FOR_0) * 100;
+  return Math.max(0, Math.min(100, Math.round(raw)));
 }
 
-function faceVector(bitmap: ImageBitmap, box: FaceBox, mirror = false): Float32Array {
+function loadScript(src: string) {
+  return new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector(`script[data-face-api="1"]`);
+    if (existing) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.dataset.faceApi = "1";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Unable to load face recognition model."));
+    document.head.appendChild(script);
+  });
+}
+
+export async function ensureFaceModels() {
+  if (!modelsReady) {
+    modelsReady = (async () => {
+      await loadScript(SCRIPT_URL);
+      const faceapi = (window as Window & { faceapi?: FaceApi }).faceapi;
+      if (!faceapi) throw new Error("Face recognition library failed to initialize.");
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+      ]);
+      return faceapi;
+    })().catch((error) => {
+      modelsReady = null;
+      throw error;
+    });
+  }
+  return modelsReady;
+}
+
+async function blobOrUrlToImage(source: string | Blob): Promise<HTMLImageElement> {
+  if (typeof source === "string") {
+    const response = await fetch(source, { mode: "cors", credentials: "omit" });
+    if (!response.ok) throw new Error("Unable to load profile photo for face match.");
+    const blobUrl = URL.createObjectURL(await response.blob());
+    try {
+      return await decodeImage(blobUrl);
+    } finally {
+      URL.revokeObjectURL(blobUrl);
+    }
+  }
+  const url = URL.createObjectURL(source);
+  try {
+    return await decodeImage(url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function decodeImage(url: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Unable to decode photo for face match."));
+    image.src = url;
+  });
+}
+
+function mirrorCanvas(image: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement) {
+  const width = "videoWidth" in image ? image.videoWidth || (image as HTMLImageElement).width : image.width;
+  const height = "videoHeight" in image ? image.videoHeight || (image as HTMLImageElement).height : image.height;
   const canvas = document.createElement("canvas");
-  canvas.width = FACE_SIZE;
-  canvas.height = FACE_SIZE;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) throw new Error("Unable to process selfie for face match.");
-  const pad = Math.min(box.width, box.height) * 0.2;
-  const sx = Math.max(0, box.x - pad);
-  const sy = Math.max(0, box.y - pad);
-  const sw = Math.min(bitmap.width - sx, box.width + pad * 2);
-  const sh = Math.min(bitmap.height - sy, box.height + pad * 2);
-  if (mirror) {
-    ctx.translate(FACE_SIZE, 0);
-    ctx.scale(-1, 1);
-  }
-  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, FACE_SIZE, FACE_SIZE);
-
-  const { data } = ctx.getImageData(0, 0, FACE_SIZE, FACE_SIZE);
-  const vector = new Float32Array(FACE_SIZE * FACE_SIZE);
-  // Local contrast normalize in 8x8 blocks so lighting differences hurt less.
-  const block = 8;
-  for (let by = 0; by < FACE_SIZE; by += block) {
-    for (let bx = 0; bx < FACE_SIZE; bx += block) {
-      let sum = 0;
-      let sumSq = 0;
-      const cells: number[] = [];
-      for (let y = by; y < by + block; y += 1) {
-        for (let x = bx; x < bx + block; x += 1) {
-          const o = (y * FACE_SIZE + x) * 4;
-          const gray = 0.299 * data[o] + 0.587 * data[o + 1] + 0.114 * data[o + 2];
-          cells.push(gray);
-          sum += gray;
-          sumSq += gray * gray;
-        }
-      }
-      const n = cells.length;
-      const mean = sum / n;
-      const variance = Math.max(sumSq / n - mean * mean, 1);
-      const std = Math.sqrt(variance);
-      let i = 0;
-      for (let y = by; y < by + block; y += 1) {
-        for (let x = bx; x < bx + block; x += 1) {
-          vector[y * FACE_SIZE + x] = (cells[i] - mean) / std;
-          i += 1;
-        }
-      }
-    }
-  }
-  let norm = 0;
-  for (let i = 0; i < vector.length; i += 1) norm += vector[i] * vector[i];
-  norm = Math.sqrt(norm) || 1;
-  for (let i = 0; i < vector.length; i += 1) vector[i] /= norm;
-  return vector;
+  canvas.width = Math.max(1, width);
+  canvas.height = Math.max(1, height);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Unable to process selfie frame.");
+  ctx.translate(canvas.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(image as CanvasImageSource, 0, 0, canvas.width, canvas.height);
+  return canvas;
 }
 
-function cosine(a: Float32Array, b: Float32Array) {
-  let score = 0;
-  for (let i = 0; i < a.length; i += 1) score += a[i] * b[i];
-  return Math.max(0, Math.min(1, score));
+async function descriptorFrom(
+  faceapi: FaceApi,
+  input: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement
+) {
+  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.35 });
+  const detection = await faceapi
+    .detectSingleFace(input, options)
+    .withFaceLandmarks()
+    .withFaceDescriptor();
+  return detection?.descriptor ?? null;
 }
 
-function bestScore(profile: ImageBitmap, selfie: ImageBitmap, profileBoxes: FaceBox[], selfieBoxes: FaceBox[]) {
-  let best = 0;
-  for (const pBox of profileBoxes) {
-    const profileVec = faceVector(profile, pBox, false);
-    for (const sBox of selfieBoxes) {
-      best = Math.max(best, cosine(profileVec, faceVector(selfie, sBox, false)));
-      best = Math.max(best, cosine(profileVec, faceVector(selfie, sBox, true)));
-    }
-  }
+async function bestDistance(
+  faceapi: FaceApi,
+  profileDesc: Float32Array,
+  live: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement
+) {
+  const direct = await descriptorFrom(faceapi, live);
+  const mirrored = await descriptorFrom(faceapi, mirrorCanvas(live));
+  let best = Number.POSITIVE_INFINITY;
+  if (direct) best = Math.min(best, faceapi.euclideanDistance(profileDesc, direct));
+  if (mirrored) best = Math.min(best, faceapi.euclideanDistance(profileDesc, mirrored));
   return best;
 }
 
-/** Compare a live selfie to the account profile photo in the browser. Does not upload either image. */
-export async function matchSelfieToProfile(selfie: Blob, profilePhotoUrl: string | null | undefined): Promise<FaceMatchResult> {
+export async function getProfileDescriptor(profilePhotoUrl: string) {
+  const cached = profileDescriptorCache.get(profilePhotoUrl);
+  if (cached) return cached;
+  const faceapi = await ensureFaceModels();
+  const image = await blobOrUrlToImage(profilePhotoUrl);
+  const descriptor = await descriptorFrom(faceapi, image);
+  if (!descriptor) throw new Error("No face found in your profile photo. Update your profile photo and try again.");
+  profileDescriptorCache.set(profilePhotoUrl, descriptor);
+  return descriptor;
+}
+
+/** Match a live video/canvas/image/blob frame against the profile photo. */
+export async function matchLiveFrameToProfile(
+  frame: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement | Blob,
+  profilePhotoUrl: string | null | undefined
+): Promise<FaceMatchResult> {
   if (!profilePhotoUrl) {
-    return { ok: false, score: 0, percent: 0, reason: "Add a profile photo first, then capture a selfie to punch." };
+    return {
+      ok: false,
+      score: 0,
+      percent: 0,
+      reason: "Add a profile photo first, then capture a selfie to punch.",
+      engine: "face-api"
+    };
   }
   try {
-    const [profileBitmap, selfieBitmap] = await Promise.all([loadBitmap(profilePhotoUrl), loadBitmap(selfie)]);
-    const [detectedProfile, detectedSelfie] = await Promise.all([
-      detectFaceBox(profileBitmap),
-      detectFaceBox(selfieBitmap)
-    ]);
-
-    const profileBoxes = [
-      detectedProfile,
-      portraitBox(profileBitmap, 0.7),
-      portraitBox(profileBitmap, 0.55)
-    ].filter(Boolean) as FaceBox[];
-    const selfieBoxes = [
-      detectedSelfie,
-      portraitBox(selfieBitmap, 0.7),
-      portraitBox(selfieBitmap, 0.55)
-    ].filter(Boolean) as FaceBox[];
-
-    const score = bestScore(profileBitmap, selfieBitmap, profileBoxes, selfieBoxes);
-    const percent = toPercent(score);
-
-    if (score < MATCH_THRESHOLD) {
+    const faceapi = await ensureFaceModels();
+    const profileDesc = await getProfileDescriptor(profilePhotoUrl);
+    const input = frame instanceof Blob ? await blobOrUrlToImage(frame) : frame;
+    if ("readyState" in input && input.readyState < 2) {
       return {
         ok: false,
-        score,
-        percent,
-        reason: `Face match ${percent}% (need ${Math.round(MATCH_THRESHOLD * 100)}%+). Retake selfie facing the camera with similar lighting.`
+        score: 0,
+        percent: 0,
+        reason: "Camera is still starting...",
+        engine: "face-api"
       };
     }
+    const distance = await bestDistance(faceapi, profileDesc, input);
+    if (!Number.isFinite(distance)) {
+      return {
+        ok: false,
+        score: 0,
+        percent: 0,
+        reason: "No face detected. Center your face in the circle.",
+        engine: "face-api"
+      };
+    }
+    const percent = toPercentFromDistance(distance);
+    const ok = percent >= MATCH_PERCENT_REQUIRED;
     return {
-      ok: true,
-      score,
+      ok,
+      score: Math.max(0, 1 - distance / MAX_DISTANCE_FOR_0),
       percent,
-      reason: `Face match ${percent}%`
+      engine: "face-api",
+      reason: ok
+        ? `Face match ${percent}%`
+        : `Face match ${percent}% (need ${MATCH_PERCENT_REQUIRED}%+). Hold steady and face the camera.`
     };
   } catch (error) {
     return {
       ok: false,
       score: 0,
       percent: 0,
-      reason: error instanceof Error ? error.message : "Unable to match selfie to profile photo."
+      engine: "face-api",
+      reason: error instanceof Error ? error.message : "Unable to match face."
     };
   }
 }
+
+export async function matchSelfieToProfile(
+  selfie: Blob,
+  profilePhotoUrl: string | null | undefined
+): Promise<FaceMatchResult> {
+  return matchLiveFrameToProfile(selfie, profilePhotoUrl);
+}
+
+export const FACE_MATCH_REQUIRED_PERCENT = MATCH_PERCENT_REQUIRED;
