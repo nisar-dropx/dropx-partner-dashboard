@@ -9,6 +9,16 @@ export type LeaveApprovalStep = {
   approver_person_id: string;
 };
 
+export type WorkforceLeaveEntitlement = {
+  leave_type_id: string;
+  name: string;
+  code: string;
+  color: string;
+  annual_allowance: number;
+  rule_id: string;
+  scope_type: "company" | "location" | "designation" | "location_designation";
+};
+
 type PermissionUser = {
   userId: string;
   scopeType: string;
@@ -66,12 +76,7 @@ async function usersWithApprovalPermission(companyId: string): Promise<Permissio
     : []);
 }
 
-export async function resolveWorkforceLeaveApproval({ companyId, workerId, workerType, days }: {
-  companyId: string;
-  workerId: string;
-  workerType: LeaveWorkerType;
-  days: number;
-}) {
+async function activeWorkforceContext(companyId: string, workerId: string, workerType: LeaveWorkerType) {
   const today = indiaToday();
   const workerColumn = workerType === "employee" ? "employee_id" : "contractor_id";
   const engagementResult = await db().from("hr_engagements").select("id,person_id,status")
@@ -80,17 +85,44 @@ export async function resolveWorkforceLeaveApproval({ companyId, workerId, worke
     throw new Error(engagementResult.error?.message ?? "Your active People engagement is not configured.");
   }
   const assignmentResult = await db().from("hr_work_assignments")
-    .select("id,business_line,position_title,location_id,is_top_level,effective_from,effective_to")
+    .select("id,business_line,position_title,location_id,designation_id,is_top_level,effective_from,effective_to")
     .eq("company_id", companyId).eq("engagement_id", engagementResult.data.id).eq("is_primary", true)
     .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`)
     .order("effective_from", { ascending: false }).limit(1).maybeSingle();
   if (assignmentResult.error || !assignmentResult.data) {
     throw new Error(assignmentResult.error?.message ?? "Your active work assignment is not configured.");
   }
+  return { today, engagement: engagementResult.data, assignment: assignmentResult.data };
+}
+
+export async function resolveWorkforceLeaveEntitlements({ companyId, workerId, workerType }: {
+  companyId: string;
+  workerId: string;
+  workerType: LeaveWorkerType;
+}): Promise<WorkforceLeaveEntitlement[]> {
+  const context = await activeWorkforceContext(companyId, workerId, workerType);
+  const result = await db().rpc("hr_resolve_leave_entitlements", {
+    p_company_id: companyId,
+    p_worker_type: workerType,
+    p_location_id: context.assignment.location_id,
+    p_designation_id: context.assignment.designation_id,
+    p_as_of: context.today
+  });
+  if (result.error) throw new Error(result.error.message);
+  return (result.data ?? []) as WorkforceLeaveEntitlement[];
+}
+
+export async function resolveWorkforceLeaveApproval({ companyId, workerId, workerType, days }: {
+  companyId: string;
+  workerId: string;
+  workerType: LeaveWorkerType;
+  days: number;
+}) {
+  const { today, engagement, assignment } = await activeWorkforceContext(companyId, workerId, workerType);
   const requesterLink = await db().from("hr_user_person_links").select("user_id,status")
-    .eq("company_id", companyId).eq("person_id", engagementResult.data.person_id).maybeSingle();
+    .eq("company_id", companyId).eq("person_id", engagement.person_id).maybeSingle();
   if (requesterLink.error) throw new Error(requesterLink.error.message);
-  if (assignmentResult.data.is_top_level) {
+  if (assignment.is_top_level) {
     return {
       direct: true,
       policyName: "Top-level direct record",
@@ -99,17 +131,25 @@ export async function resolveWorkforceLeaveApproval({ companyId, workerId, worke
     };
   }
   const policyResult = await db().from("hr_leave_approval_policies")
-    .select("name,business_line,manager_levels,priority,minimum_days")
+    .select("name,business_line,location_id,designation_id,manager_levels,priority,minimum_days")
     .eq("company_id", companyId).eq("worker_type", workerType).eq("is_active", true)
     .lte("minimum_days", days).or(`maximum_days.is.null,maximum_days.gte.${days}`)
     .order("priority").order("minimum_days", { ascending: false });
   if (policyResult.error) throw new Error(policyResult.error.message);
-  const policy = (policyResult.data ?? []).find((item) => !item.business_line || item.business_line === assignmentResult.data?.business_line);
+  const policy = (policyResult.data ?? [])
+    .filter((item) => (!item.business_line || item.business_line === assignment.business_line)
+      && (!item.location_id || item.location_id === assignment.location_id)
+      && (!item.designation_id || item.designation_id === assignment.designation_id))
+    .sort((left, right) => {
+      const leftScope = left.location_id && left.designation_id ? 3 : left.location_id ? 2 : left.designation_id ? 1 : 0;
+      const rightScope = right.location_id && right.designation_id ? 3 : right.location_id ? 2 : right.designation_id ? 1 : 0;
+      return rightScope - leftScope || left.priority - right.priority || right.minimum_days - left.minimum_days;
+    })[0];
   if (!policy) throw new Error("No active leave approval policy matches this request.");
   const permittedApprovers = await usersWithApprovalPermission(companyId);
   const steps: LeaveApprovalStep[] = [];
-  const seenPeople = new Set<string>([engagementResult.data.person_id]);
-  let subjectAssignmentId = assignmentResult.data.id;
+  const seenPeople = new Set<string>([engagement.person_id]);
+  let subjectAssignmentId = assignment.id;
   for (let level = 1; level <= policy.manager_levels; level += 1) {
     const relationshipResult = await db().from("hr_reporting_relationships").select("manager_assignment_id")
       .eq("company_id", companyId).eq("subject_assignment_id", subjectAssignmentId)
@@ -136,7 +176,7 @@ export async function resolveWorkforceLeaveApproval({ companyId, workerId, worke
     if (!linkResult.data || linkResult.data.status !== "active") throw new Error(`${personResult.data?.display_name ?? `Manager level ${level}`} does not have an active People login.`);
     const grants = permittedApprovers.filter((item) => item.userId === linkResult.data?.user_id);
     const mayApprove = grants.some((grant) => grant.scopeType === "company"
-      || (grant.scopeType === "location" && grant.scopeId === assignmentResult.data?.location_id)
+      || (grant.scopeType === "location" && grant.scopeId === assignment.location_id)
       || grant.scopeType === "direct_reports" || grant.scopeType === "reporting_subtree");
     if (!mayApprove) throw new Error(`${personResult.data?.display_name ?? `Manager level ${level}`} is not enabled for Approval Inbox approval.`);
     steps.push({
