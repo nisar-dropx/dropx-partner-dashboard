@@ -115,7 +115,9 @@ async function loadDuplicateEnrolments(companyId: string) {
     ["Field executive", "field_executives"],
     ["Independent contractor", "contractors"],
     ["Vendor", "vendors"],
-    ["Worker", "workers"]
+    ["Worker", "workers"],
+    ["Helper", "workforce_helpers"],
+    ["Picker", "workforce_pickers"]
   ] as const;
   const [employees, ...profiles] = await Promise.all([
     admin

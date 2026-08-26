@@ -240,7 +240,9 @@ async function findWorkerMatches(companyId: string, enrolmentId: string) {
     ["field_executive", "field_executives"],
     ["contractor", "contractors"],
     ["vendor", "vendors"],
-    ["worker", "workers"]
+    ["worker", "workers"],
+    ["worker", "workforce_helpers"],
+    ["worker", "workforce_pickers"]
   ] as const;
   const [employeeResult, ...nonEmployeeResults] = await Promise.all([
     admin
