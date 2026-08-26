@@ -143,22 +143,22 @@ function MappingMultiFilter({
   }
 
   return (
-    <div className="mapping-filter-field mapping-multi-filter" ref={rootRef}>
+    <div className="mapping-filter-field mapping-bulk-filter" ref={rootRef}>
       <span className="mapping-field-label">{label}</span>
-      <div className="multi-select">
-        <button aria-expanded={open} className={`multi-select-trigger ${open ? "open" : ""}`} onClick={() => setOpen((current) => !current)} type="button">
-          <span className="multi-select-summary">{summary}</span><span aria-hidden="true">⌄</span>
+      <div className="bulk-multi-filter">
+        <button aria-expanded={open} className={`bulk-multi-filter-trigger ${open ? "open" : ""}`} onClick={() => setOpen((current) => !current)} type="button">
+          <strong>{summary}</strong><span aria-hidden="true">v</span>
         </button>
-        {open ? <div className="multi-select-menu mapping-filter-menu">
-          <div className="multi-select-search">
-            <input autoFocus className="field multi-select-search-field" onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${label.toLocaleLowerCase()}`} type="search" value={query} />
+        {open ? <div className="bulk-multi-filter-menu mapping-filter-menu">
+          <div className="bulk-multi-filter-search">
+            <input autoFocus className="field" onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${label.toLocaleLowerCase()}`} type="search" value={query} />
           </div>
-          <label className="multi-select-all">
+          <div className="bulk-multi-filter-options">
+          <label className="bulk-multi-filter-option all">
             <input checked={selected.length === 0} onChange={() => setSelected([])} type="checkbox" />
-            <span>{allLabel}</span>
+            <span>All</span>
           </label>
-          <div className="multi-select-options">
-            {visibleOptions.map((option) => <label className="multi-select-option" key={option.value}>
+            {visibleOptions.map((option) => <label className="bulk-multi-filter-option" key={option.value}>
               <input checked={selected.includes(option.value)} onChange={() => toggle(option.value)} type="checkbox" />
               <span>{option.label}</span>
             </label>)}

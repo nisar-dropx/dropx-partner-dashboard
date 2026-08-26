@@ -2336,10 +2336,20 @@ h3 {
   background: #fff;
 }
 
-.mapping-multi-filter .multi-select-trigger {
+.mapping-bulk-filter .bulk-multi-filter-trigger {
   width: 100%;
   min-height: 40px;
   background: #fff;
+}
+
+.mapping-bulk-filter .bulk-multi-filter-trigger strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
 }
 
 .mapping-page-size select {
@@ -2360,12 +2370,11 @@ h3 {
   max-width: min(420px, 90vw);
 }
 
-.mapping-filter-menu .multi-select-search-field {
+.mapping-filter-menu .field {
   min-width: 0;
 }
 
-.mapping-filter-menu .multi-select-all,
-.mapping-filter-menu .multi-select-option {
+.mapping-filter-menu .bulk-multi-filter-option {
   min-height: 38px;
   padding: 8px 12px;
   color: var(--text);
@@ -2375,7 +2384,7 @@ h3 {
   text-transform: none;
 }
 
-.mapping-filter-menu .multi-select-options {
+.mapping-filter-menu .bulk-multi-filter-options {
   max-height: 260px;
 }
 
