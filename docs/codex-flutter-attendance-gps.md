@@ -12,7 +12,7 @@ SQL: `scripts/attendance_gps_integrity_v1.sql`
 2. Punch requires **selfie + lat/lng**; **server timestamp** is authoritative (never trust editable client time).
 3. Outside station geofence (default **50m**, admin-only on stations) → allow punch, **auto-flag**, employee attaches support selfie+location for manager/HR review.
 4. In-shift heartbeats only (after punch-in until punch-out).
-5. Continuous outside zone **> 2 hours** → flag `outside_geofence_gt_2h`.
+5. Continuous outside zone **> 10 minutes** → flag `outside_geofence_gt_2h` (legacy type name; threshold is 10 minutes).
 6. Reminders at **9.5h** and **10h** after punch-in if no punch-out.
 7. Biometric punch + recent phone sample outside zone → flag `biometric_phone_mismatch`.
 8. Employees **cannot** edit punch lat/lng/time from website or app.
@@ -127,7 +127,7 @@ Approve support packages (resolves linked flags). Does not rewrite punch GPS.
 3. Mock location on → punch blocked.
 4. Developer options on → punch blocked.
 5. After punch-in, kill UI; foreground service still heartbeats.
-6. Stay outside > 2h → `outside_geofence_gt_2h` flag.
+6. Stay outside > 10 minutes → `outside_geofence_gt_2h` flag.
 7. No punch-out at 9.5h / 10h → reminder notification.
 8. Biometric punch while phone outside → mismatch flag + support option.
 9. Website cannot alter punch lat/lng/time.

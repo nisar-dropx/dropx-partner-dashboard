@@ -128,9 +128,10 @@ export async function POST(request: NextRequest) {
         punchDate: shift.punchDate,
         flagType: "outside_geofence_gt_2h",
         severity: "high",
-        message: `Phone stayed outside the station geofence for more than 2 hours during the shift.`,
+        message: `Phone stayed outside the station geofence for more than 10 minutes during the shift.`,
         details: {
           outsideMs,
+          thresholdMs: OUTSIDE_CONTINUOUS_MS,
           distanceM: geofence.distanceM,
           radiusM: geofence.radiusM
         }
