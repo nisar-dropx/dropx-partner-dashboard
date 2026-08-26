@@ -20,3 +20,8 @@ export async function confirmDriverReconForDeposit(formData: FormData): Promise<
   const actions = await import("./actions");
   return actions.confirmDriverReconForDeposit(formData);
 }
+
+export async function requestCashEntryException(formData: FormData): Promise<CashEntryActionResult | void> {
+  const actions = await import("./actions");
+  return actions.requestCashEntryException(formData);
+}

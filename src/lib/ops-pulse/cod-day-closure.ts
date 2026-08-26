@@ -1,5 +1,6 @@
 import { sendEmail } from "@/lib/email";
 import { fetchDriverReconciliation, fetchLiabilitySummary, fetchRemittance, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
+import { loadOpenCashEntryExceptions } from "@/lib/ops-pulse/cash-entry-exceptions";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 // Keep in sync with DIFFERENCE_REMARKS_RUPEES in deposit-remittance-panel.tsx and actions.ts —
@@ -257,6 +258,21 @@ export async function finalizeCodClosure({
   if (runs.error) throw new Error(runs.error.message);
 
   const closure = closureResult.data as CodDayClosure;
+
+  // Authoritative server-side gate: client UI already blocks this, but final submission
+  // must not depend on the client having done so honestly. Fails OPEN on a load error
+  // (e.g. cod_cash_entry_exceptions_v1.sql not migrated yet) — a new safety feature must
+  // never make the existing, far more common final-submit action unconditionally break.
+  const openExceptions = await loadOpenCashEntryExceptions(companyId, businessDate, [locationId]);
+  if (openExceptions.error) {
+    console.error("loadOpenCashEntryExceptions failed during finalizeCodClosure", openExceptions.error);
+  } else if (openExceptions.rows.length) {
+    const names = openExceptions.rows.map((row) => row.associateName).join(", ");
+    throw new Error(
+      `Cash entry exception still open for: ${names}. Enter their cash on the cash sheet before final submission.`
+    );
+  }
+
   const latest = latestRuns((runs.data ?? []) as PortalRun[]);
   const driverRun = latest.get("driver_reconciliation");
   const depositRun = latest.get("prepared_deposit");

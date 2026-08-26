@@ -12,11 +12,16 @@ import {
 } from "react";
 import type { CashReconAssociate } from "@/lib/ops-pulse/cash-recon-types";
 import { missingRequiredCashEntries, requiresManualDriverName } from "@/lib/ops-pulse/cash-recon-types";
+import { requestCashEntryException } from "./cash-entry-actions";
 
 type SavedCashEntry = {
   providerEmployeeId: string;
   name?: string | null;
 };
+
+function normalizeId(value: string) {
+  return value.trim().toUpperCase();
+}
 
 type CashStepGateValue = {
   mode: "cash-recon" | "legacy";
@@ -24,10 +29,18 @@ type CashStepGateValue = {
   ready: boolean;
   zeroCashReady: boolean;
   required: CashReconAssociate[];
+  /** Still missing a saved cash entry and blocking Step 1 -> Step 2. */
   missing: CashReconAssociate[];
+  /** Still missing a saved cash entry, but excepted — does not block Step 1 -> Step 2. */
+  exceptedPending: CashReconAssociate[];
   step2Href: string;
   savedCount: number;
+  businessDate: string;
+  locationId: string;
+  stationCode: string;
+  returnHref: string;
   registerRequired: (required: CashReconAssociate[], loaded: boolean, zeroCashReady: boolean) => void;
+  registerException: (providerEmployeeId: string) => void;
 };
 
 const CashStepGateContext = createContext<CashStepGateValue | null>(null);
@@ -36,15 +49,116 @@ function currency(value: number) {
   return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/** Inline "will submit later" form for one row in the incomplete-drivers modal. */
+function ExceptionRowForm({
+  row,
+  businessDate,
+  locationId,
+  stationCode,
+  returnHref,
+  isToday,
+  onAdded
+}: {
+  row: CashReconAssociate;
+  businessDate: string;
+  locationId: string;
+  stationCode: string;
+  returnHref: string;
+  isToday: boolean;
+  onAdded: (providerEmployeeId: string) => void;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!isToday) return null;
+
+  if (!open) {
+    return (
+      <button className="button ghost" type="button" onClick={() => setOpen(true)} style={{ marginTop: 6 }}>
+        Add exception — will submit later
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+      <textarea
+        className="field"
+        rows={2}
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+        placeholder="e.g. Store will submit cash tomorrow"
+        disabled={submitting}
+      />
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          className="button"
+          type="button"
+          disabled={submitting || !reason.trim()}
+          onClick={() => {
+            setSubmitting(true);
+            setError(null);
+            const formData = new FormData();
+            formData.set("response_mode", "client");
+            formData.set("return_href", returnHref);
+            formData.set("business_date", businessDate);
+            formData.set("location_id", locationId);
+            formData.set("station_code", stationCode);
+            formData.set("provider_employee_id", row.providerEmployeeId);
+            formData.set("associate_name", row.displayName || row.name);
+            formData.set("expected_amount", String(row.expected ?? 0));
+            formData.set("reason", reason.trim());
+            void (async () => {
+              try {
+                const result = await requestCashEntryException(formData);
+                if (result?.ok) {
+                  onAdded(row.providerEmployeeId);
+                  router.push(result.nextHref || returnHref);
+                  router.refresh();
+                  return;
+                }
+                setError(result?.error ?? "Unable to add exception.");
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Unable to add exception.");
+              } finally {
+                setSubmitting(false);
+              }
+            })();
+          }}
+        >
+          {submitting ? "Saving…" : "Save exception & continue"}
+        </button>
+        <button className="button ghost" type="button" disabled={submitting} onClick={() => setOpen(false)}>Cancel</button>
+      </div>
+      {error ? <p className="field-error">{error}</p> : null}
+    </div>
+  );
+}
+
 function IncompleteDriversModal({
   missing,
   requiredCount,
   loaded,
+  businessDate,
+  locationId,
+  stationCode,
+  returnHref,
+  isToday,
+  onException,
   onClose
 }: {
   missing: CashReconAssociate[];
   requiredCount: number;
   loaded: boolean;
+  businessDate: string;
+  locationId: string;
+  stationCode: string;
+  returnHref: string;
+  isToday: boolean;
+  onException: (providerEmployeeId: string) => void;
   onClose: () => void;
 }) {
   return (
@@ -70,7 +184,7 @@ function IncompleteDriversModal({
           <p className="subtle" style={{ marginBottom: 12 }}>
             Select each driver in <strong>Collect cash</strong> or <strong>Add associate missing from DER</strong>,
             count denominations, and save. Drivers without a resolved name still show a Driver ID — type the employee name when entering cash.
-            Continue unlocks only when all are entered.
+            Continue unlocks only when all are entered{isToday ? ", or excepted below for a store/associate that will submit cash later" : ""}.
           </p>
           <div className="table-wrap">
             <table>
@@ -99,6 +213,15 @@ function IncompleteDriversModal({
                             Type employee name when entering cash (Missing DER).
                           </div>
                         ) : null}
+                        <ExceptionRowForm
+                          row={row}
+                          businessDate={businessDate}
+                          locationId={locationId}
+                          stationCode={stationCode}
+                          returnHref={returnHref}
+                          isToday={isToday}
+                          onAdded={onException}
+                        />
                       </td>
                       <td>{row.providerEmployeeId}</td>
                       <td>₹{currency(row.expected)}</td>
@@ -130,22 +253,36 @@ function IncompleteDriversModal({
 export function CashStepGateProvider({
   children,
   initialRequired = [],
+  initialExceptedProviderIds = [],
   mode,
   savedCount,
   savedEntries,
-  step2Href
+  step2Href,
+  businessDate,
+  locationId,
+  stationCode,
+  returnHref
 }: {
   children: ReactNode;
   initialRequired?: CashReconAssociate[];
+  /** Associates with an open "will submit later" exception for this station-day. */
+  initialExceptedProviderIds?: string[];
   mode: "cash-recon" | "legacy";
   savedCount: number;
   savedEntries: SavedCashEntry[];
   step2Href: string;
+  businessDate: string;
+  locationId: string;
+  stationCode: string;
+  returnHref: string;
 }) {
   const [loaded, setLoaded] = useState(mode !== "cash-recon" || initialRequired.length > 0);
   const [required, setRequired] = useState<CashReconAssociate[]>(initialRequired);
   const [zeroCashReady, setZeroCashReady] = useState(false);
   const [clientSavedEntries, setClientSavedEntries] = useState<SavedCashEntry[]>(savedEntries);
+  const [exceptedIds, setExceptedIds] = useState<Set<string>>(
+    () => new Set(initialExceptedProviderIds.map(normalizeId))
+  );
 
   const registerRequired = useCallback((nextRequired: CashReconAssociate[], isLoaded: boolean, isZeroCashReady: boolean) => {
     setRequired(nextRequired);
@@ -153,9 +290,17 @@ export function CashStepGateProvider({
     setZeroCashReady(isZeroCashReady);
   }, []);
 
+  const registerException = useCallback((providerEmployeeId: string) => {
+    setExceptedIds((current) => new Set(current).add(normalizeId(providerEmployeeId)));
+  }, []);
+
   useEffect(() => {
     setClientSavedEntries(savedEntries);
   }, [savedEntries]);
+
+  useEffect(() => {
+    setExceptedIds(new Set(initialExceptedProviderIds.map(normalizeId)));
+  }, [initialExceptedProviderIds]);
 
   useEffect(() => {
     function handleSaved(event: Event) {
@@ -166,6 +311,14 @@ export function CashStepGateProvider({
       setClientSavedEntries((current) => {
         const next = current.filter((row) => row.providerEmployeeId.trim().toUpperCase() !== providerEmployeeId.toUpperCase());
         next.push({ providerEmployeeId, name });
+        return next;
+      });
+      // Saving cash for this associate resolves any exception raised against them.
+      setExceptedIds((current) => {
+        const key = normalizeId(providerEmployeeId);
+        if (!current.has(key)) return current;
+        const next = new Set(current);
+        next.delete(key);
         return next;
       });
     }
@@ -185,9 +338,17 @@ export function CashStepGateProvider({
     };
   }, []);
 
-  const missing = useMemo(
+  const notSaved = useMemo(
     () => missingRequiredCashEntries(required, clientSavedEntries),
     [required, clientSavedEntries]
+  );
+  const missing = useMemo(
+    () => notSaved.filter((row) => !exceptedIds.has(normalizeId(row.providerEmployeeId))),
+    [notSaved, exceptedIds]
+  );
+  const exceptedPending = useMemo(
+    () => notSaved.filter((row) => exceptedIds.has(normalizeId(row.providerEmployeeId))),
+    [notSaved, exceptedIds]
   );
 
   const currentSavedCount = clientSavedEntries.length;
@@ -197,8 +358,24 @@ export function CashStepGateProvider({
     : Boolean(loaded && ((required.length > 0 && missing.length === 0) || zeroCashReady));
 
   const value = useMemo(
-    () => ({ mode, loaded, ready, zeroCashReady, required, missing, step2Href, savedCount: currentSavedCount, registerRequired }),
-    [mode, loaded, ready, zeroCashReady, required, missing, step2Href, currentSavedCount, registerRequired]
+    () => ({
+      mode,
+      loaded,
+      ready,
+      zeroCashReady,
+      required,
+      missing,
+      exceptedPending,
+      step2Href,
+      savedCount: currentSavedCount,
+      businessDate,
+      locationId,
+      stationCode,
+      returnHref,
+      registerRequired,
+      registerException
+    }),
+    [mode, loaded, ready, zeroCashReady, required, missing, exceptedPending, step2Href, currentSavedCount, businessDate, locationId, stationCode, returnHref, registerRequired, registerException]
   );
 
   return <CashStepGateContext.Provider value={value}>{children}</CashStepGateContext.Provider>;
@@ -226,8 +403,12 @@ export function ContinueToDriverValidation() {
   const router = useRouter();
   if (!ctx) return null;
 
-  const { mode, loaded, ready, zeroCashReady, required, missing, step2Href, savedCount } = ctx;
+  const {
+    mode, loaded, ready, zeroCashReady, required, missing, exceptedPending, step2Href, savedCount,
+    businessDate, locationId, stationCode, returnHref, registerException
+  } = ctx;
   const blocked = mode === "legacy" ? savedCount === 0 : !ready;
+  const isToday = businessDate === new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 
   if (mode === "legacy" && !savedCount) return null;
 
@@ -241,7 +422,9 @@ export function ContinueToDriverValidation() {
         ? "No associates with expected > 0 found yet. Refresh drivers, then enter denominations."
         : blocked
           ? `Enter cash for all ${required.length} associate${required.length === 1 ? "" : "s"} with expected > 0 · ${missing.length} remaining.`
-          : `All ${required.length} associate${required.length === 1 ? "" : "s"} with expected > 0 entered. Review differences before submitting COD.`;
+          : exceptedPending.length
+            ? `All entries done or excepted. ${exceptedPending.length} still pending (excepted) — final close stays locked until entered.`
+            : `All ${required.length} associate${required.length === 1 ? "" : "s"} with expected > 0 entered. Review differences before submitting COD.`;
 
   return (
     <>
@@ -276,6 +459,12 @@ export function ContinueToDriverValidation() {
           missing={mode === "legacy" ? [] : missing}
           requiredCount={mode === "legacy" ? 0 : required.length}
           loaded={mode === "legacy" ? true : loaded}
+          businessDate={businessDate}
+          locationId={locationId}
+          stationCode={stationCode}
+          returnHref={returnHref}
+          isToday={isToday}
+          onException={registerException}
           onClose={() => setShowModal(false)}
         />
       ) : null}
@@ -302,6 +491,12 @@ export function DriverValidationNavLink({
   const required = ctx?.required ?? [];
   const loaded = ctx?.loaded ?? false;
   const mode = ctx?.mode ?? "legacy";
+  const businessDate = ctx?.businessDate ?? "";
+  const locationId = ctx?.locationId ?? "";
+  const stationCode = ctx?.stationCode ?? "";
+  const returnHref = ctx?.returnHref ?? "";
+  const registerException = ctx?.registerException ?? (() => undefined);
+  const isToday = businessDate === new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 
   return (
     <>
@@ -326,6 +521,12 @@ export function DriverValidationNavLink({
           missing={missing}
           requiredCount={required.length}
           loaded={loaded}
+          businessDate={businessDate}
+          locationId={locationId}
+          stationCode={stationCode}
+          returnHref={returnHref}
+          isToday={isToday}
+          onException={registerException}
           onClose={() => setShowModal(false)}
         />
       ) : null}

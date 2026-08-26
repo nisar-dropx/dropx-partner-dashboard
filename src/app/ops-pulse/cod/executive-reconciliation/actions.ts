@@ -8,10 +8,12 @@ import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import {
   clean,
   required,
+  todayKolkata,
 } from "@/lib/ops-pulse/cod";
 import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { finalizeCodClosure, notifyCodManager } from "@/lib/ops-pulse/cod-day-closure";
+import { addCashEntryException, clearCashEntryExceptionIfAny } from "@/lib/ops-pulse/cash-entry-exceptions";
 import { canAccessCodAudit, writeCodAudit } from "@/lib/ops-pulse/cod-audit";
 import { fetchLiabilitySummary, fetchRemittance, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 
@@ -392,6 +394,9 @@ async function savePayload(
     associateName: sourceAssociateName ?? manualAssociateName
   });
   await markCashSubmissionStale(companyId, businessDate, station.id);
+  // Saving cash for this associate resolves any "will submit later" exception raised
+  // against them (e.g. an access-point store that only brings cash the next day).
+  await clearCashEntryExceptionIfAny(companyId, businessDate, station.id, providerEmployeeId);
 
   revalidatePath(pagePath);
   revalidatePath(publicPagePath);
@@ -1284,6 +1289,73 @@ export async function confirmDriverReconForDeposit(formData: FormData) {
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "Unable to confirm driver validation.";
+    if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
+    redirectWithFlash({ error: message }, returnHref);
+  }
+}
+
+/**
+ * Step 1 exception: one required associate (typically an Amazon access-point / store
+ * that only brings cash the next day) hasn't handed over cash yet today. Recording this
+ * lets the station move on to Step 2 (Driver validation) without that associate's saved
+ * cash entry — but Step 2 -> Step 3 and final submission stay blocked until the associate's
+ * cash is actually entered, which clears the exception automatically (see savePayload).
+ */
+export async function requestCashEntryException(formData: FormData): Promise<CashEntryActionResult | void> {
+  const authorization = await requirePagePermission("cod_executive_reconciliation", "edit");
+  const companyId = requireCompanyId(authorization);
+  const clientResponse = wantsClientResponse(formData);
+  const returnHref = safeReturnHref(formData.get("return_href"));
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const businessDate = required(formData.get("business_date"), "Business date");
+    const locationId = required(formData.get("location_id"), "Station");
+    const providerEmployeeId = required(formData.get("provider_employee_id"), "Associate").trim();
+    const associateName = clean(formData.get("associate_name")) || providerEmployeeId;
+    const expectedAmount = optionalAmount(formData.get("expected_amount") ?? "0", "Expected amount");
+    const reason = required(formData.get("reason"), "Reason");
+
+    if (businessDate !== todayKolkata()) {
+      throw new Error("A cash entry exception can only be added for today's business date.");
+    }
+
+    const station = await stationForInput(companyId, locationId, null);
+    assertLocationAccess(authorization, station.id);
+    await assertClosureEditable(companyId, businessDate, station.id);
+
+    await addCashEntryException({
+      companyId,
+      businessDate,
+      locationId: station.id,
+      stationCode: station.station_code,
+      providerEmployeeId,
+      associateName,
+      expectedAmount,
+      reason,
+      createdBy: authorization.userId,
+      createdByName: authorization.fullName || authorization.email
+    });
+
+    await writeCodAudit({
+      action: "Cash entry exception added",
+      after: { provider_employee_id: providerEmployeeId, associate_name: associateName, reason, expected_amount: expectedAmount },
+      authorization,
+      businessDate,
+      locationId: station.id,
+      providerEmployeeId,
+      associateName,
+      stationCode: station.station_code
+    });
+
+    revalidatePath(pagePath);
+    revalidatePath(publicPagePath);
+    const notice = `Exception recorded for ${associateName}. You can continue to Driver validation — final close stays locked until their cash is entered.`;
+    const nextHref = withStep(returnHref, 2);
+    if (clientResponse) return { ok: true, notice, nextHref } satisfies CashEntryActionResult;
+    redirectWithFlash({ notice }, nextHref);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    const message = error instanceof Error ? error.message : "Unable to add cash entry exception.";
     if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
     redirectWithFlash({ error: message }, returnHref);
   }

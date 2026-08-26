@@ -27,6 +27,7 @@ import {
 } from "./actions";
 import { LiveCacheRefresh } from "./live-cache-refresh";
 import { loadCodDayClosures, loadCodManagerNotifications } from "@/lib/ops-pulse/cod-day-closure";
+import { loadOpenCashEntryExceptions } from "@/lib/ops-pulse/cash-entry-exceptions";
 import { canAccessCodAudit, loadCodAuditRows } from "@/lib/ops-pulse/cod-audit";
 import { PortalCheckProgress } from "./portal-check-progress";
 import { DriverReconCashPanel } from "./driver-recon-cash-panel";
@@ -189,7 +190,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
   const cashReconReady = isCashReconWorkerConfigured();
   const automationReady = cashReconReady && isSupabaseAdminConfigured;
   const auditAllowed = canAccessCodAudit(authorization);
-  const [closures, managerNotifications, auditRows, portalRunsResult] = await Promise.all([
+  const [closures, managerNotifications, auditRows, portalRunsResult, cashEntryExceptionsResult] = await Promise.all([
     loadCodDayClosures(companyId, result.businessDate, result.locations.map((location) => location.id)),
     loadCodManagerNotifications(companyId, result.locations.map((location) => location.id)),
     auditAllowed
@@ -198,8 +199,15 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
     loadPortalCheckRuns(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess, {
       checkDate: result.businessDate,
       locationId: defaultLocationId
-    })
+    }),
+    loadOpenCashEntryExceptions(companyId, result.businessDate, result.locations.map((location) => location.id))
   ]);
+  // Open "will submit later" exceptions for this station-day. Step 1 -> 2 can proceed with
+  // these open; Step 2 -> 3 and final submission stay blocked until they clear (auto-cleared
+  // when that associate's cash is actually saved — see savePayload).
+  const stationCashExceptions = cashEntryExceptionsResult.rows.filter((row) => row.locationId === defaultLocationId);
+  const exceptedProviderIds = new Set(stationCashExceptions.map((row) => row.providerEmployeeId.trim().toUpperCase()));
+  const allCashEntriesResolved = stationCashExceptions.length === 0;
   const driverRun = portalRunsResult.rows.find((run) => run.check_type === "driver_reconciliation");
   const depositRun = portalRunsResult.rows.find((run) => run.check_type === "prepared_deposit");
   const hasActivePortalCheck = [driverRun, depositRun].some((run) =>
@@ -297,13 +305,18 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
     source: "matched",
     shipmentType: String(row.shipment_type ?? "Shipment data")
   }));
-  const missingServerRequired = missingRequiredCashEntries(initialRequiredAssociates, gateSavedEntries);
+  const notSavedRequired = missingRequiredCashEntries(initialRequiredAssociates, gateSavedEntries);
+  // Excepted associates ("will submit later") don't block Step 1 -> Step 2, but they still
+  // block Step 2 -> Step 3 via allCashEntriesResolved above.
+  const missingServerRequired = notSavedRequired.filter((row) =>
+    !exceptedProviderIds.has(String(row.providerEmployeeId).trim().toUpperCase())
+  );
   // Match client gate: all required cash entered, or no required list + navigating to step 2 (zero-cash day).
   const cashReady = cashReconReady
     ? missingServerRequired.length === 0
       && (initialRequiredAssociates.length > 0 || savedRows.length > 0 || requestedStep >= 2)
     : savedRows.length > 0;
-  const activeStep = requestedStep >= 3 && !driverCleared
+  const activeStep = requestedStep >= 3 && !(driverCleared && allCashEntriesResolved)
     ? cashReady ? 2 : 1
     : requestedStep >= 2 && !cashReady
       ? 1
@@ -350,6 +363,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
       {!setupError ? (
         <CashStepGateProvider
           initialRequired={initialRequiredAssociates}
+          initialExceptedProviderIds={Array.from(exceptedProviderIds)}
           mode={cashReconReady ? "cash-recon" : "legacy"}
           savedCount={savedRows.length}
           savedEntries={savedRows.map((row) => ({
@@ -357,6 +371,10 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
             name: executiveDisplayName(row)
           }))}
           step2Href={stepHref(2)}
+          businessDate={result.businessDate}
+          locationId={defaultLocationId}
+          stationCode={selectedStation?.station_code ?? ""}
+          returnHref={returnHref}
         >
           <LiveCacheRefresh active={hasActivePortalCheck} />
           <section className="panel reconciliation-control-bar">
@@ -395,7 +413,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
             >
               <i>2</i><span><strong>Driver validation</strong><small>Submit COD and check SCC</small></span>
             </DriverValidationNavLink>
-            <a className={`${activeStep === 3 ? "current" : ""} ${selectedClosure?.is_final_submitted ? "complete" : ""} ${!driverCleared ? "locked" : ""}`} href={driverCleared ? stepHref(3) : stepHref(cashReady ? 2 : 1)} aria-disabled={!driverCleared}>
+            <a className={`${activeStep === 3 ? "current" : ""} ${selectedClosure?.is_final_submitted ? "complete" : ""} ${!(driverCleared && allCashEntriesResolved) ? "locked" : ""}`} href={(driverCleared && allCashEntriesResolved) ? stepHref(3) : stepHref(cashReady ? 2 : 1)} aria-disabled={!(driverCleared && allCashEntriesResolved)}>
               <i>3</i><span><strong>Deposit & summary</strong><small>Match bank deposit and close</small></span>
             </a>
           </nav>
@@ -444,6 +462,34 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
               <StatusPill status={selectedClosure?.is_final_submitted ? "Final submitted" : cashSubmissionStatus} />
             </div>
             <div className="panel-body">
+              {(activeStep === 2 || activeStep === 3) && stationCashExceptions.length ? (
+                <div className="alert warn" style={{ marginBottom: 14 }}>
+                  <strong>
+                    Recon pending — {stationCashExceptions.length} associate{stationCashExceptions.length === 1 ? "" : "s"} will submit cash later
+                  </strong>
+                  <div className="table-wrap" style={{ marginTop: 8 }}>
+                    <table>
+                      <thead>
+                        <tr><th>Associate</th><th>Expected</th><th>Reason</th><th>Raised by</th><th></th></tr>
+                      </thead>
+                      <tbody>
+                        {stationCashExceptions.map((exception) => (
+                          <tr key={exception.id}>
+                            <td><strong>{exception.associateName}</strong></td>
+                            <td>{formatAmount(exception.expectedAmount)}</td>
+                            <td>{exception.reason}</td>
+                            <td>{exception.createdByName ?? "-"} · {formatDateTime(exception.createdAt)}</td>
+                            <td><a href={stepHref(1)}>Enter cash now</a></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="subtle" style={{ marginTop: 8, marginBottom: 0 }}>
+                    Deposit & summary and final submission stay locked until every excepted associate&apos;s cash is entered on the cash sheet.
+                  </p>
+                </div>
+              ) : null}
               {activeStep === 3 ? (
                 <section className="reconciliation-final-summary">
                   <div><span>Cash submitted</span><strong>{formatAmount(collectedTotal)}</strong><small>{currentVarianceLabel}</small></div>
@@ -636,12 +682,15 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                           <div><span>Final</span><strong>Close station day</strong></div>
                           <StatusPill status={selectedClosure?.is_final_submitted ? "Final submitted" : "Pending"} />
                         </div>
-                        <p className="subtle">Final close locks all cash entries.</p>
+                        <p className="subtle">
+                          Final close locks all cash entries.
+                          {!allCashEntriesResolved ? " Blocked while recon-pending associates above still need cash entered." : ""}
+                        </p>
                         <form action={submitCodDayClosureForm} className="form-actions" style={{ marginTop: 12 }}>
                           <input type="hidden" name="return_href" value={returnHref} />
                           <input type="hidden" name="business_date" value={result.businessDate} />
                           <input type="hidden" name="location_id" value={defaultLocationId} />
-                          <SubmitButton disabled={!permission.canEdit || !driverCleared || !depositCleared || selectedClosure?.is_final_submitted}>
+                          <SubmitButton disabled={!permission.canEdit || !driverCleared || !depositCleared || !allCashEntriesResolved || selectedClosure?.is_final_submitted}>
                             {selectedClosure?.is_final_submitted ? "Final submitted and locked" : "Submit final COD closure"}
                           </SubmitButton>
                         </form>
