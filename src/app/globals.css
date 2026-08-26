@@ -13729,7 +13729,7 @@ tbody tr:hover td {
   display: grid;
   grid-template-columns: minmax(120px, .7fr) minmax(220px, 1.4fr) auto;
   gap: 8px;
-  align-items: center;
+  align-items: start;
 }
 
 .advance-request-inline-form .field {
