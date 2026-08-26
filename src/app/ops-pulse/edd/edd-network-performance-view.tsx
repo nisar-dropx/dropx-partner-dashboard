@@ -5,8 +5,10 @@ import Link from "next/link";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
 import type { EddNetworkRunStatus, EddPerformanceNetworkStation } from "@/lib/ops-pulse/edd-worker";
 import type { EddStationOption } from "@/lib/ops-pulse/edd-stations";
+import { deliverySeverity, deliverySeverityLabel } from "./edd-performance-severity";
+import { EddPerformanceChart } from "./edd-performance-chart";
 
-type SortColumn = "stationCode" | "assigned" | "delivered" | "returned" | "held";
+type SortColumn = "stationCode" | "deliveryPerformance" | "assigned" | "delivered" | "returned" | "held";
 type SortDir = "asc" | "desc";
 const PAGE_SIZE = 12;
 /** While a sweep is running, poll the (instant, cache-only) network endpoint at this cadence. */
@@ -14,6 +16,7 @@ const RUN_POLL_MS = 15000;
 
 const COLUMNS: Array<{ key: SortColumn; label: string; align?: "num" }> = [
   { key: "stationCode", label: "Station" },
+  { key: "deliveryPerformance", label: "Delivery Performance", align: "num" },
   { key: "assigned", label: "Assigned", align: "num" },
   { key: "delivered", label: "Delivered", align: "num" },
   { key: "returned", label: "Returned", align: "num" },
@@ -27,9 +30,12 @@ function formatFetchedAt(value: string | null) {
   return date.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-function sortValue(row: EddPerformanceNetworkStation, column: SortColumn): string | number {
+/** Stations with no data yet sort to the end regardless of direction, so they never masquerade as "worst performing". */
+function sortValue(row: EddPerformanceNetworkStation, column: SortColumn, dir: SortDir): string | number {
+  const hasData = row.hasSnapshot && row.assigned > 0;
   switch (column) {
     case "stationCode": return row.stationCode;
+    case "deliveryPerformance": return hasData ? row.deliveredPct : (dir === "asc" ? Infinity : -Infinity);
     case "assigned": return row.assigned;
     case "delivered": return row.delivered;
     case "returned": return row.returned;
@@ -82,6 +88,12 @@ async function fetchNetwork(): Promise<{ stations: EddPerformanceNetworkStation[
  * (Ageing) exactly: cached reads, per-row refresh, a network-wide
  * "Refresh all" that kicks off the worker's sweep in the background, and a
  * progress poll while one is running. No per-page live Amazon calls.
+ *
+ * Led by "Delivery Performance" (delivered ÷ assigned) as the headline
+ * metric a manager actually scans for — a hero card network-wide, a chart
+ * ranking the worst stations, and its own sortable/severity-colored column
+ * in the table — rather than burying that percentage inside the Delivered
+ * cell.
  */
 export function EddNetworkPerformanceView({
   stations,
@@ -96,8 +108,8 @@ export function EddNetworkPerformanceView({
   const [rows, setRows] = useState<EddPerformanceNetworkStation[]>(initialNetwork);
   const [run, setRun] = useState<EddNetworkRunStatus | null>(initialRun);
   const [search, setSearch] = useState("");
-  const [sortColumn, setSortColumn] = useState<SortColumn>("assigned");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [sortColumn, setSortColumn] = useState<SortColumn>("deliveryPerformance");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
   const [refreshingCode, setRefreshingCode] = useState<string | null>(null);
   const [startingSweep, setStartingSweep] = useState(false);
@@ -118,6 +130,23 @@ export function EddNetworkPerformanceView({
     );
   }, [rows]);
   const pct = (value: number) => (totals.assigned > 0 ? Math.round((value / totals.assigned) * 1000) / 10 : 0);
+  const networkDeliveryPct = pct(totals.delivered);
+  const networkSeverity = deliverySeverity(networkDeliveryPct);
+
+  const worstStation = useMemo(() => {
+    const withData = rows.filter((row) => row.hasSnapshot && row.assigned > 0);
+    if (!withData.length) return null;
+    return [...withData].sort((a, b) => a.deliveredPct - b.deliveredPct)[0];
+  }, [rows]);
+  const bestStation = useMemo(() => {
+    const withData = rows.filter((row) => row.hasSnapshot && row.assigned > 0);
+    if (!withData.length) return null;
+    return [...withData].sort((a, b) => b.deliveredPct - a.deliveredPct)[0];
+  }, [rows]);
+  const criticalCount = useMemo(
+    () => rows.filter((row) => row.hasSnapshot && row.assigned > 0 && deliverySeverity(row.deliveredPct) === "critical").length,
+    [rows]
+  );
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -129,7 +158,7 @@ export function EddNetworkPerformanceView({
   }, [rows, search, nameByCode]);
 
   const sortedRows = useMemo(
-    () => [...filteredRows].sort((a, b) => compareValues(sortValue(a, sortColumn), sortValue(b, sortColumn), sortDir)),
+    () => [...filteredRows].sort((a, b) => compareValues(sortValue(a, sortColumn, sortDir), sortValue(b, sortColumn, sortDir), sortDir)),
     [filteredRows, sortColumn, sortDir]
   );
 
@@ -167,7 +196,7 @@ export function EddNetworkPerformanceView({
     setPage(1);
     if (sortColumn !== column) {
       setSortColumn(column);
-      setSortDir(column === "stationCode" ? "asc" : "desc");
+      setSortDir(column === "stationCode" ? "asc" : column === "deliveryPerformance" ? "asc" : "desc");
       return;
     }
     setSortDir((current) => (current === "asc" ? "desc" : "asc"));
@@ -219,6 +248,31 @@ export function EddNetworkPerformanceView({
 
   return (
     <>
+      <section className={`edd-hero-card ${networkSeverity}`}>
+        <div className="edd-hero-card-top">
+          <span>Network delivery performance</span>
+          <span className={`edd-severity ${networkSeverity}`}>{deliverySeverityLabel(networkSeverity)}</span>
+        </div>
+        <strong>{networkDeliveryPct}%</strong>
+        <small>
+          {totals.delivered.toLocaleString("en-IN")} of {totals.assigned.toLocaleString("en-IN")} assigned packages delivered today
+          {totals.stationsWithData < rows.length ? ` · ${totals.stationsWithData}/${rows.length} stations reporting` : ""}
+        </small>
+        <div className="edd-insight-row">
+          {criticalCount ? (
+            <span className="edd-insight-chip negative"><strong>{criticalCount}</strong> station{criticalCount === 1 ? "" : "s"} critical (&lt;70%)</span>
+          ) : (
+            <span className="edd-insight-chip positive">No stations critical right now</span>
+          )}
+          {worstStation ? (
+            <span className="edd-insight-chip negative">Lowest: <strong>{worstStation.stationCode}</strong> at {worstStation.deliveredPct}%</span>
+          ) : null}
+          {bestStation ? (
+            <span className="edd-insight-chip positive">Highest: <strong>{bestStation.stationCode}</strong> at {bestStation.deliveredPct}%</span>
+          ) : null}
+        </div>
+      </section>
+
       <section className="edd-bucket-grid">
         <div className="edd-bucket-card static">
           <span>Assigned</span>
@@ -228,7 +282,7 @@ export function EddNetworkPerformanceView({
         <div className="edd-bucket-card static future">
           <span>Delivered</span>
           <strong>{totals.delivered.toLocaleString("en-IN")}</strong>
-          <small>{pct(totals.delivered)}% · reached the customer</small>
+          <small>reached the customer</small>
         </div>
         <div className="edd-bucket-card static dueToday">
           <span>Held</span>
@@ -245,8 +299,20 @@ export function EddNetworkPerformanceView({
       <section className="panel">
         <div className="panel-head">
           <div>
+            <h3>Stations needing attention</h3>
+            <p className="subtle">Lowest delivery performance today, worst first — click a bar to open that station.</p>
+          </div>
+        </div>
+        <div className="panel-body">
+          <EddPerformanceChart stations={rows} />
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
             <h3>Stations</h3>
-            <p className="subtle">Today's assigned/delivered/returned/held, refreshed every 15 minutes. Open a station for its own Performance tab.</p>
+            <p className="subtle">Today's delivery performance, refreshed every 15 minutes. Open a station for its own Performance tab.</p>
           </div>
           <button
             type="button"
@@ -326,6 +392,8 @@ export function EddNetworkPerformanceView({
                 {pagedRows.map((row) => {
                   const isRefreshing = refreshingCode === row.stationCode;
                   const name = nameByCode.get(row.stationCode);
+                  const hasData = row.hasSnapshot && row.assigned > 0;
+                  const severity = hasData ? deliverySeverity(row.deliveredPct) : null;
                   return (
                     <tr key={row.stationCode}>
                       <td>
@@ -334,10 +402,13 @@ export function EddNetworkPerformanceView({
                           {name ? <small>{name}</small> : null}
                         </Link>
                       </td>
+                      <td className="num">
+                        {severity ? <span className={`edd-severity ${severity}`}>{row.deliveredPct}%</span> : <span className="subtle">—</span>}
+                      </td>
                       <td className="num">{row.assigned.toLocaleString("en-IN")}</td>
-                      <td className="num">{row.delivered.toLocaleString("en-IN")} <span className="subtle">({row.deliveredPct}%)</span></td>
-                      <td className="num">{row.returned ? <span className="edd-pill overdue">{row.returned.toLocaleString("en-IN")} ({row.returnedPct}%)</span> : "—"}</td>
-                      <td className="num">{row.held.toLocaleString("en-IN")} <span className="subtle">({row.heldPct}%)</span></td>
+                      <td className="num">{row.delivered.toLocaleString("en-IN")}</td>
+                      <td className="num">{row.returned ? row.returned.toLocaleString("en-IN") : "—"}</td>
+                      <td className="num">{row.held.toLocaleString("en-IN")}</td>
                       <td>{row.hasSnapshot ? formatFetchedAt(row.fetchedAt) : <span className="subtle">Never refreshed</span>}</td>
                       <td>
                         <div className="edd-row-actions">

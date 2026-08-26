@@ -18365,6 +18365,76 @@ td strong,
 .edd-legend-dot.held { background: var(--amber); }
 .edd-legend-dot.returned { background: var(--red); }
 
+.edd-severity {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.edd-severity.critical { background: #fee4e2; color: #b42318; }
+.edd-severity.watch { background: #fef0c7; color: #b54708; }
+.edd-severity.good { background: #dcfae6; color: #027a48; }
+
+.edd-hero-card {
+  display: grid;
+  gap: 8px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  border-left: 5px solid var(--muted);
+}
+.edd-hero-card.critical { border-left-color: var(--red); }
+.edd-hero-card.watch { border-left-color: var(--amber); }
+.edd-hero-card.good { border-left-color: var(--green); }
+.edd-hero-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.edd-hero-card-top span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.edd-hero-card strong {
+  font-size: 40px;
+  line-height: 1;
+  color: var(--ink);
+}
+.edd-hero-card.critical strong { color: var(--red); }
+.edd-hero-card.watch strong { color: var(--amber); }
+.edd-hero-card.good strong { color: var(--green); }
+.edd-hero-card small { color: var(--muted); }
+
+.edd-insight-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+.edd-insight-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--ink);
+}
+.edd-insight-chip strong { font-weight: 800; }
+.edd-insight-chip.positive { color: #027a48; border-color: #dcfae6; background: #f0fdf5; }
+.edd-insight-chip.negative { color: #b42318; border-color: #fee4e2; background: #fef5f5; }
+
 .edd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .edd-table th {
   text-align: left;
@@ -18563,6 +18633,12 @@ td strong,
 .edd-network-chart-bar { fill: var(--red); transition: opacity 120ms ease; }
 .edd-network-chart-bar.hovered { opacity: 0.75; }
 .edd-network-chart-row:hover .edd-network-chart-label { fill: var(--brand-dark); }
+
+.edd-performance-chart-bar { transition: opacity 120ms ease; }
+.edd-performance-chart-bar.critical { fill: var(--red); }
+.edd-performance-chart-bar.watch { fill: var(--amber); }
+.edd-performance-chart-bar.good { fill: var(--green); }
+.edd-performance-chart-bar.hovered { opacity: 0.75; }
 
 .edd-sweep-status { padding-top: 0; display: grid; gap: 8px; }
 .edd-sweep-bar {
