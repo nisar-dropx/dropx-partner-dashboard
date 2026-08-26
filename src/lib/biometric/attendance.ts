@@ -232,16 +232,22 @@ async function loadDailyWorkerSnapshot({
         : profileType === "worker"
           ? "workers"
           : "field_executives";
-    const executive = await supabaseAdmin
-      .from(table)
-      .select("dropx_id, full_name, location_id")
-      .eq("company_id", companyId)
-      .eq("id", accountId)
-      .maybeSingle();
-    if (!executive.error && executive.data) {
-      workerCode = executive.data.dropx_id ?? null;
-      workerName = executive.data.full_name ?? null;
-      locationId = executive.data.location_id ?? locationId;
+    const candidateTables = profileType === "worker"
+      ? [table, "workforce_helpers", "workforce_pickers"] as const
+      : [table] as const;
+    for (const candidateTable of candidateTables) {
+      const profile = await supabaseAdmin
+        .from(candidateTable)
+        .select("dropx_id, full_name, location_id")
+        .eq("company_id", companyId)
+        .eq("id", accountId)
+        .maybeSingle();
+      if (!profile.error && profile.data) {
+        workerCode = profile.data.dropx_id ?? null;
+        workerName = profile.data.full_name ?? null;
+        locationId = profile.data.location_id ?? locationId;
+        break;
+      }
     }
   } else if (fieldExecutiveId) {
     const contractor = await supabaseAdmin
@@ -599,7 +605,7 @@ export async function loadAttendanceReportRows({
   const dailyLocationIds = Array.from(new Set(dailyRows.map((row) => row.location_id).filter(Boolean))) as string[];
   const enrolmentIds = Array.from(new Set(dailyRows.map((row) => row.enrolment_id)));
   const biometricVariants = biometricIdVariants(enrolmentIds);
-  const [employeeResult, executiveResult, locationResult, biometricEmployeeResult, biometricExecutiveResult, biometricContractorResult, biometricVendorResult, biometricWorkerResult] = await Promise.all([
+  const [employeeResult, executiveResult, locationResult, biometricEmployeeResult, biometricExecutiveResult, biometricContractorResult, biometricVendorResult, biometricWorkerResult, biometricHelperResult, biometricPickerResult] = await Promise.all([
     employeeIds.length
       ? supabaseAdmin
         .from("employees")
@@ -655,6 +661,20 @@ export async function loadAttendanceReportRows({
         .select("dropx_id, full_name, biometric_id, designation, location_id")
         .eq("company_id", companyId)
         .in("biometric_id", biometricVariants)
+      : Promise.resolve({ data: [], error: null }),
+    biometricVariants.length
+      ? supabaseAdmin
+        .from("workforce_helpers")
+        .select("dropx_id, full_name, biometric_id, designation, location_id")
+        .eq("company_id", companyId)
+        .in("biometric_id", biometricVariants)
+      : Promise.resolve({ data: [], error: null }),
+    biometricVariants.length
+      ? supabaseAdmin
+        .from("workforce_pickers")
+        .select("dropx_id, full_name, biometric_id, designation, location_id")
+        .eq("company_id", companyId)
+        .in("biometric_id", biometricVariants)
       : Promise.resolve({ data: [], error: null })
   ]);
   if (employeeResult.error) throw new Error(employeeResult.error.message);
@@ -665,6 +685,8 @@ export async function loadAttendanceReportRows({
   if (biometricContractorResult.error) throw new Error(biometricContractorResult.error.message);
   if (biometricVendorResult.error) throw new Error(biometricVendorResult.error.message);
   if (biometricWorkerResult.error) throw new Error(biometricWorkerResult.error.message);
+  if (biometricHelperResult.error) throw new Error(biometricHelperResult.error.message);
+  if (biometricPickerResult.error) throw new Error(biometricPickerResult.error.message);
 
   const employeesById = new Map(((employeeResult.data ?? []) as EmployeeLookupRow[]).map((employee) => [employee.id, employee]));
   const executivesById = new Map(((executiveResult.data ?? []) as ExecutiveLookupRow[]).map((executive) => [executive.id, executive]));
@@ -674,6 +696,8 @@ export async function loadAttendanceReportRows({
     ...((biometricContractorResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "contractor" as const })),
     ...((biometricVendorResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "vendor" as const })),
     ...((biometricWorkerResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "worker" as const })),
+    ...((biometricHelperResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "worker" as const })),
+    ...((biometricPickerResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "worker" as const })),
     ...((biometricExecutiveResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "field_executive" as const }))
   ];
   const biometricWorkersById = new Map<string, BiometricWorkerLookup>();
