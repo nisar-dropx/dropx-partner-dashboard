@@ -285,6 +285,8 @@ export function ProviderMappingWorksheet({
   const [locationFilters, setLocationFilters] = useState<string[]>([]);
   const [paymentMethodFilters, setPaymentMethodFilters] = useState<string[]>([]);
   const [mappingStatusFilters, setMappingStatusFilters] = useState<string[]>([]);
+  const [pageSize, setPageSize] = useState("20");
+  const [currentPage, setCurrentPage] = useState(1);
 
   const handleLookupChange = useCallback((index: number, status: ProviderMemberLookupStatus) => {
     setMemberLookupStatuses((current) => ({ ...current, [index]: status }));
@@ -427,6 +429,18 @@ export function ProviderMappingWorksheet({
   });
   const visibleRowCount = visibleRows.filter(Boolean).length;
   const hasFilters = Boolean(searchQuery || locationFilters.length || paymentMethodFilters.length || mappingStatusFilters.length);
+  const filteredIndexes = visibleRows.flatMap((visible, index) => visible ? [index] : []);
+  const numericPageSize = pageSize === "all" ? Math.max(filteredIndexes.length, 1) : Number(pageSize);
+  const totalPages = Math.max(1, Math.ceil(filteredIndexes.length / numericPageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageStart = (safeCurrentPage - 1) * numericPageSize;
+  const paginatedIndexes = new Set(filteredIndexes.slice(pageStart, pageStart + numericPageSize));
+  const pageFrom = visibleRowCount ? pageStart + 1 : 0;
+  const pageTo = Math.min(pageStart + numericPageSize, visibleRowCount);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, locationFilters, paymentMethodFilters, mappingStatusFilters, pageSize]);
 
   if (!rows.length) {
     return (
@@ -475,6 +489,16 @@ export function ProviderMappingWorksheet({
             { value: "unmapped", label: "Unmapped" },
             { value: "unsaved", label: "Unsaved" }
           ]} selected={mappingStatusFilters} setSelected={setMappingStatusFilters} />
+          <label className="mapping-page-size">Rows
+            <select onChange={(event) => setPageSize(event.target.value)} value={pageSize}>
+              <option value="20">20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="all">All</option>
+            </select>
+          </label>
           <div className="mapping-filter-summary">
             <span>{visibleRowCount} of {rows.length} records</span>
             {hasFilters ? <button className="button secondary compact" onClick={() => {
@@ -488,7 +512,7 @@ export function ProviderMappingWorksheet({
 
         <div className="mapping-rows">
           {rows.map((row, index) => (
-            <div className={`mapping-row-card ${dirtyRows[index] ? "unsaved-row" : ""}`} hidden={!visibleRows[index]} key={`${row.id || row.dropxId}-${index}`}>
+            <div className={`mapping-row-card ${dirtyRows[index] ? "unsaved-row" : ""}`} hidden={!paginatedIndexes.has(index)} key={`${row.id || row.dropxId}-${index}`}>
               <input type="hidden" name={`rows[${index}][id]`} value={row.id} />
               <input type="hidden" name={`rows[${index}][source_type]`} value={row.sourceType} />
               <input type="hidden" name={`rows[${index}][mapping_id]`} value={row.mappingId} />
@@ -583,6 +607,14 @@ export function ProviderMappingWorksheet({
               </div>
             </div>
           ))}
+        </div>
+        <div className="mapping-pagination">
+          <span>Showing {pageFrom}–{pageTo} of {visibleRowCount}</span>
+          <div className="mapping-pagination-actions">
+            <button className="button secondary compact" disabled={safeCurrentPage <= 1} onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} type="button">Previous</button>
+            <span>Page {safeCurrentPage} of {totalPages}</span>
+            <button className="button secondary compact" disabled={safeCurrentPage >= totalPages} onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} type="button">Next</button>
+          </div>
         </div>
         <div className="mapping-bulk-actions">
           <span>{hasDirtyRows ? `${dirtyRows.filter(Boolean).length} unsaved row${dirtyRows.filter(Boolean).length === 1 ? "" : "s"}` : "All changes saved"}</span>
