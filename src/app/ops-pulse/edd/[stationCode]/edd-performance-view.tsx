@@ -15,7 +15,10 @@ async function fetchPerformance(stationCode: string): Promise<FetchOutcome> {
   const raw = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(String(raw.error ?? `Unable to load the performance report (${response.status}).`));
   if (raw.status === "no_snapshot") return { status: "no_snapshot" };
-  return { status: "ok", payload: raw as EddPerformancePayload };
+  // The GET route returns { status: "ok", payload: EddPerformancePayload } —
+  // unwrap it here (unlike refreshPerformance below, whose POST route
+  // returns the station payload directly).
+  return { status: "ok", payload: raw.payload as EddPerformancePayload };
 }
 
 async function refreshPerformance(stationCode: string): Promise<EddPerformancePayload> {
