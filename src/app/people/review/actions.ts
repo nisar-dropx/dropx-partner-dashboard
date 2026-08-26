@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createAppNotification } from "@/lib/app-notifications";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { assignEmployeeToPosition } from "@/lib/position-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   isWorkforceProfileType,
@@ -53,7 +54,7 @@ export async function reviewPeopleProfile(formData: FormData) {
     const statusColumn = profileType === "employee" ? "profile_completion_status" : "onboarding_status";
     const current = await supabaseAdmin
       .from(table)
-      .select(`id, ${statusColumn}, location_id`)
+      .select("*")
       .eq("id", id)
       .eq("company_id", companyId)
       .maybeSingle();
@@ -91,6 +92,19 @@ export async function reviewPeopleProfile(formData: FormData) {
       .eq("id", id)
       .eq("company_id", companyId);
     if (result.error) throw new Error(result.error.message);
+    const orgPositionId = profileType === "employee"
+      ? String((current.data as { org_position_id?: unknown }).org_position_id ?? "").trim()
+      : "";
+    if (action === "approve" && orgPositionId) {
+      await assignEmployeeToPosition({
+        actorUserId: authorization.userId,
+        companyId,
+        employeeId: id,
+        positionId: orgPositionId,
+        assignmentType: "permanent",
+        reason: "Assigned when employee profile was approved"
+      });
+    }
 
     await createAppNotification({
       accountId: id,

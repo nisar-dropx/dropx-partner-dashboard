@@ -15,12 +15,19 @@ type DesignationSelectOption = SearchableSelectOption & {
   dashboardRules?: { enabled: string[]; required: string[] };
 };
 
+type PositionSelectOption = SearchableSelectOption & {
+  allLocations?: boolean;
+  designationId?: string | null;
+  locationScopeIds?: string[];
+};
+
 type EmployeeFormProps = {
   action: (formData: FormData) => void;
   dashboardRules: { enabled: string[]; required: string[] };
   statutoryEnabled?: boolean;
   directActivate?: boolean;
   designationOptions: DesignationSelectOption[];
+  positionOptions?: PositionSelectOption[];
   employee?: {
     id: string;
     employee_code: string | null;
@@ -32,6 +39,7 @@ type EmployeeFormProps = {
     date_of_join: string;
     location_id?: string | null;
     designation_id?: string | null;
+    org_position_id?: string | null;
     gender?: string | null;
     date_of_birth?: string | null;
     father_name?: string | null;
@@ -126,9 +134,10 @@ function StatutoryMultiSelect({
   );
 }
 
-export function EmployeeForm({ action, dashboardRules, designationOptions, directActivate = false, employee, locationOptions, mode = "create", statutoryEnabled = false }: EmployeeFormProps) {
+export function EmployeeForm({ action, dashboardRules, designationOptions, directActivate = false, employee, locationOptions, mode = "create", positionOptions = [], statutoryEnabled = false }: EmployeeFormProps) {
   const [selectedLocationId, setSelectedLocationId] = useState(employee?.location_id ?? "");
   const [selectedDesignationId, setSelectedDesignationId] = useState(employee?.designation_id ?? "");
+  const [selectedPositionId, setSelectedPositionId] = useState(employee?.org_position_id ?? "");
   const [selectedStatutory, setSelectedStatutory] = useState<string[]>(
     employee?.statutory_applicability?.length ? employee.statutory_applicability : []
   );
@@ -149,6 +158,13 @@ export function EmployeeForm({ action, dashboardRules, designationOptions, direc
     ]
     : filteredDesignationOptions;
   const designationDisabled = !selectedLocationId || !effectiveDesignationOptions.length;
+  const filteredPositionOptions = positionOptions.filter((option) => (
+    (!option.designationId || option.designationId === selectedDesignationId) &&
+    (option.allLocations || (option.locationScopeIds ?? []).includes(selectedLocationId))
+  ));
+  const effectivePositionOptions = selectedPositionId && !filteredPositionOptions.some((option) => option.value === selectedPositionId)
+    ? [positionOptions.find((option) => option.value === selectedPositionId) ?? { value: selectedPositionId, label: "Current position" }, ...filteredPositionOptions]
+    : filteredPositionOptions;
   const effectiveRules = designationOptions.find((option) => option.value === selectedDesignationId)?.dashboardRules ?? dashboardRules;
   const fieldEnabled = (key: string) => effectiveRules.enabled.includes(key);
   const fieldRequired = (key: string) => directActivate && !isEdit && effectiveRules.required.includes(key);
@@ -173,7 +189,7 @@ export function EmployeeForm({ action, dashboardRules, designationOptions, direc
       </label>
       <label>
         Email
-        <input className="field" defaultValue={employee?.email ?? ""} name="email" placeholder="Enter email" type="email" />
+        <input className="field" defaultValue={employee?.email ?? ""} name="email" placeholder="Enter email" required={Boolean(selectedPositionId)} type="email" />
       </label>
       <label>
         Date of join
@@ -186,6 +202,7 @@ export function EmployeeForm({ action, dashboardRules, designationOptions, direc
           onValueChange={(value) => {
             setSelectedLocationId(value);
             setSelectedDesignationId("");
+            setSelectedPositionId("");
           }}
           options={locationOptions}
           value={selectedLocationId}
@@ -198,12 +215,27 @@ export function EmployeeForm({ action, dashboardRules, designationOptions, direc
         <SearchableSelect
           disabled={designationDisabled}
           name="designation_id"
-          onValueChange={setSelectedDesignationId}
+          onValueChange={(value) => {
+            setSelectedDesignationId(value);
+            setSelectedPositionId("");
+          }}
           options={effectiveDesignationOptions}
           placeholder={selectedLocationId ? "Select designation" : "Select location first"}
           required={!isEdit && !designationDisabled}
           value={selectedDesignationId}
         />
+      </label>
+      <label>
+        Portal position (optional)
+        <SearchableSelect
+          disabled={!selectedLocationId || !selectedDesignationId || !effectivePositionOptions.length}
+          name="org_position_id"
+          onValueChange={setSelectedPositionId}
+          options={effectivePositionOptions}
+          placeholder={!selectedDesignationId ? "Select designation first" : effectivePositionOptions.length ? "Select position" : "No matching position"}
+          value={selectedPositionId}
+        />
+        <small className="subtle">Selecting a position applies its role, reporting line, and location access after activation.</small>
       </label>
       {statutoryEnabled ? <label className="span-2">
         Statutory applicability

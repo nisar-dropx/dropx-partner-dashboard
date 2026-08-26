@@ -17,6 +17,7 @@ import { moveProfileDocumentToTrash, uploadProfileDocument } from "@/lib/profile
 import { saveProfileVerifications } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
+import { assignEmployeeToPosition } from "@/lib/position-access";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules, loadWorkforceCategoryStatutoryEnabled } from "@/lib/workforce-category-rules";
 import { sendEmployeeOnboardingWhatsApp } from "@/lib/whatsapp";
 
@@ -114,6 +115,29 @@ function employeeProfilePayload(formData: FormData) {
   };
 }
 
+async function validateEmployeePosition(
+  companyId: string,
+  positionId: string | null,
+  designationId: string,
+  locationId: string
+) {
+  if (!positionId || !supabaseAdmin) return;
+  const result = await supabaseAdmin
+    .from("org_positions")
+    .select("id, designation_id, location_access_mode, location_scope_ids, is_active")
+    .eq("id", positionId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data?.is_active) throw new Error("Selected portal position is not active.");
+  if (result.data.designation_id && result.data.designation_id !== designationId) {
+    throw new Error("Selected portal position does not match the employee designation.");
+  }
+  if (result.data.location_access_mode !== "all_locations" && !(result.data.location_scope_ids ?? []).includes(locationId)) {
+    throw new Error("Selected portal position does not cover this employee location.");
+  }
+}
+
 export async function createEmployee(formData: FormData) {
   const authorization = await requirePagePermission("employees", "add");
   const companyId = requireCompanyId(authorization);
@@ -127,6 +151,9 @@ export async function createEmployee(formData: FormData) {
     const dateOfJoin = required(formData.get("date_of_join"), "Date of join");
     const locationId = required(formData.get("location_id"), "Location");
     const designationId = required(formData.get("designation_id"), "Designation");
+    const orgPositionId = optional(formData.get("org_position_id"));
+
+    if (orgPositionId && !email) throw new Error("Email is required when a portal position is selected.");
 
     if (!/^\d{6,15}$/.test(mobile)) throw new Error("Mobile number must contain 6 to 15 digits.");
     if (Number.isNaN(Date.parse(dateOfJoin))) throw new Error("Enter a valid date of join.");
@@ -142,6 +169,7 @@ export async function createEmployee(formData: FormData) {
     if (designationResult.error) throw new Error(designationResult.error.message);
     if (!locationResult.data) throw new Error("Selected location is not available for this company.");
     if (!designationResult.data) throw new Error("Selected designation is not available.");
+    await validateEmployeePosition(companyId, orgPositionId, designationId, locationId);
     requireDesignationOnboardingAccess(designationResult.data, authorization);
   requireDesignationPortalAccess(designationResult.data, "dashboard", "add", { isOwner: isCompanyOwner(authorization) });
     const [directActivate, statutoryEnabled] = await Promise.all([
@@ -196,6 +224,7 @@ export async function createEmployee(formData: FormData) {
       date_of_join: dateOfJoin,
       location_id: locationId,
       designation_id: designationId,
+      org_position_id: orgPositionId,
       statutory_applicability: statutoryApplicability,
       created_by: authorization.userId,
       ...profilePayload,
@@ -241,6 +270,17 @@ export async function createEmployee(formData: FormData) {
       workerType: "employee"
     });
 
+    if (directActivate && orgPositionId) {
+      await assignEmployeeToPosition({
+        actorUserId: authorization.userId,
+        companyId,
+        employeeId: employee.id,
+        positionId: orgPositionId,
+        assignmentType: "permanent",
+        reason: "Assigned during employee activation"
+      });
+    }
+
     waitUntil(sendEmployeeOnboardingWhatsApp({
       companyId,
       employeeId: employee.id,
@@ -277,6 +317,9 @@ export async function updateEmployee(formData: FormData) {
     const dateOfJoin = required(formData.get("date_of_join"), "Date of join");
     const locationId = required(formData.get("location_id"), "Location");
     const designationId = required(formData.get("designation_id"), "Designation");
+    const orgPositionId = optional(formData.get("org_position_id"));
+
+    if (orgPositionId && !email) throw new Error("Email is required when a portal position is selected.");
     const statutoryEnabled = await loadWorkforceCategoryStatutoryEnabled(companyId, "employees");
     const statutoryApplicability = normalizeStatutory(formData.getAll("statutory_applicability"), statutoryEnabled);
     const isActive = optional(formData.get("is_active")) !== "false";
@@ -343,6 +386,7 @@ export async function updateEmployee(formData: FormData) {
     if (designationResult.error) throw new Error(designationResult.error.message);
     if (!locationResult.data) throw new Error("Selected location is not available for this company.");
     if (!designationResult.data) throw new Error("Selected designation is not available.");
+    await validateEmployeePosition(companyId, orgPositionId, designationId, locationId);
   requireDesignationPortalAccess(designationResult.data, "dashboard", "edit", { isOwner: isCompanyOwner(authorization) });
     const dashboardRules = (await loadWorkforceCategoryRules(
       companyId,
@@ -356,12 +400,15 @@ export async function updateEmployee(formData: FormData) {
     );
     const existingResult = await supabaseAdmin
       .from("employees")
-      .select("designation_id, biometric_id, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path")
+      .select("designation_id, org_position_id, profile_completion_status, biometric_id, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path")
       .eq("id", id)
       .eq("company_id", companyId)
       .maybeSingle();
     if (existingResult.error) throw new Error(existingResult.error.message);
     if (!existingResult.data) throw new Error("Employee was not found.");
+    if (existingResult.data.org_position_id && existingResult.data.org_position_id !== orgPositionId) {
+      throw new Error("Change an occupied position from Users & Access → Positions & Delegation.");
+    }
     if (String(existingResult.data.designation_id ?? "") !== designationId) {
       const currentDesignation = await supabaseAdmin
         .from("designations")
@@ -409,6 +456,7 @@ export async function updateEmployee(formData: FormData) {
       date_of_join: dateOfJoin,
       location_id: locationId,
       designation_id: designationId,
+      org_position_id: orgPositionId,
       statutory_applicability: statutoryApplicability,
       ...filteredExtraPayload,
       ...documentPayload,
@@ -435,6 +483,17 @@ export async function updateEmployee(formData: FormData) {
       workerType: "employee"
     });
 
+    if (isActive && orgPositionId && !existingResult.data.org_position_id && existingResult.data.profile_completion_status === "active") {
+      await assignEmployeeToPosition({
+        actorUserId: authorization.userId,
+        companyId,
+        employeeId: id,
+        positionId: orgPositionId,
+        assignmentType: "permanent",
+        reason: "Assigned from employee profile"
+      });
+    }
+
     revalidatePath("/employees");
     employeesRedirect({ notice: "Employee updated successfully." });
   } catch (error) {
@@ -459,7 +518,7 @@ export async function reviewEmployeeProfile(formData: FormData) {
 
     const current = await supabaseAdmin
       .from("employees")
-      .select("profile_completion_status, designation_id")
+      .select("profile_completion_status, designation_id, org_position_id")
       .eq("id", id)
       .eq("company_id", companyId)
       .maybeSingle();
@@ -498,6 +557,16 @@ export async function reviewEmployeeProfile(formData: FormData) {
       .eq("id", id)
       .eq("company_id", companyId);
     if (result.error) throw new Error(result.error.message);
+    if (action === "approve" && current.data.org_position_id) {
+      await assignEmployeeToPosition({
+        actorUserId: authorization.userId,
+        companyId,
+        employeeId: id,
+        positionId: current.data.org_position_id,
+        assignmentType: "permanent",
+        reason: "Assigned when employee profile was approved"
+      });
+    }
     await createAppNotification({
       accountId: id,
       companyId,

@@ -100,6 +100,10 @@ function isLocationManagedInviteMethod(value: string | null | undefined) {
   return value === "Location Email" || value === "Location Master";
 }
 
+function isPositionManagedInviteMethod(value: string | null | undefined) {
+  return value === "Position Assignment";
+}
+
 async function isLinkedLocationEmail(email: string | null | undefined, companyId: string) {
   if (!supabaseAdmin || !email) return false;
 
@@ -669,6 +673,9 @@ export async function updateUser(formData: FormData) {
   if (isLocationManagedInviteMethod(existingUser.invite_method) && await isLinkedLocationEmail(existingUser.email, companyId)) {
     throw new Error("This user is managed from Location Master and cannot be edited here.");
   }
+  if (isPositionManagedInviteMethod(existingUser.invite_method)) {
+    throw new Error("This user is managed from Positions & Delegation and cannot be edited here.");
+  }
 
   const employeeId = required(formData.get("employee_id"), "Employee ID").toUpperCase();
   const fullName = required(formData.get("full_name"), "Full name");
@@ -736,11 +743,13 @@ export async function resendUserInvitation(formData: FormData) {
 
     if (error) throw new Error(error.message);
 
-    await supabaseAdmin
-      .from("profiles")
-      .update({ invite_method: "Email" })
-      .eq("id", id)
-      .eq("company_id", companyId);
+    if (!isPositionManagedInviteMethod(profile.invite_method)) {
+      await supabaseAdmin
+        .from("profiles")
+        .update({ invite_method: "Email" })
+        .eq("id", id)
+        .eq("company_id", companyId);
+    }
 
     revalidatePath("/users");
   } catch (error) {
@@ -776,6 +785,9 @@ async function performDeleteUser(formData: FormData, companyId: string) {
   if (reporteesError) throw new Error(reporteesError.message);
   if (isLocationManagedInviteMethod(user.invite_method) && await isLinkedLocationEmail(user.email, companyId)) {
     throw new Error("This user is managed from Location Master and cannot be deleted here.");
+  }
+  if (isPositionManagedInviteMethod(user.invite_method)) {
+    throw new Error("This user is managed from Positions & Delegation and cannot be deleted here.");
   }
 
   const { count: managedLocations, error: locationsError } = user.email

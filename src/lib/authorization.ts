@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
+import { loadEffectivePositionAccess } from "@/lib/position-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
@@ -17,6 +18,7 @@ export type AuthorizationContext = {
   companyId: string | null;
   companyName: string | null;
   email: string | null;
+  effectiveRoleIds: string[];
   fullName: string | null;
   hasAllLocationAccess: boolean;
   isMasterCompany: boolean;
@@ -219,6 +221,8 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   let isMasterCompany = signedInEmail === "nisar@dropxlogistics.com";
   let isMasterOwner = Boolean(profile.is_master_owner) || signedInEmail === "nisar@dropxlogistics.com";
   let roleCode: string | null = null;
+  let effectiveRoleIds: string[] = profile.role_id ? [profile.role_id] : [];
+  let primaryRoleId: string | null = profile.role_id ?? null;
 
   if (!companyId) return null;
 
@@ -238,19 +242,34 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     await ensureMissingCurrentAccessPages(companyId as string);
   }
 
-  if (profile.role_id) {
-    const { data: role } = await supabaseAdmin
+  const positionAccess = await loadEffectivePositionAccess(companyId as string, profile.id);
+  effectiveRoleIds = Array.from(new Set([
+    ...effectiveRoleIds,
+    ...positionAccess.roleIds
+  ]));
+  primaryRoleId = positionAccess.primaryRoleId ?? primaryRoleId;
+  locationScopeIds = Array.from(new Set([
+    ...locationScopeIds,
+    ...positionAccess.locationScopeIds
+  ]));
+  hasAllLocationAccess = positionAccess.hasAllLocationAccess;
+
+  if (effectiveRoleIds.length) {
+    const rolesResult = await supabaseAdmin
       .from("user_roles")
-      .select("name, code, location_access_mode, is_system, is_active")
-      .eq("id", profile.role_id)
-      .maybeSingle();
+      .select("id, name, code, location_access_mode, is_system, is_active")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .in("id", effectiveRoleIds);
+    if (rolesResult.error) return null;
+    const roles = rolesResult.data ?? [];
+    const primaryRole = roles.find((role) => role.id === primaryRoleId) ?? roles[0] ?? null;
+    roleName = primaryRole?.name ?? null;
+    roleCode = String(primaryRole?.code ?? "").trim().toUpperCase() || null;
+    hasAllLocationAccess = hasAllLocationAccess || roles.some((role) => role.location_access_mode === "all_locations");
 
-    roleName = role?.name ?? null;
-    hasAllLocationAccess = role?.location_access_mode === "all_locations";
-
-    roleCode = String(role?.code ?? "").trim().toUpperCase() || null;
-
-    if (role?.is_active && roleCode === "LOCATION" && data.user.email) {
+    const hasLocationRole = roles.some((role) => String(role.code ?? "").trim().toUpperCase() === "LOCATION");
+    if (hasLocationRole && data.user.email) {
       const { data: allEmailLocations } = await supabaseAdmin
         .from("stations")
         .select("id, station_email")
@@ -266,54 +285,52 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
       ]));
     }
 
-    if (role?.is_active && roleCode === "OWNER") {
+    if (roles.some((role) => String(role.code ?? "").trim().toUpperCase() === "OWNER")) {
       hasAllLocationAccess = true;
       grantFullAccess(permissions);
-  } else if (role?.is_active) {
-    let pagesResult = await supabaseAdmin
-      .from("app_pages")
-      .select("id, code")
-      .eq("company_id", companyId)
-      .eq("is_active", true);
-
-    if (pagesResult.error && isMissingColumnError(pagesResult.error)) {
-      pagesResult = await supabaseAdmin.from("app_pages").select("id, code").eq("is_active", true);
-    }
-    if (!pagesResult.error && !(pagesResult.data ?? []).length) {
-      pagesResult = await supabaseAdmin
+    } else {
+      let pagesResult = await supabaseAdmin
         .from("app_pages")
         .select("id, code")
-        .in("code", accessPages.map((page) => page.code))
-        .is("company_id", null)
+        .eq("company_id", companyId)
         .eq("is_active", true);
-    }
 
-    let grantsResult = await supabaseAdmin
-      .from("role_page_permissions")
-      .select("page_id, can_view, can_add, can_edit")
-      .eq("company_id", companyId)
-      .eq("role_id", profile.role_id);
+      if (pagesResult.error && isMissingColumnError(pagesResult.error)) {
+        pagesResult = await supabaseAdmin.from("app_pages").select("id, code").eq("is_active", true);
+      }
+      if (!pagesResult.error && !(pagesResult.data ?? []).length) {
+        pagesResult = await supabaseAdmin
+          .from("app_pages")
+          .select("id, code")
+          .in("code", accessPages.map((page) => page.code))
+          .is("company_id", null)
+          .eq("is_active", true);
+      }
 
-    if (grantsResult.error && isMissingColumnError(grantsResult.error)) {
-      grantsResult = await supabaseAdmin
+      let grantsResult = await supabaseAdmin
         .from("role_page_permissions")
         .select("page_id, can_view, can_add, can_edit")
-        .eq("role_id", profile.role_id);
-    }
+        .eq("company_id", companyId)
+        .in("role_id", effectiveRoleIds);
 
-    if (pagesResult.error || grantsResult.error) {
-      return null;
-    }
+      if (grantsResult.error && isMissingColumnError(grantsResult.error)) {
+        grantsResult = await supabaseAdmin
+          .from("role_page_permissions")
+          .select("page_id, can_view, can_add, can_edit")
+          .in("role_id", effectiveRoleIds);
+      }
 
-    const codeByPageId = new Map((pagesResult.data ?? []).map((page) => [page.id, page.code]));
+      if (pagesResult.error || grantsResult.error) return null;
+      const codeByPageId = new Map((pagesResult.data ?? []).map((page) => [page.id, page.code]));
 
-    (grantsResult.data ?? []).forEach((grant) => {
-      const code = codeByPageId.get(grant.page_id);
-      if (!code) return;
-      permissions[code] = {
-          canView: grant.can_view || grant.can_edit,
-          canAdd: grant.can_add,
-          canEdit: grant.can_edit
+      (grantsResult.data ?? []).forEach((grant) => {
+        const code = codeByPageId.get(grant.page_id);
+        if (!code) return;
+        const current = permissions[code] ?? noPermission;
+        permissions[code] = {
+          canView: current.canView || grant.can_view || grant.can_edit,
+          canAdd: current.canAdd || grant.can_add,
+          canEdit: current.canEdit || grant.can_edit
         };
       });
     }
@@ -334,6 +351,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     companyId,
     companyName,
     email: data.user.email ?? null,
+    effectiveRoleIds,
     fullName: profile.full_name,
     hasAllLocationAccess,
     isMasterCompany,
@@ -341,7 +359,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     locationScopeIds,
     permissions,
     roleCode,
-    roleId: profile.role_id,
+    roleId: primaryRoleId,
     roleName,
     userId: profile.id
   };
