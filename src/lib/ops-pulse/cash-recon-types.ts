@@ -288,7 +288,11 @@ export function nearlyZero(value: number, epsilon = 0.01) {
 export function normalizeAssociateName(name: string) {
   return String(name ?? "")
     .split("/")[0]
-    ?.replace(/\s+/g, " ")
+    // Underscore-joined codes are common in raw Amazon names — "BB_Noufal Thottiyil",
+    // "Store_Reliance Pets_SO" — fold them into spaces before tokenizing, or
+    // associateNamesMatch never sees "reliance"/"pets" as separate tokens and two rows
+    // for the same person/store (one raw, one cleaned) never merge.
+    ?.replace(/[_\s]+/g, " ")
     .trim()
     .toLowerCase() ?? "";
 }
