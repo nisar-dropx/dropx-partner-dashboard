@@ -8,9 +8,13 @@ export const APP_GPS_DEVICE_SERIAL = "APP_GPS";
 /** Only used when a station has no radius configured yet (admin should set per station). */
 export const FALLBACK_GEOFENCE_RADIUS_M = 50;
 export const ACCURACY_FLAG_THRESHOLD_M = 100;
+/** Continuous outside-zone before manager flag (phone must stay beyond station radius). */
 export const OUTSIDE_CONTINUOUS_MS = 30 * 60 * 1000;
+/** After punch-in, collect phone GPS only for this window (then stop). */
+export const LOCATION_TRACKING_MS = 9 * 60 * 60 * 1000;
 export const SHIFT_REMINDER_MS = [9.5 * 60 * 60 * 1000, 10 * 60 * 60 * 1000] as const;
-export const BIOMETRIC_SAMPLE_WINDOW_MS = 15 * 60 * 1000;
+/** Biometric punch must match a phone GPS sample within this lookback. */
+export const BIOMETRIC_SAMPLE_WINDOW_MS = 20 * 60 * 1000;
 export const HEARTBEAT_MIN_INTERVAL_MS = 2 * 60 * 1000;
 
 export type GeofenceStatus = "inside" | "outside" | "unknown";
@@ -680,16 +684,81 @@ export async function checkBiometricPhoneMismatch({
     if (String(sample.error.message).toLowerCase().includes("does not exist")) return null;
     throw new Error(sample.error.message);
   }
-  if (!sample.data?.outside_zone) return null;
 
-  // Mark biometric punch flagged when possible.
+  // Connect-linked workers must have a recent phone GPS sample at biometric punch time.
+  // No sample → likely buddy punch / phone left elsewhere without reporting.
+  if (!sample.data) {
+    if (!accountId && !profileId) return null;
+    const flag = await openIntegrityFlag({
+      companyId,
+      enrolmentId,
+      profileType,
+      profileId: profileId ?? accountId,
+      punchId,
+      locationId,
+      punchDate,
+      flagType: "biometric_phone_mismatch",
+      severity: "high",
+      message:
+        "Biometric punch with no recent phone GPS — possible buddy punch (phone was not reporting location).",
+      details: {
+        reason: "phone_location_missing",
+        windowMs: BIOMETRIC_SAMPLE_WINDOW_MS,
+        punchId
+      }
+    });
+    if (flag.created && (accountId || profileId)) {
+      await createAppNotification({
+        accountId: (accountId ?? profileId) as string,
+        companyId,
+        data: { punchDate, punchId, flagId: flag.id },
+        eventCode: "attendance_location_flagged",
+        profileType: profileType ?? "employee",
+        sourceKey: `biometric-mismatch:${punchId}`,
+        variables: { date: punchDate.split("-").reverse().join("/") }
+      }).catch(() => undefined);
+    }
+    return flag;
+  }
+
+  const lat = toNumber(sample.data.lat);
+  const lng = toNumber(sample.data.lng);
+  let outside = Boolean(sample.data.outside_zone);
+  let distanceM = toNumber(sample.data.distance_m);
+  let radiusM: number | null = null;
+  let stationCode: string | null = null;
+  let stationName: string | null = null;
+  let geofenceStatus: GeofenceStatus = outside ? "outside" : "inside";
+
+  if (lat != null && lng != null) {
+    const geofence = await resolveCompanyPunchGeofence({
+      companyId,
+      lat,
+      lng,
+      preferredLocationId: locationId
+    });
+    geofenceStatus = geofence.status;
+    distanceM = geofence.distanceM;
+    radiusM = geofence.radiusM;
+    stationCode = geofence.station?.stationCode ?? null;
+    stationName = geofence.station?.stationName ?? null;
+    // Fraud = phone clearly outside every company station zone.
+    outside = geofence.status === "outside";
+  }
+
+  if (!outside) return null;
+
   const punchUpdate = await supabaseAdmin
     .from("attendance_punches")
-    .update({ is_flagged: true, geofence_status: "outside", distance_m: sample.data.distance_m })
+    .update({ is_flagged: true, geofence_status: "outside", distance_m: distanceM })
     .eq("id", punchId);
   if (punchUpdate.error && !/does not exist|schema cache|is_flagged|geofence_status/i.test(punchUpdate.error.message)) {
     console.error("Unable to mark biometric punch flagged:", punchUpdate.error.message);
   }
+
+  const distanceLabel = distanceM != null ? `${Math.round(distanceM)}m` : "unknown distance";
+  const allowedLabel = radiusM != null ? `${Math.round(radiusM)}m` : `${FALLBACK_GEOFENCE_RADIUS_M}m`;
+  const stationLabel = stationCode || stationName || "station";
 
   const flag = await openIntegrityFlag({
     companyId,
@@ -701,11 +770,19 @@ export async function checkBiometricPhoneMismatch({
     punchDate,
     flagType: "biometric_phone_mismatch",
     severity: "high",
-    message: "Biometric punch recorded while phone GPS was outside the station geofence.",
+    message: `Biometric punch while phone was outside ${stationLabel} · device ${distanceLabel} away (allowed ${allowedLabel}).`,
     details: {
+      reason: "phone_outside_on_biometric_punch",
       sampleId: sample.data.id,
-      distanceM: sample.data.distance_m,
-      sampleAt: sample.data.server_received_at
+      sampleAt: sample.data.server_received_at,
+      distanceM,
+      radiusM,
+      lat,
+      lng,
+      geofenceStatus,
+      stationCode,
+      stationName,
+      punchId
     }
   });
 

@@ -8,15 +8,15 @@ SQL: `scripts/attendance_gps_integrity_v1.sql`
 
 ## Product rules (already implemented on web)
 
-1. App GPS punch **coexists** with biometric device punches.
-2. Punch requires **live selfie matched to profile photo on device** (selfie is **not** uploaded for normal punch) + **lat/lng**; **server timestamp** is authoritative (never trust editable client time).
-3. Outside **all** company station geofences (default **50m**, admin-only on stations) → **block punch** with a warning (no punch saved). Must be inside any active company station (assigned preferred; travel to other sites allowed).
-4. In-shift heartbeats only (after punch-in until punch-out).
-5. Continuous outside zone **> 30 minutes** (beyond station radius, default 50m) → flag `outside_geofence_gt_2h` (legacy type name; threshold is 30 minutes). Review on People: `https://people.dropxlogistics.com/attendance/integrity`.
-6. Reminders at **9.5h** and **10h** after punch-in if no punch-out.
-7. Biometric punch + recent phone sample outside zone → flag `biometric_phone_mismatch`.
+1. **Primary punch = station biometric device.** Connect does **not** show GPS Punch In/Out all the time.
+2. Connect shows a **Location review** card **only when an open integrity flag exists** (support selfie + live GPS).
+3. While DropX One is open, the phone silently sends **presence GPS samples** so a biometric buddy-punch can be checked immediately.
+4. After punch-in, in-shift GPS is collected for **9 hours** from punch-in, then stops.
+5. Continuous outside zone **> station radius (default 50m) for > 30 minutes** during that window → flag `outside_geofence_gt_2h` as soon as the threshold is crossed.
+6. Biometric punch while recent phone GPS is outside the station zone → **immediate** flag `biometric_phone_mismatch`. Connect-linked workers with **no recent phone GPS** are also flagged (possible buddy punch).
+7. Reminders at **9.5h** and **10h** after punch-in if no punch-out.
 8. Employees **cannot** edit punch lat/lng/time from website or app.
-9. Support selfie upload is only for **flagged** review cases, not normal GPS punch.
+9. Support selfie upload is only for **flagged** review cases.
 
 ## REST contracts (reuse exactly)
 
@@ -27,19 +27,14 @@ Auth: DropX Connect session cookie (`dropx_connect_session`) — same as web.
 ### `GET /api/connect/attendance/punch?accountId&profileType`
 Returns shift open state, station geofence, open flags.
 
-### `POST /api/connect/attendance/punch` (multipart)
-Fields:
-- `accountId`, `profileType`
-- `action` = `in` | `out`
-- `lat`, `lng`, `accuracyM`, `altitudeM` (optional)
-- `clientCapturedAt` (ISO, advisory only)
-- `integritySignals` (JSON string)
-- `faceMatched` = `true` (required; selfie is matched to profile photo on device and **not** uploaded)
-
-Server **rejects** punch when geofence status is not `inside`. Response includes `geofence`, `integrity` (no selfie path).
+### `POST /api/connect/attendance/punch` (multipart / JSON)
+Legacy app GPS punch endpoint (kept for compatibility). Product UI no longer offers Punch In/Out; use biometric devices.
 
 ### `POST /api/connect/attendance/location-heartbeat` (multipart)
-Same location fields + `sessionId`. Only accepted while shift is open. Rate-limited (~2 min).
+Same location fields + `sessionId`.
+- Accepted as **presence** samples even when off-shift (for biometric fraud checks).
+- In-shift continuous-outside flags only while shift is open **and** within **9 hours** of punch-in.
+- Rate-limited (~2 min).
 
 ### `POST /api/connect/attendance/support-evidence` (multipart)
 - `flagId`, `punchDate`, `lat`, `lng`, `accuracyM`, `selfie`, `remarks`
@@ -49,27 +44,28 @@ Same location fields + `sessionId`. Only accepted while shift is open. Rate-limi
 
 | Capability | Web | Flutter requirement |
 |---|---|---|
-| Mock GPS detection | Client signal only; soft-block if reported | **Hard-block** punch if mock location enabled |
+| Mock GPS detection | Client signal only; soft-block if reported | **Hard-block** if mock location enabled |
 | Developer options | Not reliable | **Hard-block** until developer options / USB debugging off (configurable) |
 | VPN | Heuristic only | Detect active VPN; **block or force flag** per company policy |
-| Background location | Only while browser tab open | Foreground service + periodic updates while on shift |
-| Always-on internet/location UX | Soft messaging | Persist notification: “Location + internet required for attendance” |
-| Device integrity | None | **Google Play Integrity API** attestation token on every punch |
-| Selfie / face match | Match selfie to profile photo in browser (not uploaded) | Prefer on-device face match / liveness vs profile photo; do not upload selfie for normal punch |
+| Background location | Only while Connect tab/app is open | Foreground service + periodic updates from login through 9h after punch-in |
+| Always-on internet/location UX | Soft messaging | Persist notification: “Location + internet required for attendance integrity” |
+| Device integrity | None | **Google Play Integrity API** attestation token on heartbeats |
+| Punch UI | Flag/support only; biometric is primary | Do **not** show GPS Punch In/Out always — only location-review when flagged |
 
 ## Flutter implementation checklist
 
 1. **Permissions**
    - `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`
-   - `CAMERA`
+   - `CAMERA` (support selfie when flagged)
    - `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_LOCATION`
    - `POST_NOTIFICATIONS`
    - Guide user to disable battery optimization for DropX One
 
-2. **Punch screen**
-   - Mirror web: Punch In / Out, live distance to station, selfie capture, no editable time/coords
-   - Call same multipart APIs
-   - Before punch: run integrity checks; if mock/dev/VPN blocked → show blocking UI (“Turn off … to continue”)
+2. **Attendance screen**
+   - Calendar / list / punches + regularization
+   - Show **Location review needed** only when `openFlags.length > 0`
+   - Optional muted line: monitoring active for open shift within 9h
+   - No always-on GPS Punch In/Out buttons
 
 3. **Integrity package to send in `integritySignals`**
 ```json

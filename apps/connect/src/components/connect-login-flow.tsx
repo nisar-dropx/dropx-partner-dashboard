@@ -4,6 +4,7 @@ import Image from "next/image";
 import { Bell, CalendarDays, CheckCheck, ChevronRight, CreditCard, Fingerprint, Gauge, IndianRupee, LogOut, Menu, Settings, SwitchCamera, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
+import { AttendanceLocationMonitor } from "./attendance-location-monitor";
 import { ConnectDashboard } from "./connect-dashboard";
 import { ConnectLeave } from "./connect-leave";
 import { ConnectAdvances } from "./connect-advances";
@@ -462,6 +463,9 @@ export function ConnectLoginFlow() {
       {notice ? <div className="dx-alert success">{notice}<button onClick={() => setNotice("")}><X /></button></div> : null}
       {error ? <div className="dx-alert error">{error}<button onClick={() => setError("")}><X /></button></div> : null}
       {step === "accounts" ? <section className="dx-accounts"><h1>Choose account</h1>{accounts.map((row) => <button key={accountKey(row)} onClick={() => choose(row)}><i>{row.profilePhotoUrl ? <img alt="" src={row.profilePhotoUrl} /> : <UsersRound />}</i><span><strong>{row.companyName}</strong><em>{row.name || row.reference}</em><small>{row.reference} {row.biometricId ? ` | ${row.biometricId}` : ""}</small></span><ChevronRight /></button>)}</section> : null}
+      {account && active(account) && allowed(account, "attendance") ? (
+        <AttendanceLocationMonitor account={account} />
+      ) : null}
       {step === "dashboard" && account ? <ConnectDashboard account={account} onAttendance={() => open("attendance")} onProfile={() => open("profile")} /> : null}
       {step === "profile" && account ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "advances" && account ? <ConnectAdvances account={account} /> : null}

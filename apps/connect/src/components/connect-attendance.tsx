@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Clock3,
   Fingerprint,
-  MapPin,
   LogIn,
   LogOut,
   Paperclip,
@@ -16,8 +15,7 @@ import {
   UserX,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { matchSelfieToProfile, type FaceMatchResult } from "@/lib/face-match";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { SelfieCapturePanel } from "./selfie-capture-panel";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
@@ -57,14 +55,6 @@ type OpenFlag = {
   punch_date: string;
   created_at: string;
 };
-type StationRow = {
-  id: string;
-  code: string | null;
-  name: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  radiusM: number | null;
-};
 type PunchStatus = {
   enrolmentId: string;
   locationId: string | null;
@@ -75,25 +65,10 @@ type PunchStatus = {
     outTime: string | null;
     punchCount: number;
   };
-  station: StationRow | null;
-  stations?: StationRow[];
   openFlags: OpenFlag[];
 };
-type LiveLocation = {
-  lat: number;
-  lng: number;
-  accuracyM: number | null;
-  altitudeM: number | null;
-  capturedAt: string;
-  distanceM: number | null;
-  inside: boolean | null;
-  stationId: string | null;
-  stationLabel: string | null;
-  radiusM: number | null;
-};
 
-const HEARTBEAT_MS = 3 * 60 * 1000;
-const REMINDER_MS = [9.5 * 60 * 60 * 1000, 10 * 60 * 60 * 1000] as const;
+const LOCATION_TRACKING_MS = 9 * 60 * 60 * 1000;
 
 function monthLabel(value: string) {
   const [year, month] = value.split("-").map(Number);
@@ -134,16 +109,6 @@ function emptyAttendanceRow(date: string): Row {
   };
 }
 
-function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
 function readPosition(): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
@@ -160,16 +125,6 @@ function readPosition(): Promise<GeolocationPosition> {
   });
 }
 
-function integrityPayload() {
-  return {
-    clientPlatform: "web",
-    clientUserAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
-    vpnSuspected: false,
-    mockLocation: false,
-    developerMode: false
-  };
-}
-
 export function ConnectAttendance({ account }: { account: Account }) {
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -182,18 +137,8 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const [requestError, setRequestError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [punchStatus, setPunchStatus] = useState<PunchStatus | null>(null);
-  const [liveLocation, setLiveLocation] = useState<LiveLocation | null>(null);
-  const [locationError, setLocationError] = useState("");
-  const [punchBusy, setPunchBusy] = useState(false);
-  const [punchError, setPunchError] = useState("");
-  const [punchMessage, setPunchMessage] = useState("");
-  const [selfiePreview, setSelfiePreview] = useState("");
-  const [faceMatchLabel, setFaceMatchLabel] = useState("Selfie required · matched to profile photo");
-  const [faceMatchOk, setFaceMatchOk] = useState(false);
-  const [selfiePanelOpen, setSelfiePanelOpen] = useState(false);
   const [supportFlag, setSupportFlag] = useState<OpenFlag | null>(null);
-  const [reminderText, setReminderText] = useState("");
-  const sessionId = useRef(`web-${Date.now()}`);
+  const [supportNotice, setSupportNotice] = useState("");
 
   const loadAttendance = useCallback(() => {
     setData(null);
@@ -218,119 +163,17 @@ export function ConnectAttendance({ account }: { account: Account }) {
     return payload as PunchStatus;
   }, [account.id, account.profileType]);
 
-  const refreshLocation = useCallback(async () => {
-    if (!navigator.onLine) {
-      setLocationError("Internet is required for attendance location.");
-      return null;
-    }
-    try {
-      const position = await readPosition();
-      const stations = punchStatus?.stations?.length
-        ? punchStatus.stations
-        : punchStatus?.station
-          ? [punchStatus.station]
-          : [];
-      const preferredId = punchStatus?.locationId ?? punchStatus?.station?.id ?? null;
-
-      const scored = stations
-        .filter((station) => station.latitude != null && station.longitude != null && station.radiusM != null)
-        .map((station) => {
-          const distance = Math.round(
-            haversineMeters(position.coords.latitude, position.coords.longitude, station.latitude!, station.longitude!)
-          );
-          return { station, distance, inside: distance <= station.radiusM! };
-        })
-        .sort((left, right) => left.distance - right.distance);
-
-      const insideStations = scored.filter((row) => row.inside);
-      const matched =
-        (preferredId ? insideStations.find((row) => row.station.id === preferredId) : undefined) ??
-        insideStations[0] ??
-        scored[0] ??
-        null;
-
-      const live: LiveLocation = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-        accuracyM: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : null,
-        altitudeM: Number.isFinite(position.coords.altitude ?? NaN) ? Number(position.coords.altitude) : null,
-        capturedAt: new Date().toISOString(),
-        distanceM: matched?.distance ?? null,
-        inside: matched ? matched.inside : stations.length ? null : null,
-        stationId: matched?.station.id ?? null,
-        stationLabel: matched ? matched.station.code || matched.station.name || "station" : null,
-        radiusM: matched?.station.radiusM ?? null
-      };
-      setLiveLocation(live);
-      setLocationError("");
-      return live;
-    } catch (reason) {
-      setLocationError(reason instanceof Error ? reason.message : "Unable to read location.");
-      return null;
-    }
-  }, [punchStatus?.stations, punchStatus?.station, punchStatus?.locationId]);
-
-  const sendHeartbeat = useCallback(async (live: LiveLocation) => {
-    const form = new FormData();
-    form.set("accountId", account.id);
-    form.set("profileType", account.profileType);
-    form.set("lat", String(live.lat));
-    form.set("lng", String(live.lng));
-    if (live.accuracyM != null) form.set("accuracyM", String(live.accuracyM));
-    if (live.altitudeM != null) form.set("altitudeM", String(live.altitudeM));
-    form.set("clientCapturedAt", live.capturedAt);
-    form.set("sessionId", sessionId.current);
-    form.set("integritySignals", JSON.stringify(integrityPayload()));
-    await fetch("/api/connect/attendance/location-heartbeat", { method: "POST", body: form });
-  }, [account.id, account.profileType]);
-
   useEffect(() => {
     loadAttendance();
   }, [loadAttendance, refreshKey]);
 
   useEffect(() => {
-    loadPunchStatus().catch((reason) => {
-      setPunchError(reason instanceof Error ? reason.message : "Unable to load punch status.");
-    });
-  }, [loadPunchStatus, refreshKey]);
-
-  useEffect(() => {
-    refreshLocation().catch(() => undefined);
-  }, [refreshLocation]);
-
-  useEffect(() => {
-    if (!punchStatus?.shift.open) {
-      setReminderText("");
-      return;
-    }
-    let cancelled = false;
-    const tick = async () => {
-      const live = await refreshLocation();
-      if (cancelled || !live) return;
-      await sendHeartbeat(live).catch(() => undefined);
-      await loadPunchStatus().catch(() => undefined);
-      if (punchStatus.shift.inTime) {
-        const elapsed = Date.now() - new Date(punchStatus.shift.inTime).getTime();
-        if (elapsed >= REMINDER_MS[1]) setReminderText("You have been punched in for 10 hours. Please punch out.");
-        else if (elapsed >= REMINDER_MS[0]) setReminderText("You have been punched in for 9.5 hours. Please punch out soon.");
-        else setReminderText("");
-      }
-    };
-    tick().catch(() => undefined);
+    loadPunchStatus().catch(() => undefined);
     const timer = window.setInterval(() => {
-      tick().catch(() => undefined);
-    }, HEARTBEAT_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [punchStatus?.shift.open, punchStatus?.shift.inTime, refreshLocation, sendHeartbeat, loadPunchStatus]);
-
-  useEffect(() => {
-    return () => {
-      if (selfiePreview) URL.revokeObjectURL(selfiePreview);
-    };
-  }, [selfiePreview]);
+      loadPunchStatus().catch(() => undefined);
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [loadPunchStatus, refreshKey]);
 
   const rowsByDay = useMemo(() => new Map((data?.rows ?? []).map((row) => [Number(row.date.slice(-2)), row])), [data]);
   const [year, monthNumber] = month.split("-").map(Number);
@@ -339,86 +182,9 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const total = (data?.rows ?? []).reduce((sum, row) => sum + minutes(row.workHours), 0);
   const futureMonth = month >= currentMonth;
   const openFlags = punchStatus?.openFlags ?? [];
-  const outsideZone = liveLocation?.inside === false;
-  const zoneUnknown = liveLocation != null && liveLocation.inside == null;
-
-  async function onSelfieChange(file: File | null, match: FaceMatchResult | null = null) {
-    if (selfiePreview) URL.revokeObjectURL(selfiePreview);
-    setSelfiePreview(file ? URL.createObjectURL(file) : "");
-    if (!file) {
-      setFaceMatchOk(false);
-      setFaceMatchLabel("Selfie required · matched to profile photo");
-      return;
-    }
-    if (match) {
-      setFaceMatchOk(match.ok);
-      setFaceMatchLabel(
-        match.ok
-          ? `Face match ${match.percent}% · ready to punch`
-          : `Face match ${match.percent}% · need 60%+ (retake)`
-      );
-      return;
-    }
-    setFaceMatchLabel("Checking face match...");
-    const face = await matchSelfieToProfile(file, account.profilePhotoUrl);
-    setFaceMatchOk(face.ok);
-    setFaceMatchLabel(
-      face.ok
-        ? `Face match ${face.percent}% · ready to punch`
-        : `Face match ${face.percent}% · need 60%+ (retake)`
-    );
-  }
-
-  async function submitPunch(action: "in" | "out") {
-    setPunchBusy(true);
-    setPunchError("");
-    setPunchMessage("");
-    try {
-      if (!navigator.onLine) throw new Error("Internet is required to punch.");
-      if (!account.profilePhotoUrl) throw new Error("Add a profile photo first, then capture a selfie to punch.");
-      if (!faceMatchOk) throw new Error("Capture a selfie and reach 60%+ face match before punching.");
-      const live = (await refreshLocation()) ?? liveLocation;
-      if (!live) throw new Error("Allow location access to punch.");
-      if (live.inside !== true) {
-        throw new Error(
-          live.inside === false
-            ? `You are outside every company station zone${live.distanceM != null ? ` (nearest ${live.distanceM}m)` : ""}. Move inside a station to punch.`
-            : "No station geofence is configured. Contact admin before punching."
-        );
-      }
-      // Face already verified in the selfie panel — do not rematch on punch (scores can flicker).
-
-      const response = await fetch("/api/connect/attendance/punch", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          accountId: account.id,
-          profileType: account.profileType,
-          action,
-          lat: live.lat,
-          lng: live.lng,
-          accuracyM: live.accuracyM,
-          altitudeM: live.altitudeM,
-          clientCapturedAt: live.capturedAt,
-          integritySignals: integrityPayload(),
-          faceMatched: true
-        })
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to record punch.");
-      setPunchMessage(
-        `Punch ${action.toUpperCase()} saved${live.stationLabel ? ` at ${live.stationLabel}` : ""}.`
-      );
-      await onSelfieChange(null);
-      // Refresh shift state immediately so Punch Out unlocks after Punch In.
-      await loadPunchStatus().catch(() => undefined);
-      setRefreshKey((value) => value + 1);
-    } catch (reason) {
-      setPunchError(reason instanceof Error ? reason.message : "Unable to record punch.");
-    } finally {
-      setPunchBusy(false);
-    }
-  }
+  const monitoringActive =
+    Boolean(punchStatus?.shift.open && punchStatus.shift.inTime) &&
+    Date.now() - new Date(punchStatus!.shift.inTime!).getTime() <= LOCATION_TRACKING_MS;
 
   return (
     <section className="dx-attendance">
@@ -431,82 +197,16 @@ export function ConnectAttendance({ account }: { account: Account }) {
         </div>
       </div>
 
-      <div className="dx-gps-punch-card">
-        <header>
-          <div>
-            <strong>GPS Punch</strong>
-            <small>Match selfie to profile photo + be inside the station zone. Time is set by the server.</small>
-          </div>
-          <button type="button" onClick={() => refreshLocation()}><MapPin /> Refresh</button>
-        </header>
-        {reminderText ? <div className="dx-alert warn"><Clock3 /> {reminderText}</div> : null}
-        {locationError ? <div className="dx-alert error">{locationError}</div> : null}
-        {outsideZone ? (
-          <div className="dx-alert error">
-            You are outside every company station zone
-            {liveLocation?.distanceM != null ? ` (nearest ${liveLocation.distanceM}m)` : ""}.
-            Punch will not be allowed until you are inside a station.
-          </div>
-        ) : null}
-        {zoneUnknown ? <div className="dx-alert warn">No station geofence is configured. Punch is blocked until Master Location has coordinates and radius.</div> : null}
-        {punchError ? <div className="dx-alert error">{punchError}</div> : null}
-        {punchMessage ? <div className="dx-alert ok">{punchMessage}</div> : null}
-        <div className="dx-gps-meta">
-          <span><small>STATUS</small><strong>{punchStatus?.shift.open ? "On shift" : "Off shift"}</strong></span>
-          <span><small>ZONE</small><strong>{liveLocation?.inside == null ? "Unknown" : liveLocation.inside ? "Inside" : "Outside"}</strong></span>
-          <span><small>DISTANCE</small><strong>{liveLocation?.distanceM == null ? "--" : `${liveLocation.distanceM} m`}</strong></span>
-          <span><small>ACCURACY</small><strong>{liveLocation?.accuracyM == null ? "--" : `${Math.round(liveLocation.accuracyM)} m`}</strong></span>
-        </div>
-        {liveLocation?.stationLabel || punchStatus?.station ? (
-          <p className="dx-gps-station">
-            {liveLocation?.inside
-              ? `At ${liveLocation.stationLabel}${liveLocation.radiusM != null ? ` · allowed ${liveLocation.radiusM}m` : ""}`
-              : `Nearest ${liveLocation?.stationLabel || punchStatus?.station?.code || punchStatus?.station?.name || "station"}${
-                  liveLocation?.radiusM != null || punchStatus?.station?.radiusM != null
-                    ? ` · allowed ${liveLocation?.radiusM ?? punchStatus?.station?.radiusM}m`
-                    : ""
-                }`}
-            {punchStatus?.station && liveLocation?.stationId && liveLocation.stationId !== punchStatus.station.id
-              ? ` · assigned ${punchStatus.station.code || punchStatus.station.name}`
-              : ""}
-          </p>
-        ) : (
-          <p className="dx-gps-station">No station coordinates configured — punch is blocked until location is set.</p>
-        )}
-        <div className="dx-selfie-row">
-          <button type="button" className="secondary" onClick={() => setSelfiePanelOpen(true)}>
-            <Camera /> {faceMatchOk ? "Retake selfie" : "Capture selfie"}
-          </button>
-          {selfiePreview ? <img alt="Selfie preview" className="dx-selfie-preview" src={selfiePreview} /> : null}
-          <em>{faceMatchLabel}</em>
-        </div>
-        <div className="dx-gps-actions">
-          {punchStatus?.shift.open ? (
-            <button
-              className="dx-gps-primary"
-              disabled={punchBusy || outsideZone || zoneUnknown || !faceMatchOk}
-              onClick={() => submitPunch("out")}
-              type="button"
-            >
-              <LogOut /> {punchBusy ? "Saving..." : "Punch Out"}
-            </button>
-          ) : (
-            <button
-              className="dx-gps-primary"
-              disabled={punchBusy || outsideZone || zoneUnknown || !faceMatchOk}
-              onClick={() => submitPunch("in")}
-              type="button"
-            >
-              <LogIn /> {punchBusy ? "Saving..." : "Punch In"}
-            </button>
-          )}
-        </div>
-        <p className="dx-form-hint">
-          {punchStatus?.shift.open
-            ? "You are on shift — capture selfie, then Punch Out."
-            : "Capture selfie first, then Punch In. Punch Out appears after you are on shift."}
-        </p>
-        {openFlags.length ? (
+      {supportNotice ? <div className="dx-alert ok">{supportNotice}</div> : null}
+
+      {openFlags.length ? (
+        <div className="dx-gps-punch-card">
+          <header>
+            <div>
+              <strong>Location review needed</strong>
+              <small>A location integrity flag was raised. Submit a support selfie with live GPS for manager / HR review.</small>
+            </div>
+          </header>
           <div className="dx-flag-list">
             {openFlags.map((flag) => (
               <div key={flag.id}>
@@ -519,8 +219,14 @@ export function ConnectAttendance({ account }: { account: Account }) {
               </div>
             ))}
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
+
+      {monitoringActive ? (
+        <p className="dx-form-hint" style={{ marginTop: openFlags.length ? 8 : 0 }}>
+          Location monitoring is on for this shift (up to 9 hours from punch-in). Punch in/out on the station biometric device.
+        </p>
+      ) : null}
 
       {error ? <div className="dx-alert error">{error}<button onClick={() => setMonth((value) => `${value}`)}>Retry</button></div> : null}
       {!data && !error ? <div className="dx-loader"><span /><small>Loading attendance...</small></div> : null}
@@ -585,24 +291,13 @@ export function ConnectAttendance({ account }: { account: Account }) {
         error={requestError}
         setError={setRequestError}
       /> : null}
-      {selfiePanelOpen ? (
-        <SelfieCapturePanel
-          profilePhotoUrl={account.profilePhotoUrl}
-          requireFaceMatch
-          onClose={() => setSelfiePanelOpen(false)}
-          onCapture={(file, match) => {
-            void onSelfieChange(file, match);
-            setSelfiePanelOpen(false);
-          }}
-        />
-      ) : null}
       {supportFlag ? <SupportEvidenceSheet
         account={account}
         flag={supportFlag}
         onClose={() => setSupportFlag(null)}
         onSubmitted={() => {
           setSupportFlag(null);
-          setPunchMessage("Support selfie submitted for review.");
+          setSupportNotice("Support selfie submitted for review.");
           setRefreshKey((value) => value + 1);
         }}
       /> : null}
