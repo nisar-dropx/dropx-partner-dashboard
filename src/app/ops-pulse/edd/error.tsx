@@ -14,7 +14,7 @@ export default function EddNetworkError({ error, reset }: { error: Error & { dig
         <div className="panel-body" style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
           <AlertTriangle size={20} style={{ flex: "none", marginTop: 2, color: "var(--red)" }} />
           <div>
-            <strong>The EDD Dashboard hit an error</strong>
+            <strong>Delivery Performance hit an error</strong>
             <p className="subtle" style={{ marginTop: 6 }}>
               Something went wrong loading the network overview. This is usually transient — try again.
             </p>

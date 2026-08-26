@@ -317,3 +317,64 @@ export async function refreshEddStation(params: { stationCode: string }): Promis
   }
   return normalizePayload(raw, stationCode);
 }
+
+/** Assigned / delivered / returned / held for one station over a window — see the worker's PERFORMANCE_* config for exactly what counts as each bucket. */
+export type EddPerformancePayload = {
+  stationCode: string;
+  window: { from: string; to: string };
+  fetchedAt: string;
+  assigned: number;
+  delivered: number;
+  returned: number;
+  held: number;
+  deliveredPct: number;
+  returnedPct: number;
+  heldPct: number;
+};
+
+/**
+ * Live (never cached) — mirrors Amazon's own ageing dashboard's combined
+ * status query (adds "Delivered" on top of the live-only EDD statuses), so
+ * "assigned" matches what station staff see natively. Can take a while for
+ * a wide date range since it's a real Amazon fetch on every call.
+ */
+export async function fetchEddPerformance(params: { stationCode: string; from: string; to: string }): Promise<EddPerformancePayload> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+
+  const stationCode = params.stationCode.trim().toUpperCase();
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/performance`);
+  url.searchParams.set("stationCode", stationCode);
+  url.searchParams.set("from", params.from);
+  url.searchParams.set("to", params.to);
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(90000)
+  });
+  const raw = await readJson(response);
+
+  if (!response.ok || raw.status !== "ok") {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+
+  const windowRaw = raw.window && typeof raw.window === "object" ? (raw.window as Record<string, unknown>) : {};
+  return {
+    stationCode: String(raw.stationCode ?? stationCode).toUpperCase(),
+    window: { from: String(windowRaw.from ?? params.from), to: String(windowRaw.to ?? params.to) },
+    fetchedAt: String(raw.fetchedAt ?? new Date().toISOString()),
+    assigned: Number(raw.assigned ?? 0) || 0,
+    delivered: Number(raw.delivered ?? 0) || 0,
+    returned: Number(raw.returned ?? 0) || 0,
+    held: Number(raw.held ?? 0) || 0,
+    deliveredPct: Number(raw.deliveredPct ?? 0) || 0,
+    returnedPct: Number(raw.returnedPct ?? 0) || 0,
+    heldPct: Number(raw.heldPct ?? 0) || 0
+  };
+}

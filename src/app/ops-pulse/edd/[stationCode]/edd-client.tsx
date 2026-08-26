@@ -124,7 +124,7 @@ export function EddClient({ stationCode }: { stationCode: string }) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeBucket, setActiveBucket] = useState<EddBucketKey | null>(null);
-  const [selectedDate, setSelectedDate] = useState("");
+  const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [stateFilters, setStateFilters] = useState<Set<string>>(new Set());
   const [paymentFilters, setPaymentFilters] = useState<Set<string>>(new Set());
@@ -150,7 +150,7 @@ export function EddClient({ stationCode }: { stationCode: string }) {
           setNoSnapshot(false);
         }
         setActiveBucket(null);
-        setSelectedDate("");
+        setSelectedDates(new Set());
         setStateFilters(new Set());
         setPaymentFilters(new Set());
         setSearch("");
@@ -184,6 +184,7 @@ export function EddClient({ stationCode }: { stationCode: string }) {
   }
 
   const today = todayIstYmd();
+  const yesterday = addDaysYmd(today, -1);
   const tomorrow = addDaysYmd(today, 1);
 
   const stateOptions = useMemo(() => {
@@ -205,14 +206,14 @@ export function EddClient({ stationCode }: { stationCode: string }) {
     const rows = Array.isArray(payload?.packages) ? payload.packages : [];
     const term = search.trim().toLowerCase();
     return rows.filter((pkg) => {
-      if (selectedDate && pkg.ead !== selectedDate) return false;
+      if (selectedDates.size && !selectedDates.has(pkg.ead ?? "")) return false;
       if (stateFilters.size && !stateFilters.has(pkg.state ?? "")) return false;
       if (paymentFilters.size && !paymentFilters.has(pkg.paymentMethod ?? "")) return false;
       if (!term) return true;
       return [pkg.trackingId, pkg.lastScanBy, pkg.city, pkg.orderingOrderId, pkg.state]
         .some((field) => String(field ?? "").toLowerCase().includes(term));
     });
-  }, [payload, selectedDate, stateFilters, paymentFilters, search]);
+  }, [payload, selectedDates, stateFilters, paymentFilters, search]);
 
   const cardBucketCounts = useMemo(() => {
     const counts: Record<EddBucketKey, number> = { overdue: 0, dueToday: 0, dueTomorrow: 0, future: 0, unknown: 0 };
@@ -254,6 +255,22 @@ export function EddClient({ stationCode }: { stationCode: string }) {
       setter(value);
     };
   }
+
+  function toggleDate(date: string) {
+    setPage(1);
+    setSelectedDates((current) => {
+      const next = new Set(current);
+      if (next.has(date)) next.delete(date);
+      else next.add(date);
+      return next;
+    });
+  }
+
+  const dateSummary = selectedDates.size === 0
+    ? ""
+    : selectedDates.size === 1
+      ? formatCiaDisplayDate([...selectedDates][0])
+      : `${selectedDates.size} days`;
 
   return (
     <>
@@ -345,8 +362,8 @@ export function EddClient({ stationCode }: { stationCode: string }) {
                 <EddTrendChart
                   points={payload.byDate}
                   todayYmd={today}
-                  selectedDate={selectedDate}
-                  onSelectDate={(date) => resetToPageOne(setSelectedDate)(date === selectedDate ? "" : date)}
+                  selectedDates={selectedDates}
+                  onSelectDate={toggleDate}
                 />
               </div>
             </section>
@@ -357,7 +374,7 @@ export function EddClient({ stationCode }: { stationCode: string }) {
               <h3>
                 Live tracking IDs
                 {activeBucket ? ` · ${BUCKET_META[activeBucket].label}` : ""}
-                {selectedDate ? ` · ${formatCiaDisplayDate(selectedDate)}` : ""}
+                {dateSummary ? ` · ${dateSummary}` : ""}
               </h3>
             </div>
             <div className="panel-body">
@@ -374,34 +391,54 @@ export function EddClient({ stationCode }: { stationCode: string }) {
                 </div>
 
                 {dateOptions.length ? (
-                  <label className="edd-focus-day">
-                    <span>Filter to one day</span>
-                    <select
-                      className="field"
-                      value={selectedDate}
-                      onChange={(event) => resetToPageOne(setSelectedDate)(event.target.value)}
-                    >
-                      <option value="">All days ({dateOptions.length})</option>
-                      {dateOptions.map((point) => (
-                        <option key={point.date} value={point.date}>
-                          {formatCiaDisplayDate(point.date)} · {point.count.toLocaleString("en-IN")}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <>
+                    <div className="edd-preset-row">
+                      <button
+                        type="button"
+                        className={`button secondary edd-chip edd-chip-today${selectedDates.has(today) ? " active" : ""}`}
+                        onClick={() => toggleDate(today)}
+                      >
+                        Today
+                      </button>
+                      <button
+                        type="button"
+                        className={`button secondary edd-chip${selectedDates.has(yesterday) ? " active" : ""}`}
+                        onClick={() => toggleDate(yesterday)}
+                      >
+                        Yesterday
+                      </button>
+                      <button
+                        type="button"
+                        className={`button secondary edd-chip${selectedDates.has(tomorrow) ? " active" : ""}`}
+                        onClick={() => toggleDate(tomorrow)}
+                      >
+                        Tomorrow
+                      </button>
+                    </div>
+                    <EddMultiSelect
+                      label="EAD days"
+                      options={dateOptions.map((point) => point.date)}
+                      selected={selectedDates}
+                      onChange={resetToPageOne(setSelectedDates)}
+                      renderOption={(date) => {
+                        const point = dateOptions.find((p) => p.date === date);
+                        return `${formatCiaDisplayDate(date)}${point ? ` · ${point.count.toLocaleString("en-IN")}` : ""}`;
+                      }}
+                    />
+                  </>
                 ) : null}
 
                 <EddMultiSelect label="States" options={stateOptions} selected={stateFilters} onChange={resetToPageOne(setStateFilters)} />
 
                 <EddMultiSelect label="payment methods" options={paymentOptions} selected={paymentFilters} onChange={resetToPageOne(setPaymentFilters)} />
 
-                {activeBucket || selectedDate || stateFilters.size || paymentFilters.size || search ? (
+                {activeBucket || selectedDates.size || stateFilters.size || paymentFilters.size || search ? (
                   <button
                     type="button"
                     className="button secondary"
                     onClick={() => {
                       setActiveBucket(null);
-                      setSelectedDate("");
+                      setSelectedDates(new Set());
                       setStateFilters(new Set());
                       setPaymentFilters(new Set());
                       setSearch("");

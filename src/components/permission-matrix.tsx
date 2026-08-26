@@ -57,7 +57,7 @@ const opsGroups: PermissionGroup[] = [
   { key: "service_network", label: "Network Planning", codes: ["service_network"] },
   { key: "workforce_onboarding", label: "Workforce Onboarding", codes: ["delivery_associates"] },
   { key: "operations", label: "Operations", codes: ["daily_submission", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate"], hiddenCodes: ["cod"] },
-  { key: "edd_dashboard", label: "EDD Dashboard", codes: ["edd_dashboard"] },
+  { key: "edd_dashboard", label: "Delivery Performance", codes: ["edd_dashboard"] },
   { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },
   { key: "payments", label: "Payments", codes: ["expense_requests", "payment_requests", "payment_approvals", "payment_reports"], hiddenCodes: ["payments"] },
   { key: "cps", label: "CPS", codes: ["cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "imports", "cps_inputs", "cps_unmapped"], hiddenCodes: ["cps"] },

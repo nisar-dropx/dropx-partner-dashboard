@@ -1,18 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 
 export function EddMultiSelect({
   label,
   options,
   selected,
-  onChange
+  onChange,
+  renderOption
 }: {
   label: string;
   options: string[];
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
+  /** Custom display per option (e.g. "22 Aug · 313") while filtering still matches the raw option value. */
+  renderOption?: (option: string) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -37,7 +40,7 @@ export function EddMultiSelect({
   const summary = selected.size === 0
     ? `All ${label.toLowerCase()}`
     : selected.size === 1
-      ? [...selected][0]
+      ? (renderOption ? renderOption([...selected][0]) : [...selected][0])
       : `${selected.size} ${label.toLowerCase()} selected`;
 
   return (
@@ -55,7 +58,7 @@ export function EddMultiSelect({
           {options.map((option) => (
             <label key={option} className="edd-multiselect-option">
               <input type="checkbox" checked={selected.has(option)} onChange={() => toggle(option)} />
-              {option}
+              {renderOption ? renderOption(option) : option}
             </label>
           ))}
           {!options.length ? <p className="subtle" style={{ padding: "6px 10px" }}>No values available.</p> : null}

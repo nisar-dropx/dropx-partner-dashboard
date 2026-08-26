@@ -18085,6 +18085,137 @@ td strong,
   color: var(--muted);
 }
 
+/* ---------------------------------------------------------------------- */
+/* Ageing / Performance tabs + performance date-range picker (mirrors     */
+/* cia-associate.css's view-toggle + range-form, EDD-scoped)              */
+/* ---------------------------------------------------------------------- */
+
+.edd-view-toggle {
+  display: inline-flex;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  gap: 4px;
+}
+
+.edd-view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.edd-view-tab.active {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.edd-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.edd-chip {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.edd-preset-row .edd-chip.active {
+  background: #111827;
+  border-color: #111827;
+  color: #fff;
+}
+
+.edd-preset-row .edd-chip.edd-chip-today:not(.active) {
+  border-color: #ea580c;
+  color: #c2410c;
+}
+
+.edd-preset-row .edd-chip.edd-chip-today.active {
+  background: #c2410c;
+  border-color: #c2410c;
+  color: #fff;
+}
+
+.edd-range-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+
+.edd-range-field {
+  display: grid;
+  gap: 6px;
+  min-width: 160px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.edd-range-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-bottom: 1px;
+}
+
+.edd-range-hint, .edd-range-error {
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+
+.edd-range-error { color: var(--red); font-weight: 600; }
+
+.edd-performance-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 14px 0;
+}
+@media (max-width: 900px) {
+  .edd-performance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.edd-performance-bar {
+  display: flex;
+  height: 28px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface-soft);
+  margin: 14px 0 8px;
+}
+.edd-performance-bar-segment { height: 100%; transition: width 400ms ease; }
+.edd-performance-bar-segment.delivered { background: var(--green); }
+.edd-performance-bar-segment.held { background: var(--amber); }
+.edd-performance-bar-segment.returned { background: var(--red); }
+
+.edd-performance-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.edd-performance-legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+.edd-legend-dot.delivered { background: var(--green); }
+.edd-legend-dot.held { background: var(--amber); }
+.edd-legend-dot.returned { background: var(--red); }
+
 .edd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .edd-table th {
   text-align: left;

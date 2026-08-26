@@ -23,7 +23,7 @@ export async function requireEddAccess() {
 export async function requireEddApi() {
   const authorization = await getAuthorization();
   if (!hasEddAccess(authorization)) {
-    return NextResponse.json({ error: "EDD Dashboard access denied." }, { status: 403 });
+    return NextResponse.json({ error: "Delivery Performance access denied." }, { status: 403 });
   }
   if (!isEddWorkerConfigured()) {
     return NextResponse.json(

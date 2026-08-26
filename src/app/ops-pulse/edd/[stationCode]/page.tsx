@@ -6,7 +6,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
 import { isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
 import { loadCodLocations, loadCodStationSettings } from "@/lib/ops-pulse/cod";
-import { EddClient } from "./edd-client";
+import { EddStationTabs } from "./edd-station-tabs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -47,7 +47,7 @@ export default async function EddStationPage({
   const placeBits = [location?.city, location?.state].filter(Boolean).join(", ");
 
   return (
-    <AppShell active="EDD Dashboard" pageCode="edd_dashboard">
+    <AppShell active="Delivery Performance" pageCode="edd_dashboard">
       <div className="ops-command-center">
         <Link className="edd-back-link" href="/edd" prefetch={false}>
           <ArrowLeft size={14} /> All stations
@@ -58,8 +58,8 @@ export default async function EddStationPage({
           title={stationCode || "Station"}
           subtitle={
             stationName
-              ? `${stationName}${placeBits ? ` · ${placeBits}` : ""} · Live tracking IDs bucketed by Estimated Delivery Date`
-              : "Every live tracking ID at this station, bucketed by Estimated Delivery Date — pulled live from Amazon's station ageing dashboard."
+              ? `${stationName}${placeBits ? ` · ${placeBits}` : ""} · Ageing and delivery performance`
+              : "Ageing (live tracking IDs by Estimated Delivery Date) and assigned/delivered/returned/held performance for this station."
           }
           action={<span className={`status-pill ${workerConfigured ? "good" : "warn"}`}>{workerConfigured ? "Live" : "Setup needed"}</span>}
         />
@@ -86,7 +86,7 @@ export default async function EddStationPage({
             </div>
           </section>
         ) : (
-          <EddClient stationCode={stationCode} />
+          <EddStationTabs stationCode={stationCode} />
         )}
       </div>
     </AppShell>

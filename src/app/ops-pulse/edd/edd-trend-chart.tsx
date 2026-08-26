@@ -57,13 +57,13 @@ function pickLabelIndices(count: number, slot: number): Set<number> {
 export function EddTrendChart({
   points: rawPoints,
   todayYmd,
-  selectedDate,
+  selectedDates,
   onSelectDate
 }: {
   points: EddTrendPoint[];
   todayYmd: string;
-  /** When set, that bar is highlighted — click a bar to drive this (or the "Filter to one day" select) from the caller. */
-  selectedDate?: string;
+  /** Bars in this set are highlighted — click a bar to toggle it (kept in sync with the day multi-select). */
+  selectedDates?: Set<string>;
   onSelectDate?: (date: string) => void;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
@@ -137,7 +137,7 @@ export function EddTrendChart({
                       width={barWidth}
                       height={barHeight}
                       rx={3}
-                      className={`edd-chart-bar ${bucket}${hovered === index ? " hovered" : ""}${selectedDate === point.date ? " selected" : ""}`}
+                      className={`edd-chart-bar ${bucket}${hovered === index ? " hovered" : ""}${selectedDates?.has(point.date) ? " selected" : ""}`}
                       style={onSelectDate ? { cursor: "pointer" } : undefined}
                       onMouseEnter={() => setHovered(index)}
                       onMouseLeave={() => setHovered((current) => (current === index ? null : current))}

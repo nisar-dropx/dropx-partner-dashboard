@@ -64,12 +64,12 @@ export default async function EddDashboardPage() {
   }
 
   return (
-    <AppShell active="EDD Dashboard" pageCode="edd_dashboard">
+    <AppShell active="Delivery Performance" pageCode="edd_dashboard">
       <div className="ops-command-center">
         <PageHead
           eyebrow="Ops Pulse · Live tracking"
-          title="EDD Dashboard"
-          subtitle="Every station's live tracking IDs, bucketed by Estimated Delivery Date — pulled live from Amazon's station ageing dashboard. Open a station for the full breakdown."
+          title="Delivery Performance"
+          subtitle="Ageing (live tracking IDs by Estimated Delivery Date) and assigned/delivered/returned/held performance, by station. Open a station for the full breakdown."
           action={(
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <TrackingIdSearch />

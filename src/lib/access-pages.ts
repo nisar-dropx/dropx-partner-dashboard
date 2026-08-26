@@ -38,7 +38,7 @@ export const accessPages = [
   { code: "cod_reports", name: "COD Reports", sort_order: 90 },
   { code: "cod_portal_checks", name: "COD Portal Checks", sort_order: 91 },
   { code: "cod_cash_in_associate", name: "Cash In Associate", sort_order: 94 },
-  { code: "edd_dashboard", name: "EDD Dashboard", sort_order: 95 },
+  { code: "edd_dashboard", name: "Delivery Performance", sort_order: 95 },
   { code: "cps", name: "CPS", sort_order: 73 },
   { code: "cps_overview", name: "CPS Overview", sort_order: 74 },
   { code: "cps_daily", name: "Daily CPS", sort_order: 75 },
