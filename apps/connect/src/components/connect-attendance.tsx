@@ -392,7 +392,8 @@ function SupportEvidenceSheet({
     {selfiePanelOpen ? (
       <SelfieCapturePanel
         title="Support selfie"
-        hint="Center your face in the circle for manager / HR review."
+        hint="Complete live checks (blink + head turns), then capture. A printed photo will not pass."
+        requireLiveness
         onClose={() => setSelfiePanelOpen(false)}
         onCapture={(file) => {
           if (selfiePreview) URL.revokeObjectURL(selfiePreview);

@@ -4,7 +4,8 @@ This note tells Codex how to finish the **native Android Flutter** app (`com.dro
 
 Web app root: `apps/connect` (DropX One)  
 Shared APIs: dashboard `src/app/api/connect/attendance/*`  
-SQL: `scripts/attendance_gps_integrity_v1.sql`
+SQL: `scripts/attendance_gps_integrity_v1.sql`, `scripts/people_web_notifications_v1.sql`  
+People review: `https://people.dropxlogistics.com/attendance/integrity`
 
 ## Product rules (already implemented on web)
 
@@ -17,6 +18,7 @@ SQL: `scripts/attendance_gps_integrity_v1.sql`
 7. Reminders at **9.5h** and **10h** after punch-in if no punch-out.
 8. Employees **cannot** edit punch lat/lng/time from website or app.
 9. Support selfie upload is only for **flagged** review cases.
+10. **Liveness before selfie capture** (anti photo-spoof): user must **blink twice**, then **turn head left**, then **turn head right**, before Capture is enabled. A still photo / screen held to the camera must fail. Face match to profile (≥60%, distance ≤0.42) is additional when `requireFaceMatch` is on. Web: `apps/connect/src/lib/face-liveness.ts` + `selfie-capture-panel.tsx`. Flutter must implement the **same challenge sequence** (prefer ML Kit / native face mesh; commercial liveness SDKs are better for production).
 
 ## REST contracts (reuse exactly)
 
@@ -38,94 +40,56 @@ Same location fields + `sessionId`.
 
 ### `POST /api/connect/attendance/support-evidence` (multipart)
 - `flagId`, `punchDate`, `lat`, `lng`, `accuracyM`, `selfie`, `remarks`
-  (Support selfie is stored only for flagged review cases.)
+  (Support selfie only for flagged cases. Capture only after liveness challenges pass.)
 
 ## Web limitations → Flutter must implement
 
 | Capability | Web | Flutter requirement |
 |---|---|---|
-| Mock GPS detection | Client signal only; soft-block if reported | **Hard-block** if mock location enabled |
-| Developer options | Not reliable | **Hard-block** until developer options / USB debugging off (configurable) |
-| VPN | Heuristic only | Detect active VPN; **block or force flag** per company policy |
-| Background location | Only while Connect tab/app is open | Foreground service + periodic updates from login through 9h after punch-in |
-| Always-on internet/location UX | Soft messaging | Persist notification: “Location + internet required for attendance integrity” |
-| Device integrity | None | **Google Play Integrity API** attestation token on heartbeats |
-| Punch UI | Flag/support only; biometric is primary | Do **not** show GPS Punch In/Out always — only location-review when flagged |
+| Mock GPS detection | Client signal only | **Hard-block** if mock location enabled |
+| Developer options | Not reliable | **Hard-block** until off |
+| VPN | Heuristic only | Detect; block or force flag per policy |
+| Background location | Only while Connect open | Foreground service from login through 9h after punch-in |
+| Device integrity | None | **Play Integrity** on heartbeats |
+| Punch UI | Flag/support only | No always-on GPS Punch In/Out |
+| Liveness | Blink ×2 + turn L + turn R (face-api) | Same order; prefer **native / commercial liveness**. Reject printed photo and phone-screen replay. |
 
 ## Flutter implementation checklist
 
-1. **Permissions**
-   - `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`
-   - `CAMERA` (support selfie when flagged)
-   - `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_LOCATION`
-   - `POST_NOTIFICATIONS`
-   - Guide user to disable battery optimization for DropX One
+1. **Permissions** — fine location, camera, FGS location, notifications; disable battery optimization guidance.
+2. **Attendance screen** — calendar/list/punches; **Location review needed** only when `openFlags.length > 0`; muted 9h monitoring line; no GPS Punch In/Out.
+3. **Liveness + support selfie (required)**  
+   Challenge order (must match web):
+   1. Blink twice  
+   2. Turn head to user's left, then face forward  
+   3. Turn head to user's right, then face forward  
+   Then enable Capture. Reference: `apps/connect/src/lib/face-liveness.ts`.
+4. **`integritySignals` JSON** include `livenessPassed`, `livenessChallenges: ["blink","turn_left","turn_right"]`, Play Integrity token, mock/dev/VPN flags.
+5. **Tracker** — presence while logged in; after punch-in sample **9 hours** then stop; heartbeat every 3–5 min.
+6. **Do not build** — edit punch lat/lng/time; force-present; always-visible GPS punch.
 
-2. **Attendance screen**
-   - Calendar / list / punches + regularization
-   - Show **Location review needed** only when `openFlags.length > 0`
-   - Optional muted line: monitoring active for open shift within 9h
-   - No always-on GPS Punch In/Out buttons
+## Admin review (People)
 
-3. **Integrity package to send in `integritySignals`**
-```json
-{
-  "clientPlatform": "flutter_android",
-  "mockLocation": false,
-  "developerMode": false,
-  "vpnSuspected": false,
-  "playIntegrityToken": "<token>",
-  "appVersion": "x.y.z",
-  "deviceModel": "..."
-}
-```
+Primary: **People → Attendance → Location integrity**  
+`https://people.dropxlogistics.com/attendance/integrity`  
+Sub-tabs: Daily register | Location integrity  
+Inside integrity: Open flags | Support packages  
 
-4. **In-shift tracker**
-   - Start foreground service on successful punch-in
-   - Heartbeat every 3–5 minutes via `location-heartbeat`
-   - Stop on punch-out or end of day
-   - Local notifications at 9.5h / 10h (server also creates flags)
-
-5. **Support evidence**
-   - When open flags returned from GET punch status, show “Support selfie” flow identical to web
-
-6. **Do not build**
-   - Any UI to edit historical punch coordinates or times
-   - Client-side “force present” overrides
-
-## Google / Play Console setup for Codex
-
-1. Enable **Play Integrity API** on the Firebase/Google Cloud project used by DropX One.
-2. Link Android app package `com.dropxlogistics.one`.
-3. Add Play Integrity credentials / cloud project number to Flutter secure config.
-4. Optional later: Maps SDK only if you want a map preview (not required for geofence math).
-
-## Station setup (ops)
-
-- Ensure every assigned station has `latitude`, `longitude`, `geofence_radius_m` (default 50) in Master → Location.
-- Employees cannot change these from One.
+In-app People notifications (no email). Partner dashboard `/attendance/integrity` is legacy mirror.
 
 ## SQL prerequisite
 
-Run on Supabase:
-
 ```bash
 # scripts/attendance_gps_integrity_v1.sql
+# scripts/people_web_notifications_v1.sql
 ```
-
-## Admin review
-
-Dashboard: **Reports → Attendance Integrity** (`/attendance/integrity`)  
-Approve support packages (resolves linked flags). Does not rewrite punch GPS.
 
 ## Acceptance tests for Flutter
 
-1. Punch in inside 50m → present, not flagged (unless accuracy poor).
-2. Punch in outside 50m → saved + flagged + support flow works.
-3. Mock location on → punch blocked.
-4. Developer options on → punch blocked.
-5. After punch-in, kill UI; foreground service still heartbeats.
-6. Stay outside > 30 minutes → `outside_geofence_gt_2h` flag.
-7. No punch-out at 9.5h / 10h → reminder notification.
-8. Biometric punch while phone outside → mismatch flag + support option.
-9. Website cannot alter punch lat/lng/time.
+1. Presence GPS while logged in (off-shift) is stored.
+2. Biometric punch while phone outside → immediate `biometric_phone_mismatch`.
+3. After punch-in, heartbeats for 9h then stop; outside >50m for >30 min → flag.
+4. Support selfie: blink + left + right required; printed photo fails; then upload works.
+5. No always-on GPS Punch In/Out UI.
+6. Mock location / developer options → hard-block per policy.
+7. Website cannot alter punch lat/lng/time.
