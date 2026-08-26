@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BookOpen, CalendarDays, Loader2, RefreshCw, Users } from "lucide-react";
+import { ArrowLeft, BookOpen, CalendarDays, Loader2, RefreshCw, Users } from "lucide-react";
+import { PendingLink } from "@/components/pending-link";
 import { formatCiaDisplayDate } from "@/lib/ops-pulse/cia-types";
 import type { EddPerformanceDailyRow, EddPerformanceNetworkStation, EddPerformancePayload } from "@/lib/ops-pulse/edd-worker";
 import { deliverySeverity, deliverySeverityLabel } from "../edd-performance-severity";
@@ -162,13 +163,17 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
             {refreshing ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />}
             {refreshing ? "Refreshing…" : "Refresh"}
           </button>
-          <span className="subtle" style={{ marginLeft: "auto" }}>
+          <span className="subtle" style={{ flex: "1 1 auto" }}>
             {refreshing
               ? "Pulling today's assigned/delivered/returned/held live from Amazon…"
               : payload
                 ? `Today (${formatCiaDisplayDate(payload.window.from)}) · fetched ${formatFetchedAt(payload.fetchedAt)} · refreshed automatically every 15 minutes`
                 : " "}
           </span>
+
+          <PendingLink className="edd-back-link" href="/edd/performance">
+            <ArrowLeft size={14} /> All stations
+          </PendingLink>
         </div>
       </section>
 
@@ -254,7 +259,6 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
               todayReturned={payload.returned}
               todayHeld={payload.held}
               todayDeliveredPct={payload.deliveredPct}
-              todayPackages={payload.packages}
             />
           ) : (
             <EddPerformanceLedger rows={dailyRows} />

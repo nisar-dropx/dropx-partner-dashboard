@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
+import { PendingLink } from "@/components/pending-link";
 import { addDaysYmd, formatCiaDisplayDate, todayIstYmd } from "@/lib/ops-pulse/cia-types";
 import type { EddBucketKey, EddPackage, EddStationPayload } from "@/lib/ops-pulse/edd-worker";
 import { TrackingDetailModal } from "@/components/tracking-detail-modal";
@@ -287,13 +288,17 @@ export function EddClient({ stationCode }: { stationCode: string }) {
             {refreshing ? "Refreshing live…" : "Refresh live"}
           </button>
 
-          <span className="subtle" style={{ marginLeft: "auto" }}>
+          <span className="subtle" style={{ flex: "1 1 auto" }}>
             {refreshing
               ? "Pulling every tracking ID live from Amazon — this can take up to a minute…"
               : payload
                 ? `${payload.totalCount.toLocaleString("en-IN")} live TIDs · ${formatCiaDisplayDate(payload.window.from)} - ${formatCiaDisplayDate(payload.window.to)} · fetched ${formatFetchedAt(payload.fetchedAt)}`
                 : " "}
           </span>
+
+          <PendingLink className="edd-back-link" href="/edd">
+            <ArrowLeft size={14} /> All stations
+          </PendingLink>
         </div>
       </section>
 
