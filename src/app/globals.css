@@ -18435,6 +18435,44 @@ td strong,
 .edd-insight-chip.positive { color: #027a48; border-color: #dcfae6; background: #f0fdf5; }
 .edd-insight-chip.negative { color: #b42318; border-color: #fee4e2; background: #fef5f5; }
 
+/* ---------------------------------------------------------------------- */
+/* By-associate driver cards (mirrors cia-associate.css's cia-driver-*)   */
+/* ---------------------------------------------------------------------- */
+
+.edd-driver-list { display: grid; gap: 10px; margin-top: 12px; }
+
+.edd-driver-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.edd-driver-card.open { border-color: var(--brand-dark); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04); }
+
+.edd-driver-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.edd-driver-main { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.edd-driver-main strong { display: block; color: var(--ink); font-size: 15px; }
+.edd-driver-main small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+
+.edd-driver-meta { display: grid; gap: 4px; text-align: right; }
+.edd-driver-meta small { color: var(--muted); font-size: 12px; }
+
+.edd-driver-body { padding: 0 16px 16px; border-top: 1px solid var(--line); }
+
+.edd-table.compact th, .edd-table.compact td { padding: 8px 10px; font-size: 12px; }
+
 .edd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .edd-table th {
   text-align: left;

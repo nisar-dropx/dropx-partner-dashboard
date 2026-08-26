@@ -318,6 +318,18 @@ export async function refreshEddStation(params: { stationCode: string }): Promis
   return normalizePayload(raw, stationCode);
 }
 
+/** One package's role in a performance snapshot — enough to build the "By associate" driver breakdown. Only ever populated for today's snapshot. */
+export type EddPerformancePackage = {
+  trackingId: string;
+  state: string | null;
+  bucket: "delivered" | "returned" | "held";
+  driverId: string | null;
+  driverName: string | null;
+  paymentMethod: string | null;
+  city: string | null;
+  orderingOrderId: string | null;
+};
+
 /** Assigned / delivered / returned / held for one station, always "today" (IST) — see the worker's PERFORMANCE_* config for exactly what counts as each bucket. */
 export type EddPerformancePayload = {
   stationCode: string;
@@ -330,6 +342,21 @@ export type EddPerformancePayload = {
   deliveredPct: number;
   returnedPct: number;
   heldPct: number;
+  packages: EddPerformancePackage[];
+};
+
+/** One archived day for the "By date" / "Day-wise ledger" views — aggregate only, no per-package detail. */
+export type EddPerformanceDailyRow = {
+  stationCode: string;
+  date: string;
+  assigned: number;
+  delivered: number;
+  returned: number;
+  held: number;
+  deliveredPct: number;
+  returnedPct: number;
+  heldPct: number;
+  updatedAt: string;
 };
 
 /** GET result: either a cached snapshot, or nothing has ever been saved for this station yet today. */
@@ -356,8 +383,28 @@ export type EddPerformanceNetworkPayload = {
   run: EddNetworkRunStatus | null;
 };
 
+function normalizePerformancePackage(raw: Record<string, unknown>): EddPerformancePackage {
+  const bucket = String(raw.bucket ?? "held");
+  const validBucket: EddPerformancePackage["bucket"] = ["delivered", "returned", "held"].includes(bucket)
+    ? (bucket as EddPerformancePackage["bucket"])
+    : "held";
+  return {
+    trackingId: String(raw.trackingId ?? "").trim(),
+    state: raw.state == null ? null : String(raw.state),
+    bucket: validBucket,
+    driverId: raw.driverId == null ? null : String(raw.driverId),
+    driverName: raw.driverName == null ? null : String(raw.driverName),
+    paymentMethod: raw.paymentMethod == null ? null : String(raw.paymentMethod),
+    city: raw.city == null ? null : String(raw.city),
+    orderingOrderId: raw.orderingOrderId == null ? null : String(raw.orderingOrderId)
+  };
+}
+
 function normalizePerformancePayload(raw: Record<string, unknown>, stationCode: string): EddPerformancePayload {
   const windowRaw = raw.window && typeof raw.window === "object" ? (raw.window as Record<string, unknown>) : {};
+  const packages = Array.isArray(raw.packages)
+    ? raw.packages.map((row) => normalizePerformancePackage((row ?? {}) as Record<string, unknown>))
+    : [];
   return {
     stationCode: String(raw.stationCode ?? stationCode).toUpperCase(),
     window: { from: String(windowRaw.from ?? ""), to: String(windowRaw.to ?? "") },
@@ -368,7 +415,8 @@ function normalizePerformancePayload(raw: Record<string, unknown>, stationCode: 
     held: Number(raw.held ?? 0) || 0,
     deliveredPct: Number(raw.deliveredPct ?? 0) || 0,
     returnedPct: Number(raw.returnedPct ?? 0) || 0,
-    heldPct: Number(raw.heldPct ?? 0) || 0
+    heldPct: Number(raw.heldPct ?? 0) || 0,
+    packages
   };
 }
 
@@ -513,4 +561,53 @@ export async function fetchEddAllowedStations(): Promise<Set<string>> {
   }
   const stations = Array.isArray(raw.stations) ? raw.stations.map((code) => String(code).trim().toUpperCase()) : [];
   return new Set(stations);
+}
+
+/**
+ * The day-over-day archive for one station — aggregate assigned/delivered/
+ * returned/held per day, no per-package detail (only "today" ever has
+ * that). Starts empty and fills in one real day at a time from whenever
+ * the sweep/refresh started running against this station.
+ */
+export async function fetchEddPerformanceDaily(params: { stationCode: string; days?: number }): Promise<EddPerformanceDailyRow[]> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+
+  const stationCode = params.stationCode.trim().toUpperCase();
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/performance/daily`);
+  url.searchParams.set("stationCode", stationCode);
+  if (params.days) url.searchParams.set("days", String(params.days));
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
+  });
+  const raw = await readJson(response);
+
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+
+  const rows = Array.isArray(raw.days) ? raw.days : [];
+  return rows.map((row) => {
+    const entry = (row ?? {}) as Record<string, unknown>;
+    return {
+      stationCode: String(entry.stationCode ?? stationCode).toUpperCase(),
+      date: String(entry.date ?? ""),
+      assigned: Number(entry.assigned ?? 0) || 0,
+      delivered: Number(entry.delivered ?? 0) || 0,
+      returned: Number(entry.returned ?? 0) || 0,
+      held: Number(entry.held ?? 0) || 0,
+      deliveredPct: Number(entry.deliveredPct ?? 0) || 0,
+      returnedPct: Number(entry.returnedPct ?? 0) || 0,
+      heldPct: Number(entry.heldPct ?? 0) || 0,
+      updatedAt: String(entry.updatedAt ?? "")
+    };
+  });
 }

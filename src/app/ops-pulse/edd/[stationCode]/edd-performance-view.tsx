@@ -1,12 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { BookOpen, CalendarDays, Loader2, RefreshCw, Users } from "lucide-react";
 import { formatCiaDisplayDate } from "@/lib/ops-pulse/cia-types";
-import type { EddPerformanceNetworkStation, EddPerformancePayload } from "@/lib/ops-pulse/edd-worker";
+import type { EddPerformanceDailyRow, EddPerformanceNetworkStation, EddPerformancePayload } from "@/lib/ops-pulse/edd-worker";
 import { deliverySeverity, deliverySeverityLabel } from "../edd-performance-severity";
+import { EddPerformanceByAssociate } from "./edd-performance-by-associate";
+import { EddPerformanceByDate } from "./edd-performance-by-date";
+import { EddPerformanceLedger } from "./edd-performance-ledger";
 
 type FetchOutcome = { status: "ok"; payload: EddPerformancePayload } | { status: "no_snapshot" };
+type PerformanceView = "associate" | "date" | "ledger";
 
 async function fetchPerformance(stationCode: string): Promise<FetchOutcome> {
   const url = new URL("/api/ops-pulse/edd/performance", window.location.origin);
@@ -50,6 +54,20 @@ async function fetchNetworkAverage(): Promise<number | null> {
   }
 }
 
+/** Best-effort — an empty/failed archive just means "By date"/"Day-wise ledger" show today only, not a page-breaking error. */
+async function fetchDaily(stationCode: string): Promise<EddPerformanceDailyRow[]> {
+  try {
+    const url = new URL("/api/ops-pulse/edd/performance/daily", window.location.origin);
+    url.searchParams.set("stationCode", stationCode);
+    const response = await fetch(url.toString(), { headers: { Accept: "application/json" }, cache: "no-store" });
+    if (!response.ok) return [];
+    const raw = await response.json().catch(() => ({}));
+    return Array.isArray(raw.days) ? (raw.days as EddPerformanceDailyRow[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 function formatFetchedAt(value: string) {
   if (!value) return "—";
   const date = new Date(value);
@@ -60,9 +78,11 @@ function formatFetchedAt(value: string) {
 /**
  * Today's assigned/delivered/returned/held for one station — a cached
  * snapshot kept current by the worker's 15-minute sweep, plus a manual
- * "Refresh" button. Led by a Delivery Performance hero card (severity-
- * colored, compared against the network average) so the headline number
- * a manager actually wants doesn't get lost among four equal-weight tiles.
+ * "Refresh" button. A Delivery Performance hero card (severity-colored,
+ * compared against the network average) is the one persistent headline;
+ * everything else lives behind three tabs mirroring CIA's station page
+ * (By associate / By date / Day-wise ledger) so the detail a manager
+ * actually digs into isn't all flattened onto one screen at once.
  */
 export function EddPerformanceView({ stationCode }: { stationCode: string }) {
   const [payload, setPayload] = useState<EddPerformancePayload | null>(null);
@@ -71,6 +91,8 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [networkAvg, setNetworkAvg] = useState<number | null>(null);
+  const [dailyRows, setDailyRows] = useState<EddPerformanceDailyRow[]>([]);
+  const [view, setView] = useState<PerformanceView>("associate");
 
   useEffect(() => {
     if (!stationCode) return;
@@ -99,6 +121,9 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
     void fetchNetworkAverage().then((avg) => {
       if (!cancelled) setNetworkAvg(avg);
     });
+    void fetchDaily(stationCode).then((rows) => {
+      if (!cancelled) setDailyRows(rows);
+    });
     return () => {
       cancelled = true;
     };
@@ -111,6 +136,7 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
       .then((fresh) => {
         setPayload(fresh);
         setNoSnapshot(false);
+        void fetchDaily(stationCode).then(setDailyRows);
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : "Unable to refresh the performance report.");
@@ -193,57 +219,46 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
                 </div>
               ) : null}
             </section>
-          ) : null}
+          ) : (
+            <section className="panel message-panel info">
+              <div className="panel-body">
+                <strong>No packages were assigned to {stationCode} today.</strong>
+              </div>
+            </section>
+          )}
 
           <section className="panel">
-            <div className="panel-head">
-              <div>
-                <h3>{formatCiaDisplayDate(payload.window.from)}</h3>
-                <p className="subtle">{assigned.toLocaleString("en-IN")} packages assigned to {stationCode} today.</p>
+            <div className="panel-body" style={{ display: "flex", justifyContent: "flex-start" }}>
+              <div className="edd-view-toggle" role="tablist" aria-label="How to view this station's performance">
+                <button type="button" role="tab" aria-selected={view === "associate"} className={`edd-view-tab${view === "associate" ? " active" : ""}`} onClick={() => setView("associate")}>
+                  <Users size={16} aria-hidden /> By associate
+                </button>
+                <button type="button" role="tab" aria-selected={view === "date"} className={`edd-view-tab${view === "date" ? " active" : ""}`} onClick={() => setView("date")}>
+                  <CalendarDays size={16} aria-hidden /> By date
+                </button>
+                <button type="button" role="tab" aria-selected={view === "ledger"} className={`edd-view-tab${view === "ledger" ? " active" : ""}`} onClick={() => setView("ledger")}>
+                  <BookOpen size={16} aria-hidden /> Day-wise ledger
+                </button>
               </div>
-            </div>
-            <div className="panel-body">
-              <div className="edd-performance-grid">
-                <div className="edd-bucket-card static">
-                  <span>Assigned</span>
-                  <strong>{assigned.toLocaleString("en-IN")}</strong>
-                  <small>Total packages today</small>
-                </div>
-                <div className="edd-bucket-card static future">
-                  <span>Delivered</span>
-                  <strong>{payload.delivered.toLocaleString("en-IN")}</strong>
-                  <small>{payload.deliveredPct}% · reached the customer</small>
-                </div>
-                <div className="edd-bucket-card static dueToday">
-                  <span>Held</span>
-                  <strong>{payload.held.toLocaleString("en-IN")}</strong>
-                  <small>{payload.heldPct}% · still moving through the station</small>
-                </div>
-                <div className="edd-bucket-card static overdue">
-                  <span>Returned</span>
-                  <strong>{payload.returned.toLocaleString("en-IN")}</strong>
-                  <small>{payload.returnedPct}% · failed, rejected, or undeliverable</small>
-                </div>
-              </div>
-
-              {assigned ? (
-                <>
-                  <div className="edd-performance-bar" role="img" aria-label="Delivered, held, and returned share of assigned packages">
-                    <div className="edd-performance-bar-segment delivered" style={{ width: `${payload.deliveredPct}%` }} />
-                    <div className="edd-performance-bar-segment held" style={{ width: `${payload.heldPct}%` }} />
-                    <div className="edd-performance-bar-segment returned" style={{ width: `${payload.returnedPct}%` }} />
-                  </div>
-                  <div className="edd-performance-legend">
-                    <span><i className="edd-legend-dot delivered" aria-hidden="true" /> Delivered {payload.deliveredPct}%</span>
-                    <span><i className="edd-legend-dot held" aria-hidden="true" /> Held {payload.heldPct}%</span>
-                    <span><i className="edd-legend-dot returned" aria-hidden="true" /> Returned {payload.returnedPct}%</span>
-                  </div>
-                </>
-              ) : (
-                <p className="subtle" style={{ marginTop: 10 }}>No packages were assigned to {stationCode} today.</p>
-              )}
             </div>
           </section>
+
+          {view === "associate" ? (
+            <EddPerformanceByAssociate packages={payload.packages} />
+          ) : view === "date" ? (
+            <EddPerformanceByDate
+              stationCode={stationCode}
+              rows={dailyRows}
+              todayAssigned={payload.assigned}
+              todayDelivered={payload.delivered}
+              todayReturned={payload.returned}
+              todayHeld={payload.held}
+              todayDeliveredPct={payload.deliveredPct}
+              todayPackages={payload.packages}
+            />
+          ) : (
+            <EddPerformanceLedger rows={dailyRows} />
+          )}
         </>
       ) : null}
     </>
