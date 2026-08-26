@@ -131,6 +131,116 @@ export async function loadStationGeofence(locationId: string | null | undefined)
   };
 }
 
+function mapStationRow(row: Record<string, unknown>): StationGeofence {
+  return {
+    id: row.id as string,
+    stationCode: (row.station_code as string | null) ?? null,
+    stationName: (row.station_name as string | null) ?? null,
+    latitude: toNumber(row.latitude),
+    longitude: toNumber(row.longitude),
+    geofenceRadiusM: toNumber(row.geofence_radius_m)
+  };
+}
+
+/** Active company stations with coordinates — used so staff can punch at any site, not only their assigned one. */
+export async function loadCompanyStationGeofences(companyId: string): Promise<StationGeofence[]> {
+  if (!supabaseAdmin) return [];
+  const result = await supabaseAdmin
+    .from("stations")
+    .select("id, station_code, station_name, latitude, longitude, geofence_radius_m")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .not("latitude", "is", null)
+    .not("longitude", "is", null)
+    .limit(500);
+  if (result.error) {
+    const fallback = await supabaseAdmin
+      .from("stations")
+      .select("id, station_code, station_name, latitude, longitude")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .not("latitude", "is", null)
+      .not("longitude", "is", null)
+      .limit(500);
+    if (fallback.error) throw new Error(fallback.error.message);
+    return (fallback.data ?? []).map((row) => mapStationRow({ ...row, geofence_radius_m: null }));
+  }
+  return (result.data ?? []).map((row) => mapStationRow(row as Record<string, unknown>));
+}
+
+/**
+ * Prefer assigned station if the employee is inside it; otherwise any company station whose geofence contains them.
+ * Closest inside station wins when assigned is not in range (travel / temporary duty).
+ */
+export function resolveGeofenceAmongStations(
+  lat: number,
+  lng: number,
+  stations: StationGeofence[],
+  preferredLocationId?: string | null
+): GeofenceEvaluation {
+  if (!stations.length) {
+    return {
+      status: "unknown",
+      distanceM: null,
+      radiusM: FALLBACK_GEOFENCE_RADIUS_M,
+      station: null
+    };
+  }
+
+  const scored = stations.map((station) => ({
+    station,
+    evaluation: evaluateGeofence(lat, lng, station)
+  }));
+
+  const inside = scored
+    .filter((row) => row.evaluation.status === "inside")
+    .sort((left, right) => (left.evaluation.distanceM ?? 0) - (right.evaluation.distanceM ?? 0));
+
+  if (inside.length) {
+    const preferred = preferredLocationId
+      ? inside.find((row) => row.station.id === preferredLocationId)
+      : undefined;
+    return (preferred ?? inside[0]).evaluation;
+  }
+
+  const nearest = scored
+    .filter((row) => row.evaluation.distanceM != null)
+    .sort((left, right) => (left.evaluation.distanceM ?? Number.POSITIVE_INFINITY) - (right.evaluation.distanceM ?? Number.POSITIVE_INFINITY))[0];
+
+  if (!nearest) {
+    return {
+      status: "unknown",
+      distanceM: null,
+      radiusM: FALLBACK_GEOFENCE_RADIUS_M,
+      station: null
+    };
+  }
+
+  return {
+    ...nearest.evaluation,
+    status: nearest.evaluation.status === "unknown" ? "unknown" : "outside"
+  };
+}
+
+export async function resolveCompanyPunchGeofence({
+  companyId,
+  lat,
+  lng,
+  preferredLocationId
+}: {
+  companyId: string;
+  lat: number;
+  lng: number;
+  preferredLocationId?: string | null;
+}): Promise<GeofenceEvaluation> {
+  const stations = await loadCompanyStationGeofences(companyId);
+  if (!stations.length) {
+    const preferred = await loadStationGeofence(preferredLocationId);
+    return evaluateGeofence(lat, lng, preferred);
+  }
+  return resolveGeofenceAmongStations(lat, lng, stations, preferredLocationId);
+}
+
 export function evaluateGeofence(
   lat: number,
   lng: number,

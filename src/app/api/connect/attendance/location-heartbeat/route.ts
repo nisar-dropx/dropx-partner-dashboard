@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   continuousOutsideMs,
-  evaluateGeofence,
   evaluateIntegrity,
   HEARTBEAT_MIN_INTERVAL_MS,
   loadOpenShift,
-  loadStationGeofence,
   maybeNotifyForgotPunchOut,
   openIntegrityFlag,
   OUTSIDE_CONTINUOUS_MS,
-  parseIntegritySignals
+  parseIntegritySignals,
+  resolveCompanyPunchGeofence
 } from "@/lib/biometric/attendance-gps";
 import {
   parseClientSignals,
@@ -74,10 +73,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const station = await loadStationGeofence(worker.locationId ?? shift.locationId);
-    const geofence = evaluateGeofence(lat, lng, station);
+    const geofence = await resolveCompanyPunchGeofence({
+      companyId: worker.companyId,
+      lat,
+      lng,
+      preferredLocationId: worker.locationId ?? shift.locationId
+    });
     const integrity = evaluateIntegrity(integritySignals, accuracyM);
     const serverReceivedAt = new Date().toISOString();
+    const sampleLocationId = geofence.station?.id ?? worker.locationId;
 
     const sampleInsert = await supabaseAdmin
       .from("attendance_location_samples")
@@ -86,7 +90,7 @@ export async function POST(request: NextRequest) {
         enrolment_id: worker.enrolmentId,
         profile_type: worker.profileType,
         profile_id: worker.profileId,
-        location_id: worker.locationId,
+        location_id: sampleLocationId,
         session_id: sessionId,
         lat,
         lng,
@@ -124,9 +128,7 @@ export async function POST(request: NextRequest) {
         enrolmentId: worker.enrolmentId,
         profileType: worker.profileType,
         profileId: worker.profileId,
-        locationId: worker.locationId,
-        punchDate: shift.punchDate,
-        flagType: "outside_geofence_gt_2h",
+        locationId: sampleLocationId,
         severity: "high",
         message: `Phone stayed outside the station geofence for more than 10 minutes during the shift.`,
         details: {

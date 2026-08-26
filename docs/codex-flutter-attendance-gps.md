@@ -10,7 +10,7 @@ SQL: `scripts/attendance_gps_integrity_v1.sql`
 
 1. App GPS punch **coexists** with biometric device punches.
 2. Punch requires **live selfie matched to profile photo on device** (selfie is **not** uploaded for normal punch) + **lat/lng**; **server timestamp** is authoritative (never trust editable client time).
-3. Outside station geofence (default **50m**, admin-only on stations) → **block punch** with a warning (no punch saved). Must be inside the allocated zone.
+3. Outside **all** company station geofences (default **50m**, admin-only on stations) → **block punch** with a warning (no punch saved). Must be inside any active company station (assigned preferred; travel to other sites allowed).
 4. In-shift heartbeats only (after punch-in until punch-out).
 5. Continuous outside zone **> 10 minutes** → flag `outside_geofence_gt_2h` (legacy type name; threshold is 10 minutes).
 6. Reminders at **9.5h** and **10h** after punch-in if no punch-out.

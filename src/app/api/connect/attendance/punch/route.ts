@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  evaluateGeofence,
   evaluateIntegrity,
   insertAppGpsPunch,
+  loadCompanyStationGeofences,
   loadOpenShift,
   loadStationGeofence,
-  parseIntegritySignals
+  parseIntegritySignals,
+  resolveCompanyPunchGeofence
 } from "@/lib/biometric/attendance-gps";
 import { createAttendancePunchNotification, createAppNotification } from "@/lib/app-notifications";
 import {
@@ -29,7 +30,8 @@ export async function GET(request: NextRequest) {
       companyId: worker.companyId,
       enrolmentId: worker.enrolmentId
     });
-    const station = await loadStationGeofence(worker.locationId ?? shift.locationId);
+    const assignedStation = await loadStationGeofence(worker.locationId ?? shift.locationId);
+    const companyStations = await loadCompanyStationGeofences(worker.companyId);
     const flagsResult = await supabaseAdmin
       .from("attendance_integrity_flags")
       .select("id, flag_type, severity, message, status, punch_date, created_at, details")
@@ -41,6 +43,11 @@ export async function GET(request: NextRequest) {
     if (flagsResult.error && !String(flagsResult.error.message).toLowerCase().includes("does not exist")) {
       throw new Error(flagsResult.error.message);
     }
+    const stations = companyStations.length
+      ? companyStations
+      : assignedStation
+        ? [assignedStation]
+        : [];
     return NextResponse.json({
       enrolmentId: worker.enrolmentId,
       locationId: worker.locationId,
@@ -51,16 +58,24 @@ export async function GET(request: NextRequest) {
         outTime: shift.outTime?.toISOString() ?? null,
         punchCount: shift.punchCount
       },
-      station: station
+      station: assignedStation
         ? {
-            id: station.id,
-            code: station.stationCode,
-            name: station.stationName,
-            latitude: station.latitude,
-            longitude: station.longitude,
-            radiusM: station.geofenceRadiusM
+            id: assignedStation.id,
+            code: assignedStation.stationCode,
+            name: assignedStation.stationName,
+            latitude: assignedStation.latitude,
+            longitude: assignedStation.longitude,
+            radiusM: assignedStation.geofenceRadiusM
           }
         : null,
+      stations: stations.map((row) => ({
+        id: row.id,
+        code: row.stationCode,
+        name: row.stationName,
+        latitude: row.latitude,
+        longitude: row.longitude,
+        radiusM: row.geofenceRadiusM
+      })),
       openFlags: flagsResult.data ?? []
     });
   } catch (error) {
@@ -105,8 +120,12 @@ export async function POST(request: NextRequest) {
       throw new Error("No open punch-in found for today. Punch in first.");
     }
 
-    const station = await loadStationGeofence(worker.locationId ?? shift.locationId);
-    const geofence = evaluateGeofence(lat, lng, station);
+    const geofence = await resolveCompanyPunchGeofence({
+      companyId: worker.companyId,
+      lat,
+      lng,
+      preferredLocationId: worker.locationId ?? shift.locationId
+    });
     const integrity = evaluateIntegrity(integritySignals, accuracyM);
 
     // Soft-block strong spoof signals on web when client reports them (Flutter will hard-block).
@@ -116,6 +135,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const punchLocationId = geofence.station?.id ?? worker.locationId;
     const result = await insertAppGpsPunch({
       companyId: worker.companyId,
       enrolmentId: worker.enrolmentId,
@@ -124,7 +144,7 @@ export async function POST(request: NextRequest) {
       profileId: worker.profileId,
       employeeId: worker.employeeId,
       fieldExecutiveId: worker.fieldExecutiveId,
-      locationId: worker.locationId,
+      locationId: punchLocationId,
       lat,
       lng,
       accuracyM,
