@@ -56,6 +56,8 @@ type OpenFlag = {
   status: string;
   punch_date: string;
   created_at: string;
+  supportStatus?: "needed" | "pending_review" | "returned";
+  supportSubmitted?: boolean;
 };
 type StationGeo = {
   id: string;
@@ -317,23 +319,45 @@ export function ConnectAttendance({ account }: { account: Account }) {
         <div className="dx-gps-punch-card">
           <header>
             <div>
-              <strong>Action needed</strong>
-              <small>Submit a selfie with your current location to continue.</small>
+              <strong>
+                {openFlags.every((flag) => flag.supportStatus === "pending_review" || flag.supportSubmitted)
+                  ? "Review pending"
+                  : "Action needed"}
+              </strong>
+              <small>
+                {openFlags.every((flag) => flag.supportStatus === "pending_review" || flag.supportSubmitted)
+                  ? "Your selfie was submitted. Waiting for review."
+                  : "Submit a selfie with your current location to continue."}
+              </small>
             </div>
           </header>
           <div className="dx-flag-list">
-            {openFlags.map((flag) => (
-              <div key={flag.id}>
-                <ShieldAlert />
-                <div>
-                  <strong>Location check</strong>
-                  <small>Take a live selfie at your station.</small>
+            {openFlags.map((flag) => {
+              const reviewPending = flag.supportStatus === "pending_review" || flag.supportSubmitted === true;
+              const needsResubmit = flag.supportStatus === "returned";
+              return (
+                <div key={flag.id}>
+                  <ShieldAlert />
+                  <div>
+                    <strong>{reviewPending ? "Review pending" : "Location check"}</strong>
+                    <small>
+                      {reviewPending
+                        ? "Selfie submitted — you cannot send again until review finishes."
+                        : needsResubmit
+                          ? "Please submit a new selfie."
+                          : "Take a live selfie at your station."}
+                    </small>
+                  </div>
+                  {reviewPending ? (
+                    <em className="dx-request-status pending">Pending</em>
+                  ) : (
+                    <button type="button" onClick={() => setSupportFlag(flag)}>
+                      {needsResubmit ? "Resubmit selfie" : "Submit selfie"}
+                    </button>
+                  )}
                 </div>
-                <button type="button" onClick={() => setSupportFlag(flag)}>
-                  Submit selfie
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       ) : null}
@@ -409,7 +433,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
         onClose={() => setSupportFlag(null)}
         onSubmitted={() => {
           setSupportFlag(null);
-          setSupportNotice("Selfie submitted. Thank you.");
+          setSupportNotice("Selfie submitted. Review is pending.");
           setRefreshKey((value) => value + 1);
         }}
       /> : null}

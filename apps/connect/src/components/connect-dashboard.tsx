@@ -55,6 +55,15 @@ type Attendance = {
 type DashboardAlert = {
   label: string;
   danger: boolean;
+  target?: "profile" | "attendance";
+};
+
+type OpenFlagNotice = {
+  id: string;
+  punch_date: string;
+  supportStatus?: "needed" | "pending_review" | "returned";
+  supportSubmitted?: boolean;
+  message?: string;
 };
 
 function localIsoDate(date = new Date()) {
@@ -127,12 +136,14 @@ export function ConnectDashboard({
   const [profile, setProfile] = useState<Profile | null>(null);
   const [attendance, setAttendance] = useState<Attendance | null>(null);
   const [verifications, setVerifications] = useState<Verification[]>([]);
+  const [openFlags, setOpenFlags] = useState<OpenFlagNotice[]>([]);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     setProfile(null);
     setAttendance(null);
+    setOpenFlags([]);
     setError("");
     const executive = account.profileType !== "employee" && account.profileType !== "user";
     const profileUrl = executive
@@ -157,17 +168,42 @@ export function ConnectDashboard({
           const payload = await response.json();
           if (!response.ok) throw new Error(payload.error || "Unable to load verifications.");
           return (payload.verifications ?? []) as Verification[];
+        }),
+      fetch(`/api/connect/attendance/punch?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`)
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok) return [] as OpenFlagNotice[];
+          return (payload.openFlags ?? []) as OpenFlagNotice[];
         })
-    ]).then(([nextProfile, nextAttendance, nextVerifications]) => {
+        .catch(() => [] as OpenFlagNotice[])
+    ]).then(([nextProfile, nextAttendance, nextVerifications, nextFlags]) => {
       setProfile(nextProfile);
       setAttendance(nextAttendance);
       setVerifications(nextVerifications);
+      setOpenFlags(nextFlags);
     }).catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load dashboard."));
   }, [account.id, account.profileType, refreshKey]);
 
   const alerts = useMemo(() => {
     if (!profile) return [] as DashboardAlert[];
     const rows: DashboardAlert[] = [];
+    for (const flag of openFlags) {
+      const reviewPending = flag.supportStatus === "pending_review" || flag.supportSubmitted === true;
+      const dateLabel = displayDate(flag.punch_date);
+      if (reviewPending) {
+        rows.push({
+          label: `Attendance review pending · ${dateLabel}`,
+          danger: false,
+          target: "attendance"
+        });
+      } else {
+        rows.push({
+          label: `Action needed on Attendance · ${dateLabel}`,
+          danger: true,
+          target: "attendance"
+        });
+      }
+    }
     const fields: Record<string, string> = {
       "Driving licence": profile.editable.drivingLicenseExpiry,
       "Vehicle registration": profile.editable.registrationExpiry,
@@ -180,8 +216,8 @@ export function ConnectDashboard({
       const expiry = parseDate(value);
       if (!expiry) return;
       const days = Math.ceil((expiry.getTime() - start.getTime()) / 86400000);
-      if (days < 0) rows.push({ label: `${label} expired`, danger: true });
-      else if (days <= 30) rows.push({ label: `${label} expires in ${days} days`, danger: false });
+      if (days < 0) rows.push({ label: `${label} expired`, danger: true, target: "profile" });
+      else if (days <= 30) rows.push({ label: `${label} expires in ${days} days`, danger: false, target: "profile" });
     });
     const labels: Record<string, string> = {
       pan: "PAN verification",
@@ -191,11 +227,11 @@ export function ConnectDashboard({
     };
     verifications.forEach((verification) => {
       if (!labels[verification.kind]) return;
-      if (verification.blockSubmit) rows.push({ label: `${labels[verification.kind]} failed`, danger: true });
-      else if (!verification.verified || verification.manualReview) rows.push({ label: `${labels[verification.kind]} requires review`, danger: false });
+      if (verification.blockSubmit) rows.push({ label: `${labels[verification.kind]} failed`, danger: true, target: "profile" });
+      else if (!verification.verified || verification.manualReview) rows.push({ label: `${labels[verification.kind]} requires review`, danger: false, target: "profile" });
     });
-    return rows.slice(0, 4);
-  }, [profile, verifications]);
+    return rows.slice(0, 6);
+  }, [profile, verifications, openFlags]);
 
   if (!profile && !error) return <div className="dx-loader fullscreen"><span /><small>Loading dashboard...</small></div>;
   if (!profile || !attendance) return <div className="dx-alert error">{error}<button onClick={() => setRefreshKey((value) => value + 1)}>Retry</button></div>;
@@ -247,6 +283,22 @@ export function ConnectDashboard({
       {attendanceAllowed ? <button className="dx-dashboard-link" onClick={onAttendance}>View attendance <ChevronRight /></button> : null}
     </section>
 
+    {alerts.length ? <section className="dx-dashboard-card">
+      <h2>Requires attention</h2>
+      <div className="dx-dashboard-alerts">
+        {alerts.map((alert) => (
+          <button
+            key={alert.label}
+            onClick={alert.target === "attendance" && attendanceAllowed ? onAttendance : onProfile}
+          >
+            <AlertTriangle className={alert.danger ? "danger" : ""} />
+            <span>{alert.label}</span>
+            <ChevronRight />
+          </button>
+        ))}
+      </div>
+    </section> : null}
+
     <section className="dx-dashboard-card dx-dashboard-summary-card">
       <header><div><small>This month</small><h2>Summary</h2></div></header>
       <div className="dx-dashboard-metrics">
@@ -270,17 +322,6 @@ export function ConnectDashboard({
         <button onClick={onProfile}><i className="green"><UserRound /></i><span><strong>Profile</strong><small>Personal details</small></span><ChevronRight /></button>
       </div>
     </section>
-
-    {alerts.length ? <section className="dx-dashboard-card">
-      <h2>Requires attention</h2>
-      <div className="dx-dashboard-alerts">
-        {alerts.map((alert) => <button key={alert.label} onClick={onProfile}>
-          <AlertTriangle className={alert.danger ? "danger" : ""} />
-          <span>{alert.label}</span>
-          <ChevronRight />
-        </button>)}
-      </div>
-    </section> : null}
 
     {latestRequest?.regularization && attendanceAllowed ? <section className="dx-dashboard-card">
       <h2>Recent requests</h2>

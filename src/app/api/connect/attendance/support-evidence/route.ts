@@ -70,17 +70,7 @@ export async function POST(request: NextRequest) {
       if (flagResult.data.status !== "open") throw new Error("This flag is already closed.");
     }
 
-    const safeName = selfie.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "support-selfie.jpg";
-    const selfiePath = `${worker.companyId}/${worker.profileId}/attendance-support-${punchDate}-${Date.now()}${fileExtension(safeName) || ".jpg"}`;
-    const uploadResult = await supabaseAdmin.storage
-      .from("employee-profile-documents")
-      .upload(selfiePath, Buffer.from(await selfie.arrayBuffer()), {
-        contentType: selfie.type || "image/jpeg",
-        upsert: false
-      });
-    if (uploadResult.error) throw new Error(uploadResult.error.message);
-
-    const now = new Date().toISOString();
+    // Block duplicate submit before uploading another selfie.
     const existingQuery = supabaseAdmin
       .from("attendance_location_reviews")
       .select("id, status")
@@ -96,8 +86,20 @@ export async function POST(request: NextRequest) {
       throw new Error(existingResult.error.message);
     }
     if (existingResult.data?.status === "pending") {
-      throw new Error("A support package is already pending review for this date.");
+      throw new Error("Support already submitted. Review is pending — you cannot send again.");
     }
+
+    const safeName = selfie.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "support-selfie.jpg";
+    const selfiePath = `${worker.companyId}/${worker.profileId}/attendance-support-${punchDate}-${Date.now()}${fileExtension(safeName) || ".jpg"}`;
+    const uploadResult = await supabaseAdmin.storage
+      .from("employee-profile-documents")
+      .upload(selfiePath, Buffer.from(await selfie.arrayBuffer()), {
+        contentType: selfie.type || "image/jpeg",
+        upsert: false
+      });
+    if (uploadResult.error) throw new Error(uploadResult.error.message);
+
+    const now = new Date().toISOString();
 
     // Support selfie is review-only: never insert attendance punches or rebuild daily.
     const payload = {
@@ -159,7 +161,7 @@ export async function POST(request: NextRequest) {
       ok: true,
       review: saveResult.data,
       attendanceMarked: false,
-      message: "Sent to manager for flag approval. Attendance was not marked."
+      message: "Selfie submitted. Review is pending."
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to submit support evidence.";

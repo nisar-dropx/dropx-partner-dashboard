@@ -177,7 +177,7 @@ Returns:
 }
 ```
 
-Use `station` / `stations` for client geofence. Show an action card **only** when `openFlags.length > 0` (submit selfie). Do **not** show monitoring / pending-manager / duty-status banners — GPS tracking is silent. `pendingApproval` / `dutyOnly` are only true when open flags exist (held punches alone must not surface UX).
+Use `station` / `stations` for client geofence. Show an action card **only** when `openFlags.length > 0`. If `supportStatus === "pending_review"` (or `supportSubmitted`), show **Review pending** and do **not** allow another support selfie. Only `needed` / `returned` can open the selfie sheet. Also surface the same open-flag notices on **Home / dashboard** (Requires attention), linking to Attendance. Do **not** show monitoring / pending-manager / duty-status banners — GPS tracking is silent. `pendingApproval` / `dutyOnly` are only true when open flags exist (held punches alone must not surface UX).
 
 ### `POST /api/connect/attendance/punch` (legacy / compatibility)
 

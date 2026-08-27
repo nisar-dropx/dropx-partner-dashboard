@@ -84,20 +84,49 @@ export async function GET(request: NextRequest) {
         ? [assignedStation]
         : [];
     const openFlags = flagsResult.data ?? [];
+    const flagIds = openFlags.map((flag) => String(flag.id));
+    const pendingByFlag = new Map<string, string>();
+    if (flagIds.length) {
+      const reviewsResult = await supabaseAdmin
+        .from("attendance_location_reviews")
+        .select("flag_id, status")
+        .eq("company_id", worker.companyId)
+        .eq("enrolment_id", worker.enrolmentId)
+        .in("flag_id", flagIds)
+        .in("status", ["pending", "returned"]);
+      if (reviewsResult.error && !String(reviewsResult.error.message).toLowerCase().includes("does not exist")) {
+        throw new Error(reviewsResult.error.message);
+      }
+      for (const row of reviewsResult.data ?? []) {
+        if (row.flag_id) pendingByFlag.set(String(row.flag_id), String(row.status));
+      }
+    }
+
     // Never surface "pending approval" to the worker when there are no open flags.
     // Held punches can linger after resolve; monitoring stays server-side.
     const pendingForClient = openFlags.length > 0 && shift.pendingApproval === true;
     // Redact integrity internals — workers only need enough to submit a selfie.
-    const openFlagsForClient = openFlags.map((flag) => ({
-      id: flag.id,
-      punch_date: flag.punch_date,
-      status: flag.status,
-      created_at: flag.created_at,
-      flag_type: "action_needed",
-      severity: "medium",
-      message: "Take a live selfie at your station to continue.",
-      details: {}
-    }));
+    const openFlagsForClient = openFlags.map((flag) => {
+      const supportStatus = pendingByFlag.get(String(flag.id));
+      const reviewPending = supportStatus === "pending";
+      const needsResubmit = supportStatus === "returned";
+      return {
+        id: flag.id,
+        punch_date: flag.punch_date,
+        status: flag.status,
+        created_at: flag.created_at,
+        flag_type: "action_needed",
+        severity: "medium",
+        message: reviewPending
+          ? "Your selfie was submitted. Review is pending."
+          : needsResubmit
+            ? "Please submit a new selfie to continue."
+            : "Take a live selfie at your station to continue.",
+        details: {},
+        supportStatus: reviewPending ? "pending_review" : needsResubmit ? "returned" : "needed",
+        supportSubmitted: reviewPending
+      };
+    });
     return NextResponse.json({
       enrolmentId: worker.enrolmentId,
       locationId: worker.locationId,
