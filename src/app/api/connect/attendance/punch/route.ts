@@ -6,7 +6,8 @@ import {
   loadOpenShift,
   loadStationGeofence,
   parseIntegritySignals,
-  resolveCompanyPunchGeofence
+  resolveCompanyPunchGeofence,
+  TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY
 } from "@/lib/biometric/attendance-gps";
 import { createAppNotification } from "@/lib/app-notifications";
 import {
@@ -238,21 +239,23 @@ export async function POST(request: NextRequest) {
       faceMatched: true
     });
 
-    // Do not notify "attendance punched" — punch is held until manager approve.
-    await createAppNotification({
-      accountId: worker.profileId,
-      companyId: worker.companyId,
-      data: {
-        punchId: result.punch.id,
-        flagIds: result.flagIds,
-        geofenceStatus: geofence.status,
-        pendingApproval: true
-      },
-      eventCode: "attendance_location_flagged",
-      profileType: worker.profileType,
-      sourceKey: `gps-pending:${result.punch.id}`,
-      variables: { date: String(result.punch.punch_date).split("-").reverse().join("/") }
-    }).catch(() => undefined);
+    // TEMP auto-approve resolves the flag + activates punch inside insertAppGpsPunch / openIntegrityFlag.
+    if (!TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY) {
+      await createAppNotification({
+        accountId: worker.profileId,
+        companyId: worker.companyId,
+        data: {
+          punchId: result.punch.id,
+          flagIds: result.flagIds,
+          geofenceStatus: geofence.status,
+          pendingApproval: true
+        },
+        eventCode: "attendance_location_flagged",
+        profileType: worker.profileType,
+        sourceKey: `gps-pending:${result.punch.id}`,
+        variables: { date: String(result.punch.punch_date).split("-").reverse().join("/") }
+      }).catch(() => undefined);
+    }
 
     return NextResponse.json({
       ok: true,
@@ -269,11 +272,13 @@ export async function POST(request: NextRequest) {
         score: integrity.score,
         reasons: integrity.reasons
       },
-      isFlagged: true,
-      supportRequired: true,
-      pendingApproval: true,
+      isFlagged: !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY,
+      supportRequired: !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY,
+      pendingApproval: !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY,
       flagIds: result.flagIds,
-      message: "Action needed. Submit a selfie from Attendance if prompted."
+      message: TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY
+        ? "Punch recorded (temporary auto-approve mode)."
+        : "Action needed. Submit a selfie from Attendance if prompted."
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to record GPS punch.";

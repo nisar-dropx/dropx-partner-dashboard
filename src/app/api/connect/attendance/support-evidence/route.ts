@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveCompanyPunchGeofence } from "@/lib/biometric/attendance-gps";
+import {
+  resolveCompanyPunchGeofence,
+  resolveIntegrityFlag,
+  TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY
+} from "@/lib/biometric/attendance-gps";
 import {
   fileExtension,
   parseCoordinate,
   parseOptionalNumber,
   resolveConnectAttendanceWorker
 } from "@/lib/connect-attendance-auth";
+import { purgeSupportSelfieForReviewId } from "@/lib/purge-support-selfies";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -142,7 +147,7 @@ export async function POST(request: NextRequest) {
 
     // Notify manager/HR in People only — do not mark attendance.
     const notifyFlagId = flagId || String(saveResult.data.flag_id || "");
-    if (notifyFlagId) {
+    if (notifyFlagId && !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY) {
       const { notifyAttendanceFlagReviewers } = await import("@/lib/attendance-flag-notifications");
       await notifyAttendanceFlagReviewers({
         companyId: worker.companyId,
@@ -154,6 +159,20 @@ export async function POST(request: NextRequest) {
         flagId: notifyFlagId
       }).catch((error) => {
         console.error("Unable to notify reviewers of support selfie:", error);
+      });
+    }
+
+    // TEMP: auto-approve so workers are not stuck waiting on manager review.
+    if (TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY && notifyFlagId) {
+      await resolveIntegrityFlag(notifyFlagId, null).catch((error) => {
+        console.error("TEMP auto-approve after support selfie failed", error);
+      });
+      await purgeSupportSelfieForReviewId(worker.companyId, String(saveResult.data.id)).catch(() => undefined);
+      return NextResponse.json({
+        ok: true,
+        review: saveResult.data,
+        attendanceMarked: true,
+        message: "Selfie submitted and auto-approved (temporary development mode)."
       });
     }
 

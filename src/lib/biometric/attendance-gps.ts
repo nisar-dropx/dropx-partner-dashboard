@@ -17,6 +17,14 @@ export const SHIFT_REMINDER_MS = [9.5 * 60 * 60 * 1000, 10 * 60 * 60 * 1000] as 
 export const BIOMETRIC_SAMPLE_WINDOW_MS = 20 * 60 * 1000;
 export const HEARTBEAT_MIN_INTERVAL_MS = 2 * 60 * 1000;
 
+/**
+ * TEMP development shortcut: auto-resolve integrity flags and activate held punches
+ * so managers do not need Approve / Approve all while review UX is unfinished.
+ * Set ATTENDANCE_INTEGRITY_AUTO_APPROVE=0 (or flip this off) before production go-live.
+ */
+export const TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY =
+  process.env.ATTENDANCE_INTEGRITY_AUTO_APPROVE !== "0";
+
 export type GeofenceStatus = "inside" | "outside" | "unknown";
 
 export type StationGeofence = {
@@ -331,6 +339,7 @@ export async function openIntegrityFlag({
       .select("id, status, flag_type")
       .single();
     if (update.error) throw new Error(update.error.message);
+    await maybeTempAutoApproveIntegrityFlag(String(update.data.id));
     return { id: update.data.id as string, created: false, flagType };
   }
 
@@ -361,7 +370,7 @@ export async function openIntegrityFlag({
   }
 
   const flagId = insert.data.id as string;
-  if (profileId) {
+  if (profileId && !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY) {
     const { notifyAttendanceFlagReviewers } = await import("@/lib/attendance-flag-notifications");
     await notifyAttendanceFlagReviewers({
       companyId,
@@ -376,6 +385,7 @@ export async function openIntegrityFlag({
     });
   }
 
+  await maybeTempAutoApproveIntegrityFlag(flagId);
   return { id: flagId, created: true, flagType };
 }
 
@@ -481,8 +491,44 @@ export async function resolveIntegrityFlag(flagId: string, resolvedBy: string | 
     .single();
   if (result.error) throw new Error(result.error.message);
 
-  if (existing.data?.punch_id) {
-    await activateHeldAttendancePunch(String(existing.data.punch_id));
+  // Approve any linked support packages so workers are not stuck on "review pending".
+  const reviews = await supabaseAdmin
+    .from("attendance_location_reviews")
+    .update({
+      status: "approved",
+      review_remarks: TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY
+        ? "Auto-approved (temporary development mode)"
+        : null,
+      reviewed_at: now,
+      updated_at: now
+    })
+    .eq("flag_id", flagId)
+    .in("status", ["pending", "returned"])
+    .select("punch_id");
+  if (reviews.error && !/does not exist|schema cache/i.test(reviews.error.message)) {
+    console.error("Unable to auto-approve linked support packages", reviews.error.message);
+  }
+
+  const punchIds = new Set<string>();
+  if (existing.data?.punch_id) punchIds.add(String(existing.data.punch_id));
+  for (const row of reviews.data ?? []) {
+    if (row.punch_id) punchIds.add(String(row.punch_id));
+  }
+  for (const punchId of punchIds) {
+    await activateHeldAttendancePunch(punchId);
+  }
+}
+
+async function maybeTempAutoApproveIntegrityFlag(flagId: string) {
+  if (!TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY || !flagId) return;
+  try {
+    await resolveIntegrityFlag(flagId, null);
+  } catch (error) {
+    console.error(
+      "TEMP auto-approve integrity flag failed",
+      flagId,
+      error instanceof Error ? error.message : error
+    );
   }
 }
 
