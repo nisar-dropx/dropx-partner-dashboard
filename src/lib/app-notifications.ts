@@ -68,10 +68,10 @@ export const appNotificationDefaults: Record<AppNotificationEvent, {
     bodyTemplate: "Your attendance regularization request for {date} has been submitted."
   },
   attendance_location_flagged: {
-    label: "Location flagged",
+    label: "Selfie needed",
     route: "attendance",
-    titleTemplate: "Attendance flagged for review",
-    bodyTemplate: "Your attendance for {date} was flagged. Attach a selfie + location support package."
+    titleTemplate: "Action needed on Attendance",
+    bodyTemplate: "Please open Attendance for {date} and submit a selfie to continue."
   },
   attendance_forgot_punch_out: {
     label: "Forgot punch-out",

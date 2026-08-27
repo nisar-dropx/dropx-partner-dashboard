@@ -146,8 +146,6 @@ function evaluateClientGeofence(lat: number, lng: number, stations: StationGeo[]
   };
 }
 
-const LOCATION_TRACKING_MS = 9 * 60 * 60 * 1000;
-
 function monthLabel(value: string) {
   const [year, month] = value.split("-").map(Number);
   return new Intl.DateTimeFormat("en", { month: "short", year: "2-digit" })
@@ -274,9 +272,6 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const total = (data?.rows ?? []).reduce((sum, row) => sum + minutes(row.workHours), 0);
   const futureMonth = month >= currentMonth;
   const openFlags = punchStatus?.openFlags ?? [];
-  const monitoringActive =
-    Boolean(punchStatus?.shift.open && punchStatus.shift.inTime) &&
-    Date.now() - new Date(punchStatus!.shift.inTime!).getTime() <= LOCATION_TRACKING_MS;
 
   const supportStationKey = [
     punchStatus?.station?.id,
@@ -318,20 +313,12 @@ export function ConnectAttendance({ account }: { account: Account }) {
 
       {supportNotice ? <div className="dx-alert ok">{supportNotice}</div> : null}
 
-      {punchStatus?.shift.pendingApproval ? (
-        <div className="dx-alert" role="status">
-          Duty status is on (pending manager approval). Calendar / attendance will update only after your flag is approved.
-        </div>
-      ) : null}
-
       {openFlags.length ? (
         <div className="dx-gps-punch-card">
           <header>
             <div>
-              <strong>Location review needed</strong>
-              <small>
-                Submit a support selfie with live GPS for manager approval only — this does not mark attendance until approved.
-              </small>
+              <strong>Action needed</strong>
+              <small>Submit a selfie with your current location to continue.</small>
             </div>
           </header>
           <div className="dx-flag-list">
@@ -339,20 +326,16 @@ export function ConnectAttendance({ account }: { account: Account }) {
               <div key={flag.id}>
                 <ShieldAlert />
                 <div>
-                  <strong>{flag.flag_type.replaceAll("_", " ")}</strong>
-                  <small>{flag.message}</small>
+                  <strong>Location check</strong>
+                  <small>Take a live selfie at your station.</small>
                 </div>
-                <button type="button" onClick={() => setSupportFlag(flag)}>Support selfie</button>
+                <button type="button" onClick={() => setSupportFlag(flag)}>
+                  Submit selfie
+                </button>
               </div>
             ))}
           </div>
         </div>
-      ) : null}
-
-      {monitoringActive ? (
-        <p className="dx-form-hint" style={{ marginTop: openFlags.length ? 8 : 0 }}>
-          Location monitoring is on for this shift (up to 9 hours from punch-in). Punch in/out on the station biometric device.
-        </p>
       ) : null}
 
       {error ? <div className="dx-alert error">{error}<button onClick={() => setMonth((value) => `${value}`)}>Retry</button></div> : null}
@@ -426,7 +409,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
         onClose={() => setSupportFlag(null)}
         onSubmitted={() => {
           setSupportFlag(null);
-          setSupportNotice("Support selfie submitted for review.");
+          setSupportNotice("Selfie submitted. Thank you.");
           setRefreshKey((value) => value + 1);
         }}
       /> : null}
@@ -564,17 +547,16 @@ function SupportEvidenceSheet({
     <aside className="dx-regularization-sheet" role="dialog" aria-modal="true">
       <header>
         <div>
-          <strong>Support selfie + location</strong>
-          <small>You must be inside the allowed station perimeter. Camera stays off while you are outside.</small>
+          <strong>Submit selfie</strong>
+          <small>Stay inside your station. Camera stays off while you are outside.</small>
         </div>
         <button aria-label="Close" onClick={onClose}><X /></button>
       </header>
       <form onSubmit={submit}>
         <div className="dx-regularization-day">
-          <span><small>FLAG</small><strong>{flag.flag_type.replaceAll("_", " ")}</strong></span>
-          <em>{flag.punch_date.split("-").reverse().join("/")}</em>
+          <span><small>DATE</small><strong>{flag.punch_date.split("-").reverse().join("/")}</strong></span>
         </div>
-        <p className="dx-form-hint">{flag.message}</p>
+        <p className="dx-form-hint">Take a live selfie at your station to continue.</p>
         <div className={`dx-alert ${geofence.status === "inside" ? "ok" : geofence.status === "checking" ? "" : "error"}`} role="status">
           {geofence.message}
         </div>
@@ -597,19 +579,19 @@ function SupportEvidenceSheet({
                 ? "Retake selfie"
                 : "Capture selfie"}
           </button>
-          {selfiePreview ? <img alt="Support selfie preview" className="dx-selfie-preview" src={selfiePreview} /> : null}
+          {selfiePreview ? <img alt="Selfie preview" className="dx-selfie-preview" src={selfiePreview} /> : null}
         </div>
-        <label>Remarks<textarea placeholder="Optional notes for your manager" rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
+        <label>Remarks<textarea placeholder="Optional notes" rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
         {error ? <p className="dx-form-error">{error}</p> : null}
         <div className="dx-sheet-actions">
           <button className="secondary" onClick={onClose} type="button">Cancel</button>
-          <button disabled={saving || !cameraAllowed || !selfie} type="submit">{saving ? "Submitting..." : "Submit for review"}</button>
+          <button disabled={saving || !cameraAllowed || !selfie} type="submit">{saving ? "Submitting..." : "Submit"}</button>
         </div>
       </form>
     </aside>
     {selfiePanelOpen ? (
       <SelfieCapturePanel
-        title="Support selfie"
+        title="Selfie"
         hint="Step 1: match your profile face. Step 2: blink twice + turn left/right (hold still — a photo will fail). Step 3: capture."
         profilePhotoUrl={account.profilePhotoUrl}
         requireFaceMatch

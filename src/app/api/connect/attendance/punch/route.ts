@@ -83,6 +83,21 @@ export async function GET(request: NextRequest) {
       : assignedStation
         ? [assignedStation]
         : [];
+    const openFlags = flagsResult.data ?? [];
+    // Never surface "pending approval" to the worker when there are no open flags.
+    // Held punches can linger after resolve; monitoring stays server-side.
+    const pendingForClient = openFlags.length > 0 && shift.pendingApproval === true;
+    // Redact integrity internals — workers only need enough to submit a selfie.
+    const openFlagsForClient = openFlags.map((flag) => ({
+      id: flag.id,
+      punch_date: flag.punch_date,
+      status: flag.status,
+      created_at: flag.created_at,
+      flag_type: "action_needed",
+      severity: "medium",
+      message: "Take a live selfie at your station to continue.",
+      details: {}
+    }));
     return NextResponse.json({
       enrolmentId: worker.enrolmentId,
       locationId: worker.locationId,
@@ -92,8 +107,8 @@ export async function GET(request: NextRequest) {
         inTime: shift.inTime?.toISOString() ?? null,
         outTime: shift.outTime?.toISOString() ?? null,
         punchCount: shift.punchCount,
-        pendingApproval: shift.pendingApproval === true,
-        dutyOnly: shift.dutyOnly === true
+        pendingApproval: pendingForClient,
+        dutyOnly: pendingForClient
       },
       station: assignedStation
         ? {
@@ -113,7 +128,7 @@ export async function GET(request: NextRequest) {
         longitude: row.longitude,
         radiusM: row.geofenceRadiusM
       })),
-      openFlags: flagsResult.data ?? []
+      openFlags: openFlagsForClient
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load punch status.";
@@ -229,8 +244,7 @@ export async function POST(request: NextRequest) {
       supportRequired: true,
       pendingApproval: true,
       flagIds: result.flagIds,
-      message:
-        "Duty status updated. Attendance is pending manager approval — submit support selfie if prompted."
+      message: "Action needed. Submit a selfie from Attendance if prompted."
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to record GPS punch.";

@@ -39,6 +39,8 @@ This note tells Codex how to finish the **native Android Flutter** app (`com.dro
 11. App GPS / selfie punch-in stores a **held** punch: `calculated=false`, `is_flagged=true`, flag `pending_selfie_punch`.
 12. Flagged biometric mismatch punches are also **held** until approve.
 13. **Approve** (People) → activate punch (`calculated=true`) + rebuild day → Present.
+    - Calendar **in/out time must stay the employee’s original punch time** (`client_captured_at` when valid, else stored `punch_time`).
+    - Never write the **manager approval time** as punched-in time.
 14. **Dismiss / reject** → calendar stays unchanged (no Present).
 15. Manager is notified via **People in-app notifications only** (no email). Event: `attendance_location_flagged`.
 
@@ -59,6 +61,10 @@ This note tells Codex how to finish the **native Android Flutter** app (`com.dro
 | Face match percent | **≥ 60%** | Pass threshold |
 | Face match distance | **≤ 0.42** | face-api euclidean cap |
 | Face match streak | **3 frames** | Consecutive OK before liveness |
+| Liveness sample rate (web) | **~80 ms** | Fast enough for natural blinks (~100–150 ms) |
+| Blink closed EAR | **≤ ~86% of open baseline** (clamped ~0.12–0.22) | One closed sample counts |
+| Blink hard-shake reject | center **> ~0.10** or scale **> ~0.32** | Soft micro-motion allowed |
+| Head-turn yaw peak | **≥ ~0.11** | Then return \|yaw\| **≤ ~0.07** |
 | Accuracy integrity penalty | **> 100 m** | −25 integrity score |
 | Support selfie max size | **8 MB** | Server reject above |
 
@@ -87,16 +93,25 @@ UI: Connect Attendance → open flag → **Support selfie**.
 ### Step 2 — Liveness (anti photo-spoof)
 Only after face match passes. Order:
 
-1. **Blink twice** — real EAR eye close/open while **face box stays stable**. Reject if face center moves a lot or scale zooms (shaking a printed photo / phone screen).
+1. **Blink twice** — real EAR eye close/open. Soft head/camera micro-motion is OK.
 2. **Turn head left**, then face forward (yaw; not waving the whole photo).
 3. **Turn head right**, then face forward.
 
-Web anti-shake (approximate):
-- Blink: reject center move **> ~0.045** or scale change **> ~0.18**; need a few closed frames per blink.
-- Turns: yaw peak **≥ ~0.11**, return to center **|yaw| ≤ ~0.07**; reject huge translation/zoom.
+**Blink rules (web — match these sensitivities):**
+- Sample pose ~**80 ms** so natural blinks are not missed.
+- Closed eye = EAR drops to about **≤ 86%** of the open-eye baseline (clamped roughly **0.12–0.22**).
+- **One** closed sample + reopen counts as one blink (blinks are often &lt;150 ms — do not require many closed frames).
+- Short cooldown after a counted blink so the same blink is not double-counted.
+- Reject only **hard shake** (printed photo / screen wave): face center move **> ~0.10** or face scale change **> ~0.32**. Do **not** cancel a blink for mild motion.
+- A single missed landmark frame must **not** wipe an in-progress blink.
+- Still photos fail because EAR never drops; waving a photo fails the hard-shake gate.
+
+**Head-turn rules (web):**
+- Yaw peak **≥ ~0.11** in the requested direction, then return to center **|yaw| ≤ ~0.07**.
+- Reject huge translation/zoom without a clean yaw ramp.
 
 Web: `apps/connect/src/lib/face-liveness.ts`, `selfie-capture-panel.tsx`  
-Flutter: prefer **ML Kit Face Mesh** + commercial liveness SDK for production; never accept still photo / screen replay.
+Flutter: prefer **ML Kit Face Mesh** + commercial liveness SDK for production; never accept still photo / screen replay. Keep blink detection **sensitive to real blinks** — do not over-tighten anti-shake so natural blinks fail.
 
 ### Step 3 — Capture
 - Enable Capture only when match + liveness done.
@@ -164,7 +179,7 @@ Returns:
 }
 ```
 
-Use `station` / `stations` for client geofence. Use `openFlags` to show Location review. Use `pendingApproval` / `dutyOnly` for “duty pending manager approval” banner (calendar still not Present).
+Use `station` / `stations` for client geofence. Show an action card **only** when `openFlags.length > 0` (submit selfie). Do **not** show monitoring / pending-manager / duty-status banners — GPS tracking is silent. `pendingApproval` / `dutyOnly` are only true when open flags exist (held punches alone must not surface UX).
 
 ### `POST /api/connect/attendance/punch` (legacy / compatibility)
 
@@ -214,13 +229,12 @@ Fields: `accountId`, `profileType`, `flagId`, `punchId?`, `punchDate`, `lat`, `l
 ## Connect UI expectations (Flutter parity)
 
 1. **Attendance home** — calendar / list / punches; month nav; no GPS Punch In/Out.
-2. **Pending approval banner** when `shift.pendingApproval` — duty on, calendar not Present yet.
-3. **Location review card** only if `openFlags.length > 0` — per-flag **Support selfie**.
-4. **Monitoring hint** while in-shift within 9h — location monitoring on; punch on biometric device.
-5. **Support sheet** — geofence status alert; camera gated; then face match → liveness → capture → submit.
-6. **Silent tracker** — presence while logged in; after punch-in continue **9h**; heartbeat every **3–5 min**.
+2. **No pending-approval / duty / monitoring banners** — never tell the worker they are being monitored or that duty is “pending manager approval”.
+3. **Action needed card** only if `openFlags.length > 0` — generic “Submit selfie” (do not show flag_type / internal messages).
+4. **Support sheet** — geofence gate; camera gated; face match → liveness → capture → submit. Neutral copy only.
+5. **Silent tracker** — presence while logged in; after punch-in continue **9h**; heartbeat every **3–5 min**; no UI copy.
 
-Do **not** build: edit punch lat/lng/time; force Present; always-visible GPS punch; treating support selfie as attendance; skipping face match before liveness; remounting camera mid-liveness on GPS refresh.
+Do **not** build: edit punch lat/lng/time; force Present; always-visible GPS punch; treating support selfie as attendance; skipping face match before liveness; remounting camera mid-liveness on GPS refresh; worker-facing monitoring jargon.
 
 ---
 
@@ -239,21 +253,24 @@ Primary: **People → Attendance → Location integrity**
 - Shows **worker name + biometric ID + allowed station** (from biometric enrolment mapping).
 - Shows flag details, device vs station, last phone GPS (if any), linked support selfies.
 - Footer for open flags (managers):
-  - **Close**
-  - **Dismiss flag** — closes flag; **does not** activate held punch
-  - **Approve punch** — resolves flag, auto-approves linked pending support packages, activates held punch, rebuilds day
+  - **Close** — closes instantly (must not wait on a full page reload).
+  - **Dismiss flag** — closes flag; **does not** activate held punch; redirects out of the modal.
+  - **Approve punch** — resolves flag, auto-approves linked pending support packages, activates held punch, rebuilds day with **original punch time**, redirects out of the modal.
 - Hint: Approve counts held punch toward attendance; Dismiss leaves calendar unchanged.
 
 ### Temporary development shortcut
-- **Approve all (N)** on Open flags tab — bulk-resolves visible open flags (team or company depending on permission). Temporary only while development continues.
+- **Approve all (N)** on Open flags tab — bulk-resolves open flags (team or company depending on permission).
+- Must be **batched** (bulk flag/review updates + bulk punch activate + parallel day rebuilds). Do not approve flags one-by-one serially (hangs on ~200+ flags).
+- Temporary only while development continues.
 
 ### Support packages tab
 - Per package: Approve / Reject (remarks required on reject).
-- Approve activates held punch when linked.
+- Approve activates held punch when linked (original punch time preserved).
 
 ### Notifications
-- **In-app only** on People **home** and **People Pulse** (not a sidebar nav item).
-- Full list: `/notifications`.
+- **In-app only** — bell on **Overview** and **People Pulse** page headers (top-right, beside Open attendance / directory).
+- Not a sidebar nav item.
+- Bell opens a small popover; **Show all notifications** → `/notifications`.
 - Source key pattern: `attendance-flag:{flagId}`.
 
 Partner dashboard `/attendance/integrity` remains a legacy mirror with Approve / Dismiss on flags.
@@ -272,10 +289,11 @@ Partner dashboard `/attendance/integrity` remains a legacy mirror with Approve /
 | Punch UI | Flag / support only | No always-on GPS Punch In/Out |
 | Geofence gate | Camera off outside | Same — disable camera + clear message |
 | Face match | ≥60%, ≤0.42, 3-frame streak | Same thresholds (ML Kit / embeddings) |
-| Liveness | Blink×2 + L + R, anti-shake | Same order; prefer commercial liveness SDK |
+| Liveness | Blink×2 + L + R; soft motion OK; hard-shake reject | Same order; sensitive to real blinks; prefer commercial liveness SDK |
 | Heartbeat cadence | ~3 min client; 2 min server floor | **3–5 min** |
-| Pending punch UX | `pendingApproval` banner | Duty-pending; never treat selfie as Present |
+| Pending punch UX | silent + openFlags only | No duty/monitoring banners; action card only when flags open |
 | Camera remount | Must stay stable during liveness | Do not reset challenges on GPS refresh |
+| Approve punch time | Original punch time, never approval time | Same |
 
 ---
 
@@ -330,7 +348,9 @@ Without these, integrity queues / notifications / pending flag types fail or ret
 | People integrity actions | `dropx-hrms/src/app/attendance/integrity/actions.ts` |
 | Flag modal | `dropx-hrms/src/components/integrity-flag-modal.tsx` |
 | Name/station labels | `dropx-hrms/src/lib/integrity-worker-labels.ts` |
-| Home notifications | `dropx-hrms/src/components/people-notifications-panel.tsx` |
+| Held punch activate / bulk | `dropx-hrms/src/lib/attendance-held-punch.ts` |
+| Notifications bell | `dropx-hrms/src/components/people-notifications-bell.tsx` |
+| Notifications panel (full page) | `dropx-hrms/src/components/people-notifications-panel.tsx` |
 | Attendance sub-tabs | `dropx-hrms/src/components/attendance-section-tabs.tsx` |
 
 ---
@@ -342,11 +362,11 @@ Without these, integrity queues / notifications / pending flag types fail or ret
 3. Connect-linked worker with no recent phone GPS → same flag + hold.
 4. After punch-in, heartbeats for 9h then stop; outside radius >30 min continuous → `outside_geofence_gt_2h`.
 5. Support selfie outside geofence → camera disabled and/or submit rejected.
-6. Support selfie: **face match first**, then blink ×2 + left + right; **printed photo / shaking a photo fails**; upload succeeds; **attendance not marked**.
+6. Support selfie: **face match first**, then blink ×2 + left + right; **natural blinks must pass**; **printed photo / hard shake fails**; upload succeeds; **attendance not marked**.
 7. No always-on GPS Punch In/Out UI.
 8. Mock location / developer options → hard-block.
 9. App/website cannot alter punch lat/lng/time.
-10. Manager **Approve punch** → Present on calendar; **Dismiss/reject** → still absent.
+10. Manager **Approve punch** → Present on calendar at the **original punch time** (not approve time); **Dismiss/reject** → still absent.
 11. Reminders at 9.5h and 10h if no punch-out.
 12. Camera/liveness session does not reset when background GPS refresh runs.
 
@@ -360,7 +380,11 @@ Recent web/People work that Flutter must include (do not ship older behavior):
 - Held punches until People approve; support selfie review-only.
 - Presence GPS + 9h window + 50m/30min continuous outside.
 - Support selfie: **inside geofence → face match → liveness → capture**.
-- Anti-shake liveness (reject photo wave).
-- People centered flag modal with **Approve punch** + **Dismiss**; temporary **Approve all**.
-- Name + allowed station on integrity UI; notifications on home (not sidebar).
+- Liveness: blink×2 sensitive to **real blinks** (~80 ms sampling, one closed frame counts); reject only **hard shake** / still photo — do not over-tighten so natural blinks fail.
+- Head turns L/R after blinks.
+- Approve punch keeps **original punch time** (never manager approve time).
+- People centered flag modal: Approve / Dismiss redirect out; Close is instant.
+- Temporary **Approve all** must be batched (not serial per-flag).
+- Notifications bell on Overview / People Pulse (popover → full `/notifications`).
+- Name + allowed station on integrity UI.
 - Server rejects support evidence outside geofence.
