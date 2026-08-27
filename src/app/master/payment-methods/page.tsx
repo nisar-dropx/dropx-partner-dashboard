@@ -10,6 +10,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { createPaymentField, createPaymentMethod, deletePaymentField, deletePaymentMethod, updatePaymentField, updatePaymentMethod } from "./actions";
 import { cookies } from "next/headers";
+import type { PaymentCalculationSource, PaymentCalculationType } from "@/lib/payment-calculation";
 
 type PaymentComponentRow = {
   id: string;
@@ -28,6 +29,8 @@ type PaymentFieldRow = {
   field_type: "amount" | "production";
   label: string;
   pay_schedule: "per_hour" | "per_day" | "per_month" | null;
+  calculation_type: PaymentCalculationType;
+  calculation_source: PaymentCalculationSource | null;
   is_active: boolean;
   usage_count: number;
 };
@@ -99,7 +102,7 @@ async function loadPaymentMethods(companyId: string) {
 async function loadPaymentFields(companyId: string) {
   if (!supabaseAdmin) return { fields: [] as PaymentFieldRow[], error: "Supabase service role key is not configured." };
   const fieldsResult = await supabaseAdmin.from("payment_fields")
-    .select("id, code, field_type, label, pay_schedule, is_active")
+    .select("id, code, field_type, label, pay_schedule, calculation_type, calculation_source, is_active")
     .eq("company_id", companyId).order("code");
   if (fieldsResult.error) return { fields: [] as PaymentFieldRow[], error: fieldsResult.error.message };
   const usageResult = await supabaseAdmin.from("payment_method_components")
@@ -262,7 +265,7 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
         <div className="modal-backdrop">
           <section className="modal-panel wide payment-fields-modal" aria-label="Payment fields">
             <div className="panel-head">
-              <div><h2>Payment Fields</h2><p className="subtle">Create reusable fields once, then assign them to any payment method.</p></div>
+              <div><h2>Payment Fields</h2><p className="subtle">Create reusable fields and map each one to a normalized shipment, attendance, or performance source.</p></div>
               <PendingLink className="icon-button" href="/master/payment-methods" scroll={false} aria-label="Close">x</PendingLink>
             </div>
             {pagePermission.canAdd ? <div className="payment-field-create"><h3>Add payment field</h3><PaymentFieldForm action={createPaymentField} submitLabel="Add field" /></div> : null}

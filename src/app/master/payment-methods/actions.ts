@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { calculationNeedsSource, PAYMENT_CALCULATION_SOURCES, PAYMENT_CALCULATION_TYPES, type PaymentCalculationType } from "@/lib/payment-calculation";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -146,11 +147,23 @@ function parsePaymentField(formData: FormData) {
   const label = required(formData.get("field_label"), "Field label");
   const fieldType = required(formData.get("field_type"), "Field type");
   const paySchedule = clean(formData.get("pay_schedule"));
+  const calculationType = required(formData.get("calculation_type"), "Calculation type") as PaymentCalculationType;
+  const calculationSource = clean(formData.get("calculation_source"));
   if (!["amount", "production"].includes(fieldType)) throw new Error("Field type must be Amount or Production.");
   if (fieldType === "amount" && !["per_hour", "per_day", "per_month"].includes(paySchedule ?? "")) {
     throw new Error("Amount fields need a pay schedule.");
   }
-  return { code, label, field_type: fieldType, pay_schedule: fieldType === "amount" ? paySchedule : null };
+  if (!PAYMENT_CALCULATION_TYPES.some((option) => option.value === calculationType)) throw new Error("Select a valid calculation type.");
+  if (calculationSource && !PAYMENT_CALCULATION_SOURCES.some((option) => option.value === calculationSource)) throw new Error("Select a valid calculation source.");
+  if (calculationNeedsSource(calculationType) && !calculationSource) throw new Error("This calculation type requires a calculation source.");
+  return {
+    code,
+    label,
+    field_type: fieldType,
+    pay_schedule: fieldType === "amount" ? paySchedule : null,
+    calculation_type: calculationType,
+    calculation_source: calculationNeedsSource(calculationType) ? calculationSource : null
+  };
 }
 
 export async function createPaymentField(formData: FormData) {

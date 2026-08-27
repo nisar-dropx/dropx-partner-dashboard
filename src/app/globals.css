@@ -4188,7 +4188,7 @@ h3 {
 
 .payment-field-form {
   display: grid;
-  grid-template-columns: minmax(130px, .8fr) minmax(180px, 1.25fr) minmax(130px, .8fr) minmax(130px, .8fr) auto;
+  grid-template-columns: minmax(125px, .75fr) minmax(170px, 1fr) minmax(115px, .65fr) minmax(120px, .7fr) minmax(145px, .85fr) minmax(190px, 1.1fr) auto;
   align-items: end;
   gap: 9px;
 }
