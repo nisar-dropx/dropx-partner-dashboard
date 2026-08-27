@@ -35,17 +35,23 @@ function meanEar(points: Point[]) {
   return (left + right) / 2;
 }
 
-function yawRatio(points: Point[]) {
+/**
+ * Positive yaw = nose toward the RIGHT of the raw camera frame.
+ * Selfie video is CSS-mirrored (`scaleX(-1)`), so we invert yaw so
+ * "turn left / right" match what the user sees on screen.
+ */
+function yawRatio(points: Point[], mirroredDisplay: boolean) {
   const nose = points[30];
   const jawLeft = points[1];
   const jawRight = points[15];
   if (!nose || !jawLeft || !jawRight) return 0;
   const midX = (jawLeft.x + jawRight.x) / 2;
   const width = Math.max(1, Math.abs(jawRight.x - jawLeft.x));
-  return (nose.x - midX) / width;
+  const raw = (nose.x - midX) / width;
+  return mirroredDisplay ? -raw : raw;
 }
 
-export async function sampleFacePose(video: HTMLVideoElement) {
+export async function sampleFacePose(video: HTMLVideoElement, options?: { mirroredDisplay?: boolean }) {
   if (video.readyState < 2) return null;
   await ensureFaceModels();
   const faceapi = (
@@ -62,13 +68,14 @@ export async function sampleFacePose(video: HTMLVideoElement) {
     }
   ).faceapi;
   if (!faceapi) return null;
-  const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 });
-  const detection = await faceapi.detectSingleFace(video, options).withFaceLandmarks();
+  // Lower threshold + larger input improves blink/yaw detection on phones.
+  const detector = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.28 });
+  const detection = await faceapi.detectSingleFace(video, detector).withFaceLandmarks();
   const positions = detection?.landmarks?.positions;
   if (!positions?.length) return null;
   return {
     ear: meanEar(positions),
-    yaw: yawRatio(positions)
+    yaw: yawRatio(positions, options?.mirroredDisplay !== false)
   };
 }
 
@@ -77,13 +84,23 @@ export function createLivenessTracker(challenge: LivenessChallenge) {
   if (challenge === "blink") {
     let closed = false;
     let blinks = 0;
-    let openBaseline = 0.28;
+    let openBaseline = 0.26;
+    let samples = 0;
     return {
       ingest(pose: { ear: number; yaw: number } | null) {
-        if (!pose) return { passed: false, progress: blinks / 2, hint: "Center your face, then blink" };
-        if (pose.ear > 0.22) openBaseline = Math.max(openBaseline, pose.ear);
-        const closedThreshold = Math.min(0.19, openBaseline * 0.55);
-        const openThreshold = Math.max(0.22, openBaseline * 0.75);
+        if (!pose) return { passed: false, progress: blinks / 2, hint: "Center your face in the circle, then blink" };
+        samples += 1;
+        // Warm up a few frames so baseline reflects open eyes before counting blinks.
+        if (samples <= 4) {
+          openBaseline = Math.max(0.2, Math.min(0.4, (openBaseline * (samples - 1) + pose.ear) / samples));
+          return { passed: false, progress: 0, hint: "Hold still… then blink naturally twice" };
+        }
+        if (pose.ear > openBaseline * 0.85) {
+          openBaseline = openBaseline * 0.85 + pose.ear * 0.15;
+        }
+        // Soft thresholds: relative drop works across lighting / face size.
+        const closedThreshold = Math.min(0.21, Math.max(0.12, openBaseline * 0.72));
+        const openThreshold = Math.max(closedThreshold + 0.03, openBaseline * 0.88);
         if (!closed && pose.ear < closedThreshold) closed = true;
         else if (closed && pose.ear > openThreshold) {
           closed = false;
@@ -101,8 +118,9 @@ export function createLivenessTracker(challenge: LivenessChallenge) {
   const targetSign = challenge === "turn_left" ? -1 : 1;
   let sawTurn = false;
   let returned = false;
-  const TURN = 0.12;
-  const CENTER = 0.06;
+  // Soft enough for phone selfie + slight turns; still requires real motion.
+  const TURN = 0.08;
+  const CENTER = 0.07;
   return {
     ingest(pose: { ear: number; yaw: number } | null) {
       if (!pose) {
@@ -112,11 +130,12 @@ export function createLivenessTracker(challenge: LivenessChallenge) {
           hint: challenge === "turn_left" ? "Turn your head to your left" : "Turn your head to your right"
         };
       }
-      if (!sawTurn && pose.yaw * targetSign >= TURN) sawTurn = true;
+      const signed = pose.yaw * targetSign;
+      if (!sawTurn && signed >= TURN) sawTurn = true;
       if (sawTurn && Math.abs(pose.yaw) <= CENTER) returned = true;
       return {
         passed: sawTurn && returned,
-        progress: returned ? 1 : sawTurn ? 0.6 : Math.min(0.5, Math.abs(pose.yaw) / TURN),
+        progress: returned ? 1 : sawTurn ? 0.65 : Math.min(0.55, Math.max(0, signed) / TURN),
         hint: returned
           ? "Head turn OK"
           : sawTurn

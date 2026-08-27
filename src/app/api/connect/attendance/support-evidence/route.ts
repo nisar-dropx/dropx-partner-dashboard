@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveCompanyPunchGeofence } from "@/lib/biometric/attendance-gps";
 import {
   fileExtension,
   parseCoordinate,
@@ -34,6 +35,25 @@ export async function POST(request: NextRequest) {
     if (selfie.size > 8 * 1024 * 1024) throw new Error("Selfie must be 8 MB or smaller.");
 
     const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
+
+    const geofence = await resolveCompanyPunchGeofence({
+      companyId: worker.companyId,
+      preferredLocationId: worker.locationId,
+      lat,
+      lng
+    });
+    if (geofence.status === "outside") {
+      const distanceLabel = geofence.distanceM != null ? `${Math.round(geofence.distanceM)}m` : "unknown distance";
+      const allowedLabel = `${Math.round(geofence.radiusM)}m`;
+      const station =
+        geofence.station?.stationCode || geofence.station?.stationName || "station";
+      throw new Error(
+        `You are outside the allowed location (${distanceLabel} from ${station}, allowed ${allowedLabel}). Move inside the station perimeter to submit a support selfie.`
+      );
+    }
+    if (geofence.status === "unknown") {
+      throw new Error("Station geofence is not configured. Contact admin before submitting support evidence.");
+    }
 
     if (flagId) {
       const flagResult = await supabaseAdmin

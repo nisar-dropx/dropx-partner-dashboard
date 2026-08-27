@@ -156,7 +156,7 @@ export function SelfieCapturePanel({
       if (!video || cancelled || busy) return;
       busy = true;
       try {
-        const pose = await sampleFacePose(video);
+        const pose = await sampleFacePose(video, { mirroredDisplay: true });
         if (cancelled || !trackerRef.current) return;
         const result = trackerRef.current.ingest(pose);
         setLivenessHint(result.hint);
@@ -178,7 +178,7 @@ export function SelfieCapturePanel({
     tick().catch(() => undefined);
     const timer = window.setInterval(() => {
       tick().catch(() => undefined);
-    }, 280);
+    }, 180);
     return () => {
       cancelled = true;
       window.clearInterval(timer);

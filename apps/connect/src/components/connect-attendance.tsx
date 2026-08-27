@@ -57,6 +57,15 @@ type OpenFlag = {
   punch_date: string;
   created_at: string;
 };
+type StationGeo = {
+  id: string;
+  code: string | null;
+  name: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  radiusM: number | null;
+};
+
 type PunchStatus = {
   enrolmentId: string;
   locationId: string | null;
@@ -69,8 +78,73 @@ type PunchStatus = {
     pendingApproval?: boolean;
     dutyOnly?: boolean;
   };
+  station: StationGeo | null;
+  stations?: StationGeo[];
   openFlags: OpenFlag[];
 };
+
+type GeofenceGate = {
+  status: "checking" | "inside" | "outside" | "unknown";
+  distanceM: number | null;
+  radiusM: number | null;
+  stationLabel: string;
+  message: string;
+};
+
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(a));
+}
+
+function evaluateClientGeofence(lat: number, lng: number, stations: StationGeo[]): GeofenceGate {
+  const usable = stations.filter(
+    (row) =>
+      row.latitude != null &&
+      row.longitude != null &&
+      Number.isFinite(row.latitude) &&
+      Number.isFinite(row.longitude) &&
+      row.radiusM != null &&
+      row.radiusM > 0
+  );
+  if (!usable.length) {
+    return {
+      status: "unknown",
+      distanceM: null,
+      radiusM: null,
+      stationLabel: "station",
+      message: "Station geofence is not configured. Contact admin."
+    };
+  }
+  const ranked = usable
+    .map((station) => {
+      const distanceM = haversineMeters(lat, lng, station.latitude as number, station.longitude as number);
+      return { station, distanceM, radiusM: station.radiusM as number };
+    })
+    .sort((left, right) => left.distanceM - right.distanceM);
+  const best = ranked[0];
+  const stationLabel = best.station.code || best.station.name || "station";
+  if (best.distanceM <= best.radiusM) {
+    return {
+      status: "inside",
+      distanceM: Math.round(best.distanceM),
+      radiusM: best.radiusM,
+      stationLabel,
+      message: `Inside ${stationLabel} (${Math.round(best.distanceM)}m · allowed ${best.radiusM}m)`
+    };
+  }
+  return {
+    status: "outside",
+    distanceM: Math.round(best.distanceM),
+    radiusM: best.radiusM,
+    stationLabel,
+    message: `You are outside the allowed location (${Math.round(best.distanceM)}m from ${stationLabel}, allowed ${best.radiusM}m). Move inside the station perimeter to enable the camera.`
+  };
+}
 
 const LOCATION_TRACKING_MS = 9 * 60 * 60 * 1000;
 
@@ -325,6 +399,19 @@ export function ConnectAttendance({ account }: { account: Account }) {
       {supportFlag ? <SupportEvidenceSheet
         account={account}
         flag={supportFlag}
+        stations={(() => {
+          const rows = [
+            ...(punchStatus?.station ? [punchStatus.station] : []),
+            ...(punchStatus?.stations ?? [])
+          ];
+          const seen = new Set<string>();
+          return rows.filter((row) => {
+            const key = row.id || `${row.latitude},${row.longitude}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        })()}
         onClose={() => setSupportFlag(null)}
         onSubmitted={() => {
           setSupportFlag(null);
@@ -339,11 +426,13 @@ export function ConnectAttendance({ account }: { account: Account }) {
 function SupportEvidenceSheet({
   account,
   flag,
+  stations,
   onClose,
   onSubmitted
 }: {
   account: Account;
   flag: OpenFlag;
+  stations: StationGeo[];
   onClose: () => void;
   onSubmitted: () => void;
 }) {
@@ -353,12 +442,56 @@ function SupportEvidenceSheet({
   const [selfiePanelOpen, setSelfiePanelOpen] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [geofence, setGeofence] = useState<GeofenceGate>({
+    status: "checking",
+    distanceM: null,
+    radiusM: null,
+    stationLabel: "station",
+    message: "Checking your location…"
+  });
 
   useEffect(() => {
     return () => {
       if (selfiePreview) URL.revokeObjectURL(selfiePreview);
     };
   }, [selfiePreview]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function checkLocation() {
+      setGeofence({
+        status: "checking",
+        distanceM: null,
+        radiusM: null,
+        stationLabel: "station",
+        message: "Checking your location…"
+      });
+      try {
+        const position = await readPosition();
+        if (cancelled) return;
+        setGeofence(evaluateClientGeofence(position.coords.latitude, position.coords.longitude, stations));
+      } catch (reason) {
+        if (cancelled) return;
+        setGeofence({
+          status: "unknown",
+          distanceM: null,
+          radiusM: null,
+          stationLabel: "station",
+          message: reason instanceof Error ? reason.message : "Unable to read location. Allow GPS to continue."
+        });
+      }
+    }
+    checkLocation().catch(() => undefined);
+    const timer = window.setInterval(() => {
+      checkLocation().catch(() => undefined);
+    }, 20_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [stations]);
+
+  const cameraAllowed = geofence.status === "inside";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -368,6 +501,14 @@ function SupportEvidenceSheet({
       if (!selfie) throw new Error("Capture a support selfie.");
       if (!navigator.onLine) throw new Error("Internet is required.");
       const position = await readPosition();
+      const gate = evaluateClientGeofence(position.coords.latitude, position.coords.longitude, stations);
+      setGeofence(gate);
+      if (gate.status === "outside") {
+        throw new Error(gate.message);
+      }
+      if (gate.status !== "inside") {
+        throw new Error(gate.message || "Move inside the allowed station location to submit.");
+      }
       const form = new FormData();
       form.set("accountId", account.id);
       form.set("profileType", account.profileType);
@@ -396,7 +537,7 @@ function SupportEvidenceSheet({
       <header>
         <div>
           <strong>Support selfie + location</strong>
-          <small>Attach evidence for manager / HR review. Location and time are captured automatically.</small>
+          <small>You must be inside the allowed station perimeter. Camera stays off while you are outside.</small>
         </div>
         <button aria-label="Close" onClick={onClose}><X /></button>
       </header>
@@ -406,9 +547,27 @@ function SupportEvidenceSheet({
           <em>{flag.punch_date.split("-").reverse().join("/")}</em>
         </div>
         <p className="dx-form-hint">{flag.message}</p>
+        <div className={`dx-alert ${geofence.status === "inside" ? "ok" : geofence.status === "checking" ? "" : "error"}`} role="status">
+          {geofence.message}
+        </div>
         <div className="dx-selfie-row">
-          <button type="button" className="secondary" onClick={() => setSelfiePanelOpen(true)}>
-            <Camera /> {selfie ? "Retake selfie" : "Capture selfie"}
+          <button
+            type="button"
+            className="secondary"
+            disabled={!cameraAllowed}
+            onClick={() => {
+              if (!cameraAllowed) return;
+              setSelfiePanelOpen(true);
+            }}
+          >
+            <Camera />{" "}
+            {!cameraAllowed
+              ? geofence.status === "checking"
+                ? "Checking location…"
+                : "Camera disabled outside location"
+              : selfie
+                ? "Retake selfie"
+                : "Capture selfie"}
           </button>
           {selfiePreview ? <img alt="Support selfie preview" className="dx-selfie-preview" src={selfiePreview} /> : null}
         </div>
@@ -416,11 +575,11 @@ function SupportEvidenceSheet({
         {error ? <p className="dx-form-error">{error}</p> : null}
         <div className="dx-sheet-actions">
           <button className="secondary" onClick={onClose} type="button">Cancel</button>
-          <button disabled={saving} type="submit">{saving ? "Submitting..." : "Submit for review"}</button>
+          <button disabled={saving || !cameraAllowed || !selfie} type="submit">{saving ? "Submitting..." : "Submit for review"}</button>
         </div>
       </form>
     </aside>
-    {selfiePanelOpen ? (
+    {selfiePanelOpen && cameraAllowed ? (
       <SelfieCapturePanel
         title="Support selfie"
         hint="Complete live checks (blink + head turns), then capture. A printed photo will not pass."
