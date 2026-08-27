@@ -592,7 +592,7 @@ function SupportEvidenceSheet({
     {selfiePanelOpen ? (
       <SelfieCapturePanel
         title="Selfie"
-        hint="Step 1: match your profile face. Step 2: blink twice + turn left/right (hold still — a photo will fail). Step 3: capture."
+        hint="Step 1: match your profile face. Step 2: blink once + turn left/right. Step 3: capture."
         profilePhotoUrl={account.profilePhotoUrl}
         requireFaceMatch
         requireLiveness

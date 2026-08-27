@@ -20,7 +20,7 @@ export type FacePoseSample = {
 export function livenessPrompt(step: LivenessChallenge) {
   switch (step) {
     case "blink":
-      return "Hold still and blink twice (open → close → open)";
+      return "Look at the camera and blink once";
     case "turn_left":
       return "Turn your head slowly to your left, then face forward";
     case "turn_right":
@@ -180,69 +180,66 @@ function motionTooLarge(
 
 /**
  * Incremental liveness checker.
- * Blink uses peak→valley→recover on a rolling EAR window — face-api eyelid
- * landmarks rarely hit a hard "closed" absolute EAR on webcams.
+ * Blink is intentionally loose — manager reviews the stored selfie anyway.
+ * We only need a quick live-face signal (small EAR dip), not strict anti-spoof.
  */
 export function createLivenessTracker(challenge: LivenessChallenge) {
   if (challenge === "blink") {
     let blinks = 0;
     let samples = 0;
     let faceHits = 0;
-    let openBaseline = 0.26;
+    let openBaseline = 0.24;
     let earHistory: number[] = [];
     let inValley = false;
     let valleyMin = 1;
     let reopenCooldown = 0;
-    let hardShakeHits = 0;
     let anchor: { cx: number; cy: number; faceW: number } | null = null;
 
-    const BLINKS_NEEDED = 2;
-    const HISTORY = 12;
+    const BLINKS_NEEDED = 1;
+    const HISTORY = 10;
 
     return {
       ingest(pose: FacePoseSample | null) {
         if (!pose) {
           return {
             passed: false,
-            progress: Math.min(0.12, faceHits / 20),
+            progress: Math.min(0.15, faceHits / 12),
             hint: faceHits ? "Keep your face in the circle, then blink" : "Center your face in the circle"
           };
         }
         faceHits += 1;
         samples += 1;
 
-        if (!anchor || samples <= 5) {
+        if (!anchor || samples <= 2) {
           anchor = { cx: pose.cx, cy: pose.cy, faceW: pose.faceW };
-          if (pose.ear > 0.12) {
-            openBaseline = openBaseline * 0.4 + pose.ear * 0.6;
+          if (pose.ear > 0.1) {
+            openBaseline = openBaseline * 0.3 + pose.ear * 0.7;
             earHistory.push(pose.ear);
           }
           return {
             passed: false,
-            progress: Math.min(0.15, samples / 20),
-            hint: "Hold still — then blink twice"
+            progress: Math.min(0.2, samples / 8),
+            hint: "Blink once when ready"
           };
         }
 
-        // Hard shake only (printed photo / phone wave). Soft motion is OK while blinking.
-        if (motionTooLarge(pose, anchor, { center: 0.14, scale: 0.4 })) {
-          hardShakeHits += 1;
+        // Only reject extreme photo-wave motion; normal blink movement is fine.
+        if (motionTooLarge(pose, anchor, { center: 0.22, scale: 0.55 })) {
           inValley = false;
           valleyMin = 1;
-          reopenCooldown = 0;
           earHistory = [];
           anchor = { cx: pose.cx, cy: pose.cy, faceW: pose.faceW };
           return {
             passed: false,
-            progress: Math.min(0.25, blinks / BLINKS_NEEDED),
-            hint: "Hold still — do not shake the camera or a photo"
+            progress: Math.min(0.3, blinks / BLINKS_NEEDED),
+            hint: "Hold the phone steady and blink"
           };
         }
 
         anchor = {
-          cx: anchor.cx * 0.85 + pose.cx * 0.15,
-          cy: anchor.cy * 0.85 + pose.cy * 0.15,
-          faceW: anchor.faceW * 0.85 + pose.faceW * 0.15
+          cx: anchor.cx * 0.8 + pose.cx * 0.2,
+          cy: anchor.cy * 0.8 + pose.cy * 0.2,
+          faceW: anchor.faceW * 0.8 + pose.faceW * 0.2
         };
 
         earHistory.push(pose.ear);
@@ -250,65 +247,53 @@ export function createLivenessTracker(challenge: LivenessChallenge) {
 
         if (reopenCooldown > 0) {
           reopenCooldown -= 1;
-          // Keep open baseline fresh while waiting between blinks.
-          if (pose.ear > openBaseline * 0.85) {
-            openBaseline = openBaseline * 0.85 + pose.ear * 0.15;
-          }
           return {
             passed: blinks >= BLINKS_NEEDED,
-            progress: Math.min(1, 0.2 + (blinks / BLINKS_NEEDED) * 0.8),
-            hint: blinks >= BLINKS_NEEDED ? "Blink OK" : blinks === 1 ? "Blink once more" : "Hold still and blink twice"
+            progress: blinks >= BLINKS_NEEDED ? 1 : 0.55,
+            hint: blinks >= BLINKS_NEEDED ? "Blink OK" : "Blink once"
           };
         }
 
-        // Recent open-eye reference from the rolling window (ignore deep valleys).
-        const openCandidates = earHistory.filter((v) => v >= openBaseline * 0.75);
-        const recentOpen =
-          openCandidates.length > 0
-            ? openCandidates.reduce((a, b) => a + b, 0) / openCandidates.length
-            : openBaseline;
-        if (pose.ear >= recentOpen * 0.9) {
-          openBaseline = openBaseline * 0.8 + pose.ear * 0.2;
+        if (pose.ear >= openBaseline * 0.85) {
+          openBaseline = openBaseline * 0.7 + pose.ear * 0.3;
         }
 
-        // face-api often only drops EAR ~8–20% on a real blink. Absolute floors miss most blinks.
-        const dropNeeded = Math.max(0.018, openBaseline * 0.1);
+        // Very loose: ~5% dip (min 0.008) is enough — managers review the photo.
+        const dropNeeded = Math.max(0.008, openBaseline * 0.05);
         const closedCut = openBaseline - dropNeeded;
-        const openCut = openBaseline - dropNeeded * 0.35;
+        const openCut = openBaseline - dropNeeded * 0.2;
+
+        // Also accept any clear min/max swing in the short window (noisy webcams).
+        if (!inValley && earHistory.length >= 4) {
+          const hi = Math.max(...earHistory);
+          const lo = Math.min(...earHistory.slice(-5));
+          if (hi - lo >= dropNeeded && pose.ear <= hi - dropNeeded * 0.6) {
+            inValley = true;
+            valleyMin = pose.ear;
+          }
+        }
 
         if (!inValley && pose.ear <= closedCut) {
           inValley = true;
           valleyMin = pose.ear;
         } else if (inValley) {
           valleyMin = Math.min(valleyMin, pose.ear);
-          // Recovered after a clear dip → count one blink.
-          if (pose.ear >= openCut && openBaseline - valleyMin >= dropNeeded) {
-            blinks += 1;
-            inValley = false;
-            valleyMin = 1;
-            reopenCooldown = 4;
-            earHistory = earHistory.slice(-3);
-          } else if (pose.ear > openBaseline * 1.05) {
-            // Lost the valley without enough drop — reset.
-            inValley = false;
-            valleyMin = 1;
+          if (pose.ear >= openCut || pose.ear >= valleyMin + dropNeeded * 0.5) {
+            if (openBaseline - valleyMin >= dropNeeded * 0.7 || Math.max(...earHistory) - valleyMin >= dropNeeded) {
+              blinks += 1;
+              inValley = false;
+              valleyMin = 1;
+              reopenCooldown = 2;
+              earHistory = earHistory.slice(-2);
+            }
           }
         }
 
-        const progress = Math.min(1, 0.2 + (blinks / BLINKS_NEEDED) * 0.8);
+        const progress = Math.min(1, 0.25 + (blinks / BLINKS_NEEDED) * 0.75);
         return {
           passed: blinks >= BLINKS_NEEDED,
           progress,
-          hint:
-            blinks >= BLINKS_NEEDED
-              ? "Blink OK"
-              : blinks === 1
-                ? "Good — blink once more"
-                : inValley
-                  ? "Open your eyes…"
-                  : hardShakeHits
-                    ? "Hold still and blink (not a photo)"
-                    : "Hold still and blink twice"
+          hint: blinks >= BLINKS_NEEDED ? "Blink OK" : inValley ? "Open your eyes…" : "Blink once"
         };
       }
     };

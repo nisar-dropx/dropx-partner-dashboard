@@ -62,7 +62,7 @@ This note tells Codex how to finish the **native Android Flutter** app (`com.dro
 | Face match distance | **≤ 0.42** | face-api euclidean cap |
 | Face match streak | **3 frames** | Consecutive OK before liveness |
 | Liveness sample rate (web) | as-fast-as-detect (recursive) | Do not use fixed interval + busy skip (misses blinks) |
-| Blink detection | peak→valley→recover on EAR (~10% drop) | face-api eyelids rarely hit absolute “closed” |
+| Blink detection | **1 blink**, ~5% EAR dip | Intentionally loose — manager reviews selfie |
 | Blink hard-shake reject | center **> ~0.10** or scale **> ~0.32** | Soft micro-motion allowed |
 | Head-turn yaw peak | **≥ ~0.11** | Then return \|yaw\| **≤ ~0.07** |
 | Accuracy integrity penalty | **> 100 m** | −25 integrity score |
@@ -93,18 +93,16 @@ UI: Connect Attendance → open flag → **Support selfie**.
 ### Step 2 — Liveness (anti photo-spoof)
 Only after face match passes. Order:
 
-1. **Blink twice** — real EAR eye close/open. Soft head/camera micro-motion is OK.
+1. **Blink once** — loose EAR dip (manager reviews selfie). Soft motion OK.
 2. **Turn head left**, then face forward (yaw; not waving the whole photo).
 3. **Turn head right**, then face forward.
 
 **Blink rules (web — match these sensitivities):**
 - Sample pose **as fast as detection finishes** (recursive timeout). Fixed `setInterval` + busy lock drops frames and misses natural blinks.
-- Blink = **peak → valley → recover** on a rolling EAR window. Require about a **10% drop** from open baseline (min ~0.018 absolute) — face-api webcam landmarks rarely hit a hard closed EAR.
+- Blink is **intentionally loose** (manager reviews the stored selfie): **1 blink**, about a **5% EAR dip** (min ~0.008).
 - Use the **more-closed eye** EAR so partial blinks still register.
-- Count **2** blinks with a short cooldown so one blink is not double-counted.
-- Reject only **hard shake** (printed photo / screen wave). Soft motion while blinking is OK.
-- A single missed landmark frame must **not** wipe an in-progress blink.
-- Still photos fail because EAR never dips; waving a photo fails the hard-shake gate.
+- Reject only **extreme** phone/photo wave motion.
+- Still photos usually fail (no EAR dip); head turns L/R remain after blink.
 
 **Head-turn rules (web):**
 - Yaw peak **≥ ~0.11** in the requested direction, then return to center **|yaw| ≤ ~0.07**.
@@ -289,7 +287,7 @@ Partner dashboard `/attendance/integrity` remains a legacy mirror with Approve /
 | Punch UI | Flag / support only | No always-on GPS Punch In/Out |
 | Geofence gate | Camera off outside | Same — disable camera + clear message |
 | Face match | ≥60%, ≤0.42, 3-frame streak | Same thresholds (ML Kit / embeddings) |
-| Liveness | Blink×2 + L + R; soft motion OK; hard-shake reject | Same order; sensitive to real blinks; prefer commercial liveness SDK |
+| Liveness | Blink×1 + L + R (loose) | Manager reviews selfie; prefer commercial SDK on Flutter |
 | Heartbeat cadence | ~3 min client; 2 min server floor | **3–5 min** |
 | Pending punch UX | silent + openFlags only | No duty/monitoring banners; action card only when flags open |
 | Camera remount | Must stay stable during liveness | Do not reset challenges on GPS refresh |
@@ -302,7 +300,7 @@ Partner dashboard `/attendance/integrity` remains a legacy mirror with Approve /
 1. Permissions — fine location, camera, FGS location, notifications; battery optimization guidance.
 2. Attendance screens — calendar/list/punches; Location review only when flags exist; pending-approval banner; no GPS Punch In/Out.
 3. Presence + shift tracker — presence while logged in; 9h after punch-in; heartbeat 3–5 min; Play Integrity + mock/dev/VPN signals.
-4. Support selfie pipeline — geofence → face match → blink×2 → turn L → turn R → capture → upload; never mark Present locally after upload.
+4. Support selfie pipeline — geofence → face match → blink×1 → turn L → turn R → capture → upload; never mark Present locally after upload.
 5. Open-flag polling — refresh punch status periodically so new flags appear without restart.
 6. Do not build — punch edit; force Present; skip match/liveness; always-on GPS punch UI.
 
@@ -362,7 +360,7 @@ Without these, integrity queues / notifications / pending flag types fail or ret
 3. Connect-linked worker with no recent phone GPS → same flag + hold.
 4. After punch-in, heartbeats for 9h then stop; outside radius >30 min continuous → `outside_geofence_gt_2h`.
 5. Support selfie outside geofence → camera disabled and/or submit rejected.
-6. Support selfie: **face match first**, then blink ×2 + left + right; **natural blinks must pass**; **printed photo / hard shake fails**; upload succeeds; **attendance not marked**.
+6. Support selfie: **face match first**, then blink ×1 + left + right (loose); upload succeeds; **attendance not marked**.
 7. No always-on GPS Punch In/Out UI.
 8. Mock location / developer options → hard-block.
 9. App/website cannot alter punch lat/lng/time.
@@ -380,7 +378,7 @@ Recent web/People work that Flutter must include (do not ship older behavior):
 - Held punches until People approve; support selfie review-only.
 - Presence GPS + 9h window + 50m/30min continuous outside.
 - Support selfie: **inside geofence → face match → liveness → capture**.
-- Liveness: blink×2 sensitive to **real blinks** (~80 ms sampling, one closed frame counts); reject only **hard shake** / still photo — do not over-tighten so natural blinks fail.
+- Liveness: blink×1 (loose ~5% EAR dip) then head turns; manager reviews stored selfie.
 - Head turns L/R after blinks.
 - Approve punch keeps **original punch time** (never manager approve time).
 - People centered flag modal: Approve / Dismiss redirect out; Close is instant.
