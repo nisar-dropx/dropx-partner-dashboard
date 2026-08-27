@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { createAttendancePunchNotification } from "@/lib/app-notifications";
 import { istDate, punchLabel, rebuildAttendanceDay } from "@/lib/biometric/attendance";
-import { checkBiometricPhoneMismatch } from "@/lib/biometric/attendance-gps";
+import { checkBiometricPhoneMismatch, tempReleaseStuckHeldPunches } from "@/lib/biometric/attendance-gps";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -591,6 +591,9 @@ export async function POST(request: NextRequest) {
         profileId: enrolment.account_id,
         accountId: enrolment.account_id ?? enrolment.employee_id ?? enrolment.field_executive_id
       });
+      // TEMP: unstick punches held after the old auto-approve-then-hold race.
+      await tempReleaseStuckHeldPunches(device.company_id, canonicalEnrolmentId);
+      await rebuildAttendanceDay(device.company_id, canonicalEnrolmentId, punchDate);
     } catch (mismatchError) {
       console.error("Biometric phone geofence check failed:", mismatchError);
     }

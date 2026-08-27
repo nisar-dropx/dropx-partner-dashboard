@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
 import { loadAttendanceReportRows } from "@/lib/biometric/attendance";
+import { tempReleaseStuckHeldPunches } from "@/lib/biometric/attendance-gps";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
 import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
@@ -112,6 +113,15 @@ export async function GET(request: NextRequest) {
     if (!accountId) throw new Error("Account is required.");
     const range = monthRange(request.nextUrl.searchParams.get("month"));
     const worker = await resolveWorker({ accountId, profileType });
+    // TEMP: unstick held punches so Connect calendar shows the latest biometric punches.
+    const enrolmentKey = cleanEnrolmentId(worker.biometricId);
+    if (enrolmentKey) {
+      await tempReleaseStuckHeldPunches(worker.companyId, enrolmentKey).catch(() => undefined);
+      // Also try padded variants used in biometric enrolments.
+      if (enrolmentKey !== worker.biometricId) {
+        await tempReleaseStuckHeldPunches(worker.companyId, worker.biometricId).catch(() => undefined);
+      }
+    }
     const rows = (await loadAttendanceReportRows({
       companyId: worker.companyId,
       enrolmentIds: [worker.biometricId],

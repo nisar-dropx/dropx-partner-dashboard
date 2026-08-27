@@ -532,6 +532,52 @@ async function maybeTempAutoApproveIntegrityFlag(flagId: string) {
   }
 }
 
+/**
+ * TEMP recovery: activate held punches that were stuck after auto-approve-then-hold race.
+ * Safe to call repeatedly; only touches calculated=false rows.
+ */
+export async function tempReleaseStuckHeldPunches(companyId: string, enrolmentId?: string) {
+  if (!TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY || !supabaseAdmin) return 0;
+
+  const enrolmentVariants = (() => {
+    const raw = String(enrolmentId ?? "").trim();
+    if (!raw) return [] as string[];
+    const normalized = raw.replace(/^0+(?=\d)/, "") || "0";
+    return [...new Set([raw, normalized, normalized.padStart(6, "0"), normalized.padStart(8, "0")])];
+  })();
+
+  let query = supabaseAdmin
+    .from("attendance_punches")
+    .select("id, enrolment_id, punch_date")
+    .eq("company_id", companyId)
+    .eq("calculated", false)
+    .order("punch_time", { ascending: false })
+    .limit(100);
+  if (enrolmentVariants.length === 1) query = query.eq("enrolment_id", enrolmentVariants[0]);
+  else if (enrolmentVariants.length > 1) query = query.in("enrolment_id", enrolmentVariants);
+
+  const held = await query;
+  if (held.error) {
+    console.error("TEMP release stuck held punches query failed", held.error.message);
+    return 0;
+  }
+  let released = 0;
+  for (const row of held.data ?? []) {
+    const punchId = String(row.id);
+    try {
+      const ok = await activateHeldAttendancePunch(punchId);
+      if (ok) released += 1;
+    } catch (error) {
+      console.error(
+        "TEMP release stuck held punch failed",
+        punchId,
+        error instanceof Error ? error.message : error
+      );
+    }
+  }
+  return released;
+}
+
 export async function continuousOutsideMs({
   companyId,
   enrolmentId,
@@ -764,6 +810,7 @@ export async function insertAppGpsPunch({
     .eq("punch_date", punchDate);
   if (existing.error) throw new Error(existing.error.message);
   const nextOrder = (existing.data?.length ?? 0) + 1;
+  const holdForReview = !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY;
 
   const insert = await supabaseAdmin
     .from("attendance_punches")
@@ -784,8 +831,8 @@ export async function insertAppGpsPunch({
       punch_order: nextOrder,
       punch_label: punchLabel(nextOrder),
       worker_status: "Active",
-      // Held until People/manager approve — never Present on calendar before that.
-      calculated: false,
+      // TEMP auto-approve: write to calendar immediately. Otherwise hold until manager approve.
+      calculated: !holdForReview,
       source: "app_gps",
       lat,
       lng,
@@ -802,11 +849,17 @@ export async function insertAppGpsPunch({
       },
       geofence_status: geofence.status,
       distance_m: geofence.distanceM,
-      is_flagged: true
+      is_flagged: holdForReview
     })
     .select("id, punch_time, punch_date, punch_order, punch_label, is_flagged, geofence_status, distance_m, integrity_score, calculated")
     .single();
   if (insert.error) throw new Error(insert.error.message);
+
+  if (!holdForReview) {
+    await rebuildAttendanceDay(companyId, enrolmentId, punchDate).catch((error) => {
+      console.error("Unable to rebuild attendance after TEMP auto-approve GPS punch:", error);
+    });
+  }
 
   const flagIds: string[] = [];
   const pendingFlag = await openIntegrityFlag({
@@ -819,9 +872,11 @@ export async function insertAppGpsPunch({
     punchDate,
     flagType: "pending_selfie_punch",
     severity: integrity.isRisk ? "high" : "medium",
-    message: integrity.isRisk
-      ? `Selfie punch pending manager approval (integrity risk: ${integrity.reasons.join(", ")}).`
-      : "Selfie punch pending manager approval — attendance will update only after approve.",
+    message: holdForReview
+      ? integrity.isRisk
+        ? `Selfie punch pending manager approval (integrity risk: ${integrity.reasons.join(", ")}).`
+        : "Selfie punch pending manager approval — attendance will update only after approve."
+      : "App punch auto-approved (temporary development mode).",
     details: {
       reasons: integrity.reasons,
       signals: integritySignals,
@@ -830,7 +885,7 @@ export async function insertAppGpsPunch({
       lng,
       distanceM: geofence.distanceM,
       radiusM: geofence.radiusM,
-      pendingAttendance: true
+      pendingAttendance: holdForReview
     }
   });
   flagIds.push(pendingFlag.id);
@@ -854,10 +909,10 @@ export async function insertAppGpsPunch({
 
   return {
     punch: insert.data,
-    isFlagged: true,
+    isFlagged: holdForReview,
     flagIds,
-    supportRequired: true,
-    pendingApproval: true
+    supportRequired: holdForReview,
+    pendingApproval: holdForReview
   };
 }
 
@@ -900,6 +955,15 @@ export async function checkBiometricPhoneMismatch({
   // No sample → likely buddy punch / phone left elsewhere without reporting.
   if (!sample.data) {
     if (!accountId && !profileId) return null;
+
+    // Hold before opening the flag. TEMP auto-approve resolves the flag immediately;
+    // if we hold after that, the punch stays stuck off the calendar.
+    if (!TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY) {
+      await holdAttendancePunch(punchId).catch((error) => {
+        console.error("Unable to hold biometric punch for mismatch:", error);
+      });
+    }
+
     const flag = await openIntegrityFlag({
       companyId,
       enrolmentId,
@@ -916,14 +980,11 @@ export async function checkBiometricPhoneMismatch({
         reason: "phone_location_missing",
         windowMs: BIOMETRIC_SAMPLE_WINDOW_MS,
         punchId,
-        pendingAttendance: true
+        pendingAttendance: !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY
       }
     });
-    // Hold punch off calendar until manager approves support package.
-    await holdAttendancePunch(punchId).catch((error) => {
-      console.error("Unable to hold biometric punch for mismatch:", error);
-    });
-    if (flag.created && (accountId || profileId)) {
+
+    if (flag.created && (accountId || profileId) && !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY) {
       await createAppNotification({
         accountId: (accountId ?? profileId) as string,
         companyId,
@@ -976,6 +1037,13 @@ export async function checkBiometricPhoneMismatch({
   const allowedLabel = radiusM != null ? `${Math.round(radiusM)}m` : `${FALLBACK_GEOFENCE_RADIUS_M}m`;
   const stationLabel = stationCode || stationName || "station";
 
+  // Hold before opening the flag so TEMP auto-approve can activate a held punch.
+  if (!TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY) {
+    await holdAttendancePunch(punchId).catch((error) => {
+      console.error("Unable to hold biometric punch for mismatch:", error);
+    });
+  }
+
   const flag = await openIntegrityFlag({
     companyId,
     enrolmentId,
@@ -999,16 +1067,11 @@ export async function checkBiometricPhoneMismatch({
       stationCode,
       stationName,
       punchId,
-      pendingAttendance: true
+      pendingAttendance: !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY
     }
   });
 
-  // First flagged punch stays off calendar until manager resolves/approves.
-  await holdAttendancePunch(punchId).catch((error) => {
-    console.error("Unable to hold biometric punch for mismatch:", error);
-  });
-
-  if (flag.created && (accountId || profileId)) {
+  if (flag.created && (accountId || profileId) && !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY) {
     await createAppNotification({
       accountId: (accountId ?? profileId) as string,
       companyId,
