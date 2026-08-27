@@ -519,6 +519,8 @@ function SupportEvidenceSheet({
     };
   }, [stations]);
 
+  const cameraAllowed = geofence.status === "inside";
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
