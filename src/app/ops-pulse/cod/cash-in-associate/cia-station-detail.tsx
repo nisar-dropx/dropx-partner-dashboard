@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, ChevronDown, ChevronRight, Loader2, Search, Users, BookOpen } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronRight, Download, Loader2, Search, Users, BookOpen } from "lucide-react";
 import { formatAmount } from "@/lib/ops-pulse/cod";
 import {
   addDaysYmd,
@@ -223,6 +223,14 @@ export function CiaStationDetail({
               <button type="button" className="button secondary cia-chip" disabled={pending} onClick={() => applyPreset(90)}>
                 Last 90 days
               </button>
+              <a
+                className="button secondary"
+                href={`/api/ops-pulse/cod/cash-recon/cash-in-associate/report?stationCode=${encodeURIComponent(stationCode)}&fromDate=${showingFrom}&toDate=${showingTo}`}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                title="Download this station's summary, pending-by-driver, shipment detail, and day-wise ledger as an Excel report"
+              >
+                <Download size={14} /> Download report
+              </a>
             </div>
           </div>
 

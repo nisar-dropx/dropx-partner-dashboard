@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Download, Loader2, RefreshCw, Search } from "lucide-react";
 import { PendingLink } from "@/components/pending-link";
 import { addDaysYmd, formatCiaDisplayDate, todayIstYmd } from "@/lib/ops-pulse/cia-types";
 import type { EddBucketKey, EddPackage, EddStationPayload } from "@/lib/ops-pulse/edd-worker";
@@ -288,6 +288,15 @@ export function EddClient({ stationCode }: { stationCode: string }) {
                 ? `${payload.totalCount.toLocaleString("en-IN")} live TIDs · ${formatCiaDisplayDate(payload.window.from)} - ${formatCiaDisplayDate(payload.window.to)} · fetched ${formatFetchedAt(payload.fetchedAt)}`
                 : " "}
           </span>
+
+          <a
+            className={`button secondary${payload ? "" : " disabled"}`}
+            href={payload ? `/api/ops-pulse/edd/report?stationCode=${encodeURIComponent(stationCode)}` : undefined}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            title="Download this station's live backlog as an Excel report"
+          >
+            <Download size={16} /> Download report
+          </a>
 
           <button
             type="button"

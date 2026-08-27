@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Download, Loader2, RefreshCw, Search } from "lucide-react";
 import type { EddBucketKey, EddNetworkRunStatus, EddNetworkStation } from "@/lib/ops-pulse/edd-worker";
 import type { EddStationOption } from "@/lib/ops-pulse/edd-stations";
 import { EddNetworkChart } from "./edd-network-chart";
@@ -255,16 +255,21 @@ export function EddNetworkClient({
             <h3>Stations</h3>
             <p className="subtle">Open a station for its full bucket breakdown, EAD trend, and live tracking ID table.</p>
           </div>
-          <button
-            type="button"
-            className="button secondary"
-            onClick={handleRefreshAll}
-            disabled={startingSweep || sweepRunning}
-            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-          >
-            {startingSweep ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />}
-            {sweepRunning ? "Sweep running…" : startingSweep ? "Starting…" : "Refresh all"}
-          </button>
+          <div className="panel-head-actions">
+            <a className="button secondary" href="/api/ops-pulse/edd/network/report" style={{ display: "inline-flex", alignItems: "center", gap: 6 }} title="Download the network overview as an Excel report">
+              <Download size={16} /> Download report
+            </a>
+            <button
+              type="button"
+              className="button secondary"
+              onClick={handleRefreshAll}
+              disabled={startingSweep || sweepRunning}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              {startingSweep ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />}
+              {sweepRunning ? "Sweep running…" : startingSweep ? "Starting…" : "Refresh all"}
+            </button>
+          </div>
         </div>
 
         {run ? (
