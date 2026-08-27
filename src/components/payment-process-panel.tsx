@@ -441,6 +441,7 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
             </div>
             <form action={processFormAction} className="panel-body" id="payment-process-action-form">
               <input name="request_id" type="hidden" value={processRequest.id} />
+              {rejectConfirmationOpen ? <input name="process_action" type="hidden" value="rejected" /> : null}
               {statusKey(processRequest) === "processed" ? (
                 <div className="modal-inline-message warn">
                   <strong>Return processed payment</strong>
@@ -611,9 +612,7 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
               <button
                 className="button payment-reject-button"
                 form="payment-process-action-form"
-                name="process_action"
                 type="submit"
-                value="rejected"
               >
                 Confirm reject
               </button>
