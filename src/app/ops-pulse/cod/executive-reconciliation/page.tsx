@@ -525,7 +525,10 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                     </div>
                     <CashSubmissionForm
                       businessDate={result.businessDate}
-                      disabled={!permission.canEdit || !savedRows.length || Boolean(selectedClosure?.is_final_submitted)}
+                      // Already submitted (and driver validation may have started) — resubmitting is
+                      // meaningless until the cash sheet changes again, which flips cashSubmitted back
+                      // to false via markCashSubmissionStale.
+                      disabled={!permission.canEdit || !savedRows.length || cashSubmitted || Boolean(selectedClosure?.is_final_submitted)}
                       locationId={defaultLocationId}
                       returnHref={returnHref}
                       stationCode={selectedStation?.station_code ?? ""}
