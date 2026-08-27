@@ -60,6 +60,9 @@ async function fetchDaily(stationCode: string): Promise<EddPerformanceDailyRow[]
   try {
     const url = new URL("/api/ops-pulse/edd/performance/daily", window.location.origin);
     url.searchParams.set("stationCode", stationCode);
+    // 90 days (the route's own cap) — covers Day-wise ledger's 30-day view and
+    // By date's multi-day picker with headroom, in one fetch.
+    url.searchParams.set("days", "90");
     const response = await fetch(url.toString(), { headers: { Accept: "application/json" }, cache: "no-store" });
     if (!response.ok) return [];
     const raw = await response.json().catch(() => ({}));
@@ -153,6 +156,18 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
     <>
       <section className="panel">
         <div className="panel-body edd-toolbar">
+          <PendingLink className="edd-back-link" href="/edd/performance">
+            <ArrowLeft size={14} /> All stations
+          </PendingLink>
+
+          <span className="subtle" style={{ flex: "1 1 auto" }}>
+            {refreshing
+              ? "Pulling today's assigned/delivered/returned/held live from Amazon…"
+              : payload
+                ? `Today (${formatCiaDisplayDate(payload.window.from)}) · fetched ${formatFetchedAt(payload.fetchedAt)} · refreshed automatically every 15 minutes`
+                : " "}
+          </span>
+
           <button
             type="button"
             className="button secondary"
@@ -163,17 +178,6 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
             {refreshing ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />}
             {refreshing ? "Refreshing…" : "Refresh"}
           </button>
-          <span className="subtle" style={{ flex: "1 1 auto" }}>
-            {refreshing
-              ? "Pulling today's assigned/delivered/returned/held live from Amazon…"
-              : payload
-                ? `Today (${formatCiaDisplayDate(payload.window.from)}) · fetched ${formatFetchedAt(payload.fetchedAt)} · refreshed automatically every 15 minutes`
-                : " "}
-          </span>
-
-          <PendingLink className="edd-back-link" href="/edd/performance">
-            <ArrowLeft size={14} /> All stations
-          </PendingLink>
         </div>
       </section>
 

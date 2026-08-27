@@ -18448,6 +18448,7 @@ td strong,
   overflow: hidden;
 }
 .edd-driver-card.open { border-color: var(--brand-dark); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.04); }
+.edd-driver-card.muted { margin-top: 10px; border-style: dashed; background: var(--panel-muted, rgba(0, 0, 0, 0.015)); }
 
 .edd-driver-toggle {
   width: 100%;
