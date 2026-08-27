@@ -202,15 +202,24 @@ export function SelfieCapturePanel({
   }, [phase, needLiveness, livenessDone, challenge]);
 
   // Phase 2 — liveness after identity match.
+  // Sample as fast as detection finishes (not a fixed interval). Fixed timers
+  // + busy locks drop frames and miss ~100–200ms natural blinks.
   useEffect(() => {
     if (phase !== "liveness" || !needLiveness || livenessDone || !ready || previewUrl || modelsLoading) return;
     let cancelled = false;
-    let busy = false;
+    let timer = 0;
+
+    const schedule = (delayMs: number) => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        tick().catch(() => undefined);
+      }, delayMs);
+    };
 
     const tick = async () => {
       const video = videoRef.current;
-      if (!video || cancelled || busy || !trackerRef.current) return;
-      busy = true;
+      if (!video || cancelled || !trackerRef.current) return;
+      const started = performance.now();
       try {
         const pose = await sampleFacePose(video, { mirroredDisplay: true });
         if (cancelled || !trackerRef.current) return;
@@ -224,23 +233,23 @@ export function SelfieCapturePanel({
             setPhase("ready");
             setLivenessHint("Live checks passed — capture your selfie");
             setLivenessProgress(1);
-          } else {
-            setChallengeIndex(next);
+            return;
           }
+          setChallengeIndex(next);
         }
       } finally {
-        busy = false;
+        if (!cancelled) {
+          // Aim for ~15–20 samples/sec when the model is fast; never stack overlap.
+          const elapsed = performance.now() - started;
+          schedule(Math.max(16, 50 - elapsed));
+        }
       }
     };
 
-    tick().catch(() => undefined);
-    // ~12 fps — fast enough to catch natural blinks (~100–150ms).
-    const timer = window.setInterval(() => {
-      tick().catch(() => undefined);
-    }, 80);
+    schedule(0);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
   }, [phase, needLiveness, livenessDone, ready, previewUrl, modelsLoading]);
 

@@ -61,8 +61,8 @@ This note tells Codex how to finish the **native Android Flutter** app (`com.dro
 | Face match percent | **≥ 60%** | Pass threshold |
 | Face match distance | **≤ 0.42** | face-api euclidean cap |
 | Face match streak | **3 frames** | Consecutive OK before liveness |
-| Liveness sample rate (web) | **~80 ms** | Fast enough for natural blinks (~100–150 ms) |
-| Blink closed EAR | **≤ ~86% of open baseline** (clamped ~0.12–0.22) | One closed sample counts |
+| Liveness sample rate (web) | as-fast-as-detect (recursive) | Do not use fixed interval + busy skip (misses blinks) |
+| Blink detection | peak→valley→recover on EAR (~10% drop) | face-api eyelids rarely hit absolute “closed” |
 | Blink hard-shake reject | center **> ~0.10** or scale **> ~0.32** | Soft micro-motion allowed |
 | Head-turn yaw peak | **≥ ~0.11** | Then return \|yaw\| **≤ ~0.07** |
 | Accuracy integrity penalty | **> 100 m** | −25 integrity score |
@@ -98,13 +98,13 @@ Only after face match passes. Order:
 3. **Turn head right**, then face forward.
 
 **Blink rules (web — match these sensitivities):**
-- Sample pose ~**80 ms** so natural blinks are not missed.
-- Closed eye = EAR drops to about **≤ 86%** of the open-eye baseline (clamped roughly **0.12–0.22**).
-- **One** closed sample + reopen counts as one blink (blinks are often &lt;150 ms — do not require many closed frames).
-- Short cooldown after a counted blink so the same blink is not double-counted.
-- Reject only **hard shake** (printed photo / screen wave): face center move **> ~0.10** or face scale change **> ~0.32**. Do **not** cancel a blink for mild motion.
+- Sample pose **as fast as detection finishes** (recursive timeout). Fixed `setInterval` + busy lock drops frames and misses natural blinks.
+- Blink = **peak → valley → recover** on a rolling EAR window. Require about a **10% drop** from open baseline (min ~0.018 absolute) — face-api webcam landmarks rarely hit a hard closed EAR.
+- Use the **more-closed eye** EAR so partial blinks still register.
+- Count **2** blinks with a short cooldown so one blink is not double-counted.
+- Reject only **hard shake** (printed photo / screen wave). Soft motion while blinking is OK.
 - A single missed landmark frame must **not** wipe an in-progress blink.
-- Still photos fail because EAR never drops; waving a photo fails the hard-shake gate.
+- Still photos fail because EAR never dips; waving a photo fails the hard-shake gate.
 
 **Head-turn rules (web):**
 - Yaw peak **≥ ~0.11** in the requested direction, then return to center **|yaw| ≤ ~0.07**.
