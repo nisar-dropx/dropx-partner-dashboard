@@ -612,20 +612,88 @@ export async function fetchEddPerformanceDaily(params: { stationCode: string; da
   }
 
   const rows = Array.isArray(raw.days) ? raw.days : [];
-  return rows.map((row) => {
-    const entry = (row ?? {}) as Record<string, unknown>;
-    return {
-      stationCode: String(entry.stationCode ?? stationCode).toUpperCase(),
-      date: String(entry.date ?? ""),
-      assigned: Number(entry.assigned ?? 0) || 0,
-      delivered: Number(entry.delivered ?? 0) || 0,
-      returned: Number(entry.returned ?? 0) || 0,
-      held: Number(entry.held ?? 0) || 0,
-      yetToDispatch: Number(entry.yetToDispatch ?? 0) || 0,
-      deliveredPct: Number(entry.deliveredPct ?? 0) || 0,
-      returnedPct: Number(entry.returnedPct ?? 0) || 0,
-      heldPct: Number(entry.heldPct ?? 0) || 0,
-      updatedAt: String(entry.updatedAt ?? "")
-    };
+  return rows.map((row) => normalizePerformanceDailyRow((row ?? {}) as Record<string, unknown>, stationCode));
+}
+
+function normalizePerformanceDailyRow(entry: Record<string, unknown>, stationCode: string): EddPerformanceDailyRow {
+  return {
+    stationCode: String(entry.stationCode ?? stationCode).toUpperCase(),
+    date: String(entry.date ?? ""),
+    assigned: Number(entry.assigned ?? 0) || 0,
+    delivered: Number(entry.delivered ?? 0) || 0,
+    returned: Number(entry.returned ?? 0) || 0,
+    held: Number(entry.held ?? 0) || 0,
+    yetToDispatch: Number(entry.yetToDispatch ?? 0) || 0,
+    deliveredPct: Number(entry.deliveredPct ?? 0) || 0,
+    returnedPct: Number(entry.returnedPct ?? 0) || 0,
+    heldPct: Number(entry.heldPct ?? 0) || 0,
+    updatedAt: String(entry.updatedAt ?? "")
+  };
+}
+
+/**
+ * Pulls one specific past day live from Amazon and archives it — used when
+ * "By date" picks a day the archive doesn't have yet (today is never
+ * backfilled this way; it's always tracked live instead).
+ */
+export async function backfillEddPerformanceDay(params: { stationCode: string; date: string }): Promise<EddPerformanceDailyRow> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+
+  const stationCode = params.stationCode.trim().toUpperCase();
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/performance/backfill-day`);
+  url.searchParams.set("stationCode", stationCode);
+  url.searchParams.set("date", params.date);
+
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(60000)
   });
+  const raw = await readJson(response);
+
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  return normalizePerformanceDailyRow((raw.day ?? {}) as Record<string, unknown>, stationCode);
+}
+
+export type EddPerformanceBackfillStatus = { status: "started"; stationCode: string; days: number };
+
+/**
+ * Kicks off a background backfill of the last `days` calendar days for one
+ * station — "download all the monthly data" for the Day-wise ledger.
+ * Returns immediately; poll fetchEddPerformanceDaily for the same station
+ * to watch days fill in.
+ */
+export async function backfillEddPerformanceHistory(params: { stationCode: string; days?: number }): Promise<EddPerformanceBackfillStatus> {
+  const { baseUrl, adminKey } = workerConfig();
+  if (!baseUrl || !adminKey) {
+    throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
+  }
+
+  const stationCode = params.stationCode.trim().toUpperCase();
+  const url = new URL(`${baseUrl}/api/admin/executive/edd/performance/backfill`);
+  url.searchParams.set("stationCode", stationCode);
+  if (params.days) url.searchParams.set("days", String(params.days));
+
+  const response = await fetch(url.toString(), {
+    method: "POST",
+    headers: { "x-admin-key": adminKey, Accept: "application/json" },
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
+  });
+  const raw = await readJson(response);
+
+  if (!response.ok) {
+    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+      code: raw.code == null ? null : String(raw.code)
+    });
+  }
+  return { status: "started", stationCode: String(raw.stationCode ?? stationCode).toUpperCase(), days: Number(raw.days ?? params.days ?? 30) };
 }

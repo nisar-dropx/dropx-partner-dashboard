@@ -1,11 +1,25 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { addDaysYmd, formatCiaDisplayDate, todayIstYmd } from "@/lib/ops-pulse/cia-types";
 import type { EddPerformanceDailyRow } from "@/lib/ops-pulse/edd-worker";
 import { deliverySeverity, deliverySeverityLabel } from "../edd-performance-severity";
-import { EddMultiSelect } from "../edd-multi-select";
+import { EddPerformanceCalendar } from "./edd-performance-calendar";
+
+/** How far back a single day can be fetched live and backfilled on demand — matches the worker's own backfill cap. */
+const MAX_LOOKBACK_DAYS = 90;
+
+/** Client-side call to this dashboard's own API route (never the worker directly — that needs a server-only admin key). */
+async function fetchOrBackfillDay(stationCode: string, date: string): Promise<EddPerformanceDailyRow> {
+  const url = new URL("/api/ops-pulse/edd/performance/backfill-day", window.location.origin);
+  url.searchParams.set("stationCode", stationCode);
+  url.searchParams.set("date", date);
+  const response = await fetch(url.toString(), { method: "POST", headers: { Accept: "application/json" }, cache: "no-store" });
+  const raw = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(String(raw.error ?? `Unable to fetch ${date} (${response.status}).`));
+  return raw.day as EddPerformanceDailyRow;
+}
 
 type DaySummary = {
   date: string;
@@ -18,12 +32,13 @@ type DaySummary = {
 };
 
 /**
- * Pick one or many days and see their combined totals — mirrors the same
- * "select multiple dates" pattern the Ageing page's own date filter already
- * uses (`EddMultiSelect`), plus quick preset chips, with an explicit
- * "Search" button to apply a manual selection (so ticking several
- * checkboxes doesn't recompute the totals on every click). Aggregate
- * numbers only — driver-level detail lives in its own "By associate" tab.
+ * Pick one day from a real calendar (or combine several with the preset
+ * chips) to see totals — a single day missing from the archive is fetched
+ * and archived live from Amazon on the spot (see backfillEddPerformanceDay),
+ * so "By date" never dead-ends on "not swept yet" the way it used to.
+ * Multi-day presets don't auto-fetch every missing day one at a time (that's
+ * what the Day-wise ledger's bulk "Backfill" button is for) — they just
+ * report which of the selected days aren't archived.
  */
 export function EddPerformanceByDate({
   stationCode,
@@ -46,18 +61,25 @@ export function EddPerformanceByDate({
 }) {
   const today = todayIstYmd();
   const yesterday = addDaysYmd(today, -1);
+  const earliestAllowed = addDaysYmd(today, -(MAX_LOOKBACK_DAYS - 1));
 
-  const rowsByDate = useMemo(() => new Map(rows.map((row) => [row.date, row])), [rows]);
+  const [extraRows, setExtraRows] = useState<Map<string, EddPerformanceDailyRow>>(new Map());
+  const [fetchingDate, setFetchingDate] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [appliedDates, setAppliedDates] = useState<Set<string>>(new Set([today]));
+
+  const rowsByDate = useMemo(() => {
+    const map = new Map(rows.map((row) => [row.date, row]));
+    for (const [date, row] of extraRows) map.set(date, row);
+    return map;
+  }, [rows, extraRows]);
+
   const todaySummary: DaySummary = useMemo(
     () => ({ date: today, assigned: todayAssigned, delivered: todayDelivered, returned: todayReturned, held: todayHeld, yetToDispatch: todayYetToDispatch, deliveredPct: todayDeliveredPct }),
     [today, todayAssigned, todayDelivered, todayReturned, todayHeld, todayYetToDispatch, todayDeliveredPct]
   );
 
-  /** Every day this station has data for — today (live) plus whatever the archive holds, newest first. */
-  const availableDates = useMemo(() => {
-    const set = new Set<string>([today, ...rows.map((row) => row.date)]);
-    return [...set].sort((a, b) => b.localeCompare(a));
-  }, [today, rows]);
+  const archivedDates = useMemo(() => new Set(rowsByDate.keys()), [rowsByDate]);
 
   function summaryFor(date: string): DaySummary | null {
     if (date === today) return todaySummary;
@@ -65,16 +87,49 @@ export function EddPerformanceByDate({
     return row ? { date, assigned: row.assigned, delivered: row.delivered, returned: row.returned, held: row.held, yetToDispatch: row.yetToDispatch, deliveredPct: row.deliveredPct } : null;
   }
 
-  const [draftDates, setDraftDates] = useState<Set<string>>(new Set([today]));
-  const [appliedDates, setAppliedDates] = useState<Set<string>>(new Set([today]));
-
   function applyPreset(dates: string[]) {
-    const next = new Set(dates.filter((date) => availableDates.includes(date)));
-    setDraftDates(next);
-    setAppliedDates(next);
+    setFetchError(null);
+    setAppliedDates(new Set(dates.filter((date) => date >= earliestAllowed && date <= today)));
   }
 
-  const dirty = draftDates.size !== appliedDates.size || [...draftDates].some((date) => !appliedDates.has(date));
+  function selectSingleDay(date: string) {
+    setFetchError(null);
+    setAppliedDates(new Set([date]));
+  }
+
+  // A single selected day with no archived data yet (and not today) is
+  // fetched live from Amazon and archived on the spot — the whole point of
+  // "should be able to fetch older data directly if it's not in the snapshot".
+  useEffect(() => {
+    if (appliedDates.size !== 1) return;
+    const [date] = [...appliedDates];
+    if (date === today || rowsByDate.has(date) || date < earliestAllowed) return;
+    if (fetchingDate === date) return;
+
+    let cancelled = false;
+    setFetchingDate(date);
+    setFetchError(null);
+    fetchOrBackfillDay(stationCode, date)
+      .then((row) => {
+        if (cancelled) return;
+        setExtraRows((current) => {
+          const next = new Map(current);
+          next.set(date, row);
+          return next;
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setFetchError(err instanceof Error ? err.message : `Unable to fetch ${formatCiaDisplayDate(date)} from Amazon.`);
+      })
+      .finally(() => {
+        if (!cancelled) setFetchingDate((current) => (current === date ? null : current));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appliedDates, stationCode, today, earliestAllowed]);
 
   const selectedSummaries = useMemo(
     () => [...appliedDates].sort((a, b) => b.localeCompare(a)).map((date) => ({ date, summary: summaryFor(date) })),
@@ -82,7 +137,7 @@ export function EddPerformanceByDate({
     [appliedDates, rowsByDate, todaySummary]
   );
   const found = selectedSummaries.filter((row) => row.summary);
-  const missing = selectedSummaries.filter((row) => !row.summary);
+  const missing = selectedSummaries.filter((row) => !row.summary && row.date !== fetchingDate);
 
   const combined = useMemo(() => {
     const totals = found.reduce(
@@ -103,51 +158,50 @@ export function EddPerformanceByDate({
 
   const severity = combined.assigned > 0 ? deliverySeverity(combined.deliveredPct) : null;
   const rangeLabel = found.length === 1 ? formatCiaDisplayDate(found[0]!.date) : `${found.length} day${found.length === 1 ? "" : "s"} selected`;
+  const selectedSingleDate = appliedDates.size === 1 ? [...appliedDates][0]! : today;
 
   return (
     <section className="panel">
       <div className="panel-head">
         <div>
           <h3>By date</h3>
-          <p className="subtle">Pick one or several days to see combined totals — driver-level detail lives in the By associate tab.</p>
+          <p className="subtle">Pick a day on the calendar (or combine several with the chips) — driver-level detail lives in the By associate tab.</p>
         </div>
       </div>
       <div className="panel-body">
         <div className="edd-preset-row">
-          <button type="button" className={`button secondary edd-chip edd-chip-today${appliedDates.size === 1 && appliedDates.has(today) ? " active" : ""}`} onClick={() => applyPreset([today])}>
+          <button type="button" className={`button secondary edd-chip edd-chip-today${appliedDates.size === 1 && appliedDates.has(today) ? " active" : ""}`} onClick={() => selectSingleDay(today)}>
             Today
           </button>
-          <button type="button" className={`button secondary edd-chip${appliedDates.size === 1 && appliedDates.has(yesterday) ? " active" : ""}`} onClick={() => applyPreset([yesterday])}>
+          <button type="button" className={`button secondary edd-chip${appliedDates.size === 1 && appliedDates.has(yesterday) ? " active" : ""}`} onClick={() => selectSingleDay(yesterday)}>
             Yesterday
           </button>
-          <button type="button" className="button secondary edd-chip" onClick={() => applyPreset(availableDates.slice(0, 7))}>
+          <button type="button" className="button secondary edd-chip" onClick={() => applyPreset(Array.from({ length: 7 }, (_, i) => addDaysYmd(today, -i)))}>
             Last 7 days
           </button>
-          <button type="button" className="button secondary edd-chip" onClick={() => applyPreset(availableDates.slice(0, 30))}>
+          <button type="button" className="button secondary edd-chip" onClick={() => applyPreset(Array.from({ length: 30 }, (_, i) => addDaysYmd(today, -i)))}>
             Last 30 days
           </button>
         </div>
 
-        <div className="edd-range-form" style={{ alignItems: "center" }}>
-          <EddMultiSelect
-            label="days"
-            options={availableDates}
-            selected={draftDates}
-            onChange={setDraftDates}
-            renderOption={(date) => formatCiaDisplayDate(date)}
+        <div style={{ marginTop: 14 }}>
+          <EddPerformanceCalendar
+            selectedDate={selectedSingleDate}
+            onSelectDate={selectSingleDay}
+            archivedDates={archivedDates}
+            today={today}
+            minDate={earliestAllowed}
           />
-          <div className="edd-range-actions">
-            <button
-              type="button"
-              className="button"
-              disabled={draftDates.size === 0 || !dirty}
-              onClick={() => setAppliedDates(new Set(draftDates))}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-            >
-              <Search size={14} /> Search
-            </button>
-          </div>
         </div>
+
+        {fetchingDate ? (
+          <p className="subtle" style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 6 }}>
+            <Loader2 size={14} className="edd-spin" /> Fetching {formatCiaDisplayDate(fetchingDate)} live from Amazon and archiving it…
+          </p>
+        ) : null}
+        {fetchError ? (
+          <p className="subtle" style={{ marginTop: 12, color: "var(--red)" }}>{fetchError}</p>
+        ) : null}
 
         <div style={{ marginTop: 16 }}>
           {found.length ? (
@@ -225,13 +279,13 @@ export function EddPerformanceByDate({
                 </div>
               ) : null}
             </>
-          ) : (
+          ) : !fetchingDate ? (
             <p className="subtle">No archived data for the selected day(s) yet.</p>
-          )}
+          ) : null}
 
           {missing.length ? (
             <p className="subtle" style={{ marginTop: 12 }}>
-              No archived data yet for {missing.map((row) => formatCiaDisplayDate(row.date)).join(", ")} at {stationCode} — not swept/refreshed on {missing.length === 1 ? "that day" : "those days"}, or before the archive started. Totals above exclude {missing.length === 1 ? "it" : "them"}.
+              No archived data yet for {missing.map((row) => formatCiaDisplayDate(row.date)).join(", ")} at {stationCode}. Pick just one of these days to fetch it live, or use "Backfill last 30 days" on the Day-wise ledger tab to fill in a whole range at once.
             </p>
           ) : null}
         </div>

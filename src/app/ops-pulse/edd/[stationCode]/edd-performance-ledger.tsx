@@ -1,25 +1,38 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Loader2 } from "lucide-react";
 import { formatCiaDisplayDate } from "@/lib/ops-pulse/cia-types";
 import type { EddPerformanceDailyRow } from "@/lib/ops-pulse/edd-worker";
 import { deliverySeverity } from "../edd-performance-severity";
 
 type SortColumn = "date" | "assigned" | "deliveredPct";
 type SortDir = "asc" | "desc";
+type BackfillStatus = "idle" | "starting" | "running" | "error";
 
 const PAGE_SIZE = 10;
 
 /**
  * Day-over-day performance history for one station — reads the archive
  * EddPerformanceDailyStore builds up one real day at a time (every sweep
- * and manual refresh upserts today's totals into it). Starts empty on a
- * station that's never been refreshed before this shipped; there's no way
- * to backfill days from before the archive existed. Fetched up to 90 days
- * back (see edd-performance-view.tsx), shown 10 days at a time here.
+ * and manual refresh upserts today's totals into it). A brand-new station
+ * starts empty; "Backfill last 30 days" pulls the missing history straight
+ * from Amazon in the background (see amazon-edd-worker's
+ * eddPerformanceHistory.ts) rather than waiting for it to accumulate one
+ * day at a time going forward. Fetched up to 90 days back (see
+ * edd-performance-view.tsx), shown 10 days at a time here.
  */
-export function EddPerformanceLedger({ rows }: { rows: EddPerformanceDailyRow[] }) {
+export function EddPerformanceLedger({
+  rows,
+  onBackfill,
+  backfillStatus,
+  backfillError
+}: {
+  rows: EddPerformanceDailyRow[];
+  onBackfill: (days: number) => void;
+  backfillStatus: BackfillStatus;
+  backfillError: string | null;
+}) {
   const [sortColumn, setSortColumn] = useState<SortColumn>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [page, setPage] = useState(1);
@@ -57,12 +70,30 @@ export function EddPerformanceLedger({ rows }: { rows: EddPerformanceDailyRow[] 
       <div className="panel-head">
         <div>
           <h3>Day-wise ledger</h3>
-          <p className="subtle">Up to 90 days of archive, 10 per page, most recent first. Builds up from today onward — there's no history before this shipped.</p>
+          <p className="subtle">Up to 90 days of archive, 10 per page, most recent first.</p>
         </div>
+        <button
+          type="button"
+          className="button secondary"
+          onClick={() => onBackfill(30)}
+          disabled={backfillStatus === "starting" || backfillStatus === "running"}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+        >
+          {backfillStatus === "starting" || backfillStatus === "running" ? <Loader2 size={14} className="edd-spin" /> : <Download size={14} />}
+          {backfillStatus === "starting" ? "Starting…" : backfillStatus === "running" ? "Backfilling…" : "Backfill last 30 days"}
+        </button>
       </div>
       <div className="panel-body">
+        {backfillStatus === "running" ? (
+          <p className="subtle" style={{ marginBottom: 10 }}>
+            Pulling the last 30 days from Amazon in the background, one day at a time — this table fills in as each day finishes (a couple of minutes for a full month).
+          </p>
+        ) : null}
+        {backfillStatus === "error" && backfillError ? (
+          <p className="subtle" style={{ marginBottom: 10, color: "var(--red)" }}>{backfillError}</p>
+        ) : null}
         {!rows.length ? (
-          <p className="subtle">No archived days yet — this fills in automatically as the 15-minute sweep (or a manual refresh) runs for this station.</p>
+          <p className="subtle">No archived days yet — click &ldquo;Backfill last 30 days&rdquo; above, or wait for the 15-minute sweep to start filling today in.</p>
         ) : (
           <div className="edd-table-wrap">
             <table className="edd-table">
