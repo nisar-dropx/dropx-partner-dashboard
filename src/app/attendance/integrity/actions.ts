@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { resolveIntegrityFlag } from "@/lib/biometric/attendance-gps";
@@ -12,6 +13,12 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function clean(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
+}
+
+function integrityRedirect(formData: FormData, kind: "error" | "notice", message: string) {
+  const requested = clean(formData.get("return_to"));
+  const returnTo = requested.startsWith("/attendance/integrity") ? requested.split("?")[0] : "/attendance/integrity";
+  redirect(`${returnTo}?tab=reviews&${kind}=${encodeURIComponent(message)}`);
 }
 
 async function assertCanReviewTeamOrIntegrity(companyId: string, userId: string, profileId: string | null) {
@@ -56,10 +63,10 @@ export async function reviewAttendanceLocationPackage(formData: FormData) {
           ? "reject"
           : "";
   const remarks = clean(formData.get("review_remarks"));
-  if (!reviewId) throw new Error("Review id is required.");
-  if (!["approve", "return", "reject"].includes(action)) throw new Error("Choose a valid review action.");
+  if (!reviewId) integrityRedirect(formData, "error", "Review id is required.");
+  if (!["approve", "return", "reject"].includes(action)) integrityRedirect(formData, "error", "Choose a valid review action.");
   if ((action === "return" || action === "reject") && remarks.length < 3) {
-    throw new Error("Enter review remarks.");
+    integrityRedirect(formData, "error", "Enter review remarks when rejecting.");
   }
 
   const existing = await supabaseAdmin
@@ -103,6 +110,7 @@ export async function reviewAttendanceLocationPackage(formData: FormData) {
   }
 
   revalidatePath("/attendance/integrity");
+  integrityRedirect(formData, "notice", action === "approve" ? "Support package approved." : action === "return" ? "Support package returned." : "Support package rejected.");
 }
 
 export async function approveAttendanceIntegrityFlag(formData: FormData) {

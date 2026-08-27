@@ -168,7 +168,7 @@ async function resolveIntegrityAccess(): Promise<{
 export default async function AttendanceIntegrityPage({
   searchParams
 }: {
-  searchParams?: { tab?: string; flagId?: string };
+  searchParams?: { tab?: string; flagId?: string; error?: string; notice?: string };
 }) {
   const { companyId, canEdit, managedProfileIds } = await resolveIntegrityAccess();
   const tab = searchParams?.tab === "flags" || searchParams?.flagId ? "flags" : searchParams?.tab === "reviews" ? "reviews" : "flags";
@@ -223,6 +223,8 @@ export default async function AttendanceIntegrityPage({
             : "People review queue for GPS / outside-zone flags and support selfie packages. Check device location and distance from site."
         }
       />
+      {searchParams?.error ? <div className="panel"><p style={{ color: "var(--danger, #b42318)" }}>{searchParams.error}</p></div> : null}
+      {searchParams?.notice ? <div className="panel"><p>{searchParams.notice}</p></div> : null}
       {loadError ? <div className="panel"><p className="subtle">{loadError}</p></div> : null}
       <div className="panel">
         <div className="panel-head">
@@ -281,6 +283,7 @@ export default async function AttendanceIntegrityPage({
                       {canEdit ? (
                         <form action={reviewAttendanceLocationPackage} className="form-grid" style={{ minWidth: 220 }}>
                           <input type="hidden" name="review_id" value={row.id} />
+                          <input type="hidden" name="return_to" value="/attendance/integrity" />
                           <label>
                             Remarks
                             <textarea name="review_remarks" rows={2} placeholder="Optional notes" />

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { unstable_cache } from "next/cache";
 import { cache } from "react";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
 import { loadEffectivePositionAccess } from "@/lib/position-access";
@@ -145,7 +146,7 @@ function inheritGroupedParentPermissions(permissions: Record<string, PagePermiss
   }
 }
 
-async function ensureMissingCurrentAccessPages(companyId: string) {
+const ensureMissingCurrentAccessPages = unstable_cache(async (companyId: string) => {
   const requiredCodes = ["people_all", "people_review", "people_exceptions", "executive_id_onboarding", "business_documents", "payments", "advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports", "master_payment_banks", "master_payment_heads", "master_contacts", "payment_settings", "imports", "workforce_categories", "workforce_whatsapp", "master_imports", "ops_pulse", "performance", "capacity", "capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring", "ops_reports", "ops_attendance_reports", "daily_submission", "cod", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate", "edd_dashboard", "cod_master", "performance_master", "capacity_master", "biometric_devices", "reports", "attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports", "ai_connector", "amazon_connector", "developer_mode", "cps", "cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "cps_inputs", "cps_unmapped", "service_network", "service_network_master"];
   const { data, error } = await supabaseAdmin!
     .from("app_pages")
@@ -157,7 +158,7 @@ async function ensureMissingCurrentAccessPages(companyId: string) {
   if (requiredCodes.some((code) => !existingCodes.has(code))) {
     await ensureAccessPages(supabaseAdmin!, companyId);
   }
-}
+}, ["current-access-pages-v1"], { revalidate: 3600 });
 
 export const getAuthorization = cache(async (): Promise<AuthorizationContext | null> => {
   const supabase = createServerSupabaseClient();

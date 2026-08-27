@@ -11,6 +11,7 @@ import {
   LogIn,
   LogOut,
   PersonStanding,
+  Target,
   UserRound,
   UserRoundX
 } from "lucide-react";
@@ -125,12 +126,14 @@ export function ConnectDashboard({
   onAttendance,
   onAdvances,
   onLeave,
+  onPerformance,
   onProfile
 }: {
   account: AppAccount;
   onAttendance: () => void;
   onAdvances: () => void;
   onLeave: () => void;
+  onPerformance: () => void;
   onProfile: () => void;
 }) {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -259,6 +262,7 @@ export function ConnectDashboard({
   const profileStatus = profile.status || account.status || "active";
   const attendanceAllowed = (account.pageAccess ?? ["dashboard", "attendance", "settings"]).includes("attendance");
   const leaveAllowed = (account.pageAccess ?? ["dashboard", "attendance", "leave", "settings"]).includes("leave");
+  const performanceAllowed = account.profileType === "employee" || account.profileType === "contractor";
   const trackedDays = attendance.summary.present + attendance.summary.absent + attendance.summary.misPunch;
   const attendanceRate = trackedDays ? Math.round((attendance.summary.present / trackedDays) * 100) : 0;
 
@@ -318,6 +322,7 @@ export function ConnectDashboard({
       <div>
         {attendanceAllowed ? <button onClick={onAttendance}><i className="blue"><Fingerprint /></i><span><strong>Attendance</strong><small>View punches</small></span><ChevronRight /></button> : null}
         {leaveAllowed ? <button onClick={onLeave}><i className="pink"><CalendarDays /></i><span><strong>Time off</strong><small>Request leave</small></span><ChevronRight /></button> : null}
+        {performanceAllowed ? <button onClick={onPerformance}><i className="purple"><Target /></i><span><strong>Performance</strong><small>Goals & reviews</small></span><ChevronRight /></button> : null}
         <button onClick={onAdvances}><i className="amber"><IndianRupee /></i><span><strong>My pay</strong><small>Advances</small></span><ChevronRight /></button>
         <button onClick={onProfile}><i className="green"><UserRound /></i><span><strong>Profile</strong><small>Personal details</small></span><ChevronRight /></button>
       </div>
