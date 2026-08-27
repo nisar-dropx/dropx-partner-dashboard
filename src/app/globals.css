@@ -4162,12 +4162,24 @@ h3 {
 }
 
 .payment-fields-modal {
-  max-width: 1180px;
+  max-width: 1100px;
 }
 
 .payment-field-create {
-  padding: 14px;
+  display: grid;
+  gap: 12px;
+  padding: 18px;
   border-bottom: 1px solid var(--line);
+}
+
+.payment-field-create-head {
+  display: grid;
+  gap: 3px;
+}
+
+.payment-field-create-head h3,
+.payment-field-create-head p {
+  margin: 0;
 }
 
 .payment-field-master-list {
@@ -4178,19 +4190,18 @@ h3 {
 
 .payment-field-master-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 130px auto;
-  align-items: center;
-  gap: 12px;
-  padding: 10px;
+  gap: 10px;
+  padding: 14px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 12px;
+  background: #fff;
 }
 
 .payment-field-form {
   display: grid;
-  grid-template-columns: minmax(125px, .75fr) minmax(170px, 1fr) minmax(115px, .65fr) minmax(120px, .7fr) minmax(145px, .85fr) minmax(190px, 1.1fr) auto;
-  align-items: end;
-  gap: 9px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, .85fr) auto;
+  align-items: stretch;
+  gap: 14px;
 }
 
 .payment-field-form label {
@@ -4202,10 +4213,80 @@ h3 {
   text-transform: uppercase;
 }
 
-@media (max-width: 860px) {
+.payment-field-form-section {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 30px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft, #f8fafc);
+}
+
+.payment-field-identity {
+  grid-template-columns: minmax(125px, .8fr) minmax(180px, 1.25fr) minmax(155px, 1fr) minmax(135px, .8fr);
+}
+
+.payment-field-calculation {
+  grid-template-columns: 1fr;
+}
+
+.payment-field-section-title {
+  position: absolute;
+  top: 9px;
+  left: 12px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.payment-field-calculation-help {
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.payment-field-form-actions {
+  display: flex;
+  align-items: flex-end;
+}
+
+.payment-field-form-actions .button {
+  min-width: 92px;
+}
+
+.payment-field-row-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.payment-field-usage {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 1080px) {
   .payment-field-form,
-  .payment-field-master-row {
+  .payment-field-identity {
     grid-template-columns: 1fr;
+  }
+
+  .payment-field-form-actions {
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 640px) {
+  .payment-field-row-footer {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 

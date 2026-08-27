@@ -1,10 +1,10 @@
 export const PAYMENT_CALCULATION_TYPES = [
-  { value: "manual_input", label: "Manual input" },
-  { value: "count_x_rate", label: "Count x rate" },
-  { value: "fixed_daily", label: "Fixed daily" },
-  { value: "fixed_monthly", label: "Fixed monthly" },
-  { value: "percentage", label: "Percentage of source" },
-  { value: "eligibility_bonus", label: "Eligibility bonus" }
+  { value: "manual_input", label: "Use the configured value" },
+  { value: "count_x_rate", label: "Shipment count x rate" },
+  { value: "fixed_daily", label: "Fixed amount per eligible day" },
+  { value: "fixed_monthly", label: "Fixed amount per month" },
+  { value: "percentage", label: "Percentage of a source value" },
+  { value: "eligibility_bonus", label: "Pay only when eligible" }
 ] as const;
 
 export const PAYMENT_CALCULATION_SOURCES = [
