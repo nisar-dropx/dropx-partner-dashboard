@@ -234,9 +234,10 @@ export function SelfieCapturePanel({
     };
 
     tick().catch(() => undefined);
+    // ~12 fps — fast enough to catch natural blinks (~100–150ms).
     const timer = window.setInterval(() => {
       tick().catch(() => undefined);
-    }, 110);
+    }, 80);
     return () => {
       cancelled = true;
       window.clearInterval(timer);

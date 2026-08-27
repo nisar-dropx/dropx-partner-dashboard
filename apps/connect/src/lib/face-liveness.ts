@@ -98,7 +98,7 @@ function frameCanvasFromVideo(video: HTMLVideoElement) {
   const srcW = video.videoWidth || 0;
   const srcH = video.videoHeight || 0;
   if (!srcW || !srcH) return null;
-  const maxSide = 320;
+  const maxSide = 400;
   const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
   const width = Math.max(1, Math.round(srcW * scale));
   const height = Math.max(1, Math.round(srcH * scale));
@@ -144,8 +144,8 @@ export async function sampleFacePose(
   const input = frame ?? video;
   const frameW = frame?.width || video.videoWidth || 1;
   const frameH = frame?.height || video.videoHeight || 1;
-  // Fast enough to catch real blinks (~100–150ms).
-  const detector = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.25 });
+  // Slightly larger input keeps eye landmarks stable enough to catch blinks.
+  const detector = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.2 });
   try {
     const detection = await faceapi.detectSingleFace(input, detector).withFaceLandmarks();
     const positions = detection?.landmarks ? readLandmarkPositions(detection.landmarks) : null;
@@ -176,7 +176,7 @@ function motionTooLarge(
 /**
  * Incremental liveness checker.
  * Rejects still photos and "shake a printed photo" spoofs by requiring:
- * - blink: EAR drop while face center/size stay stable
+ * - blink: EAR drop while face center/size stay reasonably stable
  * - turn: yaw change with controlled motion, then return to center
  */
 export function createLivenessTracker(challenge: LivenessChallenge) {
@@ -188,12 +188,12 @@ export function createLivenessTracker(challenge: LivenessChallenge) {
     let samples = 0;
     let faceHits = 0;
     let anchor: { cx: number; cy: number; faceW: number } | null = null;
-    let shakeHits = 0;
+    let hardShakeHits = 0;
+    let reopenCooldown = 0;
     return {
       ingest(pose: FacePoseSample | null) {
         if (!pose) {
-          closed = false;
-          closedFrames = 0;
+          // Do not wipe a half-finished blink on a single missed frame.
           return {
             passed: false,
             progress: Math.min(0.12, faceHits / 25),
@@ -203,21 +203,24 @@ export function createLivenessTracker(challenge: LivenessChallenge) {
         faceHits += 1;
         samples += 1;
 
-        if (!anchor || samples <= 8) {
+        if (!anchor || samples <= 6) {
           anchor = { cx: pose.cx, cy: pose.cy, faceW: pose.faceW };
-          openBaseline = openBaseline * 0.55 + pose.ear * 0.45;
+          // Warm baseline from open-eye samples only.
+          if (pose.ear > 0.16) openBaseline = openBaseline * 0.5 + pose.ear * 0.5;
           return {
             passed: false,
-            progress: Math.min(0.18, samples / 40),
+            progress: Math.min(0.18, samples / 30),
             hint: "Hold still — then blink naturally twice"
           };
         }
 
-        // Printed-photo shake moves the whole face box; real blinks do not.
-        if (motionTooLarge(pose, anchor, { center: 0.045, scale: 0.18 })) {
-          shakeHits += 1;
+        // Hard shake = waving a printed photo. Soft motion is normal while blinking.
+        const hardShake = motionTooLarge(pose, anchor, { center: 0.1, scale: 0.32 });
+        if (hardShake) {
+          hardShakeHits += 1;
           closed = false;
           closedFrames = 0;
+          reopenCooldown = 0;
           anchor = { cx: pose.cx, cy: pose.cy, faceW: pose.faceW };
           return {
             passed: false,
@@ -228,27 +231,31 @@ export function createLivenessTracker(challenge: LivenessChallenge) {
 
         // Slowly refresh anchor while stable so natural micro-motion is OK.
         anchor = {
-          cx: anchor.cx * 0.85 + pose.cx * 0.15,
-          cy: anchor.cy * 0.85 + pose.cy * 0.15,
-          faceW: anchor.faceW * 0.85 + pose.faceW * 0.15
+          cx: anchor.cx * 0.9 + pose.cx * 0.1,
+          cy: anchor.cy * 0.9 + pose.cy * 0.1,
+          faceW: anchor.faceW * 0.9 + pose.faceW * 0.1
         };
 
-        if (!closed && pose.ear >= openBaseline * 0.92) {
-          openBaseline = openBaseline * 0.92 + pose.ear * 0.08;
+        if (!closed && pose.ear >= openBaseline * 0.9) {
+          openBaseline = openBaseline * 0.9 + pose.ear * 0.1;
         }
 
-        // Real blink: stronger EAR drop than photo tilt, held for a few frames.
-        const closedThreshold = Math.max(0.1, openBaseline * 0.78);
-        const openThreshold = Math.max(closedThreshold + 0.025, openBaseline * 0.9);
+        // Real blinks often drop EAR ~20–40%. Keep this sensitive enough for webcam landmarks.
+        const closedThreshold = Math.max(0.12, Math.min(0.22, openBaseline * 0.86));
+        const openThreshold = Math.max(closedThreshold + 0.02, openBaseline * 0.92);
 
-        if (!closed && pose.ear <= closedThreshold) {
+        if (reopenCooldown > 0) reopenCooldown -= 1;
+
+        if (!closed && reopenCooldown === 0 && pose.ear <= closedThreshold) {
           closed = true;
           closedFrames = 1;
         } else if (closed && pose.ear <= closedThreshold) {
           closedFrames += 1;
         } else if (closed && pose.ear >= openThreshold) {
-          if (closedFrames >= 2) {
+          // One closed sample is enough — natural blinks are often <150ms.
+          if (closedFrames >= 1) {
             blinks += 1;
+            reopenCooldown = 3; // avoid double-counting the same blink
           }
           closed = false;
           closedFrames = 0;
@@ -262,10 +269,10 @@ export function createLivenessTracker(challenge: LivenessChallenge) {
             blinks >= 2
               ? "Blink OK"
               : blinks === 1
-                ? "Blink once more — keep head still"
+                ? "Blink once more"
                 : closed
                   ? "Open your eyes…"
-                  : shakeHits
+                  : hardShakeHits
                     ? "Hold still and blink (not a photo)"
                     : "Hold still and blink naturally twice"
         };
