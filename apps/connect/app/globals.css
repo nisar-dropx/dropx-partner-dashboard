@@ -13065,3 +13065,118 @@ body {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* DropX Today — dashboard metric tiles (alignment fix) */
+.dx-dashboard-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 15px;
+}
+
+.dx-dashboard-metrics .dx-dashboard-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 78px;
+  padding: 10px 8px;
+  border: 0;
+  border-right: 0;
+  border-radius: 15px;
+  background: #f4f6fa;
+  text-align: center;
+}
+
+.dx-dashboard-metrics .dx-dashboard-metric-icon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .72);
+}
+
+.dx-dashboard-metrics .dx-dashboard-metric-icon svg {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+}
+
+.dx-dashboard-metrics .dx-dashboard-metric-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+}
+
+.dx-dashboard-metrics .dx-dashboard-metric-copy small {
+  margin: 0;
+  color: #77736d;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.dx-dashboard-metrics .dx-dashboard-metric-copy strong {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dx-dashboard-metrics .dx-dashboard-metric.green .dx-dashboard-metric-icon {
+  color: #15915f;
+  background: rgba(21, 145, 95, .12);
+}
+
+.dx-dashboard-metrics .dx-dashboard-metric.red .dx-dashboard-metric-icon {
+  color: #c73a45;
+  background: rgba(199, 58, 69, .12);
+}
+
+.dx-dashboard-metrics .dx-dashboard-metric.orange .dx-dashboard-metric-icon {
+  color: #c56a00;
+  background: rgba(197, 106, 0, .12);
+}
+
+.dx-dashboard-metrics .dx-dashboard-metric.purple .dx-dashboard-metric-icon {
+  color: #6d4aff;
+  background: rgba(109, 74, 255, .12);
+}
+
+.dx-dashboard-card.today .dx-dashboard-metrics .dx-dashboard-metric {
+  background: rgba(255, 255, 255, .09);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
+  backdrop-filter: blur(9px);
+}
+
+.dx-dashboard-card.today .dx-dashboard-metrics .dx-dashboard-metric-icon {
+  color: #fff;
+  background: rgba(255, 255, 255, .12);
+}
+
+.dx-dashboard-card.today .dx-dashboard-metrics .dx-dashboard-metric-copy small,
+.dx-dashboard-card.today .dx-dashboard-metrics .dx-dashboard-metric-copy strong {
+  color: #fff;
+}
+
+.dx-dashboard-card.today .dx-dashboard-metrics .dx-dashboard-metric-copy small {
+  opacity: .72;
+}
+
+@media (max-width: 520px) {
+  .dx-dashboard-card.today .dx-dashboard-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

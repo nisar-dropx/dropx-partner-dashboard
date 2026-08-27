@@ -95,6 +95,53 @@ export async function reviewAttendanceLocationPackage(formData: FormData) {
   revalidatePath("/attendance/integrity");
 }
 
+export async function approveAttendanceIntegrityFlag(formData: FormData) {
+  const authorization = await getAuthorization();
+  if (!authorization) throw new Error("Login required.");
+  const companyId = requireCompanyId(authorization);
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+
+  const flagId = clean(formData.get("flag_id"));
+  if (!flagId) throw new Error("Flag id is required.");
+
+  const flag = await supabaseAdmin
+    .from("attendance_integrity_flags")
+    .select("id, profile_id, status")
+    .eq("id", flagId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (flag.error) throw new Error(flag.error.message);
+  if (!flag.data) throw new Error("Flag not found.");
+  if (String(flag.data.status) !== "open") throw new Error("This flag is no longer open.");
+  await assertCanReviewTeamOrIntegrity(companyId, authorization.userId, flag.data.profile_id as string | null);
+
+  const now = new Date().toISOString();
+  const pendingReviews = await supabaseAdmin
+    .from("attendance_location_reviews")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("flag_id", flagId)
+    .in("status", ["pending", "returned"]);
+  if (pendingReviews.error) throw new Error(pendingReviews.error.message);
+
+  for (const review of pendingReviews.data ?? []) {
+    const reviewUpdate = await supabaseAdmin
+      .from("attendance_location_reviews")
+      .update({
+        status: "approved",
+        reviewed_by: authorization.userId,
+        reviewed_at: now,
+        updated_at: now
+      })
+      .eq("id", review.id)
+      .eq("company_id", companyId);
+    if (reviewUpdate.error) throw new Error(reviewUpdate.error.message);
+  }
+
+  await resolveIntegrityFlag(flagId, authorization.userId);
+  revalidatePath("/attendance/integrity");
+}
+
 export async function dismissAttendanceIntegrityFlag(formData: FormData) {
   const authorization = await getAuthorization();
   if (!authorization) throw new Error("Login required.");

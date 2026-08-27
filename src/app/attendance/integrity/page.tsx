@@ -7,6 +7,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { redirect } from "next/navigation";
 import {
+  approveAttendanceIntegrityFlag,
   dismissAttendanceIntegrityFlag,
   reviewAttendanceLocationPackage
 } from "./actions";
@@ -335,10 +336,16 @@ export default async function AttendanceIntegrityPage({
                     <td><StatusPill status={row.status} /></td>
                     <td>
                       {canEdit ? (
-                        <form action={dismissAttendanceIntegrityFlag}>
-                          <input type="hidden" name="flag_id" value={row.id} />
-                          <SubmitButton className="secondary">Dismiss</SubmitButton>
-                        </form>
+                        <div className="button-row">
+                          <form action={approveAttendanceIntegrityFlag}>
+                            <input type="hidden" name="flag_id" value={row.id} />
+                            <SubmitButton>Approve</SubmitButton>
+                          </form>
+                          <form action={dismissAttendanceIntegrityFlag}>
+                            <input type="hidden" name="flag_id" value={row.id} />
+                            <SubmitButton className="secondary">Dismiss</SubmitButton>
+                          </form>
+                        </div>
                       ) : null}
                     </td>
                   </tr>

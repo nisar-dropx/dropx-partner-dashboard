@@ -98,11 +98,17 @@ function Metric({
   value: string | number;
   tone: "green" | "red" | "orange" | "purple";
 }) {
-  return <div className={`dx-dashboard-metric ${tone}`}>
-    {icon}
-    <small>{label}</small>
-    <strong>{value}</strong>
-  </div>;
+  return (
+    <div className={`dx-dashboard-metric ${tone}`}>
+      <span className="dx-dashboard-metric-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <div className="dx-dashboard-metric-copy">
+        <small>{label}</small>
+        <strong>{value}</strong>
+      </div>
+    </div>
+  );
 }
 
 export function ConnectDashboard({
