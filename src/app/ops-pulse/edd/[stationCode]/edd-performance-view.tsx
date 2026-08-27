@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, BookOpen, CalendarDays, Loader2, RefreshCw, Users } from "lucide-react";
+import { ArrowLeft, BookOpen, CalendarDays, Download, Loader2, RefreshCw, Users } from "lucide-react";
 import { PendingLink } from "@/components/pending-link";
 import { formatCiaDisplayDate } from "@/lib/ops-pulse/cia-types";
 import type { EddPerformanceDailyRow, EddPerformanceNetworkStation, EddPerformancePayload } from "@/lib/ops-pulse/edd-worker";
@@ -204,6 +204,15 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
                 ? `Today (${formatCiaDisplayDate(payload.window.from)}) · fetched ${formatFetchedAt(payload.fetchedAt)} · refreshed automatically every 15 minutes`
                 : " "}
           </span>
+
+          <a
+            className={`button secondary${payload ? "" : " disabled"}`}
+            href={payload ? `/api/ops-pulse/edd/performance/report?stationCode=${encodeURIComponent(stationCode)}` : undefined}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            title="Download today's packages, by-associate rollup, and day-wise ledger as an Excel report"
+          >
+            <Download size={16} /> Download report
+          </a>
 
           <button
             type="button"

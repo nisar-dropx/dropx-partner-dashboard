@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { ChevronDown, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Loader2, RefreshCw, Search } from "lucide-react";
 import { formatAmount } from "@/lib/ops-pulse/cod";
 import {
   ciaSeverity,
@@ -390,6 +390,14 @@ export function CiaNetworkClient({
             </p>
           </div>
           <div className="cia-refresh-actions">
+            <a
+              className="button secondary"
+              href="/api/ops-pulse/cod/cash-recon/cash-in-associate/network/report"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+              title="Download the network overview as an Excel report"
+            >
+              <Download size={16} /> Download report
+            </a>
             <button
               type="button"
               className="button secondary"
