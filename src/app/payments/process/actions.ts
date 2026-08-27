@@ -30,13 +30,14 @@ type PaymentRequestFinalizeRow = {
   beneficiary_account_number: string | null;
   ifsc: string | null;
   beneficiary_ifsc: string | null;
+  status?: string | null;
   approval_status?: string | null;
   current_approver_user_id?: string | null;
   current_approver_role_id: string | null;
   approval_cycle?: number | null;
 };
 
-type PaymentProcessAction = "processing" | "processed" | "returned";
+type PaymentProcessAction = "processing" | "processed" | "returned" | "rejected";
 
 export type PaymentProcessActionState = {
   ok: boolean;
@@ -156,12 +157,13 @@ async function nextApprovalSequence(companyId: string, requestId: string) {
   return Math.max(0, ...(data ?? []).map((row) => Number((row as { sequence_no?: unknown }).sequence_no) || 0)) + 1;
 }
 
-async function insertBankReturnLog(
+async function insertBankDecisionLog(
   companyId: string,
   request: Pick<PaymentRequestFinalizeRow, "id" | "current_approver_role_id" | "approval_cycle">,
   comments: string,
   actorUserId: string | null,
-  actorRoleId: string | null
+  actorRoleId: string | null,
+  action: "returned" | "rejected" = "returned"
 ) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
   const payload: Record<string, unknown> = {
@@ -171,7 +173,7 @@ async function insertBankReturnLog(
     approver_user_id: actorUserId,
     approver_role_id: actorRoleId ?? request.current_approver_role_id,
     role_code: "BANK",
-    action: "returned",
+    action,
     comments,
     approval_cycle: request.approval_cycle ?? 1,
     sequence_no: await nextApprovalSequence(companyId, request.id)
@@ -218,19 +220,26 @@ export async function updatePaymentProcessStatus(
     const action = cleanFormText(formData.get("process_action")).toLowerCase() as PaymentProcessAction;
     const remarks = cleanFormText(formData.get("process_remarks"));
     if (!requestId) throw new Error("Payment request is missing.");
-    if (!["processing", "processed", "returned"].includes(action)) throw new Error("Select a valid process action.");
+    if (!["processing", "processed", "returned", "rejected"].includes(action)) throw new Error("Select a valid process action.");
     if (action === "processed" && !remarks) throw new Error("Enter UTR No to mark this request as processed.");
     if (action === "returned" && !remarks) throw new Error("Enter error remarks to return this request.");
+    if (action === "rejected" && !remarks) throw new Error("Enter rejection remarks to reject this payment request.");
 
     const { data: request, error } = await supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, approval_status, current_approver_user_id, current_approver_role_id, approval_cycle")
+      .select("id, request_no, status, approval_status, current_approver_user_id, current_approver_role_id, approval_cycle")
       .eq("company_id", companyId)
       .eq("id", requestId)
       .single();
     if (error || !request) throw new Error("Payment request was not found.");
     if (String(request.approval_status ?? "").toUpperCase() === "RE_APPROVED" && request.current_approver_user_id !== authorization.userId) {
       throw new Error("This returned request is assigned to another processor.");
+    }
+    if (action === "rejected" && (
+      ["PROCESSED", "REJECTED"].includes(String(request.status ?? "").toUpperCase()) ||
+      ["PROCESSED", "REJECTED"].includes(String(request.approval_status ?? "").toUpperCase())
+    )) {
+      throw new Error("A processed or already rejected payment request cannot be rejected.");
     }
 
     const now = new Date().toISOString();
@@ -292,6 +301,43 @@ export async function updatePaymentProcessStatus(
       };
     }
 
+    if (action === "rejected") {
+      await updatePaymentRequest(companyId, requestId, {
+        status: "rejected",
+        approval_status: "REJECTED",
+        bank_status: "Rejected",
+        bank_processing_remarks: remarks,
+        current_approver_user_id: null,
+        current_approver_role_id: null,
+        updated_at: now
+      });
+      await insertBankDecisionLog(
+        companyId,
+        request,
+        `Rejected: ${remarks}`,
+        authorization.userId,
+        authorization.roleId,
+        "rejected"
+      );
+      await sendPaymentNotification({
+        actorUserId: authorization.userId,
+        companyId,
+        eventType: "payment_reject",
+        remarks,
+        requestId
+      });
+      revalidatePath("/payments/process");
+      revalidatePath("/payments/requests");
+      revalidatePath("/payments/report");
+      return {
+        ok: true,
+        error: "",
+        notice: `${request.request_no} rejected.`,
+        requestId,
+        resultKey: crypto.randomUUID()
+      };
+    }
+
     await updatePaymentRequest(companyId, requestId, {
       status: "returned",
       approval_status: "RETURNED",
@@ -301,7 +347,7 @@ export async function updatePaymentProcessStatus(
       current_approver_role_id: null,
       updated_at: now
     });
-    await insertBankReturnLog(companyId, request, `Returned: ${remarks}`, authorization.userId, authorization.roleId);
+    await insertBankDecisionLog(companyId, request, `Returned: ${remarks}`, authorization.userId, authorization.roleId);
     await sendPaymentNotification({
       actorUserId: authorization.userId,
       companyId,
@@ -409,7 +455,7 @@ export async function finalizePaymentProcess(formData: FormData) {
           current_approver_role_id: null,
           updated_at: now
         });
-        await insertBankReturnLog(companyId, request, remarks, authorization.userId, authorization.roleId);
+        await insertBankDecisionLog(companyId, request, remarks, authorization.userId, authorization.roleId);
         await sendPaymentNotification({
           actorUserId: authorization.userId,
           companyId,

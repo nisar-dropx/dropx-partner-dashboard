@@ -173,6 +173,9 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
   const [selectedBankId, setSelectedBankId] = useState("");
   const [fileType, setFileType] = useState("");
   const [hiddenProcessResultKey, setHiddenProcessResultKey] = useState("");
+  const [processRemarks, setProcessRemarks] = useState("");
+  const [rejectConfirmationOpen, setRejectConfirmationOpen] = useState(false);
+  const [rejectValidationError, setRejectValidationError] = useState("");
 
   useEffect(() => {
     if (finalizeResultKey) setFinalizeOpen(false);
@@ -180,13 +183,27 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
 
   useEffect(() => {
     if (!processResult.ok || !processResult.resultKey || processResult.resultKey === hiddenProcessResultKey) return;
+    setRejectConfirmationOpen(false);
+    setProcessRemarks("");
     setProcessRequest(null);
     router.refresh();
   }, [hiddenProcessResultKey, processResult, router]);
 
   function openProcessRequest(request: PaymentProcessRequest) {
     setHiddenProcessResultKey(processResult.resultKey);
+    setProcessRemarks("");
+    setRejectValidationError("");
+    setRejectConfirmationOpen(false);
     setProcessRequest(request);
+  }
+
+  function requestRejectConfirmation() {
+    if (!processRemarks.trim()) {
+      setRejectValidationError("Enter rejection remarks in the UTR / Error Remarks field before rejecting.");
+      return;
+    }
+    setRejectValidationError("");
+    setRejectConfirmationOpen(true);
   }
 
   const filteredRequests = useMemo(() => {
@@ -422,7 +439,7 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
               </div>
               <button className="modal-close" onClick={() => setProcessRequest(null)} type="button">x</button>
             </div>
-            <form action={processFormAction} className="panel-body">
+            <form action={processFormAction} className="panel-body" id="payment-process-action-form">
               <input name="request_id" type="hidden" value={processRequest.id} />
               {statusKey(processRequest) === "processed" ? (
                 <div className="modal-inline-message warn">
@@ -516,9 +533,20 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
                 <input
                   className="field"
                   name="process_remarks"
+                  onChange={(event) => {
+                    setProcessRemarks(event.target.value);
+                    if (event.target.value.trim()) setRejectValidationError("");
+                  }}
                   placeholder={statusKey(processRequest) === "processed" ? "Reason for return" : "Enter UTR No or error remarks"}
+                  value={processRemarks}
                 />
               </label>
+              {rejectValidationError ? (
+                <div className="modal-inline-message error" role="alert" style={{ marginTop: 10 }}>
+                  <strong>Rejection remarks required</strong>
+                  <span>{rejectValidationError}</span>
+                </div>
+              ) : null}
               {processResult.requestId === processRequest.id &&
               processResult.resultKey !== hiddenProcessResultKey &&
               processResult.error ? (
@@ -538,8 +566,58 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
                 <ProcessActionButton className="payment-return-button" value="returned">
                   {statusKey(processRequest) === "processed" ? "Return processed" : "Return"}
                 </ProcessActionButton>
+                {statusKey(processRequest) !== "processed" ? (
+                  <button
+                    className="button compact payment-reject-button"
+                    onClick={requestRejectConfirmation}
+                    type="button"
+                  >
+                    Reject
+                  </button>
+                ) : null}
               </div>
             </form>
+          </section>
+        </div>
+      ) : null}
+
+      {processRequest && rejectConfirmationOpen ? (
+        <div
+          className="modal-backdrop confirmation-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setRejectConfirmationOpen(false);
+          }}
+        >
+          <section aria-modal="true" className="modal-panel confirmation-dialog" role="alertdialog">
+            <div className="panel-head">
+              <div>
+                <h2>Reject payment request?</h2>
+                <p className="subtle">This is a final rejection by the payment processor.</p>
+              </div>
+            </div>
+            <div className="confirmation-body">
+              <p>
+                Reject <strong>{processRequest.request_no}</strong>? The rejection and remarks will be recorded in request history.
+              </p>
+              <div className="modal-inline-message warn">
+                <strong>Rejection remarks</strong>
+                <span>{processRemarks}</span>
+              </div>
+            </div>
+            <div className="form-actions modal-actions confirmation-actions">
+              <button className="button secondary" onClick={() => setRejectConfirmationOpen(false)} type="button">
+                Cancel
+              </button>
+              <button
+                className="button payment-reject-button"
+                form="payment-process-action-form"
+                name="process_action"
+                type="submit"
+                value="rejected"
+              >
+                Confirm reject
+              </button>
+            </div>
           </section>
         </div>
       ) : null}
