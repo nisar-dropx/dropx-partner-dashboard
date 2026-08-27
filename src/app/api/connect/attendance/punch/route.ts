@@ -7,7 +7,8 @@ import {
   loadStationGeofence,
   parseIntegritySignals,
   resolveCompanyPunchGeofence,
-  TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY
+  TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY,
+  tempReleaseStuckHeldPunches
 } from "@/lib/biometric/attendance-gps";
 import { createAppNotification } from "@/lib/app-notifications";
 import {
@@ -62,6 +63,8 @@ export async function GET(request: NextRequest) {
     const profileType = request.nextUrl.searchParams.get("profileType") ?? "";
     if (!accountId) throw new Error("Account is required.");
     const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
+    // TEMP: repair punches stuck off calendar from the auto-approve/hold race.
+    await tempReleaseStuckHeldPunches(worker.companyId, worker.enrolmentId).catch(() => undefined);
     const shift = await loadOpenShift({
       companyId: worker.companyId,
       enrolmentId: worker.enrolmentId

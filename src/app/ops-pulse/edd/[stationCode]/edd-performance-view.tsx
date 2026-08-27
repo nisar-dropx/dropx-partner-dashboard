@@ -72,6 +72,16 @@ async function fetchDaily(stationCode: string): Promise<EddPerformanceDailyRow[]
   }
 }
 
+/** Kicks off the worker's background backfill for one station — returns immediately, the days themselves fill in over the next minute or two. */
+async function startBackfill(stationCode: string, days: number): Promise<void> {
+  const url = new URL("/api/ops-pulse/edd/performance/backfill", window.location.origin);
+  url.searchParams.set("stationCode", stationCode);
+  url.searchParams.set("days", String(days));
+  const response = await fetch(url.toString(), { method: "POST", headers: { Accept: "application/json" }, cache: "no-store" });
+  const raw = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(String(raw.error ?? `Unable to start the backfill (${response.status}).`));
+}
+
 function formatFetchedAt(value: string) {
   if (!value) return "—";
   const date = new Date(value);
@@ -97,6 +107,8 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
   const [networkAvg, setNetworkAvg] = useState<number | null>(null);
   const [dailyRows, setDailyRows] = useState<EddPerformanceDailyRow[]>([]);
   const [view, setView] = useState<PerformanceView>("associate");
+  const [backfillStatus, setBackfillStatus] = useState<"idle" | "starting" | "running" | "error">("idle");
+  const [backfillError, setBackfillError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!stationCode) return;
@@ -132,6 +144,31 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
       cancelled = true;
     };
   }, [stationCode]);
+
+  // Kicks off the worker's background backfill, then polls the daily
+  // archive every 15s for ~4 minutes so the ledger visibly fills in as
+  // days complete, without the user needing to reload the page.
+  function runBackfill(days: number) {
+    setBackfillStatus("starting");
+    setBackfillError(null);
+    startBackfill(stationCode, days)
+      .then(() => {
+        setBackfillStatus("running");
+        let ticks = 0;
+        const interval = setInterval(() => {
+          ticks += 1;
+          void fetchDaily(stationCode).then(setDailyRows);
+          if (ticks >= 16) {
+            clearInterval(interval);
+            setBackfillStatus("idle");
+          }
+        }, 15000);
+      })
+      .catch((err) => {
+        setBackfillStatus("error");
+        setBackfillError(err instanceof Error ? err.message : "Unable to start the backfill.");
+      });
+  }
 
   function runRefresh() {
     setRefreshing(true);
@@ -273,7 +310,12 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
               todayDeliveredPct={payload.deliveredPct}
             />
           ) : (
-            <EddPerformanceLedger rows={dailyRows} />
+            <EddPerformanceLedger
+              rows={dailyRows}
+              onBackfill={runBackfill}
+              backfillStatus={backfillStatus}
+              backfillError={backfillError}
+            />
           )}
         </>
       ) : null}
