@@ -277,6 +277,18 @@ export function EddClient({ stationCode }: { stationCode: string }) {
     <>
       <section className="panel">
         <div className="panel-body edd-toolbar">
+          <PendingLink className="edd-back-link" href="/edd">
+            <ArrowLeft size={14} /> All stations
+          </PendingLink>
+
+          <span className="subtle" style={{ flex: "1 1 auto" }}>
+            {refreshing
+              ? "Pulling every tracking ID live from Amazon — this can take up to a minute…"
+              : payload
+                ? `${payload.totalCount.toLocaleString("en-IN")} live TIDs · ${formatCiaDisplayDate(payload.window.from)} - ${formatCiaDisplayDate(payload.window.to)} · fetched ${formatFetchedAt(payload.fetchedAt)}`
+                : " "}
+          </span>
+
           <button
             type="button"
             className="button secondary"
@@ -287,18 +299,6 @@ export function EddClient({ stationCode }: { stationCode: string }) {
             {refreshing ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />}
             {refreshing ? "Refreshing live…" : "Refresh live"}
           </button>
-
-          <span className="subtle" style={{ flex: "1 1 auto" }}>
-            {refreshing
-              ? "Pulling every tracking ID live from Amazon — this can take up to a minute…"
-              : payload
-                ? `${payload.totalCount.toLocaleString("en-IN")} live TIDs · ${formatCiaDisplayDate(payload.window.from)} - ${formatCiaDisplayDate(payload.window.to)} · fetched ${formatFetchedAt(payload.fetchedAt)}`
-                : " "}
-          </span>
-
-          <PendingLink className="edd-back-link" href="/edd">
-            <ArrowLeft size={14} /> All stations
-          </PendingLink>
         </div>
       </section>
 

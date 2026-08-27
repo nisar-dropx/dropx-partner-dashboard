@@ -4,6 +4,10 @@ import { revalidatePath } from "next/cache";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { resolveIntegrityFlag } from "@/lib/biometric/attendance-gps";
+import {
+  purgeSupportSelfieForReviewId,
+  purgeSupportSelfiesForFlagIds
+} from "@/lib/purge-support-selfies";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function clean(value: FormDataEntryValue | null) {
@@ -60,7 +64,7 @@ export async function reviewAttendanceLocationPackage(formData: FormData) {
 
   const existing = await supabaseAdmin
     .from("attendance_location_reviews")
-    .select("id, status, flag_id, punch_id, company_id, profile_id")
+    .select("id, status, flag_id, punch_id, company_id, profile_id, selfie_path")
     .eq("id", reviewId)
     .eq("company_id", companyId)
     .maybeSingle();
@@ -92,6 +96,62 @@ export async function reviewAttendanceLocationPackage(formData: FormData) {
     await resolveIntegrityFlag(String(existing.data.flag_id), authorization.userId);
   }
 
+  if (action === "approve") {
+    await purgeSupportSelfieForReviewId(companyId, reviewId).catch((error) => {
+      console.error("approve package selfie purge failed", error instanceof Error ? error.message : error);
+    });
+  }
+
+  revalidatePath("/attendance/integrity");
+}
+
+export async function approveAttendanceIntegrityFlag(formData: FormData) {
+  const authorization = await getAuthorization();
+  if (!authorization) throw new Error("Login required.");
+  const companyId = requireCompanyId(authorization);
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+
+  const flagId = clean(formData.get("flag_id"));
+  if (!flagId) throw new Error("Flag id is required.");
+
+  const flag = await supabaseAdmin
+    .from("attendance_integrity_flags")
+    .select("id, profile_id, status")
+    .eq("id", flagId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (flag.error) throw new Error(flag.error.message);
+  if (!flag.data) throw new Error("Flag not found.");
+  if (String(flag.data.status) !== "open") throw new Error("This flag is no longer open.");
+  await assertCanReviewTeamOrIntegrity(companyId, authorization.userId, flag.data.profile_id as string | null);
+
+  const now = new Date().toISOString();
+  const pendingReviews = await supabaseAdmin
+    .from("attendance_location_reviews")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("flag_id", flagId)
+    .in("status", ["pending", "returned"]);
+  if (pendingReviews.error) throw new Error(pendingReviews.error.message);
+
+  for (const review of pendingReviews.data ?? []) {
+    const reviewUpdate = await supabaseAdmin
+      .from("attendance_location_reviews")
+      .update({
+        status: "approved",
+        reviewed_by: authorization.userId,
+        reviewed_at: now,
+        updated_at: now
+      })
+      .eq("id", review.id)
+      .eq("company_id", companyId);
+    if (reviewUpdate.error) throw new Error(reviewUpdate.error.message);
+  }
+
+  await resolveIntegrityFlag(flagId, authorization.userId);
+  await purgeSupportSelfiesForFlagIds(companyId, [flagId]).catch((error) => {
+    console.error("approve flag selfie purge failed", error instanceof Error ? error.message : error);
+  });
   revalidatePath("/attendance/integrity");
 }
 

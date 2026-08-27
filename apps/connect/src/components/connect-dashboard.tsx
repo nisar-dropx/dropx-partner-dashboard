@@ -55,6 +55,15 @@ type Attendance = {
 type DashboardAlert = {
   label: string;
   danger: boolean;
+  target?: "profile" | "attendance";
+};
+
+type OpenFlagNotice = {
+  id: string;
+  punch_date: string;
+  supportStatus?: "needed" | "pending_review" | "returned";
+  supportSubmitted?: boolean;
+  message?: string;
 };
 
 function localIsoDate(date = new Date()) {
@@ -98,11 +107,17 @@ function Metric({
   value: string | number;
   tone: "green" | "red" | "orange" | "purple";
 }) {
-  return <div className={`dx-dashboard-metric ${tone}`}>
-    {icon}
-    <small>{label}</small>
-    <strong>{value}</strong>
-  </div>;
+  return (
+    <div className={`dx-dashboard-metric ${tone}`}>
+      <span className="dx-dashboard-metric-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <div className="dx-dashboard-metric-copy">
+        <strong>{value}</strong>
+        <small>{label}</small>
+      </div>
+    </div>
+  );
 }
 
 export function ConnectDashboard({
@@ -121,12 +136,14 @@ export function ConnectDashboard({
   const [profile, setProfile] = useState<Profile | null>(null);
   const [attendance, setAttendance] = useState<Attendance | null>(null);
   const [verifications, setVerifications] = useState<Verification[]>([]);
+  const [openFlags, setOpenFlags] = useState<OpenFlagNotice[]>([]);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     setProfile(null);
     setAttendance(null);
+    setOpenFlags([]);
     setError("");
     const executive = account.profileType !== "employee" && account.profileType !== "user";
     const profileUrl = executive
@@ -151,17 +168,42 @@ export function ConnectDashboard({
           const payload = await response.json();
           if (!response.ok) throw new Error(payload.error || "Unable to load verifications.");
           return (payload.verifications ?? []) as Verification[];
+        }),
+      fetch(`/api/connect/attendance/punch?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`)
+        .then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok) return [] as OpenFlagNotice[];
+          return (payload.openFlags ?? []) as OpenFlagNotice[];
         })
-    ]).then(([nextProfile, nextAttendance, nextVerifications]) => {
+        .catch(() => [] as OpenFlagNotice[])
+    ]).then(([nextProfile, nextAttendance, nextVerifications, nextFlags]) => {
       setProfile(nextProfile);
       setAttendance(nextAttendance);
       setVerifications(nextVerifications);
+      setOpenFlags(nextFlags);
     }).catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load dashboard."));
   }, [account.id, account.profileType, refreshKey]);
 
   const alerts = useMemo(() => {
     if (!profile) return [] as DashboardAlert[];
     const rows: DashboardAlert[] = [];
+    for (const flag of openFlags) {
+      const reviewPending = flag.supportStatus === "pending_review" || flag.supportSubmitted === true;
+      const dateLabel = displayDate(flag.punch_date);
+      if (reviewPending) {
+        rows.push({
+          label: `Attendance review pending · ${dateLabel}`,
+          danger: false,
+          target: "attendance"
+        });
+      } else {
+        rows.push({
+          label: `Action needed on Attendance · ${dateLabel}`,
+          danger: true,
+          target: "attendance"
+        });
+      }
+    }
     const fields: Record<string, string> = {
       "Driving licence": profile.editable.drivingLicenseExpiry,
       "Vehicle registration": profile.editable.registrationExpiry,
@@ -174,8 +216,8 @@ export function ConnectDashboard({
       const expiry = parseDate(value);
       if (!expiry) return;
       const days = Math.ceil((expiry.getTime() - start.getTime()) / 86400000);
-      if (days < 0) rows.push({ label: `${label} expired`, danger: true });
-      else if (days <= 30) rows.push({ label: `${label} expires in ${days} days`, danger: false });
+      if (days < 0) rows.push({ label: `${label} expired`, danger: true, target: "profile" });
+      else if (days <= 30) rows.push({ label: `${label} expires in ${days} days`, danger: false, target: "profile" });
     });
     const labels: Record<string, string> = {
       pan: "PAN verification",
@@ -185,11 +227,11 @@ export function ConnectDashboard({
     };
     verifications.forEach((verification) => {
       if (!labels[verification.kind]) return;
-      if (verification.blockSubmit) rows.push({ label: `${labels[verification.kind]} failed`, danger: true });
-      else if (!verification.verified || verification.manualReview) rows.push({ label: `${labels[verification.kind]} requires review`, danger: false });
+      if (verification.blockSubmit) rows.push({ label: `${labels[verification.kind]} failed`, danger: true, target: "profile" });
+      else if (!verification.verified || verification.manualReview) rows.push({ label: `${labels[verification.kind]} requires review`, danger: false, target: "profile" });
     });
-    return rows.slice(0, 4);
-  }, [profile, verifications]);
+    return rows.slice(0, 6);
+  }, [profile, verifications, openFlags]);
 
   if (!profile && !error) return <div className="dx-loader fullscreen"><span /><small>Loading dashboard...</small></div>;
   if (!profile || !attendance) return <div className="dx-alert error">{error}<button onClick={() => setRefreshKey((value) => value + 1)}>Retry</button></div>;
@@ -233,21 +275,37 @@ export function ConnectDashboard({
     <section className="dx-dashboard-card today">
       <header><div><small>Today</small><h2>Attendance</h2></div><Pill text={todayStatus} tone={statusTone} /></header>
       <div className="dx-dashboard-metrics">
-        <Metric icon={<LogIn />} label="IN" value={today?.inTime || "--:--"} tone="green" />
-        <Metric icon={<LogOut />} label="OUT" value={today?.outTime || "--:--"} tone="red" />
-        <Metric icon={<Clock3 />} label="WORK" value={today?.workHours || "00:00"} tone="orange" />
-        <Metric icon={<Fingerprint />} label="PUNCHES" value={today?.punchCount || 0} tone="purple" />
+        <Metric icon={<LogIn />} label="In" value={today?.inTime || "--:--"} tone="green" />
+        <Metric icon={<LogOut />} label="Out" value={today?.outTime || "--:--"} tone="red" />
+        <Metric icon={<Clock3 />} label="Work" value={today?.workHours || "00:00"} tone="orange" />
+        <Metric icon={<Fingerprint />} label="Punches" value={today?.punchCount || 0} tone="purple" />
       </div>
       {attendanceAllowed ? <button className="dx-dashboard-link" onClick={onAttendance}>View attendance <ChevronRight /></button> : null}
     </section>
 
+    {alerts.length ? <section className="dx-dashboard-card">
+      <h2>Requires attention</h2>
+      <div className="dx-dashboard-alerts">
+        {alerts.map((alert) => (
+          <button
+            key={alert.label}
+            onClick={alert.target === "attendance" && attendanceAllowed ? onAttendance : onProfile}
+          >
+            <AlertTriangle className={alert.danger ? "danger" : ""} />
+            <span>{alert.label}</span>
+            <ChevronRight />
+          </button>
+        ))}
+      </div>
+    </section> : null}
+
     <section className="dx-dashboard-card dx-dashboard-summary-card">
       <header><div><small>This month</small><h2>Summary</h2></div></header>
       <div className="dx-dashboard-metrics">
-        <Metric icon={<PersonStanding />} label="PRESENT" value={attendance.summary.present} tone="green" />
-        <Metric icon={<UserRoundX />} label="ABSENT" value={attendance.summary.absent} tone="red" />
-        <Metric icon={<Clock3 />} label="MIS PUNCH" value={attendance.summary.misPunch} tone="orange" />
-        <Metric icon={<Clock3 />} label="TOTAL" value={totalHours} tone="purple" />
+        <Metric icon={<PersonStanding />} label="Present" value={attendance.summary.present} tone="green" />
+        <Metric icon={<UserRoundX />} label="Absent" value={attendance.summary.absent} tone="red" />
+        <Metric icon={<Clock3 />} label="Mis punch" value={attendance.summary.misPunch} tone="orange" />
+        <Metric icon={<Clock3 />} label="Total hrs" value={totalHours} tone="purple" />
       </div>
       <div className="dx-month-progress">
         <span><b>{attendanceRate}%</b><small>Attendance rate</small></span>
@@ -264,17 +322,6 @@ export function ConnectDashboard({
         <button onClick={onProfile}><i className="green"><UserRound /></i><span><strong>Profile</strong><small>Personal details</small></span><ChevronRight /></button>
       </div>
     </section>
-
-    {alerts.length ? <section className="dx-dashboard-card">
-      <h2>Requires attention</h2>
-      <div className="dx-dashboard-alerts">
-        {alerts.map((alert) => <button key={alert.label} onClick={onProfile}>
-          <AlertTriangle className={alert.danger ? "danger" : ""} />
-          <span>{alert.label}</span>
-          <ChevronRight />
-        </button>)}
-      </div>
-    </section> : null}
 
     {latestRequest?.regularization && attendanceAllowed ? <section className="dx-dashboard-card">
       <h2>Recent requests</h2>

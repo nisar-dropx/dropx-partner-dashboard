@@ -21,6 +21,14 @@ export const SHIFT_REMINDER_MS = [9.5 * 60 * 60 * 1000, 10 * 60 * 60 * 1000] as 
 export const BIOMETRIC_SAMPLE_WINDOW_MS = 20 * 60 * 1000;
 export const HEARTBEAT_MIN_INTERVAL_MS = 2 * 60 * 1000;
 
+/**
+ * TEMP development shortcut: auto-resolve integrity flags and activate held punches
+ * so managers do not need Approve / Approve all while review UX is unfinished.
+ * Set ATTENDANCE_INTEGRITY_AUTO_APPROVE=0 (or flip this off) before production go-live.
+ */
+export const TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY =
+  process.env.ATTENDANCE_INTEGRITY_AUTO_APPROVE !== "0";
+
 export type GeofenceStatus = "inside" | "outside" | "unknown";
 
 export type StationGeofence = {
@@ -402,6 +410,7 @@ export async function openIntegrityFlag({
       .select("id, status, flag_type")
       .single();
     if (update.error) throw new Error(update.error.message);
+    await maybeTempAutoApproveIntegrityFlag(String(update.data.id));
     return { id: update.data.id as string, created: false, flagType };
   }
 
@@ -432,7 +441,7 @@ export async function openIntegrityFlag({
   }
 
   const flagId = insert.data.id as string;
-  if (profileId) {
+  if (profileId && !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY) {
     const { notifyAttendanceFlagReviewers } = await import("@/lib/attendance-flag-notifications");
     await notifyAttendanceFlagReviewers({
       companyId,
@@ -447,6 +456,7 @@ export async function openIntegrityFlag({
     });
   }
 
+  await maybeTempAutoApproveIntegrityFlag(flagId);
   return { id: flagId, created: true, flagType };
 }
 
@@ -455,7 +465,7 @@ export async function holdAttendancePunch(punchId: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const punch = await supabaseAdmin
     .from("attendance_punches")
-    .select("id, company_id, enrolment_id, punch_date, calculated")
+    .select("id, company_id, enrolment_id, punch_date, punch_time, calculated")
     .eq("id", punchId)
     .maybeSingle();
   if (punch.error) throw new Error(punch.error.message);
@@ -463,7 +473,11 @@ export async function holdAttendancePunch(punchId: string) {
 
   const update = await supabaseAdmin
     .from("attendance_punches")
-    .update({ calculated: false, is_flagged: true })
+    .update({
+      calculated: false,
+      is_flagged: true,
+      ...(punch.data.punch_time ? { punch_time: punch.data.punch_time } : {})
+    })
     .eq("id", punchId);
   if (update.error) throw new Error(update.error.message);
 
@@ -475,21 +489,45 @@ export async function holdAttendancePunch(punchId: string) {
   return true;
 }
 
+function asIsoTime(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+/** Prefer device capture time; never invent approval/server "now". */
+function effectivePunchTime(punch: { punch_time?: string | null; client_captured_at?: string | null }) {
+  return asIsoTime(punch.client_captured_at) ?? asIsoTime(punch.punch_time);
+}
+
 /** After manager approve: count the held punch toward attendance calendar/daily. */
 export async function activateHeldAttendancePunch(punchId: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-  const punch = await supabaseAdmin
+  let punch = await supabaseAdmin
     .from("attendance_punches")
-    .select("id, company_id, enrolment_id, punch_date, calculated")
+    .select("id, company_id, enrolment_id, punch_date, punch_time, client_captured_at, calculated")
     .eq("id", punchId)
     .maybeSingle();
+  if (punch.error && /client_captured_at|does not exist|schema cache/i.test(punch.error.message)) {
+    punch = await supabaseAdmin
+      .from("attendance_punches")
+      .select("id, company_id, enrolment_id, punch_date, punch_time, calculated")
+      .eq("id", punchId)
+      .maybeSingle();
+  }
   if (punch.error) throw new Error(punch.error.message);
   if (!punch.data) return false;
-  if (punch.data.calculated === true) return false;
 
+  const originalPunchTime = effectivePunchTime(punch.data);
+  if (!originalPunchTime) {
+    throw new Error("Held punch is missing the original punch time.");
+  }
+
+  // Keep the employee's original punch instant — never replace with approval time.
   const update = await supabaseAdmin
     .from("attendance_punches")
-    .update({ calculated: true, is_flagged: false })
+    .update({ calculated: true, is_flagged: false, punch_time: originalPunchTime })
     .eq("id", punchId);
   if (update.error) throw new Error(update.error.message);
 
@@ -524,8 +562,44 @@ export async function resolveIntegrityFlag(flagId: string, resolvedBy: string | 
     .single();
   if (result.error) throw new Error(result.error.message);
 
-  if (existing.data?.punch_id) {
-    await activateHeldAttendancePunch(String(existing.data.punch_id));
+  // Approve any linked support packages so workers are not stuck on "review pending".
+  const reviews = await supabaseAdmin
+    .from("attendance_location_reviews")
+    .update({
+      status: "approved",
+      review_remarks: TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY
+        ? "Auto-approved (temporary development mode)"
+        : null,
+      reviewed_at: now,
+      updated_at: now
+    })
+    .eq("flag_id", flagId)
+    .in("status", ["pending", "returned"])
+    .select("punch_id");
+  if (reviews.error && !/does not exist|schema cache/i.test(reviews.error.message)) {
+    console.error("Unable to auto-approve linked support packages", reviews.error.message);
+  }
+
+  const punchIds = new Set<string>();
+  if (existing.data?.punch_id) punchIds.add(String(existing.data.punch_id));
+  for (const row of reviews.data ?? []) {
+    if (row.punch_id) punchIds.add(String(row.punch_id));
+  }
+  for (const punchId of punchIds) {
+    await activateHeldAttendancePunch(punchId);
+  }
+}
+
+async function maybeTempAutoApproveIntegrityFlag(flagId: string) {
+  if (!TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY || !flagId) return;
+  try {
+    await resolveIntegrityFlag(flagId, null);
+  } catch (error) {
+    console.error(
+      "TEMP auto-approve integrity flag failed",
+      flagId,
+      error instanceof Error ? error.message : error
+    );
   }
 }
 
@@ -801,6 +875,14 @@ export async function insertAppGpsPunch({
   }
 
   const serverReceivedAt = new Date();
+  const clientPunch = clientCapturedAt ? new Date(clientCapturedAt) : null;
+  const clientPunchValid =
+    clientPunch != null &&
+    !Number.isNaN(clientPunch.getTime()) &&
+    clientPunch.getTime() - serverReceivedAt.getTime() <= 5 * 60_000 &&
+    serverReceivedAt.getTime() - clientPunch.getTime() <= 24 * 60 * 60_000;
+  // Use the time the worker punched on device, not server/approval time.
+  const punchAt = clientPunchValid && clientPunch ? clientPunch : serverReceivedAt;
   // Count all punches for ordering (held + calculated). Held selfie punches do not
   // write attendance_daily until a manager approves the support package.
   const punchDate = await resolveAttendanceWorkDate({
@@ -810,7 +892,7 @@ export async function insertAppGpsPunch({
     enrolmentId,
     fieldExecutiveId,
     profileType,
-    punchTime: serverReceivedAt
+    punchTime: punchAt
   });
   const existing = await supabaseAdmin
     .from("attendance_punches")
@@ -835,7 +917,7 @@ export async function insertAppGpsPunch({
       field_executive_id: fieldExecutiveId,
       location_id: locationId,
       device_serial: APP_GPS_DEVICE_SERIAL,
-      punch_time: serverReceivedAt.toISOString(),
+      punch_time: punchAt.toISOString(),
       punch_date: punchDate,
       punch_order: nextOrder,
       punch_label: punchLabel(nextOrder),

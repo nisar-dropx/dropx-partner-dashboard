@@ -322,15 +322,26 @@ export async function refreshEddStation(params: { stationCode: string }): Promis
 export type EddPerformancePackage = {
   trackingId: string;
   state: string | null;
-  bucket: "delivered" | "returned" | "held";
+  bucket: "delivered" | "returned" | "held" | "yetToDispatch";
   driverId: string | null;
   driverName: string | null;
+  /** True when this "driver" is actually a locker/store access point, not a person — see amazon-edd-worker's eddPerformanceSnapshot.ts. */
+  isAccessPoint: boolean;
   paymentMethod: string | null;
   city: string | null;
   orderingOrderId: string | null;
 };
 
 /** Assigned / delivered / returned / held for one station, always "today" (IST) — see the worker's PERFORMANCE_* config for exactly what counts as each bucket. */
+/**
+ * `assigned` is packages actually dispatched to a driver or store —
+ * delivered + returned + held — and deliberately excludes `yetToDispatch`
+ * (packages still sitting at the station with no driver/store attached,
+ * e.g. just INDUCTED): those haven't started a delivery attempt, so
+ * folding them into "assigned" would understate the real delivery
+ * percentage. See amazon-edd-worker's PerformancePayload for the full
+ * rationale — this mirrors that type exactly.
+ */
 export type EddPerformancePayload = {
   stationCode: string;
   window: { from: string; to: string };
@@ -339,6 +350,7 @@ export type EddPerformancePayload = {
   delivered: number;
   returned: number;
   held: number;
+  yetToDispatch: number;
   deliveredPct: number;
   returnedPct: number;
   heldPct: number;
@@ -353,6 +365,7 @@ export type EddPerformanceDailyRow = {
   delivered: number;
   returned: number;
   held: number;
+  yetToDispatch: number;
   deliveredPct: number;
   returnedPct: number;
   heldPct: number;
@@ -372,6 +385,7 @@ export type EddPerformanceNetworkStation = {
   delivered: number;
   returned: number;
   held: number;
+  yetToDispatch: number;
   deliveredPct: number;
   returnedPct: number;
   heldPct: number;
@@ -385,7 +399,7 @@ export type EddPerformanceNetworkPayload = {
 
 function normalizePerformancePackage(raw: Record<string, unknown>): EddPerformancePackage {
   const bucket = String(raw.bucket ?? "held");
-  const validBucket: EddPerformancePackage["bucket"] = ["delivered", "returned", "held"].includes(bucket)
+  const validBucket: EddPerformancePackage["bucket"] = ["delivered", "returned", "held", "yetToDispatch"].includes(bucket)
     ? (bucket as EddPerformancePackage["bucket"])
     : "held";
   return {
@@ -394,6 +408,7 @@ function normalizePerformancePackage(raw: Record<string, unknown>): EddPerforman
     bucket: validBucket,
     driverId: raw.driverId == null ? null : String(raw.driverId),
     driverName: raw.driverName == null ? null : String(raw.driverName),
+    isAccessPoint: Boolean(raw.isAccessPoint),
     paymentMethod: raw.paymentMethod == null ? null : String(raw.paymentMethod),
     city: raw.city == null ? null : String(raw.city),
     orderingOrderId: raw.orderingOrderId == null ? null : String(raw.orderingOrderId)
@@ -413,6 +428,7 @@ function normalizePerformancePayload(raw: Record<string, unknown>, stationCode: 
     delivered: Number(raw.delivered ?? 0) || 0,
     returned: Number(raw.returned ?? 0) || 0,
     held: Number(raw.held ?? 0) || 0,
+    yetToDispatch: Number(raw.yetToDispatch ?? 0) || 0,
     deliveredPct: Number(raw.deliveredPct ?? 0) || 0,
     returnedPct: Number(raw.returnedPct ?? 0) || 0,
     heldPct: Number(raw.heldPct ?? 0) || 0,
@@ -509,6 +525,7 @@ export async function fetchEddPerformanceNetwork(): Promise<EddPerformanceNetwor
           delivered: Number(entry.delivered ?? 0) || 0,
           returned: Number(entry.returned ?? 0) || 0,
           held: Number(entry.held ?? 0) || 0,
+          yetToDispatch: Number(entry.yetToDispatch ?? 0) || 0,
           deliveredPct: Number(entry.deliveredPct ?? 0) || 0,
           returnedPct: Number(entry.returnedPct ?? 0) || 0,
           heldPct: Number(entry.heldPct ?? 0) || 0
@@ -604,6 +621,7 @@ export async function fetchEddPerformanceDaily(params: { stationCode: string; da
       delivered: Number(entry.delivered ?? 0) || 0,
       returned: Number(entry.returned ?? 0) || 0,
       held: Number(entry.held ?? 0) || 0,
+      yetToDispatch: Number(entry.yetToDispatch ?? 0) || 0,
       deliveredPct: Number(entry.deliveredPct ?? 0) || 0,
       returnedPct: Number(entry.returnedPct ?? 0) || 0,
       heldPct: Number(entry.heldPct ?? 0) || 0,

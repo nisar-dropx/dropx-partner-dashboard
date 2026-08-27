@@ -60,6 +60,9 @@ async function fetchDaily(stationCode: string): Promise<EddPerformanceDailyRow[]
   try {
     const url = new URL("/api/ops-pulse/edd/performance/daily", window.location.origin);
     url.searchParams.set("stationCode", stationCode);
+    // 90 days (the route's own cap) — covers Day-wise ledger's 30-day view and
+    // By date's multi-day picker with headroom, in one fetch.
+    url.searchParams.set("days", "90");
     const response = await fetch(url.toString(), { headers: { Accept: "application/json" }, cache: "no-store" });
     if (!response.ok) return [];
     const raw = await response.json().catch(() => ({}));
@@ -153,6 +156,18 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
     <>
       <section className="panel">
         <div className="panel-body edd-toolbar">
+          <PendingLink className="edd-back-link" href="/edd/performance">
+            <ArrowLeft size={14} /> All stations
+          </PendingLink>
+
+          <span className="subtle" style={{ flex: "1 1 auto" }}>
+            {refreshing
+              ? "Pulling today's assigned/delivered/returned/held live from Amazon…"
+              : payload
+                ? `Today (${formatCiaDisplayDate(payload.window.from)}) · fetched ${formatFetchedAt(payload.fetchedAt)} · refreshed automatically every 15 minutes`
+                : " "}
+          </span>
+
           <button
             type="button"
             className="button secondary"
@@ -163,17 +178,6 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
             {refreshing ? <Loader2 size={16} className="edd-spin" /> : <RefreshCw size={16} />}
             {refreshing ? "Refreshing…" : "Refresh"}
           </button>
-          <span className="subtle" style={{ flex: "1 1 auto" }}>
-            {refreshing
-              ? "Pulling today's assigned/delivered/returned/held live from Amazon…"
-              : payload
-                ? `Today (${formatCiaDisplayDate(payload.window.from)}) · fetched ${formatFetchedAt(payload.fetchedAt)} · refreshed automatically every 15 minutes`
-                : " "}
-          </span>
-
-          <PendingLink className="edd-back-link" href="/edd/performance">
-            <ArrowLeft size={14} /> All stations
-          </PendingLink>
         </div>
       </section>
 
@@ -216,11 +220,18 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
               </div>
               <strong>{payload.deliveredPct}%</strong>
               <small>{payload.delivered.toLocaleString("en-IN")} of {assigned.toLocaleString("en-IN")} assigned packages delivered today</small>
-              {diffVsNetwork != null ? (
+              {diffVsNetwork != null || payload.yetToDispatch > 0 ? (
                 <div className="edd-insight-row">
-                  <span className={`edd-insight-chip ${diffVsNetwork >= 0 ? "positive" : "negative"}`}>
-                    <strong>{diffVsNetwork >= 0 ? "+" : ""}{diffVsNetwork} pts</strong> vs. network average ({networkAvg}%)
-                  </span>
+                  {diffVsNetwork != null ? (
+                    <span className={`edd-insight-chip ${diffVsNetwork >= 0 ? "positive" : "negative"}`}>
+                      <strong>{diffVsNetwork >= 0 ? "+" : ""}{diffVsNetwork} pts</strong> vs. network average ({networkAvg}%)
+                    </span>
+                  ) : null}
+                  {payload.yetToDispatch > 0 ? (
+                    <span className="edd-insight-chip" title="Still at the station, no driver or store attached yet — not counted in Assigned above">
+                      <strong>{payload.yetToDispatch.toLocaleString("en-IN")}</strong> yet to dispatch (not in Assigned)
+                    </span>
+                  ) : null}
                 </div>
               ) : null}
             </section>
@@ -258,6 +269,7 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
               todayDelivered={payload.delivered}
               todayReturned={payload.returned}
               todayHeld={payload.held}
+              todayYetToDispatch={payload.yetToDispatch}
               todayDeliveredPct={payload.deliveredPct}
             />
           ) : (

@@ -6,7 +6,8 @@ import {
   loadOpenShift,
   loadStationGeofence,
   parseIntegritySignals,
-  resolveCompanyPunchGeofence
+  resolveCompanyPunchGeofence,
+  TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY
 } from "@/lib/biometric/attendance-gps";
 import { createAppNotification } from "@/lib/app-notifications";
 import {
@@ -83,6 +84,50 @@ export async function GET(request: NextRequest) {
       : assignedStation
         ? [assignedStation]
         : [];
+    const openFlags = flagsResult.data ?? [];
+    const flagIds = openFlags.map((flag) => String(flag.id));
+    const pendingByFlag = new Map<string, string>();
+    if (flagIds.length) {
+      const reviewsResult = await supabaseAdmin
+        .from("attendance_location_reviews")
+        .select("flag_id, status")
+        .eq("company_id", worker.companyId)
+        .eq("enrolment_id", worker.enrolmentId)
+        .in("flag_id", flagIds)
+        .in("status", ["pending", "returned"]);
+      if (reviewsResult.error && !String(reviewsResult.error.message).toLowerCase().includes("does not exist")) {
+        throw new Error(reviewsResult.error.message);
+      }
+      for (const row of reviewsResult.data ?? []) {
+        if (row.flag_id) pendingByFlag.set(String(row.flag_id), String(row.status));
+      }
+    }
+
+    // Never surface "pending approval" to the worker when there are no open flags.
+    // Held punches can linger after resolve; monitoring stays server-side.
+    const pendingForClient = openFlags.length > 0 && shift.pendingApproval === true;
+    // Redact integrity internals — workers only need enough to submit a selfie.
+    const openFlagsForClient = openFlags.map((flag) => {
+      const supportStatus = pendingByFlag.get(String(flag.id));
+      const reviewPending = supportStatus === "pending";
+      const needsResubmit = supportStatus === "returned";
+      return {
+        id: flag.id,
+        punch_date: flag.punch_date,
+        status: flag.status,
+        created_at: flag.created_at,
+        flag_type: "action_needed",
+        severity: "medium",
+        message: reviewPending
+          ? "Your selfie was submitted. Review is pending."
+          : needsResubmit
+            ? "Please submit a new selfie to continue."
+            : "Take a live selfie at your station to continue.",
+        details: {},
+        supportStatus: reviewPending ? "pending_review" : needsResubmit ? "returned" : "needed",
+        supportSubmitted: reviewPending
+      };
+    });
     return NextResponse.json({
       enrolmentId: worker.enrolmentId,
       locationId: worker.locationId,
@@ -92,8 +137,8 @@ export async function GET(request: NextRequest) {
         inTime: shift.inTime?.toISOString() ?? null,
         outTime: shift.outTime?.toISOString() ?? null,
         punchCount: shift.punchCount,
-        pendingApproval: shift.pendingApproval === true,
-        dutyOnly: shift.dutyOnly === true
+        pendingApproval: pendingForClient,
+        dutyOnly: pendingForClient
       },
       station: assignedStation
         ? {
@@ -113,7 +158,7 @@ export async function GET(request: NextRequest) {
         longitude: row.longitude,
         radiusM: row.geofenceRadiusM
       })),
-      openFlags: flagsResult.data ?? []
+      openFlags: openFlagsForClient
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load punch status.";
@@ -194,21 +239,23 @@ export async function POST(request: NextRequest) {
       faceMatched: true
     });
 
-    // Do not notify "attendance punched" — punch is held until manager approve.
-    await createAppNotification({
-      accountId: worker.profileId,
-      companyId: worker.companyId,
-      data: {
-        punchId: result.punch.id,
-        flagIds: result.flagIds,
-        geofenceStatus: geofence.status,
-        pendingApproval: true
-      },
-      eventCode: "attendance_location_flagged",
-      profileType: worker.profileType,
-      sourceKey: `gps-pending:${result.punch.id}`,
-      variables: { date: String(result.punch.punch_date).split("-").reverse().join("/") }
-    }).catch(() => undefined);
+    // TEMP auto-approve resolves the flag + activates punch inside insertAppGpsPunch / openIntegrityFlag.
+    if (!TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY) {
+      await createAppNotification({
+        accountId: worker.profileId,
+        companyId: worker.companyId,
+        data: {
+          punchId: result.punch.id,
+          flagIds: result.flagIds,
+          geofenceStatus: geofence.status,
+          pendingApproval: true
+        },
+        eventCode: "attendance_location_flagged",
+        profileType: worker.profileType,
+        sourceKey: `gps-pending:${result.punch.id}`,
+        variables: { date: String(result.punch.punch_date).split("-").reverse().join("/") }
+      }).catch(() => undefined);
+    }
 
     return NextResponse.json({
       ok: true,
@@ -225,12 +272,13 @@ export async function POST(request: NextRequest) {
         score: integrity.score,
         reasons: integrity.reasons
       },
-      isFlagged: true,
-      supportRequired: true,
-      pendingApproval: true,
+      isFlagged: !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY,
+      supportRequired: !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY,
+      pendingApproval: !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY,
       flagIds: result.flagIds,
-      message:
-        "Duty status updated. Attendance is pending manager approval — submit support selfie if prompted."
+      message: TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY
+        ? "Punch recorded (temporary auto-approve mode)."
+        : "Action needed. Submit a selfie from Attendance if prompted."
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to record GPS punch.";
