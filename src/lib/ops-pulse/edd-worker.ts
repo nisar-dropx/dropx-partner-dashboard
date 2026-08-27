@@ -325,6 +325,8 @@ export type EddPerformancePackage = {
   bucket: "delivered" | "returned" | "held";
   driverId: string | null;
   driverName: string | null;
+  /** True when this "driver" is actually a locker/store access point, not a person — see amazon-edd-worker's eddPerformanceSnapshot.ts. */
+  isAccessPoint: boolean;
   paymentMethod: string | null;
   city: string | null;
   orderingOrderId: string | null;
@@ -394,6 +396,7 @@ function normalizePerformancePackage(raw: Record<string, unknown>): EddPerforman
     bucket: validBucket,
     driverId: raw.driverId == null ? null : String(raw.driverId),
     driverName: raw.driverName == null ? null : String(raw.driverName),
+    isAccessPoint: Boolean(raw.isAccessPoint),
     paymentMethod: raw.paymentMethod == null ? null : String(raw.paymentMethod),
     city: raw.city == null ? null : String(raw.city),
     orderingOrderId: raw.orderingOrderId == null ? null : String(raw.orderingOrderId)

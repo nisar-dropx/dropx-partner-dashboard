@@ -10,6 +10,7 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 type DriverSummary = {
   driverKey: string;
   driverName: string;
+  isAccessPoint: boolean;
   packages: EddPerformancePackage[];
   assigned: number;
   delivered: number;
@@ -43,7 +44,7 @@ export function EddPerformanceByAssociate({ packages }: { packages: EddPerforman
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[1]);
 
   const { drivers, unassigned } = useMemo(() => {
-    const byDriver = new Map<string, { driverKey: string; driverName: string; packages: EddPerformancePackage[] }>();
+    const byDriver = new Map<string, { driverKey: string; driverName: string; isAccessPoint: boolean; packages: EddPerformancePackage[] }>();
     const unassignedPackages: EddPerformancePackage[] = [];
     for (const pkg of packages) {
       const key = pkg.driverId || pkg.driverName || "";
@@ -54,13 +55,15 @@ export function EddPerformanceByAssociate({ packages }: { packages: EddPerforman
       // A name means it resolved (against the station's live driver directory,
       // then the workforce roster) — a driverId with no name is a driver
       // neither source recognized (usually since offboarded), so label it as
-      // an ID rather than presenting the raw ID as if it were a name.
+      // an ID rather than presenting the raw ID as if it were a name. Store /
+      // locker deliveries (isAccessPoint) always resolve — the worker parses
+      // the store name straight off Amazon's own accessPointId field.
       const name = pkg.driverName || (pkg.driverId ? `Driver ${pkg.driverId} (name unavailable)` : "Unknown");
-      const entry = byDriver.get(key) ?? { driverKey: key, driverName: name, packages: [] };
+      const entry = byDriver.get(key) ?? { driverKey: key, driverName: name, isAccessPoint: pkg.isAccessPoint, packages: [] };
       entry.packages.push(pkg);
       byDriver.set(key, entry);
     }
-    const summarize = (entry: { driverKey: string; driverName: string; packages: EddPerformancePackage[] }): DriverSummary => {
+    const summarize = (entry: { driverKey: string; driverName: string; isAccessPoint: boolean; packages: EddPerformancePackage[] }): DriverSummary => {
       const assigned = entry.packages.length;
       const delivered = entry.packages.filter((p) => p.bucket === "delivered").length;
       const returned = entry.packages.filter((p) => p.bucket === "returned").length;
@@ -70,7 +73,7 @@ export function EddPerformanceByAssociate({ packages }: { packages: EddPerforman
     };
     return {
       drivers: [...byDriver.values()].map(summarize),
-      unassigned: unassignedPackages.length ? summarize({ driverKey: "__unassigned__", driverName: "No driver on record", packages: unassignedPackages }) : null
+      unassigned: unassignedPackages.length ? summarize({ driverKey: "__unassigned__", driverName: "No driver on record", isAccessPoint: false, packages: unassignedPackages }) : null
     };
   }, [packages]);
 
@@ -80,6 +83,8 @@ export function EddPerformanceByAssociate({ packages }: { packages: EddPerforman
     return [...rows].sort((a, b) => b.assigned - a.assigned);
   }, [drivers, query]);
 
+  const storeCount = filtered.filter((d) => d.isAccessPoint).length;
+  const associateCount = filtered.length - storeCount;
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const pageRows = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
@@ -93,7 +98,7 @@ export function EddPerformanceByAssociate({ packages }: { packages: EddPerforman
           <span className="edd-driver-main">
             {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
             <span>
-              <strong>{driver.driverName}</strong>
+              <strong>{driver.driverName}</strong>{driver.isAccessPoint ? <span className="edd-pill dueTomorrow" style={{ marginLeft: 8 }}>Store</span> : null}
               <small>{driver.assigned} package{driver.assigned === 1 ? "" : "s"} assigned today</small>
             </span>
           </span>
@@ -140,9 +145,9 @@ export function EddPerformanceByAssociate({ packages }: { packages: EddPerforman
       <div className="panel-head">
         <div>
           <h3>By associate</h3>
-          <p className="subtle">Every driver assigned packages today, worst delivery performance first. Open a driver for their tracking IDs.</p>
+          <p className="subtle">Every driver (and locker/store access point) assigned packages today, worst delivery performance first. Open one for its tracking IDs.</p>
         </div>
-        <span className="count-badge">{filtered.length} associates</span>
+        <span className="count-badge">{associateCount} associates{storeCount ? ` · ${storeCount} stores` : ""}</span>
       </div>
       <div className="panel-body">
         <div className="edd-toolbar">
@@ -180,7 +185,7 @@ export function EddPerformanceByAssociate({ packages }: { packages: EddPerforman
 
         {unassigned ? (
           <p className="subtle" style={{ marginBottom: 12 }}>
-            <strong>{unassigned.assigned.toLocaleString("en-IN")}</strong> package{unassigned.assigned === 1 ? "" : "s"} today have no driver on record (locker/self-service deliveries, or Amazon didn&apos;t attribute a driver) — not counted as an associate below.
+            <strong>{unassigned.assigned.toLocaleString("en-IN")}</strong> package{unassigned.assigned === 1 ? "" : "s"} today have neither a driver nor a store/locker on record yet (often still inducted, not yet handed off) — not counted as an associate below.
           </p>
         ) : null}
 
