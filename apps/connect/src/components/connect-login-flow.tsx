@@ -1,17 +1,18 @@
 "use client";
 
 import Image from "next/image";
-import { Bell, CalendarDays, CheckCheck, ChevronRight, CreditCard, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, Settings, ShieldCheck, Sparkles, SwitchCamera, UserRound, UsersRound, X } from "lucide-react";
+import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, CreditCard, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, Settings, ShieldCheck, Sparkles, SwitchCamera, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
 import { AttendanceLocationMonitor } from "./attendance-location-monitor";
 import { ConnectDashboard } from "./connect-dashboard";
 import { ConnectLeave } from "./connect-leave";
+import { ConnectRoster } from "./connect-roster";
 import { ConnectAdvances } from "./connect-advances";
 import { AppAccount, ConnectProfileApp } from "./connect-profile-app";
 import { countryCodeOptions } from "@/lib/country-codes";
 
-type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "payments" | "advances" | "earnings" | "attendance" | "leave" | "settings";
+type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "payments" | "advances" | "earnings" | "attendance" | "roster" | "leave" | "settings";
 type ConnectNotification = {
   id: string;
   title: string;
@@ -27,14 +28,15 @@ const accountKey = (account: AppAccount) => `${account.profileType}:${account.co
 const accountIdentity = (account?: AppAccount | null) =>
   [account?.reference, account?.biometricId].filter(Boolean).join(" | ");
 const active = (account?: AppAccount | null) => account?.status?.toLowerCase() === "active";
-const defaultPageAccess = ["dashboard", "attendance", "leave", "settings"];
-const allowed = (account: AppAccount | null, page: "dashboard" | "attendance" | "leave" | "settings") =>
-  page === "settings" || (account?.pageAccess ?? defaultPageAccess).includes(page);
+const defaultPageAccess = ["dashboard", "attendance", "roster", "leave", "settings"];
+const allowed = (account: AppAccount | null, page: "dashboard" | "attendance" | "roster" | "leave" | "settings") =>
+  page === "settings" || page === "roster" || (account?.pageAccess ?? defaultPageAccess).includes(page);
 
 function landingPage(account: AppAccount): Step {
   if (!active(account)) return "profile";
   if (allowed(account, "dashboard")) return "dashboard";
   if (allowed(account, "attendance")) return "attendance";
+  if (allowed(account, "roster")) return "roster";
   if (allowed(account, "leave")) return "leave";
   return "profile";
 }
@@ -245,7 +247,7 @@ export function ConnectLoginFlow() {
       }
     }
     const destination = notification.route as Step | null | undefined;
-    if (destination && ["dashboard", "profile", "advances", "attendance", "leave", "settings"].includes(destination)) {
+    if (destination && ["dashboard", "profile", "advances", "attendance", "roster", "leave", "settings"].includes(destination)) {
       setNotificationMenu(false);
       open(destination);
     } else if (destination) {
@@ -377,6 +379,7 @@ export function ConnectLoginFlow() {
     }
     if (next === "dashboard" && !allowed(account, "dashboard")) return;
     if (next === "attendance" && !allowed(account, "attendance")) return;
+    if (next === "roster" && !allowed(account, "roster")) return;
     if (next === "leave" && !allowed(account, "leave")) return;
     setStep(next);
   }
@@ -393,7 +396,7 @@ export function ConnectLoginFlow() {
     setStep(refreshed ? landingPage(refreshed) : "accounts");
   }
 
-  const loggedIn = ["accounts","dashboard","profile","payments","advances","attendance","leave","settings"].includes(step);
+  const loggedIn = ["accounts","dashboard","profile","payments","advances","earnings","attendance","roster","leave","settings"].includes(step);
   const screenLabel: Partial<Record<Step, string>> = {
     accounts: "Accounts",
     dashboard: "Today",
@@ -401,6 +404,7 @@ export function ConnectLoginFlow() {
     payments: "Payments",
     advances: "Pay advances",
     attendance: "Attendance",
+    roster: "Roster",
     leave: "Time off",
     settings: "Settings"
   };
@@ -425,6 +429,7 @@ export function ConnectLoginFlow() {
         {paymentsExpanded ? <button aria-current={step === "advances" ? "page" : undefined} className={`desktop-subitem${step === "advances" ? " active" : ""}`} onClick={() => open("advances")}><IndianRupee />Advances</button> : null}
         {paymentsExpanded ? <button aria-current={step === "earnings" ? "page" : undefined} className={`desktop-subitem${step === "earnings" ? " active" : ""}`} onClick={() => open("earnings")}><IndianRupee />My Earnings</button> : null}
         {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint />Attendance</button> : null}
+        {allowed(account, "roster") ? <button aria-current={step === "roster" ? "page" : undefined} className={step === "roster" ? "active" : ""} onClick={() => open("roster")}><ArrowLeftRight />Roster</button> : null}
         {allowed(account, "leave") ? <button aria-current={step === "leave" ? "page" : undefined} className={step === "leave" ? "active" : ""} onClick={() => open("leave")}><CalendarDays />Leave</button> : null}
         <small className="dx-nav-label">Account</small>
         <button aria-current={step === "settings" ? "page" : undefined} className={step === "settings" ? "active" : ""} onClick={() => open("settings")}><Settings />Settings</button>
@@ -458,6 +463,7 @@ export function ConnectLoginFlow() {
         {paymentsExpanded ? <button className="subitem" onClick={() => open("advances")}><span />Advances<ChevronRight /></button> : null}
         {paymentsExpanded ? <button className="subitem" onClick={() => open("earnings")}><span />My Earnings<ChevronRight /></button> : null}
         {allowed(account, "attendance") ? <button onClick={() => open("attendance")}><Fingerprint />Attendance<ChevronRight /></button> : null}
+        {allowed(account, "roster") ? <button onClick={() => open("roster")}><ArrowLeftRight />Roster<ChevronRight /></button> : null}
         {allowed(account, "leave") ? <button onClick={() => open("leave")}><CalendarDays />Leave<ChevronRight /></button> : null}
         <button onClick={() => open("settings")}><Settings />Settings<ChevronRight /></button>
       </nav>
@@ -497,6 +503,7 @@ export function ConnectLoginFlow() {
       {step === "advances" && account ? <ConnectAdvances account={account} /> : null}
       {step === "earnings" && account ? <section className="dx-earnings"><header><div className="dx-advance-title"><i><IndianRupee /></i><h1>My Earnings</h1></div></header></section> : null}
       {step === "attendance" && account ? <ConnectAttendance account={account} /> : null}
+      {step === "roster" && account ? <ConnectRoster account={account} /> : null}
       {step === "leave" && account ? <ConnectLeave account={account} /> : null}
       {step === "settings" ? <section className="dx-settings">
         <header className="dx-page-intro"><small>Personalisation</small><h1>Settings</h1><p>Control sign-in and the account you open first.</p></header>
@@ -510,8 +517,8 @@ export function ConnectLoginFlow() {
     {loggedIn && account ? <nav aria-label="Primary navigation" className="dx-mobile-nav">
       {allowed(account, "dashboard") ? <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Home /><span>Home</span></button> : null}
       {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint /><span>Attendance</span></button> : null}
+      {allowed(account, "roster") ? <button aria-current={step === "roster" ? "page" : undefined} className={step === "roster" ? "active" : ""} onClick={() => open("roster")}><ArrowLeftRight /><span>Roster</span></button> : null}
       {allowed(account, "leave") ? <button aria-current={step === "leave" ? "page" : undefined} className={step === "leave" ? "active" : ""} onClick={() => open("leave")}><CalendarDays /><span>Leave</span></button> : null}
-      <button aria-current={step === "advances" ? "page" : undefined} className={step === "advances" ? "active" : ""} onClick={() => open("advances")}><IndianRupee /><span>Pay</span></button>
       <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound /><span>Profile</span></button>
     </nav> : null}
   </div>;
