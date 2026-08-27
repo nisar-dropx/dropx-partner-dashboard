@@ -113,8 +113,8 @@ function Metric({
         {icon}
       </span>
       <div className="dx-dashboard-metric-copy">
-        <small>{label}</small>
         <strong>{value}</strong>
+        <small>{label}</small>
       </div>
     </div>
   );
@@ -275,10 +275,10 @@ export function ConnectDashboard({
     <section className="dx-dashboard-card today">
       <header><div><small>Today</small><h2>Attendance</h2></div><Pill text={todayStatus} tone={statusTone} /></header>
       <div className="dx-dashboard-metrics">
-        <Metric icon={<LogIn />} label="IN" value={today?.inTime || "--:--"} tone="green" />
-        <Metric icon={<LogOut />} label="OUT" value={today?.outTime || "--:--"} tone="red" />
-        <Metric icon={<Clock3 />} label="WORK" value={today?.workHours || "00:00"} tone="orange" />
-        <Metric icon={<Fingerprint />} label="PUNCHES" value={today?.punchCount || 0} tone="purple" />
+        <Metric icon={<LogIn />} label="In" value={today?.inTime || "--:--"} tone="green" />
+        <Metric icon={<LogOut />} label="Out" value={today?.outTime || "--:--"} tone="red" />
+        <Metric icon={<Clock3 />} label="Work" value={today?.workHours || "00:00"} tone="orange" />
+        <Metric icon={<Fingerprint />} label="Punches" value={today?.punchCount || 0} tone="purple" />
       </div>
       {attendanceAllowed ? <button className="dx-dashboard-link" onClick={onAttendance}>View attendance <ChevronRight /></button> : null}
     </section>
@@ -302,10 +302,10 @@ export function ConnectDashboard({
     <section className="dx-dashboard-card dx-dashboard-summary-card">
       <header><div><small>This month</small><h2>Summary</h2></div></header>
       <div className="dx-dashboard-metrics">
-        <Metric icon={<PersonStanding />} label="PRESENT" value={attendance.summary.present} tone="green" />
-        <Metric icon={<UserRoundX />} label="ABSENT" value={attendance.summary.absent} tone="red" />
-        <Metric icon={<Clock3 />} label="MIS PUNCH" value={attendance.summary.misPunch} tone="orange" />
-        <Metric icon={<Clock3 />} label="TOTAL" value={totalHours} tone="purple" />
+        <Metric icon={<PersonStanding />} label="Present" value={attendance.summary.present} tone="green" />
+        <Metric icon={<UserRoundX />} label="Absent" value={attendance.summary.absent} tone="red" />
+        <Metric icon={<Clock3 />} label="Mis punch" value={attendance.summary.misPunch} tone="orange" />
+        <Metric icon={<Clock3 />} label="Total hrs" value={totalHours} tone="purple" />
       </div>
       <div className="dx-month-progress">
         <span><b>{attendanceRate}%</b><small>Attendance rate</small></span>

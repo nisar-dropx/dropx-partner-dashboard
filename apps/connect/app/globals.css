@@ -13067,71 +13067,91 @@ body {
 }
 
 /* DropX Today — dashboard metric tiles (alignment fix) */
+/* DropX One — dashboard metric tiles (clean compact layout) */
+.dx-dashboard-card.today {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dx-dashboard-card.today > header {
+  margin-bottom: 0;
+}
+
 .dx-dashboard-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 9px;
-  margin-top: 15px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 0;
+}
+
+.dx-dashboard-summary-card .dx-dashboard-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .dx-dashboard-metrics .dx-dashboard-metric {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
-  min-height: 78px;
-  padding: 10px 8px;
+  min-height: 0;
+  padding: 10px 12px;
   border: 0;
-  border-right: 0;
-  border-radius: 15px;
-  background: #f4f6fa;
-  text-align: center;
+  border-radius: 14px;
+  background: #f3f5f9;
+  text-align: left;
 }
 
 .dx-dashboard-metrics .dx-dashboard-metric-icon {
   display: grid;
   flex-shrink: 0;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, .72);
+  background: rgba(255, 255, 255, .9);
 }
 
 .dx-dashboard-metrics .dx-dashboard-metric-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   padding: 0;
+  background: transparent !important;
 }
 
 .dx-dashboard-metrics .dx-dashboard-metric-copy {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 2px;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
   min-width: 0;
   width: 100%;
-}
-
-.dx-dashboard-metrics .dx-dashboard-metric-copy small {
-  margin: 0;
-  color: #77736d;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: .04em;
-  line-height: 1.2;
-  white-space: nowrap;
 }
 
 .dx-dashboard-metrics .dx-dashboard-metric-copy strong {
   overflow: hidden;
   max-width: 100%;
-  font-size: 15px;
+  color: #171d2f;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 16px;
   font-weight: 650;
+  letter-spacing: -0.03em;
   line-height: 1.15;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dx-dashboard-metrics .dx-dashboard-metric-copy small {
+  margin: 0;
+  color: #6b7288;
+  font-size: 11px;
+  font-weight: 560;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  text-transform: none;
   white-space: nowrap;
 }
 
@@ -13156,14 +13176,14 @@ body {
 }
 
 .dx-dashboard-card.today .dx-dashboard-metrics .dx-dashboard-metric {
-  background: rgba(255, 255, 255, .09);
+  background: rgba(255, 255, 255, .1);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
   backdrop-filter: blur(9px);
 }
 
 .dx-dashboard-card.today .dx-dashboard-metrics .dx-dashboard-metric-icon {
   color: #fff;
-  background: rgba(255, 255, 255, .12);
+  background: rgba(255, 255, 255, .14);
 }
 
 .dx-dashboard-card.today .dx-dashboard-metrics .dx-dashboard-metric-copy small,
@@ -13172,11 +13192,53 @@ body {
 }
 
 .dx-dashboard-card.today .dx-dashboard-metrics .dx-dashboard-metric-copy small {
-  opacity: .72;
+  opacity: .7;
+}
+
+.dx-dashboard-card.today .dx-dashboard-link {
+  margin-top: 2px;
+}
+
+.dx-dashboard-summary-card .dx-month-progress {
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+@media (min-width: 720px) {
+  .dx-dashboard-card.today .dx-dashboard-metrics,
+  .dx-dashboard-summary-card .dx-dashboard-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 520px) {
   .dx-dashboard-card.today .dx-dashboard-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .dx-dashboard-metrics .dx-dashboard-metric {
+    padding: 9px 10px;
+    gap: 8px;
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .dx-dashboard-metrics .dx-dashboard-metric-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+  }
+
+  .dx-dashboard-metrics .dx-dashboard-metric-icon svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .dx-dashboard-metrics .dx-dashboard-metric-copy strong {
+    font-size: 15px;
+  }
+
+  .dx-dashboard-metrics .dx-dashboard-metric-copy small {
+    font-size: 10px;
+  }
 }
+
