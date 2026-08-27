@@ -18,7 +18,13 @@ export function workbookResponse(sheets: Array<{ name: string; rows: Record<stri
     const rows = sheet.rows.length ? sheet.rows : [{ "No data": "Nothing to report for this selection." }];
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), sheet.name.slice(0, 31));
   }
-  const body = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Buffer;
+  // Wrapped in Uint8Array (rather than passing the Node Buffer straight
+  // through) so this satisfies Response's BodyInit type regardless of which
+  // Buffer/DOM lib types the build resolves -- a plain Buffer tripped a
+  // Vercel-only type-check failure (Buffer assignable in a local build,
+  // rejected as "missing URLSearchParams properties" in Vercel's).
+  const raw = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Buffer;
+  const body = new Uint8Array(raw);
   return new Response(body, {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
