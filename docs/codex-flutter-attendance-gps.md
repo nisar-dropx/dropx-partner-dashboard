@@ -18,7 +18,15 @@ People review: `https://people.dropxlogistics.com/attendance/integrity`
 7. Reminders at **9.5h** and **10h** after punch-in if no punch-out.
 8. Employees **cannot** edit punch lat/lng/time from website or app.
 9. Support selfie upload is only for **flagged** review cases — **review-only** (never marks attendance by itself).
-10. **Liveness before selfie capture** (anti photo-spoof): user must **blink twice**, then **turn head left**, then **turn head right**, before Capture is enabled. A still photo / screen held to the camera must fail. Face match to profile (≥60%, distance ≤0.42) is additional when `requireFaceMatch` is on. Web: `apps/connect/src/lib/face-liveness.ts` + `selfie-capture-panel.tsx`. Flutter must implement the **same challenge sequence** (prefer ML Kit / native face mesh; commercial liveness SDKs are better for production).
+10. **Support selfie capture gate (must match web):**
+    1. Worker must be **inside** the allocated station geofence (camera disabled outside).
+    2. **Face match first** against profile photo (≥60%, descriptor distance ≤0.42) — hold still until match is stable for ~3 consecutive frames.
+    3. **Then liveness** (anti photo-spoof): blink twice → turn head left → turn head right.  
+       - Blink requires **EAR drop while face center/size stay stable** (reject waving/shaking a printed photo).  
+       - Head turns require **yaw change**, not whole-frame translation/zoom.  
+    4. Only then enable **Capture**. Re-check face match on the captured frame before “Use selfie”.
+    Web: `apps/connect/src/lib/face-match.ts`, `apps/connect/src/lib/face-liveness.ts`, `apps/connect/src/components/selfie-capture-panel.tsx`.  
+    Flutter: prefer **ML Kit Face Mesh / Face Detection** + commercial liveness if available; never accept a still photo or phone-screen replay.
 
 ### Pending attendance (critical)
 
@@ -52,7 +60,9 @@ Same location fields + `sessionId`.
 
 ### `POST /api/connect/attendance/support-evidence` (multipart)
 - `flagId`, `punchDate`, `lat`, `lng`, `accuracyM`, `selfie`, `remarks`
-- Support selfie **only** for flagged cases. Capture only after liveness challenges pass.
+- Support selfie **only** for flagged cases.
+- Server **rejects** if device GPS is outside station geofence.
+- Capture only after **face match → liveness → capture** on device.
 - Does **not** insert punches or rebuild attendance. Notifies manager in People. `attendanceMarked: false`.
 
 ## Web limitations → Flutter must implement
@@ -65,23 +75,28 @@ Same location fields + `sessionId`.
 | Background location | Only while Connect open | Foreground service from login through 9h after punch-in |
 | Device integrity | None | **Play Integrity** on heartbeats |
 | Punch UI | Flag/support only | No always-on GPS Punch In/Out |
-| Liveness | Blink ×2 + turn L + turn R (face-api) | Same order; prefer **native / commercial liveness**. Reject printed photo and phone-screen replay. |
+| Geofence gate | Camera off outside station | Same — disable camera outside perimeter |
+| Face match | Profile photo first (≥60%) | Same threshold; use on-device embedding / ML Kit |
+| Liveness | Blink ×2 + turn L + turn R with anti-shake | Same order; **reject printed photo / screen shake**. Prefer commercial liveness SDK for production. |
 | Pending punch | Held until People approve | Show duty-pending; never treat support selfie as Present |
 
 ## Flutter implementation checklist
 
 1. **Permissions** — fine location, camera, FGS location, notifications; disable battery optimization guidance.
 2. **Attendance screen** — calendar/list/punches; **Location review needed** only when `openFlags.length > 0`; muted 9h monitoring line; no GPS Punch In/Out. If `shift.pendingApproval`, show “duty pending manager approval”.
-3. **Liveness + support selfie (required)**  
-   Challenge order (must match web):
-   1. Blink twice  
-   2. Turn head to user's left, then face forward  
-   3. Turn head to user's right, then face forward  
-   Then enable Capture. Reference: `apps/connect/src/lib/face-liveness.ts`.  
+3. **Support selfie pipeline (required — match web order)**  
+   a. Confirm **inside geofence** (else show “outside allowed location”, camera disabled).  
+   b. **Face match** to profile photo until stable pass (≥60%, multi-frame).  
+   c. **Liveness challenges** (must match web):
+      1. Blink twice — EAR drop with **stable face box** (reject photo shake)  
+      2. Turn head to user's left, then face forward  
+      3. Turn head to user's right, then face forward  
+   d. Enable Capture; re-verify face match on captured frame.  
+   Reference: `apps/connect/src/lib/face-liveness.ts`, `selfie-capture-panel.tsx`.  
    Upload only updates the review queue — **do not** refresh calendar as Present.
-4. **`integritySignals` JSON** include `livenessPassed`, `livenessChallenges: ["blink","turn_left","turn_right"]`, Play Integrity token, mock/dev/VPN flags.
+4. **`integritySignals` JSON** include `faceMatched`, `faceMatchPercent`, `livenessPassed`, `livenessChallenges: ["blink","turn_left","turn_right"]`, Play Integrity token, mock/dev/VPN flags.
 5. **Tracker** — presence while logged in; after punch-in sample **9 hours** then stop; heartbeat every 3–5 min.
-6. **Do not build** — edit punch lat/lng/time; force-present; always-visible GPS punch; treating support selfie as attendance.
+6. **Do not build** — edit punch lat/lng/time; force-present; always-visible GPS punch; treating support selfie as attendance; skipping face match before liveness.
 
 ## Admin review (People)
 
@@ -90,7 +105,8 @@ Primary: **People → Attendance → Location integrity**
 Sub-tabs: Daily register | Location integrity (shown for anyone with Attendance view; integrity link for integrity permission or team managers)  
 Inside integrity: Open flags | Support packages  
 
-**Approve** support package → activate held punch + rebuild day (Present).  
+**Approve** support package / flag → activate held punch + rebuild day (Present).  
+**Approve all** = temporary development shortcut on the flags tab.  
 **Reject / dismiss** → calendar stays unchanged (no Present).
 
 In-app People notifications (no email). Partner dashboard `/attendance/integrity` is legacy mirror.
@@ -110,8 +126,9 @@ In-app People notifications (no email). Partner dashboard `/attendance/integrity
 1. Presence GPS while logged in (off-shift) is stored.
 2. Biometric punch while phone outside → immediate `biometric_phone_mismatch`; calendar not Present until approve.
 3. After punch-in, heartbeats for 9h then stop; outside >50m for >30 min → flag.
-4. Support selfie: blink + left + right required; printed photo fails; then upload works; attendance not marked.
-5. No always-on GPS Punch In/Out UI.
-6. Mock location / developer options → hard-block per policy.
-7. Website cannot alter punch lat/lng/time.
-8. Manager approve → punch appears on calendar; reject → still absent.
+4. Support selfie **outside** geofence → camera disabled / submit rejected.
+5. Support selfie: **face match first**, then blink + left + right; **printed photo / shaking a photo fails**; then upload works; attendance not marked.
+6. No always-on GPS Punch In/Out UI.
+7. Mock location / developer options → hard-block per policy.
+8. Website cannot alter punch lat/lng/time.
+9. Manager approve → punch appears on calendar; reject → still absent.

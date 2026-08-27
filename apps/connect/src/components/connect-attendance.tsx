@@ -610,7 +610,9 @@ function SupportEvidenceSheet({
     {selfiePanelOpen ? (
       <SelfieCapturePanel
         title="Support selfie"
-        hint="Complete live checks (blink + head turns), then capture. A printed photo will not pass."
+        hint="Step 1: match your profile face. Step 2: blink twice + turn left/right (hold still — a photo will fail). Step 3: capture."
+        profilePhotoUrl={account.profilePhotoUrl}
+        requireFaceMatch
         requireLiveness
         onClose={() => setSelfiePanelOpen(false)}
         onCapture={(file) => {

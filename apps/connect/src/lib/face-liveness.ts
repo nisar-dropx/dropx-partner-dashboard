@@ -6,10 +6,21 @@ export type LivenessChallenge = "blink" | "turn_left" | "turn_right";
 
 export const LIVENESS_CHALLENGES: LivenessChallenge[] = ["blink", "turn_left", "turn_right"];
 
+export type FacePoseSample = {
+  ear: number;
+  yaw: number;
+  /** Normalized face center X in the sample frame (0–1). */
+  cx: number;
+  /** Normalized face center Y in the sample frame (0–1). */
+  cy: number;
+  /** Normalized face width (0–1) — used to reject photo zoom / distance shake. */
+  faceW: number;
+};
+
 export function livenessPrompt(step: LivenessChallenge) {
   switch (step) {
     case "blink":
-      return "Blink naturally twice";
+      return "Hold still and blink naturally twice";
     case "turn_left":
       return "Turn your head slowly to your left, then face forward";
     case "turn_right":
@@ -51,6 +62,26 @@ function yawRatio(points: Point[], mirroredDisplay: boolean) {
   return mirroredDisplay ? -raw : raw;
 }
 
+function faceBox(points: Point[], frameW: number, frameH: number) {
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const point of points) {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+  }
+  const w = Math.max(1, maxX - minX);
+  const h = Math.max(1, maxY - minY);
+  return {
+    cx: (minX + w / 2) / Math.max(1, frameW),
+    cy: (minY + h / 2) / Math.max(1, frameH),
+    faceW: w / Math.max(1, frameW)
+  };
+}
+
 function readLandmarkPositions(landmarks: {
   positions?: Point[];
   getPositions?: () => Point[];
@@ -80,7 +111,10 @@ function frameCanvasFromVideo(video: HTMLVideoElement) {
   return canvas;
 }
 
-export async function sampleFacePose(video: HTMLVideoElement, options?: { mirroredDisplay?: boolean }) {
+export async function sampleFacePose(
+  video: HTMLVideoElement,
+  options?: { mirroredDisplay?: boolean }
+): Promise<FacePoseSample | null> {
   if (video.readyState < 2) return null;
   await ensureFaceModels();
   const faceapi = (
@@ -108,70 +142,116 @@ export async function sampleFacePose(video: HTMLVideoElement, options?: { mirror
 
   const frame = frameCanvasFromVideo(video);
   const input = frame ?? video;
-  // Small + fast: blinks last ~100–150ms; a slow detector misses them entirely.
-  const detector = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.2 });
+  const frameW = frame?.width || video.videoWidth || 1;
+  const frameH = frame?.height || video.videoHeight || 1;
+  // Fast enough to catch real blinks (~100–150ms).
+  const detector = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.25 });
   try {
     const detection = await faceapi.detectSingleFace(input, detector).withFaceLandmarks();
     const positions = detection?.landmarks ? readLandmarkPositions(detection.landmarks) : null;
     if (!positions?.length) return null;
+    const box = faceBox(positions, frameW, frameH);
     return {
       ear: meanEar(positions),
-      yaw: yawRatio(positions, options?.mirroredDisplay !== false)
+      yaw: yawRatio(positions, options?.mirroredDisplay !== false),
+      cx: box.cx,
+      cy: box.cy,
+      faceW: box.faceW
     };
   } catch {
     return null;
   }
 }
 
-/** Incremental liveness checker — rejects a still photo (no blink / no yaw motion). */
+function motionTooLarge(
+  pose: FacePoseSample,
+  anchor: { cx: number; cy: number; faceW: number },
+  limits: { center: number; scale: number }
+) {
+  const centerMove = Math.hypot(pose.cx - anchor.cx, pose.cy - anchor.cy);
+  const scaleMove = Math.abs(pose.faceW - anchor.faceW) / Math.max(0.05, anchor.faceW);
+  return centerMove > limits.center || scaleMove > limits.scale;
+}
+
+/**
+ * Incremental liveness checker.
+ * Rejects still photos and "shake a printed photo" spoofs by requiring:
+ * - blink: EAR drop while face center/size stay stable
+ * - turn: yaw change with controlled motion, then return to center
+ */
 export function createLivenessTracker(challenge: LivenessChallenge) {
   if (challenge === "blink") {
     let closed = false;
+    let closedFrames = 0;
     let blinks = 0;
     let openBaseline = 0.28;
     let samples = 0;
     let faceHits = 0;
-    let missStreak = 0;
+    let anchor: { cx: number; cy: number; faceW: number } | null = null;
+    let shakeHits = 0;
     return {
-      ingest(pose: { ear: number; yaw: number } | null) {
+      ingest(pose: FacePoseSample | null) {
         if (!pose) {
-          missStreak += 1;
+          closed = false;
+          closedFrames = 0;
           return {
             passed: false,
-            progress: Math.min(0.15, faceHits / 20),
-            hint: faceHits
-              ? "Keep your face in the circle, then blink"
-              : "Center your face in the circle"
+            progress: Math.min(0.12, faceHits / 25),
+            hint: faceHits ? "Keep your face in the circle, then blink" : "Center your face in the circle"
           };
         }
-        missStreak = 0;
         faceHits += 1;
         samples += 1;
 
-        // Warm-up so we learn open-eye EAR before counting blinks.
-        if (samples <= 6) {
-          openBaseline = openBaseline * 0.6 + pose.ear * 0.4;
+        if (!anchor || samples <= 8) {
+          anchor = { cx: pose.cx, cy: pose.cy, faceW: pose.faceW };
+          openBaseline = openBaseline * 0.55 + pose.ear * 0.45;
           return {
             passed: false,
-            progress: Math.min(0.2, samples / 30),
-            hint: "Face found — hold still, then blink twice"
+            progress: Math.min(0.18, samples / 40),
+            hint: "Hold still — then blink naturally twice"
           };
         }
 
-        // Track open baseline only while eyes look open.
-        if (!closed && pose.ear >= openBaseline * 0.9) {
-          openBaseline = openBaseline * 0.9 + pose.ear * 0.1;
+        // Printed-photo shake moves the whole face box; real blinks do not.
+        if (motionTooLarge(pose, anchor, { center: 0.045, scale: 0.18 })) {
+          shakeHits += 1;
+          closed = false;
+          closedFrames = 0;
+          anchor = { cx: pose.cx, cy: pose.cy, faceW: pose.faceW };
+          return {
+            passed: false,
+            progress: Math.min(0.25, blinks / 2),
+            hint: "Hold still — do not shake the camera or a photo"
+          };
         }
 
-        // Soft relative blink: ~12% EAR drop counts as closed (works on phones / soft blinks).
-        const closedThreshold = Math.max(0.08, openBaseline * 0.88);
-        const openThreshold = Math.max(closedThreshold + 0.015, openBaseline * 0.94);
+        // Slowly refresh anchor while stable so natural micro-motion is OK.
+        anchor = {
+          cx: anchor.cx * 0.85 + pose.cx * 0.15,
+          cy: anchor.cy * 0.85 + pose.cy * 0.15,
+          faceW: anchor.faceW * 0.85 + pose.faceW * 0.15
+        };
+
+        if (!closed && pose.ear >= openBaseline * 0.92) {
+          openBaseline = openBaseline * 0.92 + pose.ear * 0.08;
+        }
+
+        // Real blink: stronger EAR drop than photo tilt, held for a few frames.
+        const closedThreshold = Math.max(0.1, openBaseline * 0.78);
+        const openThreshold = Math.max(closedThreshold + 0.025, openBaseline * 0.9);
 
         if (!closed && pose.ear <= closedThreshold) {
           closed = true;
+          closedFrames = 1;
+        } else if (closed && pose.ear <= closedThreshold) {
+          closedFrames += 1;
         } else if (closed && pose.ear >= openThreshold) {
+          if (closedFrames >= 2) {
+            blinks += 1;
+          }
           closed = false;
-          blinks += 1;
+          closedFrames = 0;
         }
 
         const progress = Math.min(1, 0.2 + (blinks / 2) * 0.8);
@@ -182,10 +262,12 @@ export function createLivenessTracker(challenge: LivenessChallenge) {
             blinks >= 2
               ? "Blink OK"
               : blinks === 1
-                ? "Blink once more"
+                ? "Blink once more — keep head still"
                 : closed
                   ? "Open your eyes…"
-                  : "Blink naturally twice"
+                  : shakeHits
+                    ? "Hold still and blink (not a photo)"
+                    : "Hold still and blink naturally twice"
         };
       }
     };
@@ -194,20 +276,48 @@ export function createLivenessTracker(challenge: LivenessChallenge) {
   const targetSign = challenge === "turn_left" ? -1 : 1;
   let sawTurn = false;
   let returned = false;
-  const TURN = 0.07;
-  const CENTER = 0.08;
+  let peakYaw = 0;
+  let samples = 0;
+  let anchor: { cx: number; cy: number; faceW: number } | null = null;
+  const TURN = 0.11;
+  const CENTER = 0.07;
   return {
-    ingest(pose: { ear: number; yaw: number } | null) {
+    ingest(pose: FacePoseSample | null) {
       if (!pose) {
         return {
           passed: false,
-          progress: sawTurn ? 0.55 : 0,
+          progress: sawTurn ? 0.5 : 0,
           hint: challenge === "turn_left" ? "Turn your head to your left" : "Turn your head to your right"
         };
       }
+      samples += 1;
+      if (!anchor || samples <= 5) {
+        anchor = { cx: pose.cx, cy: pose.cy, faceW: pose.faceW };
+        return {
+          passed: false,
+          progress: 0.1,
+          hint: challenge === "turn_left" ? "Face forward, then turn left" : "Face forward, then turn right"
+        };
+      }
+
+      // Reject paper/phone shake: huge translation or zoom without a clean yaw ramp.
+      if (motionTooLarge(pose, anchor, { center: 0.12, scale: 0.28 })) {
+        sawTurn = false;
+        returned = false;
+        peakYaw = 0;
+        anchor = { cx: pose.cx, cy: pose.cy, faceW: pose.faceW };
+        return {
+          passed: false,
+          progress: 0.15,
+          hint: "Turn your head only — do not wave a photo"
+        };
+      }
+
       const signed = pose.yaw * targetSign;
+      peakYaw = Math.max(peakYaw, signed);
       if (!sawTurn && signed >= TURN) sawTurn = true;
-      if (sawTurn && Math.abs(pose.yaw) <= CENTER) returned = true;
+      if (sawTurn && Math.abs(pose.yaw) <= CENTER && peakYaw >= TURN) returned = true;
+
       return {
         passed: sawTurn && returned,
         progress: returned ? 1 : sawTurn ? 0.65 : Math.min(0.55, Math.max(0, signed) / TURN),

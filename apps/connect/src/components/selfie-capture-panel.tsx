@@ -20,7 +20,7 @@ type SelfieCapturePanelProps = {
   title?: string;
   hint?: string;
   profilePhotoUrl?: string | null;
-  /** When true, Use selfie stays disabled until face match >= required %. */
+  /** When true, face match must pass before liveness / capture. */
   requireFaceMatch?: boolean;
   /** Blink + head-turn challenge to reduce photo/screen spoofing. Default: on when face match required, or always if set. */
   requireLiveness?: boolean;
@@ -28,9 +28,11 @@ type SelfieCapturePanelProps = {
   onClose: () => void;
 };
 
+type Phase = "match" | "liveness" | "ready";
+
 export function SelfieCapturePanel({
   title = "Face verification",
-  hint = "Center your face inside the circle. Complete the live checks, then capture.",
+  hint = "Match your profile face first, then complete live checks, then capture.",
   profilePhotoUrl,
   requireFaceMatch = false,
   requireLiveness,
@@ -38,32 +40,36 @@ export function SelfieCapturePanel({
   onClose
 }: SelfieCapturePanelProps) {
   const needLiveness = requireLiveness ?? requireFaceMatch;
+  const needMatch = Boolean(requireFaceMatch && profilePhotoUrl);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const trackerRef = useRef<ReturnType<typeof createLivenessTracker> | null>(null);
   const challengeIndexRef = useRef(0);
+  const matchOkStreakRef = useRef(0);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
-  const [modelsLoading, setModelsLoading] = useState(Boolean(requireFaceMatch || needLiveness));
+  const [modelsLoading, setModelsLoading] = useState(Boolean(needMatch || needLiveness));
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [capturing, setCapturing] = useState(false);
   const [liveMatch, setLiveMatch] = useState<FaceMatchResult | null>(null);
   const [checking, setChecking] = useState(false);
+  const [phase, setPhase] = useState<Phase>(needMatch ? "match" : needLiveness ? "liveness" : "ready");
   const [challengeIndex, setChallengeIndex] = useState(0);
   const [livenessDone, setLivenessDone] = useState(!needLiveness);
   const [livenessHint, setLivenessHint] = useState("");
   const [livenessProgress, setLivenessProgress] = useState(0);
+  const [matchProgress, setMatchProgress] = useState(0);
 
   challengeIndexRef.current = challengeIndex;
 
   const challenge: LivenessChallenge | null =
-    needLiveness && !livenessDone
+    phase === "liveness" && needLiveness && !livenessDone
       ? LIVENESS_CHALLENGES[Math.min(challengeIndex, LIVENESS_CHALLENGES.length - 1)]
       : null;
 
   useEffect(() => {
-    if (!requireFaceMatch && !needLiveness) {
+    if (!needMatch && !needLiveness) {
       setModelsLoading(false);
       return;
     }
@@ -82,7 +88,13 @@ export function SelfieCapturePanel({
     return () => {
       cancelled = true;
     };
-  }, [requireFaceMatch, needLiveness]);
+  }, [needMatch, needLiveness]);
+
+  useEffect(() => {
+    if (requireFaceMatch && !profilePhotoUrl) {
+      setError("Profile photo is missing. Upload a profile photo before support selfie.");
+    }
+  }, [requireFaceMatch, profilePhotoUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,8 +110,8 @@ export function SelfieCapturePanel({
           audio: false,
           video: {
             facingMode: { ideal: "user" },
-            width: { ideal: 640 },
-            height: { ideal: 640 }
+            width: { ideal: 720 },
+            height: { ideal: 720 }
           }
         });
         if (cancelled) {
@@ -139,20 +151,59 @@ export function SelfieCapturePanel({
     };
   }, [previewUrl]);
 
+  // Phase 1 — face match first (identity), before any liveness.
+  useEffect(() => {
+    if (phase !== "match" || !needMatch || !profilePhotoUrl || !ready || previewUrl || modelsLoading) return;
+    let cancelled = false;
+    let busy = false;
+    const tick = async () => {
+      const video = videoRef.current;
+      if (!video || cancelled || busy || video.readyState < 2) return;
+      busy = true;
+      try {
+        const result = await matchLiveFrameToProfile(video, profilePhotoUrl);
+        if (cancelled) return;
+        setLiveMatch(result);
+        if (result.ok) {
+          matchOkStreakRef.current += 1;
+          setMatchProgress(Math.min(1, matchOkStreakRef.current / 3));
+          // Require a few consecutive good matches so a single lucky frame cannot skip.
+          if (matchOkStreakRef.current >= 3) {
+            setPhase(needLiveness ? "liveness" : "ready");
+            setLivenessDone(!needLiveness);
+          }
+        } else {
+          matchOkStreakRef.current = 0;
+          setMatchProgress(result.percent > 0 ? Math.min(0.6, result.percent / 100) : 0);
+        }
+      } finally {
+        busy = false;
+      }
+    };
+    tick().catch(() => undefined);
+    const timer = window.setInterval(() => {
+      tick().catch(() => undefined);
+    }, 450);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [phase, needMatch, needLiveness, profilePhotoUrl, ready, previewUrl, modelsLoading]);
+
   // Reset tracker when the active challenge changes.
   useEffect(() => {
-    if (!needLiveness || livenessDone || !challenge) {
+    if (phase !== "liveness" || !needLiveness || livenessDone || !challenge) {
       trackerRef.current = null;
       return;
     }
     trackerRef.current = createLivenessTracker(challenge);
     setLivenessHint(livenessPrompt(challenge));
     setLivenessProgress(0);
-  }, [needLiveness, livenessDone, challenge]);
+  }, [phase, needLiveness, livenessDone, challenge]);
 
-  // Single stable sampling loop — do not recreate on every challengeIndex tick.
+  // Phase 2 — liveness after identity match.
   useEffect(() => {
-    if (!needLiveness || livenessDone || !ready || previewUrl || modelsLoading) return;
+    if (phase !== "liveness" || !needLiveness || livenessDone || !ready || previewUrl || modelsLoading) return;
     let cancelled = false;
     let busy = false;
 
@@ -170,6 +221,7 @@ export function SelfieCapturePanel({
           const next = challengeIndexRef.current + 1;
           if (next >= LIVENESS_CHALLENGES.length) {
             setLivenessDone(true);
+            setPhase("ready");
             setLivenessHint("Live checks passed — capture your selfie");
             setLivenessProgress(1);
           } else {
@@ -184,43 +236,20 @@ export function SelfieCapturePanel({
     tick().catch(() => undefined);
     const timer = window.setInterval(() => {
       tick().catch(() => undefined);
-    }, 120);
+    }, 110);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [needLiveness, livenessDone, ready, previewUrl, modelsLoading]);
-
-  // Live match while camera is open (after liveness when required).
-  useEffect(() => {
-    if (!requireFaceMatch || !profilePhotoUrl || !ready || previewUrl || modelsLoading) return;
-    if (needLiveness && !livenessDone) return;
-    let cancelled = false;
-    let busy = false;
-    const tick = async () => {
-      const video = videoRef.current;
-      if (!video || cancelled || busy || video.readyState < 2) return;
-      busy = true;
-      try {
-        const result = await matchLiveFrameToProfile(video, profilePhotoUrl);
-        if (!cancelled) setLiveMatch(result);
-      } finally {
-        busy = false;
-      }
-    };
-    tick().catch(() => undefined);
-    const timer = window.setInterval(() => {
-      tick().catch(() => undefined);
-    }, 700);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [requireFaceMatch, profilePhotoUrl, ready, previewUrl, modelsLoading, needLiveness, livenessDone]);
+  }, [phase, needLiveness, livenessDone, ready, previewUrl, modelsLoading]);
 
   async function snap() {
     const video = videoRef.current;
     if (!video || !ready || capturing) return;
+    if (needMatch && phase === "match") {
+      setError("Match your face to your profile photo first.");
+      return;
+    }
     if (needLiveness && !livenessDone) {
       setError("Complete the live checks (blink and head turns) before capturing.");
       return;
@@ -241,14 +270,18 @@ export function SelfieCapturePanel({
       ctx.scale(-1, 1);
       ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size);
 
-      let match: FaceMatchResult | null = null;
-      if (requireFaceMatch && profilePhotoUrl) {
+      let match: FaceMatchResult | null = liveMatch;
+      if (needMatch && profilePhotoUrl) {
         setChecking(true);
         match = await matchLiveFrameToProfile(canvas, profilePhotoUrl);
         setLiveMatch(match);
         setChecking(false);
         if (!match.ok) {
           setError(match.reason || `Face match ${match.percent}% — need ${FACE_MATCH_REQUIRED_PERCENT}%+.`);
+          setPhase("match");
+          setLivenessDone(!needLiveness);
+          setChallengeIndex(0);
+          matchOkStreakRef.current = 0;
           return;
         }
       }
@@ -280,38 +313,66 @@ export function SelfieCapturePanel({
     setLivenessDone(!needLiveness);
     setLivenessHint("");
     setLivenessProgress(0);
+    setMatchProgress(0);
+    matchOkStreakRef.current = 0;
+    setPhase(needMatch ? "match" : needLiveness ? "liveness" : "ready");
   }
 
   function confirm() {
     if (!previewBlob) return;
-    if (needLiveness && !livenessDone) {
-      setError("Live checks are required.");
+    if (needMatch && (!liveMatch || !liveMatch.ok)) {
+      setError(`Face match must be ${FACE_MATCH_REQUIRED_PERCENT}%+ before using this selfie.`);
       return;
     }
-    if (requireFaceMatch && (!liveMatch || !liveMatch.ok)) {
-      setError(`Face match must be ${FACE_MATCH_REQUIRED_PERCENT}%+ before using this selfie.`);
+    if (needLiveness && !livenessDone) {
+      setError("Live checks are required.");
       return;
     }
     const file = new File([previewBlob], `attendance-selfie-${Date.now()}.jpg`, { type: "image/jpeg" });
     onCapture(file, liveMatch);
   }
 
-  const matchLabel =
-    !livenessDone && needLiveness
-      ? livenessHint || (challenge ? livenessPrompt(challenge) : "Live check…")
-      : liveMatch
-        ? liveMatch.percent > 0 || liveMatch.ok
-          ? `Live match ${liveMatch.percent}%${liveMatch.ok ? " · good" : ` · need ${FACE_MATCH_REQUIRED_PERCENT}%+`}`
-          : liveMatch.reason || "Looking for face..."
-        : modelsLoading
-          ? "Loading face model..."
-          : requireFaceMatch
-            ? "Align face in the circle for live match"
-            : "Position your face inside the circle";
+  const captureEnabled =
+    ready &&
+    !capturing &&
+    !checking &&
+    !modelsLoading &&
+    phase === "ready" &&
+    (!needLiveness || livenessDone) &&
+    (!needMatch || Boolean(liveMatch?.ok));
 
-  const stepLabel = needLiveness
-    ? `Live check ${Math.min(challengeIndex + 1, LIVENESS_CHALLENGES.length)}/${LIVENESS_CHALLENGES.length}`
-    : null;
+  const guide =
+    previewUrl
+      ? liveMatch?.ok
+        ? `Matched ${liveMatch.percent}% — you can use this selfie`
+        : "Check that your face fills the circle clearly."
+      : phase === "match"
+        ? liveMatch
+          ? liveMatch.ok
+            ? `Matched ${liveMatch.percent}% — hold still…`
+            : liveMatch.percent > 0
+              ? `Match ${liveMatch.percent}% — need ${FACE_MATCH_REQUIRED_PERCENT}%+`
+              : liveMatch.reason || "Align your face with your profile photo"
+          : modelsLoading
+            ? "Loading face model..."
+            : "Hold still — match your profile face first"
+        : phase === "liveness"
+          ? livenessHint || (challenge ? livenessPrompt(challenge) : "Live check…")
+          : "Live checks passed — capture your selfie";
+
+  const stepLabel =
+    phase === "match"
+      ? "Step 1/3 · Face match"
+      : phase === "liveness"
+        ? `Step 2/3 · Live check ${Math.min(challengeIndex + 1, LIVENESS_CHALLENGES.length)}/${LIVENESS_CHALLENGES.length}`
+        : "Step 3/3 · Capture";
+
+  const scorePct =
+    phase === "match"
+      ? Math.round(matchProgress * 100)
+      : phase === "liveness"
+        ? Math.round(livenessProgress * 100)
+        : 100;
 
   return (
     <>
@@ -330,7 +391,11 @@ export function SelfieCapturePanel({
         <div className="dx-selfie-stage">
           <div
             className={`dx-selfie-frame ${
-              livenessDone && liveMatch?.ok ? "ok" : liveMatch && liveMatch.percent > 0 ? "warn" : livenessDone ? "ok" : ""
+              phase === "ready" || (phase === "match" && liveMatch?.ok)
+                ? "ok"
+                : liveMatch && liveMatch.percent > 0 && !liveMatch.ok
+                  ? "warn"
+                  : ""
             }`}
           >
             {previewUrl ? (
@@ -342,23 +407,17 @@ export function SelfieCapturePanel({
               <div className="dx-selfie-circle" />
             </div>
           </div>
-          <p className={`dx-selfie-guide ${livenessDone ? "ok" : ""}`}>
-            {previewUrl
-              ? liveMatch?.ok
-                ? `Matched ${liveMatch.percent}% — you can use this selfie`
-                : "Check that your face fills the circle clearly."
-              : matchLabel}
-          </p>
-          {needLiveness && !previewUrl ? (
-            <div className="dx-selfie-score warn" aria-live="polite">
+          <p className={`dx-selfie-guide ${phase === "ready" ? "ok" : ""}`}>{guide}</p>
+          {!previewUrl ? (
+            <div className={`dx-selfie-score ${phase === "ready" ? "ok" : "warn"}`} aria-live="polite">
               <strong>{stepLabel}</strong>
-              <span>{Math.round(livenessProgress * 100)}%</span>
+              <span>{scorePct}%</span>
             </div>
           ) : null}
-          {requireFaceMatch && livenessDone && liveMatch && liveMatch.percent > 0 ? (
+          {needMatch && phase !== "match" && liveMatch && liveMatch.percent > 0 ? (
             <div className={`dx-selfie-score ${liveMatch.ok ? "ok" : "warn"}`} aria-live="polite">
               <strong>{liveMatch.percent}%</strong>
-              <span>{liveMatch.ok ? "match" : `need ${FACE_MATCH_REQUIRED_PERCENT}%+`}</span>
+              <span>{liveMatch.ok ? "face match" : `need ${FACE_MATCH_REQUIRED_PERCENT}%+`}</span>
             </div>
           ) : null}
         </div>
@@ -371,7 +430,7 @@ export function SelfieCapturePanel({
               <button className="secondary" onClick={retake} type="button">
                 <RefreshCw /> Retake
               </button>
-              <button disabled={requireFaceMatch && !liveMatch?.ok} onClick={confirm} type="button">
+              <button disabled={needMatch && !liveMatch?.ok} onClick={confirm} type="button">
                 <Check /> Use selfie
               </button>
             </>
@@ -380,23 +439,21 @@ export function SelfieCapturePanel({
               <button className="secondary" onClick={onClose} type="button">
                 Cancel
               </button>
-              <button
-                disabled={!ready || capturing || checking || modelsLoading || (needLiveness && !livenessDone)}
-                onClick={snap}
-                type="button"
-              >
+              <button disabled={!captureEnabled} onClick={snap} type="button">
                 <Camera />
                 {modelsLoading
                   ? "Loading model..."
-                  : needLiveness && !livenessDone
-                    ? "Complete live checks…"
-                    : checking
-                      ? "Matching..."
-                      : capturing
-                        ? "Capturing..."
-                        : ready
-                          ? "Capture"
-                          : "Starting camera..."}
+                  : phase === "match"
+                    ? "Match face first…"
+                    : phase === "liveness"
+                      ? "Complete live checks…"
+                      : checking
+                        ? "Matching..."
+                        : capturing
+                          ? "Capturing..."
+                          : ready
+                            ? "Capture"
+                            : "Starting camera..."}
               </button>
             </>
           )}
