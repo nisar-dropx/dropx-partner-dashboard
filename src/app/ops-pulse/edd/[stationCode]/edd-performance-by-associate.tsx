@@ -22,7 +22,8 @@ type DriverSummary = {
 const BUCKET_LABEL: Record<EddPerformancePackage["bucket"], string> = {
   delivered: "Delivered",
   returned: "Returned",
-  held: "Held"
+  held: "Held",
+  yetToDispatch: "Yet to dispatch"
 };
 
 /**
@@ -31,11 +32,13 @@ const BUCKET_LABEL: Record<EddPerformancePackage["bucket"], string> = {
  * for today, see the worker's EddPerformanceDailyStore), no extra fetch.
  * Mirrors CIA's CiaDriverView expand/collapse pattern.
  *
- * Packages with no driverId AND no driverName (locker/self-service
- * deliveries, or a package Amazon never attributed to a driver) are pulled
- * out into their own summary line rather than sorted into the driver list
- * as an "Unassigned" row — they aren't a driver, so ranking them alongside
- * real associates by delivery performance is misleading.
+ * Packages the worker classified as "yetToDispatch" (no driver and no
+ * store/locker attached yet — see PerformancePayload's own methodology
+ * note) are pulled out into their own summary line rather than sorted into
+ * the driver list as an "Unassigned" row: they haven't started a delivery
+ * attempt at all, so ranking them alongside real associates by delivery
+ * performance is misleading, and they're excluded from the Assigned total
+ * these percentages are computed against.
  */
 export function EddPerformanceByAssociate({ packages }: { packages: EddPerformancePackage[] }) {
   const [query, setQuery] = useState("");
@@ -47,11 +50,20 @@ export function EddPerformanceByAssociate({ packages }: { packages: EddPerforman
     const byDriver = new Map<string, { driverKey: string; driverName: string; isAccessPoint: boolean; packages: EddPerformancePackage[] }>();
     const unassignedPackages: EddPerformancePackage[] = [];
     for (const pkg of packages) {
-      const key = pkg.driverId || pkg.driverName || "";
-      if (!key) {
+      // yetToDispatch means the worker found neither a driverId nor a store
+      // accessPointId on this package (see PerformancePayload's own
+      // methodology note) — it hasn't been handed to anyone yet, so it isn't
+      // a driver to group under.
+      if (pkg.bucket === "yetToDispatch") {
         unassignedPackages.push(pkg);
         continue;
       }
+      // Delivered/returned/held all imply dispatch happened, so driverId or
+      // driverName is expected here — trackingId is only a defensive
+      // fallback key so an unexpected blank-both row still gets its own
+      // card instead of silently merging into whichever other row got
+      // there first.
+      const key = pkg.driverId || pkg.driverName || `tid:${pkg.trackingId}`;
       // A name means it resolved (against the station's live driver directory,
       // then the workforce roster) — a driverId with no name is a driver
       // neither source recognized (usually since offboarded), so label it as
@@ -125,7 +137,7 @@ export function EddPerformanceByAssociate({ packages }: { packages: EddPerforman
                   {driver.packages.map((pkg) => (
                     <tr key={pkg.trackingId}>
                       <td>{pkg.trackingId}</td>
-                      <td><span className={`edd-pill ${pkg.bucket === "delivered" ? "future" : pkg.bucket === "returned" ? "overdue" : "dueToday"}`}>{BUCKET_LABEL[pkg.bucket]}{pkg.state ? ` · ${pkg.state}` : ""}</span></td>
+                      <td><span className={`edd-pill ${pkg.bucket === "delivered" ? "future" : pkg.bucket === "returned" ? "overdue" : pkg.bucket === "yetToDispatch" ? "unknown" : "dueToday"}`}>{BUCKET_LABEL[pkg.bucket]}{pkg.state ? ` · ${pkg.state}` : ""}</span></td>
                       <td>{pkg.paymentMethod || "—"}</td>
                       <td>{pkg.city || "—"}</td>
                       <td>{pkg.orderingOrderId || "—"}</td>
@@ -185,7 +197,7 @@ export function EddPerformanceByAssociate({ packages }: { packages: EddPerforman
 
         {unassigned ? (
           <p className="subtle" style={{ marginBottom: 12 }}>
-            <strong>{unassigned.assigned.toLocaleString("en-IN")}</strong> package{unassigned.assigned === 1 ? "" : "s"} today have neither a driver nor a store/locker on record yet (often still inducted, not yet handed off) — not counted as an associate below.
+            <strong>{unassigned.assigned.toLocaleString("en-IN")}</strong> package{unassigned.assigned === 1 ? "" : "s"} today have neither a driver nor a store/locker on record yet (often still inducted, not yet handed off) — not counted as an associate below, and excluded from the Assigned total on this page since they haven&apos;t started a delivery attempt.
           </p>
         ) : null}
 

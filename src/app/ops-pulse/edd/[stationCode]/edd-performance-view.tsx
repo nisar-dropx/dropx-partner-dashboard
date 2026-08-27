@@ -220,11 +220,18 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
               </div>
               <strong>{payload.deliveredPct}%</strong>
               <small>{payload.delivered.toLocaleString("en-IN")} of {assigned.toLocaleString("en-IN")} assigned packages delivered today</small>
-              {diffVsNetwork != null ? (
+              {diffVsNetwork != null || payload.yetToDispatch > 0 ? (
                 <div className="edd-insight-row">
-                  <span className={`edd-insight-chip ${diffVsNetwork >= 0 ? "positive" : "negative"}`}>
-                    <strong>{diffVsNetwork >= 0 ? "+" : ""}{diffVsNetwork} pts</strong> vs. network average ({networkAvg}%)
-                  </span>
+                  {diffVsNetwork != null ? (
+                    <span className={`edd-insight-chip ${diffVsNetwork >= 0 ? "positive" : "negative"}`}>
+                      <strong>{diffVsNetwork >= 0 ? "+" : ""}{diffVsNetwork} pts</strong> vs. network average ({networkAvg}%)
+                    </span>
+                  ) : null}
+                  {payload.yetToDispatch > 0 ? (
+                    <span className="edd-insight-chip" title="Still at the station, no driver or store attached yet — not counted in Assigned above">
+                      <strong>{payload.yetToDispatch.toLocaleString("en-IN")}</strong> yet to dispatch (not in Assigned)
+                    </span>
+                  ) : null}
                 </div>
               ) : null}
             </section>
@@ -262,6 +269,7 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
               todayDelivered={payload.delivered}
               todayReturned={payload.returned}
               todayHeld={payload.held}
+              todayYetToDispatch={payload.yetToDispatch}
               todayDeliveredPct={payload.deliveredPct}
             />
           ) : (

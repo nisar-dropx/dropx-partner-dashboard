@@ -68,7 +68,7 @@ async function postJson<T>(path: string): Promise<T> {
 }
 
 async function refreshStation(stationCode: string) {
-  return postJson<{ fetchedAt: string; assigned: number; delivered: number; returned: number; held: number; deliveredPct: number; returnedPct: number; heldPct: number }>(
+  return postJson<{ fetchedAt: string; assigned: number; delivered: number; returned: number; held: number; yetToDispatch: number; deliveredPct: number; returnedPct: number; heldPct: number }>(
     `/api/ops-pulse/edd/performance/refresh?stationCode=${encodeURIComponent(stationCode)}`
   );
 }
@@ -123,10 +123,11 @@ export function EddNetworkPerformanceView({
         acc.delivered += row.delivered;
         acc.returned += row.returned;
         acc.held += row.held;
+        acc.yetToDispatch += row.yetToDispatch;
         acc.stationsWithData += row.hasSnapshot ? 1 : 0;
         return acc;
       },
-      { assigned: 0, delivered: 0, returned: 0, held: 0, stationsWithData: 0 }
+      { assigned: 0, delivered: 0, returned: 0, held: 0, yetToDispatch: 0, stationsWithData: 0 }
     );
   }, [rows]);
   const pct = (value: number) => (totals.assigned > 0 ? Math.round((value / totals.assigned) * 1000) / 10 : 0);
@@ -218,6 +219,7 @@ export function EddNetworkPerformanceView({
                   delivered: fresh.delivered,
                   returned: fresh.returned,
                   held: fresh.held,
+                  yetToDispatch: fresh.yetToDispatch,
                   deliveredPct: fresh.deliveredPct,
                   returnedPct: fresh.returnedPct,
                   heldPct: fresh.heldPct
@@ -270,6 +272,11 @@ export function EddNetworkPerformanceView({
           {bestStation ? (
             <span className="edd-insight-chip positive">Highest: <strong>{bestStation.stationCode}</strong> at {bestStation.deliveredPct}%</span>
           ) : null}
+          {totals.yetToDispatch > 0 ? (
+            <span className="edd-insight-chip" title="Still at stations, no driver or store attached yet — not counted in Assigned above">
+              <strong>{totals.yetToDispatch.toLocaleString("en-IN")}</strong> network-wide yet to dispatch
+            </span>
+          ) : null}
         </div>
       </section>
 
@@ -293,6 +300,11 @@ export function EddNetworkPerformanceView({
           <span>Returned</span>
           <strong>{totals.returned.toLocaleString("en-IN")}</strong>
           <small>{pct(totals.returned)}% · failed, rejected, or undeliverable</small>
+        </div>
+        <div className="edd-bucket-card static unknown">
+          <span>Yet to dispatch</span>
+          <strong>{totals.yetToDispatch.toLocaleString("en-IN")}</strong>
+          <small>not counted in Assigned — no driver/store yet</small>
         </div>
       </section>
 

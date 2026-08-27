@@ -73,6 +73,7 @@ export function EddPerformanceLedger({ rows }: { rows: EddPerformanceDailyRow[] 
                   <th className="num">Delivered</th>
                   <th className="num">Returned</th>
                   <th className="num">Held</th>
+                  <th className="num">Yet to dispatch</th>
                   <th className="num"><button type="button" className="edd-sort-btn" onClick={() => toggleSort("deliveredPct")}>Delivery Performance {sortIcon("deliveredPct")}</button></th>
                 </tr>
               </thead>
@@ -86,6 +87,7 @@ export function EddPerformanceLedger({ rows }: { rows: EddPerformanceDailyRow[] 
                       <td className="num">{row.delivered.toLocaleString("en-IN")}</td>
                       <td className="num">{row.returned ? row.returned.toLocaleString("en-IN") : "—"}</td>
                       <td className="num">{row.held.toLocaleString("en-IN")}</td>
+                      <td className="num">{row.yetToDispatch ? row.yetToDispatch.toLocaleString("en-IN") : "—"}</td>
                       <td className="num">{severity ? <span className={`edd-severity ${severity}`}>{row.deliveredPct}%</span> : "—"}</td>
                     </tr>
                   );

@@ -32,6 +32,7 @@ export default async function EddPerformanceNetworkPage() {
         delivered: 0,
         returned: 0,
         held: 0,
+        yetToDispatch: 0,
         deliveredPct: 0,
         returnedPct: 0,
         heldPct: 0

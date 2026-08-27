@@ -13,6 +13,7 @@ type DaySummary = {
   delivered: number;
   returned: number;
   held: number;
+  yetToDispatch: number;
   deliveredPct: number;
 };
 
@@ -31,6 +32,7 @@ export function EddPerformanceByDate({
   todayDelivered,
   todayReturned,
   todayHeld,
+  todayYetToDispatch,
   todayDeliveredPct
 }: {
   stationCode: string;
@@ -39,6 +41,7 @@ export function EddPerformanceByDate({
   todayDelivered: number;
   todayReturned: number;
   todayHeld: number;
+  todayYetToDispatch: number;
   todayDeliveredPct: number;
 }) {
   const today = todayIstYmd();
@@ -46,8 +49,8 @@ export function EddPerformanceByDate({
 
   const rowsByDate = useMemo(() => new Map(rows.map((row) => [row.date, row])), [rows]);
   const todaySummary: DaySummary = useMemo(
-    () => ({ date: today, assigned: todayAssigned, delivered: todayDelivered, returned: todayReturned, held: todayHeld, deliveredPct: todayDeliveredPct }),
-    [today, todayAssigned, todayDelivered, todayReturned, todayHeld, todayDeliveredPct]
+    () => ({ date: today, assigned: todayAssigned, delivered: todayDelivered, returned: todayReturned, held: todayHeld, yetToDispatch: todayYetToDispatch, deliveredPct: todayDeliveredPct }),
+    [today, todayAssigned, todayDelivered, todayReturned, todayHeld, todayYetToDispatch, todayDeliveredPct]
   );
 
   /** Every day this station has data for — today (live) plus whatever the archive holds, newest first. */
@@ -59,7 +62,7 @@ export function EddPerformanceByDate({
   function summaryFor(date: string): DaySummary | null {
     if (date === today) return todaySummary;
     const row = rowsByDate.get(date);
-    return row ? { date, assigned: row.assigned, delivered: row.delivered, returned: row.returned, held: row.held, deliveredPct: row.deliveredPct } : null;
+    return row ? { date, assigned: row.assigned, delivered: row.delivered, returned: row.returned, held: row.held, yetToDispatch: row.yetToDispatch, deliveredPct: row.deliveredPct } : null;
   }
 
   const [draftDates, setDraftDates] = useState<Set<string>>(new Set([today]));
@@ -89,9 +92,10 @@ export function EddPerformanceByDate({
         acc.delivered += s.delivered;
         acc.returned += s.returned;
         acc.held += s.held;
+        acc.yetToDispatch += s.yetToDispatch;
         return acc;
       },
-      { assigned: 0, delivered: 0, returned: 0, held: 0 }
+      { assigned: 0, delivered: 0, returned: 0, held: 0, yetToDispatch: 0 }
     );
     const deliveredPct = totals.assigned > 0 ? Math.round((totals.delivered / totals.assigned) * 1000) / 10 : 0;
     return { ...totals, deliveredPct };
@@ -170,12 +174,19 @@ export function EddPerformanceByDate({
                   <small>failed, rejected, or undeliverable</small>
                 </div>
               </div>
-              {severity ? (
+              {severity || combined.yetToDispatch > 0 ? (
                 <div className="edd-insight-row">
-                  <span className={`edd-insight-chip ${severity === "critical" ? "negative" : severity === "good" ? "positive" : ""}`}>
-                    <span className={`edd-severity ${severity}`} style={{ marginRight: 6 }}>{deliverySeverityLabel(severity)}</span>
-                    <strong>{combined.deliveredPct}%</strong> delivery performance across {found.length} day{found.length === 1 ? "" : "s"}
-                  </span>
+                  {severity ? (
+                    <span className={`edd-insight-chip ${severity === "critical" ? "negative" : severity === "good" ? "positive" : ""}`}>
+                      <span className={`edd-severity ${severity}`} style={{ marginRight: 6 }}>{deliverySeverityLabel(severity)}</span>
+                      <strong>{combined.deliveredPct}%</strong> delivery performance across {found.length} day{found.length === 1 ? "" : "s"}
+                    </span>
+                  ) : null}
+                  {combined.yetToDispatch > 0 ? (
+                    <span className="edd-insight-chip" title="Still at the station, no driver or store attached yet — not counted in Assigned above">
+                      <strong>{combined.yetToDispatch.toLocaleString("en-IN")}</strong> yet to dispatch (not in Assigned)
+                    </span>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -189,6 +200,7 @@ export function EddPerformanceByDate({
                         <th className="num">Delivered</th>
                         <th className="num">Held</th>
                         <th className="num">Returned</th>
+                        <th className="num">Yet to dispatch</th>
                         <th className="num">Delivery Performance</th>
                       </tr>
                     </thead>
@@ -203,6 +215,7 @@ export function EddPerformanceByDate({
                             <td className="num">{s.delivered.toLocaleString("en-IN")}</td>
                             <td className="num">{s.held.toLocaleString("en-IN")}</td>
                             <td className="num">{s.returned.toLocaleString("en-IN")}</td>
+                            <td className="num">{s.yetToDispatch ? s.yetToDispatch.toLocaleString("en-IN") : "—"}</td>
                             <td className="num">{daySeverity ? <span className={`edd-severity ${daySeverity}`}>{s.deliveredPct}%</span> : "—"}</td>
                           </tr>
                         );
