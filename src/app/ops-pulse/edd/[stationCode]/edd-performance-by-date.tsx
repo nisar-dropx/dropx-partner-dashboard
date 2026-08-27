@@ -5,7 +5,6 @@ import { Loader2 } from "lucide-react";
 import { addDaysYmd, formatCiaDisplayDate, todayIstYmd } from "@/lib/ops-pulse/cia-types";
 import type { EddPerformanceDailyRow } from "@/lib/ops-pulse/edd-worker";
 import { deliverySeverity, deliverySeverityLabel } from "../edd-performance-severity";
-import { EddPerformanceCalendar } from "./edd-performance-calendar";
 
 /** How far back a single day can be fetched live and backfilled on demand — matches the worker's own backfill cap. */
 const MAX_LOOKBACK_DAYS = 90;
@@ -32,10 +31,14 @@ type DaySummary = {
 };
 
 /**
- * Pick one day from a real calendar (or combine several with the preset
- * chips) to see totals — a single day missing from the archive is fetched
- * and archived live from Amazon on the spot (see backfillEddPerformanceDay),
- * so "By date" never dead-ends on "not swept yet" the way it used to.
+ * Pick one day with a plain native date input (or combine several with the
+ * preset chips) to see totals — a single day missing from the archive is
+ * fetched and archived live from Amazon on the spot (see
+ * fetchOrBackfillDay below), so "By date" never dead-ends on "not swept
+ * yet" the way it used to. A native <input type="date"> (same edd-range-field
+ * pattern as Ageing's own date filter) opens the browser's own compact
+ * date-picker modal instead of an always-open custom calendar grid, which
+ * read as oversized against the rest of the page.
  * Multi-day presets don't auto-fetch every missing day one at a time (that's
  * what the Day-wise ledger's bulk "Backfill" button is for) — they just
  * report which of the selected days aren't archived.
@@ -78,8 +81,6 @@ export function EddPerformanceByDate({
     () => ({ date: today, assigned: todayAssigned, delivered: todayDelivered, returned: todayReturned, held: todayHeld, yetToDispatch: todayYetToDispatch, deliveredPct: todayDeliveredPct }),
     [today, todayAssigned, todayDelivered, todayReturned, todayHeld, todayYetToDispatch, todayDeliveredPct]
   );
-
-  const archivedDates = useMemo(() => new Set(rowsByDate.keys()), [rowsByDate]);
 
   function summaryFor(date: string): DaySummary | null {
     if (date === today) return todaySummary;
@@ -165,7 +166,7 @@ export function EddPerformanceByDate({
       <div className="panel-head">
         <div>
           <h3>By date</h3>
-          <p className="subtle">Pick a day on the calendar (or combine several with the chips) — driver-level detail lives in the By associate tab.</p>
+          <p className="subtle">Pick a day (or combine several with the chips) — driver-level detail lives in the By associate tab.</p>
         </div>
       </div>
       <div className="panel-body">
@@ -184,15 +185,19 @@ export function EddPerformanceByDate({
           </button>
         </div>
 
-        <div style={{ marginTop: 14 }}>
-          <EddPerformanceCalendar
-            selectedDate={selectedSingleDate}
-            onSelectDate={selectSingleDay}
-            archivedDates={archivedDates}
-            today={today}
-            minDate={earliestAllowed}
+        <label className="edd-range-field" style={{ marginTop: 14, maxWidth: 200 }}>
+          <span>Or pick a day</span>
+          <input
+            type="date"
+            className="field"
+            min={earliestAllowed}
+            max={today}
+            value={selectedSingleDate}
+            onChange={(event) => {
+              if (event.target.value) selectSingleDay(event.target.value);
+            }}
           />
-        </div>
+        </label>
 
         {fetchingDate ? (
           <p className="subtle" style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 6 }}>
