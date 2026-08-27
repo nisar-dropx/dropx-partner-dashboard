@@ -305,16 +305,22 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
   if (error) throw new Error(error.message);
 
   const punches = data ?? [];
+  // Freeze punch times before order updates so rebuild never picks up approval/server "now".
+  const punchTimes = punches.map((punch) => punch.punch_time).filter(Boolean) as string[];
   for (let index = 0; index < punches.length; index += 1) {
     const order = index + 1;
+    const preservedTime = punches[index].punch_time;
     await supabaseAdmin
       .from("attendance_punches")
-      .update({ punch_order: order, punch_label: punchLabel(order) })
+      .update({
+        punch_order: order,
+        punch_label: punchLabel(order),
+        ...(preservedTime ? { punch_time: preservedTime } : {})
+      })
       .eq("id", punches[index].id);
   }
 
-  const first = punches[0]?.punch_time ? new Date(punches[0].punch_time) : null;
-  const punchTimes = punches.map((punch) => punch.punch_time).filter(Boolean);
+  const first = punchTimes[0] ? new Date(punchTimes[0]) : null;
   const summary = summarizeFirstInLastOut(punchTimes);
   const remark = punches.length === 0
     ? "No punch"

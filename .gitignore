@@ -18,3 +18,5 @@ deploy-output.txt
 .env*
 /docs/CASH_RECON_EXECUTIVE_RECONCILIATION_MIGRATION.md
 */node_modules
+.next/*
+.cursor/*

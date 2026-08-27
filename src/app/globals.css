@@ -18381,13 +18381,13 @@ td strong,
 
 .edd-hero-card {
   display: grid;
-  gap: 8px;
-  padding: 20px;
+  gap: 6px;
+  padding: 16px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
   box-shadow: var(--shadow-soft);
-  border-left: 5px solid var(--muted);
+  border-left: 4px solid var(--muted);
 }
 .edd-hero-card.critical { border-left-color: var(--red); }
 .edd-hero-card.watch { border-left-color: var(--amber); }
@@ -18405,7 +18405,7 @@ td strong,
   text-transform: uppercase;
 }
 .edd-hero-card strong {
-  font-size: 40px;
+  font-size: 28px;
   line-height: 1;
   color: var(--ink);
 }

@@ -384,7 +384,7 @@ export async function holdAttendancePunch(punchId: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const punch = await supabaseAdmin
     .from("attendance_punches")
-    .select("id, company_id, enrolment_id, punch_date, calculated")
+    .select("id, company_id, enrolment_id, punch_date, punch_time, calculated")
     .eq("id", punchId)
     .maybeSingle();
   if (punch.error) throw new Error(punch.error.message);
@@ -392,7 +392,11 @@ export async function holdAttendancePunch(punchId: string) {
 
   const update = await supabaseAdmin
     .from("attendance_punches")
-    .update({ calculated: false, is_flagged: true })
+    .update({
+      calculated: false,
+      is_flagged: true,
+      ...(punch.data.punch_time ? { punch_time: punch.data.punch_time } : {})
+    })
     .eq("id", punchId);
   if (update.error) throw new Error(update.error.message);
 
@@ -404,21 +408,45 @@ export async function holdAttendancePunch(punchId: string) {
   return true;
 }
 
+function asIsoTime(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+/** Prefer device capture time; never invent approval/server "now". */
+function effectivePunchTime(punch: { punch_time?: string | null; client_captured_at?: string | null }) {
+  return asIsoTime(punch.client_captured_at) ?? asIsoTime(punch.punch_time);
+}
+
 /** After manager approve: count the held punch toward attendance calendar/daily. */
 export async function activateHeldAttendancePunch(punchId: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-  const punch = await supabaseAdmin
+  let punch = await supabaseAdmin
     .from("attendance_punches")
-    .select("id, company_id, enrolment_id, punch_date, calculated")
+    .select("id, company_id, enrolment_id, punch_date, punch_time, client_captured_at, calculated")
     .eq("id", punchId)
     .maybeSingle();
+  if (punch.error && /client_captured_at|does not exist|schema cache/i.test(punch.error.message)) {
+    punch = await supabaseAdmin
+      .from("attendance_punches")
+      .select("id, company_id, enrolment_id, punch_date, punch_time, calculated")
+      .eq("id", punchId)
+      .maybeSingle();
+  }
   if (punch.error) throw new Error(punch.error.message);
   if (!punch.data) return false;
-  if (punch.data.calculated === true) return false;
 
+  const originalPunchTime = effectivePunchTime(punch.data);
+  if (!originalPunchTime) {
+    throw new Error("Held punch is missing the original punch time.");
+  }
+
+  // Keep the employee's original punch instant — never replace with approval time.
   const update = await supabaseAdmin
     .from("attendance_punches")
-    .update({ calculated: true, is_flagged: false })
+    .update({ calculated: true, is_flagged: false, punch_time: originalPunchTime })
     .eq("id", punchId);
   if (update.error) throw new Error(update.error.message);
 
@@ -671,7 +699,15 @@ export async function insertAppGpsPunch({
   }
 
   const serverReceivedAt = new Date();
-  const punchDate = istDate(serverReceivedAt);
+  const clientPunch = clientCapturedAt ? new Date(clientCapturedAt) : null;
+  const clientPunchValid =
+    clientPunch != null &&
+    !Number.isNaN(clientPunch.getTime()) &&
+    clientPunch.getTime() - serverReceivedAt.getTime() <= 5 * 60_000 &&
+    serverReceivedAt.getTime() - clientPunch.getTime() <= 24 * 60 * 60_000;
+  // Use the time the worker punched on device, not server/approval time.
+  const punchAt = clientPunchValid && clientPunch ? clientPunch : serverReceivedAt;
+  const punchDate = istDate(punchAt);
   // Count all punches for ordering (held + calculated). Held selfie punches do not
   // write attendance_daily until a manager approves the support package.
   const existing = await supabaseAdmin
@@ -697,7 +733,7 @@ export async function insertAppGpsPunch({
       field_executive_id: fieldExecutiveId,
       location_id: locationId,
       device_serial: APP_GPS_DEVICE_SERIAL,
-      punch_time: serverReceivedAt.toISOString(),
+      punch_time: punchAt.toISOString(),
       punch_date: punchDate,
       punch_order: nextOrder,
       punch_label: punchLabel(nextOrder),
