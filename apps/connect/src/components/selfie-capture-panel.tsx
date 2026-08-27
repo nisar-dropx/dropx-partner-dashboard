@@ -41,9 +41,10 @@ export function SelfieCapturePanel({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const trackerRef = useRef<ReturnType<typeof createLivenessTracker> | null>(null);
+  const challengeIndexRef = useRef(0);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
-  const [modelsLoading, setModelsLoading] = useState(Boolean((requireFaceMatch || needLiveness) && true));
+  const [modelsLoading, setModelsLoading] = useState(Boolean(requireFaceMatch || needLiveness));
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [capturing, setCapturing] = useState(false);
@@ -54,9 +55,12 @@ export function SelfieCapturePanel({
   const [livenessHint, setLivenessHint] = useState("");
   const [livenessProgress, setLivenessProgress] = useState(0);
 
-  const challenge: LivenessChallenge | null = needLiveness && !livenessDone
-    ? LIVENESS_CHALLENGES[Math.min(challengeIndex, LIVENESS_CHALLENGES.length - 1)]
-    : null;
+  challengeIndexRef.current = challengeIndex;
+
+  const challenge: LivenessChallenge | null =
+    needLiveness && !livenessDone
+      ? LIVENESS_CHALLENGES[Math.min(challengeIndex, LIVENESS_CHALLENGES.length - 1)]
+      : null;
 
   useEffect(() => {
     if (!requireFaceMatch && !needLiveness) {
@@ -94,8 +98,8 @@ export function SelfieCapturePanel({
           audio: false,
           video: {
             facingMode: { ideal: "user" },
-            width: { ideal: 1280 },
-            height: { ideal: 1280 }
+            width: { ideal: 640 },
+            height: { ideal: 640 }
           }
         });
         if (cancelled) {
@@ -135,7 +139,7 @@ export function SelfieCapturePanel({
     };
   }, [previewUrl]);
 
-  // Reset / advance liveness tracker when challenge changes.
+  // Reset tracker when the active challenge changes.
   useEffect(() => {
     if (!needLiveness || livenessDone || !challenge) {
       trackerRef.current = null;
@@ -146,14 +150,15 @@ export function SelfieCapturePanel({
     setLivenessProgress(0);
   }, [needLiveness, livenessDone, challenge]);
 
-  // Liveness sampling loop (must pass before capture when enabled).
+  // Single stable sampling loop — do not recreate on every challengeIndex tick.
   useEffect(() => {
-    if (!needLiveness || livenessDone || !ready || previewUrl || modelsLoading || !challenge) return;
+    if (!needLiveness || livenessDone || !ready || previewUrl || modelsLoading) return;
     let cancelled = false;
     let busy = false;
+
     const tick = async () => {
       const video = videoRef.current;
-      if (!video || cancelled || busy) return;
+      if (!video || cancelled || busy || !trackerRef.current) return;
       busy = true;
       try {
         const pose = await sampleFacePose(video, { mirroredDisplay: true });
@@ -162,7 +167,7 @@ export function SelfieCapturePanel({
         setLivenessHint(result.hint);
         setLivenessProgress(result.progress);
         if (result.passed) {
-          const next = challengeIndex + 1;
+          const next = challengeIndexRef.current + 1;
           if (next >= LIVENESS_CHALLENGES.length) {
             setLivenessDone(true);
             setLivenessHint("Live checks passed — capture your selfie");
@@ -175,15 +180,16 @@ export function SelfieCapturePanel({
         busy = false;
       }
     };
+
     tick().catch(() => undefined);
     const timer = window.setInterval(() => {
       tick().catch(() => undefined);
-    }, 180);
+    }, 120);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [needLiveness, livenessDone, ready, previewUrl, modelsLoading, challenge, challengeIndex]);
+  }, [needLiveness, livenessDone, ready, previewUrl, modelsLoading]);
 
   // Live match while camera is open (after liveness when required).
   useEffect(() => {
@@ -290,17 +296,18 @@ export function SelfieCapturePanel({
     onCapture(file, liveMatch);
   }
 
-  const matchLabel = !livenessDone && needLiveness
-    ? livenessHint || (challenge ? livenessPrompt(challenge) : "Live check…")
-    : liveMatch
-      ? liveMatch.percent > 0 || liveMatch.ok
-        ? `Live match ${liveMatch.percent}%${liveMatch.ok ? " · good" : ` · need ${FACE_MATCH_REQUIRED_PERCENT}%+`}`
-        : liveMatch.reason || "Looking for face..."
-      : modelsLoading
-        ? "Loading face model..."
-        : requireFaceMatch
-          ? "Align face in the circle for live match"
-          : "Position your face inside the circle";
+  const matchLabel =
+    !livenessDone && needLiveness
+      ? livenessHint || (challenge ? livenessPrompt(challenge) : "Live check…")
+      : liveMatch
+        ? liveMatch.percent > 0 || liveMatch.ok
+          ? `Live match ${liveMatch.percent}%${liveMatch.ok ? " · good" : ` · need ${FACE_MATCH_REQUIRED_PERCENT}%+`}`
+          : liveMatch.reason || "Looking for face..."
+        : modelsLoading
+          ? "Loading face model..."
+          : requireFaceMatch
+            ? "Align face in the circle for live match"
+            : "Position your face inside the circle";
 
   const stepLabel = needLiveness
     ? `Live check ${Math.min(challengeIndex + 1, LIVENESS_CHALLENGES.length)}/${LIVENESS_CHALLENGES.length}`
@@ -315,21 +322,21 @@ export function SelfieCapturePanel({
             <strong id="selfie-panel-title">{title}</strong>
             <small>{hint}</small>
           </div>
-          <button aria-label="Close" onClick={onClose} type="button"><X /></button>
+          <button aria-label="Close" onClick={onClose} type="button">
+            <X />
+          </button>
         </header>
 
         <div className="dx-selfie-stage">
-          <div className={`dx-selfie-frame ${livenessDone && liveMatch?.ok ? "ok" : liveMatch && liveMatch.percent > 0 ? "warn" : livenessDone ? "ok" : ""}`}>
+          <div
+            className={`dx-selfie-frame ${
+              livenessDone && liveMatch?.ok ? "ok" : liveMatch && liveMatch.percent > 0 ? "warn" : livenessDone ? "ok" : ""
+            }`}
+          >
             {previewUrl ? (
               <img alt="Selfie preview" className="dx-selfie-live" src={previewUrl} />
             ) : (
-              <video
-                autoPlay
-                className="dx-selfie-live"
-                muted
-                playsInline
-                ref={videoRef}
-              />
+              <video autoPlay className="dx-selfie-live" muted playsInline ref={videoRef} />
             )}
             <div aria-hidden className="dx-selfie-mask">
               <div className="dx-selfie-circle" />
@@ -361,18 +368,18 @@ export function SelfieCapturePanel({
         <div className="dx-selfie-panel-actions">
           {previewUrl ? (
             <>
-              <button className="secondary" onClick={retake} type="button"><RefreshCw /> Retake</button>
-              <button
-                disabled={requireFaceMatch && !liveMatch?.ok}
-                onClick={confirm}
-                type="button"
-              >
+              <button className="secondary" onClick={retake} type="button">
+                <RefreshCw /> Retake
+              </button>
+              <button disabled={requireFaceMatch && !liveMatch?.ok} onClick={confirm} type="button">
                 <Check /> Use selfie
               </button>
             </>
           ) : (
             <>
-              <button className="secondary" onClick={onClose} type="button">Cancel</button>
+              <button className="secondary" onClick={onClose} type="button">
+                Cancel
+              </button>
               <button
                 disabled={!ready || capturing || checking || modelsLoading || (needLiveness && !livenessDone)}
                 onClick={snap}

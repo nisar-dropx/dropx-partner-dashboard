@@ -15,7 +15,7 @@ import {
   UserX,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { SelfieCapturePanel } from "./selfie-capture-panel";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
@@ -278,6 +278,29 @@ export function ConnectAttendance({ account }: { account: Account }) {
     Boolean(punchStatus?.shift.open && punchStatus.shift.inTime) &&
     Date.now() - new Date(punchStatus!.shift.inTime!).getTime() <= LOCATION_TRACKING_MS;
 
+  const supportStationKey = [
+    punchStatus?.station?.id,
+    punchStatus?.station?.latitude,
+    punchStatus?.station?.longitude,
+    punchStatus?.station?.radiusM,
+    ...(punchStatus?.stations ?? []).flatMap((row) => [row.id, row.latitude, row.longitude, row.radiusM])
+  ].join("|");
+
+  const supportStations = useMemo(() => {
+    const rows = [
+      ...(punchStatus?.station ? [punchStatus.station] : []),
+      ...(punchStatus?.stations ?? [])
+    ];
+    const seen = new Set<string>();
+    return rows.filter((row) => {
+      const key = row.id || `${row.latitude},${row.longitude}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed by supportStationKey
+  }, [supportStationKey]);
+
   return (
     <section className="dx-attendance">
       <div className="dx-title-row">
@@ -399,19 +422,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
       {supportFlag ? <SupportEvidenceSheet
         account={account}
         flag={supportFlag}
-        stations={(() => {
-          const rows = [
-            ...(punchStatus?.station ? [punchStatus.station] : []),
-            ...(punchStatus?.stations ?? [])
-          ];
-          const seen = new Set<string>();
-          return rows.filter((row) => {
-            const key = row.id || `${row.latitude},${row.longitude}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
-        })()}
+        stations={supportStations}
         onClose={() => setSupportFlag(null)}
         onSubmitted={() => {
           setSupportFlag(null);
@@ -456,22 +467,38 @@ function SupportEvidenceSheet({
     };
   }, [selfiePreview]);
 
+  const selfiePanelOpenRef = useRef(false);
+  selfiePanelOpenRef.current = selfiePanelOpen;
+
   useEffect(() => {
     let cancelled = false;
-    async function checkLocation() {
-      setGeofence({
-        status: "checking",
-        distanceM: null,
-        radiusM: null,
-        stationLabel: "station",
-        message: "Checking your location…"
-      });
+    async function checkLocation(options?: { quiet?: boolean }) {
+      // Never flip to "checking" while the camera is open — that remounted the panel
+      // and reset blink progress back to 0%.
+      if (!options?.quiet && !selfiePanelOpenRef.current) {
+        setGeofence((prev) =>
+          prev.status === "inside" || prev.status === "outside"
+            ? prev
+            : {
+                status: "checking",
+                distanceM: null,
+                radiusM: null,
+                stationLabel: "station",
+                message: "Checking your location…"
+              }
+        );
+      }
       try {
         const position = await readPosition();
         if (cancelled) return;
-        setGeofence(evaluateClientGeofence(position.coords.latitude, position.coords.longitude, stations));
+        const next = evaluateClientGeofence(position.coords.latitude, position.coords.longitude, stations);
+        setGeofence(next);
+        if (next.status === "outside" && selfiePanelOpenRef.current) {
+          setSelfiePanelOpen(false);
+        }
       } catch (reason) {
         if (cancelled) return;
+        if (selfiePanelOpenRef.current) return;
         setGeofence({
           status: "unknown",
           distanceM: null,
@@ -483,15 +510,14 @@ function SupportEvidenceSheet({
     }
     checkLocation().catch(() => undefined);
     const timer = window.setInterval(() => {
-      checkLocation().catch(() => undefined);
-    }, 20_000);
+      if (selfiePanelOpenRef.current) return;
+      checkLocation({ quiet: true }).catch(() => undefined);
+    }, 30_000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
   }, [stations]);
-
-  const cameraAllowed = geofence.status === "inside";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -579,7 +605,7 @@ function SupportEvidenceSheet({
         </div>
       </form>
     </aside>
-    {selfiePanelOpen && cameraAllowed ? (
+    {selfiePanelOpen ? (
       <SelfieCapturePanel
         title="Support selfie"
         hint="Complete live checks (blink + head turns), then capture. A printed photo will not pass."
