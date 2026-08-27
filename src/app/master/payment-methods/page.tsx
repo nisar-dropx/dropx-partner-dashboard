@@ -268,13 +268,15 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
               <div><h2>Payment Fields</h2><p className="subtle">Create reusable fields and map each one to a normalized shipment, attendance, or performance source.</p></div>
               <PendingLink className="icon-button" href="/master/payment-methods" scroll={false} aria-label="Close">x</PendingLink>
             </div>
-            {pagePermission.canAdd ? <div className="payment-field-create"><h3>Add payment field</h3><PaymentFieldForm action={createPaymentField} submitLabel="Add field" /></div> : null}
+            {pagePermission.canAdd ? <div className="payment-field-create"><div className="payment-field-create-head"><h3>Add payment field</h3><p className="subtle">Create the field once, then reuse it in any payment method.</p></div><PaymentFieldForm action={createPaymentField} submitLabel="Add field" /></div> : null}
             <div className="payment-field-master-list">
               {fields.length ? fields.map((field) => (
                 <div className="payment-field-master-row" key={field.id}>
                   {pagePermission.canEdit ? <PaymentFieldForm action={updatePaymentField} initialField={field} submitLabel="Save" /> : <div><strong>{field.label}</strong><small>{field.code}</small></div>}
-                  <span className="subtle">Used in {field.usage_count} method{field.usage_count === 1 ? "" : "s"}</span>
-                  {pagePermission.canEdit ? <form action={deletePaymentField}><input name="field_id" type="hidden" value={field.id} /><SubmitButton className="button warning compact" confirmationBlocked={field.usage_count > 0} confirmMessage={field.usage_count > 0 ? "Remove this field from every payment method before deleting it." : "Delete this payment field?"}>Delete</SubmitButton></form> : null}
+                  <div className="payment-field-row-footer">
+                    <span className="payment-field-usage">Used in {field.usage_count} payment method{field.usage_count === 1 ? "" : "s"}</span>
+                    {pagePermission.canEdit ? <form action={deletePaymentField}><input name="field_id" type="hidden" value={field.id} /><SubmitButton className="button warning compact" confirmationBlocked={field.usage_count > 0} confirmMessage={field.usage_count > 0 ? "Remove this field from every payment method before deleting it." : "Delete this payment field?"}>Delete</SubmitButton></form> : null}
+                  </div>
                 </div>
               )) : <p className="empty-cell">No payment fields created yet.</p>}
             </div>
