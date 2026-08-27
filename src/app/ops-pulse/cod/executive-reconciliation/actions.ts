@@ -552,13 +552,13 @@ export async function submitCodCashCollection(formData: FormData) {
       driver_reconciliation_pending: 0,
       no_deposit_liability: false,
       is_final_submitted: false,
-      validation_status: Math.abs(difference) >= 0.01
+      validation_status: Math.abs(difference) > DIFFERENCE_REMARKS_RUPEES
         ? "Mismatch"
         : cashReconReady
           ? "Matched"
           : "Validation required",
       submission_status: "Submitted",
-      manager_status: Math.abs(difference) >= 0.01 ? "Pending" : "Not required",
+      manager_status: Math.abs(difference) > DIFFERENCE_REMARKS_RUPEES ? "Pending" : "Not required",
       validation_snapshot: { ...previousSnapshot, cash_submission: cashSnapshot },
       submitted_by: authorization.userId,
       submitted_at: now,
@@ -650,7 +650,7 @@ export async function submitCodCashCollection(formData: FormData) {
       .limit(1)
       .maybeSingle();
     if (activeVarianceNotification.error) throw new Error(activeVarianceNotification.error.message);
-    if (Math.abs(difference) >= 0.01 && (varianceChanged || !activeVarianceNotification.data?.id)) {
+    if (Math.abs(difference) > DIFFERENCE_REMARKS_RUPEES && (varianceChanged || !activeVarianceNotification.data?.id)) {
       await supabaseAdmin
         .from("cod_manager_notifications")
         .update({ status: "Resolved", resolved_at: now })
@@ -669,7 +669,7 @@ export async function submitCodCashCollection(formData: FormData) {
         title: `COD ${difference < 0 ? "shortage" : "excess"}: ${station.station_code} on ${businessDate}`,
         message: `Cash was submitted ${varianceLabel}. Expected ₹${expectedCod.toFixed(2)}; collected ₹${collectedCod.toFixed(2)} across ${rows.length} associates. ${varianceRows.length} associate row${varianceRows.length === 1 ? "" : "s"} require manager review.${cashReconReady ? " Cash liability was checked via cash recon worker." : " SCC Driver Reconciliation has been queued."}`
       });
-    } else if (Math.abs(difference) < 0.01) {
+    } else if (Math.abs(difference) <= DIFFERENCE_REMARKS_RUPEES) {
       await supabaseAdmin
         .from("cod_manager_notifications")
         .update({ status: "Resolved", resolved_at: now })
@@ -679,7 +679,7 @@ export async function submitCodCashCollection(formData: FormData) {
     }
 
     await writeCodAudit({
-      action: Math.abs(difference) >= 0.01 ? "COD cash submitted with variance" : "COD cash submitted",
+      action: Math.abs(difference) > DIFFERENCE_REMARKS_RUPEES ? "COD cash submitted with variance" : "COD cash submitted",
       after: {
         ...cashSnapshot,
         driver_check_run_id: driverCheckRunId,
@@ -695,13 +695,13 @@ export async function submitCodCashCollection(formData: FormData) {
 
     revalidatePath(pagePath);
     revalidatePath("/ops-pulse/cod/portal-checks");
-    const notice = difference < 0
-      ? `COD submitted with shortage ₹${shortAmount.toFixed(2)}. Manager notified${cashReconReady ? "; cash liability checked." : "; Driver Reconciliation is running."}`
-      : difference > 0
-        ? `COD submitted with excess ₹${excessAmount.toFixed(2)}. Manager notified${cashReconReady ? "; cash liability checked." : "; Driver Reconciliation is running."}`
-        : cashReconReady
-          ? "COD submitted with no variance. Confirm Driver validation before Deposit & summary."
-          : "COD submitted with no variance. Driver Reconciliation is running.";
+    const notice = Math.abs(difference) <= DIFFERENCE_REMARKS_RUPEES
+      ? cashReconReady
+        ? "COD submitted with no variance. Confirm Driver validation before Deposit & summary."
+        : "COD submitted with no variance. Driver Reconciliation is running."
+      : difference < 0
+        ? `COD submitted with shortage ₹${shortAmount.toFixed(2)}. Manager notified${cashReconReady ? "; cash liability checked." : "; Driver Reconciliation is running."}`
+        : `COD submitted with excess ₹${excessAmount.toFixed(2)}. Manager notified${cashReconReady ? "; cash liability checked." : "; Driver Reconciliation is running."}`;
     const nextHref = withStep(returnHref, 2);
     if (wantsClientResponse(formData)) {
       setFlashCookie({ notice });

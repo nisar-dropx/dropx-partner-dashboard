@@ -56,6 +56,10 @@ function isCashReconWorkerConfigured() {
 
 export const maxDuration = 300;
 
+// Keep in sync with DIFFERENCE_REMARKS_RUPEES in actions.ts, deposit-remittance-panel.tsx,
+// and cod-day-closure.ts — small cash variance is auto-validated without a manager notification.
+const DIFFERENCE_REMARKS_RUPEES = 5;
+
 type SearchParams = {
   date?: string;
   location?: string;
@@ -220,19 +224,23 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
   const remittanceOverrideRemarks = String(remittanceSnapshot.override_remarks ?? "").trim();
   const cashSubmitted = Boolean(cashSubmissionSnapshot.submitted_at) && selectedClosure?.submission_status !== "Draft";
   const submittedDifference = amountValue(String(cashSubmissionSnapshot.difference_amount ?? 0));
+  const submittedDifferenceNotable = Math.abs(submittedDifference) > DIFFERENCE_REMARKS_RUPEES;
   const cashSubmissionStatus = !cashSubmitted
     ? "Draft"
-    : submittedDifference < 0
-      ? "Submitted with shortage"
-      : submittedDifference > 0
-        ? "Submitted with excess"
-        : "Submitted";
-  const currentVarianceType = netDifference < 0 ? "short" : netDifference > 0 ? "excess" : "balanced";
-  const currentVarianceLabel = netDifference < 0
-    ? `COD short ${formatAmount(Math.abs(netDifference))}`
-    : netDifference > 0
-      ? `COD excess ${formatAmount(netDifference)}`
-      : "No COD variance";
+    : !submittedDifferenceNotable
+      ? "Submitted"
+      : submittedDifference < 0
+        ? "Submitted with shortage"
+        : "Submitted with excess";
+  // Within +/-5 auto-validates like every other variance check in this flow — no
+  // manager-notification confirmation step, no "shortage/excess" framing.
+  const currentVarianceNotable = Math.abs(netDifference) > DIFFERENCE_REMARKS_RUPEES;
+  const currentVarianceType = !currentVarianceNotable ? "balanced" : netDifference < 0 ? "short" : "excess";
+  const currentVarianceLabel = !currentVarianceNotable
+    ? "No COD variance"
+    : netDifference < 0
+      ? `COD short ${formatAmount(Math.abs(netDifference))}`
+      : `COD excess ${formatAmount(netDifference)}`;
   const driverCleared = selectedClosure?.driver_check_status === "Passed" ||
     selectedClosure?.driver_check_status === "Exception approved";
   const driverDisplayStatus = driverRun?.status === "Pass"
@@ -526,7 +534,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                       workerConfigured={cashReconReady}
                     />
                   </section>
-                  {activeStep === 2 && cashSubmitted && submittedDifference !== 0 ? (
+                  {activeStep === 2 && cashSubmitted && submittedDifferenceNotable ? (
                     <div className="cash-exception-strip">
                       <StatusPill status={cashSubmissionStatus} />
                       <span>
