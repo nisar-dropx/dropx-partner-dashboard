@@ -1,7 +1,7 @@
 "use client";
 
 import { Camera, Check, ClipboardCheck, Clock3, FileText, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 
 type ExpenseItem = {
@@ -69,6 +69,84 @@ function dateTime(value: string | null) {
 function statusLabel(status: string) {
   return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
+function profileLabel(profileType: "employee" | "contractor") {
+  return profileType === "contractor" ? "Contractor" : "Employee";
+}
+
+function ApprovalHead({
+  eyebrow,
+  name,
+  meta,
+  badge
+}: {
+  eyebrow: string;
+  name: string;
+  meta: string;
+  badge: ReactNode;
+}) {
+  return (
+    <div className="dx-approval-card-head">
+      <div>
+        <p className="dx-approval-eyebrow">{eyebrow}</p>
+        <h2>{name}</h2>
+        <p className="dx-approval-sub">{meta}</p>
+      </div>
+      {badge}
+    </div>
+  );
+}
+
+function ApprovalNote({
+  id,
+  notes,
+  onChange,
+  placeholder
+}: {
+  id: string;
+  notes: Record<string, string>;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <textarea
+      className="dx-approval-note-input"
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      rows={2}
+      value={notes[id] ?? ""}
+    />
+  );
+}
+
+function ApprovalToolbar({
+  saving,
+  onReturn,
+  onReject,
+  onApprove,
+  showReturn = true
+}: {
+  saving: boolean;
+  onReturn?: () => void;
+  onReject: () => void;
+  onApprove: () => void;
+  showReturn?: boolean;
+}) {
+  return (
+    <div className={`dx-approval-toolbar${showReturn ? "" : " duo"}`}>
+      {showReturn && onReturn ? (
+        <button className="toolbar-return" disabled={saving} onClick={onReturn} type="button">
+          <RotateCcw />Return
+        </button>
+      ) : null}
+      <button className="toolbar-reject" disabled={saving} onClick={onReject} type="button">
+        <X />Reject
+      </button>
+      <button className="toolbar-approve" disabled={saving} onClick={onApprove} type="button">
+        <Check />Approve
+      </button>
+    </div>
+  );
+}
 
 export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [section, setSection] = useState<ApprovalSection>("time-off");
@@ -108,6 +186,10 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   }, [account.id, account.profileType]);
 
   useEffect(() => { void load(); }, [load]);
+
+  function setNote(id: string, value: string) {
+    setNotes((current) => ({ ...current, [id]: value }));
+  }
 
   async function decideReimbursement(claimId: string, action: "approved" | "returned" | "rejected") {
     setSaving(true); setError(""); setNotice("");
@@ -154,62 +236,137 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     finally { setSaving(false); }
   }
 
-  return <section className="dx-expenses dx-approval-inbox">
-    <header className="dx-page-intro"><small>Manager workspace</small><h1>Approval inbox</h1><p>Review only the workflow steps assigned to you.</p></header>
-    {error ? <div className="dx-alert error">{error}</div> : null}
-    {notice ? <div className="dx-alert success">{notice}</div> : null}
-    <nav className="dx-expense-tabs" aria-label="Approval sections">
-      <button className={section === "time-off" ? "active" : ""} onClick={() => setSection("time-off")}>Time off <b>{leaveApprovals.length}</b></button>
-      <button className={section === "location-integrity" ? "active" : ""} onClick={() => setSection("location-integrity")}>Location integrity <b>{supportPackages.length}</b></button>
-      <button className={section === "reimbursements" ? "active" : ""} onClick={() => setSection("reimbursements")}>Reimbursements <b>{reimbursements.length}</b></button>
-    </nav>
-    {loading ? <div className="dx-loader"><span /><small>Loading approvals…</small></div> : null}
-    {!loading && section === "time-off" ? <div className="dx-expense-list">
-      {leaveApprovals.length ? leaveApprovals.map((approval) => <article className="dx-expense-approval" key={approval.id}>
-        <header><span><small>{approval.leaveType} · {approval.stepName}</small><strong>{approval.requesterName}</strong><em>{approval.requesterCode || "—"} · {approval.profileType === "contractor" ? "Independent contractor" : "Employee"}</em></span><b className="dx-approval-chip">{approval.days} day{approval.days === 1 ? "" : "s"}</b></header>
-        <div className="dx-approval-details">
-          <span><small>Dates</small><strong>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</strong></span>
-          <span><small>Reason</small><strong>{approval.reason}</strong></span>
-        </div>
-        <label>Decision note<textarea onChange={(event) => setNotes((current) => ({ ...current, [approval.requestId]: event.target.value }))} placeholder="Optional reviewer note" rows={2} value={notes[approval.requestId] ?? ""} /></label>
-        <footer className="dx-approval-actions"><button className="danger" disabled={saving} onClick={() => void decideLeave(approval.requestId, "rejected")}><X />Reject</button><button className="primary" disabled={saving} onClick={() => void decideLeave(approval.requestId, "approved")}><Check />Approve</button></footer>
-      </article>) : <div className="dx-empty"><Clock3 /><strong>No time-off approvals waiting</strong><small>Assigned time-off approvals will appear here.</small></div>}
-    </div> : null}
-    {!loading && section === "location-integrity" ? <div className="dx-expense-list">
-      {supportPackages.length ? supportPackages.map((item) => <article className="dx-expense-approval" key={item.id}>
-        <header><span><small>Support package · {displayDate(item.punchDate)}</small><strong>{item.workerName}</strong><em>{item.workerCode || "—"} · {item.profileType === "contractor" ? "Independent contractor" : "Employee"}</em></span><b className={`dx-status-badge ${item.status}`}>{statusLabel(item.status)}</b></header>
-        <div className="dx-support-evidence">
-          {item.selfieUrl ? (
-            <a aria-label="Open support selfie" className="dx-support-thumb" href={item.selfieUrl} rel="noreferrer" target="_blank">
-              <img alt="" src={item.selfieUrl} />
-              <Camera />
-            </a>
-          ) : (
-            <div aria-hidden="true" className="dx-support-thumb missing"><Camera /></div>
+  return (
+    <section className="dx-approval-inbox">
+      <header className="dx-page-intro">
+        <small>Manager workspace</small>
+        <h1>Approval inbox</h1>
+        <p>Review workflow steps assigned to you.</p>
+      </header>
+      {error ? <div className="dx-alert error">{error}</div> : null}
+      {notice ? <div className="dx-alert success">{notice}</div> : null}
+      <nav aria-label="Approval sections" className="dx-approval-tabs">
+        <button className={section === "time-off" ? "active" : ""} onClick={() => setSection("time-off")} type="button">
+          Time off<span>{leaveApprovals.length}</span>
+        </button>
+        <button className={section === "location-integrity" ? "active" : ""} onClick={() => setSection("location-integrity")} type="button">
+          Location<span>{supportPackages.length}</span>
+        </button>
+        <button className={section === "reimbursements" ? "active" : ""} onClick={() => setSection("reimbursements")} type="button">
+          Claims<span>{reimbursements.length}</span>
+        </button>
+      </nav>
+      {loading ? <div className="dx-loader"><span /><small>Loading approvals…</small></div> : null}
+
+      {!loading && section === "time-off" ? (
+        <div className="dx-approval-list">
+          {leaveApprovals.length ? leaveApprovals.map((approval) => (
+            <article className="dx-approval-card" key={approval.id}>
+              <ApprovalHead
+                badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+                eyebrow={`${approval.leaveType} · ${approval.stepName}`}
+                meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                name={approval.requesterName}
+              />
+              <dl className="dx-approval-facts">
+                <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
+                <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
+              </dl>
+              <ApprovalNote id={approval.requestId} notes={notes} onChange={(value) => setNote(approval.requestId, value)} placeholder="Note for worker (optional)" />
+              <ApprovalToolbar
+                onApprove={() => void decideLeave(approval.requestId, "approved")}
+                onReject={() => void decideLeave(approval.requestId, "rejected")}
+                saving={saving}
+                showReturn={false}
+              />
+            </article>
+          )) : (
+            <div className="dx-empty"><Clock3 /><strong>No time-off approvals</strong><small>Assigned leave requests will appear here.</small></div>
           )}
-          <div className="dx-support-meta">
-            <div className="dx-support-meta-row"><LocateFixed /><span>{item.lat.toFixed(5)}, {item.lng.toFixed(5)}{item.accuracyM == null ? "" : ` · ±${Math.round(item.accuracyM)}m`}</span></div>
-            <p>{item.remarks || "Selfie and GPS submitted outside station"}</p>
-            <div className="dx-support-meta-foot">
-              <small>{item.receivedAt ? `Received ${dateTime(item.receivedAt)}` : "Awaiting receipt"}</small>
-              <a href={`https://www.google.com/maps?q=${item.lat},${item.lng}`} rel="noreferrer" target="_blank"><MapPin />Map</a>
-            </div>
-          </div>
         </div>
-        <label>Review note<textarea onChange={(event) => setNotes((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Optional note" rows={2} value={notes[item.id] ?? ""} /></label>
-        <footer className="dx-approval-actions dx-approval-actions-triple">
-          <button disabled={saving} onClick={() => void decideSupportPackage(item.id, "returned")}><RotateCcw />Return</button>
-          <button className="danger" disabled={saving} onClick={() => void decideSupportPackage(item.id, "rejected")}><X />Reject</button>
-          <button className="primary" disabled={saving} onClick={() => void decideSupportPackage(item.id, "approved")}><Check />Approve</button>
-        </footer>
-      </article>) : <div className="dx-empty"><LocateFixed /><strong>No support packages waiting</strong><small>Assigned location verification packages will appear here.</small></div>}
-    </div> : null}
-    {!loading && section === "reimbursements" ? <div className="dx-expense-list">{reimbursements.length ? reimbursements.map((approval) => <article className="dx-expense-approval" key={approval.id}>
-      <header><span><small>{approval.claim.claim_no} · {approval.step_name}</small><strong>{approval.claim.requesterName}</strong><em>{approval.claim.purpose}</em></span><b className="dx-approval-chip">{money(approval.claim.total_claimed)}</b></header>
-      <div className="dx-approval-details">{approval.claim.hr_expense_items?.map((item) => <span key={item.id}><small>{first(item.hr_expense_categories)?.name ?? "Expense"} · {item.expense_date}</small><strong>{money(item.amount)}</strong>{approval.claim.attachments?.filter((attachment) => attachment.item_id === item.id && attachment.url).map((attachment) => <a href={attachment.url ?? "#"} key={attachment.id} rel="noreferrer" target="_blank"><FileText />{attachment.file_name}</a>)}</span>)}</div>
-      <label>Decision note<textarea onChange={(event) => setNotes((current) => ({ ...current, [approval.claim.id]: event.target.value }))} placeholder="Required when returning or rejecting" rows={2} value={notes[approval.claim.id] ?? ""} /></label>
-      <footer className="dx-approval-actions dx-approval-actions-triple"><button disabled={saving} onClick={() => void decideReimbursement(approval.claim.id, "returned")}><RotateCcw />Return</button><button className="danger" disabled={saving} onClick={() => void decideReimbursement(approval.claim.id, "rejected")}><X />Reject</button><button className="primary" disabled={saving} onClick={() => void decideReimbursement(approval.claim.id, "approved")}><Check />Approve</button></footer>
-    </article>) : <div className="dx-empty"><Clock3 /><strong>No approvals waiting</strong><small>Assigned reimbursement approvals will appear here.</small></div>}</div> : null}
-    <div className="dx-approval-note"><ClipboardCheck /><span><strong>Master-driven routing</strong><small>Each approval follows the active policy and reporting hierarchy before it reaches the next step or Payments.</small></span></div>
-  </section>;
+      ) : null}
+
+      {!loading && section === "location-integrity" ? (
+        <div className="dx-approval-list">
+          {supportPackages.length ? supportPackages.map((item) => (
+            <article className="dx-approval-card" key={item.id}>
+              <ApprovalHead
+                badge={<span className={`dx-approval-badge status-${item.status}`}>{statusLabel(item.status)}</span>}
+                eyebrow={`Location check · ${displayDate(item.punchDate)}`}
+                meta={`${item.workerCode || "—"} · ${profileLabel(item.profileType)}`}
+                name={item.workerName}
+              />
+              <div className="dx-evidence-row">
+                {item.selfieUrl ? (
+                  <a aria-label="View support selfie" className="dx-evidence-photo" href={item.selfieUrl} rel="noreferrer" target="_blank">
+                    <img alt="" src={item.selfieUrl} />
+                    <Camera />
+                  </a>
+                ) : (
+                  <div aria-hidden="true" className="dx-evidence-photo missing"><Camera /></div>
+                )}
+                <div className="dx-evidence-info">
+                  <span className="dx-evidence-kicker"><LocateFixed />GPS</span>
+                  <strong>{item.lat.toFixed(5)}, {item.lng.toFixed(5)}{item.accuracyM == null ? "" : ` · ±${Math.round(item.accuracyM)}m`}</strong>
+                  <p>{item.remarks || "Selfie and GPS submitted outside station"}</p>
+                  <div className="dx-evidence-links">
+                    <small>{item.receivedAt ? dateTime(item.receivedAt) : "Awaiting receipt"}</small>
+                    <a href={`https://www.google.com/maps?q=${item.lat},${item.lng}`} rel="noreferrer" target="_blank"><MapPin />Map</a>
+                  </div>
+                </div>
+              </div>
+              <ApprovalNote id={item.id} notes={notes} onChange={(value) => setNote(item.id, value)} placeholder="Note for worker (optional)" />
+              <ApprovalToolbar
+                onApprove={() => void decideSupportPackage(item.id, "approved")}
+                onReject={() => void decideSupportPackage(item.id, "rejected")}
+                onReturn={() => void decideSupportPackage(item.id, "returned")}
+                saving={saving}
+              />
+            </article>
+          )) : (
+            <div className="dx-empty"><LocateFixed /><strong>No location checks</strong><small>Support packages from your team will appear here.</small></div>
+          )}
+        </div>
+      ) : null}
+
+      {!loading && section === "reimbursements" ? (
+        <div className="dx-approval-list">
+          {reimbursements.length ? reimbursements.map((approval) => (
+            <article className="dx-approval-card" key={approval.id}>
+              <ApprovalHead
+                badge={<span className="dx-approval-badge">{money(approval.claim.total_claimed)}</span>}
+                eyebrow={`${approval.claim.claim_no} · ${approval.step_name}`}
+                meta={approval.claim.purpose}
+                name={approval.claim.requesterName}
+              />
+              <dl className="dx-approval-facts">
+                {approval.claim.hr_expense_items?.map((item) => (
+                  <div key={item.id}>
+                    <dt>{first(item.hr_expense_categories)?.name ?? "Expense"}</dt>
+                    <dd>
+                      {item.expense_date} · {money(item.amount)}
+                      {approval.claim.attachments?.filter((attachment) => attachment.item_id === item.id && attachment.url).map((attachment) => (
+                        <a href={attachment.url ?? "#"} key={attachment.id} rel="noreferrer" target="_blank"><FileText />{attachment.file_name}</a>
+                      ))}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <ApprovalNote id={approval.claim.id} notes={notes} onChange={(value) => setNote(approval.claim.id, value)} placeholder="Required when returning or rejecting" />
+              <ApprovalToolbar
+                onApprove={() => void decideReimbursement(approval.claim.id, "approved")}
+                onReject={() => void decideReimbursement(approval.claim.id, "rejected")}
+                onReturn={() => void decideReimbursement(approval.claim.id, "returned")}
+                saving={saving}
+              />
+            </article>
+          )) : (
+            <div className="dx-empty"><Clock3 /><strong>No claims waiting</strong><small>Reimbursement approvals will appear here.</small></div>
+          )}
+        </div>
+      ) : null}
+
+      <p className="dx-approval-footnote"><ClipboardCheck /> Routed by active policy and reporting hierarchy.</p>
+    </section>
+  );
 }
