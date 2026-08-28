@@ -4,8 +4,9 @@ import { useCallback, useEffect, useRef } from "react";
 
 type Account = { id: string; profileType: string };
 
-const HEARTBEAT_MS = 3 * 60 * 1000;
+const POLL_MS = 30 * 1000;
 const LOCATION_TRACKING_MS = 9 * 60 * 60 * 1000;
+const PUNCH_CORRELATION_MS = 3 * 60 * 1000;
 
 function integrityPayload() {
   return {
@@ -17,7 +18,7 @@ function integrityPayload() {
   };
 }
 
-function readPosition(): Promise<GeolocationPosition> {
+function readPosition(maximumAge = 30_000): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
       reject(new Error("Location is not supported on this device."));
@@ -27,20 +28,57 @@ function readPosition(): Promise<GeolocationPosition> {
       reject(new Error(error.message || "Unable to read device location."));
     }, {
       enableHighAccuracy: true,
-      maximumAge: 30_000,
+      maximumAge,
       timeout: 20_000
     });
   });
 }
 
+async function postBiometricPunchLocation(
+  account: Account,
+  punch: { id: string; punchTime: string },
+  position: GeolocationPosition,
+  sessionId: string
+) {
+  const form = new FormData();
+  form.set("accountId", account.id);
+  form.set("profileType", account.profileType);
+  form.set("punchId", punch.id);
+  form.set("lat", String(position.coords.latitude));
+  form.set("lng", String(position.coords.longitude));
+  if (Number.isFinite(position.coords.accuracy)) form.set("accuracyM", String(position.coords.accuracy));
+  if (Number.isFinite(position.coords.altitude ?? NaN)) {
+    form.set("altitudeM", String(position.coords.altitude));
+  }
+  form.set("clientCapturedAt", new Date(position.timestamp).toISOString());
+  form.set("sessionId", sessionId);
+  form.set("integritySignals", JSON.stringify(integrityPayload()));
+  await fetch("/api/connect/attendance/biometric-punch-location", { method: "POST", body: form });
+}
+
+async function finalizeMissingPunchLocation(
+  account: Account,
+  punch: { id: string; punchTime: string },
+  punchDate: string
+) {
+  const form = new FormData();
+  form.set("accountId", account.id);
+  form.set("profileType", account.profileType);
+  form.set("punchId", punch.id);
+  form.set("punchDate", punchDate);
+  form.set("finalize", "true");
+  await fetch("/api/connect/attendance/biometric-punch-location", { method: "POST", body: form });
+}
+
 /**
  * Silent phone GPS reporter while Connect is open.
- * - Presence samples (even off-shift) so biometric buddy-punch can be caught immediately.
- * - In-shift samples for 9 hours after punch-in; continuous outside >50m for 30+ min flags.
+ * - Fresh GPS at each biometric punch when location flags are ON.
+ * - In-shift samples for 9 hours after punch-in when location tracking is ON.
  */
 export function AttendanceLocationMonitor({ account }: { account: Account }) {
   const sessionId = useRef(`web-${Date.now()}`);
-  const lastInTime = useRef<string | null>(null);
+  const reportedPunchIds = useRef(new Set<string>());
+  const finalizedPunchIds = useRef(new Set<string>());
 
   const tick = useCallback(async () => {
     if (!navigator.onLine || typeof navigator.geolocation === "undefined") return;
@@ -52,16 +90,40 @@ export function AttendanceLocationMonitor({ account }: { account: Account }) {
       const status = await statusResponse.json().catch(() => null);
       if (!statusResponse.ok || !status) return;
 
-      if (status.attendanceSettings?.locationTrackingEnabled !== true) {
-        return;
+      const integrityFlags = status.attendanceSettings?.integrityFlagsEnabled === true;
+      const locationTracking = status.attendanceSettings?.locationTrackingEnabled === true;
+      if (!integrityFlags && !locationTracking) return;
+
+      const latestPunch = status.latestBiometricPunch as
+        | { id: string; punchTime: string; needsLocation: boolean }
+        | null
+        | undefined;
+
+      if (integrityFlags && latestPunch?.needsLocation && latestPunch.id) {
+        const punchAgeMs = Date.now() - new Date(latestPunch.punchTime).getTime();
+        if (punchAgeMs >= 0 && punchAgeMs <= PUNCH_CORRELATION_MS && !reportedPunchIds.current.has(latestPunch.id)) {
+          const position = await readPosition(0);
+          await postBiometricPunchLocation(account, latestPunch, position, sessionId.current);
+          reportedPunchIds.current.add(latestPunch.id);
+        } else if (
+          punchAgeMs > PUNCH_CORRELATION_MS &&
+          !finalizedPunchIds.current.has(latestPunch.id)
+        ) {
+          await finalizeMissingPunchLocation(
+            account,
+            latestPunch,
+            String(status.shift?.punchDate ?? new Date().toISOString().slice(0, 10))
+          );
+          finalizedPunchIds.current.add(latestPunch.id);
+        }
       }
 
+      if (!locationTracking) return;
+
       const inTime = status.shift?.open && status.shift?.inTime ? String(status.shift.inTime) : null;
-      lastInTime.current = inTime;
       if (inTime) {
         const elapsed = Date.now() - new Date(inTime).getTime();
         if (elapsed > LOCATION_TRACKING_MS) {
-          // Past 9h window — do not keep sampling this shift.
           return;
         }
       }
@@ -91,7 +153,7 @@ export function AttendanceLocationMonitor({ account }: { account: Account }) {
       if (!cancelled) tick().catch(() => undefined);
     };
     run();
-    const timer = window.setInterval(run, HEARTBEAT_MS);
+    const timer = window.setInterval(run, POLL_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") run();
     };

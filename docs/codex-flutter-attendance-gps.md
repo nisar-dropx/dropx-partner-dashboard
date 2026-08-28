@@ -395,3 +395,75 @@ Recent web/People work that Flutter must include (do not ship older behavior):
 - Notifications bell on Overview / People Pulse (popover → full `/notifications`).
 - Name + allowed station on integrity UI.
 - Server rejects support evidence outside geofence.
+
+---
+
+## ADDENDUM — Biometric punch-time GPS (DropX One only, Aug 2026)
+
+This section documents **new** Connect (One) behavior. It does **not** change the partner dashboard (`dashboard.dropxlogistics.com`) APIs.
+
+### Rule
+
+When **Location flags** are ON for the worker’s assigned station:
+
+1. At each **biometric punch**, DropX One must fetch **fresh** phone GPS (`maximumAge: 0` / current position).
+2. Post it to Connect’s own endpoint (not the dashboard).
+3. If phone GPS is **outside** the station geofence at punch time → flag `outside_geofence_punch` and hold the punch.
+4. If **no punch-time GPS** arrives within **3 minutes** → flag `biometric_phone_mismatch` and hold the punch.
+5. In-shift continuous outside (**30+ minutes**) remains unchanged (`outside_station_over_limit` via heartbeat).
+
+**Do not** use a stale heartbeat sample from minutes earlier for punch-time geofence.
+
+### New Connect-only API
+
+`POST /api/connect/attendance/biometric-punch-location` (multipart, served by **one.dropxlogistics.com**)
+
+| Field | Required | Notes |
+|---|---|---|
+| `accountId` | yes | Workforce account id |
+| `profileType` | yes | `employee` or `contractor` |
+| `punchId` | yes | Latest biometric punch id |
+| `lat`, `lng` | yes* | Fresh GPS (*omit when `finalize=true`) |
+| `accuracyM`, `altitudeM` | no | |
+| `clientCapturedAt` | no | ISO timestamp from device |
+| `sessionId` | no | Client session id |
+| `integritySignals` | no | JSON string (mock/dev/VPN flags) |
+| `finalize` | no | `true` = after 3 min with no GPS, open missing-location flag |
+
+### Punch GET enrichment (Connect proxy)
+
+`GET /api/connect/attendance/punch` on **One** proxies the dashboard response and **adds**:
+
+```json
+"latestBiometricPunch": {
+  "id": "uuid",
+  "punchTime": "ISO",
+  "needsLocation": true
+}
+```
+
+Only present when location flags are ON and today’s latest biometric punch has no punch-correlated sample yet.
+
+### Flutter implementation checklist (add to existing checklist)
+
+13. Poll punch GET every **~30s** while logged in (when location flags ON).
+14. When `latestBiometricPunch.needsLocation === true` and punch age ≤ 3 min → `getCurrentPosition({ maximumAge: 0 })` → POST `biometric-punch-location`.
+15. When `needsLocation` still true and punch age > 3 min → POST same endpoint with `finalize=true`.
+16. Tag samples server-side via `integrity_signals.punchId` + `mode: "biometric_punch_correlation"` (handled by Connect API).
+
+### Connect web reference files (One app only)
+
+| Purpose | Path |
+|---|---|
+| Punch-time GPS logic | `apps/connect/src/lib/connect-biometric-punch-location.ts` |
+| Worker session resolve | `apps/connect/src/lib/connect-attendance-worker.ts` |
+| Punch-time API route | `apps/connect/app/api/connect/attendance/biometric-punch-location/route.ts` |
+| Punch GET enrichment | `apps/connect/app/api/connect/attendance/punch/route.ts` |
+| Silent monitor (fresh GPS on punch) | `apps/connect/src/components/attendance-location-monitor.tsx` |
+
+### New acceptance tests (add)
+
+13. Biometric punch while Connect open → fresh GPS posted within 30s; inside → attendance stays; outside → `outside_geofence_punch` + hold.
+14. Biometric punch with Connect open but GPS never sent within 3 min → `biometric_phone_mismatch` + hold.
+15. Punch-time check does **not** use a 20-minute-old heartbeat sample.
+
