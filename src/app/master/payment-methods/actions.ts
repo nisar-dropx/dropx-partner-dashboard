@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { AMAZON_PAYMENT_CALCULATION_SOURCES, INTERNAL_PAYMENT_CALCULATION_SOURCES, type PaymentCalculationType } from "@/lib/payment-calculation";
+import { type PaymentCalculationType } from "@/lib/payment-calculation";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -148,30 +148,43 @@ function parsePaymentField(formData: FormData) {
   const fieldType = required(formData.get("field_type"), "Field type");
   const paySchedule = clean(formData.get("pay_schedule"));
   const calculationType: PaymentCalculationType = fieldType === "production" ? "count_x_rate" : "manual_input";
-  const amazonSource = clean(formData.get("amazon_calculation_source"));
-  const flipkartSource = clean(formData.get("flipkart_calculation_source"));
-  const internalSource = clean(formData.get("internal_calculation_source"));
   if (!["amount", "production"].includes(fieldType)) throw new Error("Field type must be Amount or Production.");
   if (fieldType === "amount" && !["per_hour", "per_day", "per_month"].includes(paySchedule ?? "")) {
     throw new Error("Amount fields need a pay schedule.");
   }
-  if (amazonSource && !AMAZON_PAYMENT_CALCULATION_SOURCES.some((option) => option.value === amazonSource)) throw new Error("Select a valid Amazon production count.");
-  if (flipkartSource) throw new Error("Flipkart production sources have not been configured yet.");
-  if (internalSource && !INTERNAL_PAYMENT_CALCULATION_SOURCES.some((option) => option.value === internalSource)) throw new Error("Select a valid internal calculation source.");
-  if (fieldType === "production" && !amazonSource && !flipkartSource && !internalSource) throw new Error("Select at least one provider or internal calculation source.");
   return {
     code,
     label,
     field_type: fieldType,
     pay_schedule: fieldType === "amount" ? paySchedule : null,
     calculation_type: calculationType,
-    calculation_source: fieldType === "production" ? amazonSource : null,
-    provider_calculation_sources: fieldType === "production" ? {
-      amazon: amazonSource,
-      flipkart: flipkartSource,
-      internal: internalSource
-    } : {}
+    calculation_source: null,
+    provider_calculation_sources: {}
   };
+}
+
+async function saveProviderMetricSelections(formData: FormData, companyId: string, paymentFieldId: string) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  const selected = [...formData.entries()]
+    .filter(([key, value]) => key.startsWith("provider_metric_") && String(value).trim())
+    .map(([key, value]) => ({ providerId: key.slice("provider_metric_".length), metricId: String(value) }));
+  const metricIds = selected.map((item) => item.metricId);
+  if (metricIds.length) {
+    const valid = await supabaseAdmin.from("provider_production_metrics").select("id, provider_id")
+      .eq("company_id", companyId).eq("is_active", true).in("id", metricIds);
+    if (valid.error) throw new Error(valid.error.message);
+    const validById = new Map((valid.data ?? []).map((row) => [String(row.id), String(row.provider_id)]));
+    if (selected.some((item) => validById.get(item.metricId) !== item.providerId)) throw new Error("One or more provider counts are invalid.");
+  }
+  const removed = await supabaseAdmin.from("payment_field_provider_metrics").delete()
+    .eq("company_id", companyId).eq("payment_field_id", paymentFieldId);
+  if (removed.error) throw new Error(removed.error.message);
+  if (selected.length) {
+    const inserted = await supabaseAdmin.from("payment_field_provider_metrics").insert(selected.map((item) => ({
+      company_id: companyId, payment_field_id: paymentFieldId, provider_id: item.providerId, provider_metric_id: item.metricId
+    })));
+    if (inserted.error) throw new Error(inserted.error.message);
+  }
 }
 
 export async function createPaymentField(formData: FormData) {
@@ -179,8 +192,9 @@ export async function createPaymentField(formData: FormData) {
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
   const payload = parsePaymentField(formData);
-  const result = await supabaseAdmin.from("payment_fields").insert(withCompany({ ...payload, is_active: true }, companyId));
+  const result = await supabaseAdmin.from("payment_fields").insert(withCompany({ ...payload, is_active: true }, companyId)).select("id").single();
   if (result.error) throw new Error(result.error.message);
+  await saveProviderMetricSelections(formData, companyId, result.data.id);
   revalidatePath("/master/payment-methods");
   redirect("/master/payment-methods?fields=1");
 }
@@ -194,6 +208,7 @@ export async function updatePaymentField(formData: FormData) {
   const update = await supabaseAdmin.from("payment_fields").update({ ...payload, updated_at: new Date().toISOString() })
     .eq("id", id).eq("company_id", companyId);
   if (update.error) throw new Error(update.error.message);
+  await saveProviderMetricSelections(formData, companyId, id);
   const sync = await supabaseAdmin.from("payment_method_components").update({
     component_code: payload.code,
     component_type: payload.field_type,

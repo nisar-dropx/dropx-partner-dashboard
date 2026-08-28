@@ -34,7 +34,10 @@ type PaymentFieldRow = {
   provider_calculation_sources: ProviderCalculationSources | null;
   is_active: boolean;
   usage_count: number;
+  selected_metric_ids: string[];
 };
+
+type ProviderMetricRow = { id: string; provider_id: string; provider_name: string; name: string; source_key: string };
 
 type PaymentMethodRow = {
   id: string;
@@ -111,7 +114,19 @@ async function loadPaymentFields(companyId: string) {
   if (usageResult.error) return { fields: [] as PaymentFieldRow[], error: usageResult.error.message };
   const usage = new Map<string, number>();
   (usageResult.data ?? []).forEach((row) => usage.set(String(row.payment_field_id), (usage.get(String(row.payment_field_id)) ?? 0) + 1));
-  return { fields: ((fieldsResult.data ?? []) as Omit<PaymentFieldRow, "usage_count">[]).map((field) => ({ ...field, usage_count: usage.get(field.id) ?? 0 })), error: null };
+  const selections = await supabaseAdmin.from("payment_field_provider_metrics").select("payment_field_id, provider_metric_id").eq("company_id", companyId);
+  if (selections.error) return { fields: [] as PaymentFieldRow[], error: selections.error.message };
+  const selectedByField = new Map<string, string[]>();
+  (selections.data ?? []).forEach((row) => selectedByField.set(String(row.payment_field_id), [...(selectedByField.get(String(row.payment_field_id)) ?? []), String(row.provider_metric_id)]));
+  return { fields: ((fieldsResult.data ?? []) as Omit<PaymentFieldRow, "usage_count" | "selected_metric_ids">[]).map((field) => ({ ...field, usage_count: usage.get(field.id) ?? 0, selected_metric_ids: selectedByField.get(field.id) ?? [] })), error: null };
+}
+
+async function loadProviderMetrics(companyId: string) {
+  if (!supabaseAdmin) return [] as ProviderMetricRow[];
+  const result = await supabaseAdmin.from("provider_production_metrics")
+    .select("id, provider_id, name, source_key, providers(name)").eq("company_id", companyId).eq("is_active", true).order("sort_order").order("name");
+  if (result.error) return [] as ProviderMetricRow[];
+  return (result.data ?? []).map((row: any) => ({ id: row.id, provider_id: row.provider_id, provider_name: row.providers?.name ?? "Provider", name: row.name, source_key: row.source_key }));
 }
 
 function loadPaymentMethodFlash() {
@@ -136,6 +151,7 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
   const pagePermission = authorization.permissions.payment_methods;
   const { methods, error } = await loadPaymentMethods(companyId);
   const { fields, error: fieldsError } = await loadPaymentFields(companyId);
+  const providerMetrics = await loadProviderMetrics(companyId);
   const flash = loadPaymentMethodFlash();
   const editMethod = methods.find((method) => method.id === searchParams?.edit) ?? null;
 
@@ -269,11 +285,11 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
               <div><h2>Payment Fields</h2><p className="subtle">Link each production field to a provider count. Enter the corresponding rate separately for each DropX ID.</p></div>
               <PendingLink className="icon-button" href="/master/payment-methods" scroll={false} aria-label="Close">x</PendingLink>
             </div>
-            {pagePermission.canAdd ? <div className="payment-field-create"><div className="payment-field-create-head"><h3>Add payment field</h3><p className="subtle">Create the field once, then reuse it in any payment method.</p></div><PaymentFieldForm action={createPaymentField} submitLabel="Add field" /></div> : null}
+            {pagePermission.canAdd ? <div className="payment-field-create"><div className="payment-field-create-head"><h3>Add payment field</h3><p className="subtle">Create the field once, then reuse it in any payment method.</p></div><PaymentFieldForm action={createPaymentField} providerMetrics={providerMetrics} submitLabel="Add field" /></div> : null}
             <div className="payment-field-master-list">
               {fields.length ? fields.map((field) => (
                 <div className="payment-field-master-row" key={field.id}>
-                  {pagePermission.canEdit ? <PaymentFieldForm action={updatePaymentField} initialField={field} submitLabel="Save" /> : <div><strong>{field.label}</strong><small>{field.code}</small></div>}
+                  {pagePermission.canEdit ? <PaymentFieldForm action={updatePaymentField} initialField={field} providerMetrics={providerMetrics} selectedMetricIds={field.selected_metric_ids} submitLabel="Save" /> : <div><strong>{field.label}</strong><small>{field.code}</small></div>}
                   <div className="payment-field-row-footer">
                     <span className="payment-field-usage">Used in {field.usage_count} payment method{field.usage_count === 1 ? "" : "s"}</span>
                     {pagePermission.canEdit ? <form action={deletePaymentField}><input name="field_id" type="hidden" value={field.id} /><SubmitButton className="button warning compact" confirmationBlocked={field.usage_count > 0} confirmMessage={field.usage_count > 0 ? "Remove this field from every payment method before deleting it." : "Delete this payment field?"}>Delete</SubmitButton></form> : null}

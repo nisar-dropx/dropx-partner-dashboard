@@ -3,9 +3,6 @@
 import { useState } from "react";
 import { SubmitButton } from "@/components/submit-button";
 import {
-  AMAZON_PAYMENT_CALCULATION_SOURCES,
-  FLIPKART_PAYMENT_CALCULATION_SOURCES,
-  INTERNAL_PAYMENT_CALCULATION_SOURCES,
   type ProviderCalculationSources,
   type PaymentCalculationSource,
   type PaymentCalculationType
@@ -23,7 +20,9 @@ type PaymentField = {
   usage_count?: number;
 };
 
-export function PaymentFieldForm({ action, initialField, submitLabel }: { action: (formData: FormData) => Promise<void>; initialField?: PaymentField; submitLabel: string }) {
+type ProviderMetric = { id: string; provider_id: string; provider_name: string; name: string; source_key: string };
+
+export function PaymentFieldForm({ action, initialField, submitLabel, providerMetrics = [], selectedMetricIds = [] }: { action: (formData: FormData) => Promise<void>; initialField?: PaymentField; submitLabel: string; providerMetrics?: ProviderMetric[]; selectedMetricIds?: string[] }) {
   const [type, setType] = useState<"amount" | "production">(initialField?.field_type ?? "production");
 
   return (
@@ -41,15 +40,11 @@ export function PaymentFieldForm({ action, initialField, submitLabel }: { action
         <span className="payment-field-section-title">How payment is calculated</span>
         <input name="calculation_type" type="hidden" value={type === "production" ? "count_x_rate" : "manual_input"} />
         {type === "production" ? <>
-          <label>Amazon production count<select className="select" defaultValue={initialField?.provider_calculation_sources?.amazon ?? initialField?.calculation_source ?? ""} name="amazon_calculation_source"><option value="">Not mapped</option>{AMAZON_PAYMENT_CALCULATION_SOURCES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-          <label>Flipkart production count<select className="select" defaultValue={initialField?.provider_calculation_sources?.flipkart ?? ""} disabled={FLIPKART_PAYMENT_CALCULATION_SOURCES.length === 0} name="flipkart_calculation_source"><option value="">Sources will be added later</option></select></label>
-          <label>Internal calculation source<select className="select" defaultValue={initialField?.provider_calculation_sources?.internal ?? ""} name="internal_calculation_source"><option value="">Not mapped</option>{INTERNAL_PAYMENT_CALCULATION_SOURCES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-          <div className="payment-field-calculation-help"><strong>Provider count</strong> is selected independently for each provider. Internal sources cover bonuses and incentives.<br /><strong>Production rate</strong> is entered separately for each DropX ID in ID &amp; pay mapping.</div>
+          {Array.from(new Map(providerMetrics.map((metric) => [metric.provider_id, metric.provider_name]))).map(([providerId, providerName]) => <label key={providerId}>{providerName} production count<select className="select" defaultValue={providerMetrics.find((metric) => metric.provider_id === providerId && selectedMetricIds.includes(metric.id))?.id ?? ""} name={`provider_metric_${providerId}`}><option value="">Not used for this provider</option>{providerMetrics.filter((metric) => metric.provider_id === providerId).map((metric) => <option key={metric.id} value={metric.id}>{metric.name}</option>)}</select></label>)}
+          {!providerMetrics.length ? <p className="payment-field-calculation-help">No provider production counts are configured. Add them in Provider Master first.</p> : null}
+          <div className="payment-field-calculation-help">Choose the count used by each provider. The individual rate is entered for each DropX ID in ID &amp; pay mapping.</div>
         </> : <>
           <input name="calculation_source" type="hidden" value="" />
-          <input name="amazon_calculation_source" type="hidden" value="" />
-          <input name="flipkart_calculation_source" type="hidden" value="" />
-          <input name="internal_calculation_source" type="hidden" value="" />
           <p className="payment-field-calculation-help">The configured amount in ID &amp; pay mapping will be used directly.</p>
         </>}
       </div>

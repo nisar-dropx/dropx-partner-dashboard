@@ -3,10 +3,12 @@ import { AppShell } from "@/components/app-shell";
 import { MasterDataLists } from "@/components/master-data-lists";
 import { PageHead } from "@/components/page-head";
 import { SubmitButton } from "@/components/submit-button";
+import { StatusPill } from "@/components/status-pill";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { createProvider, updateProvider } from "../../settings/actions";
+import { saveProviderProductionMetric } from "./metric-actions";
 
 type ProviderRow = {
   id: string;
@@ -14,6 +16,7 @@ type ProviderRow = {
   name: string;
   is_active: boolean;
 };
+type ProviderMetricRow = { id: string; provider_id: string; code: string; name: string; source_key: string; is_active: boolean; providers?: { name?: string } | null };
 
 async function loadProviders(companyId: string) {
   if (!supabaseAdmin) {
@@ -41,6 +44,7 @@ type ProvidersPageProps = {
   searchParams?: {
     add?: string;
     edit?: string;
+    counts?: string;
   };
 };
 
@@ -49,6 +53,8 @@ export default async function ProvidersPage({ searchParams }: ProvidersPageProps
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.master_providers;
   const { providers, error } = await loadProviders(companyId);
+  const metricResult = supabaseAdmin ? await supabaseAdmin.from("provider_production_metrics").select("id, provider_id, code, name, source_key, is_active, providers(name)").eq("company_id", companyId).order("provider_id").order("sort_order") : { data: [], error: null };
+  const metrics = (metricResult.data ?? []) as unknown as ProviderMetricRow[];
   const addType = pagePermission.canAdd ? searchParams?.add : null;
   const [editType, editId] = (searchParams?.edit ?? "").split(":");
   const editProvider = pagePermission.canEdit && editType === "provider" ? providers.find((row) => row.id === editId) : null;
@@ -59,7 +65,7 @@ export default async function ProvidersPage({ searchParams }: ProvidersPageProps
         eyebrow="Setup"
         title="Providers"
         subtitle="Maintain client and report source masters used by locations, uploads, and payouts."
-        action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
+        action={<div className="page-head-actions">{pagePermission.canEdit ? <Link className="button secondary" href="/master/providers?counts=1" scroll={false}>Production Counts</Link> : null}<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span></div>}
       />
 
       {error ? (
@@ -132,6 +138,7 @@ export default async function ProvidersPage({ searchParams }: ProvidersPageProps
           </section>
         </div>
       ) : null}
+      {searchParams?.counts === "1" && pagePermission.canEdit ? <div className="modal-backdrop"><section className="modal-panel wide" aria-label="Provider production counts"><div className="panel-head"><div><h2>Provider Production Counts</h2><p className="subtle">Define the human-readable counts available from each provider report. These choices are reused in Payment Fields.</p></div><Link className="icon-button" href="/master/providers" scroll={false}>x</Link></div><div className="panel-body"><form action={saveProviderProductionMetric} className="form-grid"><label>Provider<select className="select" name="provider_id" required><option value="">Select provider</option>{providers.filter((provider) => provider.is_active).map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label><label>Count ID<input className="field" name="code" placeholder="TOTAL_DELIVERY" required /></label><label>Display name<input className="field" name="name" placeholder="Total Delivery" required /></label><label>Imported data key<input className="field" name="source_key" placeholder="total_delivery" required /></label><div className="form-actions"><SubmitButton>Add count</SubmitButton></div></form><div className="table-wrap" style={{marginTop: 20}}><table><thead><tr><th>Provider</th><th>Count</th><th>Imported data key</th><th>Status</th></tr></thead><tbody>{metrics.map((metric) => <tr key={metric.id}><td>{metric.providers?.name ?? providers.find((provider) => provider.id === metric.provider_id)?.name}</td><td><strong>{metric.name}</strong><br/><small>{metric.code}</small></td><td><code>{metric.source_key}</code></td><td><StatusPill status={metric.is_active ? "Active" : "Inactive"}/></td></tr>)}</tbody></table></div></div></section></div> : null}
     </AppShell>
   );
 }
