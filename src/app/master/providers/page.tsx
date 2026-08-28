@@ -8,7 +8,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { createProvider, updateProvider } from "../../settings/actions";
-import { saveProviderProductionMetric } from "./metric-actions";
+import { deleteProviderProductionMetric, saveProviderProductionMetric } from "./metric-actions";
 
 type ProviderRow = {
   id: string;
@@ -16,7 +16,8 @@ type ProviderRow = {
   name: string;
   is_active: boolean;
 };
-type ProviderMetricRow = { id: string; provider_id: string; code: string; name: string; source_key: string; is_active: boolean; providers?: { name?: string } | null };
+type ProviderModelRow = { id: string; provider_id: string | null; code: string; name: string; is_active: boolean };
+type ProviderMetricRow = { id: string; provider_id: string; provider_model_id: string | null; code: string; name: string; source_key: string; source_keys: string[] | null; calculation_operation: "direct" | "sum"; sort_order: number; is_active: boolean; providers?: { name?: string } | null; location_models?: { name?: string; code?: string } | null };
 
 async function loadProviders(companyId: string) {
   if (!supabaseAdmin) {
@@ -53,7 +54,9 @@ export default async function ProvidersPage({ searchParams }: ProvidersPageProps
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.master_providers;
   const { providers, error } = await loadProviders(companyId);
-  const metricResult = supabaseAdmin ? await supabaseAdmin.from("provider_production_metrics").select("id, provider_id, code, name, source_key, is_active, providers(name)").eq("company_id", companyId).order("provider_id").order("sort_order") : { data: [], error: null };
+  const modelResult = supabaseAdmin ? await supabaseAdmin.from("location_models").select("id, provider_id, code, name, is_active").eq("company_id", companyId).order("provider_id").order("code") : { data: [], error: null };
+  const models = (modelResult.data ?? []) as ProviderModelRow[];
+  const metricResult = supabaseAdmin ? await supabaseAdmin.from("provider_production_metrics").select("id, provider_id, provider_model_id, code, name, source_key, source_keys, calculation_operation, sort_order, is_active, providers(name), location_models(name,code)").eq("company_id", companyId).order("provider_id").order("provider_model_id").order("sort_order") : { data: [], error: null };
   const metrics = (metricResult.data ?? []) as unknown as ProviderMetricRow[];
   const addType = pagePermission.canAdd ? searchParams?.add : null;
   const [editType, editId] = (searchParams?.edit ?? "").split(":");
@@ -138,7 +141,25 @@ export default async function ProvidersPage({ searchParams }: ProvidersPageProps
           </section>
         </div>
       ) : null}
-      {searchParams?.counts === "1" && pagePermission.canEdit ? <div className="modal-backdrop"><section className="modal-panel wide" aria-label="Provider production counts"><div className="panel-head"><div><h2>Provider Production Counts</h2><p className="subtle">Define the human-readable counts available from each provider report. These choices are reused in Payment Fields.</p></div><Link className="icon-button" href="/master/providers" scroll={false}>x</Link></div><div className="panel-body"><form action={saveProviderProductionMetric} className="form-grid"><label>Provider<select className="select" name="provider_id" required><option value="">Select provider</option>{providers.filter((provider) => provider.is_active).map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label><label>Count ID<input className="field" name="code" placeholder="TOTAL_DELIVERY" required /></label><label>Display name<input className="field" name="name" placeholder="Total Delivery" required /></label><label>Imported data key<input className="field" name="source_key" placeholder="total_delivery" required /></label><div className="form-actions"><SubmitButton>Add count</SubmitButton></div></form><div className="table-wrap" style={{marginTop: 20}}><table><thead><tr><th>Provider</th><th>Count</th><th>Imported data key</th><th>Status</th></tr></thead><tbody>{metrics.map((metric) => <tr key={metric.id}><td>{metric.providers?.name ?? providers.find((provider) => provider.id === metric.provider_id)?.name}</td><td><strong>{metric.name}</strong><br/><small>{metric.code}</small></td><td><code>{metric.source_key}</code></td><td><StatusPill status={metric.is_active ? "Active" : "Inactive"}/></td></tr>)}</tbody></table></div></div></section></div> : null}
+      {searchParams?.counts === "1" && pagePermission.canEdit ? <div className="modal-backdrop"><section className="modal-panel wide provider-counts-modal" aria-label="Provider production counts">
+        <div className="panel-head"><div><h2>Production Count Master</h2><p className="subtle">Configure what each provider and operating model reports. Payment Fields reuse these counts; individual rates stay in ID &amp; pay mapping.</p></div><Link className="icon-button" href="/master/providers" scroll={false}>x</Link></div>
+        <div className="panel-body">
+          <section className="provider-count-create"><div><h3>Add production count</h3><p className="subtle">Use one imported key for a direct count, or comma-separated keys to add values together.</p></div>
+            <form action={saveProviderProductionMetric} className="provider-count-form">
+              <label>Provider<select className="select" name="provider_id" required><option value="">Select provider</option>{providers.filter((provider) => provider.is_active).map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
+              <label>Operating model<select className="select" name="provider_model_id"><option value="">All models (fallback)</option>{models.filter((model) => model.is_active).map((model) => <option key={model.id} value={model.id}>{providers.find((provider) => provider.id === model.provider_id)?.name} · {model.code} — {model.name}</option>)}</select></label>
+              <label>Count ID<input className="field mono" name="code" placeholder="TOTAL_DELIVERY" required /></label>
+              <label>Display name<input className="field" name="name" placeholder="Total Delivery" required /></label>
+              <label>Calculation<select className="select" name="calculation_operation" defaultValue="direct"><option value="direct">Use one imported count</option><option value="sum">Add imported counts together</option></select></label>
+              <label className="provider-count-sources">Imported data key(s)<input className="field mono" name="source_keys" placeholder="amazon_delivery, swa_delivery" required /><small>These are normalized keys from the provider upload. Separate multiple keys with commas.</small></label>
+              <label>Display order<input className="field" type="number" name="sort_order" defaultValue="0" /></label>
+              <div className="form-actions"><SubmitButton>Add production count</SubmitButton></div>
+            </form>
+          </section>
+          <div className="provider-count-groups">{providers.map((provider) => { const providerMetrics = metrics.filter((metric) => metric.provider_id === provider.id); if (!providerMetrics.length) return null; return <section className="provider-count-group" key={provider.id}><div className="provider-count-group-head"><div><h3>{provider.name}</h3><span>{providerMetrics.length} configured count{providerMetrics.length === 1 ? "" : "s"}</span></div></div><div className="table-wrap"><table><thead><tr><th>Model</th><th>Production count</th><th>Calculation</th><th>Imported data</th><th>Status</th><th>Action</th></tr></thead><tbody>{providerMetrics.map((metric) => <tr key={metric.id}><td><strong>{metric.location_models?.code ?? "All"}</strong><small>{metric.location_models?.name ?? "All models fallback"}</small></td><td><strong>{metric.name}</strong><small>{metric.code}</small></td><td>{metric.calculation_operation === "sum" ? "Add counts" : "Direct count"}</td><td><code>{(metric.source_keys?.length ? metric.source_keys : [metric.source_key]).join(" + ")}</code></td><td><StatusPill status={metric.is_active ? "Active" : "Inactive"}/></td><td><form action={deleteProviderProductionMetric}><input type="hidden" name="id" value={metric.id}/><SubmitButton className="button warning compact" confirmMessage={`Delete ${metric.name}? It can be deleted only when it is not used by a Payment Field.`}>Delete</SubmitButton></form></td></tr>)}</tbody></table></div></section>; })}</div>
+          {!metrics.length ? <div className="empty-cell">No production counts configured. Add the first provider/model count above.</div> : null}
+        </div>
+      </section></div> : null}
     </AppShell>
   );
 }

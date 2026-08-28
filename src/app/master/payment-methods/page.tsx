@@ -37,7 +37,7 @@ type PaymentFieldRow = {
   selected_metric_ids: string[];
 };
 
-type ProviderMetricRow = { id: string; provider_id: string; provider_name: string; name: string; source_key: string };
+type ProviderMetricRow = { id: string; provider_id: string; provider_name: string; provider_model_id: string | null; provider_model_name: string | null; name: string; source_key: string };
 
 type PaymentMethodRow = {
   id: string;
@@ -124,9 +124,9 @@ async function loadPaymentFields(companyId: string) {
 async function loadProviderMetrics(companyId: string) {
   if (!supabaseAdmin) return [] as ProviderMetricRow[];
   const result = await supabaseAdmin.from("provider_production_metrics")
-    .select("id, provider_id, name, source_key, providers(name)").eq("company_id", companyId).eq("is_active", true).order("sort_order").order("name");
+    .select("id, provider_id, provider_model_id, name, source_key, providers(name), location_models(name,code)").eq("company_id", companyId).eq("is_active", true).order("sort_order").order("name");
   if (result.error) return [] as ProviderMetricRow[];
-  return (result.data ?? []).map((row: any) => ({ id: row.id, provider_id: row.provider_id, provider_name: row.providers?.name ?? "Provider", name: row.name, source_key: row.source_key }));
+  return (result.data ?? []).map((row: any) => ({ id: row.id, provider_id: row.provider_id, provider_name: row.providers?.name ?? "Provider", provider_model_id: row.provider_model_id ?? null, provider_model_name: row.location_models ? `${row.location_models.code} — ${row.location_models.name}` : null, name: row.name, source_key: row.source_key }));
 }
 
 function loadPaymentMethodFlash() {
