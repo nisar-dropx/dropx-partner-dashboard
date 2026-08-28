@@ -305,12 +305,14 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     throw new Error(designationResult.error.message);
   }
   const pageAccessByDesignationId = new Map<string, string[] | null>();
+  const designationNameById = new Map<string, string>();
   const pageAccessByDesignationKey = new Map<string, string[] | null>();
   for (const designation of designationRows) {
     const pages = designationAccessAvailable && Array.isArray((designation as { app_page_access?: unknown }).app_page_access)
       ? (designation as { app_page_access: unknown[] }).app_page_access.map(String)
       : null;
     pageAccessByDesignationId.set(String(designation.id), pages);
+    designationNameById.set(String(designation.id), String(designation.name || designation.code));
     const categories = Array.isArray(designation.onboarding_categories)
       ? designation.onboarding_categories.map(String)
       : [];
@@ -356,7 +358,11 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       name: account.full_name,
       email: account.email ?? null,
       reference: account.employee_id || account.dropx_id || null,
-      role: account.role ?? null,
+      role: account.designation_id
+        ? designationNameById.get(String(account.designation_id)) ?? null
+        : account.role === "Employee"
+          ? null
+          : account.role ?? null,
       status: account.status ?? null,
       biometricId: account.biometric_id ?? null,
       profilePhotoUrl: await signedProfilePhotoUrl(account.profile_photo_path),

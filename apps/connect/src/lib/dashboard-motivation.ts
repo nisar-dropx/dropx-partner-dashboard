@@ -3,6 +3,8 @@ export type MotivationHistoryEntry = {
   message: string;
 };
 
+export type DashboardMotivationContext = "workday" | "birthday" | "sick_leave" | "leave" | "weekly_off";
+
 const FALLBACK_MESSAGES = [
   "A thoughtful step today can create meaningful progress for everyone.",
   "Fresh energy and steady focus can make today feel rewarding.",
@@ -23,6 +25,42 @@ const FALLBACK_MESSAGES = [
   "Let today be shaped by clarity, warmth, and forward movement.",
   "A bright idea and a steady hand can move the day forward."
 ] as const;
+
+const CONTEXT_FALLBACK_MESSAGES = {
+  workday: FALLBACK_MESSAGES,
+  birthday: [
+    "Wishing you a birthday filled with bright moments and meaningful memories.",
+    "May your birthday bring warm smiles, fresh possibilities, and joyful moments.",
+    "May this birthday open a year of bright and meaningful possibilities.",
+    "Warm birthday wishes for a day that feels genuinely special and joyful.",
+    "Celebrate your day with warmth, joy, and plenty of bright moments.",
+    "May your special day bring smiles, calm joy, and fresh beginnings."
+  ],
+  sick_leave: [
+    "Take today gently; rest and recovery deserve your full attention.",
+    "May today bring the quiet rest and steady recovery you need.",
+    "Give yourself room to rest; everything else can wait for now.",
+    "A calm day of rest can be a meaningful step toward recovery.",
+    "Let today move softly, with enough space for rest and recovery.",
+    "Rest without pressure today, and allow recovery to set the pace."
+  ],
+  leave: [
+    "Enjoy this pause, and let today move comfortably at your pace.",
+    "Make space for what matters today, with no rush and no pressure.",
+    "May this leave day feel calm, refreshing, and entirely your own.",
+    "Step away fully today; a genuine pause has value of its own.",
+    "Let this day offer fresh space, easy moments, and a slower rhythm.",
+    "Take the day as it comes, with room to pause and recharge."
+  ],
+  weekly_off: [
+    "Let today be a genuine pause, with room to recharge fully.",
+    "Your weekly pause is here; enjoy a calmer rhythm today.",
+    "Step away from routine and give today a lighter pace.",
+    "Make this off day refreshing, unhurried, and entirely your own.",
+    "A quiet reset today can make the week ahead feel brighter.",
+    "Pause, recharge, and enjoy the freedom of an unhurried day."
+  ]
+} as const satisfies Record<DashboardMotivationContext, readonly string[]>;
 
 const OFF_LIMITS_LANGUAGE = /\b(?:religion|religious|god|faith|caste|race|skin|gender|sexual|politic|election|disability|disabled|body|weight|mental health|young|old|lazy|loser|weak|quota|underperform|hustle|sacrifice|warrior|hero|superstar|rockstar|good morning|good afternoon|good evening)\b/i;
 
@@ -77,13 +115,49 @@ function stableHash(value: string) {
   return hash >>> 0;
 }
 
-export function selectFallbackMotivation(seed: string, recent: string[]) {
-  const start = stableHash(seed) % FALLBACK_MESSAGES.length;
-  for (let offset = 0; offset < FALLBACK_MESSAGES.length; offset += 1) {
-    const message = FALLBACK_MESSAGES[(start + offset) % FALLBACK_MESSAGES.length];
+export function selectFallbackMotivation(
+  seed: string,
+  recent: string[],
+  context: DashboardMotivationContext = "workday"
+) {
+  const messages = CONTEXT_FALLBACK_MESSAGES[context];
+  const start = stableHash(seed) % messages.length;
+  for (let offset = 0; offset < messages.length; offset += 1) {
+    const message = messages[(start + offset) % messages.length];
     if (!isTooSimilarMotivation(message, recent)) return message;
   }
-  return FALLBACK_MESSAGES[start];
+  return messages[start];
+}
+
+function dateParts(value: string) {
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return { month: Number(iso[2]), day: Number(iso[3]) };
+  const display = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return display ? { month: Number(display[2]), day: Number(display[1]) } : null;
+}
+
+export function dashboardMotivationContext({
+  date = new Date(),
+  dateOfBirth = "",
+  status = "",
+  statusKind,
+  statusLabel = ""
+}: {
+  date?: Date;
+  dateOfBirth?: string;
+  status?: string;
+  statusKind?: "attendance" | "leave";
+  statusLabel?: string | null;
+}): DashboardMotivationContext {
+  const birthday = dateParts(dateOfBirth);
+  if (birthday && birthday.month === date.getMonth() + 1 && birthday.day === date.getDate()) return "birthday";
+
+  const attendanceState = `${status} ${statusLabel ?? ""}`.toLowerCase().replaceAll("_", " ");
+  if (statusKind === "leave") {
+    return /\b(?:sick|medical|illness|sl)\b/.test(attendanceState) ? "sick_leave" : "leave";
+  }
+  if (/\b(?:weekly off|week off|rest day|scheduled off|wo|off)\b/.test(attendanceState)) return "weekly_off";
+  return "workday";
 }
 
 export function motivationPeriod(hour: number) {
@@ -96,7 +170,7 @@ export function motivationPeriod(hour: number) {
   return "late-evening";
 }
 
-export function motivationSlotKey(date: Date) {
+export function motivationSlotKey(date: Date, context: DashboardMotivationContext = "workday") {
   const localDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  return `${localDate}:${motivationPeriod(date.getHours())}`;
+  return `${localDate}:${motivationPeriod(date.getHours())}:${context}`;
 }

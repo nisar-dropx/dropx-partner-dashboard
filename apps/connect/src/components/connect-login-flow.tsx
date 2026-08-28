@@ -436,7 +436,10 @@ export function ConnectLoginFlow() {
       </div>
       <div className="dx-desktop-account">
         <i>{avatar ? <img alt="" src={avatar} /> : <b>{(account.name || "U")[0]}</b>}</i>
-        <span><strong>{account.name || account.reference}</strong><small>{account.role || account.reference}</small></span>
+        <span>
+          <strong>{account.name || account.reference}</strong>
+          {account.role ? <small>{account.role}</small> : null}
+        </span>
         {accounts.length > 1 ? <button aria-label="Switch accounts" onClick={() => open("accounts")}><SwitchCamera /></button> : null}
       </div>
       <nav>
@@ -477,7 +480,13 @@ export function ConnectLoginFlow() {
     </header> : null}
     {drawer && account ? <><button aria-label="Close menu" className="dx-scrim" onClick={() => setDrawer(false)} /><aside className="dx-drawer">
       <div><Image alt="DropX" height={44} src="/dropx-logo.png" width={126} /><button aria-label="Switch accounts" onClick={() => open("accounts")}><SwitchCamera /></button><button aria-label="Close" onClick={() => setDrawer(false)}><X /></button></div>
-      <section className="dx-drawer-account"><i>{avatar ? <img alt="" src={avatar} /> : <b>{(account.name || "U")[0]}</b>}</i><span><strong>{account.name || account.reference}</strong><small>{account.role || account.reference}</small></span></section>
+      <section className="dx-drawer-account">
+        <i>{avatar ? <img alt="" src={avatar} /> : <b>{(account.name || "U")[0]}</b>}</i>
+        <span>
+          <strong>{account.name || account.reference}</strong>
+          {account.role ? <small>{account.role}</small> : null}
+        </span>
+      </section>
       <nav>
         {allowed(account, "dashboard") ? <button onClick={() => open("dashboard")}><Gauge />Dashboard<ChevronRight /></button> : null}
         <button onClick={() => open("profile")}><UserRound />My Profile<ChevronRight /></button>
