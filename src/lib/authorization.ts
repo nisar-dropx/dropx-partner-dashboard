@@ -96,7 +96,7 @@ const groupedParentPermissions: Record<string, string[]> = {
   reports: ["attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports"],
   master_data: ["master_locations", "master_providers", "master_models", "payment_methods", "master_payment_banks", "master_payment_heads", "master_contacts", "workforce_categories", "workforce_whatsapp", "designations", "biometric_devices", "cod_master", "master_documents", "master_imports"],
   app_settings: ["app_settings", "ai_connector", "amazon_connector", "developer_mode"],
-  payments: ["advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports"]
+  payments: ["advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "workforce_payouts", "payment_reports"]
 };
 
 const peopleProfilePageCodes = [

@@ -2,6 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PaymentMethodForm } from "@/components/payment-method-form";
 import { PaymentFieldForm } from "@/components/payment-field-form";
+import { DeductionHeadForm, type DeductionHead } from "@/components/deduction-head-form";
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
 import { PendingLink } from "@/components/pending-link";
@@ -9,6 +10,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { createPaymentField, createPaymentMethod, deletePaymentField, deletePaymentMethod, updatePaymentField, updatePaymentMethod } from "./actions";
+import { createDeductionHead, updateDeductionHead } from "./deduction-actions";
 import { cookies } from "next/headers";
 import type { PaymentCalculationSource, PaymentCalculationType, ProviderCalculationSources } from "@/lib/payment-calculation";
 
@@ -138,6 +140,15 @@ async function loadProviderModels(companyId: string) {
   return (result.data ?? []).map((row: any) => ({ id: String(row.id), provider_id: String(row.provider_id), provider_name: row.providers?.name ?? "Provider", name: `${row.code} — ${row.name}` }));
 }
 
+async function loadDeductionHeads(companyId: string) {
+  if (!supabaseAdmin) return [] as DeductionHead[];
+  const result = await supabaseAdmin.from("workforce_deduction_heads")
+    .select("id, code, name, description, calculation_type, default_value, is_active")
+    .eq("company_id", companyId).order("name");
+  if (result.error) return [] as DeductionHead[];
+  return (result.data ?? []) as DeductionHead[];
+}
+
 function loadPaymentMethodFlash() {
   const raw = cookies().get("dropx_payment_method_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
@@ -154,7 +165,7 @@ function loadPaymentMethodFlash() {
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentMethodsPage({ searchParams }: { searchParams?: { edit?: string; fields?: string } }) {
+export default async function PaymentMethodsPage({ searchParams }: { searchParams?: { edit?: string; fields?: string; deductions?: string } }) {
   const authorization = await requirePagePermission("payment_methods", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_methods;
@@ -162,6 +173,7 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
   const { fields, error: fieldsError } = await loadPaymentFields(companyId);
   const providerMetrics = await loadProviderMetrics(companyId);
   const providerModels = await loadProviderModels(companyId);
+  const deductionHeads = await loadDeductionHeads(companyId);
   const flash = loadPaymentMethodFlash();
   const editMethod = methods.find((method) => method.id === searchParams?.edit) ?? null;
 
@@ -171,7 +183,7 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
         eyebrow="Master Data"
         title="Payment methods"
         subtitle="Define the payment method and the exact fields managers must fill during Provider ID mapping."
-        action={<div className="page-head-actions"><PendingLink className="button secondary" href="/master/payment-methods?fields=1" scroll={false}>Payment Fields</PendingLink><span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span></div>}
+        action={<div className="page-head-actions"><PendingLink className="button secondary" href="/master/payment-methods?fields=1" scroll={false}>Payment Fields</PendingLink><PendingLink className="button secondary" href="/master/payment-methods?deductions=1" scroll={false}>Deduction Heads</PendingLink><span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span></div>}
       />
 
       {error || fieldsError ? (
@@ -306,6 +318,24 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
                   </div>
                 </div>
               )) : <p className="empty-cell">No payment fields created yet.</p>}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {searchParams?.deductions === "1" ? (
+        <div className="modal-backdrop">
+          <section className="modal-panel wide deduction-heads-modal" aria-label="Deduction heads">
+            <div className="panel-head">
+              <div><h2>Deduction Heads</h2><p className="subtle">Create reusable deductions for workforce payouts. Actual deductions remain visible per worker and pay period.</p></div>
+              <PendingLink className="icon-button" href="/master/payment-methods" scroll={false} aria-label="Close">x</PendingLink>
+            </div>
+            {pagePermission.canAdd ? <DeductionHeadForm action={createDeductionHead} /> : null}
+            <div className="deduction-head-list">
+              {deductionHeads.length ? deductionHeads.map((head) => pagePermission.canEdit
+                ? <DeductionHeadForm action={updateDeductionHead} compact head={head} key={head.id} />
+                : <div className="deduction-head-summary" key={head.id}><strong>{head.name}</strong><span>{head.code}</span></div>)
+                : <p className="empty-cell">No deduction heads created yet.</p>}
             </div>
           </section>
         </div>
