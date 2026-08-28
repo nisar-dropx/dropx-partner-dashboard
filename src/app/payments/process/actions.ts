@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { sendPaymentNotification } from "@/lib/payment-email-notifications";
+import { notifyReimbursementPayment } from "@/lib/reimbursement-payment-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { insertPaymentApprovalLog } from "../approvals/actions";
 
@@ -259,6 +260,7 @@ export async function updatePaymentProcessStatus(
         action: "processing",
         comments: remarks || "Payment processing started."
       }, companyId);
+      await notifyReimbursementPayment({ companyId, paymentRequestId: requestId, status: "processing", remarks: remarks || null, actorUserId: authorization.userId });
       revalidatePath("/payments/process");
       revalidatePath("/payments/report");
       return {
@@ -290,6 +292,7 @@ export async function updatePaymentProcessStatus(
         action: "processed",
         comments: `Processed. UTR/CIN: ${remarks}`
       }, companyId);
+      await notifyReimbursementPayment({ companyId, paymentRequestId: requestId, status: "paid", remarks, actorUserId: authorization.userId });
       revalidatePath("/payments/process");
       revalidatePath("/payments/report");
       return {
@@ -326,6 +329,7 @@ export async function updatePaymentProcessStatus(
         remarks,
         requestId
       });
+      await notifyReimbursementPayment({ companyId, paymentRequestId: requestId, status: "rejected", remarks, actorUserId: authorization.userId });
       revalidatePath("/payments/process");
       revalidatePath("/payments/requests");
       revalidatePath("/payments/report");
@@ -355,6 +359,7 @@ export async function updatePaymentProcessStatus(
       remarks,
       requestId
     });
+    await notifyReimbursementPayment({ companyId, paymentRequestId: requestId, status: "returned", remarks, actorUserId: authorization.userId });
     revalidatePath("/payments/process");
     revalidatePath("/payments/requests");
     revalidatePath("/payments/report");
@@ -443,6 +448,7 @@ export async function finalizePaymentProcess(formData: FormData) {
           action: "processed",
           comments: row.utrCin ? `Processed by bank. UTR/CIN: ${row.utrCin}` : "Processed by bank."
         }, companyId);
+        await notifyReimbursementPayment({ companyId, paymentRequestId: request.id, status: "paid", remarks: row.utrCin || row.remarks || null, actorUserId: authorization.userId });
         paidCount += 1;
       } else if (status === "CANCELLED" || status === "CANCELED") {
         const remarks = `Payment Failed - ${row.remarks || "Cancelled by bank"}`;
@@ -463,6 +469,7 @@ export async function finalizePaymentProcess(formData: FormData) {
           remarks,
           requestId: request.id
         });
+        await notifyReimbursementPayment({ companyId, paymentRequestId: request.id, status: "returned", remarks, actorUserId: authorization.userId });
         returnedCount += 1;
       } else {
         skippedCount += 1;

@@ -1,0 +1,143 @@
+import "server-only";
+
+import { supabaseAdmin } from "./supabase-admin";
+import type { ConnectAccount } from "./connect-auth";
+
+export type ExpenseWorkerType = "employee" | "contractor";
+
+function db() {
+  if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
+  return supabaseAdmin;
+}
+
+function indiaToday() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
+export function expenseWorkerType(profileType: string): ExpenseWorkerType | null {
+  return profileType === "employee" || profileType === "contractor" ? profileType : null;
+}
+
+export async function expenseIdentity(account: ConnectAccount) {
+  const workerType = expenseWorkerType(account.profileType);
+  if (!workerType) throw new Error("Reimbursements are available for employees and independent contractors.");
+  const workerColumn = workerType === "employee" ? "employee_id" : "contractor_id";
+  const today = indiaToday();
+  const engagement = await db().from("hr_engagements").select("id,person_id,status")
+    .eq("company_id", account.companyId).eq("worker_type", workerType).eq(workerColumn, account.id).maybeSingle();
+  if (engagement.error || !engagement.data || engagement.data.status !== "active") {
+    throw new Error(engagement.error?.message ?? "Your active People engagement is not configured.");
+  }
+  const assignment = await db().from("hr_work_assignments")
+    .select("id,business_line,position_title,location_id,designation_id,is_top_level,effective_from,effective_to")
+    .eq("company_id", account.companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true)
+    .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`)
+    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+  if (assignment.error || !assignment.data) throw new Error(assignment.error?.message ?? "Your active work assignment is not configured.");
+  const link = await db().from("hr_user_person_links").select("user_id,status")
+    .eq("company_id", account.companyId).eq("person_id", engagement.data.person_id).maybeSingle();
+  if (link.error) throw new Error(link.error.message);
+  return {
+    workerType,
+    workerId: account.id,
+    personId: engagement.data.person_id,
+    userId: link.data?.status === "active" ? link.data.user_id : null,
+    assignment: assignment.data,
+    today
+  };
+}
+
+export async function resolveExpensePolicy(account: ConnectAccount, amount: number) {
+  const identity = await expenseIdentity(account);
+  const result = await db().from("hr_expense_policies")
+    .select("id,name,worker_type,location_id,designation_id,minimum_amount,maximum_amount,manager_levels,allow_short_manager_chain,fallback_approver_role_ids,payment_head_id,priority,effective_from,effective_to")
+    .eq("company_id", account.companyId).eq("is_active", true).lte("minimum_amount", amount)
+    .lte("effective_from", identity.today).or(`effective_to.is.null,effective_to.gte.${identity.today}`)
+    .order("priority");
+  if (result.error) throw new Error(result.error.message);
+  const policy = (result.data ?? []).filter((item) =>
+    (item.worker_type === "all" || item.worker_type === identity.workerType) &&
+    (!item.location_id || item.location_id === identity.assignment.location_id) &&
+    (!item.designation_id || item.designation_id === identity.assignment.designation_id) &&
+    (item.maximum_amount == null || Number(item.maximum_amount) >= amount)
+  ).sort((left, right) => {
+    const specificity = (item: typeof left) => (item.location_id ? 2 : 0) + (item.designation_id ? 1 : 0) + (item.worker_type === "all" ? 0 : 1);
+    return specificity(right) - specificity(left) || left.priority - right.priority;
+  })[0];
+  if (!policy?.payment_head_id) throw new Error("No active reimbursement policy and payment head match this claim.");
+  return { identity, policy };
+}
+
+export async function resolveExpenseApprovers(account: ConnectAccount, amount: number) {
+  const { identity, policy } = await resolveExpensePolicy(account, amount);
+  const steps: Array<{ step_order: number; step_name: string; approver_user_id: string; approver_person_id: string }> = [];
+  const seen = new Set<string>([identity.personId]);
+  let subjectAssignmentId = identity.assignment.id;
+  for (let level = 1; level <= policy.manager_levels; level += 1) {
+    const relationship = await db().from("hr_reporting_relationships").select("manager_assignment_id")
+      .eq("company_id", account.companyId).eq("subject_assignment_id", subjectAssignmentId)
+      .eq("relationship_type", "solid_line").eq("is_primary", true)
+      .lte("effective_from", identity.today).or(`effective_to.is.null,effective_to.gte.${identity.today}`)
+      .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+    if (relationship.error) throw new Error(relationship.error.message);
+    if (!relationship.data) {
+      if (policy.allow_short_manager_chain && steps.length > 0) break;
+      throw new Error(`Reporting manager level ${level} is not configured for this reimbursement policy.`);
+    }
+    const assignment = await db().from("hr_work_assignments").select("id,engagement_id,position_title")
+      .eq("company_id", account.companyId).eq("id", relationship.data.manager_assignment_id).maybeSingle();
+    if (assignment.error || !assignment.data) throw new Error(`Reporting manager level ${level} is not active.`);
+    const engagement = await db().from("hr_engagements").select("person_id,status")
+      .eq("company_id", account.companyId).eq("id", assignment.data.engagement_id).maybeSingle();
+    if (engagement.error || !engagement.data || engagement.data.status !== "active") throw new Error(`Reporting manager level ${level} is not active.`);
+    if (seen.has(engagement.data.person_id)) throw new Error("The reporting hierarchy contains a cycle.");
+    seen.add(engagement.data.person_id);
+    const link = await db().from("hr_user_person_links").select("user_id,status")
+      .eq("company_id", account.companyId).eq("person_id", engagement.data.person_id).maybeSingle();
+    if (link.error || !link.data || link.data.status !== "active") throw new Error(`${assignment.data.position_title} does not have an active One/People login.`);
+    steps.push({ step_order: level, step_name: `${assignment.data.position_title} approval`, approver_user_id: link.data.user_id, approver_person_id: engagement.data.person_id });
+    subjectAssignmentId = assignment.data.id;
+  }
+  if (!steps.length) throw new Error("No reporting manager is configured. Configure a reporting line or policy fallback before submission.");
+  return { identity, policy, steps };
+}
+
+export async function activeExpenseCategories(account: ConnectAccount) {
+  const result = await db().from("hr_expense_categories")
+    .select("id,code,name,description,receipt_required,receipt_threshold,per_item_limit,per_day_limit,sort_order")
+    .eq("company_id", account.companyId).eq("is_active", true).order("sort_order").order("name");
+  if (result.error) throw new Error(result.error.message);
+  return result.data ?? [];
+}
+
+export async function expenseCategoriesForPolicy(account: ConnectAccount, policyId: string) {
+  const [categories, rules] = await Promise.all([
+    activeExpenseCategories(account),
+    db().from("hr_expense_policy_categories")
+      .select("category_id,is_allowed,receipt_required_override,receipt_threshold_override,per_item_limit_override,per_day_limit_override")
+      .eq("company_id", account.companyId).eq("policy_id", policyId)
+  ]);
+  if (rules.error) throw new Error(rules.error.message);
+  const byCategory = new Map((rules.data ?? []).map((rule) => [rule.category_id, rule]));
+  return categories.flatMap((category) => {
+    const rule = byCategory.get(category.id);
+    if (rule && !rule.is_allowed) return [];
+    return [{
+      ...category,
+      receipt_required: rule?.receipt_required_override ?? category.receipt_required,
+      receipt_threshold: rule?.receipt_threshold_override ?? category.receipt_threshold,
+      per_item_limit: rule?.per_item_limit_override ?? category.per_item_limit,
+      per_day_limit: rule?.per_day_limit_override ?? category.per_day_limit
+    }];
+  });
+}
+
+export async function expensePayoutReadiness(account: ConnectAccount) {
+  const table = account.profileType === "employee" ? "employees" : "contractors";
+  const ifscColumn = account.profileType === "employee" ? "ifsc" : "ifsc_code";
+  const result = await db().from(table).select(`bank_account_no,${ifscColumn}`).eq("company_id", account.companyId).eq("id", account.id).maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  const row = result.data as Record<string, unknown> | null;
+  const ready = Boolean(String(row?.bank_account_no ?? "").trim() && String(row?.[ifscColumn] ?? "").trim());
+  return { ready, message: ready ? null : "Complete your bank account and IFSC in My Profile before submitting a reimbursement." };
+}
