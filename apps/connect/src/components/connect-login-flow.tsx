@@ -461,7 +461,7 @@ export function ConnectLoginFlow() {
     {loggedIn ? <header className="dx-header">
       <button aria-label="Menu" className={!account ? "dx-menu-unavailable" : ""} disabled={!account} onClick={() => { setDrawer(true); setProfileMenu(false); }}><Menu /></button>
       <Image alt="DropX" height={42} priority src="/dropx-logo.png" width={120} />
-      <span className="dx-header-context"><small>DropX One</small><b>{screenLabel[step] || "Workspace"}</b></span>
+      <span className="dx-header-context"><small>DropX One</small>{step === "dashboard" ? null : <b>{screenLabel[step] || "Workspace"}</b>}</span>
       <button aria-label="Notifications" className="dx-notification-trigger" disabled={!account} onClick={() => void loadNotifications()}><Bell />{unreadNotifications ? <b>{unreadNotifications > 99 ? "99+" : unreadNotifications}</b> : null}</button>
       <button className="avatar" onClick={() => { setProfileMenu((v) => !v); setNotificationMenu(false); setDrawer(false); }}>{avatar ? <img alt="" src={avatar} /> : <b>{(account?.name || "U")[0]}</b>}</button>
       {notificationMenu ? <aside className="dx-notification-pop">

@@ -17,6 +17,13 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
+import {
+  isSafeProfessionalMotivation,
+  isTooSimilarMotivation,
+  motivationSlotKey,
+  selectFallbackMotivation,
+  type MotivationHistoryEntry
+} from "../lib/dashboard-motivation";
 
 type Profile = {
   editable: Record<string, string>;
@@ -142,6 +149,81 @@ export function ConnectDashboard({
   const [openFlags, setOpenFlags] = useState<OpenFlagNotice[]>([]);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [motivation, setMotivation] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const storageKey = `dropx-one:dashboard-motivation:v1:${account.companyId}:${account.profileType}:${account.id}`;
+
+    function readHistory() {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(storageKey) || "[]");
+        if (!Array.isArray(parsed)) return [] as MotivationHistoryEntry[];
+        return parsed.filter((entry): entry is MotivationHistoryEntry =>
+          Boolean(entry) && typeof entry.key === "string" && typeof entry.message === "string"
+        ).slice(0, 16);
+      } catch {
+        return [] as MotivationHistoryEntry[];
+      }
+    }
+
+    function saveHistory(entry: MotivationHistoryEntry, history: MotivationHistoryEntry[]) {
+      const next = [entry, ...history.filter((item) => item.key !== entry.key)].slice(0, 16);
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify(next));
+      } catch {
+        // The message remains available when private browsing blocks local storage.
+      }
+    }
+
+    async function refreshMotivation() {
+      const now = new Date();
+      const slotKey = motivationSlotKey(now);
+      const history = readHistory();
+      const cached = history.find((entry) => entry.key === slotKey);
+      if (cached) {
+        if (!cancelled) setMotivation(cached.message);
+        return;
+      }
+
+      const recent = history.map((entry) => entry.message).slice(0, 12);
+      const fallback = selectFallbackMotivation(`${account.id}:${slotKey}`, recent);
+      if (!cancelled) setMotivation(fallback);
+
+      try {
+        const response = await fetch("/api/connect/motivation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            dayOfWeek: now.toLocaleDateString("en-US", { weekday: "long" }),
+            hour: now.getHours(),
+            localDate: localIsoDate(now),
+            recent,
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+          })
+        });
+        const payload = await response.json();
+        const candidate = typeof payload.message === "string" ? payload.message.replace(/\s+/g, " ").trim() : "";
+        const message = isSafeProfessionalMotivation(candidate) && !isTooSimilarMotivation(candidate, recent)
+          ? candidate
+          : fallback;
+        if (!cancelled) {
+          setMotivation(message);
+          saveHistory({ key: slotKey, message }, history);
+        }
+      } catch {
+        if (!cancelled) saveHistory({ key: slotKey, message: fallback }, history);
+      }
+    }
+
+    setMotivation("");
+    void refreshMotivation();
+    const timer = window.setInterval(() => void refreshMotivation(), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [account.companyId, account.id, account.profileType]);
 
   useEffect(() => {
     setProfile(null);
@@ -272,7 +354,7 @@ export function ConnectDashboard({
       <div>
         <small className="dx-page-eyebrow">Today · {todayLabel}</small>
         <h1>{greeting}, {firstName}</h1>
-        <p>Your workday at a glance.</p>
+        <p aria-live="polite">{motivation || "A fresh moment is ready for thoughtful progress."}</p>
       </div>
       <span className="dx-live-chip"><i /> Live</span>
     </header>
