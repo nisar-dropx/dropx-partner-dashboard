@@ -109,6 +109,7 @@ async function signedProfilePhotoUrl(path?: string | null) {
 
 const defaultPageAccess = ["dashboard", "attendance", "roster", "leave", "performance", "settings"];
 const managerPageAccess = ["dashboard", "approvals", "settings"];
+const workforceSharedPageAccess = ["dashboard", "profile", "advances", "settings"];
 
 export function connectWorkspace(profileType: ConnectAccount["profileType"]) {
   return profileType === "user" || profileType === "employee" ? "people" as const : "workforce" as const;
@@ -385,7 +386,9 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       profilePhotoUrl: await signedProfilePhotoUrl(account.profile_photo_path),
       pageAccess: account.profile_type === "user"
         ? managerPageAccess
-        : intersectPageAccess(categoryPages, designationPages),
+        : connectWorkspace(account.profile_type) === "workforce"
+          ? workforceSharedPageAccess
+          : intersectPageAccess(categoryPages, designationPages),
       isDefault: defaultPreference?.default_company_id === account.company_id &&
         defaultPreference?.default_profile_type === account.profile_type &&
         defaultPreference?.default_account_id === account.id,
