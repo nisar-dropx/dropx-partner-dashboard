@@ -440,33 +440,26 @@ export async function updateUserRole(formData: FormData) {
     const surfacePageIds = (surfacePages ?? [])
       .filter((page) => pageBelongsToSurface(page.code, surface))
       .map((page) => page.id);
-    const submittedPageIds = new Set(submittedPermissions.map((permission) => permission.page_id));
     if (submittedPermissions.some((permission) => !surfacePageIds.includes(permission.page_id))) {
       throw new Error("The submitted permissions include pages from another frontend.");
     }
 
-    const clearQuery = supabaseAdmin
-      .from("role_page_permissions")
-      .delete()
-      .eq("company_id", companyId)
-      .eq("role_id", roleId);
-    const { error: clearPermissionsError } = surfacePageIds.length
-      ? await clearQuery.in("page_id", surfacePageIds)
-      : { error: null };
-
-    if (clearPermissionsError) throw new Error(clearPermissionsError.message);
+    const submittedPageIds = new Set(submittedPermissions.map((permission) => permission.page_id));
+    if (surfacePageIds.some((pageId) => !submittedPageIds.has(pageId))) {
+      throw new Error("The permission form is incomplete. Refresh the page and try again.");
+    }
 
     if (submittedPermissions.length) {
       const { error: permissionsError } = await supabaseAdmin
         .from("role_page_permissions")
-        .insert(submittedPermissions.filter((permission) => submittedPageIds.has(permission.page_id)).map((permission) => ({
+        .upsert(submittedPermissions.map((permission) => ({
           company_id: companyId,
           role_id: roleId,
           page_id: permission.page_id,
           can_view: permission.can_view,
           can_add: permission.can_add,
           can_edit: permission.can_edit
-        })));
+        })), { onConflict: "company_id,role_id,page_id" });
 
       if (permissionsError) throw new Error(permissionsError.message);
     }
