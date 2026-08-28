@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { expenseIdentity } from "../../../../src/lib/connect-expense-data";
+import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
@@ -61,8 +62,11 @@ async function listLeaveApprovals(account: ConnectAccount) {
 export async function GET(request: Request) {
   try {
     const account = await selectedAccount(request);
-    const leaveApprovals = await listLeaveApprovals(account);
-    return NextResponse.json({ leaveApprovals }, { headers: { "Cache-Control": "private, no-store" } });
+    const [leaveApprovals, locationSupportPackages] = await Promise.all([
+      listLeaveApprovals(account),
+      listConnectLocationSupportPackages(account)
+    ]);
+    return NextResponse.json({ leaveApprovals, locationSupportPackages }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load approvals." }, { status: 400 });
   }
@@ -72,6 +76,13 @@ export async function PATCH(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
     const account = await selectedAccount(request, body);
+    const reviewId = clean(body.reviewId);
+    if (reviewId) {
+      const decision = clean(body.decision);
+      const note = clean(body.note);
+      const notice = await reviewConnectLocationSupportPackage(account, reviewId, decision, note);
+      return NextResponse.json({ ok: true, notice });
+    }
     const identity = await expenseIdentity(account);
     if (!identity.userId) throw new Error("A linked People login is required to approve time off.");
     const requestId = clean(body.requestId);

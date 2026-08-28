@@ -261,7 +261,8 @@ export function ConnectDashboard({
   const firstName = firstNameRaw.charAt(0).toUpperCase() + firstNameRaw.slice(1).toLowerCase();
   const profileStatus = profile.status || account.status || "active";
   const attendanceAllowed = (account.pageAccess ?? ["dashboard", "attendance", "settings"]).includes("attendance");
-  const leaveAllowed = (account.pageAccess ?? ["dashboard", "attendance", "leave", "settings"]).includes("leave");
+  const leaveAllowed = account.profileType === "contractor"
+    || (account.pageAccess ?? ["dashboard", "attendance", "leave", "settings"]).includes("leave");
   const performanceAllowed = account.profileType === "employee" || account.profileType === "contractor";
   const trackedDays = attendance.summary.present + attendance.summary.absent + attendance.summary.misPunch;
   const attendanceRate = trackedDays ? Math.round((attendance.summary.present / trackedDays) * 100) : 0;

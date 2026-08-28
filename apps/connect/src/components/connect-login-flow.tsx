@@ -35,8 +35,8 @@ const active = (account?: AppAccount | null) => account?.status?.toLowerCase() =
 const defaultPageAccess = ["dashboard", "attendance", "roster", "leave", "performance", "settings"];
 const peopleSelfService = (account: AppAccount | null) => account?.profileType === "employee" || account?.profileType === "contractor";
 const isContractorAccount = (account: AppAccount | null) => account?.profileType === "contractor";
-const showLeaveNav = (account: AppAccount | null) => allowed(account, "leave") && !isContractorAccount(account);
-const showLopNav = (account: AppAccount | null) => allowed(account, "leave") && isContractorAccount(account);
+const showLeaveNav = (account: AppAccount | null) => Boolean(account && active(account) && !isContractorAccount(account) && allowed(account, "leave"));
+const showLopNav = (account: AppAccount | null) => Boolean(account && active(account) && isContractorAccount(account));
 const allowed = (account: AppAccount | null, page: "dashboard" | "attendance" | "roster" | "leave" | "performance" | "settings") =>
   page === "settings" || page === "roster" || (page === "performance" && peopleSelfService(account)) || (account?.pageAccess ?? defaultPageAccess).includes(page);
 

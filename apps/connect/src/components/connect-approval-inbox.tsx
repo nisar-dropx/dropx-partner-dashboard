@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Check, ClipboardCheck, Clock3, FileText, RotateCcw, X } from "lucide-react";
+import { CalendarDays, Check, ClipboardCheck, Clock3, FileText, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
 
@@ -43,16 +43,35 @@ type LeaveApproval = {
   profileType: "employee" | "contractor";
 };
 
-type ApprovalSection = "time-off" | "reimbursements";
+type LocationSupportPackage = {
+  id: string;
+  punchDate: string;
+  status: string;
+  remarks: string | null;
+  lat: number;
+  lng: number;
+  accuracyM: number | null;
+  receivedAt: string | null;
+  selfieUrl: string | null;
+  workerName: string;
+  workerCode: string | null;
+  profileType: "employee" | "contractor";
+};
+
+type ApprovalSection = "time-off" | "location-integrity" | "reimbursements";
 
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
 function money(value: number | null | undefined) { return `₹${Number(value ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
 function displayDate(value: string) { return value.split("-").reverse().join("/"); }
+function dateTime(value: string | null) {
+  return value ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }).format(new Date(value)) : "—";
+}
 
 export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [section, setSection] = useState<ApprovalSection>("time-off");
   const [reimbursements, setReimbursements] = useState<ReimbursementApproval[]>([]);
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
+  const [supportPackages, setSupportPackages] = useState<LocationSupportPackage[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -73,8 +92,12 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       if (!leaveResponse.ok) throw new Error(leavePayload.error || "Unable to load time-off approvals.");
       setReimbursements(reimbursementPayload.approvals ?? []);
       setLeaveApprovals(leavePayload.leaveApprovals ?? []);
+      setSupportPackages(leavePayload.locationSupportPackages ?? []);
       setSection((current) => {
-        if (current === "time-off" && !(leavePayload.leaveApprovals ?? []).length && (reimbursementPayload.approvals ?? []).length) return "reimbursements";
+        if (current === "time-off" && !(leavePayload.leaveApprovals ?? []).length) {
+          if ((leavePayload.locationSupportPackages ?? []).length) return "location-integrity";
+          if ((reimbursementPayload.approvals ?? []).length) return "reimbursements";
+        }
         return current;
       });
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load approvals."); }
@@ -113,12 +136,28 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     finally { setSaving(false); }
   }
 
+  async function decideSupportPackage(reviewId: string, decision: "approved" | "returned" | "rejected") {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/approvals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: account.id, profileType: account.profileType, reviewId, decision, note: notes[reviewId] ?? "" })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to update support package.");
+      setNotice(payload.notice); setNotes((current) => ({ ...current, [reviewId]: "" })); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update support package."); }
+    finally { setSaving(false); }
+  }
+
   return <section className="dx-expenses dx-approval-inbox">
     <header className="dx-page-intro"><small>Manager workspace</small><h1>Approval inbox</h1><p>Review only the workflow steps assigned to you.</p></header>
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
     <nav className="dx-expense-tabs" aria-label="Approval sections">
       <button className={section === "time-off" ? "active" : ""} onClick={() => setSection("time-off")}>Time off <b>{leaveApprovals.length}</b></button>
+      <button className={section === "location-integrity" ? "active" : ""} onClick={() => setSection("location-integrity")}>Location integrity <b>{supportPackages.length}</b></button>
       <button className={section === "reimbursements" ? "active" : ""} onClick={() => setSection("reimbursements")}>Reimbursements <b>{reimbursements.length}</b></button>
     </nav>
     {loading ? <div className="dx-loader"><span /><small>Loading approvals…</small></div> : null}
@@ -129,6 +168,24 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
         <label>Decision note<textarea onChange={(event) => setNotes((current) => ({ ...current, [approval.requestId]: event.target.value }))} placeholder="Optional reviewer note" rows={2} value={notes[approval.requestId] ?? ""} /></label>
         <footer><button className="danger" disabled={saving} onClick={() => void decideLeave(approval.requestId, "rejected")}><X />Reject</button><button className="primary" disabled={saving} onClick={() => void decideLeave(approval.requestId, "approved")}><Check />Approve</button></footer>
       </article>) : <div className="dx-empty"><Clock3 /><strong>No time-off approvals waiting</strong><small>Assigned time-off approvals will appear here.</small></div>}
+    </div> : null}
+    {!loading && section === "location-integrity" ? <div className="dx-expense-list">
+      {supportPackages.length ? supportPackages.map((item) => <article className="dx-expense-approval" key={item.id}>
+        <header><span><small>Support package · {displayDate(item.punchDate)}</small><strong>{item.workerName}</strong><em>{item.workerCode || "—"} · {item.profileType === "contractor" ? "Independent contractor" : "Employee"}</em></span><b>{item.status.replaceAll("_", " ")}</b></header>
+        <div>
+          <span><LocateFixed /> {item.lat.toFixed(5)}, {item.lng.toFixed(5)}{item.accuracyM == null ? "" : ` · ±${Math.round(item.accuracyM)}m`}</span>
+          <span>{item.remarks || "Selfie and GPS submitted outside station"}</span>
+          <span>{item.receivedAt ? `Received ${dateTime(item.receivedAt)}` : "Awaiting server receipt"}</span>
+          {item.selfieUrl ? <a href={item.selfieUrl} rel="noreferrer" target="_blank"><FileText />View selfie</a> : null}
+          <a href={`https://www.google.com/maps?q=${item.lat},${item.lng}`} rel="noreferrer" target="_blank"><MapPin />Open map</a>
+        </div>
+        <label>Review note<textarea onChange={(event) => setNotes((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Optional note" rows={2} value={notes[item.id] ?? ""} /></label>
+        <footer>
+          <button disabled={saving} onClick={() => void decideSupportPackage(item.id, "returned")}><RotateCcw />Return</button>
+          <button className="danger" disabled={saving} onClick={() => void decideSupportPackage(item.id, "rejected")}><X />Reject</button>
+          <button className="primary" disabled={saving} onClick={() => void decideSupportPackage(item.id, "approved")}><Check />Approve</button>
+        </footer>
+      </article>) : <div className="dx-empty"><LocateFixed /><strong>No support packages waiting</strong><small>Assigned location verification packages will appear here.</small></div>}
     </div> : null}
     {!loading && section === "reimbursements" ? <div className="dx-expense-list">{reimbursements.length ? reimbursements.map((approval) => <article className="dx-expense-approval" key={approval.id}>
       <header><span><small>{approval.claim.claim_no} · {approval.step_name}</small><strong>{approval.claim.requesterName}</strong><em>{approval.claim.purpose}</em></span><b>{money(approval.claim.total_claimed)}</b></header>
