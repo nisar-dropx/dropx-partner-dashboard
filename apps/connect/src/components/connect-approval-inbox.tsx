@@ -296,20 +296,22 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
                 meta={`${item.workerCode || "—"} · ${profileLabel(item.profileType)}`}
                 name={item.workerName}
               />
-              <div className="dx-evidence-row">
+              <div className="dx-approval-evidence">
                 {item.selfieUrl ? (
-                  <a aria-label="View support selfie" className="dx-evidence-photo" href={item.selfieUrl} rel="noreferrer" target="_blank">
+                  <a aria-label="View support selfie" className="dx-approval-evidence-photo" href={item.selfieUrl} rel="noreferrer" target="_blank">
                     <img alt="" src={item.selfieUrl} />
                     <Camera />
                   </a>
                 ) : (
-                  <div aria-hidden="true" className="dx-evidence-photo missing"><Camera /></div>
+                  <div aria-hidden="true" className="dx-approval-evidence-photo missing"><Camera /></div>
                 )}
-                <div className="dx-evidence-info">
-                  <span className="dx-evidence-kicker"><LocateFixed />GPS</span>
-                  <strong>{item.lat.toFixed(5)}, {item.lng.toFixed(5)}{item.accuracyM == null ? "" : ` · ±${Math.round(item.accuracyM)}m`}</strong>
-                  <p>{item.remarks || "Selfie and GPS submitted outside station"}</p>
-                  <div className="dx-evidence-links">
+                <div className="dx-approval-evidence-copy">
+                  <p className="dx-approval-evidence-coords">
+                    <LocateFixed />
+                    <span>{item.lat.toFixed(5)}, {item.lng.toFixed(5)}{item.accuracyM == null ? "" : ` · ±${Math.round(item.accuracyM)}m`}</span>
+                  </p>
+                  <p className="dx-approval-evidence-note">{item.remarks || "Selfie and GPS submitted outside station"}</p>
+                  <div className="dx-approval-evidence-foot">
                     <small>{item.receivedAt ? dateTime(item.receivedAt) : "Awaiting receipt"}</small>
                     <a href={`https://www.google.com/maps?q=${item.lat},${item.lng}`} rel="noreferrer" target="_blank"><MapPin />Map</a>
                   </div>
