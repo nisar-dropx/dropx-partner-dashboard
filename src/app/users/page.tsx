@@ -281,14 +281,28 @@ async function loadAccessData(
   })();
 
   const permissionsPromise = (async () => {
-    let result = await client
-      .from("role_page_permissions")
-      .select("role_id, page_id, can_view, can_add, can_edit")
-      .eq("company_id", companyId);
+    const pageSize = 1000;
+    async function loadPermissionPages(filterByCompany: boolean) {
+      const data: RolePermissionRow[] = [];
+      for (let offset = 0; ; offset += pageSize) {
+        let query = client
+          .from("role_page_permissions")
+          .select("role_id, page_id, can_view, can_add, can_edit")
+          .order("role_id")
+          .order("page_id")
+          .range(offset, offset + pageSize - 1);
+        if (filterByCompany) query = query.eq("company_id", companyId);
+        const result = await query;
+        if (result.error) return { data: null, error: result.error };
+        const rows = (result.data ?? []) as RolePermissionRow[];
+        data.push(...rows);
+        if (rows.length < pageSize) return { data, error: null };
+      }
+    }
+
+    let result = await loadPermissionPages(true);
     if (isMissingCompanyColumn(result.error)) {
-      result = await client
-        .from("role_page_permissions")
-        .select("role_id, page_id, can_view, can_add, can_edit");
+      result = await loadPermissionPages(false);
     }
     return result;
   })();
