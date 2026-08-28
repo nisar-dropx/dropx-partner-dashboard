@@ -893,6 +893,13 @@ export function DepositRemittancePanel({
                   <span>Difference</span><strong>{money(pageVsRemittance)}</strong>
                 </div>
               </div>
+              <p className="subtle" style={{ marginTop: -6, marginBottom: 12 }}>
+                {needsDifferenceRemarks && hasPendingCreated
+                  ? `Variance is beyond ₹${DIFFERENCE_REMARKS_RUPEES}, and ${remittance.createdCount} remittance${remittance.createdCount === 1 ? "" : "s"} totaling ${money(remittance.createdTotal)} ${remittance.createdCount === 1 ? "is" : "are"} still pending creation in SCC.`
+                  : needsDifferenceRemarks
+                    ? `Variance is beyond the ₹${DIFFERENCE_REMARKS_RUPEES} auto-validate limit.`
+                    : `The ₹${DIFFERENCE_REMARKS_RUPEES} cash variance itself is within tolerance — remarks are needed because ${remittance.createdCount} remittance${remittance.createdCount === 1 ? "" : "s"} totaling ${money(remittance.createdTotal)} ${remittance.createdCount === 1 ? "is" : "are"} still pending creation in SCC.`}
+              </p>
               <label style={{ display: "grid", gap: 6 }}>
                 Remarks
                 <textarea
@@ -900,7 +907,7 @@ export function DepositRemittancePanel({
                   rows={3}
                   value={validateRemarks}
                   onChange={(event) => setValidateRemarks(event.target.value)}
-                  placeholder="Explain why page cash differs from remittance"
+                  placeholder="Explain why deposit can be validated now"
                 />
               </label>
               <div className="form-actions" style={{ marginTop: 14 }}>
