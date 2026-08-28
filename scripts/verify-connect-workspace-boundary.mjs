@@ -6,49 +6,42 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const loginFlow = readFileSync(resolve(root, "apps/connect/src/components/connect-login-flow.tsx"), "utf8");
 const auth = readFileSync(resolve(root, "apps/connect/src/lib/connect-auth.ts"), "utf8");
 const peopleDashboard = readFileSync(resolve(root, "apps/connect/src/components/connect-dashboard.tsx"), "utf8");
-const workforceDashboard = readFileSync(resolve(root, "apps/connect/src/components/connect-workforce-workspace.tsx"), "utf8");
 
 function requireSource(condition, message) {
   if (!condition) throw new Error(`DropX One workspace boundary failed: ${message}`);
 }
 
-const workforceStepsMatch = loginFlow.match(/const workforceSharedSteps = new Set<Step>\(\[([^\]]+)]\);/);
-requireSource(workforceStepsMatch, "the Workforce route allow-list is missing");
-
-const workforceSteps = Array.from(workforceStepsMatch[1].matchAll(/"([^"]+)"/g), (match) => match[1]);
-const expectedWorkforceSteps = ["accounts", "dashboard", "profile", "payments", "advances", "settings"];
 requireSource(
-  JSON.stringify(workforceSteps) === JSON.stringify(expectedWorkforceSteps),
-  `Workforce routes changed (${workforceSteps.join(", ")})`
-);
-
-requireSource(
-  loginFlow.includes("isWorkforceWorkspace(account) && !workforceSharedSteps.has(next)"),
-  "the client route guard is missing"
+  loginFlow.includes("<ConnectPeopleWorkspace account={account}"),
+  "the People manager workspace is not rendered"
 );
 requireSource(
-  loginFlow.includes("<ConnectWorkforceWorkspace account={account}"),
-  "the dedicated Workforce workspace is not rendered"
+  loginFlow.includes('variant={isWorkforceWorkspace(account) ? "workforce" : "people"}'),
+  "the shared dashboard is not using the Workforce variant"
 );
 requireSource(
-  !loginFlow.includes("variant={isWorkforceWorkspace(account)"),
-  "the People dashboard is still being reused for Workforce"
+  !loginFlow.includes("<ConnectWorkforceWorkspace account={account}"),
+  "the stripped-down Workforce workspace replaced the shared dashboard"
 );
-
-const accessMatch = auth.match(/const workforceSharedPageAccess = \[([^\]]+)]/);
-requireSource(accessMatch, "the server account access boundary is missing");
-const accessPages = Array.from(accessMatch[1].matchAll(/"([^"]+)"/g), (match) => match[1]);
 requireSource(
-  JSON.stringify(accessPages) === JSON.stringify(["dashboard", "profile", "advances", "settings"]),
-  `Workforce server access changed (${accessPages.join(", ")})`
+  loginFlow.includes("showLopNav") && loginFlow.includes('<ConnectLeave account={account} lopOnly />'),
+  "contractor LOP navigation is missing"
+);
+requireSource(
+  !loginFlow.includes("workforceSharedSteps"),
+  "the Workforce route allow-list is still blocking attendance and roster"
+);
+requireSource(
+  !auth.includes("workforceSharedPageAccess"),
+  "Workforce page access is still being stripped on the server"
+);
+requireSource(
+  auth.includes("intersectPageAccess(categoryPages, designationPages)"),
+  "Workforce page access must follow category and designation rules"
+);
+requireSource(
+  peopleDashboard.includes('variant?: "people" | "workforce"'),
+  "the shared dashboard variant prop is missing"
 );
 
-for (const peopleOnlyFeature of ["Attendance", "Roster", "Leave", "Performance", "Documents", "Reimbursements", "Approval Inbox"]) {
-  requireSource(
-    !workforceDashboard.includes(peopleOnlyFeature),
-    `${peopleOnlyFeature} leaked into the Workforce workspace`
-  );
-}
-requireSource(!peopleDashboard.includes("variant"), "the People dashboard still contains a Workforce variant");
-
-console.log("DropX One workspace boundary verified: Workforce shares only Profile and Payments → Advances.");
+console.log("DropX One workspace boundary verified: managers use People workspace; workforce uses the shared dashboard with full category access.");
