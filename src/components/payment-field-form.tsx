@@ -3,7 +3,10 @@
 import { useState } from "react";
 import { SubmitButton } from "@/components/submit-button";
 import {
-  PAYMENT_CALCULATION_SOURCES,
+  AMAZON_PAYMENT_CALCULATION_SOURCES,
+  FLIPKART_PAYMENT_CALCULATION_SOURCES,
+  INTERNAL_PAYMENT_CALCULATION_SOURCES,
+  type ProviderCalculationSources,
   type PaymentCalculationSource,
   type PaymentCalculationType
 } from "@/lib/payment-calculation";
@@ -16,6 +19,7 @@ type PaymentField = {
   pay_schedule: "per_hour" | "per_day" | "per_month" | null;
   calculation_type: PaymentCalculationType;
   calculation_source: PaymentCalculationSource | null;
+  provider_calculation_sources?: ProviderCalculationSources | null;
   usage_count?: number;
 };
 
@@ -37,10 +41,15 @@ export function PaymentFieldForm({ action, initialField, submitLabel }: { action
         <span className="payment-field-section-title">How payment is calculated</span>
         <input name="calculation_type" type="hidden" value={type === "production" ? "count_x_rate" : "manual_input"} />
         {type === "production" ? <>
-          <label>Calculation rule<select className="select" defaultValue={initialField?.calculation_source ?? ""} name="calculation_source" required><option value="">Select Provider production count</option>{PAYMENT_CALCULATION_SOURCES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-          <div className="payment-field-calculation-help"><strong>Production count</strong> comes from the selected provider daily-data value.<br /><strong>Production rate</strong> is entered separately for each DropX ID in ID &amp; pay mapping.</div>
+          <label>Amazon production count<select className="select" defaultValue={initialField?.provider_calculation_sources?.amazon ?? initialField?.calculation_source ?? ""} name="amazon_calculation_source"><option value="">Not mapped</option>{AMAZON_PAYMENT_CALCULATION_SOURCES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          <label>Flipkart production count<select className="select" defaultValue={initialField?.provider_calculation_sources?.flipkart ?? ""} disabled={FLIPKART_PAYMENT_CALCULATION_SOURCES.length === 0} name="flipkart_calculation_source"><option value="">Sources will be added later</option></select></label>
+          <label>Internal calculation source<select className="select" defaultValue={initialField?.provider_calculation_sources?.internal ?? ""} name="internal_calculation_source"><option value="">Not mapped</option>{INTERNAL_PAYMENT_CALCULATION_SOURCES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          <div className="payment-field-calculation-help"><strong>Provider count</strong> is selected independently for each provider. Internal sources cover bonuses and incentives.<br /><strong>Production rate</strong> is entered separately for each DropX ID in ID &amp; pay mapping.</div>
         </> : <>
           <input name="calculation_source" type="hidden" value="" />
+          <input name="amazon_calculation_source" type="hidden" value="" />
+          <input name="flipkart_calculation_source" type="hidden" value="" />
+          <input name="internal_calculation_source" type="hidden" value="" />
           <p className="payment-field-calculation-help">The configured amount in ID &amp; pay mapping will be used directly.</p>
         </>}
       </div>

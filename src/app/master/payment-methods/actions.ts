@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { PAYMENT_CALCULATION_SOURCES, type PaymentCalculationType } from "@/lib/payment-calculation";
+import { AMAZON_PAYMENT_CALCULATION_SOURCES, INTERNAL_PAYMENT_CALCULATION_SOURCES, type PaymentCalculationType } from "@/lib/payment-calculation";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -148,20 +148,29 @@ function parsePaymentField(formData: FormData) {
   const fieldType = required(formData.get("field_type"), "Field type");
   const paySchedule = clean(formData.get("pay_schedule"));
   const calculationType: PaymentCalculationType = fieldType === "production" ? "count_x_rate" : "manual_input";
-  const calculationSource = clean(formData.get("calculation_source"));
+  const amazonSource = clean(formData.get("amazon_calculation_source"));
+  const flipkartSource = clean(formData.get("flipkart_calculation_source"));
+  const internalSource = clean(formData.get("internal_calculation_source"));
   if (!["amount", "production"].includes(fieldType)) throw new Error("Field type must be Amount or Production.");
   if (fieldType === "amount" && !["per_hour", "per_day", "per_month"].includes(paySchedule ?? "")) {
     throw new Error("Amount fields need a pay schedule.");
   }
-  if (calculationSource && !PAYMENT_CALCULATION_SOURCES.some((option) => option.value === calculationSource)) throw new Error("Select a valid calculation source.");
-  if (fieldType === "production" && !calculationSource) throw new Error("Select the Amazon production count for this field.");
+  if (amazonSource && !AMAZON_PAYMENT_CALCULATION_SOURCES.some((option) => option.value === amazonSource)) throw new Error("Select a valid Amazon production count.");
+  if (flipkartSource) throw new Error("Flipkart production sources have not been configured yet.");
+  if (internalSource && !INTERNAL_PAYMENT_CALCULATION_SOURCES.some((option) => option.value === internalSource)) throw new Error("Select a valid internal calculation source.");
+  if (fieldType === "production" && !amazonSource && !flipkartSource && !internalSource) throw new Error("Select at least one provider or internal calculation source.");
   return {
     code,
     label,
     field_type: fieldType,
     pay_schedule: fieldType === "amount" ? paySchedule : null,
     calculation_type: calculationType,
-    calculation_source: fieldType === "production" ? calculationSource : null
+    calculation_source: fieldType === "production" ? amazonSource : null,
+    provider_calculation_sources: fieldType === "production" ? {
+      amazon: amazonSource,
+      flipkart: flipkartSource,
+      internal: internalSource
+    } : {}
   };
 }
 

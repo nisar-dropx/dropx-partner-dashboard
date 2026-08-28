@@ -4199,7 +4199,7 @@ h3 {
 
 .payment-field-form {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(300px, .85fr) auto;
+  grid-template-columns: minmax(0, 1.15fr) minmax(460px, 1.15fr) auto;
   align-items: stretch;
   gap: 14px;
 }
@@ -4229,7 +4229,11 @@ h3 {
 }
 
 .payment-field-calculation {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.payment-field-calculation-help {
+  grid-column: 1 / -1;
 }
 
 .payment-field-section-title {
