@@ -20,7 +20,7 @@ type PaymentField = {
   usage_count?: number;
 };
 
-type ProviderMetric = { id: string; provider_id: string; provider_name: string; name: string; source_key: string };
+type ProviderMetric = { id: string; provider_id: string; provider_name: string; provider_model_id: string | null; provider_model_name: string | null; name: string; source_key: string };
 
 export function PaymentFieldForm({ action, initialField, submitLabel, providerMetrics = [], selectedMetricIds = [] }: { action: (formData: FormData) => Promise<void>; initialField?: PaymentField; submitLabel: string; providerMetrics?: ProviderMetric[]; selectedMetricIds?: string[] }) {
   const [type, setType] = useState<"amount" | "production">(initialField?.field_type ?? "production");
@@ -40,7 +40,10 @@ export function PaymentFieldForm({ action, initialField, submitLabel, providerMe
         <span className="payment-field-section-title">How payment is calculated</span>
         <input name="calculation_type" type="hidden" value={type === "production" ? "count_x_rate" : "manual_input"} />
         {type === "production" ? <>
-          {Array.from(new Map(providerMetrics.map((metric) => [metric.provider_id, metric.provider_name]))).map(([providerId, providerName]) => <label key={providerId}>{providerName} production count<select className="select" defaultValue={providerMetrics.find((metric) => metric.provider_id === providerId && selectedMetricIds.includes(metric.id))?.id ?? ""} name={`provider_metric_${providerId}`}><option value="">Not used for this provider</option>{providerMetrics.filter((metric) => metric.provider_id === providerId).map((metric) => <option key={metric.id} value={metric.id}>{metric.name}</option>)}</select></label>)}
+          {Array.from(new Map(providerMetrics.map((metric) => [`${metric.provider_id}:${metric.provider_model_id ?? "all"}`, metric]))).map(([scope, group]) => {
+            const options = providerMetrics.filter((metric) => `${metric.provider_id}:${metric.provider_model_id ?? "all"}` === scope);
+            return <label key={scope}>{group.provider_name} · {group.provider_model_name ?? "All models"}<select className="select" defaultValue={options.find((metric) => selectedMetricIds.includes(metric.id))?.id ?? ""} name={`provider_metric_${scope.replace(/[^a-zA-Z0-9]/g, "_")}`}><option value="">Not used</option>{options.map((metric) => <option key={metric.id} value={metric.id}>{metric.name}</option>)}</select></label>;
+          })}
           {!providerMetrics.length ? <p className="payment-field-calculation-help">No provider production counts are configured. Add them in Provider Master first.</p> : null}
           <div className="payment-field-calculation-help">Choose the count used by each provider. The individual rate is entered for each DropX ID in ID &amp; pay mapping.</div>
         </> : <>
