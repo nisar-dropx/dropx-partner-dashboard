@@ -271,32 +271,40 @@ export function SelfieCapturePanel({
       if (!size) throw new Error("Camera is still starting. Try again.");
       const sx = (video.videoWidth - size) / 2;
       const sy = (video.videoHeight - size) / 2;
-      const canvas = document.createElement("canvas");
-      canvas.width = size;
-      canvas.height = size;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Unable to capture selfie.");
-      ctx.translate(size, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size);
+
+      // Match on an unmirrored crop — same orientation pipeline as the live video feed.
+      const matchCanvas = document.createElement("canvas");
+      matchCanvas.width = size;
+      matchCanvas.height = size;
+      const matchCtx = matchCanvas.getContext("2d");
+      if (!matchCtx) throw new Error("Unable to capture selfie.");
+      matchCtx.drawImage(video, sx, sy, size, size, 0, 0, size, size);
 
       let match: FaceMatchResult | null = liveMatch;
       if (needMatch && profilePhotoUrl) {
         setChecking(true);
-        match = await matchLiveFrameToProfile(canvas, profilePhotoUrl);
-        setLiveMatch(match);
+        match = await matchLiveFrameToProfile(matchCanvas, profilePhotoUrl);
         setChecking(false);
         if (!match.ok) {
-          setError(match.reason || `Face match ${match.percent}% — need ${FACE_MATCH_REQUIRED_PERCENT}%+.`);
-          setPhase("match");
-          setLivenessDone(!needLiveness);
-          setChallengeIndex(0);
-          matchOkStreakRef.current = 0;
+          setError(
+            match.reason ||
+              `Face match ${match.percent}% in this frame — hold still facing the camera and tap Capture again.`
+          );
           return;
         }
+        setLiveMatch(match);
       }
 
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+      const outCanvas = document.createElement("canvas");
+      outCanvas.width = size;
+      outCanvas.height = size;
+      const outCtx = outCanvas.getContext("2d");
+      if (!outCtx) throw new Error("Unable to capture selfie.");
+      outCtx.translate(size, 0);
+      outCtx.scale(-1, 1);
+      outCtx.drawImage(video, sx, sy, size, size, 0, 0, size, size);
+
+      const blob = await new Promise<Blob | null>((resolve) => outCanvas.toBlob(resolve, "image/jpeg", 0.92));
       if (!blob) throw new Error("Unable to capture selfie.");
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -304,7 +312,6 @@ export function SelfieCapturePanel({
       setPreviewBlob(blob);
       setPreviewUrl(URL.createObjectURL(blob));
       setReady(false);
-      if (match) setLiveMatch(match);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to capture selfie.");
     } finally {
@@ -367,7 +374,9 @@ export function SelfieCapturePanel({
       : phase === "match"
         ? liveMatch
           ? liveMatch.ok
-            ? `Matched ${liveMatch.percent}% — hold still…`
+            ? matchProgress >= 1
+              ? `Matched ${liveMatch.percent}% — starting live checks…`
+              : `Matched ${liveMatch.percent}% — hold still (${Math.min(3, Math.max(1, Math.round(matchProgress * 3)))}/3)`
             : liveMatch.percent > 0
               ? `Match ${liveMatch.percent}% — need ${FACE_MATCH_REQUIRED_PERCENT}%+`
               : liveMatch.reason || "Align your face with your profile photo"
