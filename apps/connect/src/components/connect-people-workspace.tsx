@@ -4,7 +4,7 @@ import { CalendarDays, ChevronRight, ClipboardCheck, LocateFixed, ReceiptText, S
 import { useEffect, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
 
-type Counts = { leave: number; location: number; claims: number };
+type Counts = { leave: number; attendance: number; rosters: number; exits: number; location: number; claims: number };
 
 export function ConnectPeopleWorkspace({
   account,
@@ -17,7 +17,7 @@ export function ConnectPeopleWorkspace({
   onSettings: () => void;
   onSwitch: () => void;
 }) {
-  const [counts, setCounts] = useState<Counts>({ leave: 0, location: 0, claims: 0 });
+  const [counts, setCounts] = useState<Counts>({ leave: 0, attendance: 0, rosters: 0, exits: 0, location: 0, claims: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -39,6 +39,9 @@ export function ConnectPeopleWorkspace({
       if (cancelled) return;
       setCounts({
         leave: workflow.leaveApprovals?.length ?? 0,
+        attendance: workflow.attendanceApprovals?.length ?? 0,
+        rosters: workflow.rosterApprovals?.length ?? 0,
+        exits: workflow.exitApprovals?.length ?? 0,
         location: workflow.locationSupportPackages?.length ?? 0,
         claims: reimbursements.approvals?.length ?? 0
       });
@@ -50,7 +53,9 @@ export function ConnectPeopleWorkspace({
     return () => { cancelled = true; };
   }, [account.companyId, account.id, account.profileType]);
 
-  const pending = counts.leave + counts.location + counts.claims;
+  const peopleRequests = counts.leave + counts.attendance + counts.exits;
+  const operations = counts.location + counts.rosters;
+  const pending = peopleRequests + operations + counts.claims;
   const firstName = (account.name || "there").trim().split(/\s+/)[0];
 
   return <section className="dx-people-workspace">
@@ -65,8 +70,8 @@ export function ConnectPeopleWorkspace({
       <ChevronRight />
     </button>
     <section className="dx-manager-counts" aria-label="Pending approvals">
-      <button onClick={onApprovals}><CalendarDays /><strong>{counts.leave}</strong><small>Time off</small></button>
-      <button onClick={onApprovals}><LocateFixed /><strong>{counts.location}</strong><small>Location</small></button>
+      <button onClick={onApprovals}><CalendarDays /><strong>{peopleRequests}</strong><small>People requests</small></button>
+      <button onClick={onApprovals}><LocateFixed /><strong>{operations}</strong><small>Roster &amp; location</small></button>
       <button onClick={onApprovals}><ReceiptText /><strong>{counts.claims}</strong><small>Claims</small></button>
     </section>
     <section className="dx-manager-actions">

@@ -85,3 +85,39 @@ export async function notifyExitApprovalRequired(input: { companyId: string; cas
   }
   await supabaseAdmin.from("hr_exit_notification_log").insert({ company_id: input.companyId, case_id: input.caseId, event_code: "APPROVAL_REQUIRED", to_emails: to, cc_emails: cc, subject, status, error_message: errorMessage });
 }
+
+export async function notifyConnectExitOutcome(input: { companyId: string; caseId: string; event: "CASE_APPROVED" | "CASE_REJECTED" }) {
+  if (!supabaseAdmin) return { status: "skipped" as const, error: "Database is unavailable." };
+  const [{ data: template }, { data: exitCase }] = await Promise.all([
+    supabaseAdmin.from("hr_exit_notification_templates").select("*").eq("company_id", input.companyId).eq("event_code", input.event).eq("is_enabled", true).maybeSingle(),
+    supabaseAdmin.from("hr_exit_cases").select("case_number,requested_last_working_date,approved_last_working_date,personal_email,worker_type,employees(employee_code,full_name,email),contractors(dropx_id,full_name,email)").eq("company_id", input.companyId).eq("id", input.caseId).maybeSingle()
+  ]);
+  if (!template || !exitCase) return { status: "skipped" as const };
+  const employee = Array.isArray(exitCase.employees) ? exitCase.employees[0] : exitCase.employees;
+  const contractor = Array.isArray(exitCase.contractors) ? exitCase.contractors[0] : exitCase.contractors;
+  const worker = exitCase.worker_type === "contractor" ? contractor : employee;
+  const workerCode = exitCase.worker_type === "contractor" ? contractor?.dropx_id : employee?.employee_code;
+  const to = Array.from(new Set([exitCase.personal_email, worker?.email].map((email) => String(email ?? "").trim().toLowerCase()).filter(Boolean)));
+  const values = {
+    case_number: exitCase.case_number,
+    employee_name: worker?.full_name ?? "Team member",
+    employee_code: workerCode ?? "",
+    requested_last_working_date: exitCase.requested_last_working_date ?? "",
+    last_working_date: exitCase.approved_last_working_date ?? exitCase.requested_last_working_date ?? "",
+    approval_step: "",
+    approval_decision: input.event === "CASE_APPROVED" ? "approved" : "rejected"
+  };
+  const subject = fill(template.subject_template, values);
+  const body = fill(template.body_template, values);
+  let status: "sent" | "failed" | "skipped" = "sent";
+  let errorMessage: string | null = null;
+  try {
+    if (!to.length) { status = "skipped"; errorMessage = "The requester has no email address."; }
+    else await sendConnectEmail({ companyId: input.companyId, to, subject, body });
+  } catch (error) {
+    status = "failed";
+    errorMessage = error instanceof Error ? error.message : "Email failed.";
+  }
+  await supabaseAdmin.from("hr_exit_notification_log").insert({ company_id: input.companyId, case_id: input.caseId, event_code: input.event, to_emails: to, cc_emails: [], subject, status, error_message: errorMessage });
+  return { status, error: errorMessage };
+}
