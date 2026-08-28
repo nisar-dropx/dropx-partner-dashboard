@@ -3,8 +3,6 @@ import "server-only";
 import type { ConnectAccount } from "./connect-auth";
 import { expenseIdentity } from "./connect-expense-data";
 import { supabaseAdmin } from "./supabase-admin";
-import { resolveIntegrityFlag } from "../../../../src/lib/biometric/attendance-integrity-resolution";
-import { purgeSupportSelfieForReviewId } from "../../../../src/lib/purge-support-selfies";
 
 export type ConnectLocationSupportPackage = {
   id: string;
@@ -32,8 +30,107 @@ function indiaToday() {
 
 async function signedSelfieUrl(path: string) {
   if (!path) return null;
-  const signed = await db().storage.from("employee-profile-documents").createSignedUrl(path, 15 * 60);
+  const signed = await db().storage.from("attendance-support-selfies").createSignedUrl(path, 15 * 60);
   return signed.data?.signedUrl ?? null;
+}
+
+async function purgeSupportSelfieForReviewId(companyId: string, reviewId: string) {
+  const result = await db().from("attendance_location_reviews")
+    .select("selfie_path")
+    .eq("company_id", companyId)
+    .eq("id", reviewId)
+    .maybeSingle();
+  if (result.error || !result.data?.selfie_path) return;
+  const path = String(result.data.selfie_path).trim();
+  if (!path || path.startsWith("[")) return;
+  await db().storage.from("attendance-support-selfies").remove([path]).catch((error) => {
+    console.error("Unable to remove support selfie from storage", error instanceof Error ? error.message : error);
+  });
+  await db().from("attendance_location_reviews")
+    .update({ selfie_path: "[removed]", updated_at: new Date().toISOString() })
+    .eq("company_id", companyId)
+    .eq("id", reviewId);
+}
+
+async function activateHeldPunchMinimal(punchId: string) {
+  let punch = await db().from("attendance_punches")
+    .select("id, company_id, enrolment_id, punch_date, punch_time, client_captured_at")
+    .eq("id", punchId)
+    .maybeSingle();
+  if (punch.error && /client_captured_at|does not exist|schema cache/i.test(punch.error.message)) {
+    punch = await db().from("attendance_punches")
+      .select("id, company_id, enrolment_id, punch_date, punch_time")
+      .eq("id", punchId)
+      .maybeSingle();
+  }
+  if (punch.error) throw new Error(punch.error.message);
+  if (!punch.data?.enrolment_id || !punch.data.punch_date) return;
+
+  const punchTime = (punch.data as { client_captured_at?: string | null }).client_captured_at ?? punch.data.punch_time;
+  if (!punchTime) throw new Error("Held punch is missing the original punch time.");
+
+  const punchUpdate = await db().from("attendance_punches")
+    .update({ calculated: true, is_flagged: false, punch_time: punchTime })
+    .eq("id", punchId);
+  if (punchUpdate.error) throw new Error(punchUpdate.error.message);
+
+  const punchesResult = await db().from("attendance_punches")
+    .select("punch_time")
+    .eq("company_id", punch.data.company_id)
+    .eq("enrolment_id", punch.data.enrolment_id)
+    .eq("punch_date", punch.data.punch_date)
+    .eq("calculated", true)
+    .order("punch_time", { ascending: true });
+  if (punchesResult.error) throw new Error(punchesResult.error.message);
+
+  const times = (punchesResult.data ?? []).map((row) => row.punch_time).filter(Boolean) as string[];
+  const first = times[0] ?? null;
+  const last = times.length > 1 ? times[times.length - 1] : null;
+  const dailyUpdate = await db().from("attendance_daily").upsert({
+    company_id: punch.data.company_id,
+    enrolment_id: punch.data.enrolment_id,
+    punch_date: punch.data.punch_date,
+    in_time: first,
+    out_time: last && last !== first ? last : null,
+    punch_count: times.length,
+    status: times.length ? "P" : "A",
+    updated_at: new Date().toISOString()
+  }, { onConflict: "company_id,enrolment_id,punch_date" });
+  if (dailyUpdate.error && !/does not exist|schema cache/i.test(dailyUpdate.error.message)) {
+    throw new Error(dailyUpdate.error.message);
+  }
+}
+
+async function resolveIntegrityFlagMinimal(flagId: string, resolvedBy: string | null) {
+  const now = new Date().toISOString();
+  const existing = await db().from("attendance_integrity_flags")
+    .select("id, punch_id")
+    .eq("id", flagId)
+    .maybeSingle();
+  if (existing.error) throw new Error(existing.error.message);
+
+  const flagUpdate = await db().from("attendance_integrity_flags")
+    .update({ status: "resolved", resolved_at: now, resolved_by: resolvedBy, updated_at: now })
+    .eq("id", flagId);
+  if (flagUpdate.error) throw new Error(flagUpdate.error.message);
+
+  const reviews = await db().from("attendance_location_reviews")
+    .update({ status: "approved", reviewed_at: now, updated_at: now })
+    .eq("flag_id", flagId)
+    .in("status", ["pending", "returned"])
+    .select("punch_id");
+  if (reviews.error && !/does not exist|schema cache/i.test(reviews.error.message)) {
+    throw new Error(reviews.error.message);
+  }
+
+  const punchIds = new Set<string>();
+  if (existing.data?.punch_id) punchIds.add(String(existing.data.punch_id));
+  for (const row of reviews.data ?? []) {
+    if (row.punch_id) punchIds.add(String(row.punch_id));
+  }
+  for (const punchId of punchIds) {
+    await activateHeldPunchMinimal(punchId);
+  }
 }
 
 async function managerTeamProfileIds(companyId: string, managerAssignmentId: string, today: string) {
@@ -177,7 +274,7 @@ export async function reviewConnectLocationSupportPackage(account: ConnectAccoun
   if (update.error) throw new Error(update.error.message);
 
   if (action === "approve" && existing.data.flag_id) {
-    await resolveIntegrityFlag(String(existing.data.flag_id), identity.userId);
+    await resolveIntegrityFlagMinimal(String(existing.data.flag_id), identity.userId);
     void purgeSupportSelfieForReviewId(account.companyId, reviewId).catch((error) => {
       console.error("approve package selfie purge failed", error instanceof Error ? error.message : error);
     });
