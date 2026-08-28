@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, CreditCard, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
+import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, CreditCard, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
 import { AttendanceLocationMonitor } from "./attendance-location-monitor";
@@ -11,10 +11,11 @@ import { ConnectRoster } from "./connect-roster";
 import { ConnectAdvances } from "./connect-advances";
 import { ConnectPerformance } from "./connect-performance";
 import { ConnectReimbursements } from "./connect-reimbursements";
+import { ConnectApprovalInbox } from "./connect-approval-inbox";
 import { AppAccount, ConnectProfileApp } from "./connect-profile-app";
 import { countryCodeOptions } from "@/lib/country-codes";
 
-type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "payments" | "advances" | "reimbursements" | "earnings" | "attendance" | "roster" | "leave" | "performance" | "settings";
+type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "approvals" | "payments" | "advances" | "reimbursements" | "earnings" | "attendance" | "roster" | "leave" | "performance" | "settings";
 type ConnectNotification = {
   id: string;
   title: string;
@@ -251,7 +252,7 @@ export function ConnectLoginFlow() {
       }
     }
     const destination = notification.route as Step | null | undefined;
-    if (destination && ["dashboard", "profile", "advances", "reimbursements", "attendance", "roster", "leave", "settings"].includes(destination)) {
+    if (destination && ["dashboard", "profile", "approvals", "advances", "reimbursements", "attendance", "roster", "leave", "settings"].includes(destination)) {
       setNotificationMenu(false);
       open(destination);
     } else if (destination) {
@@ -401,11 +402,12 @@ export function ConnectLoginFlow() {
     setStep(refreshed ? landingPage(refreshed) : "accounts");
   }
 
-  const loggedIn = ["accounts","dashboard","profile","payments","advances","reimbursements","earnings","attendance","roster","leave","performance","settings"].includes(step);
+  const loggedIn = ["accounts","dashboard","profile","approvals","payments","advances","reimbursements","earnings","attendance","roster","leave","performance","settings"].includes(step);
   const screenLabel: Partial<Record<Step, string>> = {
     accounts: "Accounts",
     dashboard: "Today",
     profile: "My profile",
+    approvals: "Approvals",
     payments: "Payments",
     advances: "Pay advances",
     reimbursements: "Reimbursements",
@@ -432,6 +434,7 @@ export function ConnectLoginFlow() {
         <small className="dx-nav-label">Workspace</small>
         {allowed(account, "dashboard") ? <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Gauge />Dashboard</button> : null}
         <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />My Profile</button>
+        <button aria-current={step === "approvals" ? "page" : undefined} className={step === "approvals" ? "active" : ""} onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox</button>
         <button aria-expanded={paymentsExpanded} className={`payments-toggle${step === "advances" || step === "reimbursements" || step === "earnings" ? " active" : ""}${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard /><span>Payments</span><ChevronRight /></button>
         {paymentsExpanded ? <button aria-current={step === "advances" ? "page" : undefined} className={`desktop-subitem${step === "advances" ? " active" : ""}`} onClick={() => open("advances")}><IndianRupee />Advances</button> : null}
         {paymentsExpanded ? <button aria-current={step === "reimbursements" ? "page" : undefined} className={`desktop-subitem${step === "reimbursements" ? " active" : ""}`} onClick={() => open("reimbursements")}><ReceiptText />Reimbursements</button> : null}
@@ -468,6 +471,7 @@ export function ConnectLoginFlow() {
       <nav>
         {allowed(account, "dashboard") ? <button onClick={() => open("dashboard")}><Gauge />Dashboard<ChevronRight /></button> : null}
         <button onClick={() => open("profile")}><UserRound />My Profile<ChevronRight /></button>
+        <button onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox<ChevronRight /></button>
         <button aria-expanded={paymentsExpanded} className={`payments-toggle${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard />Payments<ChevronRight /></button>
         {paymentsExpanded ? <button className="subitem" onClick={() => open("advances")}><span />Advances<ChevronRight /></button> : null}
         {paymentsExpanded ? <button className="subitem" onClick={() => open("reimbursements")}><span />Reimbursements<ChevronRight /></button> : null}
@@ -511,6 +515,7 @@ export function ConnectLoginFlow() {
       ) : null}
       {step === "dashboard" && account ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onLeave={() => open("leave")} onPerformance={() => open("performance")} onProfile={() => open("profile")} /> : null}
       {step === "profile" && account ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
+      {step === "approvals" && account ? <ConnectApprovalInbox account={account} /> : null}
       {step === "advances" && account ? <ConnectAdvances account={account} /> : null}
       {step === "reimbursements" && account ? <ConnectReimbursements account={account} /> : null}
       {step === "earnings" && account ? <section className="dx-earnings"><header><div className="dx-advance-title"><i><IndianRupee /></i><h1>My Earnings</h1></div></header></section> : null}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, Clock3, FileText, IndianRupee, Plus, ReceiptText, RotateCcw, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, FileText, IndianRupee, Plus, ReceiptText, RotateCcw, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type { AppAccount } from "./connect-profile-app";
 
@@ -14,8 +14,7 @@ type Claim = {
   attachments: Array<{ id: string; item_id?: string | null; file_name: string; content_type?: string | null; url?: string | null }>;
   payment?: { request_no: string; status: string; approval_status?: string | null; utr_cin?: string | null; bank_status?: string | null; bank_processing_remarks?: string | null; processed_at?: string | null } | null;
 };
-type Approval = { id: string; step_order: number; step_name: string; claim: { id: string; claim_no: string; purpose: string; total_claimed: number; trip_from?: string | null; trip_to?: string | null; requesterName: string; requesterCode: string; hr_expense_items?: Claim["items"]; attachments?: Claim["attachments"] } };
-type Payload = { categories: Category[]; payout: { ready: boolean; message?: string | null }; claims: Claim[]; approvals: Approval[] };
+type Payload = { categories: Category[]; payout: { ready: boolean; message?: string | null }; claims: Claim[] };
 
 function uid() { return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`; }
 function newItem(): ExpenseItem { return { id: uid(), categoryId: "", expenseDate: new Date().toISOString().slice(0, 10), merchant: "", description: "", amount: "", receipt: null }; }
@@ -26,13 +25,12 @@ function statusLabel(status: string) { return status.replaceAll("_", " ").replac
 
 export function ConnectReimbursements({ account }: { account: AppAccount }) {
   const [data, setData] = useState<Payload | null>(null);
-  const [tab, setTab] = useState<"new" | "claims" | "approvals">("new");
+  const [tab, setTab] = useState<"new" | "claims">("new");
   const [purpose, setPurpose] = useState("");
   const [tripFrom, setTripFrom] = useState("");
   const [tripTo, setTripTo] = useState("");
   const [items, setItems] = useState<ExpenseItem[]>([newItem()]);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -83,17 +81,6 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
     setNotice("Correct the returned report, attach the receipts again, and resubmit it through the current approval policy.");
   }
 
-  async function decide(claimId: string, action: "approved" | "returned" | "rejected") {
-    setSaving(true); setError(""); setNotice("");
-    try {
-      const response = await fetch("/api/connect/reimbursements", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId: account.id, profileType: account.profileType, claimId, action, note: notes[claimId] ?? "" }) });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to update reimbursement.");
-      setNotice(payload.notice); setNotes((current) => ({ ...current, [claimId]: "" })); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update reimbursement."); }
-    finally { setSaving(false); }
-  }
-
   return <section className="dx-expenses">
     <header className="dx-page-intro"><small>Payments</small><h1>Reimbursements</h1><p>Submit one report with all expenses, then track approvals and payment in one place.</p></header>
     {error ? <div className="dx-alert error">{error}</div> : null}{notice ? <div className="dx-alert success">{notice}</div> : null}
@@ -101,7 +88,6 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
     <nav className="dx-expense-tabs">
       <button className={tab === "new" ? "active" : ""} onClick={() => setTab("new")}>New claim</button>
       <button className={tab === "claims" ? "active" : ""} onClick={() => setTab("claims")}>My claims <b>{data?.claims.length ?? 0}</b></button>
-      <button className={tab === "approvals" ? "active" : ""} onClick={() => setTab("approvals")}>Approvals <b>{data?.approvals.length ?? 0}</b></button>
     </nav>
     {loading ? <div className="dx-loader"><span /><small>Loading reimbursements…</small></div> : null}
     {!loading && tab === "new" ? <form className="dx-expense-form" onSubmit={submit}>
@@ -124,6 +110,5 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
         {claim.status === "returned" ? <button className="dx-save" onClick={() => correctReturnedClaim(claim)} type="button"><RotateCcw /> Correct and resubmit</button> : null}
       </div> : null}
     </article>) : <div className="dx-empty"><ReceiptText /><strong>No reimbursement claims yet</strong><small>Your submitted reports will appear here.</small></div>}</div> : null}
-    {!loading && tab === "approvals" ? <div className="dx-expense-list">{data?.approvals.length ? data.approvals.map((approval) => <article className="dx-expense-approval" key={approval.id}><header><span><small>{approval.claim.claim_no} · {approval.step_name}</small><strong>{approval.claim.requesterName}</strong><em>{approval.claim.purpose}</em></span><b>{money(approval.claim.total_claimed)}</b></header><div>{approval.claim.hr_expense_items?.map((item) => <span key={item.id}>{first(item.hr_expense_categories)?.name ?? "Expense"} · {item.expense_date}{approval.claim.attachments?.filter((attachment) => attachment.item_id === item.id && attachment.url).map((attachment) => <a href={attachment.url ?? "#"} key={attachment.id} rel="noreferrer" target="_blank"><FileText />{attachment.file_name}</a>)}<b>{money(item.amount)}</b></span>)}</div><label>Decision note<textarea onChange={(event) => setNotes((current) => ({ ...current, [approval.claim.id]: event.target.value }))} placeholder="Required when returning or rejecting" rows={2} value={notes[approval.claim.id] ?? ""} /></label><footer><button disabled={saving} onClick={() => void decide(approval.claim.id, "returned")}><RotateCcw />Return</button><button className="danger" disabled={saving} onClick={() => void decide(approval.claim.id, "rejected")}><X />Reject</button><button className="primary" disabled={saving} onClick={() => void decide(approval.claim.id, "approved")}><Check />Approve</button></footer></article>) : <div className="dx-empty"><Clock3 /><strong>No approvals waiting</strong><small>Assigned reimbursement approvals will appear here.</small></div>}</div> : null}
   </section>;
 }

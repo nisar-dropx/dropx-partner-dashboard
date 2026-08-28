@@ -35,6 +35,7 @@ export async function notifyExpenseUser(input: {
   body: string;
   emailSubject: string;
   emailBody: string;
+  route?: "approvals" | "reimbursements";
 }) {
   if (!input.recipientUserId) return { status: "skipped" as const, error: "Recipient login is not linked." };
   const recipient = await recipientAccounts(input.companyId, input.recipientUserId);
@@ -47,7 +48,7 @@ export async function notifyExpenseUser(input: {
       event_code: input.eventCode,
       title: input.title,
       body: input.body,
-      route: "reimbursements",
+      route: input.route ?? "reimbursements",
       data: { claimId: input.claimId }
     });
   }

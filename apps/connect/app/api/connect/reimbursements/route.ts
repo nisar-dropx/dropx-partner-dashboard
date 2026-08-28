@@ -165,7 +165,8 @@ export async function POST(request: Request) {
       companyId: account.companyId, claimId, recipientUserId: firstApprover.approver_user_id, eventCode: "REIMBURSEMENT_APPROVAL_REQUIRED",
       title: "Reimbursement needs approval", body: `${account.name ?? "A team member"} submitted Rs ${total.toLocaleString("en-IN")} for ${purpose}.`,
       emailSubject: `Reimbursement approval required · ${account.name ?? "Team member"}`,
-      emailBody: `${account.name ?? "A team member"} submitted a reimbursement claim for Rs ${total.toLocaleString("en-IN")} (${purpose}). Open DropX One or People Approval Inbox to review it.`
+      emailBody: `${account.name ?? "A team member"} submitted a reimbursement claim for Rs ${total.toLocaleString("en-IN")} (${purpose}). Open DropX One or People Approval Inbox to review it.`,
+      route: "approvals"
     });
     return NextResponse.json({ ok: true, claimId, notice: `Claim ${isResubmit ? "resubmitted" : "submitted"} through ${approval.policy.name}.${notification.status === "failed" ? ` Email warning: ${notification.error}` : ""}` });
   } catch (error) {
@@ -192,7 +193,7 @@ export async function PATCH(request: Request) {
     if (claim.error) throw new Error(claim.error.message);
     const nextUserId = decision?.next_approver_user_id ?? null;
     if (nextUserId) {
-      await notifyExpenseUser({ companyId: account.companyId, claimId, recipientUserId: nextUserId, eventCode: "REIMBURSEMENT_APPROVAL_REQUIRED", title: "Reimbursement needs approval", body: `${claim.data.claim_no} is waiting for your approval.`, emailSubject: `Reimbursement approval required · ${claim.data.claim_no}`, emailBody: `${claim.data.claim_no} for Rs ${Number(claim.data.total_claimed).toLocaleString("en-IN")} is waiting for your approval. Open DropX One or People Approval Inbox.` });
+      await notifyExpenseUser({ companyId: account.companyId, claimId, recipientUserId: nextUserId, eventCode: "REIMBURSEMENT_APPROVAL_REQUIRED", title: "Reimbursement needs approval", body: `${claim.data.claim_no} is waiting for your approval.`, emailSubject: `Reimbursement approval required · ${claim.data.claim_no}`, emailBody: `${claim.data.claim_no} for Rs ${Number(claim.data.total_claimed).toLocaleString("en-IN")} is waiting for your approval. Open DropX One or People Approval Inbox.`, route: "approvals" });
     }
     await notifyExpenseUser({ companyId: account.companyId, claimId, recipientUserId: claim.data.claimant_user_id, eventCode: `REIMBURSEMENT_${action.toUpperCase()}`, title: action === "approved" ? "Reimbursement updated" : `Reimbursement ${action}`, body: nextUserId ? `${claim.data.claim_no} was approved and moved to the next approver.` : decision?.claim_status === "approved_for_payment" ? `${claim.data.claim_no} is approved and sent to Payments.` : `${claim.data.claim_no} was ${action}.${note ? ` ${note}` : ""}`, emailSubject: `Reimbursement ${action} · ${claim.data.claim_no}`, emailBody: nextUserId ? `${claim.data.claim_no} was approved and has moved to the next approver.` : decision?.claim_status === "approved_for_payment" ? `${claim.data.claim_no} is fully approved and has been sent to Payments. You can track processing and UTR in DropX One.` : `${claim.data.claim_no} was ${action}.${note ? `\n\nReason: ${note}` : ""}` });
     return NextResponse.json({ ok: true, notice: decision?.claim_status === "approved_for_payment" ? "Approved and sent to Payments." : `Claim ${action}.` });
