@@ -55,7 +55,7 @@ const opsGroups: PermissionGroup[] = [
   { key: "performance", label: "Performance", codes: ["performance"] },
   { key: "capacity", label: "Capacity", codes: ["capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring"], hiddenCodes: ["capacity"] },
   { key: "service_network", label: "Network Planning", codes: ["service_network"] },
-  { key: "workforce_onboarding", label: "Workforce Onboarding", codes: ["delivery_associates"] },
+  { key: "workforce_register", label: "Work Force Register", codes: ["contractors"] },
   { key: "operations", label: "Operations", codes: ["daily_submission", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate"], hiddenCodes: ["cod"] },
   { key: "edd_dashboard", label: "Delivery Performance", codes: ["edd_dashboard"] },
   { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },

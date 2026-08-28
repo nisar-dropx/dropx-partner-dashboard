@@ -35,6 +35,7 @@ export const opsAccessPageCodes = [
   "service_network",
   "service_network_master",
   "delivery_associates",
+  "contractors",
   "business_documents",
   "advance_requests",
   "expense_requests",
@@ -65,6 +66,7 @@ const opsPageCodes = new Set<string>(opsAccessPageCodes);
 
 const sharedPageCodes = new Set([
   "imports",
+  "contractors",
   "business_documents",
   "advance_requests",
   "expense_requests",
