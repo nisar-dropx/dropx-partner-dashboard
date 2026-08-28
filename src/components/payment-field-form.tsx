@@ -37,8 +37,8 @@ export function PaymentFieldForm({ action, initialField, submitLabel }: { action
         <span className="payment-field-section-title">How payment is calculated</span>
         <input name="calculation_type" type="hidden" value={type === "production" ? "count_x_rate" : "manual_input"} />
         {type === "production" ? <>
-          <label>Calculation rule<select className="select" defaultValue={initialField?.calculation_source ?? ""} name="calculation_source" required><option value="">Select Amazon production count</option>{PAYMENT_CALCULATION_SOURCES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-          <div className="payment-field-calculation-help"><strong>Production count</strong> comes from the selected Amazon daily-data value.<br /><strong>Production rate</strong> is entered separately for each DropX ID in ID &amp; pay mapping.</div>
+          <label>Calculation rule<select className="select" defaultValue={initialField?.calculation_source ?? ""} name="calculation_source" required><option value="">Select Provider production count</option>{PAYMENT_CALCULATION_SOURCES.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          <div className="payment-field-calculation-help"><strong>Production count</strong> comes from the selected provider daily-data value.<br /><strong>Production rate</strong> is entered separately for each DropX ID in ID &amp; pay mapping.</div>
         </> : <>
           <input name="calculation_source" type="hidden" value="" />
           <p className="payment-field-calculation-help">The configured amount in ID &amp; pay mapping will be used directly.</p>
