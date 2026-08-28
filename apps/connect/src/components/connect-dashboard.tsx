@@ -18,6 +18,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import {
+  dashboardMotivationContext,
   isSafeProfessionalMotivation,
   isTooSimilarMotivation,
   motivationSlotKey,
@@ -156,8 +157,15 @@ export function ConnectDashboard({
   const [motivation, setMotivation] = useState("");
 
   useEffect(() => {
+    if (!profile || !attendance) {
+      setMotivation("");
+      return;
+    }
+
+    const dashboardProfile = profile;
+    const dashboardAttendance = attendance;
     let cancelled = false;
-    const storageKey = `dropx-one:dashboard-motivation:v1:${account.companyId}:${account.profileType}:${account.id}`;
+    const storageKey = `dropx-one:dashboard-motivation:v2:${account.companyId}:${account.profileType}:${account.id}`;
 
     function readHistory() {
       try {
@@ -182,7 +190,15 @@ export function ConnectDashboard({
 
     async function refreshMotivation() {
       const now = new Date();
-      const slotKey = motivationSlotKey(now);
+      const todayRow = dashboardAttendance.rows.find((row) => row.date === localIsoDate(now));
+      const context = dashboardMotivationContext({
+        date: now,
+        dateOfBirth: dashboardProfile.editable.dateOfBirth,
+        status: todayRow?.status,
+        statusKind: todayRow?.statusKind,
+        statusLabel: todayRow?.statusLabel
+      });
+      const slotKey = motivationSlotKey(now, context);
       const history = readHistory();
       const cached = history.find((entry) => entry.key === slotKey);
       if (cached) {
@@ -191,7 +207,7 @@ export function ConnectDashboard({
       }
 
       const recent = history.map((entry) => entry.message).slice(0, 12);
-      const fallback = selectFallbackMotivation(`${account.id}:${slotKey}`, recent);
+      const fallback = selectFallbackMotivation(`${account.id}:${slotKey}`, recent, context);
       if (!cancelled) setMotivation(fallback);
 
       try {
@@ -202,6 +218,7 @@ export function ConnectDashboard({
             dayOfWeek: now.toLocaleDateString("en-US", { weekday: "long" }),
             hour: now.getHours(),
             localDate: localIsoDate(now),
+            context,
             recent,
             timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
           })
@@ -227,7 +244,7 @@ export function ConnectDashboard({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [account.companyId, account.id, account.profileType]);
+  }, [account.companyId, account.id, account.profileType, attendance, profile]);
 
   useEffect(() => {
     setProfile(null);
@@ -360,7 +377,9 @@ export function ConnectDashboard({
       <div>
         <small className="dx-page-eyebrow">{workforce ? "Workforce" : "Today"} · {todayLabel}</small>
         <h1>{greeting}, {firstName}</h1>
-        <p aria-live="polite">{workforce ? "Shift, attendance and work updates in one place." : motivation || "A fresh moment is ready for thoughtful progress."}</p>
+        <p className="dx-dashboard-motivation" aria-live="polite">
+          {workforce ? "Shift, attendance and work updates in one place." : motivation || "A fresh moment is ready for thoughtful progress."}
+        </p>
       </div>
       <span className="dx-live-chip"><i /> {workforce ? "Workforce" : "Live"}</span>
     </header>

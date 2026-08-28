@@ -8968,22 +8968,26 @@ body {
 
   .dx-desktop-account {
     display: grid;
-    grid-template-columns: 32px minmax(0, 1fr) 28px;
-    gap: 8px;
-    align-items: center;
+    grid-template-columns: 36px minmax(0, 1fr);
+    gap: 9px;
+    align-items: start;
     margin: 16px 0 13px;
-    padding: 9px;
+    padding: 10px;
     border: 1px solid var(--one-line);
-    border-radius: 10px;
+    border-radius: 12px;
     background: var(--one-surface-soft);
+  }
+
+  .dx-desktop-account:has(> button) {
+    grid-template-columns: 36px minmax(0, 1fr) 28px;
   }
 
   .dx-desktop-account > i {
     display: grid;
     overflow: hidden;
     place-items: center;
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     color: #fff;
     border-radius: 8px;
     background: var(--one-brand);
@@ -8999,10 +9003,10 @@ body {
   .dx-desktop-account > span {
     display: grid;
     min-width: 0;
-    gap: 2px;
+    gap: 3px;
+    padding-top: 1px;
   }
 
-  .dx-desktop-account strong,
   .dx-desktop-account small {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -9010,12 +9014,19 @@ body {
   }
 
   .dx-desktop-account strong {
-    font-size: 12px;
+    min-width: 0;
+    font-size: 11px;
+    font-weight: 680;
+    line-height: 1.28;
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
 
   .dx-desktop-account small {
     color: var(--one-muted);
-    font-size: 10px;
+    font-size: 9px;
+    font-weight: 520;
+    line-height: 1.3;
   }
 
   .dx-desktop-account button {
@@ -9404,18 +9415,16 @@ body {
 }
 
 .dx-dashboard-greeting p {
-  order: 1;
   margin: 0;
-  color: var(--one-brand-strong);
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
-  font-size: 10px;
-  font-weight: 620;
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
+  color: var(--one-muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 450;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .dx-dashboard-greeting h1 {
-  order: 2;
   color: var(--one-ink);
   font-size: clamp(23px, 3vw, 30px);
   font-weight: 640;
@@ -9424,7 +9433,6 @@ body {
 }
 
 .dx-dashboard-greeting > span {
-  order: 3;
   color: var(--one-muted);
   font-size: 12px;
   line-height: 1.5;
@@ -12221,17 +12229,20 @@ body {
 .dx-drawer-account small {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .dx-drawer-account strong {
   color: var(--one-ink);
   font-size: 13px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .dx-drawer-account small {
   color: var(--one-muted);
   font-size: 10px;
+  white-space: nowrap;
 }
 
 .dx-drawer nav {
@@ -12243,41 +12254,45 @@ body {
 }
 
 .dx-dashboard-greeting {
-  display: flex;
-  min-height: 72px;
-  padding: 4px 3px 8px;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
+  display: grid;
+  min-height: 0;
+  padding: 6px 3px 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
 }
 
 .dx-dashboard-greeting > div {
   display: grid;
-  gap: 3px;
+  min-width: 0;
+  gap: 0;
 }
 
 .dx-dashboard-greeting h1 {
-  margin: 0;
+  margin: 7px 0 0;
   color: var(--one-ink);
-  font-size: clamp(29px, 5.4vw, 41px);
-  font-weight: 730;
-  line-height: 1.02;
-  letter-spacing: -.06em;
+  font-size: clamp(30px, 5.2vw, 40px);
+  font-weight: 720;
+  line-height: 1;
+  letter-spacing: -.052em;
 }
 
-.dx-dashboard-greeting p {
-  margin: 1px 0 0;
-  color: var(--one-muted);
-  font-size: 12px;
+.dx-dashboard-greeting .dx-dashboard-motivation {
+  max-width: 42ch;
+  margin: 9px 0 0;
+  color: #667085;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
   font-weight: 450;
-  letter-spacing: 0;
-  text-transform: none;
+  letter-spacing: -.008em;
+  line-height: 1.45;
+  text-wrap: balance;
 }
 
 .dx-live-chip {
   display: inline-flex;
-  margin-bottom: 4px;
-  padding: 7px 10px;
+  margin: 1px 0 0;
+  padding: 6px 9px;
   align-items: center;
   gap: 6px;
   color: #087453;
@@ -13179,11 +13194,24 @@ body {
   }
 
   .dx-dashboard-greeting {
-    min-height: 66px;
+    min-height: 0;
+    padding: 3px 1px 11px;
+    gap: 10px;
   }
 
   .dx-dashboard-greeting h1 {
-    font-size: 30px;
+    max-width: 12ch;
+    margin-top: 7px;
+    font-size: 31px;
+    line-height: .98;
+    letter-spacing: -.047em;
+  }
+
+  .dx-dashboard-greeting .dx-dashboard-motivation {
+    max-width: 34ch;
+    margin-top: 9px;
+    font-size: 13px;
+    line-height: 1.48;
   }
 
   .dx-dashboard-card.today {
@@ -13307,11 +13335,12 @@ body {
   }
 
   .dx-dashboard-greeting h1 {
-    font-size: 27px;
+    font-size: 29px;
   }
 
   .dx-live-chip {
-    padding: 6px 8px;
+    padding: 5px 8px;
+    font-size: 8px;
   }
 
   .dx-title-row {
@@ -14264,16 +14293,6 @@ body {
   }
 }
 
-.dx-support-evidence {
-  display: flex;
-  align-items: flex-start;
-  gap: 11px;
-  margin-top: 10px;
-  padding: 10px 11px;
-  background: #f8fafc;
-  border: 1px solid #e4e7ec;
-  border-radius: 10px;
-}
 
 /* Approval inbox — dedicated UI */
 .dx-approval-inbox {
@@ -14459,7 +14478,7 @@ body {
   width: 12px;
 }
 
-.dx-evidence-row {
+.dx-approval-inbox .dx-approval-evidence {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -14468,7 +14487,7 @@ body {
   border-top: 1px solid #f2f4f7;
 }
 
-.dx-evidence-photo {
+.dx-approval-inbox .dx-approval-evidence-photo {
   position: relative;
   flex: 0 0 44px;
   width: 44px;
@@ -14479,13 +14498,13 @@ body {
   background: #fff;
 }
 
-.dx-evidence-photo img {
+.dx-approval-inbox .dx-approval-evidence-photo img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.dx-evidence-photo svg {
+.dx-approval-inbox .dx-approval-evidence-photo svg {
   position: absolute;
   right: 2px;
   bottom: 2px;
@@ -14496,14 +14515,14 @@ body {
   background: rgba(16, 24, 40, 0.58);
 }
 
-.dx-evidence-photo.missing {
+.dx-approval-inbox .dx-approval-evidence-photo.missing {
   display: grid;
   place-items: center;
   color: #98a2b3;
   background: #f9fafb;
 }
 
-.dx-evidence-photo.missing svg {
+.dx-approval-inbox .dx-approval-evidence-photo.missing svg {
   position: static;
   width: 16px;
   padding: 0;
@@ -14511,65 +14530,68 @@ body {
   background: transparent;
 }
 
-.dx-evidence-info {
+.dx-approval-inbox .dx-approval-evidence-copy {
   display: grid;
   flex: 1 1 auto;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
 }
 
-.dx-evidence-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: #667085;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-.dx-evidence-kicker svg {
-  width: 12px;
-}
-
-.dx-evidence-info strong {
+.dx-approval-inbox .dx-approval-evidence-coords {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
   color: #101828;
   font-size: 12px;
   font-weight: 650;
   line-height: 1.35;
 }
 
-.dx-evidence-info p {
+.dx-approval-inbox .dx-approval-evidence-coords svg {
+  width: 13px;
+  margin-top: 1px;
+  flex: 0 0 auto;
+  color: #667085;
+}
+
+.dx-approval-inbox .dx-approval-evidence-coords span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dx-approval-inbox .dx-approval-evidence-note {
   margin: 0;
   color: #667085;
   font-size: 11px;
   line-height: 1.4;
 }
 
-.dx-evidence-links {
+.dx-approval-inbox .dx-approval-evidence-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
-.dx-evidence-links small {
+.dx-approval-inbox .dx-approval-evidence-foot small {
   color: #98a2b3;
   font-size: 10px;
+  line-height: 1.35;
 }
 
-.dx-evidence-links a {
+.dx-approval-inbox .dx-approval-evidence-foot a {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   color: #026aa2;
   font-size: 11px;
   font-weight: 650;
+  white-space: nowrap;
 }
 
-.dx-evidence-links a svg {
+.dx-approval-inbox .dx-approval-evidence-foot a svg {
   width: 12px;
 }
 
