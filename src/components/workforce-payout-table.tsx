@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 export type WorkforcePayoutRow = {
   id: string; dropxId: string; name: string; providerMemberId: string; locationId: string | null;
   location: string; provider: string; model: string; paymentMethod: string; production: number;
+  productionBreakdown: Array<{ code: string; label: string; count: number; rate: number; amount: number }>;
   baseAmount: number; additions: number; deductions: number; netAmount: number; status: string;
 };
 
@@ -31,10 +32,22 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages);
   const visible = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const productionColumns = useMemo(() => {
+    const values = new Map<string, string>();
+    rows.forEach((row) => row.productionBreakdown.forEach((item) => values.set(item.code, item.label)));
+    const preferred = ["DELIVERY", "CRETURN", "SELLER_PICKUP", "SLLLER_RETURN"];
+    return Array.from(values, ([code, label]) => ({ code, label })).sort((left, right) => {
+      const leftIndex = preferred.indexOf(left.code); const rightIndex = preferred.indexOf(right.code);
+      if (leftIndex === -1 && rightIndex === -1) return left.label.localeCompare(right.label);
+      if (leftIndex === -1) return 1; if (rightIndex === -1) return -1;
+      return leftIndex - rightIndex;
+    });
+  }, [rows]);
 
   function exportRows() {
-    const columns = ["DropX ID","Worker","Provider Member ID","Location","Provider","Model","Payment Method","Production","Base Amount","Additional Payments","Deductions","Net Pay","Status"];
-    const csv = [columns, ...filtered.map((r) => [r.dropxId,r.name,r.providerMemberId,r.location,r.provider,r.model,r.paymentMethod,r.production,r.baseAmount,r.additions,r.deductions,r.netAmount,r.status])]
+    const productionHeaders = productionColumns.flatMap((item) => [`${item.label} Count`, `${item.label} Rate`, `${item.label} Amount`]);
+    const columns = ["DropX ID","Worker","Provider Member ID","Location Code","Provider","Model","Payment Method",...productionHeaders,"Base Amount","Additional Payments","Deductions","Net Pay","Status"];
+    const csv = [columns, ...filtered.map((r) => [r.dropxId,r.name,r.providerMemberId,r.location,r.provider,r.model,r.paymentMethod,...productionColumns.flatMap((column) => { const item = r.productionBreakdown.find((value) => value.code === column.code); return [item?.count ?? 0,item?.rate ?? 0,item?.amount ?? 0]; }),r.baseAmount,r.additions,r.deductions,r.netAmount,r.status])]
       .map((line) => line.map((value) => `"${String(value).replaceAll('"','""')}"`).join(",")).join("\r\n");
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = "workforce-payouts.csv"; link.click(); URL.revokeObjectURL(link.href);
   }
@@ -49,8 +62,8 @@ export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
       <label>Rows<select className="field" value={size} onChange={(e) => { setSize(e.target.value); setPage(1); }}>{["20","50","100","500","1000","all"].map((v) => <option value={v} key={v}>{v === "all" ? "All" : v}</option>)}</select></label>
       <button className="button secondary" type="button" onClick={exportRows}>Export</button>
     </div>
-    <div className="table-wrap"><table className="workforce-payout-table"><thead><tr><th>DropX ID</th><th>Worker / Holder ID</th><th>Location</th><th>Provider / Model</th><th>Payment Method</th><th>Production</th><th>Base Amount</th><th>Additional Payments</th><th>Deductions</th><th>Net Pay</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>{visible.length ? visible.map((row) => <tr key={row.id}><td><strong>{row.dropxId}</strong></td><td><strong>{row.name}</strong><small>{row.providerMemberId}</small></td><td>{row.location}</td><td>{row.provider}<small>{row.model}</small></td><td>{row.paymentMethod}</td><td>{row.production.toLocaleString("en-IN")}</td><td>{money(row.baseAmount)}</td><td className="positive">+ {money(row.additions)}</td><td className="negative">- {money(row.deductions)}</td><td><strong>{money(row.netAmount)}</strong></td><td><span className="status-pill warn">{row.status}</span></td><td><button className="button secondary compact" type="button">Review</button></td></tr>) : <tr><td className="empty-cell" colSpan={12}>No mapped workforce payouts match the selected period and filters.</td></tr>}</tbody>
+    <div className="table-wrap"><table className="workforce-payout-table workforce-payout-detail-table"><thead><tr><th rowSpan={2}>DropX ID</th><th rowSpan={2}>Worker / Holder ID</th><th rowSpan={2}>Location Code</th><th rowSpan={2}>Provider / Model</th><th rowSpan={2}>Payment Method</th>{productionColumns.map((column) => <th className="production-group" colSpan={3} key={column.code}>{column.label}</th>)}<th rowSpan={2}>Base Amount</th><th rowSpan={2}>Additional Payments</th><th rowSpan={2}>Deductions</th><th rowSpan={2}>Net Pay</th><th rowSpan={2}>Status</th><th rowSpan={2}>Action</th></tr><tr>{productionColumns.flatMap((column) => [<th key={`${column.code}-count`}>Count</th>,<th key={`${column.code}-rate`}>Rate</th>,<th key={`${column.code}-amount`}>Amount</th>])}</tr></thead>
+      <tbody>{visible.length ? visible.map((row) => <tr key={row.id}><td><strong>{row.dropxId}</strong></td><td><strong>{row.name}</strong><small>{row.providerMemberId}</small></td><td><strong>{row.location}</strong></td><td>{row.provider}<small>{row.model}</small></td><td>{row.paymentMethod}</td>{productionColumns.flatMap((column) => { const item = row.productionBreakdown.find((value) => value.code === column.code); return [<td key={`${column.code}-count`}>{(item?.count ?? 0).toLocaleString("en-IN")}</td>,<td key={`${column.code}-rate`}>{money(item?.rate ?? 0)}</td>,<td key={`${column.code}-amount`}><strong>{money(item?.amount ?? 0)}</strong></td>]; })}<td>{money(row.baseAmount)}</td><td className="positive">+ {money(row.additions)}</td><td className="negative">- {money(row.deductions)}</td><td><strong>{money(row.netAmount)}</strong></td><td><span className="status-pill warn">{row.status}</span></td><td><button className="button secondary compact" type="button">Review</button></td></tr>) : <tr><td className="empty-cell" colSpan={11 + productionColumns.length * 3}>No mapped workforce payouts match the selected period and filters.</td></tr>}</tbody>
     </table></div>
     <div className="pagination"><span>Showing {filtered.length ? (safePage - 1) * pageSize + 1 : 0}–{Math.min(safePage * pageSize, filtered.length)} of {filtered.length}</span><div><button className="button secondary compact" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>Previous</button><span>Page {safePage} of {pages}</span><button className="button secondary compact" disabled={safePage >= pages} onClick={() => setPage(safePage + 1)}>Next</button></div></div>
   </>;

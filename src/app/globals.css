@@ -19078,3 +19078,10 @@ td strong,
 .pagination { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 16px; border-top: 1px solid #e4e9f0; color: #647087; }
 .pagination > div { display: flex; align-items: center; gap: 12px; }
 @media (max-width: 1100px) { .payout-filters { grid-template-columns: repeat(3, minmax(170px, 1fr)); } .deduction-head-create, .deduction-head-row { grid-template-columns: repeat(2, minmax(180px,1fr)); } }
+.workforce-payout-detail-table th, .workforce-payout-detail-table td { white-space: nowrap; }
+.workforce-payout-detail-table thead tr:first-child th { vertical-align: middle; }
+.workforce-payout-detail-table .production-group { text-align: center; background: #fff7ed; border-left: 1px solid #f0d8bd; border-right: 1px solid #f0d8bd; color: #a84a10; }
+.payout-period-head { align-items: end; gap: 20px; }
+.payout-period-filter { display: grid; grid-template-columns: 130px 155px 155px 155px 155px auto; gap: 10px; align-items: end; }
+.payout-period-filter label { color: #526078; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+@media (max-width: 1100px) { .payout-period-head { display: block; } .payout-period-filter { grid-template-columns: repeat(3, minmax(150px,1fr)); margin-top: 14px; } }
