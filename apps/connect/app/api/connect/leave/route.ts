@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { resolveWorkforceLeaveApproval, resolveWorkforceLeaveEntitlements, type LeaveWorkerType } from "../../../../src/lib/connect-leave-data";
@@ -15,6 +16,45 @@ function overlapDays(startDate: string, endDate: string, rangeStart: string, ran
   return start <= end ? daysBetween(start, end) : 0;
 }
 function relation<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
+const LEAVE_PROOF_BUCKET = "employee-profile-documents";
+const LEAVE_PROOF_TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
+const LEAVE_PROOF_MAX_BYTES = 10 * 1024 * 1024;
+
+function safeFileName(value: string) { return value.replace(/[^a-zA-Z0-9._-]/g, "_") || "medical-proof"; }
+function uploadedFile(value: FormDataEntryValue | undefined): value is File { return value instanceof File && value.size > 0; }
+
+async function requestInput(request: Request) {
+  if (request.headers.get("content-type")?.includes("multipart/form-data")) {
+    const form = await request.formData();
+    return {
+      body: Object.fromEntries(Array.from(form.entries()).filter(([key]) => key !== "proof")) as Record<string, unknown>,
+      proof: form.get("proof") ?? undefined
+    };
+  }
+  return { body: await request.json() as Record<string, unknown>, proof: undefined };
+}
+
+function validateProof(file: FormDataEntryValue | undefined) {
+  if (!uploadedFile(file)) return null;
+  if (!LEAVE_PROOF_TYPES.has(file.type)) throw new Error("Medical proof must be a PDF, JPG, PNG, or WebP file.");
+  if (file.size > LEAVE_PROOF_MAX_BYTES) throw new Error("Medical proof must be 10 MB or smaller.");
+  return file;
+}
+
+async function uploadProof(account: ConnectAccount, type: LeaveWorkerType, file: File) {
+  const path = `${account.companyId}/leave-proof/${type}/${account.id}/${Date.now()}-${randomUUID()}-${safeFileName(file.name)}`;
+  const result = await db().storage.from(LEAVE_PROOF_BUCKET).upload(path, Buffer.from(await file.arrayBuffer()), {
+    contentType: file.type,
+    upsert: false
+  });
+  if (result.error) throw new Error(result.error.message);
+  return { path, fileName: file.name.slice(0, 240), mimeType: file.type, fileSize: file.size };
+}
+
+async function removeProof(path: string | null | undefined) {
+  if (!path) return;
+  await db().storage.from(LEAVE_PROOF_BUCKET).remove([path]);
+}
 
 async function accountFromRequest(url: URL, body?: Record<string, unknown>) {
   const accountId = clean(body?.accountId ?? url.searchParams.get("accountId"));
@@ -35,7 +75,7 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType) {
   const [entitlements, requestResult] = await Promise.all([
     resolveWorkforceLeaveEntitlements({ companyId: account.companyId, workerId: account.id, workerType: type }),
     db().from("hr_leave_requests")
-      .select("id,leave_type_id,start_date,end_date,days,reason,status,requested_at,reviewer_note,hr_leave_types(name,code,color)")
+      .select("id,leave_type_id,start_date,end_date,days,reason,status,requested_at,reviewer_note,proof_path,proof_file_name,proof_mime_type,hr_leave_types(name,code,color)")
       .eq("company_id", account.companyId).eq(workerColumn, account.id)
       .order("requested_at", { ascending: false }).limit(50)
   ]);
@@ -53,7 +93,13 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType) {
       reason: request.reason,
       status: request.status,
       requestedAt: request.requested_at,
-      reviewerNote: request.reviewer_note
+      reviewerNote: request.reviewer_note,
+      hasProof: Boolean(request.proof_path),
+      proofFileName: request.proof_file_name,
+      proofMimeType: request.proof_mime_type,
+      proofUrl: request.proof_path
+        ? `/api/connect/leave/proof/${request.id}?${new URLSearchParams({ accountId: account.id, profileType: account.profileType })}`
+        : null
     };
   });
   const types = entitlements
@@ -151,14 +197,22 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  let uploadedPath: string | null = null;
   try {
-    const body = await request.json() as Record<string, unknown>;
+    const { body, proof: proofValue } = await requestInput(request);
     const { account, workerType: type } = await accountFromRequest(new URL(request.url), body);
     const leaveTypeId = clean(body.leaveTypeId);
     const fromDate = clean(body.fromDate);
     const toDate = clean(body.toDate);
     const reason = clean(body.reason);
-    const { days } = await validateLeaveSubmission({ account, type, leaveTypeId, fromDate, toDate, reason });
+    const { days, leaveType } = await validateLeaveSubmission({ account, type, leaveTypeId, fromDate, toDate, reason });
+    const proofFile = validateProof(proofValue);
+    if (proofFile && leaveType.code.toUpperCase() !== "SICK") throw new Error("Medical proof can be attached only to sick leave.");
+    if (leaveType.code.toUpperCase() === "SICK" && days > 1 && !proofFile) {
+      throw new Error("Medical proof is mandatory for sick leave longer than one day.");
+    }
+    const proof = proofFile ? await uploadProof(account, type, proofFile) : null;
+    uploadedPath = proof?.path ?? null;
 
     const approval = await resolveWorkforceLeaveApproval({ companyId: account.companyId, workerId: account.id, workerType: type, days });
     let requestId = "";
@@ -178,12 +232,17 @@ export async function POST(request: Request) {
         requested_profile_id: account.id,
         reviewed_by: approval.requesterUserId,
         reviewed_at: new Date().toISOString(),
-        reviewer_note: "Recorded directly for a top-level assignment in DropX One."
+        reviewer_note: "Recorded directly for a top-level assignment in DropX One.",
+        proof_path: proof?.path ?? null,
+        proof_file_name: proof?.fileName ?? null,
+        proof_mime_type: proof?.mimeType ?? null,
+        proof_file_size: proof?.fileSize ?? null,
+        proof_uploaded_at: proof ? new Date().toISOString() : null
       }).select("id").single();
       if (directResult.error) throw new Error(directResult.error.message);
       requestId = directResult.data.id;
     } else {
-      const createResult = await db().rpc("hr_create_workforce_leave_request_with_steps", {
+      const createResult = await db().rpc("hr_create_workforce_leave_request_with_proof", {
         p_company_id: account.companyId,
         p_worker_type: type,
         p_profile_id: account.id,
@@ -191,6 +250,10 @@ export async function POST(request: Request) {
         p_start_date: fromDate,
         p_end_date: toDate,
         p_reason: reason,
+        p_proof_path: proof?.path ?? null,
+        p_proof_file_name: proof?.fileName ?? null,
+        p_proof_mime_type: proof?.mimeType ?? null,
+        p_proof_file_size: proof?.fileSize ?? null,
         p_steps: approval.steps
       });
       if (createResult.error) throw new Error(createResult.error.message);
@@ -209,13 +272,15 @@ export async function POST(request: Request) {
         : `${`Request submitted through ${approval.policyName}.`}${notification?.status === "sent" ? " Your manager was notified by email." : notification?.error ? ` Email warning: ${notification.error}` : ""}`
     });
   } catch (error) {
+    await removeProof(uploadedPath);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to submit time off." }, { status: 400 });
   }
 }
 
 export async function PATCH(request: Request) {
+  let uploadedPath: string | null = null;
   try {
-    const body = await request.json() as Record<string, unknown>;
+    const { body, proof: proofValue } = await requestInput(request);
     const { account, workerType: type } = await accountFromRequest(new URL(request.url), body);
     const requestId = clean(body.requestId);
     const leaveTypeId = clean(body.leaveTypeId);
@@ -223,8 +288,20 @@ export async function PATCH(request: Request) {
     const toDate = clean(body.toDate);
     const reason = clean(body.reason);
     if (!/^[0-9a-f-]{36}$/i.test(requestId)) throw new Error("Leave request is invalid.");
-    await validateLeaveSubmission({ account, type, leaveTypeId, fromDate, toDate, reason, excludeRequestId: requestId });
-    const result = await db().rpc("hr_update_workforce_leave_request", {
+    const workerColumn = type === "employee" ? "employee_id" : "contractor_id";
+    const existing = await db().from("hr_leave_requests")
+      .select("proof_path,proof_file_name,proof_mime_type,proof_file_size")
+      .eq("company_id", account.companyId).eq("id", requestId).eq(workerColumn, account.id).eq("status", "pending").maybeSingle();
+    if (existing.error || !existing.data) throw new Error(existing.error?.message ?? "Leave request was not found or can no longer be edited.");
+    const { days, leaveType } = await validateLeaveSubmission({ account, type, leaveTypeId, fromDate, toDate, reason, excludeRequestId: requestId });
+    const proofFile = validateProof(proofValue);
+    if (proofFile && leaveType.code.toUpperCase() !== "SICK") throw new Error("Medical proof can be attached only to sick leave.");
+    if (leaveType.code.toUpperCase() === "SICK" && days > 1 && !proofFile && !existing.data.proof_path) {
+      throw new Error("Medical proof is mandatory for sick leave longer than one day.");
+    }
+    const proof = proofFile ? await uploadProof(account, type, proofFile) : null;
+    uploadedPath = proof?.path ?? null;
+    const result = await db().rpc("hr_update_workforce_leave_request_with_proof", {
       p_company_id: account.companyId,
       p_request_id: requestId,
       p_worker_type: type,
@@ -232,11 +309,18 @@ export async function PATCH(request: Request) {
       p_leave_type_id: leaveTypeId,
       p_start_date: fromDate,
       p_end_date: toDate,
-      p_reason: reason
+      p_reason: reason,
+      p_proof_path: proof?.path ?? existing.data.proof_path,
+      p_proof_file_name: proof?.fileName ?? existing.data.proof_file_name,
+      p_proof_mime_type: proof?.mimeType ?? existing.data.proof_mime_type,
+      p_proof_file_size: proof?.fileSize ?? existing.data.proof_file_size
     });
     if (result.error) throw new Error(result.error.message);
+    if (proof && existing.data.proof_path && existing.data.proof_path !== proof.path) await removeProof(existing.data.proof_path);
+    if (leaveType.code.toUpperCase() !== "SICK" && existing.data.proof_path) await removeProof(existing.data.proof_path);
     return NextResponse.json({ ok: true, notice: "Time-off request updated." });
   } catch (error) {
+    await removeProof(uploadedPath);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to update time off." }, { status: 400 });
   }
 }

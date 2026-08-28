@@ -1,7 +1,7 @@
 "use client";
 
-import { CalendarDays, Clock3, Pencil, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { CalendarDays, Clock3, FileCheck2, Info, Paperclip, Pencil, RotateCcw, Upload } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { AppAccount } from "./connect-profile-app";
 
 type LeaveTab = "request" | "history";
@@ -26,6 +26,9 @@ type LeaveRequest = {
   reason: string;
   status: string;
   reviewerNote?: string | null;
+  hasProof?: boolean;
+  proofFileName?: string | null;
+  proofUrl?: string | null;
 };
 type LeaveData = {
   year: number;
@@ -37,6 +40,11 @@ type LeaveData = {
 
 function displayDate(value: string) { return value.split("-").reverse().join("/"); }
 function todayInIndia() { return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()); }
+function inclusiveDays(fromDate: string, toDate: string) {
+  if (!fromDate || !toDate) return 0;
+  const difference = Date.parse(`${toDate}T00:00:00Z`) - Date.parse(`${fromDate}T00:00:00Z`);
+  return Number.isFinite(difference) && difference >= 0 ? Math.floor(difference / 86_400_000) + 1 : 0;
+}
 
 export function ConnectLeave({ account, lopOnly = account.profileType === "contractor" }: { account: AppAccount; lopOnly?: boolean }) {
   const [tab, setTab] = useState<LeaveTab>("request");
@@ -45,17 +53,23 @@ export function ConnectLeave({ account, lopOnly = account.profileType === "contr
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [reason, setReason] = useState("");
+  const [proof, setProof] = useState<File | null>(null);
+  const [existingProofName, setExistingProofName] = useState("");
   const [editingRequestId, setEditingRequestId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const proofInput = useRef<HTMLInputElement>(null);
 
   const resetForm = useCallback(() => {
     setEditingRequestId(null);
     setFromDate("");
     setToDate("");
     setReason("");
+    setProof(null);
+    setExistingProofName("");
+    if (proofInput.current) proofInput.current.value = "";
   }, []);
 
   const loadLeave = useCallback(async () => {
@@ -80,6 +94,9 @@ export function ConnectLeave({ account, lopOnly = account.profileType === "contr
   const leaveMasterReady = Boolean(data?.types.length);
   const minimumDate = todayInIndia();
   const isLop = lopOnly || data?.lopOnly;
+  const requestedDays = inclusiveDays(fromDate, toDate);
+  const isSickLeave = selectedType?.code.toUpperCase() === "SICK";
+  const medicalProofRequired = isSickLeave && requestedDays > 1;
 
   function startEdit(request: LeaveRequest) {
     const typeMatch = data?.types.find((type) => type.name === request.leaveType || type.code === request.leaveTypeCode);
@@ -88,6 +105,9 @@ export function ConnectLeave({ account, lopOnly = account.profileType === "contr
     setFromDate(request.fromDate);
     setToDate(request.toDate);
     setReason(request.reason);
+    setProof(null);
+    setExistingProofName(request.proofFileName ?? "");
+    if (proofInput.current) proofInput.current.value = "";
     setTab("request");
     setNotice("");
     setError("");
@@ -95,21 +115,21 @@ export function ConnectLeave({ account, lopOnly = account.profileType === "contr
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!leaveTypeId || !fromDate || !toDate || !reason.trim()) return;
+    if (!leaveTypeId || !fromDate || !toDate || !reason.trim() || (medicalProofRequired && !proof && !existingProofName)) return;
     setSubmitting(true); setError(""); setNotice("");
     try {
+      const body = new FormData();
+      body.set("accountId", account.id);
+      body.set("profileType", account.profileType);
+      if (editingRequestId) body.set("requestId", editingRequestId);
+      body.set("leaveTypeId", leaveTypeId);
+      body.set("fromDate", fromDate);
+      body.set("toDate", toDate);
+      body.set("reason", reason);
+      if (proof) body.set("proof", proof);
       const response = await fetch("/api/connect/leave", {
         method: editingRequestId ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: account.id,
-          profileType: account.profileType,
-          requestId: editingRequestId ?? undefined,
-          leaveTypeId,
-          fromDate,
-          toDate,
-          reason
-        })
+        body
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to submit time off.");
@@ -183,9 +203,18 @@ export function ConnectLeave({ account, lopOnly = account.profileType === "contr
             <label>To date<input min={fromDate || minimumDate} onChange={(event) => setToDate(event.target.value)} type="date" value={toDate} /></label>
           </div>
           <label>Reason<textarea onChange={(event) => setReason(event.target.value)} placeholder={isLop ? "Enter reason for LOP" : "Enter reason for leave"} rows={4} value={reason} /></label>
+          {isSickLeave ? <section className={`dx-leave-proof${medicalProofRequired ? " required" : ""}`}>
+            <div className="dx-leave-proof-head"><span><Paperclip /><strong>Medical proof</strong></span><em>{medicalProofRequired ? "Required" : "Optional for 1 day"}</em></div>
+            <p><Info />A doctor&apos;s note, prescription, or medical certificate is required when sick leave is longer than one day.</p>
+            <label className="dx-leave-proof-upload">
+              <Upload />
+              <span><strong>{proof?.name || existingProofName || "Choose proof"}</strong><small>PDF, JPG, PNG or WebP · max 10 MB</small></span>
+              <input accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => setProof(event.target.files?.[0] ?? null)} ref={proofInput} required={medicalProofRequired && !existingProofName} type="file" />
+            </label>
+          </section> : null}
           <div className="dx-leave-form-actions">
             {editingRequestId ? <button className="dx-leave-secondary" disabled={submitting} onClick={() => { resetForm(); setTab("history"); }} type="button">Cancel edit</button> : null}
-            <button className="dx-save" disabled={submitting || !leaveMasterReady || !leaveTypeId || !fromDate || !toDate || reason.trim().length < 3} type="submit">{submitting ? "Saving…" : editingRequestId ? "Save changes" : "Submit request"}</button>
+            <button className="dx-save" disabled={submitting || !leaveMasterReady || !leaveTypeId || !fromDate || !toDate || reason.trim().length < 3 || (medicalProofRequired && !proof && !existingProofName)} type="submit">{submitting ? "Saving…" : editingRequestId ? "Save changes" : "Submit request"}</button>
           </div>
         </form> : null}
 
@@ -197,6 +226,7 @@ export function ConnectLeave({ account, lopOnly = account.profileType === "contr
             <header><strong>{request.leaveType}</strong><em className={request.status}>{request.status}</em></header>
             <div><span>{displayDate(request.fromDate)}{request.toDate !== request.fromDate ? ` – ${displayDate(request.toDate)}` : ""}</span><b>{request.days} day{request.days === 1 ? "" : "s"}</b></div>
             <p>{request.reason}</p>
+            {request.hasProof && request.proofUrl ? <a className="dx-leave-proof-link" href={request.proofUrl}><FileCheck2 />{request.proofFileName || "View medical proof"}</a> : null}
             {request.reviewerNote ? <small>{request.reviewerNote}</small> : null}
             {request.status === "pending" ? <footer className="dx-leave-history-actions">
               <button disabled={submitting} onClick={() => startEdit(request)} type="button"><Pencil />Edit</button>

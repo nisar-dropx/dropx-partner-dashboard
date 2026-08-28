@@ -1,11 +1,12 @@
 "use client";
 
 import Image from "next/image";
-import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, CreditCard, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
+import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, CreditCard, Files, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
 import { AttendanceLocationMonitor } from "./attendance-location-monitor";
 import { ConnectDashboard } from "./connect-dashboard";
+import { ConnectDocuments } from "./connect-documents";
 import { ConnectLeave } from "./connect-leave";
 import { ConnectRoster } from "./connect-roster";
 import { ConnectAdvances } from "./connect-advances";
@@ -15,7 +16,7 @@ import { ConnectApprovalInbox } from "./connect-approval-inbox";
 import { AppAccount, ConnectProfileApp } from "./connect-profile-app";
 import { countryCodeOptions } from "@/lib/country-codes";
 
-type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "approvals" | "payments" | "advances" | "reimbursements" | "earnings" | "attendance" | "roster" | "leave" | "lop" | "performance" | "settings";
+type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "approvals" | "payments" | "advances" | "reimbursements" | "earnings" | "attendance" | "roster" | "leave" | "lop" | "performance" | "settings";
 type ConnectNotification = {
   id: string;
   title: string;
@@ -392,6 +393,7 @@ export function ConnectLoginFlow() {
     if (next === "leave" && !showLeaveNav(account)) return;
     if (next === "lop" && !showLopNav(account)) return;
     if (next === "performance" && !allowed(account, "performance")) return;
+    if (next === "documents" && !peopleSelfService(account)) return;
     setStep(next);
   }
 
@@ -407,11 +409,12 @@ export function ConnectLoginFlow() {
     setStep(refreshed ? landingPage(refreshed) : "accounts");
   }
 
-  const loggedIn = ["accounts","dashboard","profile","approvals","payments","advances","reimbursements","earnings","attendance","roster","leave","lop","performance","settings"].includes(step);
+  const loggedIn = ["accounts","dashboard","profile","documents","approvals","payments","advances","reimbursements","earnings","attendance","roster","leave","lop","performance","settings"].includes(step);
   const screenLabel: Partial<Record<Step, string>> = {
     accounts: "Accounts",
     dashboard: "Today",
     profile: "My profile",
+    documents: "Documents",
     approvals: "Approvals",
     payments: "Payments",
     advances: "Pay advances",
@@ -440,6 +443,7 @@ export function ConnectLoginFlow() {
         <small className="dx-nav-label">Workspace</small>
         {allowed(account, "dashboard") ? <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Gauge />Dashboard</button> : null}
         <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />My Profile</button>
+        {peopleSelfService(account) ? <button aria-current={step === "documents" ? "page" : undefined} className={step === "documents" ? "active" : ""} onClick={() => open("documents")}><Files />Documents</button> : null}
         <button aria-current={step === "approvals" ? "page" : undefined} className={step === "approvals" ? "active" : ""} onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox</button>
         <button aria-expanded={paymentsExpanded} className={`payments-toggle${step === "advances" || step === "reimbursements" || step === "earnings" ? " active" : ""}${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard /><span>Payments</span><ChevronRight /></button>
         {paymentsExpanded ? <button aria-current={step === "advances" ? "page" : undefined} className={`desktop-subitem${step === "advances" ? " active" : ""}`} onClick={() => open("advances")}><IndianRupee />Advances</button> : null}
@@ -478,6 +482,7 @@ export function ConnectLoginFlow() {
       <nav>
         {allowed(account, "dashboard") ? <button onClick={() => open("dashboard")}><Gauge />Dashboard<ChevronRight /></button> : null}
         <button onClick={() => open("profile")}><UserRound />My Profile<ChevronRight /></button>
+        {peopleSelfService(account) ? <button onClick={() => open("documents")}><Files />Documents<ChevronRight /></button> : null}
         <button onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox<ChevronRight /></button>
         <button aria-expanded={paymentsExpanded} className={`payments-toggle${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard />Payments<ChevronRight /></button>
         {paymentsExpanded ? <button className="subitem" onClick={() => open("advances")}><span />Advances<ChevronRight /></button> : null}
@@ -523,6 +528,7 @@ export function ConnectLoginFlow() {
       ) : null}
       {step === "dashboard" && account ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onLeave={() => open(isContractorAccount(account) ? "lop" : "leave")} onPerformance={() => open("performance")} onProfile={() => open("profile")} /> : null}
       {step === "profile" && account ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
+      {step === "documents" && account && peopleSelfService(account) ? <ConnectDocuments account={account} /> : null}
       {step === "approvals" && account ? <ConnectApprovalInbox account={account} /> : null}
       {step === "advances" && account ? <ConnectAdvances account={account} /> : null}
       {step === "reimbursements" && account ? <ConnectReimbursements account={account} /> : null}
