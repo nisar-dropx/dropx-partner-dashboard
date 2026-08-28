@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount } from "../../../../src/lib/connect-auth";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { isNonEmployeeProfileType, workforceLabel, workforceTable, type NonEmployeeProfileType } from "../../../../src/lib/workforce-profiles";
+import { todayInIndia } from "../../../../src/lib/india-date";
 
 const peopleProfileTypes = new Set(["employee", "user", "contractor"]);
 
@@ -111,7 +112,7 @@ export async function POST(request: Request) {
     const effectiveDate = String(body.effectiveDate ?? body.requestedLastWorkingDate ?? "").trim();
     const reasonDetails = String(body.reasonDetails ?? "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) throw new Error("Requested last working date is required.");
-    if (effectiveDate < new Date().toISOString().slice(0, 10)) throw new Error("Requested last working date cannot be in the past.");
+    if (effectiveDate < todayInIndia()) throw new Error("Requested last working date cannot be in the past.");
     if (reasonDetails.length < 5) throw new Error("Provide a clear resignation reason.");
     const lifecycleStatus = String(current.profile.lifecycle_status ?? (current.profile.is_active ? "active" : "inactive")).toLowerCase();
     if (!current.profile.is_active || lifecycleStatus !== "active") throw new Error("Only an active workforce profile can submit a resignation.");

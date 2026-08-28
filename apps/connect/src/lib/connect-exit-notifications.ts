@@ -1,4 +1,5 @@
 import { sendConnectEmail } from "./connect-email";
+import { todayInIndia } from "./india-date";
 import { supabaseAdmin } from "./supabase-admin";
 
 function fill(template: string, values: Record<string, string>) { return template.replace(/{{\s*([a-z0-9_]+)\s*}}/gi, (_, key: string) => values[key] ?? ""); }
@@ -42,7 +43,7 @@ export async function notifyExitApprovalRequired(input: { companyId: string; cas
     supabaseAdmin.from("hr_exit_approvals").select("id, step_name, assigned_user_id, approver_role_id").eq("company_id", input.companyId).eq("case_id", input.caseId).eq("workflow_step_id", input.approvalStepId).eq("status", "pending").maybeSingle()
   ]);
   if (!template || !exitCase || !approval) return;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInIndia();
   const roleQueries = approval.approver_role_id ? await Promise.all([
     supabaseAdmin.from("hr_access_grants").select("user_id").eq("company_id", input.companyId).eq("role_id", approval.approver_role_id).eq("is_active", true).lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`),
     supabaseAdmin.from("hr_user_access").select("user_id").eq("company_id", input.companyId).eq("role_id", approval.approver_role_id).eq("is_active", true)

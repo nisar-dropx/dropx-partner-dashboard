@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { SelfieCapturePanel } from "./selfie-capture-panel";
+import { todayInIndia } from "@/lib/india-date";
 import { stampSupportSelfieBlob } from "@/lib/support-selfie-stamp";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
@@ -242,7 +243,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || "Unable to load attendance.");
         setData(payload);
-        setSelected(payload.rows?.find((row: Row) => row.date === new Date().toISOString().slice(0, 10)) ?? payload.rows?.at(-1) ?? null);
+        setSelected(payload.rows?.find((row: Row) => row.date === todayInIndia()) ?? payload.rows?.at(-1) ?? null);
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load attendance."));
   }, [account.id, account.profileType, month]);

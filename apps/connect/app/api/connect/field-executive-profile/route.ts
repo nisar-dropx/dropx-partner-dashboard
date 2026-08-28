@@ -12,6 +12,7 @@ import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { loadWorkforceCategoryRules } from "../../../../src/lib/workforce-category-rules";
 import { assertMinimumProfileAge } from "../../../../src/lib/profile-age";
 import { createProfileSubmittedNotification } from "../../../../src/lib/app-notifications";
+import { todayInIndia } from "../../../../src/lib/india-date";
 import {
   isNonEmployeeProfileType,
   profileFieldRuleCategory,
@@ -263,7 +264,7 @@ async function loadApplicableAgreement(row: FieldExecutiveRow): Promise<Workforc
     : null;
   if (designation?.error) throw new Error(designation.error.message);
   const designationCode = String(designation?.data?.code ?? "").trim().toUpperCase();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInIndia();
   const agreements = await supabaseAdmin
     .from("workforce_agreement_master")
     .select("id, code, title, version, agreement_body, applicable_designation_codes, effective_to")

@@ -36,6 +36,7 @@ type PaymentRequestFinalizeRow = {
   current_approver_user_id?: string | null;
   current_approver_role_id: string | null;
   approval_cycle?: number | null;
+  processing_started_at?: string | null;
 };
 
 type PaymentProcessAction = "processing" | "processed" | "returned" | "rejected";
@@ -228,7 +229,7 @@ export async function updatePaymentProcessStatus(
 
     const { data: request, error } = await supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, status, approval_status, current_approver_user_id, current_approver_role_id, approval_cycle")
+      .select("id, request_no, status, approval_status, current_approver_user_id, current_approver_role_id, approval_cycle, processing_started_at")
       .eq("company_id", companyId)
       .eq("id", requestId)
       .single();
@@ -248,6 +249,7 @@ export async function updatePaymentProcessStatus(
       await updatePaymentRequest(companyId, requestId, {
         status: "processing",
         approval_status: "PROCESSING",
+        processing_started_at: request.processing_started_at ?? now,
         updated_at: now
       });
       await insertPaymentApprovalLog({
@@ -279,6 +281,7 @@ export async function updatePaymentProcessStatus(
         utr_cin: remarks,
         bank_status: "Paid",
         bank_processing_remarks: remarks,
+        processing_started_at: request.processing_started_at ?? now,
         processed_at: now,
         updated_at: now
       });

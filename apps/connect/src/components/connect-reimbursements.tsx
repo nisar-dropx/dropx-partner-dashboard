@@ -2,6 +2,7 @@
 
 import { Check, ChevronDown, FileText, IndianRupee, Plus, ReceiptText, RotateCcw, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { todayInIndia } from "@/lib/india-date";
 import type { AppAccount } from "./connect-profile-app";
 
 type Category = { id: string; code: string; name: string; description?: string | null; receipt_required: boolean; receipt_threshold: number; per_item_limit?: number | null; per_day_limit?: number | null };
@@ -17,7 +18,7 @@ type Claim = {
 type Payload = { categories: Category[]; payout: { ready: boolean; message?: string | null }; claims: Claim[] };
 
 function uid() { return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`; }
-function newItem(): ExpenseItem { return { id: uid(), categoryId: "", expenseDate: new Date().toISOString().slice(0, 10), merchant: "", description: "", amount: "", receipt: null }; }
+function newItem(): ExpenseItem { return { id: uid(), categoryId: "", expenseDate: todayInIndia(), merchant: "", description: "", amount: "", receipt: null }; }
 function money(value: number | string | null | undefined) { return `₹${Number(value ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
 function dateTime(value: string) { return new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }); }
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }

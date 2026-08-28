@@ -3,6 +3,7 @@ import { PaymentProcessPanel } from "@/components/payment-process-panel";
 import { finalizePaymentProcess, updatePaymentProcessStatus } from "@/app/payments/process/actions";
 import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { dashboardDateInputValue } from "@/lib/date-format";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type PaymentBankRow = {
@@ -275,7 +276,7 @@ export default async function PaymentProcessPage({
   const pagePermission = authorization.permissions.payment_process;
   const canSeeAllFinalApproved = isCompanyOwner(authorization);
   const { banks, requests, error } = await loadPaymentProcess(companyId, authorization.userId, authorization.roleId, canSeeAllFinalApproved);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = dashboardDateInputValue();
 
   return (
     <AppShell active="Payment Process" pageCode="payment_process">

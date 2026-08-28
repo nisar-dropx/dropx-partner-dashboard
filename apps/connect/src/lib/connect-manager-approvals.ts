@@ -3,6 +3,7 @@ import "server-only";
 import type { ConnectAccount } from "./connect-auth";
 import { connectApproverIdentity } from "./connect-expense-data";
 import { notifyConnectExitOutcome, notifyExitApprovalRequired } from "./connect-exit-notifications";
+import { todayInIndia } from "./india-date";
 import { supabaseAdmin } from "./supabase-admin";
 
 type Decision = "approved" | "returned" | "rejected";
@@ -214,7 +215,7 @@ export async function decideConnectRosterApproval(account: ConnectAccount, planI
 }
 
 async function actorRoleIds(companyId: string, actorUserId: string) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInIndia();
   const [grants, legacy] = await Promise.all([
     db().from("hr_access_grants").select("role_id").eq("company_id", companyId).eq("user_id", actorUserId).eq("is_active", true).lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`),
     db().from("hr_user_access").select("role_id").eq("company_id", companyId).eq("user_id", actorUserId).eq("is_active", true)

@@ -9,6 +9,7 @@ import {
   Route
 } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { addDaysToDateOnly, todayInIndia } from "@/lib/india-date";
 
 type Account = {
   id: string;
@@ -171,9 +172,9 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
     data.policy.withdrawal_allowed &&
     !["withdrawal_requested", "documents_ready", "closed", "rejected", "withdrawn", "cancelled"].includes(exitCase.status)
   );
-  const minDate = new Date().toISOString().slice(0, 10);
-  const suggested = new Date();
-  suggested.setDate(suggested.getDate() + (data?.policy.resignation_notice_days ?? 0));
+  const minDate = todayInIndia();
+  const suggestedDate = addDaysToDateOnly(minDate, data?.policy.resignation_notice_days ?? 0);
+  const maxDate = addDaysToDateOnly(minDate, 365);
 
   return <section className="connect-exit-page">
     <header className="dx-exit-page-heading">
@@ -188,7 +189,7 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
     {canStart && data ? <form className="connect-exit-card dx-exit-form" onSubmit={submit}>
       <div className="dx-exit-card-heading"><span className="connect-exit-eyebrow">New request</span><h2>Plan your last working day</h2><p>This request will enter the configured {data.flow === "people" ? "People approval" : "Workforce lifecycle"} workflow.</p></div>
       {data.flow === "people" ? <label>Reason *<select name="reason_id" required defaultValue=""><option value="" disabled>Select a reason</option>{data.reasons.map((reason) => <option key={reason.id} value={reason.id}>{reason.name}</option>)}</select></label> : null}
-      <label>Requested last working date *<input name="requested_last_working_date" type="date" min={minDate} max={new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10)} defaultValue={suggested.toISOString().slice(0, 10)} required />{data.policy.resignation_notice_days ? <small>Configured notice period: {data.policy.resignation_notice_days} days</small> : null}</label>
+      <label>Requested last working date *<input name="requested_last_working_date" type="date" min={minDate} max={maxDate} defaultValue={suggestedDate} required />{data.policy.resignation_notice_days ? <small>Configured notice period: {data.policy.resignation_notice_days} days</small> : null}</label>
       {data.flow === "people" ? <label>Comments<textarea name="comments" placeholder="Share any details the reviewers should know" /></label> : <label>Reason *<textarea minLength={5} name="reason_details" placeholder="Briefly explain your reason" required /></label>}
       {data.flow === "people" ? <div className="dx-exit-contact-grid"><label>Personal email<input name="personal_email" type="email" defaultValue={account.email ?? ""} placeholder="For exit communication" /></label><label>Personal mobile<input name="personal_mobile" inputMode="tel" placeholder="For exit communication" /></label></div> : null}
       {data.flow === "people" ? <div className="dx-exit-route-preview" aria-label="Configured approval route">

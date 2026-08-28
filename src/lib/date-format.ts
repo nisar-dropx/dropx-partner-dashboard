@@ -1,5 +1,14 @@
 const dashboardTimeZone = "Asia/Kolkata";
 
+export function dashboardDateInputValue(value: Date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: dashboardTimeZone
+  }).format(value);
+}
+
 function dateOnlyParts(value: string) {
   const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return null;

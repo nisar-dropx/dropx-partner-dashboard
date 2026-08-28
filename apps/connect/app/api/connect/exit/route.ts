@@ -3,6 +3,7 @@ import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/
 import { notifyEmployeeExitSubmitted, notifyEmployeeExitWithdrawal, notifyExitApprovalRequired } from "../../../../src/lib/connect-exit-notifications";
 import { createAppNotification } from "../../../../src/lib/app-notifications";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
+import { todayInIndia } from "../../../../src/lib/india-date";
 
 type PeopleProfileType = "employee" | "user" | "contractor";
 type WorkerContext = {
@@ -119,7 +120,7 @@ async function resolveWorker(profileType: string, accountId: string): Promise<Wo
 
 async function reportingManagerChain(context: WorkerContext, levels: number) {
   const sourceColumn = context.workerType === "contractor" ? "contractor_id" : "employee_id";
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInIndia();
   const { data: engagement } = await db().from("hr_engagements")
     .select("id")
     .eq("company_id", context.account.companyId)
@@ -204,7 +205,7 @@ async function reportingManagerChain(context: WorkerContext, levels: number) {
 }
 
 async function activeRoleUsers(companyId: string, roleId: string) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInIndia();
   const [{ data: grants }, { data: legacy }] = await Promise.all([
     db().from("hr_access_grants").select("user_id").eq("company_id", companyId).eq("role_id", roleId).eq("is_active", true).lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`),
     db().from("hr_user_access").select("user_id").eq("company_id", companyId).eq("role_id", roleId).eq("is_active", true)
@@ -221,7 +222,7 @@ async function activeApprovalUserIds(companyId: string) {
   const { data: permissions } = await db().from("hr_role_page_permissions").select("role_id").eq("company_id", companyId).eq("page_id", page.id).eq("can_approve", true);
   const roleIds = [...new Set((permissions ?? []).map((row) => row.role_id))];
   if (!roleIds.length) return new Set<string>();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInIndia();
   const [{ data: grants }, { data: legacy }] = await Promise.all([
     db().from("hr_access_grants").select("user_id").eq("company_id", companyId).in("role_id", roleIds).eq("is_active", true).lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`),
     db().from("hr_user_access").select("user_id").eq("company_id", companyId).in("role_id", roleIds).eq("is_active", true)
