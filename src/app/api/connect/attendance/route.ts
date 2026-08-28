@@ -40,10 +40,11 @@ function validTime(value: string) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
-function fileExtension(name: string) {
-  const match = name.toLowerCase().match(/\.[a-z0-9]{1,8}$/);
-  return match?.[0] ?? "";
-}
+const regularizationProofTypes = new Map([
+  ["image/jpeg", ".jpg"],
+  ["image/png", ".png"],
+  ["image/webp", ".webp"]
+]);
 
 async function activeSession() {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
@@ -224,12 +225,15 @@ export async function POST(request: NextRequest) {
     const worker = await resolveWorker({ accountId, profileType });
     const existingResult = await supabaseAdmin
       .from("attendance_regularization_requests")
-      .select("id, status")
+      .select("id, status, attachment_path")
       .eq("company_id", worker.companyId)
       .eq("profile_type", worker.profileType)
       .eq("profile_id", worker.profileId)
       .eq("attendance_date", attendanceDate)
-      .in("status", ["pending", "returned"])
+      .is("request_kind", null)
+      .in("status", ["pending", "pending_manager", "pending_hr", "returned"])
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
     if (existingResult.error) {
       if (isMissingRegularizationTable(existingResult.error.message)) {
@@ -237,16 +241,19 @@ export async function POST(request: NextRequest) {
       }
       throw new Error(existingResult.error.message);
     }
-    if (existingResult.data?.status === "pending") {
+    if (existingResult.data && existingResult.data.status !== "returned") {
       throw new Error("A regularization request is already pending for this date.");
     }
 
-    let attachmentPath: string | null = null;
+    let attachmentPath = existingResult.data?.attachment_path ?? null;
+    let uploadedPath: string | null = null;
     const attachment = formData.get("attachment");
     if (attachment instanceof File && attachment.size > 0) {
-      if (attachment.size > 8 * 1024 * 1024) throw new Error("Attachment must be 8 MB or smaller.");
-      const safeName = attachment.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      attachmentPath = `${worker.companyId}/${worker.profileId}/attendance-regularization-${attendanceDate}-${Date.now()}${fileExtension(safeName)}`;
+      const extension = regularizationProofTypes.get(attachment.type);
+      if (!extension) throw new Error("CCTV proof must be a JPG, PNG or WebP image.");
+      if (attachment.size > 5 * 1024 * 1024) throw new Error("CCTV proof must be 5 MB or smaller.");
+      attachmentPath = `${worker.companyId}/${worker.profileId}/attendance-regularization-${attendanceDate}-${Date.now()}${extension}`;
+      uploadedPath = attachmentPath;
       const uploadResult = await supabaseAdmin.storage
         .from("employee-profile-documents")
         .upload(attachmentPath, Buffer.from(await attachment.arrayBuffer()), {
@@ -254,6 +261,9 @@ export async function POST(request: NextRequest) {
           upsert: false
         });
       if (uploadResult.error) throw new Error(uploadResult.error.message);
+    }
+    if (!attachmentPath) {
+      throw new Error("Upload a CCTV screenshot showing the punch date and time before submitting.");
     }
 
     const payload = {
@@ -286,7 +296,10 @@ export async function POST(request: NextRequest) {
           .insert(payload)
           .select("id, status")
           .single();
-    if (saveResult.error) throw new Error(saveResult.error.message);
+    if (saveResult.error) {
+      if (uploadedPath) await supabaseAdmin.storage.from("employee-profile-documents").remove([uploadedPath]);
+      throw new Error(saveResult.error.message);
+    }
     await createAppNotification({
       accountId: worker.profileId,
       companyId: worker.companyId,

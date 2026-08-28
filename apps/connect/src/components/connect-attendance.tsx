@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clock3,
   Fingerprint,
+  Info,
   LogIn,
   LogOut,
   Paperclip,
@@ -656,6 +657,10 @@ function RegularizationSheet({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (!attachment && !row.regularization?.hasAttachment) {
+      setError("Upload a CCTV screenshot with a visible punch date and time.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -707,9 +712,30 @@ function RegularizationSheet({
           <option value="other">Other</option>
         </select></label>
         <label>Remarks<textarea required minLength={5} placeholder="Briefly explain the correction" rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
-        <label className="dx-attachment"><Paperclip /><span>{attachment?.name || "Attach supporting file (optional)"}</span><input accept=".jpg,.jpeg,.png,.webp,.pdf" type="file" onChange={(event) => setAttachment(event.target.files?.[0] ?? null)} /></label>
+        <div className="dx-evidence-info" role="note">
+          <Info aria-hidden="true" />
+          <span><strong>CCTV proof is mandatory</strong>Upload a clear screenshot showing you at the punch device with the punch date and time visible. The approver will verify this image before taking action.</span>
+        </div>
+        <label className="dx-attachment required"><Paperclip /><span>{attachment?.name || (row.regularization?.hasAttachment ? "Existing proof attached · choose to replace" : "Upload CCTV timestamp proof")}</span><em>Required</em><input accept="image/jpeg,image/png,image/webp" required={!row.regularization?.hasAttachment} type="file" onChange={(event) => {
+          const file = event.target.files?.[0] ?? null;
+          if (file && !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+            setAttachment(null);
+            setError("Use a JPG, PNG or WebP CCTV screenshot.");
+            event.target.value = "";
+            return;
+          }
+          if (file && file.size > 5 * 1024 * 1024) {
+            setAttachment(null);
+            setError("CCTV proof must be 5 MB or smaller.");
+            event.target.value = "";
+            return;
+          }
+          setError("");
+          setAttachment(file);
+        }} /></label>
+        <p className="dx-evidence-format">JPG, PNG or WebP · maximum 5 MB · timestamp must match the requested punch</p>
         {error ? <p className="dx-form-error">{error}</p> : null}
-        <div className="dx-sheet-actions"><button className="secondary" onClick={onClose} type="button">Cancel</button><button disabled={saving} type="submit">{saving ? "Submitting..." : "Submit request"}</button></div>
+        <div className="dx-sheet-actions"><button className="secondary" onClick={onClose} type="button">Cancel</button><button disabled={saving || (!attachment && !row.regularization?.hasAttachment)} type="submit">{saving ? "Submitting..." : "Submit request"}</button></div>
       </form>
     </aside>
   </>;
