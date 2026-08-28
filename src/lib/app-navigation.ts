@@ -106,6 +106,7 @@ export const navItems: NavItem[] = [
       { code: "workforce_categories", label: "Workforce Categories", href: "/master/workforce-categories" },
       { code: "workforce_whatsapp", label: "Workforce WhatsApp", href: "/master/workforce-whatsapp" },
       { code: "designations", label: "Designations", href: "/master/designations" },
+      { code: "designations", label: "Designation Routing", href: "/master/designation-routing" },
       { code: "biometric_devices", label: "Device Master", href: "/master/biometric-devices" },
       { code: "master_documents", label: "Documents", href: "/master/documents" },
       { code: "master_imports", label: "Import Master", href: "/master/imports" }

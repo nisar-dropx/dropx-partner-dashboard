@@ -1,0 +1,96 @@
+import "server-only";
+
+import { supabaseAdmin } from "@/lib/supabase-admin";
+
+export const physicalRegisterTables = [
+  "employees",
+  "contractors",
+  "workforce",
+  "vendors",
+  "workers"
+] as const;
+
+export type PhysicalRegisterTable = typeof physicalRegisterTables[number];
+
+type ResolvedRoute = {
+  designation_id: string;
+  register_id: string;
+  register_code: string;
+  table_name: PhysicalRegisterTable;
+  profile_type: string;
+  registration_enabled: boolean;
+};
+
+function isPhysicalRegisterTable(value: unknown): value is PhysicalRegisterTable {
+  return physicalRegisterTables.includes(String(value) as PhysicalRegisterTable);
+}
+
+export async function resolveDesignationRegister({
+  companyId,
+  designationId,
+  designationValue
+}: {
+  companyId: string;
+  designationId?: string | null;
+  designationValue?: string | null;
+}) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const result = await supabaseAdmin.rpc("resolve_designation_register", {
+    p_company_id: companyId,
+    p_designation_id: designationId ?? null,
+    p_designation_value: designationValue ?? null
+  });
+  if (result.error) {
+    if (result.error.message.toLowerCase().includes("resolve_designation_register")) {
+      throw new Error("Workforce Register Routing is not installed yet. Apply the designation routing migration.");
+    }
+    throw new Error(result.error.message);
+  }
+  const row = (result.data?.[0] ?? null) as ResolvedRoute | null;
+  if (!row || !isPhysicalRegisterTable(row.table_name)) return null;
+  return row;
+}
+
+export async function assertDesignationRegister({
+  companyId,
+  designationId,
+  designationValue,
+  expectedTables
+}: {
+  companyId: string;
+  designationId?: string | null;
+  designationValue?: string | null;
+  expectedTables: PhysicalRegisterTable[];
+}) {
+  const route = await resolveDesignationRegister({ companyId, designationId, designationValue });
+  if (!route) {
+    throw new Error("This designation is not mapped in Workforce Master. Map it before registration.");
+  }
+  if (!route.registration_enabled) {
+    throw new Error("Registration is disabled for this designation in Workforce Master.");
+  }
+  if (!expectedTables.includes(route.table_name)) {
+    throw new Error(`This designation is routed to ${route.register_code}. Start the registration from that register.`);
+  }
+  return route;
+}
+
+export function targetRegisterForWorkforceRoute(returnPath: string): PhysicalRegisterTable {
+  if (returnPath === "/vendors" || returnPath.endsWith("/vendors")) return "vendors";
+  if (returnPath === "/workers" || returnPath.endsWith("/helpers")) return "workers";
+  if (returnPath === "/contractors") return "contractors";
+  return "workforce";
+}
+
+export async function loadMappedDesignationIds(companyId: string, tableName: PhysicalRegisterTable) {
+  if (!supabaseAdmin) return new Set<string>();
+  const result = await supabaseAdmin
+    .from("designation_register_routes")
+    .select("designation_id, registration_enabled, workforce_register_master!inner(table_name, is_active)")
+    .eq("company_id", companyId)
+    .eq("registration_enabled", true)
+    .eq("workforce_register_master.table_name", tableName)
+    .eq("workforce_register_master.is_active", true);
+  if (result.error) throw new Error(result.error.message);
+  return new Set((result.data ?? []).map((row) => String(row.designation_id)));
+}

@@ -15,6 +15,7 @@ import { cleanCountryCode } from "@/lib/country-codes";
 import { assertWorkerDesignationMappedToIdSeries, generateConfiguredBiometricId, generateConfiguredWorkerId } from "@/lib/dropx-id-generation";
 import { requireDesignationOnboardingAccess } from "@/lib/designation-onboarding-access";
 import { requireDesignationPortalAccess } from "@/lib/designation-portal-access";
+import { assertDesignationRegister, targetRegisterForWorkforceRoute } from "@/lib/designation-register-routing";
 import { moveProfileDocumentToTrash, uploadProfileDocument } from "@/lib/profile-document-storage";
 import { saveProfileVerifications } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -243,6 +244,11 @@ export async function createFieldExecutive(formData: FormData) {
       .maybeSingle();
     if (designationRuleResult.error) throw new Error(designationRuleResult.error.message);
     if (!designationRuleResult.data) throw new Error("Selected designation is not available.");
+    await assertDesignationRegister({
+      companyId,
+      designationId: designationRuleResult.data.id,
+      expectedTables: [targetRegisterForWorkforceRoute(returnPath)]
+    });
     requireDesignationOnboardingAccess(designationRuleResult.data, authorization);
     const accessSurface = currentAccessSurface();
     requireDesignationPortalAccess(designationRuleResult.data, accessSurface, "add", { isOwner: accessSurface === "dashboard" && isCompanyOwner(authorization) });
@@ -869,6 +875,11 @@ export async function bulkImportFieldExecutives(formData: FormData) {
       const designation = designations.get(row.designationCode);
       if (!locationId) throw new Error(`Row ${rowNumber}: Location ${row.locationCode} not found.`);
       if (!designation) throw new Error(`Row ${rowNumber}: Designation code ${row.designationCode} not found.`);
+      await assertDesignationRegister({
+        companyId,
+        designationId: designation.id,
+        expectedTables: [targetRegisterForWorkforceRoute(returnPath)]
+      });
       requireDesignationOnboardingAccess(designation, authorization);
       const accessSurface = currentAccessSurface();
       requireDesignationPortalAccess(designation, accessSurface, "add", { isOwner: accessSurface === "dashboard" && isCompanyOwner(authorization) });

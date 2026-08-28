@@ -9,9 +9,9 @@ import { SubmitButton } from "@/components/submit-button";
 import { isCompanyOwner, type AuthorizationContext, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate } from "@/lib/date-format";
-import { normalizeDesignationCategories } from "@/lib/designation-categories";
 import { canOnboardDesignation } from "@/lib/designation-onboarding-access";
 import { canAccessDesignationPortal } from "@/lib/designation-portal-access";
+import { loadMappedDesignationIds } from "@/lib/designation-register-routing";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { isMissingPositionAccessSchema } from "@/lib/position-access";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
@@ -335,6 +335,8 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
     };
   }
 
+  const mappedEmployeeDesignationIds = await loadMappedDesignationIds(companyId, "employees");
+
   const [initialEmployeesResult, locationsResult, designationsResult, positionsResult] = await Promise.all([
     supabaseAdmin
       .from("employees")
@@ -432,7 +434,7 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
     viewEmployee: viewId ? employeesWithUrls.find((employee) => employee.id === viewId) ?? null : null,
     locations: allowedLocations as LocationRow[],
     designations: (designationRows as DesignationRow[])
-      .filter((designation) => normalizeDesignationCategories(designation.onboarding_categories).includes("employees")),
+      .filter((designation) => mappedEmployeeDesignationIds.has(designation.id)),
     positions: positionsResult.error && isMissingPositionAccessSchema(positionsResult.error) ? [] : (positionsResult.data ?? []),
     error: null
   };

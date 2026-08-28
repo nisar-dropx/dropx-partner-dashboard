@@ -13,6 +13,7 @@ import { cleanCountryCode } from "@/lib/country-codes";
 import { assertWorkerDesignationMappedToIdSeries, generateConfiguredBiometricId, generateConfiguredWorkerId } from "@/lib/dropx-id-generation";
 import { requireDesignationOnboardingAccess } from "@/lib/designation-onboarding-access";
 import { requireDesignationPortalAccess } from "@/lib/designation-portal-access";
+import { assertDesignationRegister } from "@/lib/designation-register-routing";
 import { moveProfileDocumentToTrash, uploadProfileDocument } from "@/lib/profile-document-storage";
 import { saveProfileVerifications } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -169,6 +170,7 @@ export async function createEmployee(formData: FormData) {
     if (designationResult.error) throw new Error(designationResult.error.message);
     if (!locationResult.data) throw new Error("Selected location is not available for this company.");
     if (!designationResult.data) throw new Error("Selected designation is not available.");
+    await assertDesignationRegister({ companyId, designationId, expectedTables: ["employees"] });
     await validateEmployeePosition(companyId, orgPositionId, designationId, locationId);
     requireDesignationOnboardingAccess(designationResult.data, authorization);
   requireDesignationPortalAccess(designationResult.data, "dashboard", "add", { isOwner: isCompanyOwner(authorization) });
@@ -702,6 +704,7 @@ export async function bulkImportEmployees(formData: FormData) {
       const designation = designations.get(row.designationCode);
       if (!locationId) throw new Error(`Row ${rowNumber}: Location ${row.locationCode} not found.`);
       if (!designation) throw new Error(`Row ${rowNumber}: Designation code ${row.designationCode} not found.`);
+      await assertDesignationRegister({ companyId, designationId: String(designation.id), expectedTables: ["employees"] });
       requireDesignationOnboardingAccess(designation, authorization);
   requireDesignationPortalAccess(designation, "dashboard", "add", { isOwner: isCompanyOwner(authorization) });
       const designationId = String(designation.id);

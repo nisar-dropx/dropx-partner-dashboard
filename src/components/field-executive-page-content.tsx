@@ -14,9 +14,13 @@ import { currentAccessSurface, type AccessSurface } from "@/lib/access-surface";
 import { requireCompanyId } from "@/lib/company-scope";
 import { countryCodeOptions } from "@/lib/country-codes";
 import { formatDashboardDate } from "@/lib/date-format";
-import { normalizeDesignationCategories } from "@/lib/designation-categories";
 import { canOnboardDesignation } from "@/lib/designation-onboarding-access";
 import { canAccessDesignationPortal } from "@/lib/designation-portal-access";
+import {
+  loadMappedDesignationIds,
+  targetRegisterForWorkforceRoute,
+  type PhysicalRegisterTable
+} from "@/lib/designation-register-routing";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules, loadWorkforceCategoryStatutoryEnabled } from "@/lib/workforce-category-rules";
@@ -597,8 +601,9 @@ function FieldExecutiveBulkImportPanel({
 
 async function loadFieldExecutiveData(
   authorization: AuthorizationContext,
-  designationCategoryFilter: DesignationCategoryFilter[],
-  table: "field_executives" | "contractors" | "vendors" | "workers",
+  _designationCategoryFilter: DesignationCategoryFilter[],
+  table: "field_executives" | "contractors" | "workforce" | "vendors" | "workers",
+  targetRegister: PhysicalRegisterTable,
   accessSurface: AccessSurface,
   editId?: string,
   viewId?: string
@@ -616,6 +621,7 @@ async function loadFieldExecutiveData(
   }
 
   const companyId = requireCompanyId(authorization);
+  const mappedDesignationIds = await loadMappedDesignationIds(companyId, targetRegister);
   let locationsResult: { data: unknown[] | null; error: { message?: string } | null } = await supabaseAdmin
     .from("stations")
     .select("id, station_code, station_name, location_model_id, hide_from_location_list, providers (name), location_models (code, name)")
@@ -719,10 +725,8 @@ async function loadFieldExecutiveData(
     providers: firstRelation(location.providers),
     location_models: firstRelation(location.location_models)
   })) as LocationRow[];
-  const designations = ((designationsResult.data ?? []) as unknown as DesignationRow[]).filter((designation) => {
-    const categories = normalizeDesignationCategories(designation.onboarding_categories);
-    return designationCategoryFilter.some((category) => categories.includes(category));
-  });
+  const designations = ((designationsResult.data ?? []) as unknown as DesignationRow[])
+    .filter((designation) => mappedDesignationIds.has(designation.id));
   const allowedLocationIds = new Set(locations.map((location) => location.id));
   const allowedDesignationNames = new Set(designations
     .filter((designation) => canAccessDesignationPortal(designation, accessSurface, "view", { isOwner: ownerAccess }))
@@ -838,7 +842,16 @@ export async function FieldExecutivePageContent({
     canEdit: false
   };
   const workforceConfig = nonEmployeeConfigForRoute(returnPath);
-  const { executives, locations, designations, editExecutive, viewExecutive, error } = await loadFieldExecutiveData(authorization, designationCategoryFilter, workforceConfig.table, accessSurface, editId, viewId);
+  const displayTable = returnPath === "/work-force-register" ? "workforce" : workforceConfig.table;
+  const { executives, locations, designations, editExecutive, viewExecutive, error } = await loadFieldExecutiveData(
+    authorization,
+    designationCategoryFilter,
+    displayTable,
+    targetRegisterForWorkforceRoute(returnPath),
+    accessSurface,
+    editId,
+    viewId
+  );
   const categoryRules = await loadWorkforceCategoryRules(
     requireCompanyId(authorization),
     workforceConfig.designationCategory,
