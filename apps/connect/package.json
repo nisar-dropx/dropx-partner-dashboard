@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "prebuild": "node ../../scripts/verify-connect-workspace-boundary.mjs",
+    "prebuild": "node ../../scripts/verify-connect-workspace-boundary.mjs && node ../../scripts/verify-connect-canonical-workforce.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start"
