@@ -16,6 +16,7 @@ import {
   UserRoundX
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { todayInIndia } from "@/lib/india-date";
 import type { AppAccount } from "./connect-profile-app";
 import {
   dashboardMotivationContext,
@@ -76,7 +77,7 @@ type OpenFlagNotice = {
 };
 
 function localIsoDate(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return todayInIndia(date);
 }
 
 function displayDate(value: string) {
@@ -353,12 +354,17 @@ export function ConnectDashboard({
   const latestRequest = [...attendance.rows]
     .filter((row) => row.regularization)
     .sort((left, right) => right.date.localeCompare(left.date))[0];
-  const hour = now.getHours();
+  const hour = Number(new Intl.DateTimeFormat("en-IN", {
+    hour: "2-digit",
+    hourCycle: "h23",
+    timeZone: "Asia/Kolkata"
+  }).format(now));
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const todayLabel = new Intl.DateTimeFormat("en-IN", {
     weekday: "long",
     day: "numeric",
-    month: "short"
+    month: "short",
+    timeZone: "Asia/Kolkata"
   }).format(now);
   const firstNameRaw = (account.name || account.reference || "there").trim().split(/\s+/)[0];
   const firstName = firstNameRaw.charAt(0).toUpperCase() + firstNameRaw.slice(1).toLowerCase();

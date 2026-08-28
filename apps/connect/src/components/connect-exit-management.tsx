@@ -211,7 +211,7 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
         <div className="dx-exit-card-heading"><span className="connect-exit-eyebrow">Live tracker</span><h3>Request progress</h3><p>Updates appear here as managers and teams complete their actions.</p></div>
         <div className="dx-exit-timeline">{exitCase.timeline.length ? exitCase.timeline.map((item, index) => {
           const state = timelineState(exitCase.timeline, index);
-          return <div className={state} key={item.id}><i>{state === "complete" ? <Check /> : <Circle />}</i><span><strong>{item.title}</strong><small>{item.actorName ? `${item.actorName} · ` : ""}{item.createdAt ? new Date(item.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : label(item.status)}</small>{item.note ? <em>{item.note}</em> : null}</span></div>;
+          return <div className={state} key={item.id}><i>{state === "complete" ? <Check /> : <Circle />}</i><span><strong>{item.title}</strong><small>{item.actorName ? `${item.actorName} · ` : ""}{item.createdAt ? new Date(item.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }) : label(item.status)}</small>{item.note ? <em>{item.note}</em> : null}</span></div>;
         }) : <div className="current"><i><Route /></i><span><strong>Submitted for review</strong><small>The receiving team will update this request.</small></span></div>}</div>
       </article>
 

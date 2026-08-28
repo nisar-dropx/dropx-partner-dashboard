@@ -484,7 +484,7 @@ export function ConnectLoginFlow() {
         {notificationLoading ? <div className="dx-notification-empty"><span className="mini-spin" /></div> : notifications.length ? <div className="dx-notification-list">
           {notifications.map((item) => <button className={item.read_at ? "read" : "unread"} key={item.id} onClick={() => void readNotification(item)}>
             <i>{item.read_at ? <CheckCheck /> : <Bell />}</i>
-            <span><strong>{item.title}</strong><em>{item.body}</em><small>{new Date(item.created_at).toLocaleString("en-IN")}</small></span>
+            <span><strong>{item.title}</strong><em>{item.body}</em><small>{new Date(item.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</small></span>
           </button>)}
         </div> : <div className="dx-notification-empty"><Bell /><span>No notifications</span></div>}
       </aside> : null}
