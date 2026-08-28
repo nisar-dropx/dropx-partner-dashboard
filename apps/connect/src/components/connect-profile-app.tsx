@@ -22,6 +22,8 @@ export type AppAccount = {
   profilePhotoUrl?: string | null;
   pageAccess?: string[];
   isDefault?: boolean;
+  workspace?: "people" | "workforce";
+  workspaceLabel?: string;
 };
 
 type Profile = {

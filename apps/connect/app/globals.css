@@ -14688,3 +14688,241 @@ body {
     font-size: 15px;
   }
 }
+
+/* Multi-persona workspace switcher and manager home */
+.dx-accounts > button {
+  position: relative;
+}
+
+.dx-accounts > button > span > b {
+  width: max-content;
+  margin-bottom: 3px;
+  padding: 3px 7px;
+  color: #175cd3;
+  background: #eff8ff;
+  border-radius: 999px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.dx-accounts > button.workforce > span > b {
+  color: #b54708;
+  background: #fff6ed;
+}
+
+.dx-accounts > button.people {
+  border-left: 3px solid #2e90fa;
+}
+
+.dx-accounts > button.workforce {
+  border-left: 3px solid #f79009;
+}
+
+.dx-people-workspace {
+  display: grid;
+  gap: 16px;
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.dx-people-workspace > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dx-people-workspace > header small {
+  color: #175cd3;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.dx-people-workspace > header h1 {
+  margin: 5px 0 4px;
+  color: #101828;
+  font-size: clamp(24px, 3vw, 34px);
+  line-height: 1.12;
+}
+
+.dx-people-workspace > header p {
+  margin: 0;
+  color: #667085;
+  font-size: 13px;
+}
+
+.dx-people-workspace > header > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  color: #027a48;
+  background: #ecfdf3;
+  border: 1px solid #abefc6;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.dx-people-workspace > header > span svg {
+  width: 15px;
+}
+
+.dx-manager-priority {
+  display: grid;
+  grid-template-columns: 44px 1fr 20px;
+  gap: 13px;
+  align-items: center;
+  width: 100%;
+  padding: 16px;
+  color: #fff;
+  background: linear-gradient(120deg, #101828, #27364f);
+  border: 0;
+  border-radius: 16px;
+  text-align: left;
+  box-shadow: 0 12px 28px #1018281c;
+}
+
+.dx-manager-priority > i {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  color: #101828;
+  background: #fff;
+  border-radius: 12px;
+}
+
+.dx-manager-priority svg {
+  width: 20px;
+}
+
+.dx-manager-priority > span {
+  display: grid;
+  gap: 3px;
+}
+
+.dx-manager-priority small {
+  color: #d0d5dd;
+  font-size: 11px;
+}
+
+.dx-manager-priority strong {
+  font-size: 17px;
+}
+
+.dx-manager-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dx-manager-counts button {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 1px 9px;
+  align-items: center;
+  padding: 13px;
+  color: #344054;
+  background: #fff;
+  border: 1px solid #e4e7ec;
+  border-radius: 14px;
+  text-align: left;
+}
+
+.dx-manager-counts svg {
+  grid-row: span 2;
+  width: 19px;
+  color: #2e90fa;
+}
+
+.dx-manager-counts strong {
+  color: #101828;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.dx-manager-counts small {
+  color: #667085;
+  font-size: 11px;
+}
+
+.dx-manager-actions {
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e4e7ec;
+  border-radius: 16px;
+}
+
+.dx-manager-actions button {
+  display: grid;
+  grid-template-columns: 32px 1fr 18px;
+  gap: 11px;
+  align-items: center;
+  width: 100%;
+  padding: 14px 16px;
+  color: #344054;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #f2f4f7;
+  text-align: left;
+}
+
+.dx-manager-actions button:last-child {
+  border-bottom: 0;
+}
+
+.dx-manager-actions button > svg:first-child {
+  width: 19px;
+  color: #475467;
+}
+
+.dx-manager-actions button > svg:last-child {
+  width: 16px;
+  color: #98a2b3;
+}
+
+.dx-manager-actions span {
+  display: grid;
+  gap: 2px;
+}
+
+.dx-manager-actions strong {
+  color: #101828;
+  font-size: 13px;
+}
+
+.dx-manager-actions small {
+  color: #667085;
+  font-size: 11px;
+}
+
+.dx-workforce-dashboard .dx-dashboard-greeting {
+  border-bottom-color: #fedf89;
+}
+
+.dx-workforce-dashboard .dx-live-chip {
+  color: #b54708;
+  background: #fff6ed;
+  border-color: #fedf89;
+}
+
+.dx-workforce-dashboard .dx-live-chip i {
+  background: #f79009;
+}
+
+@media (max-width: 560px) {
+  .dx-manager-counts {
+    grid-template-columns: 1fr;
+  }
+
+  .dx-people-workspace > header > span {
+    display: none;
+  }
+}

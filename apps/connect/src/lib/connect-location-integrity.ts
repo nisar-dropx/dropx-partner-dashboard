@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { ConnectAccount } from "./connect-auth";
-import { expenseIdentity } from "./connect-expense-data";
+import { connectApproverIdentity } from "./connect-expense-data";
 import { supabaseAdmin } from "./supabase-admin";
 
 export type ConnectLocationSupportPackage = {
@@ -173,7 +173,7 @@ async function managerTeamProfileIds(companyId: string, managerAssignmentId: str
 export async function listConnectLocationSupportPackages(account: ConnectAccount): Promise<ConnectLocationSupportPackage[]> {
   let identity;
   try {
-    identity = await expenseIdentity(account);
+    identity = await connectApproverIdentity(account);
   } catch {
     return [];
   }
@@ -246,7 +246,7 @@ export async function reviewConnectLocationSupportPackage(account: ConnectAccoun
   if (!/^[0-9a-f-]{36}$/i.test(reviewId)) throw new Error("Support package is invalid.");
   if (!["approve", "return", "reject"].includes(action)) throw new Error("Choose Approve, Return, or Reject.");
 
-  const identity = await expenseIdentity(account);
+  const identity = await connectApproverIdentity(account);
   if (!identity.userId) throw new Error("A linked People login is required to review support packages.");
 
   const existing = await db().from("attendance_location_reviews")

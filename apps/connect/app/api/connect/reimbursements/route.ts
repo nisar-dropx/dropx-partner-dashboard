@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
-import { activeExpenseCategories, expenseCategoriesForPolicy, expenseIdentity, expensePayoutReadiness, expenseWorkerType, resolveExpenseApprovers } from "../../../../src/lib/connect-expense-data";
+import { activeExpenseCategories, connectApproverIdentity, expenseCategoriesForPolicy, expenseIdentity, expensePayoutReadiness, expenseWorkerType, resolveExpenseApprovers } from "../../../../src/lib/connect-expense-data";
 import { notifyExpenseUser } from "../../../../src/lib/connect-expense-notifications";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
@@ -17,29 +17,41 @@ async function signedAttachments(value: Array<{ id: string; item_id: string | nu
   }));
 }
 
-async function selectedAccount(request: Request, body?: Record<string, unknown>) {
+async function selectedAccount(request: Request, body?: Record<string, unknown>, approverAccess = false) {
   const url = new URL(request.url);
   const accountId = clean(body?.accountId ?? url.searchParams.get("accountId"));
   const profileType = clean(body?.profileType ?? url.searchParams.get("profileType"));
-  if (!accountId || !profileType || !expenseWorkerType(profileType)) throw new Error("Select an employee or independent contractor account.");
+  if (!accountId || !profileType || (!expenseWorkerType(profileType) && !(approverAccess && profileType === "user"))) {
+    throw new Error(approverAccess ? "Select an authorised approver account." : "Select an employee or independent contractor account.");
+  }
   return requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
+}
+
+async function approvalPayload(companyId: string, userId: string | null) {
+  if (!userId) return [];
+  const result = await db().from("hr_expense_approval_steps")
+    .select("id,claim_id,step_order,step_name,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
+    .eq("company_id", companyId).eq("approver_user_id", userId).eq("status", "pending").order("created_at");
+  if (result.error) throw new Error(result.error.message);
+  return (await Promise.all((result.data ?? []).map(async (step) => {
+    const claim = relation(step.hr_expense_claims);
+    const employee = relation(claim?.employees);
+    const contractor = relation(claim?.contractors);
+    return { ...step, claim: claim ? { ...claim, requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member", requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "", attachments: await signedAttachments(claim.hr_expense_attachments) } : null };
+  }))).filter((step) => step.claim);
 }
 
 async function claimPayload(account: ConnectAccount) {
   const identity = await expenseIdentity(account);
   const workerColumn = identity.workerType === "employee" ? "employee_id" : "contractor_id";
-  const [categories, payout, claimsResult, approvalsResult] = await Promise.all([
+  const [categories, payout, claimsResult] = await Promise.all([
     activeExpenseCategories(account),
     expensePayoutReadiness(account),
     db().from("hr_expense_claims")
       .select("id,claim_no,purpose,trip_from,trip_to,total_claimed,total_approved,status,current_step,submitted_at,created_at,return_reason,rejection_reason,payment_request_id,hr_expense_items(id,expense_date,merchant,description,amount,approved_amount,reviewer_note,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path),hr_expense_approval_steps(id,step_order,step_name,approver_user_id,status,decision_note,decided_by,decided_at),hr_expense_events(id,event_type,from_status,to_status,actor_name,actor_role,comments,metadata,created_at),payment_requests(request_no,status,approval_status,utr_cin,bank_status,bank_processing_remarks,processing_started_at,processed_at)")
-      .eq("company_id", account.companyId).eq(workerColumn, account.id).order("created_at", { ascending: false }).limit(50),
-    identity.userId ? db().from("hr_expense_approval_steps")
-      .select("id,claim_id,step_order,step_name,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
-      .eq("company_id", account.companyId).eq("approver_user_id", identity.userId).eq("status", "pending").order("created_at")
-      : Promise.resolve({ data: [], error: null })
+      .eq("company_id", account.companyId).eq(workerColumn, account.id).order("created_at", { ascending: false }).limit(50)
   ]);
-  if (claimsResult.error || approvalsResult.error) throw new Error(claimsResult.error?.message ?? approvalsResult.error?.message ?? "Unable to load reimbursements.");
+  if (claimsResult.error) throw new Error(claimsResult.error.message ?? "Unable to load reimbursements.");
   const claims = await Promise.all((claimsResult.data ?? []).map(async (claim) => ({
     ...claim,
     payment: relation(claim.payment_requests),
@@ -48,19 +60,17 @@ async function claimPayload(account: ConnectAccount) {
     events: [...(claim.hr_expense_events ?? [])].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)),
     attachments: await signedAttachments(claim.hr_expense_attachments)
   })));
-  const approvals = (await Promise.all((approvalsResult.data ?? []).map(async (step) => {
-    const claim = relation(step.hr_expense_claims);
-    const employee = relation(claim?.employees);
-    const contractor = relation(claim?.contractors);
-    return { ...step, claim: claim ? { ...claim, requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member", requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "", attachments: await signedAttachments(claim.hr_expense_attachments) } : null };
-  }))).filter((step) => step.claim);
+  const approvals = await approvalPayload(account.companyId, identity.userId);
   return { categories, payout, claims, approvals };
 }
 
 export async function GET(request: Request) {
   try {
-    const account = await selectedAccount(request);
-    return NextResponse.json(await claimPayload(account), { headers: { "Cache-Control": "private, no-store" } });
+    const account = await selectedAccount(request, undefined, true);
+    const payload = account.profileType === "user"
+      ? { categories: [], payout: { ready: false, message: null }, claims: [], approvals: await approvalPayload(account.companyId, account.id) }
+      : await claimPayload(account);
+    return NextResponse.json(payload, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load reimbursements." }, { status: 400 });
   }
@@ -179,14 +189,15 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
-    const account = await selectedAccount(request, body);
-    const identity = await expenseIdentity(account);
-    if (!identity.userId) throw new Error("Your One account is not linked to a People approver login.");
+    const account = await selectedAccount(request, body, true);
+    const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
+    const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
+    if (!approverUserId) throw new Error("Your One account is not linked to a People approver login.");
     const claimId = clean(body.claimId);
     const action = clean(body.action).toLowerCase();
     const note = clean(body.note);
     if (!claimId || !["approved", "returned", "rejected"].includes(action)) throw new Error("Select a valid reimbursement decision.");
-    const result = await db().rpc("hr_decide_expense_claim", { p_company_id: account.companyId, p_claim_id: claimId, p_actor_user_id: identity.userId, p_action: action, p_note: note || null });
+    const result = await db().rpc("hr_decide_expense_claim", { p_company_id: account.companyId, p_claim_id: claimId, p_actor_user_id: approverUserId, p_action: action, p_note: note || null });
     if (result.error) throw new Error(result.error.message);
     const decision = Array.isArray(result.data) ? result.data[0] : result.data;
     const claim = await db().from("hr_expense_claims").select("claim_no,purpose,total_claimed,claimant_user_id").eq("company_id", account.companyId).eq("id", claimId).single();

@@ -47,6 +47,40 @@ export async function expenseIdentity(account: ConnectAccount) {
   };
 }
 
+export async function connectApproverIdentity(account: ConnectAccount) {
+  if (account.profileType !== "user") return expenseIdentity(account);
+  const today = indiaToday();
+  const link = await db().from("hr_user_person_links").select("person_id,status")
+    .eq("company_id", account.companyId).eq("user_id", account.id).eq("status", "active")
+    .limit(1).maybeSingle();
+  if (link.error || !link.data) {
+    throw new Error(link.error?.message ?? "Your People login is not linked to an active person record.");
+  }
+  const engagement = await db().from("hr_engagements").select("id,person_id,worker_type,employee_id,contractor_id,status")
+    .eq("company_id", account.companyId).eq("person_id", link.data.person_id).eq("status", "active")
+    .limit(1).maybeSingle();
+  if (engagement.error || !engagement.data) {
+    throw new Error(engagement.error?.message ?? "Your active People engagement is not configured.");
+  }
+  const assignment = await db().from("hr_work_assignments")
+    .select("id,business_line,position_title,location_id,designation_id,is_top_level,effective_from,effective_to")
+    .eq("company_id", account.companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true)
+    .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`)
+    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+  if (assignment.error || !assignment.data) {
+    throw new Error(assignment.error?.message ?? "Your current People assignment is not configured.");
+  }
+  const workerType: ExpenseWorkerType = engagement.data.worker_type === "contractor" ? "contractor" : "employee";
+  return {
+    workerType,
+    workerId: engagement.data.employee_id ?? engagement.data.contractor_id ?? account.id,
+    personId: engagement.data.person_id,
+    userId: account.id,
+    assignment: assignment.data,
+    today
+  };
+}
+
 export async function resolveExpensePolicy(account: ConnectAccount, amount: number) {
   const identity = await expenseIdentity(account);
   const result = await db().from("hr_expense_policies")

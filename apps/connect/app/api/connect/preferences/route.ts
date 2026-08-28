@@ -37,7 +37,6 @@ export async function PUT(request: Request) {
     const profileType = String(body.profileType ?? "").trim().toLowerCase();
     const accounts = await findConnectAccounts(login.countryCode, login.mobile);
     const account = accounts.find((row) =>
-      row.profileType !== "user" &&
       row.id === accountId &&
       row.companyId === companyId &&
       row.profileType === profileType

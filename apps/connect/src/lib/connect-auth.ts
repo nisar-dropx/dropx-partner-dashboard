@@ -24,6 +24,8 @@ export type ConnectAccount = {
   isDefault: boolean;
   companyName: string;
   label: string;
+  workspace: "people" | "workforce";
+  workspaceLabel: string;
 };
 
 type AccountRow = {
@@ -106,6 +108,11 @@ async function signedProfilePhotoUrl(path?: string | null) {
 }
 
 const defaultPageAccess = ["dashboard", "attendance", "roster", "leave", "performance", "settings"];
+const managerPageAccess = ["dashboard", "approvals", "settings"];
+
+export function connectWorkspace(profileType: ConnectAccount["profileType"]) {
+  return profileType === "user" || profileType === "employee" ? "people" as const : "workforce" as const;
+}
 
 function categoryCodeForProfile(profileType: ConnectAccount["profileType"]) {
   if (profileType === "employee") return "employees";
@@ -228,6 +235,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       email: profile.email,
       employee_id: profile.employee_id,
       role: profile.role,
+      status: "Active",
       profile_type: "user" as const
     }))),
     ...nonEmployeeResults.flatMap((result, index) => {
@@ -254,7 +262,16 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     ...employeeAccounts
   ].filter((account) => account.company_id);
 
-  const companyIds = Array.from(new Set(accounts.map((account) => account.company_id)));
+  // A People login and its employee record represent the same employee workspace.
+  // Keep the richer employee account in that case, while retaining a manager login
+  // beside contractor/workforce identities so genuine dual-role users can switch.
+  const employeeReferences = new Set(employeeAccounts
+    .filter((account) => account.employee_id)
+    .map((account) => `${account.company_id}:${String(account.employee_id).trim().toLowerCase()}`));
+  const visibleAccounts = accounts.filter((account) => account.profile_type !== "user" || !account.employee_id ||
+    !employeeReferences.has(`${account.company_id}:${String(account.employee_id).trim().toLowerCase()}`));
+
+  const companyIds = Array.from(new Set(visibleAccounts.map((account) => account.company_id)));
   const companiesResult = companyIds.length
     ? await supabaseAdmin.from("companies").select("id, name, code").in("id", companyIds).eq("is_active", true)
     : { data: [], error: null };
@@ -338,7 +355,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   }
   const defaultPreference = preferenceResult.error ? null : preferenceResult.data;
 
-  return Promise.all(accounts
+  return Promise.all(visibleAccounts
     .filter((account) => companyNameById.has(account.company_id))
     .map(async (account): Promise<ConnectAccount> => {
       const categoryCode = categoryCodeForProfile(account.profile_type);
@@ -361,14 +378,15 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       biometricId: account.biometric_id ?? null,
       profilePhotoUrl: await signedProfilePhotoUrl(account.profile_photo_path),
       pageAccess: account.profile_type === "user"
-        ? defaultPageAccess
+        ? managerPageAccess
         : intersectPageAccess(categoryPages, designationPages),
-      isDefault: account.profile_type !== "user" &&
-        defaultPreference?.default_company_id === account.company_id &&
+      isDefault: defaultPreference?.default_company_id === account.company_id &&
         defaultPreference?.default_profile_type === account.profile_type &&
         defaultPreference?.default_account_id === account.id,
       companyName: companyNameById.get(account.company_id) ?? "Company",
-      label: accountLabel(account, companyNameById)
+      label: accountLabel(account, companyNameById),
+      workspace: connectWorkspace(account.profile_type),
+      workspaceLabel: connectWorkspace(account.profile_type) === "people" ? "People workspace" : "Workforce workspace"
       };
     }));
 }

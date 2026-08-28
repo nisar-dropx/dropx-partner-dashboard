@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
-import { expenseIdentity } from "../../../../src/lib/connect-expense-data";
+import { connectApproverIdentity } from "../../../../src/lib/connect-expense-data";
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
@@ -13,17 +13,18 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>)
   const accountId = clean(body?.accountId ?? url.searchParams.get("accountId"));
   const profileType = clean(body?.profileType ?? url.searchParams.get("profileType"));
   if (!accountId || !profileType) throw new Error("Account is required.");
-  if (profileType !== "employee" && profileType !== "contractor") throw new Error("Approvals are available for workforce accounts.");
+  if (profileType !== "user" && profileType !== "employee" && profileType !== "contractor") throw new Error("Approvals are not available for this account.");
   return requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
 }
 
 async function listLeaveApprovals(account: ConnectAccount) {
-  const identity = await expenseIdentity(account);
-  if (!identity.userId) return [];
+  const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
+  const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
+  if (!approverUserId) return [];
   const stepResult = await db().from("hr_leave_approval_steps")
     .select("id,request_id,step_order,step_name,status")
     .eq("company_id", account.companyId)
-    .eq("approver_user_id", identity.userId)
+    .eq("approver_user_id", approverUserId)
     .eq("status", "pending")
     .order("created_at");
   if (stepResult.error) throw new Error(stepResult.error.message);
@@ -83,8 +84,9 @@ export async function PATCH(request: Request) {
       const notice = await reviewConnectLocationSupportPackage(account, reviewId, decision, note);
       return NextResponse.json({ ok: true, notice });
     }
-    const identity = await expenseIdentity(account);
-    if (!identity.userId) throw new Error("A linked People login is required to approve time off.");
+    const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
+    const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
+    if (!approverUserId) throw new Error("A linked People login is required to approve time off.");
     const requestId = clean(body.requestId);
     const decision = clean(body.decision);
     const note = clean(body.note);
@@ -93,7 +95,7 @@ export async function PATCH(request: Request) {
     const result = await db().rpc("hr_decide_leave_step", {
       p_company_id: account.companyId,
       p_request_id: requestId,
-      p_actor_user_id: identity.userId,
+      p_actor_user_id: approverUserId,
       p_decision: decision,
       p_note: note
     });
