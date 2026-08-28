@@ -28,9 +28,12 @@ function indiaToday() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
+const SUPPORT_SELFIE_BUCKET = "employee-profile-documents";
+
 async function signedSelfieUrl(path: string) {
-  if (!path) return null;
-  const signed = await db().storage.from("attendance-support-selfies").createSignedUrl(path, 15 * 60);
+  const trimmed = String(path ?? "").trim();
+  if (!trimmed || trimmed.startsWith("[")) return null;
+  const signed = await db().storage.from(SUPPORT_SELFIE_BUCKET).createSignedUrl(trimmed, 15 * 60);
   return signed.data?.signedUrl ?? null;
 }
 
@@ -43,7 +46,7 @@ async function purgeSupportSelfieForReviewId(companyId: string, reviewId: string
   if (result.error || !result.data?.selfie_path) return;
   const path = String(result.data.selfie_path).trim();
   if (!path || path.startsWith("[")) return;
-  await db().storage.from("attendance-support-selfies").remove([path]).catch((error) => {
+  await db().storage.from(SUPPORT_SELFIE_BUCKET).remove([path]).catch((error) => {
     console.error("Unable to remove support selfie from storage", error instanceof Error ? error.message : error);
   });
   await db().from("attendance_location_reviews")

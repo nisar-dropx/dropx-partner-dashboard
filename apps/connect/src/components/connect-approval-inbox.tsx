@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Check, ClipboardCheck, Clock3, FileText, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
+import { Camera, Check, ClipboardCheck, Clock3, FileText, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
 
@@ -172,12 +172,23 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     {!loading && section === "location-integrity" ? <div className="dx-expense-list">
       {supportPackages.length ? supportPackages.map((item) => <article className="dx-expense-approval" key={item.id}>
         <header><span><small>Support package · {displayDate(item.punchDate)}</small><strong>{item.workerName}</strong><em>{item.workerCode || "—"} · {item.profileType === "contractor" ? "Independent contractor" : "Employee"}</em></span><b>{item.status.replaceAll("_", " ")}</b></header>
-        <div>
-          <span><LocateFixed /> {item.lat.toFixed(5)}, {item.lng.toFixed(5)}{item.accuracyM == null ? "" : ` · ±${Math.round(item.accuracyM)}m`}</span>
-          <span>{item.remarks || "Selfie and GPS submitted outside station"}</span>
-          <span>{item.receivedAt ? `Received ${dateTime(item.receivedAt)}` : "Awaiting server receipt"}</span>
-          {item.selfieUrl ? <a href={item.selfieUrl} rel="noreferrer" target="_blank"><FileText />View selfie</a> : null}
-          <a href={`https://www.google.com/maps?q=${item.lat},${item.lng}`} rel="noreferrer" target="_blank"><MapPin />Open map</a>
+        <div className="dx-support-evidence">
+          <figure className="dx-support-selfie">
+            {item.selfieUrl ? (
+              <>
+                <img alt={`Support selfie for ${item.workerName}`} src={item.selfieUrl} />
+                <a href={item.selfieUrl} rel="noreferrer" target="_blank"><Camera />Open full photo</a>
+              </>
+            ) : (
+              <div className="dx-support-selfie-missing"><Camera /><span>Selfie unavailable</span></div>
+            )}
+          </figure>
+          <div className="dx-support-location">
+            <span><LocateFixed /> {item.lat.toFixed(5)}, {item.lng.toFixed(5)}{item.accuracyM == null ? "" : ` · ±${Math.round(item.accuracyM)}m`}</span>
+            <span>{item.remarks || "Selfie and GPS submitted outside station"}</span>
+            <span>{item.receivedAt ? `Received ${dateTime(item.receivedAt)}` : "Awaiting server receipt"}</span>
+            <a href={`https://www.google.com/maps?q=${item.lat},${item.lng}`} rel="noreferrer" target="_blank"><MapPin />Open map</a>
+          </div>
         </div>
         <label>Review note<textarea onChange={(event) => setNotes((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Optional note" rows={2} value={notes[item.id] ?? ""} /></label>
         <footer>
