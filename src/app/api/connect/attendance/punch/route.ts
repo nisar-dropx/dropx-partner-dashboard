@@ -6,10 +6,9 @@ import {
   loadOpenShift,
   loadStationGeofence,
   parseIntegritySignals,
-  resolveCompanyPunchGeofence,
-  TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY,
-  tempReleaseStuckHeldPunches
+  resolveCompanyPunchGeofence
 } from "@/lib/biometric/attendance-gps";
+import { resolveStationAttendanceSettings } from "@/lib/biometric/station-attendance-settings";
 import { createAppNotification } from "@/lib/app-notifications";
 import {
   parseClientSignals,
@@ -63,8 +62,7 @@ export async function GET(request: NextRequest) {
     const profileType = request.nextUrl.searchParams.get("profileType") ?? "";
     if (!accountId) throw new Error("Account is required.");
     const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
-    // TEMP: repair punches stuck off calendar from the auto-approve/hold race.
-    await tempReleaseStuckHeldPunches(worker.companyId, worker.enrolmentId).catch(() => undefined);
+    const stationSettings = await resolveStationAttendanceSettings(worker.locationId ?? null);
     const shift = await loadOpenShift({
       companyId: worker.companyId,
       enrolmentId: worker.enrolmentId
@@ -161,7 +159,11 @@ export async function GET(request: NextRequest) {
         longitude: row.longitude,
         radiusM: row.geofenceRadiusM
       })),
-      openFlags: openFlagsForClient
+      openFlags: openFlagsForClient,
+      attendanceSettings: {
+        locationTrackingEnabled: stationSettings.locationTrackingEnabled,
+        integrityFlagsEnabled: stationSettings.integrityFlagsEnabled
+      }
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load punch status.";
@@ -242,8 +244,7 @@ export async function POST(request: NextRequest) {
       faceMatched: true
     });
 
-    // TEMP auto-approve resolves the flag + activates punch inside insertAppGpsPunch / openIntegrityFlag.
-    if (!TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY) {
+    if (result.isFlagged) {
       await createAppNotification({
         accountId: worker.profileId,
         companyId: worker.companyId,
@@ -275,13 +276,13 @@ export async function POST(request: NextRequest) {
         score: integrity.score,
         reasons: integrity.reasons
       },
-      isFlagged: !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY,
-      supportRequired: !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY,
-      pendingApproval: !TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY,
+      isFlagged: result.isFlagged,
+      supportRequired: result.supportRequired,
+      pendingApproval: result.pendingApproval,
       flagIds: result.flagIds,
-      message: TEMP_AUTO_APPROVE_ATTENDANCE_INTEGRITY
-        ? "Punch recorded (temporary auto-approve mode)."
-        : "Action needed. Submit a selfie from Attendance if prompted."
+      message: result.isFlagged
+        ? "Action needed. Submit a selfie from Attendance if prompted."
+        : "Punch recorded."
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to record GPS punch.";

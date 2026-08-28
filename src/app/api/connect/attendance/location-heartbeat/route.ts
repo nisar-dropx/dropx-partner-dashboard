@@ -11,6 +11,7 @@ import {
   openIntegrityFlag,
   parseIntegritySignals
 } from "@/lib/biometric/attendance-gps";
+import { resolveStationAttendanceSettings } from "@/lib/biometric/station-attendance-settings";
 import {
   parseClientSignals,
   parseCoordinate,
@@ -40,6 +41,10 @@ export async function POST(request: NextRequest) {
     const worker = await resolveConnectAttendanceWorker({ accountId, profileType, requirePeopleScope: true });
     if (!worker.locationId) {
       return NextResponse.json({ ok: true, skipped: true, reason: "assigned_station_missing" });
+    }
+    const stationSettings = await resolveStationAttendanceSettings(worker.locationId);
+    if (!stationSettings.locationTrackingEnabled) {
+      return NextResponse.json({ ok: true, skipped: true, reason: "location_tracking_disabled" });
     }
     const shift = await loadOpenShift({
       companyId: worker.companyId,

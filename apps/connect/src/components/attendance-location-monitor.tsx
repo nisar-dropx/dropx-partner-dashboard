@@ -52,6 +52,10 @@ export function AttendanceLocationMonitor({ account }: { account: Account }) {
       const status = await statusResponse.json().catch(() => null);
       if (!statusResponse.ok || !status) return;
 
+      if (status.attendanceSettings?.locationTrackingEnabled !== true) {
+        return;
+      }
+
       const inTime = status.shift?.open && status.shift?.inTime ? String(status.shift.inTime) : null;
       lastInTime.current = inTime;
       if (inTime) {

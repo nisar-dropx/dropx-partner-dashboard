@@ -13,6 +13,7 @@ This note tells Codex how to finish the **native Android Flutter** app (`com.dro
 | Connect web (DropX One) | `apps/connect` in `dropx-partner-dashboard` |
 | Shared attendance APIs | `src/app/api/connect/attendance/*` (dashboard) |
 | Core GPS / hold / flag logic | `src/lib/biometric/attendance-gps.ts` |
+| Per-location tracking / flag toggles | **People HRMS** → Attendance → **Location settings** (`https://people.dropxlogistics.com/attendance/location-settings`) |
 | People HRMS review | `dropx-hrms` → `https://people.dropxlogistics.com/attendance/integrity` |
 | Connect production | `https://one.dropxlogistics.com/` |
 | Partner integrity (legacy mirror) | `https://dashboard…/attendance/integrity` |
@@ -25,10 +26,10 @@ This note tells Codex how to finish the **native Android Flutter** app (`com.dro
 
 1. **Primary punch = station biometric device.** Connect must **not** show always-on GPS Punch In/Out.
 2. Connect shows **Location review needed** **only when** `openFlags.length > 0` (support selfie + live GPS for manager review).
-3. While DropX One is logged in, the phone silently sends **presence GPS** (even off-shift) so buddy-punch can be checked on biometric punch.
-4. After punch-in, in-shift tracking / continuous-outside flagging runs for **9 hours**, then stops (`LOCATION_TRACKING_MS`).
-5. Continuous outside station geofence **> radius (default 50m) for > 30 minutes** during that window → flag `outside_geofence_gt_2h` (name is historical; threshold is **30 min**, not 2h).
-6. Biometric punch while recent phone GPS is outside any company station → immediate `biometric_phone_mismatch`. Connect-linked workers with **no recent phone GPS** (within **20 min**) are also flagged (`phone_location_missing` in details). That punch is **held**.
+3. While DropX One is logged in, the phone silently sends **presence GPS** when **location tracking is ON** for the worker’s assigned station (People → Attendance → Location settings). Default is **off** for all stations until enabled.
+4. After punch-in, in-shift tracking / continuous-outside flagging runs for **9 hours** (only when tracking ON), then stops (`LOCATION_TRACKING_MS`).
+5. Continuous outside station geofence **> radius (default 50m) for > 30 minutes** during that window → flag `outside_station_over_limit` — only when **location flags** are ON for that station.
+6. Biometric punch while recent phone GPS is outside any company station → immediate `biometric_phone_mismatch` (only when **location flags ON** for station). Connect-linked workers with **no recent phone GPS** (within **20 min**) are also flagged when flags ON. That punch is **held**.
 7. Forgot punch-out reminders at **9.5h** and **10h** after punch-in → `forgot_punch_out`.
 8. Employees **cannot** edit punch lat/lng/time from website or app.
 9. Support selfie is **review-only** — never marks Present by itself (`attendanceMarked: false`).
@@ -230,7 +231,16 @@ Fields: `accountId`, `profileType`, `flagId`, `punchId?`, `punchDate`, `lat`, `l
 2. **No pending-approval / duty / monitoring banners** — never tell the worker they are being monitored or that duty is “pending manager approval”.
 3. **Action needed card** only if `openFlags.length > 0` — generic “Submit selfie” (do not show flag_type / internal messages).
 4. **Support sheet** — geofence gate; camera gated; face match → liveness → capture → submit. Neutral copy only.
-5. **Silent tracker** — presence while logged in; after punch-in continue **9h**; heartbeat every **3–5 min**; no UI copy.
+5. **Silent tracker** — only when `attendanceSettings.locationTrackingEnabled === true` from punch GET; after punch-in continue **9h**; heartbeat every **3–5 min**; no UI copy.
+
+### Per-location admin toggles (People → Attendance → Location settings)
+
+| Toggle | DB column | Default | Effect |
+|---|---|---|---|
+| Location tracking | `stations.attendance_location_tracking_enabled` | **off** | GPS heartbeats + samples for workers at this station |
+| Location flags | `stations.attendance_integrity_flags_enabled` | **off** | Opens integrity flags + holds punches for manager review |
+
+Punch GET includes `attendanceSettings: { locationTrackingEnabled, integrityFlagsEnabled }` for the worker’s assigned station. Skip heartbeats client-side when tracking is off.
 
 Do **not** build: edit punch lat/lng/time; force Present; always-visible GPS punch; treating support selfie as attendance; skipping face match before liveness; remounting camera mid-liveness on GPS refresh; worker-facing monitoring jargon.
 
@@ -256,10 +266,9 @@ Primary: **People → Attendance → Location integrity**
   - **Approve punch** — resolves flag, auto-approves linked pending support packages, activates held punch, rebuilds day with **original punch time**, redirects out of the modal.
 - Hint: Approve counts held punch toward attendance; Dismiss leaves calendar unchanged.
 
-### Temporary development shortcut
+### Bulk approve (managers)
 - **Approve all (N)** on Open flags tab — bulk-resolves open flags (team or company depending on permission).
 - Must be **batched** (bulk flag/review updates + bulk punch activate + parallel day rebuilds). Do not approve flags one-by-one serially (hangs on ~200+ flags).
-- Temporary only while development continues.
 
 ### Support packages tab
 - Per package: Approve / Reject (remarks required on reject).
