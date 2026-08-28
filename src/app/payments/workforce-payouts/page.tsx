@@ -7,13 +7,13 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const EMPTY_SCOPE = "00000000-0000-0000-0000-000000000000";
-const metricValue = (row: any, source: string) => source === "amazon_delivery" ? Number(row.delivery_units ?? 0)
-  : source === "swa_delivery" ? Number(row.swa_units ?? 0)
-  : source === "total_delivery" ? Number(row.delivery_units ?? 0) + Number(row.swa_units ?? 0)
-  : source === "customer_return" ? Number(row.customer_return_units ?? 0)
-  : source === "seller_pickup" ? Number(row.mfn_units ?? 0)
-  : source === "seller_return" ? Number(row.seller_return_units ?? 0)
-  : Number(row.other_metrics?.[source] ?? 0);
+const metricValue = (row: any, source: string) => source === "amazon_delivery" ? Number(row.amazon_delivery ?? 0)
+  : source === "swa_delivery" ? Number(row.swa_delivery ?? 0)
+  : source === "total_delivery" ? Number(row.total_delivery ?? (Number(row.amazon_delivery ?? 0) + Number(row.swa_delivery ?? 0)))
+  : source === "customer_return" ? Number(row.c_return ?? 0)
+  : source === "seller_pickup" ? Number(row.mfn ?? 0)
+  : source === "seller_return" ? Number(row.mfn_return ?? 0)
+  : 0;
 
 async function loadRows(companyId: string, authorization: AuthorizationContext) {
   if (!supabaseAdmin) return { rows: [] as WorkforcePayoutRow[], error: "Database connection is not configured." };
@@ -30,17 +30,17 @@ async function loadRows(companyId: string, authorization: AuthorizationContext) 
   const allowed = new Set(locations.map((row) => row.id));
   const mappings = (mappingsResult.data ?? []).filter((row: any) => allowed.has(row.station_id));
   const sourceIds = Array.from(new Set(mappings.flatMap((row: any) => [row.contractor_id,row.employee_id,row.field_executive_id]).filter(Boolean)));
-  const mappingIds = mappings.map((row: any) => row.id);
+  const providerMemberIds = Array.from(new Set(mappings.map((row: any) => row.provider_member_id).filter(Boolean)));
   const from = new Date(); from.setDate(1); const fromDate = from.toISOString().slice(0,10); const toDate = new Date().toISOString().slice(0,10);
   const [workforceResult, metricsResult, modelsResult] = await Promise.all([
     sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, dropx_id, full_name").eq("company_id", companyId).in("source_profile_id", sourceIds) : Promise.resolve({ data: [], error: null }),
-    mappingIds.length ? supabaseAdmin.from("provider_daily_metrics").select("mapping_id, delivery_units, customer_return_units, mfn_units, seller_return_units, swa_units, other_metrics").in("mapping_id", mappingIds).gte("work_date", fromDate).lte("work_date", toDate) : Promise.resolve({ data: [], error: null }),
+    providerMemberIds.length ? supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, work_date, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return").eq("company_id", companyId).in("provider_employee_id", providerMemberIds).gte("work_date", fromDate).lte("work_date", toDate).limit(50000) : Promise.resolve({ data: [], error: null }),
     supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId)
   ]);
   if (workforceResult.error || metricsResult.error || modelsResult.error) return { rows: [] as WorkforcePayoutRow[], error: workforceResult.error?.message || metricsResult.error?.message || modelsResult.error?.message || "Unable to load payout data." };
   const workerBySource = new Map((workforceResult.data ?? []).map((row: any) => [row.source_profile_id, row]));
   const locationById = new Map(locations.map((row: any) => [row.id, row])); const modelById = new Map((modelsResult.data ?? []).map((row: any) => [row.id, row]));
-  const metricsByMapping = new Map<string, any[]>(); (metricsResult.data ?? []).forEach((row: any) => metricsByMapping.set(row.mapping_id, [...(metricsByMapping.get(row.mapping_id) ?? []), row]));
+  const metricsByProviderMember = new Map<string, any[]>(); (metricsResult.data ?? []).forEach((row: any) => metricsByProviderMember.set(row.provider_employee_id, [...(metricsByProviderMember.get(row.provider_employee_id) ?? []), row]));
   const allocations = allocationResult.data ?? [];
   const rows = mappings.map((mapping: any) => {
     const sourceId = mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id);
@@ -48,7 +48,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext) 
     allocations.filter((item: any) => item.provider_id === mapping.provider_id && (!item.provider_model_id || item.provider_model_id === location?.location_model_id)).forEach((item: any) => {
       const field: any = Array.isArray(item.payment_fields) ? item.payment_fields[0] : item.payment_fields; const metric: any = Array.isArray(item.provider_production_metrics) ? item.provider_production_metrics[0] : item.provider_production_metrics;
       if (!field?.code || field.field_type !== "production" || !metric?.source_key) return;
-      const count = (metricsByMapping.get(mapping.id) ?? []).reduce((sum, daily) => sum + metricValue(daily, metric.source_key), 0); const rate = Number(mapping.payment_values?.[field.code] ?? 0); production += count; baseAmount += count * rate;
+      const count = (metricsByProviderMember.get(mapping.provider_member_id) ?? []).filter((daily) => daily.work_date >= mapping.effective_from && (!mapping.effective_to || daily.work_date <= mapping.effective_to)).reduce((sum, daily) => sum + metricValue(daily, metric.source_key), 0); const rate = Number(mapping.payment_values?.[field.code] ?? 0); production += count; baseAmount += count * rate;
     });
     return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", locationId: mapping.station_id, location: location ? `${location.station_code} - ${location.station_name}` : "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, baseAmount, additions: 0, deductions: 0, netAmount: baseAmount, status: production > 0 ? "Ready for review" : "Awaiting production" } satisfies WorkforcePayoutRow;
   });
