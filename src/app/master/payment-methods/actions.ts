@@ -31,6 +31,16 @@ function paymentMethodRedirect(params: { error?: string; notice?: string }) {
   redirect("/master/payment-methods");
 }
 
+function paymentFieldRedirect(params: { error?: string; notice?: string }) {
+  cookies().set("dropx_payment_method_flash", JSON.stringify(params), {
+    httpOnly: true,
+    maxAge: 15,
+    path: "/master/payment-methods",
+    sameSite: "lax"
+  });
+  redirect("/master/payment-methods?fields=1");
+}
+
 export async function createPaymentMethod(formData: FormData) {
   const authorization = await requirePagePermission("payment_methods", "add");
   const companyId = requireCompanyId(authorization);
@@ -202,36 +212,44 @@ async function saveProviderMetricSelections(formData: FormData, companyId: strin
 export async function createPaymentField(formData: FormData) {
   const authorization = await requirePagePermission("payment_methods", "add");
   const companyId = requireCompanyId(authorization);
-  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
-  const payload = parsePaymentField(formData);
-  const result = await supabaseAdmin.from("payment_fields").insert(withCompany({ ...payload, is_active: true }, companyId)).select("id").single();
-  if (result.error) throw new Error(result.error.message);
-  await saveProviderMetricSelections(formData, companyId, result.data.id);
-  revalidatePath("/master/payment-methods");
-  redirect("/master/payment-methods?fields=1");
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+    const payload = parsePaymentField(formData);
+    const result = await supabaseAdmin.from("payment_fields").insert(withCompany({ ...payload, is_active: true }, companyId)).select("id").single();
+    if (result.error) throw new Error(result.error.message);
+    await saveProviderMetricSelections(formData, companyId, result.data.id);
+    revalidatePath("/master/payment-methods");
+  } catch (error) {
+    paymentFieldRedirect({ error: error instanceof Error ? error.message : "Unable to create the payment field." });
+  }
+  paymentFieldRedirect({ notice: "Payment field created." });
 }
 
 export async function updatePaymentField(formData: FormData) {
   const authorization = await requirePagePermission("payment_methods", "edit");
   const companyId = requireCompanyId(authorization);
-  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
-  const id = required(formData.get("field_id"), "Payment field");
-  const payload = parsePaymentField(formData);
-  const update = await supabaseAdmin.from("payment_fields").update({ ...payload, updated_at: new Date().toISOString() })
-    .eq("id", id).eq("company_id", companyId);
-  if (update.error) throw new Error(update.error.message);
-  await saveProviderMetricSelections(formData, companyId, id);
-  const sync = await supabaseAdmin.from("payment_method_components").update({
-    component_code: payload.code,
-    component_type: payload.field_type,
-    label: payload.label,
-    pay_schedule: payload.pay_schedule,
-    updated_at: new Date().toISOString()
-  }).eq("payment_field_id", id).eq("company_id", companyId);
-  if (sync.error) throw new Error(sync.error.message);
-  revalidatePath("/master/payment-methods");
-  revalidatePath("/provider-mapping");
-  redirect("/master/payment-methods?fields=1");
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+    const id = required(formData.get("field_id"), "Payment field");
+    const payload = parsePaymentField(formData);
+    const update = await supabaseAdmin.from("payment_fields").update({ ...payload, updated_at: new Date().toISOString() })
+      .eq("id", id).eq("company_id", companyId);
+    if (update.error) throw new Error(update.error.message);
+    await saveProviderMetricSelections(formData, companyId, id);
+    const sync = await supabaseAdmin.from("payment_method_components").update({
+      component_code: payload.code,
+      component_type: payload.field_type,
+      label: payload.label,
+      pay_schedule: payload.pay_schedule,
+      updated_at: new Date().toISOString()
+    }).eq("payment_field_id", id).eq("company_id", companyId);
+    if (sync.error) throw new Error(sync.error.message);
+    revalidatePath("/master/payment-methods");
+    revalidatePath("/provider-mapping");
+  } catch (error) {
+    paymentFieldRedirect({ error: error instanceof Error ? error.message : "Unable to save the payment field." });
+  }
+  paymentFieldRedirect({ notice: "Payment field saved." });
 }
 
 export async function deletePaymentField(formData: FormData) {
