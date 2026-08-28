@@ -518,7 +518,7 @@ export function ProviderMappingWorksheet({
       <BulkIdUpload canEdit={canEdit} />
       <small className="subtle">Accepted headers: DROPX_ID and PROVIDER_MEMBER_ID. Empty or incomplete rows are skipped.</small>
     </section>
-    <form action={saveProviderMappingWorksheet} autoComplete="off" className="worksheet-form" onSubmit={handleSubmit}>
+    <form action={saveProviderMappingWorksheet} autoComplete="off" className="worksheet-form" noValidate onSubmit={handleSubmit}>
       <input type="hidden" name="row_count" value={rows.length} />
       <input
         type="hidden"
