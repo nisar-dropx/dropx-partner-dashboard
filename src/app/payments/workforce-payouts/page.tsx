@@ -17,7 +17,7 @@ const metricValue = (row: any, source: string) => source === "amazon_delivery" ?
 
 async function loadRows(companyId: string, authorization: AuthorizationContext) {
   if (!supabaseAdmin) return { rows: [] as WorkforcePayoutRow[], error: "Database connection is not configured." };
-  let locationsQuery = supabaseAdmin.from("locations").select("id, code, name, model_id").eq("company_id", companyId);
+  let locationsQuery = supabaseAdmin.from("stations").select("id, station_code, station_name, location_model_id").eq("company_id", companyId);
   if (!authorization.hasAllLocationAccess) locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
   const [locationsResult, mappingsResult, allocationResult] = await Promise.all([
     locationsQuery,
@@ -43,14 +43,14 @@ async function loadRows(companyId: string, authorization: AuthorizationContext) 
   const metricsByMapping = new Map<string, any[]>(); (metricsResult.data ?? []).forEach((row: any) => metricsByMapping.set(row.mapping_id, [...(metricsByMapping.get(row.mapping_id) ?? []), row]));
   const allocations = allocationResult.data ?? [];
   const rows = mappings.map((mapping: any) => {
-    const sourceId = mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.model_id);
+    const sourceId = mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id);
     let baseAmount = 0; let production = 0;
-    allocations.filter((item: any) => item.provider_id === mapping.provider_id && (!item.provider_model_id || item.provider_model_id === location?.model_id)).forEach((item: any) => {
+    allocations.filter((item: any) => item.provider_id === mapping.provider_id && (!item.provider_model_id || item.provider_model_id === location?.location_model_id)).forEach((item: any) => {
       const field: any = Array.isArray(item.payment_fields) ? item.payment_fields[0] : item.payment_fields; const metric: any = Array.isArray(item.provider_production_metrics) ? item.provider_production_metrics[0] : item.provider_production_metrics;
       if (!field?.code || field.field_type !== "production" || !metric?.source_key) return;
       const count = (metricsByMapping.get(mapping.id) ?? []).reduce((sum, daily) => sum + metricValue(daily, metric.source_key), 0); const rate = Number(mapping.payment_values?.[field.code] ?? 0); production += count; baseAmount += count * rate;
     });
-    return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", locationId: mapping.station_id, location: location ? `${location.code} - ${location.name}` : "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, baseAmount, additions: 0, deductions: 0, netAmount: baseAmount, status: production > 0 ? "Ready for review" : "Awaiting production" } satisfies WorkforcePayoutRow;
+    return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", locationId: mapping.station_id, location: location ? `${location.station_code} - ${location.station_name}` : "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, baseAmount, additions: 0, deductions: 0, netAmount: baseAmount, status: production > 0 ? "Ready for review" : "Awaiting production" } satisfies WorkforcePayoutRow;
   });
   return { rows, error: null };
 }
