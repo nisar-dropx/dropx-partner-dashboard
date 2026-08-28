@@ -28,6 +28,7 @@ async function accountFromRequest(url: URL, body?: Record<string, unknown>) {
 
 async function leavePayload(account: ConnectAccount, type: LeaveWorkerType) {
   const workerColumn = type === "employee" ? "employee_id" : "contractor_id";
+  const lopOnly = type === "contractor";
   const year = Number(indiaToday().slice(0, 4));
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
@@ -55,7 +56,9 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType) {
       reviewerNote: request.reviewer_note
     };
   });
-  const types = entitlements.map((leaveType) => {
+  const types = entitlements
+    .filter((leaveType) => !lopOnly || leaveType.code === "LOP")
+    .map((leaveType) => {
     const approved = (requestResult.data ?? []).filter((request) => request.leave_type_id === leaveType.leave_type_id && request.status === "approved")
       .reduce((total, request) => total + overlapDays(request.start_date, request.end_date, yearStart, yearEnd), 0);
     const pending = (requestResult.data ?? []).filter((request) => request.leave_type_id === leaveType.leave_type_id && request.status === "pending")
@@ -78,11 +81,64 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType) {
     year,
     types,
     requests,
+    lopOnly,
     summary: {
       available: types.reduce((total, leaveType) => total + (leaveType.available ?? 0), 0),
       pending: requests.filter((request) => request.status === "pending").length
     }
   };
+}
+
+async function validateLeaveSubmission({
+  account,
+  type,
+  leaveTypeId,
+  fromDate,
+  toDate,
+  reason,
+  excludeRequestId
+}: {
+  account: ConnectAccount;
+  type: LeaveWorkerType;
+  leaveTypeId: string;
+  fromDate: string;
+  toDate: string;
+  reason: string;
+  excludeRequestId?: string;
+}) {
+  const today = indiaToday();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate)) throw new Error("Select the leave dates.");
+  if (fromDate < today) throw new Error("A time-off request cannot start in the past.");
+  if (toDate < fromDate) throw new Error("The end date cannot be before the start date.");
+  if (fromDate.slice(0, 4) !== toDate.slice(0, 4)) throw new Error("Submit separate requests for each leave year.");
+  if (reason.length < 3 || reason.length > 1000) throw new Error("Enter a valid reason between 3 and 1,000 characters.");
+  const days = daysBetween(fromDate, toDate);
+  const entitlements = await resolveWorkforceLeaveEntitlements({ companyId: account.companyId, workerId: account.id, workerType: type });
+  const scopedEntitlements = type === "contractor" ? entitlements.filter((item) => item.code === "LOP") : entitlements;
+  const leaveType = scopedEntitlements.find((item) => item.leave_type_id === leaveTypeId);
+  if (!leaveType) throw new Error(type === "contractor"
+    ? "LOP is not available for your current location and designation."
+    : "This leave type is not available for your current location and designation.");
+  const workerColumn = type === "employee" ? "employee_id" : "contractor_id";
+  let overlapQuery = db().from("hr_leave_requests").select("id").eq("company_id", account.companyId).eq(workerColumn, account.id)
+    .in("status", ["pending", "approved"]).lte("start_date", toDate).gte("end_date", fromDate);
+  if (excludeRequestId) overlapQuery = overlapQuery.neq("id", excludeRequestId);
+  const [overlapResult, balanceResult] = await Promise.all([
+    overlapQuery.limit(1),
+    db().from("hr_leave_requests").select("id,start_date,end_date,status").eq("company_id", account.companyId).eq(workerColumn, account.id)
+      .eq("leave_type_id", leaveTypeId).in("status", ["pending", "approved"])
+      .lte("start_date", `${fromDate.slice(0, 4)}-12-31`).gte("end_date", `${fromDate.slice(0, 4)}-01-01`)
+  ]);
+  if (overlapResult.error || balanceResult.error) throw new Error(overlapResult.error?.message ?? balanceResult.error?.message ?? "Unable to validate leave.");
+  if (overlapResult.data?.length) throw new Error("A pending or approved request already overlaps these dates.");
+  const committedDays = (balanceResult.data ?? [])
+    .filter((item) => item.id !== excludeRequestId)
+    .reduce((total, item) => total + overlapDays(item.start_date, item.end_date, `${fromDate.slice(0, 4)}-01-01`, `${fromDate.slice(0, 4)}-12-31`), 0);
+  if (leaveType.balance_mode === "annual_balance") {
+    const availableDays = Math.max(0, leaveType.annual_allowance - committedDays);
+    if (days > availableDays) throw new Error(`Only ${availableDays} ${leaveType.name} day(s) are available.`);
+  }
+  return { days, leaveType };
 }
 
 export async function GET(request: Request) {
@@ -102,31 +158,7 @@ export async function POST(request: Request) {
     const fromDate = clean(body.fromDate);
     const toDate = clean(body.toDate);
     const reason = clean(body.reason);
-    const today = indiaToday();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate)) throw new Error("Select the leave dates.");
-    if (fromDate < today) throw new Error("A time-off request cannot start in the past.");
-    if (toDate < fromDate) throw new Error("The end date cannot be before the start date.");
-    if (fromDate.slice(0, 4) !== toDate.slice(0, 4)) throw new Error("Submit separate requests for each leave year.");
-    if (reason.length < 3 || reason.length > 1000) throw new Error("Enter a valid reason between 3 and 1,000 characters.");
-    const days = daysBetween(fromDate, toDate);
-    const entitlements = await resolveWorkforceLeaveEntitlements({ companyId: account.companyId, workerId: account.id, workerType: type });
-    const leaveType = entitlements.find((item) => item.leave_type_id === leaveTypeId);
-    if (!leaveType) throw new Error("This leave type is not available for your current location and designation.");
-    const workerColumn = type === "employee" ? "employee_id" : "contractor_id";
-    const [overlapResult, balanceResult] = await Promise.all([
-      db().from("hr_leave_requests").select("id").eq("company_id", account.companyId).eq(workerColumn, account.id)
-        .in("status", ["pending", "approved"]).lte("start_date", toDate).gte("end_date", fromDate).limit(1),
-      db().from("hr_leave_requests").select("start_date,end_date,status").eq("company_id", account.companyId).eq(workerColumn, account.id)
-        .eq("leave_type_id", leaveTypeId).in("status", ["pending", "approved"])
-        .lte("start_date", `${fromDate.slice(0, 4)}-12-31`).gte("end_date", `${fromDate.slice(0, 4)}-01-01`)
-    ]);
-    if (overlapResult.error || balanceResult.error) throw new Error(overlapResult.error?.message ?? balanceResult.error?.message ?? "Unable to validate leave.");
-    if (overlapResult.data?.length) throw new Error("A pending or approved request already overlaps these dates.");
-    const committedDays = (balanceResult.data ?? []).reduce((total, item) => total + overlapDays(item.start_date, item.end_date, `${fromDate.slice(0, 4)}-01-01`, `${fromDate.slice(0, 4)}-12-31`), 0);
-    if (leaveType.balance_mode === "annual_balance") {
-      const availableDays = Math.max(0, leaveType.annual_allowance - committedDays);
-      if (days > availableDays) throw new Error(`Only ${availableDays} ${leaveType.name} day(s) are available.`);
-    }
+    const { days } = await validateLeaveSubmission({ account, type, leaveTypeId, fromDate, toDate, reason });
 
     const approval = await resolveWorkforceLeaveApproval({ companyId: account.companyId, workerId: account.id, workerType: type, days });
     let requestId = "";
@@ -178,5 +210,52 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to submit time off." }, { status: 400 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json() as Record<string, unknown>;
+    const { account, workerType: type } = await accountFromRequest(new URL(request.url), body);
+    const requestId = clean(body.requestId);
+    const leaveTypeId = clean(body.leaveTypeId);
+    const fromDate = clean(body.fromDate);
+    const toDate = clean(body.toDate);
+    const reason = clean(body.reason);
+    if (!/^[0-9a-f-]{36}$/i.test(requestId)) throw new Error("Leave request is invalid.");
+    await validateLeaveSubmission({ account, type, leaveTypeId, fromDate, toDate, reason, excludeRequestId: requestId });
+    const result = await db().rpc("hr_update_workforce_leave_request", {
+      p_company_id: account.companyId,
+      p_request_id: requestId,
+      p_worker_type: type,
+      p_profile_id: account.id,
+      p_leave_type_id: leaveTypeId,
+      p_start_date: fromDate,
+      p_end_date: toDate,
+      p_reason: reason
+    });
+    if (result.error) throw new Error(result.error.message);
+    return NextResponse.json({ ok: true, notice: "Time-off request updated." });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to update time off." }, { status: 400 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const body = await request.json() as Record<string, unknown>;
+    const { account, workerType: type } = await accountFromRequest(new URL(request.url), body);
+    const requestId = clean(body.requestId);
+    if (!/^[0-9a-f-]{36}$/i.test(requestId)) throw new Error("Leave request is invalid.");
+    const result = await db().rpc("hr_cancel_workforce_leave_request", {
+      p_company_id: account.companyId,
+      p_request_id: requestId,
+      p_worker_type: type,
+      p_profile_id: account.id
+    });
+    if (result.error) throw new Error(result.error.message);
+    return NextResponse.json({ ok: true, notice: "Time-off request withdrawn." });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to withdraw time off." }, { status: 400 });
   }
 }

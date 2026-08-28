@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ClipboardCheck, Clock3, FileText, RotateCcw, X } from "lucide-react";
+import { CalendarDays, Check, ClipboardCheck, Clock3, FileText, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
 
@@ -13,7 +13,7 @@ type ExpenseItem = {
 
 type Attachment = { id: string; item_id?: string | null; file_name: string; url?: string | null };
 
-type Approval = {
+type ReimbursementApproval = {
   id: string;
   step_name: string;
   claim: {
@@ -28,11 +28,31 @@ type Approval = {
   };
 };
 
+type LeaveApproval = {
+  id: string;
+  requestId: string;
+  stepName: string;
+  stepOrder: number;
+  leaveType: string;
+  startDate: string;
+  endDate: string;
+  days: number;
+  reason: string;
+  requesterName: string;
+  requesterCode: string;
+  profileType: "employee" | "contractor";
+};
+
+type ApprovalSection = "time-off" | "reimbursements";
+
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
 function money(value: number | null | undefined) { return `₹${Number(value ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
+function displayDate(value: string) { return value.split("-").reverse().join("/"); }
 
 export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
-  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [section, setSection] = useState<ApprovalSection>("time-off");
+  const [reimbursements, setReimbursements] = useState<ReimbursementApproval[]>([]);
+  const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -43,17 +63,27 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     setLoading(true); setError("");
     try {
       const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
-      const response = await fetch(`/api/connect/reimbursements?${query}`, { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to load approvals.");
-      setApprovals(payload.approvals ?? []);
+      const [reimbursementResponse, leaveResponse] = await Promise.all([
+        fetch(`/api/connect/reimbursements?${query}`, { cache: "no-store" }),
+        fetch(`/api/connect/approvals?${query}`, { cache: "no-store" })
+      ]);
+      const reimbursementPayload = await reimbursementResponse.json();
+      const leavePayload = await leaveResponse.json();
+      if (!reimbursementResponse.ok) throw new Error(reimbursementPayload.error || "Unable to load approvals.");
+      if (!leaveResponse.ok) throw new Error(leavePayload.error || "Unable to load time-off approvals.");
+      setReimbursements(reimbursementPayload.approvals ?? []);
+      setLeaveApprovals(leavePayload.leaveApprovals ?? []);
+      setSection((current) => {
+        if (current === "time-off" && !(leavePayload.leaveApprovals ?? []).length && (reimbursementPayload.approvals ?? []).length) return "reimbursements";
+        return current;
+      });
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load approvals."); }
     finally { setLoading(false); }
   }, [account.id, account.profileType]);
 
   useEffect(() => { void load(); }, [load]);
 
-  async function decide(claimId: string, action: "approved" | "returned" | "rejected") {
+  async function decideReimbursement(claimId: string, action: "approved" | "returned" | "rejected") {
     setSaving(true); setError(""); setNotice("");
     try {
       const response = await fetch("/api/connect/reimbursements", {
@@ -68,18 +98,44 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     finally { setSaving(false); }
   }
 
+  async function decideLeave(requestId: string, decision: "approved" | "rejected") {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/approvals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: account.id, profileType: account.profileType, requestId, decision, note: notes[requestId] ?? "" })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to update time-off approval.");
+      setNotice(payload.notice); setNotes((current) => ({ ...current, [requestId]: "" })); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update time-off approval."); }
+    finally { setSaving(false); }
+  }
+
   return <section className="dx-expenses dx-approval-inbox">
     <header className="dx-page-intro"><small>Manager workspace</small><h1>Approval inbox</h1><p>Review only the workflow steps assigned to you.</p></header>
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
-    <nav className="dx-expense-tabs" aria-label="Approval sections"><button className="active">Reimbursements <b>{approvals.length}</b></button></nav>
+    <nav className="dx-expense-tabs" aria-label="Approval sections">
+      <button className={section === "time-off" ? "active" : ""} onClick={() => setSection("time-off")}>Time off <b>{leaveApprovals.length}</b></button>
+      <button className={section === "reimbursements" ? "active" : ""} onClick={() => setSection("reimbursements")}>Reimbursements <b>{reimbursements.length}</b></button>
+    </nav>
     {loading ? <div className="dx-loader"><span /><small>Loading approvals…</small></div> : null}
-    {!loading ? <div className="dx-expense-list">{approvals.length ? approvals.map((approval) => <article className="dx-expense-approval" key={approval.id}>
+    {!loading && section === "time-off" ? <div className="dx-expense-list">
+      {leaveApprovals.length ? leaveApprovals.map((approval) => <article className="dx-expense-approval" key={approval.id}>
+        <header><span><small>{approval.leaveType} · {approval.stepName}</small><strong>{approval.requesterName}</strong><em>{approval.requesterCode || "—"} · {approval.profileType === "contractor" ? "Independent contractor" : "Employee"}</em></span><b>{approval.days} day{approval.days === 1 ? "" : "s"}</b></header>
+        <div><span>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</span><span>{approval.reason}</span></div>
+        <label>Decision note<textarea onChange={(event) => setNotes((current) => ({ ...current, [approval.requestId]: event.target.value }))} placeholder="Optional reviewer note" rows={2} value={notes[approval.requestId] ?? ""} /></label>
+        <footer><button className="danger" disabled={saving} onClick={() => void decideLeave(approval.requestId, "rejected")}><X />Reject</button><button className="primary" disabled={saving} onClick={() => void decideLeave(approval.requestId, "approved")}><Check />Approve</button></footer>
+      </article>) : <div className="dx-empty"><Clock3 /><strong>No time-off approvals waiting</strong><small>Assigned time-off approvals will appear here.</small></div>}
+    </div> : null}
+    {!loading && section === "reimbursements" ? <div className="dx-expense-list">{reimbursements.length ? reimbursements.map((approval) => <article className="dx-expense-approval" key={approval.id}>
       <header><span><small>{approval.claim.claim_no} · {approval.step_name}</small><strong>{approval.claim.requesterName}</strong><em>{approval.claim.purpose}</em></span><b>{money(approval.claim.total_claimed)}</b></header>
       <div>{approval.claim.hr_expense_items?.map((item) => <span key={item.id}>{first(item.hr_expense_categories)?.name ?? "Expense"} · {item.expense_date}{approval.claim.attachments?.filter((attachment) => attachment.item_id === item.id && attachment.url).map((attachment) => <a href={attachment.url ?? "#"} key={attachment.id} rel="noreferrer" target="_blank"><FileText />{attachment.file_name}</a>)}<b>{money(item.amount)}</b></span>)}</div>
       <label>Decision note<textarea onChange={(event) => setNotes((current) => ({ ...current, [approval.claim.id]: event.target.value }))} placeholder="Required when returning or rejecting" rows={2} value={notes[approval.claim.id] ?? ""} /></label>
-      <footer><button disabled={saving} onClick={() => void decide(approval.claim.id, "returned")}><RotateCcw />Return</button><button className="danger" disabled={saving} onClick={() => void decide(approval.claim.id, "rejected")}><X />Reject</button><button className="primary" disabled={saving} onClick={() => void decide(approval.claim.id, "approved")}><Check />Approve</button></footer>
+      <footer><button disabled={saving} onClick={() => void decideReimbursement(approval.claim.id, "returned")}><RotateCcw />Return</button><button className="danger" disabled={saving} onClick={() => void decideReimbursement(approval.claim.id, "rejected")}><X />Reject</button><button className="primary" disabled={saving} onClick={() => void decideReimbursement(approval.claim.id, "approved")}><Check />Approve</button></footer>
     </article>) : <div className="dx-empty"><Clock3 /><strong>No approvals waiting</strong><small>Assigned reimbursement approvals will appear here.</small></div>}</div> : null}
-    <div className="dx-approval-note"><ClipboardCheck /><span><strong>Master-driven routing</strong><small>Each approval follows the active reimbursement policy and reporting hierarchy before it reaches Payments.</small></span></div>
+    <div className="dx-approval-note"><ClipboardCheck /><span><strong>Master-driven routing</strong><small>Each approval follows the active policy and reporting hierarchy before it reaches the next step or Payments.</small></span></div>
   </section>;
 }
