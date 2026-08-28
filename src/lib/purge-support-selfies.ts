@@ -1,6 +1,6 @@
 import "server-only";
 
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { supabaseAdmin } from "./supabase-admin";
 
 const SELFIE_BUCKET = "employee-profile-documents";
 const REMOVED_MARKER = "[removed]";

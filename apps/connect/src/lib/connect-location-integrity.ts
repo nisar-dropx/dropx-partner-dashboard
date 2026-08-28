@@ -3,7 +3,7 @@ import "server-only";
 import type { ConnectAccount } from "./connect-auth";
 import { expenseIdentity } from "./connect-expense-data";
 import { supabaseAdmin } from "./supabase-admin";
-import { resolveIntegrityFlag } from "../../../../src/lib/biometric/attendance-gps";
+import { resolveIntegrityFlag } from "../../../../src/lib/biometric/attendance-integrity-resolution";
 import { purgeSupportSelfieForReviewId } from "../../../../src/lib/purge-support-selfies";
 
 export type ConnectLocationSupportPackage = {
@@ -32,7 +32,7 @@ function indiaToday() {
 
 async function signedSelfieUrl(path: string) {
   if (!path) return null;
-  const signed = await db().storage.from("attendance-support-selfies").createSignedUrl(path, 15 * 60);
+  const signed = await db().storage.from("employee-profile-documents").createSignedUrl(path, 15 * 60);
   return signed.data?.signedUrl ?? null;
 }
 
