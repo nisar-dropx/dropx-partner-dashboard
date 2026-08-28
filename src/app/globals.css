@@ -4293,7 +4293,7 @@ h3 {
 
 .payment-field-form {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(460px, 1.15fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 1.05fr) auto;
   align-items: stretch;
   gap: 14px;
 }
@@ -4309,6 +4309,7 @@ h3 {
 
 .payment-field-form-section {
   position: relative;
+  min-width: 0;
   display: grid;
   align-content: start;
   gap: 10px;
@@ -4319,11 +4320,18 @@ h3 {
 }
 
 .payment-field-identity {
-  grid-template-columns: minmax(125px, .8fr) minmax(180px, 1.25fr) minmax(155px, 1fr) minmax(135px, .8fr);
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
 }
 
 .payment-field-calculation {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.payment-field-form label,
+.payment-field-form .field,
+.payment-field-form .select {
+  min-width: 0;
+  width: 100%;
 }
 
 .payment-field-calculation-help {
@@ -4370,7 +4378,7 @@ h3 {
   font-weight: 700;
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 900px) {
   .payment-field-form,
   .payment-field-identity {
     grid-template-columns: 1fr;
