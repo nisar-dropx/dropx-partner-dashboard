@@ -677,7 +677,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                     </label>
                   </div>
                   <PermissionMatrix
-                    key={`${accessSurface}:${editRole.id}`}
+                    key={`${accessSurface}:${editRole.id}:${editRolePermissions.map((permission) => `${permission.page_id}:${Number(permission.can_view)}${Number(permission.can_add)}${Number(permission.can_edit)}`).sort().join("|")}`}
                     pages={pages}
                     initialPermissions={editRolePermissions}
                     surface={accessSurface}
