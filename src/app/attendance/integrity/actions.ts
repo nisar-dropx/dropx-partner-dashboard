@@ -103,9 +103,23 @@ export async function reviewAttendanceLocationPackage(formData: FormData) {
     await resolveIntegrityFlag(String(existing.data.flag_id), authorization.userId);
   }
 
-  if (action === "approve") {
+  if (action === "reject" && existing.data.flag_id) {
+    await supabaseAdmin
+      .from("attendance_integrity_flags")
+      .update({
+        status: "dismissed",
+        resolved_at: now,
+        resolved_by: authorization.userId,
+        updated_at: now
+      })
+      .eq("company_id", companyId)
+      .eq("id", existing.data.flag_id)
+      .eq("status", "open");
+  }
+
+  if (action === "approve" || action === "return" || action === "reject") {
     await purgeSupportSelfieForReviewId(companyId, reviewId).catch((error) => {
-      console.error("approve package selfie purge failed", error instanceof Error ? error.message : error);
+      console.error("support package selfie purge failed", error instanceof Error ? error.message : error);
     });
   }
 
@@ -194,5 +208,24 @@ export async function dismissAttendanceIntegrityFlag(formData: FormData) {
     .eq("id", flagId)
     .eq("company_id", companyId);
   if (result.error) throw new Error(result.error.message);
+
+  const reviewUpdate = await supabaseAdmin
+    .from("attendance_location_reviews")
+    .update({
+      status: "rejected",
+      reviewed_by: authorization.userId,
+      reviewed_at: now,
+      updated_at: now
+    })
+    .eq("company_id", companyId)
+    .eq("flag_id", flagId)
+    .in("status", ["pending", "returned"]);
+  if (reviewUpdate.error && !/does not exist|schema cache/i.test(reviewUpdate.error.message)) {
+    throw new Error(reviewUpdate.error.message);
+  }
+
+  await purgeSupportSelfiesForFlagIds(companyId, [flagId]).catch((error) => {
+    console.error("dismiss flag selfie purge failed", error instanceof Error ? error.message : error);
+  });
   revalidatePath("/attendance/integrity");
 }

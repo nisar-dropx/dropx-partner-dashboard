@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { SelfieCapturePanel } from "./selfie-capture-panel";
+import { stampSupportSelfieBlob } from "@/lib/support-selfie-stamp";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
 type Regularization = {
@@ -458,6 +459,13 @@ function SupportEvidenceSheet({
   const [remarks, setRemarks] = useState("");
   const [selfie, setSelfie] = useState<File | null>(null);
   const [selfiePreview, setSelfiePreview] = useState("");
+  const [captureMeta, setCaptureMeta] = useState<{
+    lat: number;
+    lng: number;
+    accuracyM: number | null;
+    capturedAt: string;
+    stationLabel: string;
+  } | null>(null);
   const [selfiePanelOpen, setSelfiePanelOpen] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -553,7 +561,7 @@ function SupportEvidenceSheet({
       form.set("lat", String(position.coords.latitude));
       form.set("lng", String(position.coords.longitude));
       if (Number.isFinite(position.coords.accuracy)) form.set("accuracyM", String(position.coords.accuracy));
-      form.set("clientCapturedAt", new Date().toISOString());
+      form.set("clientCapturedAt", captureMeta?.capturedAt ?? new Date().toISOString());
       form.set("remarks", remarks);
       form.set("selfie", selfie);
       const response = await fetch("/api/connect/attendance/support-evidence", { method: "POST", body: form });
@@ -622,10 +630,31 @@ function SupportEvidenceSheet({
         requireFaceMatch
         requireLiveness
         onClose={() => setSelfiePanelOpen(false)}
-        onCapture={(file) => {
+        onCapture={async (file) => {
+          const position = await readPosition();
+          const capturedAt = new Date().toISOString();
+          const gate = evaluateClientGeofence(position.coords.latitude, position.coords.longitude, stations);
+          if (gate.status !== "inside") {
+            throw new Error(gate.message || "Move inside the allowed station location to capture.");
+          }
+          const stampedBlob = await stampSupportSelfieBlob(file, {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracyM: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : null,
+            capturedAt,
+            stationLabel: gate.stationLabel
+          });
+          const stampedFile = new File([stampedBlob], file.name, { type: "image/jpeg" });
           if (selfiePreview) URL.revokeObjectURL(selfiePreview);
-          setSelfie(file);
-          setSelfiePreview(URL.createObjectURL(file));
+          setSelfie(stampedFile);
+          setSelfiePreview(URL.createObjectURL(stampedFile));
+          setCaptureMeta({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracyM: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : null,
+            capturedAt,
+            stationLabel: gate.stationLabel
+          });
           setSelfiePanelOpen(false);
         }}
       />

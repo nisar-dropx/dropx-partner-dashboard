@@ -24,7 +24,7 @@ type SelfieCapturePanelProps = {
   requireFaceMatch?: boolean;
   /** Blink + head-turn challenge to reduce photo/screen spoofing. Default: on when face match required, or always if set. */
   requireLiveness?: boolean;
-  onCapture: (file: File, match: FaceMatchResult | null) => void;
+  onCapture: (file: File, match: FaceMatchResult | null) => void | Promise<void>;
   onClose: () => void;
 };
 
@@ -328,7 +328,7 @@ export function SelfieCapturePanel({
     setPhase(needMatch ? "match" : needLiveness ? "liveness" : "ready");
   }
 
-  function confirm() {
+  async function confirm() {
     if (!previewBlob) return;
     if (needMatch && (!liveMatch || !liveMatch.ok)) {
       setError(`Face match must be ${FACE_MATCH_REQUIRED_PERCENT}%+ before using this selfie.`);
@@ -339,7 +339,15 @@ export function SelfieCapturePanel({
       return;
     }
     const file = new File([previewBlob], `attendance-selfie-${Date.now()}.jpg`, { type: "image/jpeg" });
-    onCapture(file, liveMatch);
+    setCapturing(true);
+    setError("");
+    try {
+      await onCapture(file, liveMatch);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to use this selfie.");
+    } finally {
+      setCapturing(false);
+    }
   }
 
   const captureEnabled =
