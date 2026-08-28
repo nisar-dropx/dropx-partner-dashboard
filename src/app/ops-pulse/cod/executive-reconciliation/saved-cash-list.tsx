@@ -4,7 +4,6 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { StatusPill } from "@/components/status-pill";
 import {
-  amountValue,
   executiveDisplayName,
   formatAmount,
   type ExecutiveReconciliationViewRow
@@ -16,12 +15,12 @@ type OptimisticSavedCashRow = ExecutiveReconciliationViewRow & {
 };
 
 const denominations = [
-  ["cash_500_count", "500"],
-  ["cash_200_count", "200"],
-  ["cash_100_count", "100"],
-  ["cash_50_count", "50"],
-  ["cash_20_count", "20"],
-  ["cash_10_count", "10"]
+  ["cash_500_count", "500", 500],
+  ["cash_200_count", "200", 200],
+  ["cash_100_count", "100", 100],
+  ["cash_50_count", "50", 50],
+  ["cash_20_count", "20", 20],
+  ["cash_10_count", "10", 10]
 ] as const;
 
 type DenominationField = typeof denominations[number][0];
@@ -54,6 +53,44 @@ function differenceLabel(value: number) {
   if (value < 0) return `Short ${formatAmount(Math.abs(value))}`;
   if (value > 0) return `Excess ${formatAmount(value)}`;
   return "0.00";
+}
+
+function numberValue(value: string) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** Mirrors reconciliationStatus() in actions.ts — the status this row will be saved with. */
+function liveReconciliationStatus(expectedAmount: number, collectedAmount: number) {
+  if (expectedAmount === 0 && collectedAmount === 0) return "Pending";
+  const difference = Number((collectedAmount - expectedAmount).toFixed(2));
+  if (Math.abs(difference) < 0.01) return "Completed";
+  return difference < 0 ? "Pending Amount" : "Mismatch";
+}
+
+/** Editable fields that drive the live Received/Returned/Net kept/Expected totals. */
+type SavedRowEdits = {
+  expectedAmount: string;
+  denominationCounts: Record<DenominationField, string>;
+  returnDenominationCounts: Record<DenominationField, string>;
+  cashOtherAmount: string;
+  returnCashOtherAmount: string;
+};
+
+function rowEditsFromRow(row: ExecutiveReconciliationViewRow): SavedRowEdits {
+  const denominationCounts = {} as Record<DenominationField, string>;
+  const returnDenominationCounts = {} as Record<DenominationField, string>;
+  for (const [field] of denominations) {
+    denominationCounts[field] = String(denominationValue(row, field));
+    returnDenominationCounts[field] = String(returnDenominationValue(row, returnDenominationFieldMap[field]));
+  }
+  return {
+    expectedAmount: String(row.expected_amount ?? 0),
+    denominationCounts,
+    returnDenominationCounts,
+    cashOtherAmount: String(row.cash_other_amount ?? 0),
+    returnCashOtherAmount: String(row.return_cash_other_amount ?? 0)
+  };
 }
 
 function objectValue(value: unknown) {
@@ -153,6 +190,10 @@ export function SavedCashList({
   const [errorByKey, setErrorByKey] = useState<Record<string, string>>({});
   const [localRows, setLocalRows] = useState(rows);
   const [optimisticRows, setOptimisticRows] = useState<OptimisticSavedCashRow[]>([]);
+  // Live edits for denomination/expected fields, keyed by row.key — a row with no entry
+  // here just falls back to its server value (rowEditsFromRow), so a fresh row or one
+  // reset after a successful update needs no extra sync logic.
+  const [edits, setEdits] = useState<Record<string, SavedRowEdits>>({});
 
   useEffect(() => {
     setLocalRows(rows);
@@ -223,17 +264,24 @@ export function SavedCashList({
   return (
     <div className="reconciliation-entry-list reconciliation-saved-list" aria-label="Executive reconciliation sheet">
       {displayRows.length ? displayRows.map((row) => {
-        const difference = amountValue(row.difference_amount);
-        const returnedAmount =
-          amountValue(row.return_cash_500_count) * 500
-          + amountValue(row.return_cash_200_count) * 200
-          + amountValue(row.return_cash_100_count) * 100
-          + amountValue(row.return_cash_50_count) * 50
-          + amountValue(row.return_cash_20_count) * 20
-          + amountValue(row.return_cash_10_count) * 10
-          + amountValue(row.return_cash_other_amount);
         const rowPending = activeKey === row.key;
         const rowError = errorByKey[row.key];
+        const state = edits[row.key] ?? rowEditsFromRow(row);
+        const patchEdits = (partial: Partial<SavedRowEdits>) => {
+          setEdits((current) => ({ ...current, [row.key]: { ...(current[row.key] ?? rowEditsFromRow(row)), ...partial } }));
+        };
+        const collectedAmount = denominations.reduce(
+          (total, [name, , amount]) => total + numberValue(state.denominationCounts[name]) * amount,
+          numberValue(state.cashOtherAmount)
+        );
+        const returnAmount = denominations.reduce(
+          (total, [name, , amount]) => total + numberValue(state.returnDenominationCounts[name]) * amount,
+          numberValue(state.returnCashOtherAmount)
+        );
+        const netCollectedAmount = Number((collectedAmount - returnAmount).toFixed(2));
+        const expectedAmount = numberValue(state.expectedAmount);
+        const difference = Number((netCollectedAmount - expectedAmount).toFixed(2));
+        const liveStatus = liveReconciliationStatus(expectedAmount, netCollectedAmount);
         return (
           <article className="reconciliation-entry-card" key={row.key}>
             <form
@@ -252,6 +300,12 @@ export function SavedCashList({
                     if (result?.ok) {
                       setActiveKey(null);
                       setActiveAction(null);
+                      setEdits((current) => {
+                        if (!(row.key in current)) return current;
+                        const next = { ...current };
+                        delete next[row.key];
+                        return next;
+                      });
                       startTransition(() => router.refresh());
                       return;
                     }
@@ -277,7 +331,13 @@ export function SavedCashList({
                   <span className="subtle">{row.provider_employee_id} · {row.shipment_type ?? "SCC Driver Reconciliation"}</span>
                 </div>
                 <label>Expected COD
-                  <input className="field" name="expected_amount" defaultValue={String(row.expected_amount ?? 0)} inputMode="decimal" />
+                  <input
+                    className="field"
+                    name="expected_amount"
+                    value={state.expectedAmount}
+                    onChange={(event) => patchEdits({ expectedAmount: event.target.value })}
+                    inputMode="decimal"
+                  />
                 </label>
                 <label>Remarks
                   <input className="field" name="remarks" defaultValue={row.remarks ?? ""} placeholder="Optional note" />
@@ -319,6 +379,12 @@ export function SavedCashList({
                             }));
                             setLocalRows((current) => current.filter((item) => item.key !== row.key));
                             setOptimisticRows((current) => current.filter((item) => item.key !== row.key));
+                            setEdits((current) => {
+                              if (!(row.key in current)) return current;
+                              const next = { ...current };
+                              delete next[row.key];
+                              return next;
+                            });
                             setActiveKey(null);
                             setActiveAction(null);
                             startTransition(() => router.refresh());
@@ -346,25 +412,37 @@ export function SavedCashList({
                   <div className="cash-breakdown-section received">
                     <div className="cash-breakdown-section-head">
                       <strong>Received from associate</strong>
-                      <span className="cash-breakdown-subtotal">{formatAmount(row.collected_amount)}</span>
+                      <span className="cash-breakdown-subtotal">{formatAmount(collectedAmount)}</span>
                     </div>
                     <div className="denomination-grid">
                       {denominations.map(([name, label]) => (
                         <label className="denomination-chip" key={`${row.key}-${name}`}>
                           <span className="denomination-chip-label">₹{label}</span>
-                          <input className="field" name={name} defaultValue={String(denominationValue(row, name))} inputMode="numeric" />
+                          <input
+                            className="field"
+                            name={name}
+                            value={state.denominationCounts[name]}
+                            onChange={(event) => patchEdits({ denominationCounts: { ...state.denominationCounts, [name]: event.target.value } })}
+                            inputMode="numeric"
+                          />
                         </label>
                       ))}
                       <label className="denomination-chip other">
                         <span className="denomination-chip-label">Other</span>
-                        <input className="field" name="cash_other_amount" defaultValue={String(row.cash_other_amount ?? 0)} inputMode="decimal" />
+                        <input
+                          className="field"
+                          name="cash_other_amount"
+                          value={state.cashOtherAmount}
+                          onChange={(event) => patchEdits({ cashOtherAmount: event.target.value })}
+                          inputMode="decimal"
+                        />
                       </label>
                     </div>
                   </div>
                   <div className="cash-breakdown-section returned">
                     <div className="cash-breakdown-section-head">
                       <strong>Returned to associate</strong>
-                      <span className="cash-breakdown-subtotal">{formatAmount(returnedAmount)}</span>
+                      <span className="cash-breakdown-subtotal">{formatAmount(returnAmount)}</span>
                     </div>
                     <div className="denomination-grid">
                       {denominations.map(([name, label]) => (
@@ -373,25 +451,33 @@ export function SavedCashList({
                           <input
                             className="field"
                             name={returnDenominationFieldMap[name]}
-                            defaultValue={String(returnDenominationValue(row, returnDenominationFieldMap[name]))}
+                            value={state.returnDenominationCounts[name]}
+                            onChange={(event) => patchEdits({ returnDenominationCounts: { ...state.returnDenominationCounts, [name]: event.target.value } })}
                             inputMode="numeric"
                           />
                         </label>
                       ))}
                       <label className="denomination-chip other" aria-label="Coins or other returned">
                         <span className="denomination-chip-label">Other</span>
-                        <input className="field" name="return_cash_other_amount" defaultValue={String(row.return_cash_other_amount ?? 0)} inputMode="decimal" />
+                        <input
+                          className="field"
+                          name="return_cash_other_amount"
+                          value={state.returnCashOtherAmount}
+                          onChange={(event) => patchEdits({ returnCashOtherAmount: event.target.value })}
+                          inputMode="decimal"
+                        />
                       </label>
                     </div>
                   </div>
                 </div>
               </details>
-              <div className={`cash-live-status ${difference < -0.005 ? "short" : difference > 0.005 ? "excess" : "matched"}`}>
-                <span>Collected <strong>{formatAmount(row.collected_amount)}</strong></span>
-                <span>Returned <strong>{formatAmount(returnedAmount)}</strong></span>
-                <span>Expected <strong>{formatAmount(row.expected_amount)}</strong></span>
+              <div className={`cash-live-status ${difference < -0.005 ? "short" : difference > 0.005 ? "excess" : "matched"}`} aria-live="polite">
+                <span>Collected <strong>{formatAmount(collectedAmount)}</strong></span>
+                <span>Returned <strong>{formatAmount(returnAmount)}</strong></span>
+                <span>Net kept <strong>{formatAmount(netCollectedAmount)}</strong></span>
+                <span>Expected <strong>{formatAmount(expectedAmount)}</strong></span>
                 <span className="cash-live-result">
-                  <StatusPill status={row.reconciliation_status} />{" "}
+                  <StatusPill status={liveStatus} />{" "}
                   <strong>{differenceLabel(difference)}</strong>
                 </span>
               </div>
