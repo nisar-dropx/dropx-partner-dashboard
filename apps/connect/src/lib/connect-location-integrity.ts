@@ -185,7 +185,7 @@ export async function listConnectLocationSupportPackages(account: ConnectAccount
   const reviewsResult = await db().from("attendance_location_reviews")
     .select("id, profile_type, profile_id, punch_date, selfie_path, lat, lng, accuracy_m, remarks, status, server_received_at")
     .eq("company_id", account.companyId)
-    .in("status", ["pending", "returned"])
+    .eq("status", "pending")
     .in("profile_id", teamIds)
     .order("created_at", { ascending: false })
     .limit(100);
@@ -283,12 +283,19 @@ export async function reviewConnectLocationSupportPackage(account: ConnectAccoun
     });
   }
 
-  if (action === "reject" && existing.data.flag_id) {
-    await db().from("attendance_integrity_flags")
-      .update({ status: "dismissed", resolved_at: now, resolved_by: identity.userId, updated_at: now })
-      .eq("company_id", account.companyId)
-      .eq("id", existing.data.flag_id)
-      .eq("status", "open");
+  if (action === "return") {
+    await purgeSupportSelfieForReviewId(account.companyId, reviewId);
+  }
+
+  if (action === "reject") {
+    if (existing.data.flag_id) {
+      await db().from("attendance_integrity_flags")
+        .update({ status: "dismissed", resolved_at: now, resolved_by: identity.userId, updated_at: now })
+        .eq("company_id", account.companyId)
+        .eq("id", existing.data.flag_id)
+        .eq("status", "open");
+    }
+    await purgeSupportSelfieForReviewId(account.companyId, reviewId);
   }
 
   return action === "approve"

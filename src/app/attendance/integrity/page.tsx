@@ -193,7 +193,7 @@ export default async function AttendanceIntegrityPage({
         .from("attendance_location_reviews")
         .select("id, flag_id, punch_id, enrolment_id, profile_type, profile_id, punch_date, selfie_path, lat, lng, accuracy_m, remarks, status, review_remarks, created_at, server_received_at")
         .eq("company_id", companyId)
-        .in("status", ["pending", "returned"])
+        .eq("status", "pending")
         .order("created_at", { ascending: false })
         .limit(100)
     ]);

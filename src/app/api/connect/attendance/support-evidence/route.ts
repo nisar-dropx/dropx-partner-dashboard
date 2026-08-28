@@ -7,7 +7,6 @@ import {
   resolveConnectAttendanceWorker
 } from "@/lib/connect-attendance-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { stampSupportSelfieOverlay } from "@/lib/support-selfie-stamp";
 
 export const dynamic = "force-dynamic";
 
@@ -90,30 +89,17 @@ export async function POST(request: NextRequest) {
       throw new Error("Support already submitted. Review is pending — you cannot send again.");
     }
 
-    const now = new Date().toISOString();
-    const capturedAt =
-      clientCapturedAt && Number.isFinite(Date.parse(clientCapturedAt)) ? clientCapturedAt : now;
-    const stationLabel =
-      geofence.station?.stationCode || geofence.station?.stationName || null;
-    const rawSelfieBuffer = Buffer.from(await selfie.arrayBuffer());
-    const stampedSelfieBuffer = await stampSupportSelfieOverlay({
-      imageBuffer: rawSelfieBuffer,
-      lat,
-      lng,
-      accuracyM,
-      capturedAt,
-      stationLabel
-    });
-
     const safeName = selfie.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "support-selfie.jpg";
     const selfiePath = `${worker.companyId}/${worker.profileId}/attendance-support-${punchDate}-${Date.now()}${fileExtension(safeName) || ".jpg"}`;
     const uploadResult = await supabaseAdmin.storage
       .from("employee-profile-documents")
-      .upload(selfiePath, stampedSelfieBuffer, {
-        contentType: "image/jpeg",
+      .upload(selfiePath, Buffer.from(await selfie.arrayBuffer()), {
+        contentType: selfie.type || "image/jpeg",
         upsert: false
       });
     if (uploadResult.error) throw new Error(uploadResult.error.message);
+
+    const now = new Date().toISOString();
 
     // Support selfie is review-only: never insert attendance punches or rebuild daily.
     const payload = {

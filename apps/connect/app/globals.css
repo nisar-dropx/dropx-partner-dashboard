@@ -14925,6 +14925,20 @@ body {
   font-size: 11px;
 }
 
+.dx-workforce-dashboard .dx-dashboard-greeting {
+  border-bottom-color: #fedf89;
+}
+
+.dx-workforce-dashboard .dx-live-chip {
+  color: #b54708;
+  background: #fff6ed;
+  border-color: #fedf89;
+}
+
+.dx-workforce-dashboard .dx-live-chip i {
+  background: #f79009;
+}
+
 .dx-workforce-workspace {
   display: grid;
   gap: 18px;

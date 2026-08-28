@@ -116,7 +116,7 @@ Flutter: prefer **ML Kit Face Mesh** + commercial liveness SDK for production; n
 - Enable Capture only when match + liveness done.
 - Re-check face match on the captured frame before “Use selfie”.
 - Upload via `support-evidence` with live GPS + selfie.
-- **Server stamps the stored selfie** (dashboard `stampSupportSelfieOverlay`): semi-transparent bar at the bottom with capture time (IST), lat/lng ± accuracy, and station label when known. Managers see the stamped image in the support package — no client overlay required.
+- **Client stamps the stored selfie** (`apps/connect/src/lib/support-selfie-stamp.ts`): at capture time, canvas draws a bottom bar with capture time (IST), lat/lng ± accuracy, and station label. The stamped JPEG is uploaded as-is; the dashboard API stores it without re-processing.
 
 ---
 

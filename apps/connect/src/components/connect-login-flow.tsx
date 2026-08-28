@@ -14,7 +14,6 @@ import { ConnectPerformance } from "./connect-performance";
 import { ConnectReimbursements } from "./connect-reimbursements";
 import { ConnectApprovalInbox } from "./connect-approval-inbox";
 import { ConnectPeopleWorkspace } from "./connect-people-workspace";
-import { ConnectWorkforceWorkspace } from "./connect-workforce-workspace";
 import { AppAccount, ConnectProfileApp } from "./connect-profile-app";
 import { countryCodeOptions } from "@/lib/country-codes";
 
@@ -36,20 +35,15 @@ const accountIdentity = (account?: AppAccount | null) =>
 const active = (account?: AppAccount | null) => account?.status?.toLowerCase() === "active";
 const defaultPageAccess = ["dashboard", "attendance", "roster", "leave", "performance", "settings"];
 const isManagerAccount = (account: AppAccount | null) => account?.profileType === "user";
+const isContractorAccount = (account: AppAccount | null) => account?.profileType === "contractor";
 const isWorkforceWorkspace = (account: AppAccount | null) => account?.workspace === "workforce" || Boolean(account && !["user", "employee"].includes(account.profileType));
 const peopleSelfService = (account: AppAccount | null) => account?.profileType === "employee" && !isWorkforceWorkspace(account);
 const sharedSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account));
 const canViewApprovals = (account: AppAccount | null) => Boolean(account && !isWorkforceWorkspace(account) && (isManagerAccount(account) || peopleSelfService(account) || account.pageAccess?.includes("approvals")));
-const allowed = (account: AppAccount | null, page: "dashboard" | "attendance" | "roster" | "leave" | "performance" | "settings") => {
-  if (!account) return false;
-  if (page === "settings") return true;
-  if (isWorkforceWorkspace(account)) return page === "dashboard";
-  if (page === "roster") return true;
-  if (page === "performance" && !peopleSelfService(account)) return false;
-  return (account.pageAccess ?? defaultPageAccess).includes(page);
-};
-const showLeaveNav = (account: AppAccount | null) => Boolean(account && peopleSelfService(account) && active(account) && allowed(account, "leave"));
-const workforceSharedSteps = new Set<Step>(["accounts", "dashboard", "profile", "payments", "advances", "settings"]);
+const allowed = (account: AppAccount | null, page: "dashboard" | "attendance" | "roster" | "leave" | "performance" | "settings") =>
+  page === "settings" || page === "roster" || (page === "performance" && peopleSelfService(account)) || (account?.pageAccess ?? defaultPageAccess).includes(page);
+const showLeaveNav = (account: AppAccount | null) => Boolean(account && active(account) && !isContractorAccount(account) && allowed(account, "leave"));
+const showLopNav = (account: AppAccount | null) => Boolean(account && active(account) && isContractorAccount(account));
 
 function landingPage(account: AppAccount): Step {
   if (!active(account)) return "profile";
@@ -57,6 +51,7 @@ function landingPage(account: AppAccount): Step {
   if (allowed(account, "dashboard")) return "dashboard";
   if (allowed(account, "attendance")) return "attendance";
   if (allowed(account, "roster")) return "roster";
+  if (showLopNav(account)) return "lop";
   if (showLeaveNav(account)) return "leave";
   if (allowed(account, "performance")) return "performance";
   return "profile";
@@ -397,12 +392,11 @@ export function ConnectLoginFlow() {
       setStep("profile");
       return;
     }
-    if (isWorkforceWorkspace(account) && !workforceSharedSteps.has(next)) return;
     if (next === "dashboard" && !allowed(account, "dashboard")) return;
     if (next === "attendance" && !allowed(account, "attendance")) return;
     if (next === "roster" && !allowed(account, "roster")) return;
     if (next === "leave" && !showLeaveNav(account)) return;
-    if (next === "lop") return;
+    if (next === "lop" && !showLopNav(account)) return;
     if (next === "performance" && !allowed(account, "performance")) return;
     if (next === "documents" && !peopleSelfService(account)) return;
     if (next === "approvals" && !canViewApprovals(account)) return;
@@ -472,6 +466,7 @@ export function ConnectLoginFlow() {
         {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint />Attendance</button> : null}
         {allowed(account, "roster") ? <button aria-current={step === "roster" ? "page" : undefined} className={step === "roster" ? "active" : ""} onClick={() => open("roster")}><ArrowLeftRight />Roster</button> : null}
         {showLeaveNav(account) ? <button aria-current={step === "leave" ? "page" : undefined} className={step === "leave" ? "active" : ""} onClick={() => open("leave")}><CalendarDays />Leave</button> : null}
+        {showLopNav(account) ? <button aria-current={step === "lop" ? "page" : undefined} className={step === "lop" ? "active" : ""} onClick={() => open("lop")}><CalendarDays />LOP</button> : null}
         {allowed(account, "performance") ? <button aria-current={step === "performance" ? "page" : undefined} className={step === "performance" ? "active" : ""} onClick={() => open("performance")}><Target />Performance</button> : null}
         <small className="dx-nav-label">Account</small>
         <button aria-current={step === "settings" ? "page" : undefined} className={step === "settings" ? "active" : ""} onClick={() => open("settings")}><Settings />Settings</button>
@@ -515,6 +510,7 @@ export function ConnectLoginFlow() {
         {allowed(account, "attendance") ? <button onClick={() => open("attendance")}><Fingerprint />Attendance<ChevronRight /></button> : null}
         {allowed(account, "roster") ? <button onClick={() => open("roster")}><ArrowLeftRight />Roster<ChevronRight /></button> : null}
         {showLeaveNav(account) ? <button onClick={() => open("leave")}><CalendarDays />Leave<ChevronRight /></button> : null}
+        {showLopNav(account) ? <button onClick={() => open("lop")}><CalendarDays />LOP<ChevronRight /></button> : null}
         {allowed(account, "performance") ? <button onClick={() => open("performance")}><Target />Performance<ChevronRight /></button> : null}
         <button onClick={() => open("settings")}><Settings />Settings<ChevronRight /></button>
       </nav>
@@ -550,8 +546,7 @@ export function ConnectLoginFlow() {
         <AttendanceLocationMonitor account={account} />
       ) : null}
       {step === "dashboard" && account && isManagerAccount(account) ? <ConnectPeopleWorkspace account={account} onApprovals={() => open("approvals")} onSettings={() => open("settings")} onSwitch={() => open("accounts")} /> : null}
-      {step === "dashboard" && account && isWorkforceWorkspace(account) ? <ConnectWorkforceWorkspace account={account} onAdvances={() => open("advances")} onProfile={() => open("profile")} /> : null}
-      {step === "dashboard" && account && peopleSelfService(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onLeave={() => open("leave")} onPerformance={() => open("performance")} onProfile={() => open("profile")} /> : null}
+      {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onLeave={() => open(isContractorAccount(account) ? "lop" : "leave")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRoster={() => open("roster")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
       {step === "profile" && account && !isManagerAccount(account) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "documents" && account && peopleSelfService(account) ? <ConnectDocuments account={account} /> : null}
       {step === "approvals" && account && canViewApprovals(account) ? <ConnectApprovalInbox account={account} /> : null}
@@ -560,6 +555,7 @@ export function ConnectLoginFlow() {
       {step === "attendance" && account && allowed(account, "attendance") ? <ConnectAttendance account={account} /> : null}
       {step === "roster" && account && allowed(account, "roster") ? <ConnectRoster account={account} /> : null}
       {step === "leave" && account && showLeaveNav(account) ? <ConnectLeave account={account} /> : null}
+      {step === "lop" && account && showLopNav(account) ? <ConnectLeave account={account} lopOnly /> : null}
       {step === "performance" && account && allowed(account, "performance") ? <ConnectPerformance account={account} /> : null}
       {step === "settings" ? <section className="dx-settings">
         <header className="dx-page-intro"><small>Personalisation</small><h1>Settings</h1><p>Control sign-in and the account you open first.</p></header>
@@ -576,6 +572,7 @@ export function ConnectLoginFlow() {
       {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint /><span>Attendance</span></button> : null}
       {allowed(account, "roster") ? <button aria-current={step === "roster" ? "page" : undefined} className={step === "roster" ? "active" : ""} onClick={() => open("roster")}><ArrowLeftRight /><span>Roster</span></button> : null}
       {showLeaveNav(account) ? <button aria-current={step === "leave" ? "page" : undefined} className={step === "leave" ? "active" : ""} onClick={() => open("leave")}><CalendarDays /><span>Leave</span></button> : null}
+      {showLopNav(account) ? <button aria-current={step === "lop" ? "page" : undefined} className={step === "lop" ? "active" : ""} onClick={() => open("lop")}><CalendarDays /><span>LOP</span></button> : null}
       {canViewApprovals(account) && isManagerAccount(account) ? <button aria-current={step === "approvals" ? "page" : undefined} className={step === "approvals" ? "active" : ""} onClick={() => open("approvals")}><ClipboardCheck /><span>Approvals</span></button> : null}
       {!isManagerAccount(account) ? <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound /><span>Profile</span></button> : <button aria-current={step === "settings" ? "page" : undefined} className={step === "settings" ? "active" : ""} onClick={() => open("settings")}><Settings /><span>Settings</span></button>}
     </nav> : null}
