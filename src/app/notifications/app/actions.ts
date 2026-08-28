@@ -11,6 +11,7 @@ const internalRoutes = new Set(["", "dashboard", "profile", "attendance", "leave
 const variablePattern = /\{(full_name|dropx_id|biometric_id|category|location|designation)\}/g;
 const profileLabels: Record<WorkforceProfileType, string> = {
   employee: "Employee",
+  workforce: "Workforce",
   field_executive: "Field executive",
   contractor: "Independent contractor",
   vendor: "Vendor",

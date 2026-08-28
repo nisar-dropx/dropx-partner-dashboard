@@ -1,5 +1,6 @@
 export const workforceProfileTypes = [
   "employee",
+  "workforce",
   "field_executive",
   "contractor",
   "vendor",
@@ -7,7 +8,7 @@ export const workforceProfileTypes = [
 ] as const;
 
 export type WorkforceProfileType = typeof workforceProfileTypes[number];
-export type NonEmployeeProfileType = Exclude<WorkforceProfileType, "employee">;
+export type NonEmployeeProfileType = Exclude<WorkforceProfileType, "employee" | "workforce">;
 
 export type NonEmployeeRoute =
   | "/field-executive"
@@ -72,7 +73,7 @@ export function isWorkforceProfileType(value: unknown): value is WorkforceProfil
 }
 
 export function isNonEmployeeProfileType(value: unknown): value is NonEmployeeProfileType {
-  return isWorkforceProfileType(value) && value !== "employee";
+  return isWorkforceProfileType(value) && value !== "employee" && value !== "workforce";
 }
 
 export function nonEmployeeConfigForProfileType(value: unknown) {
@@ -95,9 +96,9 @@ export function nonEmployeeConfigForRoute(value: unknown) {
 }
 
 export function workforceTable(profileType: WorkforceProfileType) {
-  return profileType === "employee"
-    ? "employees" as const
-    : nonEmployeeProfileConfigs[profileType].table;
+  if (profileType === "employee") return "employees" as const;
+  if (profileType === "workforce") return "workforce" as const;
+  return nonEmployeeProfileConfigs[profileType].table;
 }
 
 export function workforceLabel(profileType: NonEmployeeProfileType) {

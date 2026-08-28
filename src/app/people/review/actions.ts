@@ -27,7 +27,9 @@ function isNextRedirectError(error: unknown) {
 }
 
 function profileLabel(profileType: WorkforceProfileType) {
-  return profileType === "employee" ? "Employee" : nonEmployeeProfileConfigs[profileType].label;
+  if (profileType === "employee") return "Employee";
+  if (profileType === "workforce") return "Workforce";
+  return nonEmployeeProfileConfigs[profileType].label;
 }
 
 export async function reviewPeopleProfile(formData: FormData) {
@@ -117,7 +119,11 @@ export async function reviewPeopleProfile(formData: FormData) {
     });
 
     revalidatePath("/people/review");
-    revalidatePath(profileType === "employee" ? "/employees" : nonEmployeeProfileConfigs[profileType].route);
+    revalidatePath(profileType === "employee"
+      ? "/employees"
+      : profileType === "workforce"
+        ? "/field-executive"
+        : nonEmployeeProfileConfigs[profileType].route);
     reviewRedirect({
       notice: action === "approve"
         ? `${profileLabel(profileType)} profile approved.`

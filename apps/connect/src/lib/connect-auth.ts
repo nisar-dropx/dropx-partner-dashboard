@@ -40,6 +40,8 @@ type AccountRow = {
   role?: string | null;
   designation_id?: string | null;
   status?: string | null;
+  source_profile_type?: string | null;
+  source_profile_id?: string | null;
   profile_type: "user" | WorkforceProfileType;
 };
 
@@ -117,6 +119,7 @@ export function connectWorkspace(profileType: ConnectAccount["profileType"]) {
 
 function categoryCodeForProfile(profileType: ConnectAccount["profileType"]) {
   if (profileType === "employee") return "employees";
+  if (profileType === "workforce") return "field_executives";
   if (profileType === "field_executive") return "field_executives";
   if (profileType === "contractor") return "contractors";
   if (profileType === "vendor") return "vendors";
@@ -138,7 +141,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const localMobile = mobile.startsWith(countryCode) ? mobile.slice(countryCode.length) : mobile;
   type ProfileMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; employee_id?: string | null; role?: string | null };
-  type NonEmployeeMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; dropx_id?: string | null; biometric_id?: string | null; designation?: string | null; onboarding_status?: string | null; profile_photo_path?: string | null };
+  type NonEmployeeMatch = { id: string; company_id: string; full_name: string | null; email?: string | null; dropx_id?: string | null; biometric_id?: string | null; designation?: string | null; onboarding_status?: string | null; lifecycle_status?: string | null; profile_photo_path?: string | null; source_profile_type?: string | null; source_profile_id?: string | null; deleted_at?: string | null };
 
   let profilesResult: MatchResult<ProfileMatch> = await supabaseAdmin
     .from("profiles")
@@ -153,17 +156,17 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
     .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
 
-  const nonEmployeeTypes: NonEmployeeProfileType[] = ["field_executive", "contractor", "vendor", "worker"];
+  const nonEmployeeTypes: NonEmployeeProfileType[] = ["workforce", "field_executive", "contractor", "vendor", "worker"];
   async function loadNonEmployee(profileType: NonEmployeeProfileType): Promise<MatchResult<NonEmployeeMatch>> {
     const table = workforceTable(profileType);
     let query = supabaseAdmin!
       .from(table)
-      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, profile_photo_path, is_active, mobile_country_code")
+      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, mobile_country_code, source_profile_type, source_profile_id, deleted_at")
       .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
       .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
-    if (profileType !== "field_executive") query = query.eq("is_active", true);
+    if (!["workforce", "field_executive"].includes(profileType)) query = query.eq("is_active", true);
     let result: MatchResult<NonEmployeeMatch> = await query;
-    if (profileType !== "field_executive" && isMissingColumnError(result.error)) {
+    if (!["workforce", "field_executive"].includes(profileType) && isMissingColumnError(result.error)) {
       return { data: [], error: null };
     }
     if (isMissingColumnError(result.error)) {
@@ -171,19 +174,23 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         .from(table)
         .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, is_active")
         .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
-      if (profileType !== "field_executive") fallbackQuery = fallbackQuery.eq("is_active", true);
+      if (!["workforce", "field_executive"].includes(profileType)) fallbackQuery = fallbackQuery.eq("is_active", true);
       result = await fallbackQuery;
     }
-    if (profileType !== "field_executive" && isMissingColumnError(result.error)) {
+    if (!["workforce", "field_executive"].includes(profileType) && isMissingColumnError(result.error)) {
       return { data: [], error: null };
     }
     return result;
   }
   const nonEmployeeResults = (await Promise.all(nonEmployeeTypes.map(loadNonEmployee))).map((result, index) => {
-    if (nonEmployeeTypes[index] !== "field_executive") return result;
+    if (!["workforce", "field_executive"].includes(nonEmployeeTypes[index])) return result;
     return {
       ...result,
-      data: (result.data ?? []).filter((row) => !["rejected", "cancelled"].includes(String(row.onboarding_status ?? "pending").toLowerCase()))
+      data: (result.data ?? []).filter((row) =>
+        !["rejected", "cancelled"].includes(String(row.onboarding_status ?? "pending").toLowerCase()) &&
+        String(row.lifecycle_status ?? "").toLowerCase() !== "exited" &&
+        !row.deleted_at
+      )
     };
   });
 
@@ -257,6 +264,8 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
               ? "Returned"
               : "Pending",
         profile_photo_path: profile.profile_photo_path ?? null,
+        source_profile_type: profile.source_profile_type ?? null,
+        source_profile_id: profile.source_profile_id ?? null,
         profile_type: profileType
       }));
     }),
@@ -269,8 +278,19 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   const employeeReferences = new Set(employeeAccounts
     .filter((account) => account.employee_id)
     .map((account) => `${account.company_id}:${String(account.employee_id).trim().toLowerCase()}`));
-  const visibleAccounts = accounts.filter((account) => account.profile_type !== "user" || !account.employee_id ||
-    !employeeReferences.has(`${account.company_id}:${String(account.employee_id).trim().toLowerCase()}`));
+  const canonicalWorkforceSources = new Set(accounts
+    .filter((account) => account.profile_type === "workforce" && account.source_profile_type && account.source_profile_id)
+    .map((account) => `${account.company_id}:${account.source_profile_type}:${account.source_profile_id}`));
+  const visibleAccounts = accounts.filter((account) => {
+    if (account.profile_type === "user") {
+      return !account.employee_id ||
+        !employeeReferences.has(`${account.company_id}:${String(account.employee_id).trim().toLowerCase()}`);
+    }
+    if (["field_executive", "contractor", "vendor", "worker"].includes(account.profile_type)) {
+      return !canonicalWorkforceSources.has(`${account.company_id}:${account.profile_type}:${account.id}`);
+    }
+    return true;
+  });
 
   const companyIds = Array.from(new Set(visibleAccounts.map((account) => account.company_id)));
   const companiesResult = companyIds.length
