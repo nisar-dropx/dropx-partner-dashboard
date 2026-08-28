@@ -165,23 +165,28 @@ function parsePaymentField(formData: FormData) {
 
 async function saveProviderMetricSelections(formData: FormData, companyId: string, paymentFieldId: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
-  const selected: Array<{ metricId: string; providerId?: string; providerModelId?: string | null }> = [...formData.entries()]
+  const selected: Array<{ metricId: string; providerId: string; providerModelId: string | null }> = [...formData.entries()]
     .filter(([key, value]) => key.startsWith("provider_metric_") && String(value).trim())
-    .map(([, value]) => ({ metricId: String(value) }));
+    .map(([, value]) => {
+      const [providerId, providerModelId, metricId] = String(value).split("|");
+      if (!providerId || !metricId) throw new Error("A provider allocation is incomplete.");
+      return { providerId, providerModelId: providerModelId || null, metricId };
+    });
   const metricIds = selected.map((item) => item.metricId);
   if (metricIds.length) {
     const valid = await supabaseAdmin.from("provider_production_metrics").select("id, provider_id, provider_model_id")
       .eq("company_id", companyId).eq("is_active", true).in("id", metricIds);
     if (valid.error) throw new Error(valid.error.message);
     if ((valid.data ?? []).length !== new Set(metricIds).size) throw new Error("One or more provider counts are invalid.");
-    const scopes = new Set((valid.data ?? []).map((row) => `${row.provider_id}:${row.provider_model_id ?? "all"}`));
-    if (scopes.size !== (valid.data ?? []).length) throw new Error("Select only one count for each provider and model.");
     const validById = new Map((valid.data ?? []).map((row) => [String(row.id), row]));
     selected.forEach((item) => {
       const metric = validById.get(item.metricId)!;
-      item.providerId = String(metric.provider_id);
-      item.providerModelId = metric.provider_model_id ? String(metric.provider_model_id) : null;
+      if (String(metric.provider_id) !== item.providerId || (metric.provider_model_id && String(metric.provider_model_id) !== item.providerModelId)) {
+        throw new Error("The selected production count does not belong to this provider and model.");
+      }
     });
+    const scopes = new Set(selected.map((item) => `${item.providerId}:${item.providerModelId ?? "default"}`));
+    if (scopes.size !== selected.length) throw new Error("Select only one count for each provider and model.");
   }
   const removed = await supabaseAdmin.from("payment_field_provider_metrics").delete()
     .eq("company_id", companyId).eq("payment_field_id", paymentFieldId);
