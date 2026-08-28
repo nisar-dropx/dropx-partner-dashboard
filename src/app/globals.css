@@ -4324,7 +4324,33 @@ h3 {
 }
 
 .payment-field-calculation {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: 1fr;
+}
+
+.payment-field-allocation-head,
+.payment-field-allocation-row {
+  display: grid;
+  grid-template-columns: minmax(110px, .7fr) minmax(170px, 1fr) minmax(190px, 1.3fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.payment-field-allocation-head {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.payment-field-allocation-row {
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.payment-field-allocation-row.fallback {
+  background: color-mix(in srgb, var(--warning, #f59e0b) 7%, transparent);
 }
 
 .payment-field-form label,
@@ -4390,6 +4416,8 @@ h3 {
 }
 
 @media (max-width: 640px) {
+  .payment-field-allocation-head { display: none; }
+  .payment-field-allocation-row { grid-template-columns: 1fr; }
   .payment-field-row-footer {
     align-items: stretch;
     flex-direction: column;
