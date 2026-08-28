@@ -9213,7 +9213,7 @@ body {
 .dx-payments-menu > button { width: 100%; display: flex; align-items: center; gap: 14px; padding: 18px; border: 1px solid #e7e2da; border-radius: 16px; background: #fff; color: #202124; text-align: left; }
 .dx-payments-menu > button > span { flex: 1; display: grid; gap: 3px; }
 .dx-payments-menu > button small { color: #737373; }
-.dx-advances > header, .dx-earnings > header { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 16px; margin-bottom: 20px; padding: 18px; border: 1px solid #e4dfd7; border-radius: 16px; background: #fff; box-shadow: 0 5px 18px rgba(32,33,36,.05); }
+.dx-advances > header { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 16px; margin-bottom: 20px; padding: 18px; border: 1px solid #e4dfd7; border-radius: 16px; background: #fff; box-shadow: 0 5px 18px rgba(32,33,36,.05); }
 .dx-advance-title { display: flex; align-items: center; gap: 13px; min-width: 0; }
 .dx-advance-title i { display: grid; place-items: center; width: 46px; height: 46px; flex: 0 0 46px; border-radius: 14px; color: #ca426c; background: #fff0f5; font-style: normal; }
 .dx-advance-title svg { width: 24px; height: 24px; }
@@ -9638,8 +9638,7 @@ body {
 .dx-settings h1,
 .dx-accounts h1,
 .dx-payments-menu h1,
-.dx-advances h1,
-.dx-earnings h1 {
+.dx-advances h1 {
   color: var(--one-ink);
   font-size: clamp(22px, 3vw, 27px);
   font-weight: 640;
@@ -12629,6 +12628,32 @@ body {
   gap: 14px;
 }
 
+.dx-documents-head {
+  display: flex;
+  gap: 18px;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.dx-documents-head > div { min-width: 0; }
+.dx-documents-head > button,
+.dx-document-request-list > article > button {
+  display: inline-flex;
+  min-height: 40px;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  color: #fff;
+  border: 0;
+  border-radius: 11px;
+  background: var(--one-ink);
+  font-size: 11px;
+  font-weight: 750;
+}
+.dx-documents-head > button:disabled { cursor: not-allowed; opacity: .45; }
+.dx-documents-head > button svg { width: 16px; height: 16px; }
+
 .dx-document-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -12671,6 +12696,35 @@ body {
   gap: 10px;
 }
 
+.dx-document-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 5px;
+  border: 1px solid rgba(25, 34, 59, .08);
+  border-radius: 15px;
+  background: rgba(255,255,255,.72);
+}
+
+.dx-document-tabs button {
+  display: flex;
+  min-width: 0;
+  min-height: 42px;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  color: var(--one-muted);
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 720;
+}
+.dx-document-tabs button.active { color: var(--one-ink); background: #fff; box-shadow: 0 5px 15px rgba(25,34,59,.07); }
+.dx-document-tabs svg { width: 15px; height: 15px; }
+.dx-document-tabs b { display: grid; min-width: 20px; height: 20px; place-items: center; border-radius: 999px; background: rgba(25,34,59,.06); font-size: 9px; }
+
 .dx-document-list > article {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -12703,6 +12757,51 @@ body {
 }
 .dx-document-list > article > a svg { width: 15px; height: 15px; }
 
+.dx-document-request-list { display: grid; gap: 10px; }
+.dx-document-request-list > article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 15px;
+  border: 1px solid rgba(25,34,59,.09);
+  border-radius: 17px;
+  background: rgba(255,255,255,.9);
+}
+.dx-document-request-list > article > i { display: grid; width: 40px; height: 40px; place-items: center; color: #d5790e; border-radius: 13px; background: #fff5df; }
+.dx-document-request-list > article > i.status-fulfilled { color: #047857; background: #e9f8f2; }
+.dx-document-request-list > article > i svg { width: 19px; height: 19px; }
+.dx-document-request-list > article > div { display: grid; min-width: 0; gap: 4px; }
+.dx-document-request-list > article > div > span { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.dx-document-request-list strong { color: var(--one-ink); font-size: 13px; }
+.dx-document-request-list em { color: var(--one-muted); font-size: 9px; font-style: normal; font-weight: 700; }
+.dx-document-request-list p, .dx-document-request-list small { margin: 0; color: var(--one-muted); font-size: 10px; }
+.dx-document-request-list > article > a { display: inline-flex; gap: 6px; align-items: center; color: #bd431f; font-size: 10px; font-weight: 750; text-decoration: none; }
+.dx-document-request-list > article > a svg { width: 14px; height: 14px; }
+.dx-request-status { padding: 5px 8px; color: #9a5b00; border-radius: 999px; background: #fff4db; font-size: 9px; font-weight: 780; white-space: nowrap; }
+.dx-request-status.fulfilled { color: #047857; background: #e9f8f2; }
+.dx-request-status.rejected { color: #b42318; background: #fff0ee; }
+.dx-request-status.returned { color: #a34617; background: #fff1e6; }
+
+.dx-document-request-modal { position: fixed; z-index: 80; inset: 0; display: grid; place-items: center; padding: 18px; }
+.dx-document-request-scrim { position: absolute; inset: 0; border: 0; background: rgba(12,18,35,.56); backdrop-filter: blur(4px); }
+.dx-document-request-modal > form { position: relative; display: grid; width: min(100%, 460px); gap: 14px; padding: 20px; border: 1px solid rgba(255,255,255,.5); border-radius: 20px; background: #fff; box-shadow: 0 30px 90px rgba(12,18,35,.28); }
+.dx-document-request-modal header { display: flex; align-items: start; justify-content: space-between; gap: 14px; }
+.dx-document-request-modal header span { display: grid; gap: 2px; }
+.dx-document-request-modal header small { color: #d55328; font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.dx-document-request-modal h2 { margin: 0; color: var(--one-ink); font-size: 20px; }
+.dx-document-request-modal header > button { display: grid; width: 34px; height: 34px; place-items: center; color: var(--one-muted); border: 0; border-radius: 10px; background: #f3f4f7; }
+.dx-document-request-modal header svg { width: 17px; height: 17px; }
+.dx-document-request-modal label { display: grid; gap: 6px; color: var(--one-muted); font-size: 10px; font-weight: 730; text-transform: uppercase; }
+.dx-document-request-modal select, .dx-document-request-modal textarea { width: 100%; color: var(--one-ink); border: 1px solid rgba(25,34,59,.14); border-radius: 12px; background: #fff; font: inherit; font-size: 12px; text-transform: none; }
+.dx-document-request-modal select { min-height: 44px; padding: 0 11px; }
+.dx-document-request-modal textarea { min-height: 96px; padding: 11px; resize: vertical; }
+.dx-document-request-modal > form > button { min-height: 44px; color: #fff; border: 0; border-radius: 12px; background: var(--one-ink); font-size: 12px; font-weight: 760; }
+.dx-document-request-modal > form > button:disabled { opacity: .45; }
+.dx-document-request-guidance { display: grid; gap: 5px; padding: 12px; color: var(--one-muted); border-radius: 12px; background: #f7f8fb; font-size: 10px; line-height: 1.45; }
+.dx-document-request-guidance strong { color: var(--one-ink); font-size: 11px; }
+.dx-document-request-guidance small { color: #bd431f; font-weight: 750; }
+
 .dx-document-empty {
   display: grid;
   min-height: 230px;
@@ -12723,10 +12822,16 @@ body {
 .dx-document-privacy svg { width: 14px; height: 14px; }
 
 @media (max-width: 640px) {
+  .dx-documents-head { align-items: start; }
+  .dx-documents-head > button { min-width: 42px; padding: 0 11px; font-size: 0; }
   .dx-document-summary { grid-template-columns: 1fr 1fr; }
   .dx-document-summary > div:first-child { grid-column: 1 / -1; }
+  .dx-document-tabs { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; }
+  .dx-document-tabs button { min-width: 125px; flex: 0 0 auto; scroll-snap-align: start; }
   .dx-document-list > article { grid-template-columns: auto minmax(0, 1fr); }
   .dx-document-list > article > a { grid-column: 1 / -1; justify-content: center; }
+  .dx-document-request-list > article { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .dx-document-request-list > article > button, .dx-document-request-list > article > a { grid-column: 1 / -1; justify-content: center; }
 }
 
 .dx-advances > header {
