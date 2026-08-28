@@ -204,8 +204,8 @@ export function ConnectLeave({ account, lopOnly = account.profileType === "contr
           </div>
           <label>Reason<textarea onChange={(event) => setReason(event.target.value)} placeholder={isLop ? "Enter reason for LOP" : "Enter reason for leave"} rows={4} value={reason} /></label>
           {isSickLeave ? <section className={`dx-leave-proof${medicalProofRequired ? " required" : ""}`}>
-            <div className="dx-leave-proof-head"><span><Paperclip /><strong>Medical proof</strong></span><em>{medicalProofRequired ? "Required" : "Optional for 1 day"}</em></div>
-            <p><Info />A doctor&apos;s note, prescription, or medical certificate is required when sick leave is longer than one day.</p>
+            <div className="dx-leave-proof-head"><span><Paperclip /><strong>Medical proof</strong></span><em>{medicalProofRequired ? "Required for this request" : "Required for 2+ days"}</em></div>
+            <p><Info />Optional for a one-day request. A doctor&apos;s note, prescription, or medical certificate is mandatory for two or more days.</p>
             <label className="dx-leave-proof-upload">
               <Upload />
               <span><strong>{proof?.name || existingProofName || "Choose proof"}</strong><small>PDF, JPG, PNG or WebP · max 10 MB</small></span>
