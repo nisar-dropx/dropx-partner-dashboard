@@ -165,7 +165,7 @@ function parsePaymentField(formData: FormData) {
 
 async function saveProviderMetricSelections(formData: FormData, companyId: string, paymentFieldId: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
-  const selected = [...formData.entries()]
+  const selected: Array<{ metricId: string; providerId?: string; providerModelId?: string | null }> = [...formData.entries()]
     .filter(([key, value]) => key.startsWith("provider_metric_") && String(value).trim())
     .map(([, value]) => ({ metricId: String(value) }));
   const metricIds = selected.map((item) => item.metricId);
@@ -177,7 +177,7 @@ async function saveProviderMetricSelections(formData: FormData, companyId: strin
     const scopes = new Set((valid.data ?? []).map((row) => `${row.provider_id}:${row.provider_model_id ?? "all"}`));
     if (scopes.size !== (valid.data ?? []).length) throw new Error("Select only one count for each provider and model.");
     const validById = new Map((valid.data ?? []).map((row) => [String(row.id), row]));
-    selected.forEach((item: { metricId: string; providerId?: string; providerModelId?: string | null }) => {
+    selected.forEach((item) => {
       const metric = validById.get(item.metricId)!;
       item.providerId = String(metric.provider_id);
       item.providerModelId = metric.provider_model_id ? String(metric.provider_model_id) : null;
