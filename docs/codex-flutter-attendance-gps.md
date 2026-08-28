@@ -13,7 +13,7 @@ This note tells Codex how to finish the **native Android Flutter** app (`com.dro
 | Connect web (DropX One) | `apps/connect` in `dropx-partner-dashboard` |
 | Shared attendance APIs | `src/app/api/connect/attendance/*` (dashboard) |
 | Core GPS / hold / flag logic | `src/lib/biometric/attendance-gps.ts` |
-| Per-location tracking / flag toggles | **People HRMS** → Attendance → **Location settings** (`https://people.dropxlogistics.com/attendance/location-settings`) |
+| Per-location tracking / flag toggles | **People HRMS** → Administration → Masters → **Location Attendance** (`/settings/location-attendance`) |
 | People HRMS review | `dropx-hrms` → `https://people.dropxlogistics.com/attendance/integrity` |
 | Connect production | `https://one.dropxlogistics.com/` |
 | Partner integrity (legacy mirror) | `https://dashboard…/attendance/integrity` |
@@ -26,7 +26,7 @@ This note tells Codex how to finish the **native Android Flutter** app (`com.dro
 
 1. **Primary punch = station biometric device.** Connect must **not** show always-on GPS Punch In/Out.
 2. Connect shows **Location review needed** **only when** `openFlags.length > 0` (support selfie + live GPS for manager review).
-3. While DropX One is logged in, the phone silently sends **presence GPS** when **location tracking is ON** for the worker’s assigned station (People → Attendance → Location settings). Default is **off** for all stations until enabled.
+3. While DropX One is logged in, the phone silently sends **presence GPS** when **location tracking is ON** for the worker’s assigned station (People → Masters → Location Attendance). Default is **off** for all stations until enabled.
 4. After punch-in, in-shift tracking / continuous-outside flagging runs for **9 hours** (only when tracking ON), then stops (`LOCATION_TRACKING_MS`).
 5. Continuous outside station geofence **> radius (default 50m) for > 30 minutes** during that window → flag `outside_station_over_limit` — only when **location flags** are ON for that station.
 6. Biometric punch while recent phone GPS is outside any company station → immediate `biometric_phone_mismatch` (only when **location flags ON** for station). Connect-linked workers with **no recent phone GPS** (within **20 min**) are also flagged when flags ON. That punch is **held**.
@@ -233,7 +233,7 @@ Fields: `accountId`, `profileType`, `flagId`, `punchId?`, `punchDate`, `lat`, `l
 4. **Support sheet** — geofence gate; camera gated; face match → liveness → capture → submit. Neutral copy only.
 5. **Silent tracker** — only when `attendanceSettings.locationTrackingEnabled === true` from punch GET; after punch-in continue **9h**; heartbeat every **3–5 min**; no UI copy.
 
-### Per-location admin toggles (People → Attendance → Location settings)
+### Per-location admin toggles (People → Masters → Location Attendance)
 
 | Toggle | DB column | Default | Effect |
 |---|---|---|---|
