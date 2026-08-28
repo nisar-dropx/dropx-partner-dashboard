@@ -654,11 +654,32 @@ function RegularizationSheet({
   const [remarks, setRemarks] = useState(row.regularization?.remarks || "");
   const [attachment, setAttachment] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const requestsInTime = ["missed_in", "incorrect_in", "missed_both", "other"].includes(reason);
+  const requestsOutTime = ["missed_out", "incorrect_out", "missed_both", "other"].includes(reason);
+  const proofTimeLabel = !reason
+    ? "requested attendance time"
+    : requestsInTime && requestsOutTime
+      ? "requested IN and OUT times"
+      : requestsInTime
+        ? "requested IN time"
+        : "requested OUT time";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (!reason) {
+      setError("Select a regularization reason.");
+      return;
+    }
+    if (requestsInTime && !inTime) {
+      setError("Enter the requested IN time.");
+      return;
+    }
+    if (requestsOutTime && !outTime) {
+      setError("Enter the requested OUT time.");
+      return;
+    }
     if (!attachment && !row.regularization?.hasAttachment) {
-      setError("Upload a CCTV screenshot with a visible punch date and time.");
+      setError(`Upload workplace CCTV proof with a visible timestamp matching the ${proofTimeLabel}.`);
       return;
     }
     setSaving(true);
@@ -670,8 +691,8 @@ function RegularizationSheet({
       form.set("attendanceDate", row.date);
       form.set("currentInTime", row.inTime);
       form.set("currentOutTime", row.outTime);
-      form.set("requestedInTime", inTime);
-      form.set("requestedOutTime", outTime);
+      form.set("requestedInTime", requestsInTime ? inTime : row.inTime);
+      form.set("requestedOutTime", requestsOutTime ? outTime : row.outTime);
       form.set("reasonCode", reason);
       form.set("remarks", remarks);
       if (attachment) form.set("attachment", attachment);
@@ -698,11 +719,7 @@ function RegularizationSheet({
           <span><small>DATE</small><strong>{row.date.split("-").reverse().join("/")}</strong></span>
           <em>{attendanceLabel(row)}</em>
         </div>
-        <div className="dx-time-grid">
-          <label>Requested IN<input required type="time" value={inTime} onChange={(event) => setInTime(event.target.value)} /></label>
-          <label>Requested OUT<input required type="time" value={outTime} onChange={(event) => setOutTime(event.target.value)} /></label>
-        </div>
-        <label>Reason<select required value={reason} onChange={(event) => setReason(event.target.value)}>
+        <label>Reason<select required value={reason} onChange={(event) => { setReason(event.target.value); setError(""); }}>
           <option value="">Select reason</option>
           <option value="missed_in">Missed IN punch</option>
           <option value="missed_out">Missed OUT punch</option>
@@ -711,12 +728,16 @@ function RegularizationSheet({
           <option value="incorrect_out">Incorrect OUT time</option>
           <option value="other">Other</option>
         </select></label>
+        {reason ? <div className={`dx-time-grid ${requestsInTime !== requestsOutTime ? "single" : ""}`}>
+          {requestsInTime ? <label>Requested IN<input required type="time" value={inTime} onChange={(event) => setInTime(event.target.value)} /></label> : null}
+          {requestsOutTime ? <label>Requested OUT<input required type="time" value={outTime} onChange={(event) => setOutTime(event.target.value)} /></label> : null}
+        </div> : <p className="dx-time-prompt">Select a reason to enter only the time that needs correction.</p>}
         <label>Remarks<textarea required minLength={5} placeholder="Briefly explain the correction" rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
         <div className="dx-evidence-info" role="note">
           <Info aria-hidden="true" />
-          <span><strong>CCTV proof is mandatory</strong>Upload a clear screenshot showing you at the punch device with the punch date and time visible. The approver will verify this image before taking action.</span>
+          <span><strong>Workplace CCTV proof is mandatory</strong>Upload a clear screenshot showing you were present at the workplace at the {proofTimeLabel}. The CCTV date and time must be visible; you do not need to be standing near the biometric device.</span>
         </div>
-        <label className="dx-attachment required"><Paperclip /><span>{attachment?.name || (row.regularization?.hasAttachment ? "Existing proof attached · choose to replace" : "Upload CCTV timestamp proof")}</span><em>Required</em><input accept="image/jpeg,image/png,image/webp" required={!row.regularization?.hasAttachment} type="file" onChange={(event) => {
+        <label className="dx-attachment required"><Paperclip /><span>{attachment?.name || (row.regularization?.hasAttachment ? "Existing proof attached · choose to replace" : "Upload workplace CCTV proof")}</span><em>Required</em><input accept="image/jpeg,image/png,image/webp" required={!row.regularization?.hasAttachment} type="file" onChange={(event) => {
           const file = event.target.files?.[0] ?? null;
           if (file && !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
             setAttachment(null);
@@ -733,7 +754,7 @@ function RegularizationSheet({
           setError("");
           setAttachment(file);
         }} /></label>
-        <p className="dx-evidence-format">JPG, PNG or WebP · maximum 5 MB · timestamp must match the requested punch</p>
+        <p className="dx-evidence-format">JPG, PNG or WebP · maximum 5 MB · timestamp must match the requested attendance time</p>
         {error ? <p className="dx-form-error">{error}</p> : null}
         <div className="dx-sheet-actions"><button className="secondary" onClick={onClose} type="button">Cancel</button><button disabled={saving || (!attachment && !row.regularization?.hasAttachment)} type="submit">{saving ? "Submitting..." : "Submit request"}</button></div>
       </form>

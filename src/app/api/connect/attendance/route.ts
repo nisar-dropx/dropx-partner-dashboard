@@ -214,13 +214,18 @@ export async function POST(request: NextRequest) {
     if (!accountId) throw new Error("Account is required.");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(attendanceDate)) throw new Error("Attendance date is required.");
     if (attendanceDate > new Date().toISOString().slice(0, 10)) throw new Error("Future attendance cannot be regularized.");
-    if (!validTime(requestedInTime) || !validTime(requestedOutTime)) {
-      throw new Error("Requested IN and OUT times are required.");
-    }
-    if (requestedOutTime <= requestedInTime) throw new Error("Requested OUT time must be after IN time.");
     if (!["missed_in", "missed_out", "missed_both", "incorrect_in", "incorrect_out", "other"].includes(reasonCode)) {
       throw new Error("Select a regularization reason.");
     }
+    const requestsInTime = ["missed_in", "incorrect_in", "missed_both", "other"].includes(reasonCode);
+    const requestsOutTime = ["missed_out", "incorrect_out", "missed_both", "other"].includes(reasonCode);
+    const normalizedRequestedInTime = requestsInTime ? requestedInTime : currentInTime;
+    const normalizedRequestedOutTime = requestsOutTime ? requestedOutTime : currentOutTime;
+    if (requestsInTime && !validTime(requestedInTime)) throw new Error("Requested IN time is required for this reason.");
+    if (requestsOutTime && !validTime(requestedOutTime)) throw new Error("Requested OUT time is required for this reason.");
+    if (!requestsInTime && !validTime(currentInTime)) throw new Error("The existing IN punch is missing. Select Missed both punches.");
+    if (!requestsOutTime && !validTime(currentOutTime)) throw new Error("The existing OUT punch is missing. Select Missed both punches.");
+    if (normalizedRequestedOutTime <= normalizedRequestedInTime) throw new Error("Requested OUT time must be after IN time.");
     if (remarks.length < 5) throw new Error("Enter a short explanation.");
     const worker = await resolveWorker({ accountId, profileType });
     const existingResult = await supabaseAdmin
@@ -263,7 +268,7 @@ export async function POST(request: NextRequest) {
       if (uploadResult.error) throw new Error(uploadResult.error.message);
     }
     if (!attachmentPath) {
-      throw new Error("Upload a CCTV screenshot showing the punch date and time before submitting.");
+      throw new Error("Upload workplace CCTV proof with a visible timestamp matching the requested IN or OUT time.");
     }
 
     const payload = {
@@ -276,8 +281,8 @@ export async function POST(request: NextRequest) {
       attendance_date: attendanceDate,
       current_in_time: currentInTime || null,
       current_out_time: currentOutTime || null,
-      requested_in_time: requestedInTime,
-      requested_out_time: requestedOutTime,
+      requested_in_time: normalizedRequestedInTime,
+      requested_out_time: normalizedRequestedOutTime,
       reason_code: reasonCode,
       remarks,
       attachment_path: attachmentPath,
