@@ -7,6 +7,15 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
 import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
 
+function todayInIndia(now = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(now);
+}
+
 function monthRange(month: string | null) {
   const today = new Date();
   const match = month?.match(/^(\d{4})-(\d{2})$/);
@@ -213,7 +222,7 @@ export async function POST(request: NextRequest) {
     const currentOutTime = String(formData.get("currentOutTime") ?? "").trim();
     if (!accountId) throw new Error("Account is required.");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(attendanceDate)) throw new Error("Attendance date is required.");
-    if (attendanceDate > new Date().toISOString().slice(0, 10)) throw new Error("Future attendance cannot be regularized.");
+    if (attendanceDate > todayInIndia()) throw new Error("Future attendance cannot be regularized.");
     if (!["missed_in", "missed_out", "missed_both", "incorrect_in", "incorrect_out", "other"].includes(reasonCode)) {
       throw new Error("Select a regularization reason.");
     }
