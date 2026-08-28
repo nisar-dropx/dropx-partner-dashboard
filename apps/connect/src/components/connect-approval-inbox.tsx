@@ -66,6 +66,9 @@ function displayDate(value: string) { return value.split("-").reverse().join("/"
 function dateTime(value: string | null) {
   return value ? new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }).format(new Date(value)) : "—";
 }
+function statusLabel(status: string) {
+  return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
 
 export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [section, setSection] = useState<ApprovalSection>("time-off");
@@ -163,35 +166,38 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     {loading ? <div className="dx-loader"><span /><small>Loading approvals…</small></div> : null}
     {!loading && section === "time-off" ? <div className="dx-expense-list">
       {leaveApprovals.length ? leaveApprovals.map((approval) => <article className="dx-expense-approval" key={approval.id}>
-        <header><span><small>{approval.leaveType} · {approval.stepName}</small><strong>{approval.requesterName}</strong><em>{approval.requesterCode || "—"} · {approval.profileType === "contractor" ? "Independent contractor" : "Employee"}</em></span><b>{approval.days} day{approval.days === 1 ? "" : "s"}</b></header>
-        <div><span>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</span><span>{approval.reason}</span></div>
+        <header><span><small>{approval.leaveType} · {approval.stepName}</small><strong>{approval.requesterName}</strong><em>{approval.requesterCode || "—"} · {approval.profileType === "contractor" ? "Independent contractor" : "Employee"}</em></span><b className="dx-approval-chip">{approval.days} day{approval.days === 1 ? "" : "s"}</b></header>
+        <div className="dx-approval-details">
+          <span><small>Dates</small><strong>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</strong></span>
+          <span><small>Reason</small><strong>{approval.reason}</strong></span>
+        </div>
         <label>Decision note<textarea onChange={(event) => setNotes((current) => ({ ...current, [approval.requestId]: event.target.value }))} placeholder="Optional reviewer note" rows={2} value={notes[approval.requestId] ?? ""} /></label>
-        <footer><button className="danger" disabled={saving} onClick={() => void decideLeave(approval.requestId, "rejected")}><X />Reject</button><button className="primary" disabled={saving} onClick={() => void decideLeave(approval.requestId, "approved")}><Check />Approve</button></footer>
+        <footer className="dx-approval-actions"><button className="danger" disabled={saving} onClick={() => void decideLeave(approval.requestId, "rejected")}><X />Reject</button><button className="primary" disabled={saving} onClick={() => void decideLeave(approval.requestId, "approved")}><Check />Approve</button></footer>
       </article>) : <div className="dx-empty"><Clock3 /><strong>No time-off approvals waiting</strong><small>Assigned time-off approvals will appear here.</small></div>}
     </div> : null}
     {!loading && section === "location-integrity" ? <div className="dx-expense-list">
       {supportPackages.length ? supportPackages.map((item) => <article className="dx-expense-approval" key={item.id}>
-        <header><span><small>Support package · {displayDate(item.punchDate)}</small><strong>{item.workerName}</strong><em>{item.workerCode || "—"} · {item.profileType === "contractor" ? "Independent contractor" : "Employee"}</em></span><b>{item.status.replaceAll("_", " ")}</b></header>
+        <header><span><small>Support package · {displayDate(item.punchDate)}</small><strong>{item.workerName}</strong><em>{item.workerCode || "—"} · {item.profileType === "contractor" ? "Independent contractor" : "Employee"}</em></span><b className={`dx-status-badge ${item.status}`}>{statusLabel(item.status)}</b></header>
         <div className="dx-support-evidence">
-          <figure className="dx-support-selfie">
-            {item.selfieUrl ? (
-              <>
-                <img alt={`Support selfie for ${item.workerName}`} src={item.selfieUrl} />
-                <a href={item.selfieUrl} rel="noreferrer" target="_blank"><Camera />Open full photo</a>
-              </>
-            ) : (
-              <div className="dx-support-selfie-missing"><Camera /><span>Selfie unavailable</span></div>
-            )}
-          </figure>
-          <div className="dx-support-location">
-            <span><LocateFixed /> {item.lat.toFixed(5)}, {item.lng.toFixed(5)}{item.accuracyM == null ? "" : ` · ±${Math.round(item.accuracyM)}m`}</span>
-            <span>{item.remarks || "Selfie and GPS submitted outside station"}</span>
-            <span>{item.receivedAt ? `Received ${dateTime(item.receivedAt)}` : "Awaiting server receipt"}</span>
-            <a href={`https://www.google.com/maps?q=${item.lat},${item.lng}`} rel="noreferrer" target="_blank"><MapPin />Open map</a>
+          {item.selfieUrl ? (
+            <a aria-label="Open support selfie" className="dx-support-thumb" href={item.selfieUrl} rel="noreferrer" target="_blank">
+              <img alt="" src={item.selfieUrl} />
+              <Camera />
+            </a>
+          ) : (
+            <div aria-hidden="true" className="dx-support-thumb missing"><Camera /></div>
+          )}
+          <div className="dx-support-meta">
+            <div className="dx-support-meta-row"><LocateFixed /><span>{item.lat.toFixed(5)}, {item.lng.toFixed(5)}{item.accuracyM == null ? "" : ` · ±${Math.round(item.accuracyM)}m`}</span></div>
+            <p>{item.remarks || "Selfie and GPS submitted outside station"}</p>
+            <div className="dx-support-meta-foot">
+              <small>{item.receivedAt ? `Received ${dateTime(item.receivedAt)}` : "Awaiting receipt"}</small>
+              <a href={`https://www.google.com/maps?q=${item.lat},${item.lng}`} rel="noreferrer" target="_blank"><MapPin />Map</a>
+            </div>
           </div>
         </div>
         <label>Review note<textarea onChange={(event) => setNotes((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="Optional note" rows={2} value={notes[item.id] ?? ""} /></label>
-        <footer>
+        <footer className="dx-approval-actions dx-approval-actions-triple">
           <button disabled={saving} onClick={() => void decideSupportPackage(item.id, "returned")}><RotateCcw />Return</button>
           <button className="danger" disabled={saving} onClick={() => void decideSupportPackage(item.id, "rejected")}><X />Reject</button>
           <button className="primary" disabled={saving} onClick={() => void decideSupportPackage(item.id, "approved")}><Check />Approve</button>
@@ -199,10 +205,10 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       </article>) : <div className="dx-empty"><LocateFixed /><strong>No support packages waiting</strong><small>Assigned location verification packages will appear here.</small></div>}
     </div> : null}
     {!loading && section === "reimbursements" ? <div className="dx-expense-list">{reimbursements.length ? reimbursements.map((approval) => <article className="dx-expense-approval" key={approval.id}>
-      <header><span><small>{approval.claim.claim_no} · {approval.step_name}</small><strong>{approval.claim.requesterName}</strong><em>{approval.claim.purpose}</em></span><b>{money(approval.claim.total_claimed)}</b></header>
-      <div>{approval.claim.hr_expense_items?.map((item) => <span key={item.id}>{first(item.hr_expense_categories)?.name ?? "Expense"} · {item.expense_date}{approval.claim.attachments?.filter((attachment) => attachment.item_id === item.id && attachment.url).map((attachment) => <a href={attachment.url ?? "#"} key={attachment.id} rel="noreferrer" target="_blank"><FileText />{attachment.file_name}</a>)}<b>{money(item.amount)}</b></span>)}</div>
+      <header><span><small>{approval.claim.claim_no} · {approval.step_name}</small><strong>{approval.claim.requesterName}</strong><em>{approval.claim.purpose}</em></span><b className="dx-approval-chip">{money(approval.claim.total_claimed)}</b></header>
+      <div className="dx-approval-details">{approval.claim.hr_expense_items?.map((item) => <span key={item.id}><small>{first(item.hr_expense_categories)?.name ?? "Expense"} · {item.expense_date}</small><strong>{money(item.amount)}</strong>{approval.claim.attachments?.filter((attachment) => attachment.item_id === item.id && attachment.url).map((attachment) => <a href={attachment.url ?? "#"} key={attachment.id} rel="noreferrer" target="_blank"><FileText />{attachment.file_name}</a>)}</span>)}</div>
       <label>Decision note<textarea onChange={(event) => setNotes((current) => ({ ...current, [approval.claim.id]: event.target.value }))} placeholder="Required when returning or rejecting" rows={2} value={notes[approval.claim.id] ?? ""} /></label>
-      <footer><button disabled={saving} onClick={() => void decideReimbursement(approval.claim.id, "returned")}><RotateCcw />Return</button><button className="danger" disabled={saving} onClick={() => void decideReimbursement(approval.claim.id, "rejected")}><X />Reject</button><button className="primary" disabled={saving} onClick={() => void decideReimbursement(approval.claim.id, "approved")}><Check />Approve</button></footer>
+      <footer className="dx-approval-actions dx-approval-actions-triple"><button disabled={saving} onClick={() => void decideReimbursement(approval.claim.id, "returned")}><RotateCcw />Return</button><button className="danger" disabled={saving} onClick={() => void decideReimbursement(approval.claim.id, "rejected")}><X />Reject</button><button className="primary" disabled={saving} onClick={() => void decideReimbursement(approval.claim.id, "approved")}><Check />Approve</button></footer>
     </article>) : <div className="dx-empty"><Clock3 /><strong>No approvals waiting</strong><small>Assigned reimbursement approvals will appear here.</small></div>}</div> : null}
     <div className="dx-approval-note"><ClipboardCheck /><span><strong>Master-driven routing</strong><small>Each approval follows the active policy and reporting hierarchy before it reaches the next step or Payments.</small></span></div>
   </section>;
