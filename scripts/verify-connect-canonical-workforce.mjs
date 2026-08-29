@@ -21,6 +21,8 @@ const checks = [
   [auth.includes("enrichAccountsWithIcSelfService"), "IC manager logins enrich with register self-service"],
   [auth.includes("collectSelfServiceReferences"), "Manager user logins collapse when self-service registers exist"],
   [auth.includes("resolveConnectPageAccess"), "Contractor page access keeps core self-service pages"],
+  [auth.includes('nonEmployeeSelect("contractor")') && auth.includes("nonEmployeeSelect(profileType, true)"), "Each One account register is queried only with columns available on that table"],
+  [auth.includes('if (profileType === "contractor")') && auth.includes('`${nonEmployeeBaseSelect}${mobileColumns},deleted_at`'), "People contractors do not depend on Workforce-only source columns"],
   [auth.includes("employeeReferences"), "Duplicate People manager and employee logins stay collapsed"],
   [!auth.includes("loadLinkedSelfServiceRecords"), "Broad linked profile discovery stays disabled"],
   [migration.includes("public.set_designation_register_route"), "Cutover uses the master-defined routing workflow"],

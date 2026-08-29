@@ -135,6 +135,19 @@ function normalizeWorkforceReference(value: unknown) {
   return String(value ?? "").trim();
 }
 
+const nonEmployeeBaseSelect = "id,company_id,full_name,email,dropx_id,biometric_id,designation,onboarding_status,lifecycle_status,profile_photo_path,is_active";
+
+function nonEmployeeSelect(profileType: NonEmployeeProfileType, includeMobile = false) {
+  const mobileColumns = includeMobile ? ",mobile,mobile_country_code" : "";
+  if (profileType === "workforce") {
+    return `${nonEmployeeBaseSelect}${mobileColumns},source_profile_type,source_profile_id,deleted_at`;
+  }
+  if (profileType === "contractor") {
+    return `${nonEmployeeBaseSelect}${mobileColumns},deleted_at`;
+  }
+  return `${nonEmployeeBaseSelect}${mobileColumns}`;
+}
+
 function icContractorReferenceKey(companyId: string, reference: string) {
   return `${companyId}:${reference.trim().toLowerCase()}`;
 }
@@ -344,14 +357,14 @@ async function resolveIcSelfServiceByReference(
   async function resolveContractor(requireActive: boolean) {
     let query = supabaseAdmin!
       .from("contractors")
-      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
+      .select(nonEmployeeSelect("contractor"))
       .eq("company_id", companyId);
     if (requireActive) query = query.eq("is_active", true);
     const result = await query;
     if (result.error && !isMissingColumnError(result.error)) {
       throw new Error(result.error.message);
     }
-    for (const row of (result.data ?? []) as WorkforceRegisterRow[]) {
+    for (const row of (result.data ?? []) as unknown as WorkforceRegisterRow[]) {
       if (!rowMatchesReferences(row, references)) continue;
       if (
         ["rejected", "cancelled"].includes(String(row.onboarding_status ?? "pending").toLowerCase()) ||
@@ -374,12 +387,12 @@ async function resolveIcSelfServiceByReference(
     const table = workforceTable(profileType);
     const result = await supabaseAdmin
       .from(table)
-      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
+      .select(nonEmployeeSelect(profileType))
       .eq("company_id", companyId);
     if (result.error && !isMissingColumnError(result.error)) {
       throw new Error(result.error.message);
     }
-    for (const row of (result.data ?? []) as WorkforceRegisterRow[]) {
+    for (const row of (result.data ?? []) as unknown as WorkforceRegisterRow[]) {
       if (!rowMatchesReferences(row, references) || !isActiveWorkforceRegisterRow(row)) continue;
       if (profileType === "field_executive") {
         const mirrorResult = await supabaseAdmin
@@ -412,14 +425,14 @@ async function resolveIcSelfServiceByReference(
 
   const contractorByMobile = await supabaseAdmin
     .from("contractors")
-    .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
+    .select(nonEmployeeSelect("contractor"))
     .eq("company_id", companyId)
     .eq("is_active", true)
     .or(mobileOr);
   if (contractorByMobile.error && !isMissingColumnError(contractorByMobile.error)) {
     throw new Error(contractorByMobile.error.message);
   }
-  const contractorMatch = ((contractorByMobile.data ?? []) as WorkforceRegisterRow[]).find(isActiveWorkforceRegisterRow);
+  const contractorMatch = ((contractorByMobile.data ?? []) as unknown as WorkforceRegisterRow[]).find(isActiveWorkforceRegisterRow);
   if (contractorMatch) return mapNonEmployeeAccountRow(contractorMatch, "contractor");
 
   return null;
@@ -586,11 +599,11 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     const table = workforceTable(profileType);
     let query = supabaseAdmin!
       .from(table)
-      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, mobile_country_code, source_profile_type, source_profile_id, deleted_at")
+      .select(nonEmployeeSelect(profileType, true))
       .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
       .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
     if (!["workforce", "field_executive"].includes(profileType)) query = query.eq("is_active", true);
-    let result: MatchResult<NonEmployeeMatch> = await query;
+    let result = await query as unknown as MatchResult<NonEmployeeMatch>;
     if (!["workforce", "field_executive"].includes(profileType) && isMissingColumnError(result.error)) {
       return { data: [], error: null };
     }
