@@ -40,7 +40,7 @@ requireSource(
   "Workforce page access must follow category and designation rules"
 );
 requireSource(
-  auth.includes("loadLinkedSelfServiceFromProfileReferences") && auth.includes("collectSelfServiceReferences"),
+  auth.includes("resolveIcSelfServiceByReference") && auth.includes("collectSelfServiceReferences"),
   "IC logins must swap to contractor self-service without adding extra profiles"
 );
 requireSource(

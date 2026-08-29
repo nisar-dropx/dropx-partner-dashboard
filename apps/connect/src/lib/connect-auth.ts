@@ -139,15 +139,24 @@ function collectSelfServiceReferences(accounts: AccountRow[]) {
   return references;
 }
 
-function rowMatchesReferences(row: { dropx_id?: string | null; biometric_id?: string | null; employee_code?: string | null }, references: Set<string>) {
+function rowMatchesReferences(
+  row: { id?: string | null; dropx_id?: string | null; biometric_id?: string | null; employee_code?: string | null },
+  references: Set<string>
+) {
+  const idReference = normalizeWorkforceReference(row.id).toLowerCase();
   const dropxReference = normalizeWorkforceReference(row.dropx_id).toLowerCase();
   const biometricReference = normalizeWorkforceReference(row.biometric_id).toLowerCase();
   const employeeCodeReference = normalizeWorkforceReference(row.employee_code).toLowerCase();
   return (
+    (idReference && references.has(idReference)) ||
     (dropxReference && references.has(dropxReference)) ||
     (biometricReference && references.has(biometricReference)) ||
     (employeeCodeReference && references.has(employeeCodeReference))
   );
+}
+
+function accountIdentityKey(account: Pick<AccountRow, "profile_type" | "company_id" | "id">) {
+  return `${account.profile_type}:${account.company_id}:${account.id}`;
 }
 
 function mapEmployeeAccountRow(employee: EmployeeAccountRow): AccountRow {
@@ -212,92 +221,141 @@ function mapNonEmployeeAccountRow(
   };
 }
 
-async function loadLinkedSelfServiceFromProfileReferences(
-  profileUsers: Array<{ company_id: string; employee_id?: string | null }>,
-  knownEmployeeIds: Set<string>,
-  knownWorkforceIds: Record<NonEmployeeProfileType, Set<string>>
-) {
-  const linkedEmployees: EmployeeAccountRow[] = [];
-  const linkedNonEmployees: Partial<Record<NonEmployeeProfileType, WorkforceRegisterRow[]>> = {};
-  if (!profileUsers.length || !supabaseAdmin) {
-    return { linkedEmployees, linkedNonEmployees };
+async function resolveIcSelfServiceByReference(
+  companyId: string,
+  reference: string,
+  countryCode: string,
+  mobile: string,
+  localMobile: string
+): Promise<AccountRow | null> {
+  if (!supabaseAdmin || !reference) return null;
+
+  const references = new Set([reference.toLowerCase()]);
+  const mobileOr = `mobile.eq.${mobile},mobile.eq.${localMobile}`;
+
+  const employeeResult = await supabaseAdmin
+    .from("employees")
+    .select("id, company_id, full_name, email, employee_code, biometric_id, designation_id, profile_completion_status, profile_photo_path, is_active")
+    .eq("company_id", companyId)
+    .eq("is_active", true);
+  if (employeeResult.error && !isMissingColumnError(employeeResult.error)) {
+    throw new Error(employeeResult.error.message);
+  }
+  for (const employee of (employeeResult.data ?? []) as EmployeeAccountRow[]) {
+    if (rowMatchesReferences(employee, references)) {
+      return mapEmployeeAccountRow(employee);
+    }
   }
 
-  const referencesByCompany = new Map<string, Set<string>>();
+  async function resolveContractor(requireActive: boolean) {
+    let query = supabaseAdmin!
+      .from("contractors")
+      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
+      .eq("company_id", companyId);
+    if (requireActive) query = query.eq("is_active", true);
+    const result = await query;
+    if (result.error && !isMissingColumnError(result.error)) {
+      throw new Error(result.error.message);
+    }
+    for (const row of (result.data ?? []) as WorkforceRegisterRow[]) {
+      if (!rowMatchesReferences(row, references)) continue;
+      if (
+        ["rejected", "cancelled"].includes(String(row.onboarding_status ?? "pending").toLowerCase()) ||
+        String(row.lifecycle_status ?? "").toLowerCase() === "exited" ||
+        row.deleted_at
+      ) {
+        continue;
+      }
+      return mapNonEmployeeAccountRow(row, "contractor");
+    }
+    return null;
+  }
+
+  const activeContractor = await resolveContractor(true);
+  if (activeContractor) return activeContractor;
+  const inactiveContractor = await resolveContractor(false);
+  if (inactiveContractor) return inactiveContractor;
+
+  for (const profileType of ["field_executive", "workforce"] as NonEmployeeProfileType[]) {
+    const table = workforceTable(profileType);
+    const result = await supabaseAdmin
+      .from(table)
+      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
+      .eq("company_id", companyId);
+    if (result.error && !isMissingColumnError(result.error)) {
+      throw new Error(result.error.message);
+    }
+    for (const row of (result.data ?? []) as WorkforceRegisterRow[]) {
+      if (!rowMatchesReferences(row, references) || !isActiveWorkforceRegisterRow(row)) continue;
+      if (profileType === "field_executive") {
+        const mirrorResult = await supabaseAdmin
+          .from("workforce")
+          .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
+          .eq("company_id", companyId)
+          .eq("source_profile_type", "field_executive")
+          .eq("source_profile_id", row.id);
+        if (mirrorResult.error && !isMissingColumnError(mirrorResult.error)) {
+          throw new Error(mirrorResult.error.message);
+        }
+        const mirror = ((mirrorResult.data ?? []) as WorkforceRegisterRow[]).find(isActiveWorkforceRegisterRow);
+        if (mirror) return mapNonEmployeeAccountRow(mirror, "workforce");
+      }
+      return mapNonEmployeeAccountRow(row, profileType);
+    }
+  }
+
+  const employeeByMobile = await supabaseAdmin
+    .from("employees")
+    .select("id, company_id, full_name, email, employee_code, biometric_id, designation_id, profile_completion_status, profile_photo_path, is_active")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .or(mobileOr);
+  if (employeeByMobile.error && !isMissingColumnError(employeeByMobile.error)) {
+    throw new Error(employeeByMobile.error.message);
+  }
+  const employeeMatch = (employeeByMobile.data ?? [])[0] as EmployeeAccountRow | undefined;
+  if (employeeMatch) return mapEmployeeAccountRow(employeeMatch);
+
+  const contractorByMobile = await supabaseAdmin
+    .from("contractors")
+    .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .or(mobileOr);
+  if (contractorByMobile.error && !isMissingColumnError(contractorByMobile.error)) {
+    throw new Error(contractorByMobile.error.message);
+  }
+  const contractorMatch = ((contractorByMobile.data ?? []) as WorkforceRegisterRow[]).find(isActiveWorkforceRegisterRow);
+  if (contractorMatch) return mapNonEmployeeAccountRow(contractorMatch, "contractor");
+
+  return null;
+}
+
+async function enrichAccountsWithIcSelfService(
+  profileUsers: Array<{ company_id: string; employee_id?: string | null; role?: string | null }>,
+  accounts: AccountRow[],
+  countryCode: string,
+  mobile: string,
+  localMobile: string
+) {
+  const existingKeys = new Set(accounts.map((account) => accountIdentityKey(account)));
   for (const profile of profileUsers) {
+    if (isConnectManagerLogin(profile.role)) continue;
     const reference = normalizeWorkforceReference(profile.employee_id);
     if (!reference) continue;
-    const bucket = referencesByCompany.get(profile.company_id) ?? new Set<string>();
-    bucket.add(reference.toLowerCase());
-    referencesByCompany.set(profile.company_id, bucket);
+    const resolved = await resolveIcSelfServiceByReference(
+      profile.company_id,
+      reference,
+      countryCode,
+      mobile,
+      localMobile
+    );
+    if (!resolved) continue;
+    const key = accountIdentityKey(resolved);
+    if (existingKeys.has(key)) continue;
+    accounts.push(resolved);
+    existingKeys.add(key);
   }
-
-  for (const [companyId, references] of referencesByCompany) {
-    const employeeResult = await supabaseAdmin
-      .from("employees")
-      .select("id, company_id, full_name, email, employee_code, biometric_id, designation_id, profile_completion_status, profile_photo_path, is_active")
-      .eq("company_id", companyId)
-      .eq("is_active", true);
-    if (employeeResult.error && !isMissingColumnError(employeeResult.error)) {
-      throw new Error(employeeResult.error.message);
-    }
-    for (const employee of employeeResult.data ?? []) {
-      if (knownEmployeeIds.has(employee.id)) continue;
-      if (!rowMatchesReferences({ employee_code: employee.employee_code, biometric_id: employee.biometric_id }, references)) continue;
-      linkedEmployees.push(employee as EmployeeAccountRow);
-      knownEmployeeIds.add(employee.id);
-    }
-
-    for (const profileType of ["contractor", "field_executive", "workforce"] as NonEmployeeProfileType[]) {
-      const table = workforceTable(profileType);
-      let query = supabaseAdmin
-        .from(table)
-        .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
-        .eq("company_id", companyId);
-      if (profileType === "contractor") query = query.eq("is_active", true);
-      const result = await query;
-      if (result.error && !isMissingColumnError(result.error)) {
-        throw new Error(result.error.message);
-      }
-      for (const row of (result.data ?? []) as WorkforceRegisterRow[]) {
-        if (knownWorkforceIds[profileType].has(row.id)) continue;
-        if (
-          ["rejected", "cancelled"].includes(String(row.onboarding_status ?? "pending").toLowerCase()) ||
-          String(row.lifecycle_status ?? "").toLowerCase() === "exited" ||
-          row.deleted_at
-        ) {
-          continue;
-        }
-        if (!rowMatchesReferences(row, references)) continue;
-        const bucket = linkedNonEmployees[profileType] ?? [];
-        bucket.push(row);
-        linkedNonEmployees[profileType] = bucket;
-        knownWorkforceIds[profileType].add(row.id);
-      }
-    }
-
-    const linkedFieldExecutives = linkedNonEmployees.field_executive ?? [];
-    for (const fieldExecutive of linkedFieldExecutives) {
-      const mirrorResult = await supabaseAdmin
-        .from("workforce")
-        .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
-        .eq("company_id", companyId)
-        .eq("source_profile_type", "field_executive")
-        .eq("source_profile_id", fieldExecutive.id);
-      if (mirrorResult.error && !isMissingColumnError(mirrorResult.error)) {
-        throw new Error(mirrorResult.error.message);
-      }
-      for (const row of (mirrorResult.data ?? []) as WorkforceRegisterRow[]) {
-        if (!isActiveWorkforceRegisterRow(row) || knownWorkforceIds.workforce.has(row.id)) continue;
-        const bucket = linkedNonEmployees.workforce ?? [];
-        bucket.push(row);
-        linkedNonEmployees.workforce = bucket;
-        knownWorkforceIds.workforce.add(row.id);
-      }
-    }
-  }
-
-  return { linkedEmployees, linkedNonEmployees };
 }
 
 type WorkforceRegisterRow = {
@@ -477,7 +535,6 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     if (result.error) throw new Error(result.error.message);
   }
 
-  const knownEmployeeIds = new Set((employeesResult.data ?? []).map((employee) => employee.id));
   const knownWorkforceIds = Object.fromEntries(
     nonEmployeeTypes.map((profileType, index) => [
       profileType,
@@ -486,7 +543,6 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   ) as Record<NonEmployeeProfileType, Set<string>>;
 
   const fieldExecutiveIndex = nonEmployeeTypes.indexOf("field_executive");
-  const contractorIndex = nonEmployeeTypes.indexOf("contractor");
   const workforceIndex = nonEmployeeTypes.indexOf("workforce");
   const fieldExecutiveRows = (nonEmployeeResults[fieldExecutiveIndex]?.data ?? []) as WorkforceRegisterRow[];
   const workforceMirrors = await loadCanonicalWorkforceMirrors({
@@ -497,28 +553,6 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     nonEmployeeResults[workforceIndex] = {
       ...nonEmployeeResults[workforceIndex],
       data: [...(nonEmployeeResults[workforceIndex].data ?? []), ...workforceMirrors]
-    };
-  }
-
-  const linkedSelfService = await loadLinkedSelfServiceFromProfileReferences(
-    profilesResult.data ?? [],
-    knownEmployeeIds,
-    knownWorkforceIds
-  );
-  if (linkedSelfService.linkedEmployees.length) {
-    employeesResult = {
-      ...employeesResult,
-      data: [...(employeesResult.data ?? []), ...linkedSelfService.linkedEmployees]
-    };
-  }
-  for (const profileType of ["contractor", "field_executive", "workforce"] as NonEmployeeProfileType[]) {
-    const linkedRows = linkedSelfService.linkedNonEmployees[profileType] ?? [];
-    if (!linkedRows.length) continue;
-    const index = nonEmployeeTypes.indexOf(profileType);
-    if (index < 0) continue;
-    nonEmployeeResults[index] = {
-      ...nonEmployeeResults[index],
-      data: [...(nonEmployeeResults[index].data ?? []), ...linkedRows]
     };
   }
 
@@ -541,8 +575,16 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     ...employeeAccounts
   ].filter((account) => account.company_id);
 
-  const employeeReferences = new Set(employeeAccounts
-    .filter((account) => account.employee_id)
+  await enrichAccountsWithIcSelfService(
+    profilesResult.data ?? [],
+    accounts,
+    countryCode,
+    mobile,
+    localMobile
+  );
+
+  const employeeReferences = new Set(accounts
+    .filter((account) => account.profile_type === "employee" && account.employee_id)
     .map((account) => `${account.company_id}:${String(account.employee_id).trim().toLowerCase()}`));
   const selfServiceReferences = collectSelfServiceReferences(accounts);
 
@@ -579,7 +621,24 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     return true;
   });
 
-  const companyIds = Array.from(new Set(visibleAccounts.map((account) => account.company_id)));
+  let loginAccounts = visibleAccounts;
+  if (
+    loginAccounts.length === 1 &&
+    loginAccounts[0].profile_type === "user" &&
+    !isConnectManagerLogin(loginAccounts[0].role)
+  ) {
+    const soleUser = loginAccounts[0];
+    const resolved = await resolveIcSelfServiceByReference(
+      soleUser.company_id,
+      normalizeWorkforceReference(soleUser.employee_id),
+      countryCode,
+      mobile,
+      localMobile
+    );
+    if (resolved) loginAccounts = [resolved];
+  }
+
+  const companyIds = Array.from(new Set(loginAccounts.map((account) => account.company_id)));
   const companiesResult = companyIds.length
     ? await supabaseAdmin.from("companies").select("id, name, code").in("id", companyIds).eq("is_active", true)
     : { data: [], error: null };
@@ -665,7 +724,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   }
   const defaultPreference = preferenceResult.error ? null : preferenceResult.data;
 
-  return Promise.all(visibleAccounts
+  return Promise.all(loginAccounts
     .filter((account) => companyNameById.has(account.company_id))
     .map(async (account): Promise<ConnectAccount> => {
       const categoryCode = categoryCodeForProfile(account.profile_type);
