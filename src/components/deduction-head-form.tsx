@@ -29,7 +29,9 @@ export function DeductionHeadForm({ action, head, compact = false }: {
       <option value="fixed">Fixed amount</option><option value="percentage">Percentage</option><option value="manual">Manual entry</option>
     </select></label>
     {calculationType === "percentage" ? <>
-      <label>Calculation base<input className="field" value="Gross Earnings" disabled readOnly /></label>
+      <label>Calculation base<select className="field" name="calculation_base" defaultValue="gross_earnings" required>
+        <option value="gross_earnings">Gross Earnings</option>
+      </select></label>
       <label>Percentage<input className="field" name="default_value" type="number" min="0" max="100" step="0.01" defaultValue={head?.default_value ?? 0} required /></label>
     </> : <label>{calculationType === "fixed" ? "Amount" : "Default value"}<input className="field" name="default_value" type="number" min="0" step="0.01" defaultValue={head?.default_value ?? 0} /></label>}
     <label className={`deduction-apply-all${calculationType === "manual" ? " disabled" : ""}`}>
