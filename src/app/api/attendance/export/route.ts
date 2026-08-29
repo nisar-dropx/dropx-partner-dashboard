@@ -8,6 +8,8 @@ import {
 import { filterAttendanceReportRows } from "@/lib/biometric/attendance-report-filters";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { loadCodLocations } from "@/lib/ops-pulse/cod";
+import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -429,16 +431,12 @@ export async function GET(request: Request) {
       ? monthBounds(month)
       : { ...periodicRange, label: `${periodicRange.fromDate}-to-${periodicRange.toDate}` };
 
-    const stationResult = await supabaseAdmin
-      .from("stations")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("is_active", true);
-    if (stationResult.error) throw new Error(stationResult.error.message);
-    const companyLocationIds = (stationResult.data ?? []).map((row) => String(row.id));
-    const allowedLocationIds = authorization.hasAllLocationAccess
-      ? companyLocationIds
-      : companyLocationIds.filter((id) => authorization.locationScopeIds.includes(id));
+    const authorizedLocations = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
+    if (authorizedLocations.error) throw new Error(authorizedLocations.error);
+    const allowedLocationIds = (isOps
+      ? resolveOperatingContext(authorizedLocations.locations).selectedLocations
+      : authorizedLocations.locations
+    ).map((location) => location.id);
     if (locationId && !allowedLocationIds.includes(locationId)) {
       return Response.json({ error: "Location is outside your allocated scope." }, { status: 403 });
     }

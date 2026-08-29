@@ -12,6 +12,8 @@ import { attendanceReportFilterOptions, filterAttendanceReportRows } from "@/lib
 import { currentAccessSurface } from "@/lib/access-surface";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { loadCodLocations } from "@/lib/ops-pulse/cod";
+import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 
 type LocationRow = {
@@ -139,7 +141,8 @@ export default async function AttendanceReportsPage({
     to_date?: string;
   };
 }) {
-  const pageCode = currentAccessSurface() === "ops" ? "ops_attendance_reports" : "attendance_reports";
+  const isOpsSurface = currentAccessSurface() === "ops";
+  const pageCode = isOpsSurface ? "ops_attendance_reports" : "attendance_reports";
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
   const mode = safeMode(searchParams?.mode);
@@ -165,7 +168,14 @@ export default async function AttendanceReportsPage({
   let error: string | null = null;
 
   try {
-    locations = await loadLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
+    if (isOpsSurface) {
+      const opsLocations = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
+      if (opsLocations.error) throw new Error(opsLocations.error);
+      const selectedOpsLocationIds = new Set(resolveOperatingContext(opsLocations.locations).selectedLocations.map((location) => location.id));
+      locations = opsLocations.locations.filter((location) => selectedOpsLocationIds.has(location.id));
+    } else {
+      locations = await loadLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
+    }
     const allowedLocationIds = new Set(locations.map((location) => location.id));
     const selectedLocationIds = locationId && allowedLocationIds.has(locationId)
       ? [locationId]
@@ -192,7 +202,9 @@ export default async function AttendanceReportsPage({
     .filter((entry) => entry.time && entry.time !== "--:--")
     .at(-1);
   const locationOptions = [
-    authorization.hasAllLocationAccess
+    isOpsSurface
+      ? { value: "", label: locations.length === 1 ? "Selected location" : "All selected locations", helper: `${locations.length} location${locations.length === 1 ? "" : "s"} in OpsPulse scope` }
+      : authorization.hasAllLocationAccess
       ? { value: "", label: "All locations", helper: "Company-wide report" }
       : { value: "", label: "All assigned locations", helper: "Only your allocated location scope" },
     ...locations.map((location) => ({
@@ -236,7 +248,7 @@ export default async function AttendanceReportsPage({
             <SearchableSelect name="sort" options={sortingOptions} defaultValue={sort} placeholder="Select sorting" required />
           </label>
           <label>Location
-            <SearchableSelect name="location_id" options={locationOptions} defaultValue={locationId} placeholder="All locations" />
+            <SearchableSelect name="location_id" options={locationOptions} defaultValue={locations.some((location) => location.id === locationId) ? locationId : ""} placeholder={isOpsSurface ? "Selected OpsPulse locations" : "All locations"} />
           </label>
           <label>Designation
             <SearchableSelect name="designation" options={[{ value: "", label: "All designations" }, ...filterOptions.designations.map((value) => ({ value, label: value }))]} defaultValue={designation} placeholder="All designations" />
