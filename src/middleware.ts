@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isPeopleHostName, isPeoplePortalPath } from "@/lib/people/surface";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -14,8 +15,6 @@ const MOVED_OPS_PAYMENT_PATHS = [
   "/payments/approvals",
   "/payments/report"
 ];
-const PEOPLE_APP_URL = process.env.PEOPLE_APP_URL?.trim() || "https://people.dropxlogistics.com";
-const WORKFORCE_APP_URL = process.env.WORKFORCE_APP_URL?.trim() || "https://workforce.dropxlogistics.com";
 const DEPRECATED_MAIN_PEOPLE_PATHS = ["/people", "/field-executive", "/vendors", "/workers"];
 const DEPRECATED_MAIN_HR_PATHS = ["/employees", "/contractors"];
 
@@ -48,6 +47,25 @@ function isPublicOpsInstallAsset(path: string) {
     path.startsWith("/.well-known/");
 }
 
+function isPublicAppPath(path: string) {
+  return path === "/login" ||
+    path.startsWith("/api/") ||
+    path.startsWith("/auth/") ||
+    path.startsWith("/_next/") ||
+    isPublicOpsInstallAsset(path) ||
+    isAssetPath(path);
+}
+
+function surfaceDeniedUrl(request: NextRequest, portalPage: string, requestedPath: string) {
+  const deniedUrl = request.nextUrl.clone();
+  deniedUrl.pathname = "/unauthorized";
+  deniedUrl.search = "";
+  deniedUrl.searchParams.set("page", portalPage);
+  deniedUrl.searchParams.set("reason", "surface");
+  deniedUrl.searchParams.set("requested", requestedPath);
+  return deniedUrl;
+}
+
 function encodeCookieValue(value: string) {
   const bytes = new TextEncoder().encode(value);
   let binary = "";
@@ -76,21 +94,35 @@ export async function middleware(request: NextRequest) {
   const host = request.headers.get("host")?.split(":")[0].toLowerCase() ?? "";
   const isPlatformAdminHost = host === "admin-panel.dropxlogistics.com";
   const isOpsHost = host === "ops.dropxlogistics.com";
+  const isPeopleHost = isPeopleHostName(host);
   const isDashboardHost = host === "dashboard.dropxlogistics.com";
   const isSharedOpsPath = path === "/fleet" || path.startsWith("/fleet/") ||
     path === "/business-documents" || path.startsWith("/business-documents/");
 
-  const opsAppUrl = process.env.OPS_APP_URL?.trim();
-  if (isDashboardHost && opsAppUrl && (path === "/ops-pulse" || path.startsWith("/ops-pulse/"))) {
-    return NextResponse.redirect(new URL(cleanOpsPath(path) + request.nextUrl.search, opsAppUrl));
+  if (isDashboardHost && (path === "/ops-pulse" || path.startsWith("/ops-pulse/"))) {
+    return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));
   }
 
   if (isDashboardHost && matchesPath(path, DEPRECATED_MAIN_PEOPLE_PATHS)) {
-    return NextResponse.redirect(new URL("/delivery-network/contractor-profiles", WORKFORCE_APP_URL), 308);
+    return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));
   }
 
   if (isDashboardHost && matchesPath(path, DEPRECATED_MAIN_HR_PATHS)) {
-    return NextResponse.redirect(new URL("/people", PEOPLE_APP_URL), 308);
+    return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));
+  }
+
+  if (!isPlatformAdminHost && path === "/platform-admin") {
+    return NextResponse.redirect(surfaceDeniedUrl(request, "platform_admin_portal", path));
+  }
+
+  if (
+    isPlatformAdminHost &&
+    !isPublicAppPath(path) &&
+    path !== "/" &&
+    path !== "/platform-admin" &&
+    path !== "/unauthorized"
+  ) {
+    return NextResponse.redirect(surfaceDeniedUrl(request, "platform_admin_portal", path));
   }
 
   if (isOpsHost && (path === "/ops-pulse" || path.startsWith("/ops-pulse/"))) {
@@ -100,7 +132,14 @@ export async function middleware(request: NextRequest) {
   }
 
   if (isOpsHost && path.startsWith("/payments/") && !isMovedOpsPaymentPath(path)) {
-    return NextResponse.redirect(new URL(path + request.nextUrl.search, "https://dashboard.dropxlogistics.com"));
+    return NextResponse.redirect(surfaceDeniedUrl(request, "ops_portal", path));
+  }
+
+  if (isPeopleHost && !isPublicAppPath(path) && !isPeoplePortalPath(path)) {
+    const peopleHomeUrl = request.nextUrl.clone();
+    peopleHomeUrl.pathname = "/";
+    peopleHomeUrl.search = "";
+    return NextResponse.redirect(peopleHomeUrl);
   }
 
   if (
@@ -132,11 +171,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (!isPlatformAdminHost && path === "/platform-admin") {
-    return NextResponse.redirect(new URL("https://admin-panel.dropxlogistics.com/", request.url));
-  }
-
-  if (path === "/login" || path.startsWith("/api/") || path.startsWith("/auth/") || path.startsWith("/_next/") || isPublicOpsInstallAsset(path) || isAssetPath(path)) {
+  if (isPublicAppPath(path)) {
     return NextResponse.next();
   }
 

@@ -2,11 +2,16 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { DocumentTitle } from "@/components/document-title";
 import { OpsLoginPanel } from "@/components/ops-login-panel";
+import { PeopleLoginPanel } from "@/components/people-login-panel";
 import { SubmitButton } from "@/components/submit-button";
 import { firstAllowedHref } from "@/lib/app-navigation";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { opsAccessPageCodes } from "@/lib/access-surface";
 import { safeOpsNextPath } from "@/lib/ops-pulse/auth";
+import { firstAllowedOpsHref } from "@/lib/ops-pulse/navigation";
+import { safePeopleNextPath } from "@/lib/people/auth";
+import { firstAllowedPeopleHref, hasPeoplePortalAccess } from "@/lib/people/navigation";
+import { isPeopleHostName } from "@/lib/people/surface";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { signInWithGoogle } from "./actions";
 
@@ -19,6 +24,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     headers().get("host")?.split(":")[0].toLowerCase() ??
     "";
   const isOpsHost = host === "ops.dropxlogistics.com";
+  const isPeopleHost = isPeopleHostName(host);
   const supabase = createServerSupabaseClient(undefined, isOpsHost ? true : undefined);
   const { data } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
   if (data.user) {
@@ -29,9 +35,24 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         isCompanyOwner(authorization) ||
         opsAccessPageCodes.some((code) => hasPermission(authorization, code, "access"))
       ));
-      redirect(hasOpsAccess ? safeOpsNextPath(searchParams?.next) : "/unauthorized?reason=access");
+      if (!hasOpsAccess || !authorization) redirect("/unauthorized?page=ops_portal&reason=access");
+      const requestedPath = safeOpsNextPath(searchParams?.next);
+      redirect(requestedPath === "/"
+        ? firstAllowedOpsHref(authorization) ?? "/unauthorized?page=ops_portal&reason=access"
+        : requestedPath);
     }
-    redirect(authorization ? firstAllowedHref(authorization) ?? "/unauthorized" : "/dashboard");
+    if (isPeopleHost) {
+      if (!authorization || !hasPeoplePortalAccess(authorization)) {
+        redirect("/unauthorized?page=people_portal&reason=access");
+      }
+      const requestedPath = safePeopleNextPath(searchParams?.next);
+      redirect(requestedPath === "/"
+        ? firstAllowedPeopleHref(authorization) ?? "/unauthorized?page=people_portal&reason=access"
+        : requestedPath);
+    }
+    redirect(authorization
+      ? firstAllowedHref(authorization) ?? "/unauthorized?page=dashboard_portal&reason=access"
+      : "/unauthorized?page=dashboard_portal&reason=access");
   }
 
   const message = searchParams?.error ?? searchParams?.reason;
@@ -41,6 +62,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       <>
         <DocumentTitle pageName="OpsPulse Login" />
         <OpsLoginPanel initialMessage={message} nextPath={safeOpsNextPath(searchParams?.next)} />
+      </>
+    );
+  }
+
+  if (isPeopleHost) {
+    return (
+      <>
+        <DocumentTitle pageName="People Login" productName="DropX People" />
+        <PeopleLoginPanel initialMessage={message} nextPath={safePeopleNextPath(searchParams?.next)} />
       </>
     );
   }

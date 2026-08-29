@@ -2,11 +2,17 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { OpsPwaRegister } from "@/components/ops-pwa-register";
+import { isPeopleHostName } from "@/lib/people/surface";
 import "./globals.css";
 
 function isOpsHost() {
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
   return host === "ops.dropxlogistics.com" || host.startsWith("ops-");
+}
+
+function isPeopleHost() {
+  const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
+  return isPeopleHostName(host);
 }
 
 export function generateMetadata(): Metadata {
@@ -21,6 +27,14 @@ export function generateMetadata(): Metadata {
         icon: [{ url: "/opspulse/icon-192.png", sizes: "192x192", type: "image/png" }],
         apple: [{ url: "/opspulse/apple-touch-icon.png", sizes: "180x180", type: "image/png" }]
       }
+    };
+  }
+  if (isPeopleHost()) {
+    return {
+      title: { default: "DropX People", template: "%s · DropX People" },
+      description: "DropX People HRMS for workforce profiles, attendance, approvals and employee operations.",
+      applicationName: "DropX People",
+      icons: { icon: "/favicon.png", shortcut: "/favicon.png", apple: "/favicon.png" }
     };
   }
   return {

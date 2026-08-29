@@ -23,6 +23,17 @@ export async function GET() {
     }
     await supabaseAdmin.from("connect_login_sessions").update({ last_seen_at: new Date().toISOString() }).eq("id", session.id);
     const accounts = await findConnectAccounts(session.country_code, session.mobile_number);
+    if (!accounts.length) {
+      await supabaseAdmin
+        .from("connect_login_sessions")
+        .update({ revoked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq("id", session.id);
+      cookies().delete(connectSessionCookieName);
+      return NextResponse.json({
+        authenticated: false,
+        error: "You don't have access to DropX Connect. Contact HR or your platform administrator for access."
+      }, { status: 403 });
+    }
     return NextResponse.json({ authenticated: true, accounts });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load session." }, { status: 500 });

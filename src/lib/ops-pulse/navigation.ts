@@ -1,4 +1,5 @@
 import { fleetNavItem, type NavItem } from "@/lib/app-navigation";
+import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import type { OperatingMode } from "@/lib/ops-pulse/operating-context";
 
 const commonStart: NavItem[] = [
@@ -125,6 +126,21 @@ const eddDashboard: NavItem = { code: "edd_dashboard", label: "Delivery Performa
 
 export function opsNavItemsForMode(mode: OperatingMode): NavItem[] {
   return [...commonStart, modelOperations(mode), eddDashboard, businessDocuments, payments, cps, fleetNavItem, attendanceReports, reports, ...administration];
+}
+
+export function firstAllowedOpsHref(authorization: AuthorizationContext) {
+  if (isCompanyOwner(authorization)) return "/";
+  const candidates = [
+    ...opsNavItemsForMode("amazon_edsp"),
+    modelOperations("amazon_now"),
+    modelOperations("flipkart_odh_mdh")
+  ];
+  for (const item of candidates) {
+    if (item.href && hasPermission(authorization, item.code, "access")) return item.href;
+    const child = item.children?.find((entry) => entry.href && entry.code && hasPermission(authorization, entry.code, "access"));
+    if (child?.href && child.href.startsWith("/")) return child.href;
+  }
+  return null;
 }
 
 export function normalizeOpsClient(value: string | null | undefined) {

@@ -11,6 +11,11 @@ const pageNames: Record<string, string> = {
   capacity_master: "Capacity Master",
   performance: "Performance",
   performance_master: "Performance Master",
+  dashboard_portal: "DropX Dashboard",
+  ops_portal: "OpsPulse",
+  people_portal: "DropX People",
+  platform_admin_portal: "Platform Admin",
+  connect_portal: "DropX Connect",
   ops_reports: "Reports",
   service_network: "Network Planning",
   service_network_master: "Network Planning Master"
@@ -25,8 +30,8 @@ export default function UnauthorizedPage({ searchParams }: { searchParams?: { pa
         <div className="login-copy">
           <span className="eyebrow"><ShieldX size={15} aria-hidden="true" /> Access not provided</span>
           <h1>You don&apos;t have access to {requestedPage}.</h1>
-          <p>Your assigned role or location scope does not include this area. No other dashboard has been opened.</p>
-          <div className="message-panel warning"><Headphones size={16} aria-hidden="true" /><span>Contact HR or DropX Operations Support to request access. Share the page name and your station or jurisdiction.</span></div>
+          <p>This account is signed in, but access to the requested platform or page has not been assigned. You have not been redirected to another DropX platform.</p>
+          <div className="message-panel warning"><Headphones size={16} aria-hidden="true" /><span>Contact HR or your platform administrator to request access. Share the platform name and your station or jurisdiction.</span></div>
         </div>
         <form action={signOut}>
           <SubmitButton className="button secondary" pendingText="Signing out">

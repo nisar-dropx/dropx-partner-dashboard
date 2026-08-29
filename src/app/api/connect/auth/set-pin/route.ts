@@ -43,7 +43,11 @@ export async function POST(request: Request) {
     }
 
     const accounts = await findConnectAccounts(countryCode, mobile);
-    if (!accounts.length) return NextResponse.json({ error: "No active account found for this mobile number." }, { status: 404 });
+    if (!accounts.length) {
+      return NextResponse.json({
+        error: "You don't have access to DropX Connect. Contact HR or your platform administrator for access."
+      }, { status: 403 });
+    }
 
     await supabaseAdmin.from("connect_whatsapp_otp_requests").update({
       status: "verified",

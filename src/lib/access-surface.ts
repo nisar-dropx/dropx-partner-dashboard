@@ -1,6 +1,8 @@
 import { headers } from "next/headers";
+import { isPeopleHostName } from "@/lib/people/surface";
 
 export type AccessSurface = "dashboard" | "ops";
+export type AdminAccessSurface = AccessSurface | "people";
 
 export const opsAccessPageCodes = [
   "ops_pulse",
@@ -93,6 +95,53 @@ const sharedPageCodes = new Set([
   "fleet_reports"
 ]);
 
+const peoplePageCodes = new Set([
+  "people_all",
+  "people_review",
+  "people_exceptions",
+  "employees",
+  "delivery_associates",
+  "contractors",
+  "vendors",
+  "workers",
+  "reports",
+  "attendance_reports",
+  "attendance_integrity",
+  "raw_punch_reports",
+  "verification_api_reports",
+  "event_log_reports",
+  "inbox",
+  "business_documents",
+  "payments",
+  "advance_requests",
+  "expense_requests",
+  "payment_requests",
+  "payment_approvals",
+  "payment_process",
+  "workforce_payouts",
+  "payment_reports",
+  "imports",
+  "notifications",
+  "notifications_whatsapp",
+  "notifications_history",
+  "notifications_app",
+  "users",
+  "master_data",
+  "master_locations",
+  "master_providers",
+  "payment_methods",
+  "master_payment_banks",
+  "master_payment_heads",
+  "master_contacts",
+  "workforce_categories",
+  "workforce_whatsapp",
+  "designations",
+  "biometric_devices",
+  "master_documents",
+  "master_imports",
+  "app_settings"
+]);
+
 export function currentAccessSurface(): AccessSurface {
   const host = (
     headers().get("x-forwarded-host") ??
@@ -102,11 +151,22 @@ export function currentAccessSurface(): AccessSurface {
   return host === "ops.dropxlogistics.com" || host.startsWith("ops-") ? "ops" : "dashboard";
 }
 
-export function pageBelongsToSurface(code: string, surface: AccessSurface) {
+export function currentAdminAccessSurface(): AdminAccessSurface {
+  const host = (
+    headers().get("x-forwarded-host") ??
+    headers().get("host") ??
+    ""
+  ).split(":")[0].toLowerCase();
+  if (isPeopleHostName(host)) return "people";
+  return host === "ops.dropxlogistics.com" || host.startsWith("ops-") ? "ops" : "dashboard";
+}
+
+export function pageBelongsToSurface(code: string, surface: AdminAccessSurface) {
+  if (surface === "people") return peoplePageCodes.has(code) || code.startsWith("workforce_category_");
   if (sharedPageCodes.has(code)) return true;
   return surface === "ops" ? opsPageCodes.has(code) : !opsPageCodes.has(code);
 }
 
-export function accessSurfaceLabel(surface: AccessSurface) {
-  return surface === "ops" ? "Ops" : "Dashboard";
+export function accessSurfaceLabel(surface: AdminAccessSurface) {
+  return surface === "ops" ? "Ops" : surface === "people" ? "People" : "Dashboard";
 }

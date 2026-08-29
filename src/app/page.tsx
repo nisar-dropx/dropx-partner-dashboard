@@ -2,6 +2,8 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { firstAllowedHref } from "@/lib/app-navigation";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { firstAllowedPeopleHref, hasPeoplePortalAccess } from "@/lib/people/navigation";
+import { isPeopleHostName } from "@/lib/people/surface";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -26,8 +28,12 @@ export default async function DashboardPage() {
   if (host === "connect.dropxlogistics.com") redirect("/connect");
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
+  if (isPeopleHostName(host)) {
+    if (!hasPeoplePortalAccess(authorization)) redirect("/unauthorized?page=people_portal&reason=access");
+    redirect(firstAllowedPeopleHref(authorization) ?? "/unauthorized?page=people_portal&reason=access");
+  }
   if (!hasPermission(authorization, "dashboard", "access")) {
-    redirect(firstAllowedHref(authorization) ?? "/unauthorized?page=dashboard&action=access");
+    redirect(firstAllowedHref(authorization) ?? "/unauthorized?page=dashboard_portal&reason=access");
   }
 
   return (
