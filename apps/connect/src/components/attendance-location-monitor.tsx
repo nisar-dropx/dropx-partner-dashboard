@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import { todayInIndia } from "@/lib/india-date";
 
 type Account = { id: string; profileType: string };
 
@@ -113,7 +112,7 @@ export function AttendanceLocationMonitor({ account }: { account: Account }) {
           await finalizeMissingPunchLocation(
             account,
             latestPunch,
-            String(status.shift?.punchDate ?? todayInIndia())
+            String(status.shift?.punchDate ?? new Date().toISOString().slice(0, 10))
           );
           finalizedPunchIds.current.add(latestPunch.id);
         }

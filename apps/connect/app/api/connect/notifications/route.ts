@@ -75,6 +75,10 @@ export async function POST(request: Request) {
     const deviceId = String(body.deviceId ?? "").trim();
     const pushToken = String(body.pushToken ?? "").trim();
     const appVersion = String(body.appVersion ?? "").trim();
+    // Defaults to "android" for backward compatibility with callers that
+    // predate the DropX One Flutter app (it always sends its own platform).
+    const requestedPlatform = String(body.platform ?? "android").trim().toLowerCase();
+    const platform = requestedPlatform === "ios" ? "ios" : "android";
     if (!deviceId || !pushToken) {
       return NextResponse.json({ error: "Device ID and push token are required." }, { status: 400 });
     }
@@ -88,7 +92,7 @@ export async function POST(request: Request) {
         company_id: account.companyId,
         profile_type: account.profileType,
         account_id: account.id,
-        platform: "android",
+        platform,
         device_id: deviceId,
         push_token: pushToken,
         app_version: appVersion || null,

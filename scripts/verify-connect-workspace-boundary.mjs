@@ -40,6 +40,10 @@ requireSource(
   "Workforce page access must follow category and designation rules"
 );
 requireSource(
+  auth.includes("loadPeopleOnlyDesignationKeys") && auth.includes("matchesPeopleOnlyDesignation"),
+  "People-only designation routing must collapse duplicate Workforce mirrors"
+);
+requireSource(
   peopleDashboard.includes('variant?: "people" | "workforce"'),
   "the shared dashboard variant prop is missing"
 );

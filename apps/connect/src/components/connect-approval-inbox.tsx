@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Camera, Check, ClipboardCheck, Clock3, FileText, LogOut, LocateFixed, MapPin, Paperclip, RotateCcw, ShieldCheck, X } from "lucide-react";
+import { Camera, Check, ClipboardCheck, Clock3, FileText, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 
@@ -41,52 +41,6 @@ type LeaveApproval = {
   requesterName: string;
   requesterCode: string;
   profileType: "employee" | "contractor";
-  proofUrl: string | null;
-  proofRequired: boolean;
-};
-
-type AttendanceApproval = {
-  id: string;
-  requestId: string;
-  stepName: string;
-  workerName: string;
-  workerCode: string;
-  profileType: "employee" | "contractor";
-  attendanceDate: string;
-  currentInTime: string | null;
-  currentOutTime: string | null;
-  requestedInTime: string | null;
-  requestedOutTime: string | null;
-  reasonCode: string;
-  remarks: string;
-  evidenceUrl: string | null;
-};
-
-type RosterApproval = {
-  id: string;
-  planId: string;
-  stepId: string | null;
-  stageType: string;
-  name: string;
-  stationCode: string;
-  stationName: string;
-  effectiveFrom: string;
-  periodEnd: string;
-  revision: number;
-  rowCount: number;
-};
-
-type ExitApproval = {
-  id: string;
-  caseId: string;
-  caseNumber: string;
-  stepName: string;
-  requesterName: string;
-  requesterCode: string;
-  profileType: "employee" | "contractor";
-  requestedLastWorkingDate: string;
-  reason: string;
-  submittedAt: string;
 };
 
 type LocationSupportPackage = {
@@ -104,7 +58,7 @@ type LocationSupportPackage = {
   profileType: "employee" | "contractor";
 };
 
-type ApprovalSection = "time-off" | "attendance" | "rostering" | "exits" | "location-integrity" | "reimbursements";
+type ApprovalSection = "time-off" | "location-integrity" | "reimbursements";
 
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
 function money(value: number | null | undefined) { return `₹${Number(value ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
@@ -199,9 +153,6 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [reimbursements, setReimbursements] = useState<ReimbursementApproval[]>([]);
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
   const [supportPackages, setSupportPackages] = useState<LocationSupportPackage[]>([]);
-  const [attendanceApprovals, setAttendanceApprovals] = useState<AttendanceApproval[]>([]);
-  const [rosterApprovals, setRosterApprovals] = useState<RosterApproval[]>([]);
-  const [exitApprovals, setExitApprovals] = useState<ExitApproval[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -223,14 +174,8 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       setReimbursements(reimbursementPayload.approvals ?? []);
       setLeaveApprovals(leavePayload.leaveApprovals ?? []);
       setSupportPackages(leavePayload.locationSupportPackages ?? []);
-      setAttendanceApprovals(leavePayload.attendanceApprovals ?? []);
-      setRosterApprovals(leavePayload.rosterApprovals ?? []);
-      setExitApprovals(leavePayload.exitApprovals ?? []);
       setSection((current) => {
         if (current === "time-off" && !(leavePayload.leaveApprovals ?? []).length) {
-          if ((leavePayload.attendanceApprovals ?? []).length) return "attendance";
-          if ((leavePayload.rosterApprovals ?? []).length) return "rostering";
-          if ((leavePayload.exitApprovals ?? []).length) return "exits";
           if ((leavePayload.locationSupportPackages ?? []).length) return "location-integrity";
           if ((reimbursementPayload.approvals ?? []).length) return "reimbursements";
         }
@@ -291,30 +236,6 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     finally { setSaving(false); }
   }
 
-  async function decideWorkflow(actionType: "attendance" | "rostering" | "exit", id: string, decision: "approved" | "returned" | "rejected", extra: Record<string, string | null> = {}) {
-    setSaving(true); setError(""); setNotice("");
-    try {
-      const response = await fetch("/api/connect/approvals", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: account.id,
-          profileType: account.profileType,
-          actionType,
-          decision,
-          note: notes[id] ?? "",
-          ...(actionType === "attendance" ? { requestId: id } : {}),
-          ...(actionType === "exit" ? { approvalId: id } : {}),
-          ...extra
-        })
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to update approval.");
-      setNotice(payload.notice); setNotes((current) => ({ ...current, [id]: "" })); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update approval."); }
-    finally { setSaving(false); }
-  }
-
   return (
     <section className="dx-approval-inbox">
       <header className="dx-page-intro">
@@ -327,15 +248,6 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       <nav aria-label="Approval sections" className="dx-approval-tabs">
         <button className={section === "time-off" ? "active" : ""} onClick={() => setSection("time-off")} type="button">
           Time off<span>{leaveApprovals.length}</span>
-        </button>
-        <button className={section === "attendance" ? "active" : ""} onClick={() => setSection("attendance")} type="button">
-          Attendance<span>{attendanceApprovals.length}</span>
-        </button>
-        <button className={section === "rostering" ? "active" : ""} onClick={() => setSection("rostering")} type="button">
-          Rosters<span>{rosterApprovals.length}</span>
-        </button>
-        <button className={section === "exits" ? "active" : ""} onClick={() => setSection("exits")} type="button">
-          Exits<span>{exitApprovals.length}</span>
         </button>
         <button className={section === "location-integrity" ? "active" : ""} onClick={() => setSection("location-integrity")} type="button">
           Location<span>{supportPackages.length}</span>
@@ -359,8 +271,6 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
               <dl className="dx-approval-facts">
                 <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
                 <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
-                {approval.proofUrl ? <div><dt>Proof</dt><dd><a href={approval.proofUrl} rel="noreferrer" target="_blank"><Paperclip />View medical proof</a></dd></div> : null}
-                {approval.proofRequired && !approval.proofUrl ? <div><dt>Proof</dt><dd>Medical proof missing — approval will remain blocked.</dd></div> : null}
               </dl>
               <ApprovalNote id={approval.requestId} notes={notes} onChange={(value) => setNote(approval.requestId, value)} placeholder="Note for worker (optional)" />
               <ApprovalToolbar
@@ -372,92 +282,6 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
             </article>
           )) : (
             <div className="dx-empty"><Clock3 /><strong>No time-off approvals</strong><small>Assigned leave requests will appear here.</small></div>
-          )}
-        </div>
-      ) : null}
-
-      {!loading && section === "attendance" ? (
-        <div className="dx-approval-list">
-          {attendanceApprovals.length ? attendanceApprovals.map((approval) => (
-            <article className="dx-approval-card" key={approval.id}>
-              <ApprovalHead
-                badge={<span className="dx-approval-badge">{displayDate(approval.attendanceDate)}</span>}
-                eyebrow={`Attendance · ${approval.stepName}`}
-                meta={`${approval.workerCode || "—"} · ${profileLabel(approval.profileType)}`}
-                name={approval.workerName}
-              />
-              <dl className="dx-approval-facts">
-                <div><dt>Requested correction</dt><dd>{approval.requestedInTime ? `In ${approval.requestedInTime}` : ""}{approval.requestedInTime && approval.requestedOutTime ? " · " : ""}{approval.requestedOutTime ? `Out ${approval.requestedOutTime}` : ""}</dd></div>
-                <div><dt>Current record</dt><dd>In {approval.currentInTime || "—"} · Out {approval.currentOutTime || "—"}</dd></div>
-                <div><dt>Reason</dt><dd>{statusLabel(approval.reasonCode)}{approval.remarks ? ` · ${approval.remarks}` : ""}</dd></div>
-                <div><dt>Timestamped workplace proof</dt><dd>{approval.evidenceUrl ? <a href={approval.evidenceUrl} rel="noreferrer" target="_blank"><Camera />View proof</a> : "Missing — approval is blocked"}</dd></div>
-              </dl>
-              <ApprovalNote id={approval.requestId} notes={notes} onChange={(value) => setNote(approval.requestId, value)} placeholder="Decision note (optional)" />
-              <ApprovalToolbar
-                onApprove={() => void decideWorkflow("attendance", approval.requestId, "approved")}
-                onReject={() => void decideWorkflow("attendance", approval.requestId, "rejected")}
-                saving={saving}
-                showReturn={false}
-              />
-            </article>
-          )) : (
-            <div className="dx-empty"><ShieldCheck /><strong>No attendance corrections</strong><small>Regularizations assigned through the reporting hierarchy will appear here.</small></div>
-          )}
-        </div>
-      ) : null}
-
-      {!loading && section === "rostering" ? (
-        <div className="dx-approval-list">
-          {rosterApprovals.length ? rosterApprovals.map((approval) => (
-            <article className="dx-approval-card" key={approval.id}>
-              <ApprovalHead
-                badge={<span className="dx-approval-badge">{approval.rowCount} rows</span>}
-                eyebrow={`Weekly roster · ${statusLabel(approval.stageType)}`}
-                meta={`${approval.stationCode}${approval.stationName ? ` · ${approval.stationName}` : ""}`}
-                name={approval.name}
-              />
-              <dl className="dx-approval-facts">
-                <div><dt>Effective from</dt><dd>{displayDate(approval.effectiveFrom)}</dd></div>
-                <div><dt>Pattern</dt><dd>Version {approval.revision} · repeats weekly until an approved replacement starts</dd></div>
-              </dl>
-              <ApprovalNote id={approval.id} notes={notes} onChange={(value) => setNote(approval.id, value)} placeholder="Required when returning or rejecting" />
-              <ApprovalToolbar
-                onApprove={() => void decideWorkflow("rostering", approval.id, "approved", { planId: approval.planId, stepId: approval.stepId })}
-                onReject={() => void decideWorkflow("rostering", approval.id, "rejected", { planId: approval.planId, stepId: approval.stepId })}
-                onReturn={() => void decideWorkflow("rostering", approval.id, "returned", { planId: approval.planId, stepId: approval.stepId })}
-                saving={saving}
-              />
-            </article>
-          )) : (
-            <div className="dx-empty"><CalendarDays /><strong>No roster approvals</strong><small>Station roster changes assigned by the rostering master will appear here.</small></div>
-          )}
-        </div>
-      ) : null}
-
-      {!loading && section === "exits" ? (
-        <div className="dx-approval-list">
-          {exitApprovals.length ? exitApprovals.map((approval) => (
-            <article className="dx-approval-card" key={approval.id}>
-              <ApprovalHead
-                badge={<span className="dx-approval-badge">{approval.caseNumber}</span>}
-                eyebrow={`Exit · ${approval.stepName}`}
-                meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                name={approval.requesterName}
-              />
-              <dl className="dx-approval-facts">
-                <div><dt>Requested last working day</dt><dd>{displayDate(approval.requestedLastWorkingDate)}</dd></div>
-                <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
-              </dl>
-              <ApprovalNote id={approval.id} notes={notes} onChange={(value) => setNote(approval.id, value)} placeholder="Required when rejecting" />
-              <ApprovalToolbar
-                onApprove={() => void decideWorkflow("exit", approval.id, "approved")}
-                onReject={() => void decideWorkflow("exit", approval.id, "rejected")}
-                saving={saving}
-                showReturn={false}
-              />
-            </article>
-          )) : (
-            <div className="dx-empty"><LogOut /><strong>No exit approvals</strong><small>Only the current step from the configured exit workflow appears here.</small></div>
           )}
         </div>
       ) : null}

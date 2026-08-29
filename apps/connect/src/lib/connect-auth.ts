@@ -131,9 +131,106 @@ function designationLookupKey(companyId: string, categoryCode: string, value: st
 }
 
 function intersectPageAccess(categoryPages: string[], designationPages?: string[] | null) {
-  if (!designationPages) return categoryPages;
+  if (!designationPages?.length) return categoryPages;
   const allowedByDesignation = new Set(designationPages.map((page) => page.trim().toLowerCase()));
   return categoryPages.filter((page) => allowedByDesignation.has(page.trim().toLowerCase()));
+}
+
+function resolveConnectPageAccess(
+  profileType: AccountRow["profile_type"],
+  categoryPages: string[],
+  designationPages?: string[] | null
+) {
+  if (profileType === "user") return managerPageAccess;
+  const pages = intersectPageAccess(categoryPages, designationPages);
+  if (profileType !== "contractor") return pages;
+  // Independent contractors always need core self-service even when designation pages are narrow.
+  return [...new Set([...pages, "dashboard", "attendance", "roster", "settings"])];
+}
+
+const workforceMirrorProfileTypes = new Set<AccountRow["profile_type"]>([
+  "workforce",
+  "field_executive",
+  "contractor",
+  "vendor",
+  "worker"
+]);
+
+function isWorkforceMirrorProfileType(profileType: AccountRow["profile_type"]) {
+  return workforceMirrorProfileTypes.has(profileType);
+}
+
+async function loadPeopleOnlyDesignationKeys(companyIds: string[]) {
+  const peopleOnlyDesignationIds = new Set<string>();
+  const peopleOnlyDesignationKeys = new Set<string>();
+  if (!companyIds.length) {
+    return { peopleOnlyDesignationIds, peopleOnlyDesignationKeys };
+  }
+
+  const routesResult = await supabaseAdmin!
+    .from("designation_register_routes")
+    .select("company_id, designation_id, registration_enabled, workforce_register_master!inner(table_name, is_active)")
+    .in("company_id", companyIds)
+    .eq("registration_enabled", true)
+    .eq("workforce_register_master.table_name", "employees")
+    .eq("workforce_register_master.is_active", true);
+  if (routesResult.error && !isMissingColumnError(routesResult.error)) {
+    throw new Error(routesResult.error.message);
+  }
+  if (!routesResult.error) {
+    for (const row of routesResult.data ?? []) {
+      peopleOnlyDesignationIds.add(String(row.designation_id));
+    }
+  }
+
+  const designationResult = await supabaseAdmin!
+    .from("designations")
+    .select("id, company_id, code, name, onboarding_categories")
+    .in("company_id", companyIds)
+    .eq("is_active", true);
+  if (designationResult.error && !isMissingColumnError(designationResult.error)) {
+    throw new Error(designationResult.error.message);
+  }
+  for (const designation of designationResult.data ?? []) {
+    const categories = Array.isArray(designation.onboarding_categories)
+      ? designation.onboarding_categories.map(String)
+      : [];
+    const routesToEmployeesRegister = peopleOnlyDesignationIds.has(String(designation.id));
+    const employeesCategoryOnly = categories.length === 1 && categories[0] === "employees";
+    if (!routesToEmployeesRegister && !employeesCategoryOnly) continue;
+
+    peopleOnlyDesignationIds.add(String(designation.id));
+    const registerCategories = new Set([
+      ...categories,
+      "employees",
+      "field_executives",
+      "contractors",
+      "workforce",
+      "vendors",
+      "workers"
+    ]);
+    for (const category of registerCategories) {
+      peopleOnlyDesignationKeys.add(
+        designationLookupKey(String(designation.company_id), category, String(designation.name))
+      );
+      peopleOnlyDesignationKeys.add(
+        designationLookupKey(String(designation.company_id), category, String(designation.code))
+      );
+    }
+  }
+
+  return { peopleOnlyDesignationIds, peopleOnlyDesignationKeys };
+}
+
+function matchesPeopleOnlyDesignation(
+  account: AccountRow,
+  peopleOnlyDesignationIds: Set<string>,
+  peopleOnlyDesignationKeys: Set<string>
+) {
+  if (account.designation_id && peopleOnlyDesignationIds.has(account.designation_id)) return true;
+  if (!account.role) return false;
+  const categoryCode = categoryCodeForProfile(account.profile_type);
+  return peopleOnlyDesignationKeys.has(designationLookupKey(account.company_id, categoryCode, account.role));
 }
 
 export async function findConnectAccounts(countryCode: string, mobile: string) {
@@ -277,18 +374,77 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   const employeeReferences = new Set(employeeAccounts
     .filter((account) => account.employee_id)
     .map((account) => `${account.company_id}:${String(account.employee_id).trim().toLowerCase()}`));
+  const employeeIdsByCompany = new Set(employeeAccounts.map((account) => `${account.company_id}:${account.id}`));
+  const employeeCodesByCompany = new Map<string, Set<string>>();
+  const employeeBiometricsByCompany = new Map<string, Set<string>>();
+  for (const employee of employeeAccounts) {
+    if (employee.employee_id) {
+      const codes = employeeCodesByCompany.get(employee.company_id) ?? new Set<string>();
+      codes.add(String(employee.employee_id).trim().toLowerCase());
+      employeeCodesByCompany.set(employee.company_id, codes);
+    }
+    if (employee.biometric_id) {
+      const biometrics = employeeBiometricsByCompany.get(employee.company_id) ?? new Set<string>();
+      biometrics.add(String(employee.biometric_id).trim().toLowerCase());
+      employeeBiometricsByCompany.set(employee.company_id, biometrics);
+    }
+  }
+  const companyIdsForRoutes = Array.from(new Set(accounts.map((account) => account.company_id)));
+  const { peopleOnlyDesignationIds, peopleOnlyDesignationKeys } = await loadPeopleOnlyDesignationKeys(companyIdsForRoutes);
   const canonicalWorkforceSources = new Set(accounts
     .filter((account) => account.profile_type === "workforce" && account.source_profile_type && account.source_profile_id)
     .map((account) => `${account.company_id}:${account.source_profile_type}:${account.source_profile_id}`));
+  const contractorAccountKeys = new Set(accounts
+    .filter((account) => account.profile_type === "contractor")
+    .map((account) => `${account.company_id}:${account.id}`));
   const visibleAccounts = accounts.filter((account) => {
     if (account.profile_type === "user") {
       return !account.employee_id ||
         !employeeReferences.has(`${account.company_id}:${String(account.employee_id).trim().toLowerCase()}`);
     }
-    if (["field_executive", "contractor", "vendor", "worker"].includes(account.profile_type)) {
-      return !canonicalWorkforceSources.has(`${account.company_id}:${account.profile_type}:${account.id}`);
+    // DA / WM legacy rows move to the canonical Workforce register; IC contractors stay on contractors.
+    if (account.profile_type === "field_executive") {
+      return !canonicalWorkforceSources.has(`${account.company_id}:field_executive:${account.id}`);
     }
-    return true;
+    if (!isWorkforceMirrorProfileType(account.profile_type)) {
+      return true;
+    }
+
+    if (account.profile_type === "workforce") {
+      if (
+        account.source_profile_type === "employee" &&
+        account.source_profile_id &&
+        employeeIdsByCompany.has(`${account.company_id}:${account.source_profile_id}`)
+      ) {
+        return false;
+      }
+      if (
+        account.source_profile_type === "contractor" &&
+        account.source_profile_id &&
+        contractorAccountKeys.has(`${account.company_id}:${account.source_profile_id}`)
+      ) {
+        return false;
+      }
+    }
+
+    const peopleOnlyDesignation = matchesPeopleOnlyDesignation(
+      account,
+      peopleOnlyDesignationIds,
+      peopleOnlyDesignationKeys
+    );
+    if (!peopleOnlyDesignation) {
+      return true;
+    }
+
+    const employeeCodes = employeeCodesByCompany.get(account.company_id);
+    const employeeBiometrics = employeeBiometricsByCompany.get(account.company_id);
+    return !(
+      (account.source_profile_type === "employee" &&
+        account.source_profile_id &&
+        employeeIdsByCompany.has(`${account.company_id}:${account.source_profile_id}`)) ||
+      (employeeCodes && account.dropx_id && employeeCodes.has(String(account.dropx_id).trim().toLowerCase())) ||
+      (employeeBiometrics && account.biometric_id && employeeBiometrics.has(String(account.biometric_id).trim().toLowerCase()))
+    );
   });
 
   const companyIds = Array.from(new Set(visibleAccounts.map((account) => account.company_id)));
@@ -403,9 +559,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       status: account.status ?? null,
       biometricId: account.biometric_id ?? null,
       profilePhotoUrl: await signedProfilePhotoUrl(account.profile_photo_path),
-      pageAccess: account.profile_type === "user"
-        ? managerPageAccess
-        : intersectPageAccess(categoryPages, designationPages),
+      pageAccess: resolveConnectPageAccess(account.profile_type, categoryPages, designationPages),
       isDefault: defaultPreference?.default_company_id === account.company_id &&
         defaultPreference?.default_profile_type === account.profile_type &&
         defaultPreference?.default_account_id === account.id,

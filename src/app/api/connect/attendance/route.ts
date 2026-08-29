@@ -5,17 +5,7 @@ import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-
 import { loadAttendanceReportRows } from "@/lib/biometric/attendance";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
-import { resolveAttendanceApprovalSteps } from "@/lib/connect-attendance-approval";
 import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
-
-function todayInIndia(now = new Date()) {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).format(now);
-}
 
 function monthRange(month: string | null) {
   const today = new Date();
@@ -223,7 +213,7 @@ export async function POST(request: NextRequest) {
     const currentOutTime = String(formData.get("currentOutTime") ?? "").trim();
     if (!accountId) throw new Error("Account is required.");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(attendanceDate)) throw new Error("Attendance date is required.");
-    if (attendanceDate > todayInIndia()) throw new Error("Future attendance cannot be regularized.");
+    if (attendanceDate > new Date().toISOString().slice(0, 10)) throw new Error("Future attendance cannot be regularized.");
     if (!["missed_in", "missed_out", "missed_both", "incorrect_in", "incorrect_out", "other"].includes(reasonCode)) {
       throw new Error("Select a regularization reason.");
     }
@@ -238,14 +228,6 @@ export async function POST(request: NextRequest) {
     if (normalizedRequestedOutTime <= normalizedRequestedInTime) throw new Error("Requested OUT time must be after IN time.");
     if (remarks.length < 5) throw new Error("Enter a short explanation.");
     const worker = await resolveWorker({ accountId, profileType });
-    if (worker.profileType !== "employee" && worker.profileType !== "contractor") {
-      throw new Error("Attendance regularization is available only for employees and independent contractors.");
-    }
-    const steps = await resolveAttendanceApprovalSteps({
-      companyId: worker.companyId,
-      workerId: worker.profileId,
-      workerType: worker.profileType
-    });
     const existingResult = await supabaseAdmin
       .from("attendance_regularization_requests")
       .select("id, status, attachment_path")
@@ -289,47 +271,54 @@ export async function POST(request: NextRequest) {
       throw new Error("Upload workplace CCTV proof with a visible timestamp matching the requested IN or OUT time.");
     }
 
-    const saveResult = await supabaseAdmin.rpc("hr_create_attendance_regularization_with_steps", {
-      p_company_id: worker.companyId,
-      p_profile_type: worker.profileType,
-      p_profile_id: worker.profileId,
-      p_dropx_id: worker.dropxId,
-      p_biometric_id: worker.biometricId,
-      p_full_name: worker.fullName,
-      p_attendance_date: attendanceDate,
-      p_current_in_time: currentInTime,
-      p_current_out_time: currentOutTime,
-      p_requested_in_time: normalizedRequestedInTime,
-      p_requested_out_time: normalizedRequestedOutTime,
-      p_reason_code: reasonCode,
-      p_remarks: remarks,
-      p_attachment_path: attachmentPath,
-      p_steps: steps
-    });
+    const payload = {
+      company_id: worker.companyId,
+      profile_type: worker.profileType,
+      profile_id: worker.profileId,
+      dropx_id: worker.dropxId || null,
+      biometric_id: worker.biometricId || null,
+      full_name: worker.fullName || null,
+      attendance_date: attendanceDate,
+      current_in_time: currentInTime || null,
+      current_out_time: currentOutTime || null,
+      requested_in_time: normalizedRequestedInTime,
+      requested_out_time: normalizedRequestedOutTime,
+      reason_code: reasonCode,
+      remarks,
+      attachment_path: attachmentPath,
+      status: "pending",
+      updated_at: new Date().toISOString()
+    };
+    const saveResult = existingResult.data?.id
+      ? await supabaseAdmin
+          .from("attendance_regularization_requests")
+          .update(payload)
+          .eq("id", existingResult.data.id)
+          .select("id, status")
+          .single()
+      : await supabaseAdmin
+          .from("attendance_regularization_requests")
+          .insert(payload)
+          .select("id, status")
+          .single();
     if (saveResult.error) {
       if (uploadedPath) await supabaseAdmin.storage.from("employee-profile-documents").remove([uploadedPath]);
       throw new Error(saveResult.error.message);
     }
-    const requestId = String(saveResult.data ?? "");
-    if (!requestId) {
-      if (uploadedPath) await supabaseAdmin.storage.from("employee-profile-documents").remove([uploadedPath]);
-      throw new Error("Attendance regularization could not be routed for approval.");
-    }
-    const submittedAt = new Date().toISOString();
     await createAppNotification({
       accountId: worker.profileId,
       companyId: worker.companyId,
       data: {
         attendanceDate,
-        regularizationRequestId: requestId,
-        status: "pending_manager"
+        regularizationRequestId: saveResult.data.id,
+        status: saveResult.data.status
       },
       eventCode: "attendance_regularization_submitted",
       profileType: worker.profileType,
-      sourceKey: `${requestId}:${submittedAt}`,
+      sourceKey: `${saveResult.data.id}:${payload.updated_at}`,
       variables: { date: attendanceDate.split("-").reverse().join("/") }
     });
-    return NextResponse.json({ ok: true, request: { id: requestId, status: "pending_manager" } });
+    return NextResponse.json({ ok: true, request: saveResult.data });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to submit regularization request.";
     const status = message.includes("Login") ? 401 : 400;

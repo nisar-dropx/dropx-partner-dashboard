@@ -13,7 +13,9 @@ const checks = [
   [connectTypes.includes('"workforce"'), "DropX One accepts the canonical Workforce profile type"],
   [dashboardTypes.includes('profileType === "workforce"') && dashboardTypes.includes('return "workforce" as const'), "Dashboard APIs resolve canonical Workforce accounts"],
   [auth.includes('["workforce", "field_executive", "contractor", "vendor", "worker"]'), "Account discovery reads Workforce before legacy registers"],
-  [auth.includes("canonicalWorkforceSources"), "Legacy mirrored accounts are removed from the switcher"],
+  [auth.includes("canonicalWorkforceSources"), "Legacy field executive mirrors are removed from the switcher"],
+  [auth.includes("contractorAccountKeys"), "Workforce mirrors defer to active contractor accounts"],
+  [auth.includes("resolveConnectPageAccess"), "Contractor page access keeps core self-service pages"],
   [migration.includes("public.set_designation_register_route"), "Cutover uses the master-defined routing workflow"],
   [migration.includes("in ('DA', 'WM', 'ODCD', 'DCD')"), "All four requested designation codes are covered"],
   [migration.includes("raise exception 'One or more core Workforce designations"), "Partial cutovers fail atomically"]

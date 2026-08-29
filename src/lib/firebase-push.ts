@@ -102,11 +102,11 @@ export async function deliverNotificationPush(notification: PushNotification) {
 
   const tokenResult = await supabaseAdmin
     .from("mob_app_device_tokens")
-    .select("id, push_token")
+    .select("id, push_token, platform")
     .eq("company_id", notification.companyId)
     .eq("profile_type", notification.profileType)
     .eq("account_id", notification.accountId)
-    .eq("platform", "android")
+    .in("platform", ["android", "ios"])
     .eq("is_active", true)
     .not("push_token", "is", null);
   if (tokenResult.error) {
@@ -121,7 +121,7 @@ export async function deliverNotificationPush(notification: PushNotification) {
   if (tokens.length === 0) {
     await supabaseAdmin
       .from("mob_app_notifications")
-      .update({ push_status: "pending", push_error: "No active Android device token." })
+      .update({ push_status: "pending", push_error: "No active device token." })
       .eq("id", notification.id);
     return;
   }
@@ -129,6 +129,29 @@ export async function deliverNotificationPush(notification: PushNotification) {
   try {
     const accessToken = await firebaseAccessToken();
     const results = await Promise.all(tokens.map(async (row) => {
+      const message: Record<string, unknown> = {
+        token: row.push_token,
+        notification: {
+          title: notification.title,
+          body: notification.body
+        },
+        data: pushData(notification)
+      };
+      if (row.platform === "ios") {
+        message.apns = {
+          headers: { "apns-priority": "10" },
+          payload: { aps: { sound: "default", alert: { title: notification.title, body: notification.body } } }
+        };
+      } else {
+        message.android = {
+          priority: "high",
+          notification: {
+            channel_id: "dropx_one_notifications",
+            sound: "default"
+          }
+        };
+      }
+
       const response = await fetch(
         `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(config.projectId)}/messages:send`,
         {
@@ -137,23 +160,7 @@ export async function deliverNotificationPush(notification: PushNotification) {
             Authorization: `Bearer ${accessToken}`,
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({
-            message: {
-              token: row.push_token,
-              notification: {
-                title: notification.title,
-                body: notification.body
-              },
-              data: pushData(notification),
-              android: {
-                priority: "high",
-                notification: {
-                  channel_id: "dropx_one_notifications",
-                  sound: "default"
-                }
-              }
-            }
-          }),
+          body: JSON.stringify({ message }),
           cache: "no-store"
         }
       );
