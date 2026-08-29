@@ -25,7 +25,14 @@ const peoplePortalRoots = [
 
 export function isPeopleHostName(host: string) {
   const normalized = host.split(":")[0].trim().toLowerCase();
-  return normalized === "people.dropxlogistics.com" || normalized.startsWith("people-") || normalized.startsWith("people.");
+  return normalized === "people.dropxlogistics.com" ||
+    normalized === "hrms.dropxlogistics.com" ||
+    normalized === "dropx-hrms.vercel.app" ||
+    normalized.startsWith("people-") ||
+    normalized.startsWith("people.") ||
+    normalized.startsWith("hrms-") ||
+    normalized.startsWith("hrms.") ||
+    normalized.startsWith("dropx-hrms-");
 }
 
 export function isPeoplePortalPath(pathname: string) {
