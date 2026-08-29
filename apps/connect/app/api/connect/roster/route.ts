@@ -10,8 +10,7 @@ function clean(value: unknown) { return String(value ?? "").trim(); }
 function relation<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
 function todayIndia() { return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
 function addDays(value: string, days: number) { const date = new Date(`${value}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); }
-// Temporary testing window — revert to 7 after roster approval testing is complete.
-const ROSTER_VIEW_DAYS = Number(process.env.CONNECT_ROSTER_VIEW_DAYS ?? 30);
+const ROSTER_VIEW_DAYS = Math.min(35, Math.max(7, Number(process.env.CONNECT_ROSTER_VIEW_DAYS ?? 30) || 30));
 function appWorkerType(profileType: string): WorkerType | null { return profileType === "employee" || profileType === "contractor" ? profileType : null; }
 function shiftOf(entry: Entry) { return relation(entry.hr_shifts); }
 function planOf(entry: Entry) { return relation(entry.hr_roster_plans); }
@@ -21,7 +20,6 @@ function isoWeekday(date: string) {
 }
 
 async function expandRecurringOwnEntries(account: ConnectAccount, workerType: WorkerType, start: string, direct: Entry[]) {
-  if (ROSTER_VIEW_DAYS <= 7) return direct;
   const byDate = new Map(direct.map((entry) => [entry.roster_date, entry]));
   let locationId = direct.find((entry) => entry.location_id)?.location_id ?? null;
   if (!locationId) {
