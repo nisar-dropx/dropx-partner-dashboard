@@ -115,6 +115,16 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "platform_admin_portal", path));
   }
 
+  if (
+    isPlatformAdminHost &&
+    !isPublicAppPath(path) &&
+    path !== "/" &&
+    path !== "/platform-admin" &&
+    path !== "/unauthorized"
+  ) {
+    return NextResponse.redirect(surfaceDeniedUrl(request, "platform_admin_portal", path));
+  }
+
   if (isOpsHost && (path === "/ops-pulse" || path.startsWith("/ops-pulse/"))) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = cleanOpsPath(path);
