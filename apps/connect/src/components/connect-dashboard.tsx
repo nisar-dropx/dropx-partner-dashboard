@@ -429,7 +429,7 @@ export function ConnectDashboard({
       <div>
         {attendanceAllowed ? <button onClick={onAttendance}><i className="blue"><Fingerprint /></i><span><strong>Attendance</strong><small>View punches</small></span><ChevronRight /></button> : null}
         {workforce ? <button onClick={onRoster}><i className="amber"><CalendarClock /></i><span><strong>My roster</strong><small>Shift and swap requests</small></span><ChevronRight /></button> : null}
-        {leaveAllowed ? <button onClick={onLeave}><i className="pink"><CalendarDays /></i><span><strong>{account.profileType === "contractor" ? "LOP" : "Time off"}</strong><small>{account.profileType === "contractor" ? "Request LOP" : "Request leave"}</small></span><ChevronRight /></button> : null}
+        {leaveAllowed ? <button onClick={onLeave}><i className="pink"><CalendarDays /></i><span><strong>Time off</strong><small>Request leave</small></span><ChevronRight /></button> : null}
         {performanceAllowed ? <button onClick={onPerformance}><i className="purple"><Target /></i><span><strong>Performance</strong><small>Goals & reviews</small></span><ChevronRight /></button> : null}
         {!workforce ? <button onClick={onAdvances}><i className="amber"><IndianRupee /></i><span><strong>My pay</strong><small>Advances</small></span><ChevronRight /></button> : null}
         <button onClick={onProfile}><i className="green"><UserRound /></i><span><strong>Profile</strong><small>Personal details</small></span><ChevronRight /></button>

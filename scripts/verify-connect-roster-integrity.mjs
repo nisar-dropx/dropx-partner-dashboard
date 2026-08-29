@@ -12,7 +12,9 @@ const checks = [
   [route.includes('.eq("location_id", locationId)') && route.includes('.eq("worker_id", account.id)'), "recurring projection remains scoped to the signed-in worker and location"],
   [route.includes("requester_shift_id,partner_shift_id,requester_day_type,partner_day_type"), "swap history loads immutable shift and day snapshots"],
   [route.includes("storedShiftIds") && route.includes('db().from("hr_shifts")'), "historical swaps resolve their stored shifts after a roster revision"],
-  [route.includes('isProjected: entry.id.startsWith("preview:")') && component.includes('day.isProjected ? "Recurring schedule"'), "recurring dates never show a false cutoff warning"],
+  [route.includes("projectedEntryId") && route.includes("hr_create_roster_swap_request"), "recurring dates materialize safe one-day swap overrides"],
+  [route.includes("expandRecurringColleagueEntries") && component.includes('body: JSON.stringify({ accountId: account.id, profileType: account.profileType, requesterEntryId: selectedDay.id, partnerEntryId, rosterDate: selectedDay.date, note })'), "projected dates load colleagues and submit their exact roster date"],
+  [component.includes('day.canSwap ? day.partners.length ? "Request swap"') && !component.includes('day.isProjected ? "Recurring schedule"'), "eligible recurring dates expose the swap action"],
   [component.includes("activeRequests") && component.includes("completedRequests"), "active requests and completed history are separated"],
   [component.includes("Recent swap history") && component.includes("You requested with"), "swap history is compact and shows request direction"]
 ];

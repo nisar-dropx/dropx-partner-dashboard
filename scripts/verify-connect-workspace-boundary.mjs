@@ -24,8 +24,8 @@ requireSource(
   "the stripped-down Workforce workspace replaced the shared dashboard"
 );
 requireSource(
-  loginFlow.includes("showLopNav") && loginFlow.includes('<ConnectLeave account={account} lopOnly />'),
-  "contractor LOP navigation is missing"
+  loginFlow.includes('const showLeaveNav') && !loginFlow.includes("showLopNav") && !loginFlow.includes('<ConnectLeave account={account} lopOnly />'),
+  "employee and contractor leave must use one master-driven Leave workspace"
 );
 requireSource(
   !loginFlow.includes("workforceSharedSteps"),

@@ -28,6 +28,11 @@ function isoWeekday(date: string) {
   const day = new Date(`${date}T00:00:00Z`).getUTCDay();
   return day === 0 ? 7 : day;
 }
+function projectedEntryId(sourceEntryId: string, date: string) { return `preview:${sourceEntryId}:${date}`; }
+function projectedSelection(value: string) {
+  const match = /^preview:([0-9a-f-]{36}):(\d{4}-\d{2}-\d{2})$/i.exec(value);
+  return match ? { sourceEntryId: match[1], date: match[2] } : null;
+}
 
 async function expandRecurringOwnEntries(account: ConnectAccount, workerType: WorkerType, start: string, direct: Entry[]) {
   const byDate = new Map(direct.map((entry) => [entry.roster_date, entry]));
@@ -74,9 +79,54 @@ async function expandRecurringOwnEntries(account: ConnectAccount, workerType: Wo
     if (byDate.has(date)) continue;
     const match = index.get(String(isoWeekday(date)))?.find((candidate) => candidate.effectiveFrom <= date && (!candidate.supersededAt || date < candidate.supersededAt));
     if (!match) continue;
-    expanded.push({ ...match.entry, id: `preview:${date}`, roster_date: date });
+    expanded.push({ ...match.entry, id: projectedEntryId(match.entry.id, date), roster_date: date });
   }
   return expanded.sort((left, right) => left.roster_date.localeCompare(right.roster_date));
+}
+
+async function expandRecurringColleagueEntries(companyId: string, locations: string[], start: string, direct: Entry[]) {
+  if (!locations.length) return direct;
+  const patternResult = await db().from("hr_roster_entries")
+    .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
+    .eq("company_id", companyId).in("location_id", locations)
+    .eq("hr_roster_plans.status", "approved")
+    .eq("hr_roster_plans.roster_kind", "recurring_weekly");
+  if (patternResult.error) throw new Error(patternResult.error.message);
+
+  const directKeys = new Set(direct.map((entry) => `${entry.worker_type}:${entry.worker_id}:${entry.location_id}:${entry.roster_date}`));
+  const index = new Map<string, Array<{ effectiveFrom: string; supersededAt: string | null; revisionNo: number; entry: Entry }>>();
+  const keysByWeekday = new Map<number, Set<string>>();
+  for (const row of patternResult.data ?? []) {
+    const entry = row as unknown as Entry;
+    const plan = planOf(entry);
+    if (!plan?.effective_from || !entry.location_id) continue;
+    const weekday = isoWeekday(entry.roster_date);
+    const key = `${entry.worker_type}:${entry.worker_id}:${entry.location_id}:${weekday}`;
+    index.set(key, [...(index.get(key) ?? []), {
+      effectiveFrom: plan.effective_from,
+      supersededAt: plan.superseded_at ?? null,
+      revisionNo: Number(plan.revision_no ?? 0),
+      entry
+    }]);
+    keysByWeekday.set(weekday, new Set([...(keysByWeekday.get(weekday) ?? []), key]));
+  }
+  for (const values of index.values()) {
+    values.sort((left, right) => right.effectiveFrom.localeCompare(left.effectiveFrom) || right.revisionNo - left.revisionNo);
+  }
+
+  const expanded = [...direct];
+  for (let offset = 0; offset < ROSTER_VIEW_DAYS; offset += 1) {
+    const date = addDays(start, offset);
+    for (const key of keysByWeekday.get(isoWeekday(date)) ?? []) {
+      const match = index.get(key)?.find((candidate) => candidate.effectiveFrom <= date && (!candidate.supersededAt || date < candidate.supersededAt));
+      if (!match) continue;
+      const directKey = `${match.entry.worker_type}:${match.entry.worker_id}:${match.entry.location_id}:${date}`;
+      if (directKeys.has(directKey)) continue;
+      expanded.push({ ...match.entry, id: projectedEntryId(match.entry.id, date), roster_date: date });
+      directKeys.add(directKey);
+    }
+  }
+  return expanded;
 }
 
 async function accountFrom(url: URL, body?: Record<string, unknown>) {
@@ -138,7 +188,7 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType) {
       .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status)")
       .eq("company_id", account.companyId).in("location_id", locations).gte("roster_date", start).lte("roster_date", end).eq("hr_roster_plans.status", "approved");
     if (colleagues.error) throw new Error(colleagues.error.message);
-    colleagueEntries = (colleagues.data ?? []) as unknown as Entry[];
+    colleagueEntries = await expandRecurringColleagueEntries(account.companyId, locations, start, (colleagues.data ?? []) as unknown as Entry[]);
   }
   const swapColumns = "id,requester_entry_id,partner_entry_id,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,requester_shift_id,partner_shift_id,requester_day_type,partner_day_type,roster_date,status,requester_note,partner_note,requested_at";
   const [requesterSwaps, partnerSwaps] = await Promise.all([
@@ -172,13 +222,16 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType) {
   for (const item of storedShifts.data ?? []) shifts.set(item.id, item as Shift);
   const leadHours = await swapCutoff(account.companyId);
   const entriesById = new Map([...own, ...colleagueEntries].map((entry) => [entry.id, entry]));
-  const days = own.map((entry) => ({
-    id: entry.id, date: entry.roster_date, dayType: entry.day_type, locationId: entry.location_id,
-    shift: entry.day_type === "weekly_off" ? null : shiftOf(entry),
-    isProjected: entry.id.startsWith("preview:"),
-    canSwap: !entry.id.startsWith("preview:") && (() => { try { assertBeforeCutoff(entry, leadHours); return true; } catch { return false; } })(),
-    partners: colleagueEntries.filter((candidate) => candidate.id !== entry.id && candidate.roster_date === entry.roster_date && candidate.location_id === entry.location_id && !(candidate.worker_type === workerType && candidate.worker_id === account.id)).map((candidate) => ({ id: candidate.id, workerType: candidate.worker_type, workerId: candidate.worker_id, ...names.get(`${candidate.worker_type}:${candidate.worker_id}`), dayType: candidate.day_type, shift: candidate.day_type === "weekly_off" ? null : shiftOf(candidate) }))
-  }));
+  const days = own.map((entry) => {
+    const partners = colleagueEntries.filter((candidate) => candidate.id !== entry.id && candidate.roster_date === entry.roster_date && candidate.location_id === entry.location_id && !(candidate.worker_type === workerType && candidate.worker_id === account.id)).map((candidate) => ({ id: candidate.id, workerType: candidate.worker_type, workerId: candidate.worker_id, ...names.get(`${candidate.worker_type}:${candidate.worker_id}`), dayType: candidate.day_type, shift: candidate.day_type === "weekly_off" ? null : shiftOf(candidate) }));
+    let canSwap = true;
+    try { assertBeforeCutoff(entry, leadHours); } catch { canSwap = false; }
+    return {
+      id: entry.id, date: entry.roster_date, dayType: entry.day_type, locationId: entry.location_id,
+      shift: entry.day_type === "weekly_off" ? null : shiftOf(entry),
+      isProjected: entry.id.startsWith("preview:"), canSwap, partners
+    };
+  });
   const requests = swaps.map((request) => {
     const requesterEntry = entriesById.get(request.requester_entry_id);
     const partnerEntry = entriesById.get(request.partner_entry_id);
@@ -213,20 +266,28 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
     const { account, workerType } = await accountFrom(new URL(request.url), body);
-    const requesterEntryId = clean(body.requesterEntryId); const partnerEntryId = clean(body.partnerEntryId); const note = clean(body.note).slice(0, 500);
+    const requesterEntryId = clean(body.requesterEntryId); const partnerEntryId = clean(body.partnerEntryId); const requestedDate = clean(body.rosterDate); const note = clean(body.note).slice(0, 500);
     if (!requesterEntryId || !partnerEntryId || requesterEntryId === partnerEntryId) throw new Error("Select a valid shift partner.");
-    const entries = await db().from("hr_roster_entries").select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status)").eq("company_id", account.companyId).in("id", [requesterEntryId, partnerEntryId]);
+    const requesterSelection = projectedSelection(requesterEntryId);
+    const partnerSelection = projectedSelection(partnerEntryId);
+    if ((requesterSelection && requesterSelection.date !== requestedDate) || (partnerSelection && partnerSelection.date !== requestedDate)) throw new Error("The selected recurring shift does not match this date.");
+    const requesterSourceId = requesterSelection?.sourceEntryId ?? requesterEntryId;
+    const partnerSourceId = partnerSelection?.sourceEntryId ?? partnerEntryId;
+    const entries = await db().from("hr_roster_entries").select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)").eq("company_id", account.companyId).in("id", [requesterSourceId, partnerSourceId]);
     if (entries.error || entries.data?.length !== 2) throw new Error(entries.error?.message ?? "One of the roster entries is unavailable.");
-    const requester = entries.data.find((item) => item.id === requesterEntryId) as unknown as Entry;
-    const partner = entries.data.find((item) => item.id === partnerEntryId) as unknown as Entry;
+    const requester = entries.data.find((item) => item.id === requesterSourceId) as unknown as Entry;
+    const partner = entries.data.find((item) => item.id === partnerSourceId) as unknown as Entry;
     if (requester.worker_type !== workerType || requester.worker_id !== account.id) throw new Error("You can request a swap only for your own roster.");
     if (planOf(requester)?.status !== "approved" || planOf(partner)?.status !== "approved") throw new Error("Only approved roster shifts can be swapped.");
-    if (requester.roster_date !== partner.roster_date || requester.location_id !== partner.location_id) throw new Error("Choose a colleague from the same date and location.");
-    const leadHours = await swapCutoff(account.companyId); assertBeforeCutoff(requester, leadHours);
+    const rosterDate = requestedDate || requester.roster_date;
+    if (requesterSelection?.date !== partnerSelection?.date && requesterSelection && partnerSelection) throw new Error("Choose a colleague from the same date.");
+    if (requester.location_id !== partner.location_id) throw new Error("Choose a colleague from the same location.");
+    const leadHours = await swapCutoff(account.companyId); assertBeforeCutoff({ ...requester, roster_date: rosterDate }, leadHours);
     const approverUserId = await immediateManager(account.companyId, workerType, account.id);
-    const created = await db().from("hr_roster_swap_requests").insert({ company_id: account.companyId, requester_entry_id: requester.id, partner_entry_id: partner.id, requester_worker_type: requester.worker_type, requester_worker_id: requester.worker_id, partner_worker_type: partner.worker_type, partner_worker_id: partner.worker_id, roster_date: requester.roster_date, requester_shift_id: requester.shift_id, partner_shift_id: partner.shift_id, requester_day_type: requester.day_type, partner_day_type: partner.day_type, approver_user_id: approverUserId, requester_note: note || null }).select("id").single();
-    if (created.error) throw new Error(created.error.code === "23505" ? "One of these shifts already has a pending swap request." : created.error.message);
-    await notifyWorker({ companyId: account.companyId, workerType: partner.worker_type, workerId: partner.worker_id, event: "roster_swap_requested", sourceKey: created.data.id, title: "Shift swap request", body: `${account.name ?? account.reference ?? "A colleague"} wants to swap the ${requester.roster_date} shift with you.`, data: { requestId: created.data.id, rosterDate: requester.roster_date } });
+    const created = await db().rpc("hr_create_roster_swap_request", { p_company_id: account.companyId, p_requester_source_entry_id: requester.id, p_partner_source_entry_id: partner.id, p_roster_date: rosterDate, p_requester_worker_type: requester.worker_type, p_requester_worker_id: requester.worker_id, p_approver_user_id: approverUserId, p_requester_note: note || null });
+    if (created.error) throw new Error(created.error.message);
+    const requestId = String(created.data);
+    await notifyWorker({ companyId: account.companyId, workerType: partner.worker_type, workerId: partner.worker_id, event: "roster_swap_requested", sourceKey: requestId, title: "Shift swap request", body: `${account.name ?? account.reference ?? "A colleague"} wants to swap the ${rosterDate} shift with you.`, data: { requestId, rosterDate } });
     return NextResponse.json({ ok: true, notice: "Swap request sent to your colleague." });
   } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to request the shift swap." }, { status: 400 }); }
 }
@@ -241,7 +302,7 @@ export async function PATCH(request: Request) {
     if (current.error || !current.data) throw new Error(current.error?.message ?? "Swap request was not found.");
     if (action === "cancel") {
       if (current.data.requester_worker_type !== workerType || current.data.requester_worker_id !== account.id || !["pending_partner", "pending_manager"].includes(current.data.status)) throw new Error("This swap request cannot be cancelled.");
-      const cancelled = await db().from("hr_roster_swap_requests").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", requestId).in("status", ["pending_partner", "pending_manager"]);
+      const cancelled = await db().rpc("hr_cancel_roster_swap", { p_company_id: account.companyId, p_request_id: requestId, p_requester_worker_type: workerType, p_requester_worker_id: account.id });
       if (cancelled.error) throw new Error(cancelled.error.message);
       await notifyWorker({ companyId: account.companyId, workerType: current.data.partner_worker_type, workerId: current.data.partner_worker_id, event: "roster_swap_cancelled", sourceKey: requestId, title: "Shift swap cancelled", body: `The swap request for ${current.data.roster_date} was cancelled.` });
       return NextResponse.json({ ok: true, notice: "Swap request cancelled." });

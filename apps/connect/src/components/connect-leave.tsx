@@ -34,7 +34,6 @@ type LeaveData = {
   year: number;
   types: LeaveType[];
   requests: LeaveRequest[];
-  lopOnly?: boolean;
   summary: { available: number; pending: number };
 };
 
@@ -46,7 +45,7 @@ function inclusiveDays(fromDate: string, toDate: string) {
   return Number.isFinite(difference) && difference >= 0 ? Math.floor(difference / 86_400_000) + 1 : 0;
 }
 
-export function ConnectLeave({ account, lopOnly = account.profileType === "contractor" }: { account: AppAccount; lopOnly?: boolean }) {
+export function ConnectLeave({ account }: { account: AppAccount }) {
   const [tab, setTab] = useState<LeaveTab>("request");
   const [data, setData] = useState<LeaveData | null>(null);
   const [leaveTypeId, setLeaveTypeId] = useState("");
@@ -93,7 +92,6 @@ export function ConnectLeave({ account, lopOnly = account.profileType === "contr
   const selectedType = data?.types.find((item) => item.id === leaveTypeId) ?? null;
   const leaveMasterReady = Boolean(data?.types.length);
   const minimumDate = todayInIndia();
-  const isLop = lopOnly || data?.lopOnly;
   const requestedDays = inclusiveDays(fromDate, toDate);
   const isSickLeave = selectedType?.code.toUpperCase() === "SICK";
   const medicalProofRequired = isSickLeave && requestedDays > 1;
@@ -168,18 +166,18 @@ export function ConnectLeave({ account, lopOnly = account.profileType === "contr
   return (
     <section className="dx-leave">
       <header className="dx-page-intro">
-        <small>{isLop ? "Unpaid time off" : "Time off"}</small>
-        <h1>{isLop ? "LOP" : "Leave"}</h1>
-        <p>{isLop ? "Request loss-of-pay days and track approval." : "Plan time away and follow every request."}</p>
+        <small>Time off</small>
+        <h1>Leave</h1>
+        <p>Plan time away and follow every request.</p>
       </header>
       <div className="dx-leave-summary">
-        <div><i><CalendarDays /></i><span><small>{isLop ? "LOP type" : "Available"}</small><strong>{loading ? "—" : isLop ? (data?.types[0]?.name ?? "LOP") : data?.summary.available ?? 0}</strong></span></div>
+        <div><i><CalendarDays /></i><span><small>Available</small><strong>{loading ? "—" : data?.summary.available ?? 0}</strong></span></div>
         <div><i><Clock3 /></i><span><small>Pending</small><strong>{loading ? "—" : data?.summary.pending ?? 0}</strong></span></div>
       </div>
 
       <div className="dx-leave-card">
         <nav>
-          <button className={tab === "request" ? "active" : ""} onClick={() => { setTab("request"); setError(""); }}>{editingRequestId ? "Edit request" : isLop ? "Request LOP" : "Request leave"}</button>
+          <button className={tab === "request" ? "active" : ""} onClick={() => { setTab("request"); setError(""); }}>{editingRequestId ? "Edit request" : "Request leave"}</button>
           <button className={tab === "history" ? "active" : ""} onClick={() => { setTab("history"); resetForm(); }}>My requests</button>
         </nav>
         {loading ? <div className="dx-loader"><span /><small>Loading leave policy…</small></div> : null}
@@ -187,22 +185,22 @@ export function ConnectLeave({ account, lopOnly = account.profileType === "contr
         {notice ? <div className="dx-alert success" aria-live="polite">{notice}</div> : null}
 
         {!loading && tab === "request" ? <form onSubmit={submit}>
-          {!isLop ? <label>
+          <label>
             Leave type
             <select disabled={!leaveMasterReady || submitting || Boolean(editingRequestId && data?.types.length === 1)} onChange={(event) => setLeaveTypeId(event.target.value)} value={leaveTypeId}>
               <option value="">{leaveMasterReady ? "Select leave type" : "No active leave types"}</option>
               {(data?.types ?? []).map((type) => <option key={type.id} value={type.id}>{type.name} · {type.balanceMode === "unlimited_unpaid" ? "Unpaid" : `${type.available} available`}</option>)}
             </select>
-          </label> : leaveMasterReady ? <p className="dx-leave-balance">Loss of pay · Unpaid · No balance limit</p> : null}
-          {selectedType && !isLop ? <p className="dx-leave-balance">{selectedType.balanceMode === "unlimited_unpaid"
+          </label>
+          {selectedType ? <p className="dx-leave-balance">{selectedType.balanceMode === "unlimited_unpaid"
             ? `Unpaid leave · No balance limit · ${selectedType.pending} pending`
             : `${selectedType.allowance} yearly · ${selectedType.used} used · ${selectedType.pending} pending`}</p> : null}
-          {!leaveMasterReady ? <p>{isLop ? "LOP is not configured for your profile. Contact HR." : "No active leave type is available. HR can enable one in Leave Policy."}</p> : null}
+          {!leaveMasterReady ? <p>No active leave type is available. HR can enable one in Leave Policy.</p> : null}
           <div className="dx-leave-dates">
             <label>From date<input min={minimumDate} onChange={(event) => setFromDate(event.target.value)} type="date" value={fromDate} /></label>
             <label>To date<input min={fromDate || minimumDate} onChange={(event) => setToDate(event.target.value)} type="date" value={toDate} /></label>
           </div>
-          <label>Reason<textarea onChange={(event) => setReason(event.target.value)} placeholder={isLop ? "Enter reason for LOP" : "Enter reason for leave"} rows={4} value={reason} /></label>
+          <label>Reason<textarea onChange={(event) => setReason(event.target.value)} placeholder="Enter reason for leave" rows={4} value={reason} /></label>
           {isSickLeave ? <section className={`dx-leave-proof${medicalProofRequired ? " required" : ""}`}>
             <div className="dx-leave-proof-head"><span><Paperclip /><strong>Medical proof</strong></span><em>{medicalProofRequired ? "Required" : "Optional for 1 day"}</em></div>
             <p><Info />A doctor&apos;s note, prescription, or medical certificate is required when sick leave is longer than one day.</p>

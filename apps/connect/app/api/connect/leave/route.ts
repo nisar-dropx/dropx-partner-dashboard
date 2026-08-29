@@ -68,7 +68,6 @@ async function accountFromRequest(url: URL, body?: Record<string, unknown>) {
 
 async function leavePayload(account: ConnectAccount, type: LeaveWorkerType) {
   const workerColumn = type === "employee" ? "employee_id" : "contractor_id";
-  const lopOnly = type === "contractor";
   const year = Number(indiaToday().slice(0, 4));
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
@@ -102,9 +101,7 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType) {
         : null
     };
   });
-  const types = entitlements
-    .filter((leaveType) => !lopOnly || leaveType.code === "LOP")
-    .map((leaveType) => {
+  const types = entitlements.map((leaveType) => {
     const approved = (requestResult.data ?? []).filter((request) => request.leave_type_id === leaveType.leave_type_id && request.status === "approved")
       .reduce((total, request) => total + overlapDays(request.start_date, request.end_date, yearStart, yearEnd), 0);
     const pending = (requestResult.data ?? []).filter((request) => request.leave_type_id === leaveType.leave_type_id && request.status === "pending")
@@ -127,7 +124,6 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType) {
     year,
     types,
     requests,
-    lopOnly,
     summary: {
       available: types.reduce((total, leaveType) => total + (leaveType.available ?? 0), 0),
       pending: requests.filter((request) => request.status === "pending").length
@@ -160,11 +156,8 @@ async function validateLeaveSubmission({
   if (reason.length < 3 || reason.length > 1000) throw new Error("Enter a valid reason between 3 and 1,000 characters.");
   const days = daysBetween(fromDate, toDate);
   const entitlements = await resolveWorkforceLeaveEntitlements({ companyId: account.companyId, workerId: account.id, workerType: type });
-  const scopedEntitlements = type === "contractor" ? entitlements.filter((item) => item.code === "LOP") : entitlements;
-  const leaveType = scopedEntitlements.find((item) => item.leave_type_id === leaveTypeId);
-  if (!leaveType) throw new Error(type === "contractor"
-    ? "LOP is not available for your current location and designation."
-    : "This leave type is not available for your current location and designation.");
+  const leaveType = entitlements.find((item) => item.leave_type_id === leaveTypeId);
+  if (!leaveType) throw new Error("This leave type is not available for your current location and designation.");
   const workerColumn = type === "employee" ? "employee_id" : "contractor_id";
   let overlapQuery = db().from("hr_leave_requests").select("id").eq("company_id", account.companyId).eq(workerColumn, account.id)
     .in("status", ["pending", "approved"]).lte("start_date", toDate).gte("end_date", fromDate);

@@ -79,7 +79,7 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
     if (!selectedDay || !partnerEntryId) return;
     setPending("request"); setError(""); setNotice("");
     try {
-      const response = await fetch("/api/connect/roster", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId: account.id, profileType: account.profileType, requesterEntryId: selectedDay.id, partnerEntryId, note }) });
+      const response = await fetch("/api/connect/roster", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId: account.id, profileType: account.profileType, requesterEntryId: selectedDay.id, partnerEntryId, rosterDate: selectedDay.date, note }) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to request the swap.");
       setNotice(payload.notice); setSelectedDay(null); setPartnerEntryId(""); setNote(""); await load();
@@ -107,7 +107,7 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
       {(data?.days ?? []).length ? data?.days.map((day) => <article className={day.dayType === "weekly_off" ? "off" : ""} key={day.id}>
         <div className="dx-roster-date"><CalendarDays /><span><strong>{displayDate(day.date)}</strong><small>{day.dayType === "weekly_off" ? "Rest day" : day.shift?.name || "Working day"}</small></span></div>
         <div className="dx-roster-shift"><Clock3 /><strong>{shiftLabel(day.shift, day.dayType)}</strong></div>
-        <button disabled={!day.canSwap || !day.partners.length} onClick={() => { setSelectedDay(day); setPartnerEntryId(""); setNote(""); }}><ArrowLeftRight />{day.isProjected ? "Recurring schedule" : day.canSwap ? day.partners.length ? "Request swap" : "No partner available" : `Closed ${data?.leadHours ?? 24}h before`}</button>
+        <button disabled={!day.canSwap || !day.partners.length} onClick={() => { setSelectedDay(day); setPartnerEntryId(""); setNote(""); }}><ArrowLeftRight />{day.canSwap ? day.partners.length ? "Request swap" : "No partner available" : `Closed ${data?.leadHours ?? 24}h before`}</button>
       </article>) : <div className="dx-roster-empty"><CalendarDays /><strong>No approved roster yet</strong><small>Your published shifts will appear here.</small></div>}
     </div> : null}
 
