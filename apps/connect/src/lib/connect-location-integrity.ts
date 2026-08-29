@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ConnectAccount } from "./connect-auth";
 import { connectApproverIdentity } from "./connect-expense-data";
+import { connectReporteeMatches, loadConnectReporteeAccess, type ConnectReporteeAccess, type ConnectReporteeScope } from "./connect-reportee-scope";
 import { supabaseAdmin } from "./supabase-admin";
 
 export type ConnectLocationSupportPackage = {
@@ -22,10 +23,6 @@ export type ConnectLocationSupportPackage = {
 function db() {
   if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
   return supabaseAdmin;
-}
-
-function indiaToday() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
 const SUPPORT_SELFIE_BUCKET = "employee-profile-documents";
@@ -136,65 +133,62 @@ async function resolveIntegrityFlagMinimal(flagId: string, resolvedBy: string | 
   }
 }
 
-async function managerTeamProfileIds(companyId: string, managerAssignmentId: string, today: string) {
-  const relationships = await db().from("hr_reporting_relationships")
-    .select("subject_assignment_id")
-    .eq("company_id", companyId)
-    .eq("manager_assignment_id", managerAssignmentId)
-    .eq("relationship_type", "solid_line")
-    .eq("is_primary", true)
-    .lte("effective_from", today)
-    .or(`effective_to.is.null,effective_to.gte.${today}`);
-  if (relationships.error) throw new Error(relationships.error.message);
-  const assignmentIds = [...new Set((relationships.data ?? []).map((row) => row.subject_assignment_id).filter(Boolean))];
-  if (!assignmentIds.length) return [];
+type LocationReviewRow = {
+  id: string;
+  profile_type: string;
+  profile_id: string;
+  punch_date: string;
+  selfie_path: string | null;
+  lat: number | string;
+  lng: number | string;
+  accuracy_m: number | string | null;
+  remarks: string | null;
+  status: string;
+  server_received_at: string | null;
+  created_at: string;
+};
 
-  const assignments = await db().from("hr_work_assignments")
-    .select("engagement_id")
-    .eq("company_id", companyId)
-    .in("id", assignmentIds);
-  if (assignments.error) throw new Error(assignments.error.message);
-  const engagementIds = [...new Set((assignments.data ?? []).map((row) => row.engagement_id).filter(Boolean))];
-  if (!engagementIds.length) return [];
-
-  const engagements = await db().from("hr_engagements")
-    .select("worker_type,employee_id,contractor_id,status")
-    .eq("company_id", companyId)
-    .in("id", engagementIds)
-    .eq("status", "active");
-  if (engagements.error) throw new Error(engagements.error.message);
-  return (engagements.data ?? []).flatMap((row) => {
-    if (row.worker_type === "employee" && row.employee_id) return [row.employee_id];
-    if (row.worker_type === "contractor" && row.contractor_id) return [row.contractor_id];
-    return [];
-  });
+function chunks<T>(values: T[], size = 100) {
+  const result: T[][] = [];
+  for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
+  return result;
 }
 
-export async function listConnectLocationSupportPackages(account: ConnectAccount): Promise<ConnectLocationSupportPackage[]> {
-  let identity;
-  try {
-    identity = await connectApproverIdentity(account);
-  } catch {
-    return [];
+async function locationReviewsForReportees(companyId: string, reportees: ConnectReporteeAccess) {
+  const reviews: LocationReviewRow[] = [];
+  const profileGroups: Array<["employee" | "contractor", string[]]> = [
+    ["employee", [...reportees.employeeIds]],
+    ["contractor", [...reportees.contractorIds]]
+  ];
+  for (const [profileType, profileIds] of profileGroups) {
+    for (const profileIdChunk of chunks(profileIds)) {
+      const result = await db().from("attendance_location_reviews")
+        .select("id, profile_type, profile_id, punch_date, selfie_path, lat, lng, accuracy_m, remarks, status, server_received_at, created_at")
+        .eq("company_id", companyId)
+        .eq("status", "pending")
+        .eq("profile_type", profileType)
+        .in("profile_id", profileIdChunk)
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (result.error) {
+        if (/does not exist|schema cache/i.test(result.error.message)) return [];
+        throw new Error(result.error.message);
+      }
+      reviews.push(...((result.data ?? []) as LocationReviewRow[]));
+    }
   }
-  if (!identity.userId) return [];
+  return reviews
+    .filter((row) => connectReporteeMatches(reportees, row.profile_type, row.profile_id))
+    .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))
+    .slice(0, 100);
+}
 
-  const teamIds = await managerTeamProfileIds(account.companyId, identity.assignment.id, identity.today);
-  if (!teamIds.length) return [];
-
-  const reviewsResult = await db().from("attendance_location_reviews")
-    .select("id, profile_type, profile_id, punch_date, selfie_path, lat, lng, accuracy_m, remarks, status, server_received_at")
-    .eq("company_id", account.companyId)
-    .eq("status", "pending")
-    .in("profile_id", teamIds)
-    .order("created_at", { ascending: false })
-    .limit(100);
-  if (reviewsResult.error) {
-    if (/does not exist|schema cache/i.test(reviewsResult.error.message)) return [];
-    throw new Error(reviewsResult.error.message);
-  }
-
-  const reviews = reviewsResult.data ?? [];
+export async function listConnectLocationSupportPackages(
+  account: ConnectAccount,
+  reportees: ConnectReporteeAccess
+): Promise<ConnectLocationSupportPackage[]> {
+  if (!reportees.employeeIds.size && !reportees.contractorIds.size) return [];
+  const reviews = await locationReviewsForReportees(account.companyId, reportees);
   if (!reviews.length) return [];
 
   const employeeIds = reviews.filter((row) => row.profile_type === "employee").map((row) => row.profile_id);
@@ -234,7 +228,13 @@ export async function listConnectLocationSupportPackages(account: ConnectAccount
   }));
 }
 
-export async function reviewConnectLocationSupportPackage(account: ConnectAccount, reviewId: string, decision: string, note: string) {
+export async function reviewConnectLocationSupportPackage(
+  account: ConnectAccount,
+  reviewId: string,
+  decision: string,
+  note: string,
+  reporteeScope: ConnectReporteeScope = "immediate"
+) {
   const action =
     decision === "approved" || decision === "approve"
       ? "approve"
@@ -250,16 +250,18 @@ export async function reviewConnectLocationSupportPackage(account: ConnectAccoun
   if (!identity.userId) throw new Error("A linked People login is required to review support packages.");
 
   const existing = await db().from("attendance_location_reviews")
-    .select("id, status, flag_id, profile_id")
+    .select("id, status, flag_id, profile_type, profile_id")
     .eq("id", reviewId)
     .eq("company_id", account.companyId)
     .maybeSingle();
   if (existing.error || !existing.data) throw new Error(existing.error?.message ?? "Support package not found.");
   if (!["pending", "returned"].includes(String(existing.data.status))) throw new Error("This support package has already been decided.");
 
-  const teamIds = new Set(await managerTeamProfileIds(account.companyId, identity.assignment.id, indiaToday()));
-  if (!teamIds.has(String(existing.data.profile_id))) {
-    throw new Error("You can only review support packages for your direct reports.");
+  const reportees = await loadConnectReporteeAccess(account, reporteeScope);
+  if (!connectReporteeMatches(reportees, existing.data.profile_type, existing.data.profile_id)) {
+    throw new Error(reporteeScope === "team"
+      ? "You can only review support packages within your active reporting tree."
+      : "You can only review support packages for your immediate reportees.");
   }
 
   const now = new Date().toISOString();

@@ -3,6 +3,7 @@ import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/
 import { connectApproverIdentity } from "../../../../src/lib/connect-expense-data";
 import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval } from "../../../../src/lib/connect-manager-approvals";
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
+import { connectReporteeMatches, loadConnectReporteeAccess, normalizeConnectReporteeScope, type ConnectReporteeAccess } from "../../../../src/lib/connect-reportee-scope";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
@@ -18,7 +19,7 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>)
   return requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
 }
 
-async function listLeaveApprovals(account: ConnectAccount) {
+async function listLeaveApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
   const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
   const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
   if (!approverUserId) return [];
@@ -39,6 +40,9 @@ async function listLeaveApprovals(account: ConnectAccount) {
   if (requestResult.error) throw new Error(requestResult.error.message);
   const stepByRequest = new Map(steps.map((step) => [step.request_id, step]));
   return (requestResult.data ?? []).flatMap((request) => {
+    const profileType = request.contractor_id ? "contractor" : "employee";
+    const profileId = request.contractor_id ?? request.employee_id;
+    if (!connectReporteeMatches(reportees, profileType, profileId)) return [];
     const step = stepByRequest.get(request.id);
     if (!step) return [];
     const employee = relation(request.employees);
@@ -56,7 +60,7 @@ async function listLeaveApprovals(account: ConnectAccount) {
       reason: request.reason,
       requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
       requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
-      profileType: request.contractor_id ? "contractor" : "employee"
+      profileType
     }];
   });
 }
@@ -64,15 +68,17 @@ async function listLeaveApprovals(account: ConnectAccount) {
 export async function GET(request: Request) {
   try {
     const account = await selectedAccount(request);
+    const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
+    const reportees = await loadConnectReporteeAccess(account, scope);
     const [leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals] = await Promise.all([
-      listLeaveApprovals(account),
-      listConnectLocationSupportPackages(account),
-      listConnectAttendanceApprovals(account),
-      listConnectAttendanceHrApprovals(account),
+      listLeaveApprovals(account, reportees),
+      listConnectLocationSupportPackages(account, reportees),
+      listConnectAttendanceApprovals(account, reportees),
+      listConnectAttendanceHrApprovals(account, reportees),
       listConnectRosterApprovals(account),
       listConnectRosterSwapApprovals(account)
     ]);
-    return NextResponse.json({ leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({ scope, leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load approvals." }, { status: 400 });
   }
@@ -86,7 +92,8 @@ export async function PATCH(request: Request) {
     if (reviewId) {
       const decision = clean(body.decision);
       const note = clean(body.note);
-      const notice = await reviewConnectLocationSupportPackage(account, reviewId, decision, note);
+      const scope = normalizeConnectReporteeScope(body.reporteeScope);
+      const notice = await reviewConnectLocationSupportPackage(account, reviewId, decision, note, scope);
       return NextResponse.json({ ok: true, notice });
     }
     const attendanceRequestId = clean(body.attendanceRequestId);

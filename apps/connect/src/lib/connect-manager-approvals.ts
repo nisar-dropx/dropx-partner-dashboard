@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ConnectAccount } from "./connect-auth";
 import { connectApproverIdentity } from "./connect-expense-data";
+import { connectReporteeMatches, type ConnectReporteeAccess } from "./connect-reportee-scope";
 import { notifyConnectExitOutcome, notifyExitApprovalRequired } from "./connect-exit-notifications";
 import { todayInIndia } from "./india-date";
 import { supabaseAdmin } from "./supabase-admin";
@@ -86,7 +87,7 @@ async function signedEvidence(path: string | null | undefined) {
   return result.data?.signedUrl ?? null;
 }
 
-export async function listConnectAttendanceApprovals(account: ConnectAccount) {
+export async function listConnectAttendanceApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
   const actorUserId = await approverUserId(account);
   if (!actorUserId) return [];
   if (await isTeamLeadRegularizationApprover(account)) return [];
@@ -102,7 +103,9 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount) {
     .eq("company_id", account.companyId).is("request_kind", null).eq("status", "pending_manager")
     .in("id", [...new Set(steps.map((step) => step.request_id))]);
   if (requestsResult.error) throw new Error(requestsResult.error.message);
-  const requestById = new Map((requestsResult.data ?? []).map((request) => [request.id, request]));
+  const requestById = new Map((requestsResult.data ?? [])
+    .filter((request) => connectReporteeMatches(reportees, request.profile_type, request.profile_id))
+    .map((request) => [request.id, request]));
   return Promise.all(steps.flatMap((step) => {
     const request = requestById.get(step.request_id);
     return request ? [{ step, request }] : [];
@@ -127,7 +130,7 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount) {
   })));
 }
 
-export async function listConnectAttendanceHrApprovals(account: ConnectAccount) {
+export async function listConnectAttendanceHrApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
   const actorUserId = await approverUserId(account);
   if (!actorUserId) return [];
   if (!(await canConnectFinalizeAttendance(account.companyId, actorUserId))) return [];
@@ -137,7 +140,7 @@ export async function listConnectAttendanceHrApprovals(account: ConnectAccount) 
     .in("status", ["pending_hr", "pending"])
     .order("created_at");
   if (requestsResult.error) throw new Error(requestsResult.error.message);
-  const rows = (requestsResult.data ?? []) as Array<{
+  const rows = ((requestsResult.data ?? []) as Array<{
     id: string;
     profile_type: string;
     profile_id: string;
@@ -153,7 +156,7 @@ export async function listConnectAttendanceHrApprovals(account: ConnectAccount) 
     attachment_path: string | null;
     status: string;
     created_at: string;
-  }>;
+  }>).filter((request) => connectReporteeMatches(reportees, request.profile_type, request.profile_id));
   const filtered = [];
   for (const request of rows) {
     if (request.status === "pending_hr") {

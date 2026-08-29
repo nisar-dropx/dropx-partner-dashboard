@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { activeExpenseCategories, connectApproverIdentity, expenseCategoriesForPolicy, expenseIdentity, expensePayoutReadiness, expenseWorkerType, resolveExpenseApprovers } from "../../../../src/lib/connect-expense-data";
 import { notifyExpenseUser } from "../../../../src/lib/connect-expense-notifications";
+import { connectReporteeMatches, loadConnectReporteeAccess, normalizeConnectReporteeScope, type ConnectReporteeAccess } from "../../../../src/lib/connect-reportee-scope";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
@@ -27,21 +28,35 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>,
   return requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
 }
 
-async function approvalPayload(companyId: string, userId: string | null) {
+async function approvalPayload(companyId: string, userId: string | null, reportees: ConnectReporteeAccess) {
   if (!userId) return [];
   const result = await db().from("hr_expense_approval_steps")
     .select("id,claim_id,step_order,step_name,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
     .eq("company_id", companyId).eq("approver_user_id", userId).eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
-  return (await Promise.all((result.data ?? []).map(async (step) => {
+  const scopedApprovals = (result.data ?? []).flatMap((step) => {
     const claim = relation(step.hr_expense_claims);
-    const employee = relation(claim?.employees);
-    const contractor = relation(claim?.contractors);
-    return { ...step, claim: claim ? { ...claim, requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member", requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "", attachments: await signedAttachments(claim.hr_expense_attachments) } : null };
-  }))).filter((step) => step.claim);
+    const profileType = claim?.contractor_id ? "contractor" : "employee";
+    const profileId = claim?.contractor_id ?? claim?.employee_id;
+    if (!claim || !connectReporteeMatches(reportees, profileType, profileId)) return [];
+    return [{ step, claim }];
+  });
+  return Promise.all(scopedApprovals.map(async ({ step, claim }) => {
+    const employee = relation(claim.employees);
+    const contractor = relation(claim.contractors);
+    return {
+      ...step,
+      claim: {
+        ...claim,
+        requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
+        requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
+        attachments: await signedAttachments(claim.hr_expense_attachments)
+      }
+    };
+  }));
 }
 
-async function claimPayload(account: ConnectAccount) {
+async function claimPayload(account: ConnectAccount, reportees: ConnectReporteeAccess) {
   const identity = await expenseIdentity(account);
   const workerColumn = identity.workerType === "employee" ? "employee_id" : "contractor_id";
   const [categories, payout, claimsResult] = await Promise.all([
@@ -60,17 +75,19 @@ async function claimPayload(account: ConnectAccount) {
     events: [...(claim.hr_expense_events ?? [])].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)),
     attachments: await signedAttachments(claim.hr_expense_attachments)
   })));
-  const approvals = await approvalPayload(account.companyId, identity.userId);
+  const approvals = await approvalPayload(account.companyId, identity.userId, reportees);
   return { categories, payout, claims, approvals };
 }
 
 export async function GET(request: Request) {
   try {
     const account = await selectedAccount(request, undefined, true);
+    const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
+    const reportees = await loadConnectReporteeAccess(account, scope);
     const payload = account.profileType === "user"
-      ? { categories: [], payout: { ready: false, message: null }, claims: [], approvals: await approvalPayload(account.companyId, account.id) }
-      : await claimPayload(account);
-    return NextResponse.json(payload, { headers: { "Cache-Control": "private, no-store" } });
+      ? { categories: [], payout: { ready: false, message: null }, claims: [], approvals: await approvalPayload(account.companyId, account.id, reportees) }
+      : await claimPayload(account, reportees);
+    return NextResponse.json({ ...payload, scope }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load reimbursements." }, { status: 400 });
   }
