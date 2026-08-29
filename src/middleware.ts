@@ -14,6 +14,14 @@ const MOVED_OPS_PAYMENT_PATHS = [
   "/payments/approvals",
   "/payments/report"
 ];
+const PEOPLE_APP_URL = process.env.PEOPLE_APP_URL?.trim() || "https://people.dropxlogistics.com";
+const WORKFORCE_APP_URL = process.env.WORKFORCE_APP_URL?.trim() || "https://workforce.dropxlogistics.com";
+const DEPRECATED_MAIN_PEOPLE_PATHS = ["/people", "/field-executive", "/vendors", "/workers"];
+const DEPRECATED_MAIN_HR_PATHS = ["/employees", "/contractors"];
+
+function matchesPath(path: string, roots: string[]) {
+  return roots.some((root) => path === root || path.startsWith(`${root}/`));
+}
 
 function cleanOpsPath(path: string) {
   if (path === "/ops-pulse") return "/";
@@ -75,6 +83,14 @@ export async function middleware(request: NextRequest) {
   const opsAppUrl = process.env.OPS_APP_URL?.trim();
   if (isDashboardHost && opsAppUrl && (path === "/ops-pulse" || path.startsWith("/ops-pulse/"))) {
     return NextResponse.redirect(new URL(cleanOpsPath(path) + request.nextUrl.search, opsAppUrl));
+  }
+
+  if (isDashboardHost && matchesPath(path, DEPRECATED_MAIN_PEOPLE_PATHS)) {
+    return NextResponse.redirect(new URL("/delivery-network/contractor-profiles", WORKFORCE_APP_URL), 308);
+  }
+
+  if (isDashboardHost && matchesPath(path, DEPRECATED_MAIN_HR_PATHS)) {
+    return NextResponse.redirect(new URL("/people", PEOPLE_APP_URL), 308);
   }
 
   if (isOpsHost && (path === "/ops-pulse" || path.startsWith("/ops-pulse/"))) {
