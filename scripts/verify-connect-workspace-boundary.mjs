@@ -40,8 +40,8 @@ requireSource(
   "Workforce page access must follow category and designation rules"
 );
 requireSource(
-  auth.includes("loadPeopleOnlyDesignationKeys") && auth.includes("matchesPeopleOnlyDesignation"),
-  "People-only designation routing must collapse duplicate Workforce mirrors"
+  auth.includes("loadIcContractorsFromProfiles") && auth.includes("icContractorReferences"),
+  "IC logins must swap to contractor self-service without adding extra profiles"
 );
 requireSource(
   peopleDashboard.includes('variant?: "people" | "workforce"'),
