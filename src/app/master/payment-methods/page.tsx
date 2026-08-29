@@ -143,7 +143,7 @@ async function loadProviderModels(companyId: string) {
 async function loadDeductionHeads(companyId: string) {
   if (!supabaseAdmin) return [] as DeductionHead[];
   const result = await supabaseAdmin.from("workforce_deduction_heads")
-    .select("id, code, name, description, calculation_type, default_value, is_active")
+    .select("id, code, name, description, calculation_type, default_value, applies_to_all, is_active")
     .eq("company_id", companyId).order("name");
   if (result.error) return [] as DeductionHead[];
   return (result.data ?? []) as DeductionHead[];
@@ -334,7 +334,12 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
             <div className="deduction-head-list">
               {deductionHeads.length ? deductionHeads.map((head) => pagePermission.canEdit
                 ? <DeductionHeadForm action={updateDeductionHead} compact head={head} key={head.id} />
-                : <div className="deduction-head-summary" key={head.id}><strong>{head.name}</strong><span>{head.code}</span></div>)
+                : <div className="deduction-head-summary" key={head.id}>
+                    <strong>{head.name}</strong>
+                    <span>{head.code}</span>
+                    <span>{head.calculation_type === "percentage" ? `${head.default_value}% of Gross Earnings` : `Rs ${head.default_value}`}</span>
+                    <span>{head.applies_to_all ? "Applies to all workers" : "Individual assignment"}</span>
+                  </div>)
                 : <p className="empty-cell">No deduction heads created yet.</p>}
             </div>
           </section>
