@@ -101,6 +101,278 @@ function accountLabel(account: AccountRow, companyNameById: Map<string, string>)
   return [companyName, account.full_name, id].filter(Boolean).join(" - ");
 }
 
+function normalizeWorkforceReference(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function collectProfileWorkforceReferences(
+  profiles: Array<{ company_id: string; employee_id?: string | null }>
+) {
+  return collectWorkforceReferencesByCompany(
+    profiles.map((profile) => ({
+      company_id: profile.company_id,
+      references: [profile.employee_id]
+    }))
+  );
+}
+
+function collectWorkforceReferencesByCompany(
+  seeds: Array<{ company_id: string; references: Array<unknown> }>
+) {
+  const referencesByCompany = new Map<string, Set<string>>();
+  for (const seed of seeds) {
+    for (const value of seed.references) {
+      const reference = normalizeWorkforceReference(value);
+      if (!reference) continue;
+      const bucket = referencesByCompany.get(seed.company_id) ?? new Set<string>();
+      bucket.add(reference.toLowerCase());
+      referencesByCompany.set(seed.company_id, bucket);
+    }
+  }
+  return referencesByCompany;
+}
+
+function matchesWorkforceReference(candidate: unknown, references: Set<string>) {
+  const normalized = normalizeWorkforceReference(candidate).toLowerCase();
+  return Boolean(normalized && references.has(normalized));
+}
+
+function mapEmployeeAccountRow(employee: EmployeeAccountRow): AccountRow {
+  return {
+    id: employee.id,
+    company_id: employee.company_id,
+    full_name: employee.full_name,
+    email: employee.email,
+    employee_id: employee.employee_code,
+    biometric_id: employee.biometric_id ?? null,
+    designation_id: employee.designation_id ?? null,
+    role: "Employee",
+    status: employee.profile_completion_status === "active"
+      ? "Active"
+      : employee.profile_completion_status === "under_review"
+        ? "Under review"
+        : employee.profile_completion_status === "returned"
+          ? "Returned"
+          : employee.profile_completion_status === "submitted"
+            ? "Submitted"
+            : "Pending",
+    profile_type: "employee",
+    profile_photo_path: employee.profile_photo_path ?? null,
+  };
+}
+
+function mapNonEmployeeAccountRow(
+  profile: {
+    id: string;
+    company_id: string;
+    full_name: string | null;
+    email?: string | null;
+    dropx_id?: string | null;
+    biometric_id?: string | null;
+    designation?: string | null;
+    onboarding_status?: string | null;
+    profile_photo_path?: string | null;
+    source_profile_type?: string | null;
+    source_profile_id?: string | null;
+  },
+  profileType: NonEmployeeProfileType
+): AccountRow {
+  return {
+    id: profile.id,
+    company_id: profile.company_id,
+    full_name: profile.full_name,
+    email: profile.email,
+    dropx_id: profile.dropx_id,
+    biometric_id: profile.biometric_id,
+    role: profile.designation || workforceLabel(profileType),
+    status: profile.onboarding_status === "active"
+      ? "Active"
+      : profile.onboarding_status === "under_review"
+        ? "Under review"
+        : profile.onboarding_status === "returned"
+          ? "Returned"
+          : "Pending",
+    profile_photo_path: profile.profile_photo_path ?? null,
+    source_profile_type: profile.source_profile_type ?? null,
+    source_profile_id: profile.source_profile_id ?? null,
+    profile_type: profileType,
+  };
+}
+
+async function loadLinkedSelfServiceRecords({
+  referenceSeeds,
+  knownEmployeeIds,
+  knownWorkforceIds
+}: {
+  referenceSeeds: Array<{ company_id: string; references: Array<unknown> }>;
+  knownEmployeeIds: Set<string>;
+  knownWorkforceIds: Record<NonEmployeeProfileType, Set<string>>;
+}) {
+  const referencesByCompany = collectWorkforceReferencesByCompany(referenceSeeds);
+  const linkedEmployees: EmployeeAccountRow[] = [];
+  const linkedNonEmployees: Partial<Record<NonEmployeeProfileType, NonEmployeeMatch[]>> = {};
+  if (!referencesByCompany.size || !supabaseAdmin) {
+    return { linkedEmployees, linkedNonEmployees };
+  }
+
+  type NonEmployeeMatch = {
+    id: string;
+    company_id: string;
+    full_name: string | null;
+    email?: string | null;
+    dropx_id?: string | null;
+    biometric_id?: string | null;
+    designation?: string | null;
+    onboarding_status?: string | null;
+    lifecycle_status?: string | null;
+    profile_photo_path?: string | null;
+    source_profile_type?: string | null;
+    source_profile_id?: string | null;
+    deleted_at?: string | null;
+    is_active?: boolean | null;
+  };
+
+  for (const [companyId, references] of referencesByCompany) {
+    const employeeResult = await supabaseAdmin
+      .from("employees")
+      .select("id, company_id, full_name, email, employee_code, biometric_id, designation_id, profile_completion_status, profile_photo_path, is_active")
+      .eq("company_id", companyId)
+      .eq("is_active", true);
+    if (employeeResult.error && !isMissingColumnError(employeeResult.error)) {
+      throw new Error(employeeResult.error.message);
+    }
+    for (const employee of employeeResult.data ?? []) {
+      if (knownEmployeeIds.has(employee.id)) continue;
+      if (
+        !matchesWorkforceReference(employee.employee_code, references) &&
+        !matchesWorkforceReference(employee.biometric_id, references)
+      ) {
+        continue;
+      }
+      linkedEmployees.push(employee as EmployeeAccountRow);
+      knownEmployeeIds.add(employee.id);
+    }
+
+    for (const profileType of ["contractor", "field_executive", "workforce"] as NonEmployeeProfileType[]) {
+      const table = workforceTable(profileType);
+      let query = supabaseAdmin
+        .from(table)
+        .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
+        .eq("company_id", companyId);
+      if (profileType === "contractor") query = query.eq("is_active", true);
+      const result = await query;
+      if (result.error && !isMissingColumnError(result.error)) {
+        throw new Error(result.error.message);
+      }
+      for (const row of (result.data ?? []) as NonEmployeeMatch[]) {
+        if (knownWorkforceIds[profileType].has(row.id)) continue;
+        if (
+          ["rejected", "cancelled"].includes(String(row.onboarding_status ?? "pending").toLowerCase()) ||
+          String(row.lifecycle_status ?? "").toLowerCase() === "exited" ||
+          row.deleted_at
+        ) {
+          continue;
+        }
+        if (
+          !matchesWorkforceReference(row.dropx_id, references) &&
+          !matchesWorkforceReference(row.biometric_id, references)
+        ) {
+          continue;
+        }
+        const bucket = linkedNonEmployees[profileType] ?? [];
+        bucket.push(row);
+        linkedNonEmployees[profileType] = bucket;
+        knownWorkforceIds[profileType].add(row.id);
+      }
+    }
+  }
+
+  return { linkedEmployees, linkedNonEmployees };
+}
+
+type WorkforceRegisterRow = {
+  id: string;
+  company_id: string;
+  full_name: string | null;
+  email?: string | null;
+  dropx_id?: string | null;
+  biometric_id?: string | null;
+  designation?: string | null;
+  onboarding_status?: string | null;
+  lifecycle_status?: string | null;
+  profile_photo_path?: string | null;
+  source_profile_type?: string | null;
+  source_profile_id?: string | null;
+  deleted_at?: string | null;
+  is_active?: boolean | null;
+};
+
+function isActiveWorkforceRegisterRow(row: WorkforceRegisterRow) {
+  return !["rejected", "cancelled"].includes(String(row.onboarding_status ?? "pending").toLowerCase()) &&
+    String(row.lifecycle_status ?? "").toLowerCase() !== "exited" &&
+    !row.deleted_at;
+}
+
+async function loadCanonicalWorkforceMirrors({
+  sourceProfileType,
+  sourceRows,
+  knownWorkforceIds
+}: {
+  sourceProfileType: "field_executive" | "contractor";
+  sourceRows: WorkforceRegisterRow[];
+  knownWorkforceIds: Set<string>;
+}) {
+  const mirrors: WorkforceRegisterRow[] = [];
+  if (!sourceRows.length || !supabaseAdmin) return mirrors;
+
+  for (const sourceRow of sourceRows) {
+    const result = await supabaseAdmin
+      .from("workforce")
+      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
+      .eq("company_id", sourceRow.company_id)
+      .eq("source_profile_type", sourceProfileType)
+      .eq("source_profile_id", sourceRow.id);
+    if (result.error && !isMissingColumnError(result.error)) {
+      throw new Error(result.error.message);
+    }
+    for (const row of (result.data ?? []) as WorkforceRegisterRow[]) {
+      if (!isActiveWorkforceRegisterRow(row) || knownWorkforceIds.has(row.id)) continue;
+      mirrors.push(row);
+      knownWorkforceIds.add(row.id);
+    }
+  }
+
+  return mirrors;
+}
+
+function buildReferenceSeeds({
+  profiles,
+  employees,
+  nonEmployeeRows
+}: {
+  profiles: Array<{ company_id: string; employee_id?: string | null }>;
+  employees: EmployeeAccountRow[];
+  nonEmployeeRows: WorkforceRegisterRow[];
+}) {
+  const seeds: Array<{ company_id: string; references: Array<unknown> }> = [];
+  for (const profile of profiles) {
+    seeds.push({ company_id: profile.company_id, references: [profile.employee_id] });
+  }
+  for (const employee of employees) {
+    seeds.push({
+      company_id: employee.company_id,
+      references: [employee.employee_code, employee.biometric_id]
+    });
+  }
+  for (const row of nonEmployeeRows) {
+    seeds.push({
+      company_id: row.company_id,
+      references: [row.dropx_id, row.biometric_id, row.designation]
+    });
+  }
+  return seeds;
+}
+
 async function signedProfilePhotoUrl(path?: string | null) {
   if (!supabaseAdmin || !path) return "";
   const result = await supabaseAdmin.storage
@@ -310,27 +582,64 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     if (result.error) throw new Error(result.error.message);
   }
 
-  const employeeAccounts = (employeesResult.data ?? []).map((employee) => ({
-    id: employee.id,
-    company_id: employee.company_id,
-    full_name: employee.full_name,
-    email: employee.email,
-    employee_id: employee.employee_code,
-    biometric_id: employee.biometric_id ?? null,
-    designation_id: employee.designation_id ?? null,
-    role: "Employee",
-    status: employee.profile_completion_status === "active"
-      ? "Active"
-      : employee.profile_completion_status === "under_review"
-        ? "Under review"
-        : employee.profile_completion_status === "returned"
-          ? "Returned"
-          : employee.profile_completion_status === "submitted"
-            ? "Submitted"
-            : "Pending",
-    profile_type: "employee" as const,
-    profile_photo_path: employee.profile_photo_path ?? null,
-  }));
+  const knownEmployeeIds = new Set((employeesResult.data ?? []).map((employee) => employee.id));
+  const knownWorkforceIds = Object.fromEntries(
+    nonEmployeeTypes.map((profileType, index) => [
+      profileType,
+      new Set((nonEmployeeResults[index].data ?? []).map((row) => row.id))
+    ])
+  ) as Record<NonEmployeeProfileType, Set<string>>;
+
+  const fieldExecutiveIndex = nonEmployeeTypes.indexOf("field_executive");
+  const contractorIndex = nonEmployeeTypes.indexOf("contractor");
+  const workforceIndex = nonEmployeeTypes.indexOf("workforce");
+  const fieldExecutiveRows = (nonEmployeeResults[fieldExecutiveIndex]?.data ?? []) as WorkforceRegisterRow[];
+  const contractorRows = (nonEmployeeResults[contractorIndex]?.data ?? []) as WorkforceRegisterRow[];
+
+  for (const [sourceProfileType, sourceRows] of [
+    ["field_executive", fieldExecutiveRows],
+    ["contractor", contractorRows]
+  ] as const) {
+    const mirrors = await loadCanonicalWorkforceMirrors({
+      sourceProfileType,
+      sourceRows,
+      knownWorkforceIds: knownWorkforceIds.workforce
+    });
+    if (!mirrors.length) continue;
+    nonEmployeeResults[workforceIndex] = {
+      ...nonEmployeeResults[workforceIndex],
+      data: [...(nonEmployeeResults[workforceIndex].data ?? []), ...mirrors]
+    };
+  }
+
+  const referenceSeeds = buildReferenceSeeds({
+    profiles: profilesResult.data ?? [],
+    employees: employeesResult.data ?? [],
+    nonEmployeeRows: nonEmployeeTypes.flatMap((_, index) => nonEmployeeResults[index].data ?? []) as WorkforceRegisterRow[]
+  });
+  const linkedRecords = await loadLinkedSelfServiceRecords({
+    referenceSeeds,
+    knownEmployeeIds,
+    knownWorkforceIds
+  });
+  if (linkedRecords.linkedEmployees.length) {
+    employeesResult = {
+      ...employeesResult,
+      data: [...(employeesResult.data ?? []), ...linkedRecords.linkedEmployees]
+    };
+  }
+  for (const profileType of ["contractor", "field_executive", "workforce"] as NonEmployeeProfileType[]) {
+    const linkedRows = linkedRecords.linkedNonEmployees[profileType] ?? [];
+    if (!linkedRows.length) continue;
+    const index = nonEmployeeTypes.indexOf(profileType);
+    if (index < 0) continue;
+    nonEmployeeResults[index] = {
+      ...nonEmployeeResults[index],
+      data: [...(nonEmployeeResults[index].data ?? []), ...linkedRows]
+    };
+  }
+
+  const employeeAccounts = (employeesResult.data ?? []).map((employee) => mapEmployeeAccountRow(employee));
   const accounts: AccountRow[] = [
     ...((profilesResult.data ?? []).map((profile) => ({
       id: profile.id,
@@ -338,42 +647,18 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       full_name: profile.full_name,
       email: profile.email,
       employee_id: profile.employee_id,
-      role: profile.role,
+      role: profile.role?.trim() || "Manager",
       status: "Active",
       profile_type: "user" as const
     }))),
     ...nonEmployeeResults.flatMap((result, index) => {
       const profileType = nonEmployeeTypes[index];
-      return (result.data ?? []).map((profile) => ({
-        id: profile.id,
-        company_id: profile.company_id,
-        full_name: profile.full_name,
-        email: profile.email,
-        dropx_id: profile.dropx_id,
-        biometric_id: profile.biometric_id,
-        role: profile.designation || workforceLabel(profileType),
-        status: profile.onboarding_status === "active"
-          ? "Active"
-          : profile.onboarding_status === "under_review"
-            ? "Under review"
-            : profile.onboarding_status === "returned"
-              ? "Returned"
-              : "Pending",
-        profile_photo_path: profile.profile_photo_path ?? null,
-        source_profile_type: profile.source_profile_type ?? null,
-        source_profile_id: profile.source_profile_id ?? null,
-        profile_type: profileType
-      }));
+      return (result.data ?? []).map((profile) => mapNonEmployeeAccountRow(profile, profileType));
     }),
     ...employeeAccounts
   ].filter((account) => account.company_id);
 
-  // A People login and its employee record represent the same employee workspace.
-  // Keep the richer employee account in that case, while retaining a manager login
-  // beside contractor/workforce identities so genuine dual-role users can switch.
-  const employeeReferences = new Set(employeeAccounts
-    .filter((account) => account.employee_id)
-    .map((account) => `${account.company_id}:${String(account.employee_id).trim().toLowerCase()}`));
+  // Manager logins stay available beside self-service employee / contractor identities.
   const employeeIdsByCompany = new Set(employeeAccounts.map((account) => `${account.company_id}:${account.id}`));
   const employeeCodesByCompany = new Map<string, Set<string>>();
   const employeeBiometricsByCompany = new Map<string, Set<string>>();
@@ -398,10 +683,6 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     .filter((account) => account.profile_type === "contractor")
     .map((account) => `${account.company_id}:${account.id}`));
   const visibleAccounts = accounts.filter((account) => {
-    if (account.profile_type === "user") {
-      return !account.employee_id ||
-        !employeeReferences.has(`${account.company_id}:${String(account.employee_id).trim().toLowerCase()}`);
-    }
     // DA / WM legacy rows move to the canonical Workforce register; IC contractors stay on contractors.
     if (account.profile_type === "field_executive") {
       return !canonicalWorkforceSources.has(`${account.company_id}:field_executive:${account.id}`);
@@ -551,7 +832,9 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       name: account.full_name,
       email: account.email ?? null,
       reference: account.employee_id || account.dropx_id || null,
-      role: account.designation_id
+      role: account.profile_type === "user"
+        ? account.role ?? "Manager"
+        : account.designation_id
         ? designationNameById.get(String(account.designation_id)) ?? null
         : account.role === "Employee"
           ? null
@@ -566,7 +849,11 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       companyName: companyNameById.get(account.company_id) ?? "Company",
       label: accountLabel(account, companyNameById),
       workspace: connectWorkspace(account.profile_type),
-      workspaceLabel: connectWorkspace(account.profile_type) === "people" ? "People workspace" : "Workforce workspace"
+      workspaceLabel: account.profile_type === "user"
+        ? "People workspace · Manager"
+        : connectWorkspace(account.profile_type) === "people"
+          ? "People workspace"
+          : "Workforce workspace"
       };
     }));
 }

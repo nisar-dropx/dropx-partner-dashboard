@@ -51,7 +51,39 @@ left join workforce_mirrors mirror
  and mirror.source_profile_id = contractor.id
 order by contractor.full_name;
 
--- Designation routing for contractor designations (should stay on contractors register).
+-- Manager login on DropX One (profiles) and linked workforce registers for the same person.
+select
+  profile.id as profile_id,
+  profile.full_name as profile_name,
+  profile.employee_id as profile_reference,
+  profile.role as profile_role,
+  profile.mobile as profile_mobile,
+  employee.id as employee_id,
+  employee.employee_code,
+  employee.mobile as employee_mobile,
+  contractor.id as contractor_id,
+  contractor.dropx_id as contractor_dropx_id,
+  contractor.mobile as contractor_mobile
+from public.profiles profile
+left join public.employees employee
+  on employee.company_id = profile.company_id
+ and employee.is_active
+ and (
+   lower(btrim(employee.employee_code)) = lower(btrim(profile.employee_id))
+   or lower(btrim(employee.biometric_id::text)) = lower(btrim(profile.employee_id))
+ )
+left join public.contractors contractor
+  on contractor.company_id = profile.company_id
+ and contractor.is_active
+ and (
+   lower(btrim(contractor.dropx_id)) = lower(btrim(profile.employee_id))
+   or lower(btrim(contractor.biometric_id::text)) = lower(btrim(profile.employee_id))
+ )
+cross join target_mobile target
+where profile.is_active
+  and regexp_replace(coalesce(profile.mobile, ''), '\D', '', 'g') like '%' || target.mobile
+order by profile.full_name;
+
 select
   designation.code,
   designation.name,

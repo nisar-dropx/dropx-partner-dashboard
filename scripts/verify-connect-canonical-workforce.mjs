@@ -15,7 +15,10 @@ const checks = [
   [auth.includes('["workforce", "field_executive", "contractor", "vendor", "worker"]'), "Account discovery reads Workforce before legacy registers"],
   [auth.includes("canonicalWorkforceSources"), "Legacy field executive mirrors are removed from the switcher"],
   [auth.includes("contractorAccountKeys"), "Workforce mirrors defer to active contractor accounts"],
-  [auth.includes("resolveConnectPageAccess"), "Contractor page access keeps core self-service pages"],
+  [auth.includes("loadLinkedSelfServiceRecords"), "Linked self-service registers load from collected references"],
+  [auth.includes("loadCanonicalWorkforceMirrors"), "Canonical Workforce rows resolve from matched legacy registers"],
+  [auth.includes("buildReferenceSeeds"), "Self-service registers resolve from every linked DropX reference"],
+  [auth.includes("People workspace · Manager"), "Manager and self-service People workspaces are labelled separately"],
   [migration.includes("public.set_designation_register_route"), "Cutover uses the master-defined routing workflow"],
   [migration.includes("in ('DA', 'WM', 'ODCD', 'DCD')"), "All four requested designation codes are covered"],
   [migration.includes("raise exception 'One or more core Workforce designations"), "Partial cutovers fail atomically"]
