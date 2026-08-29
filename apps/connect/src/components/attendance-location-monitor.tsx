@@ -9,8 +9,12 @@ const LOCATION_TRACKING_MS = 9 * 60 * 60 * 1000;
 const PUNCH_CORRELATION_MS = 3 * 60 * 1000;
 
 function integrityPayload() {
+  const native = typeof window !== "undefined" && (
+    (window as Window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()
+    || /Capacitor/i.test(navigator.userAgent)
+  );
   return {
-    clientPlatform: "web",
+    clientPlatform: native ? "android" : "web",
     clientUserAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
     vpnSuspected: false,
     mockLocation: false,
@@ -120,13 +124,8 @@ export function AttendanceLocationMonitor({ account }: { account: Account }) {
 
       if (!locationTracking) return;
 
-      const inTime = status.shift?.open && status.shift?.inTime ? String(status.shift.inTime) : null;
-      if (inTime) {
-        const elapsed = Date.now() - new Date(inTime).getTime();
-        if (elapsed > LOCATION_TRACKING_MS) {
-          return;
-        }
-      }
+      const inTime = status.shift?.inTime ? String(status.shift.inTime) : null;
+      if (!inTime) return;
 
       const position = await readPosition();
       const form = new FormData();

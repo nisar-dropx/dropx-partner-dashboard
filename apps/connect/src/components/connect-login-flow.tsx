@@ -5,6 +5,7 @@ import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, Clipboard
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
 import { AttendanceLocationMonitor } from "./attendance-location-monitor";
+import { ConnectNativeBridge } from "./connect-native-bridge";
 import { ConnectDashboard } from "./connect-dashboard";
 import { ConnectDocuments } from "./connect-documents";
 import { ConnectLeave } from "./connect-leave";
@@ -547,6 +548,7 @@ export function ConnectLoginFlow() {
       {account && active(account) && allowed(account, "attendance") ? (
         <AttendanceLocationMonitor account={account} />
       ) : null}
+      {account ? <ConnectNativeBridge account={account} /> : null}
       {step === "dashboard" && account && isManagerAccount(account) ? <ConnectPeopleWorkspace account={account} onApprovals={() => open("approvals")} onSettings={() => open("settings")} onSwitch={() => open("accounts")} /> : null}
       {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onLeave={() => open(isContractorAccount(account) ? "lop" : "leave")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRoster={() => open("roster")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
       {step === "profile" && account && !isManagerAccount(account) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}

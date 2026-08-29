@@ -30,6 +30,9 @@ export default function RootLayout({
 }>) {
   return (
     <html className={`${GeistSans.variable} ${GeistMono.variable}`} lang="en">
+      <head>
+        <meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport" />
+      </head>
       <body className={GeistSans.className}>{children}</body>
     </html>
   );

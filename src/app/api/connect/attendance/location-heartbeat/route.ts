@@ -7,6 +7,7 @@ import {
   loadOpenShift,
   loadOutsideStationPolicy,
   loadStationGeofence,
+  LOCATION_TRACKING_MS,
   maybeNotifyForgotPunchOut,
   openIntegrityFlag,
   parseIntegritySignals
@@ -50,11 +51,19 @@ export async function POST(request: NextRequest) {
       companyId: worker.companyId,
       enrolmentId: worker.enrolmentId
     });
-    if (!shift.open || !shift.inTime) {
+    if (!shift.inTime) {
       return NextResponse.json({
         ok: true,
         skipped: true,
-        reason: "no_open_shift"
+        reason: "no_punch_in"
+      });
+    }
+    const trackingElapsedMs = Date.now() - shift.inTime.getTime();
+    if (trackingElapsedMs < 0 || trackingElapsedMs > LOCATION_TRACKING_MS) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: "tracking_window_elapsed"
       });
     }
     const policy = await loadOutsideStationPolicy({
@@ -185,7 +194,8 @@ export async function POST(request: NextRequest) {
       shift: {
         punchDate: shift.punchDate,
         inTime: shift.inTime.toISOString(),
-        open: true
+        open: shift.open,
+        outTime: shift.outTime?.toISOString() ?? null
       }
     });
   } catch (error) {

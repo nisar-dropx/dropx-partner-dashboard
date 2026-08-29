@@ -89,6 +89,37 @@ a {
   .dx-header{top:0}
 }
 
+html.native-app {
+  --dx-safe-top: max(env(safe-area-inset-top), 28px);
+}
+
+html.native-app .dx-header {
+  top: 0;
+  min-height: calc(76px + var(--dx-safe-top));
+  padding-top: var(--dx-safe-top) !important;
+}
+
+html.native-app .dx-notification-pop,
+html.native-app .dx-profile-pop {
+  top: calc(76px + var(--dx-safe-top)) !important;
+}
+
+html.native-app .dx-notification-pop {
+  max-height: min(58dvh, 420px);
+}
+
+html.native-app .dx-drawer {
+  padding-top: calc(var(--dx-safe-top) + 22px) !important;
+}
+
+html.native-app .dx-auth {
+  padding-top: max(42px, calc(var(--dx-safe-top) + 32px)) !important;
+}
+
+html.native-app .dx-mobile-nav {
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+}
+
 .deletion-page {
   min-height: 100vh;
   background: #faf9f7;
