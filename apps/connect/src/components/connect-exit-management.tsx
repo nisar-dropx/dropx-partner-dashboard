@@ -144,7 +144,7 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
   }
 
   async function withdraw() {
-    if (!window.confirm("Send a request to withdraw this resignation?")) return;
+    if (!window.confirm("Withdraw this resignation? You can submit a new request afterwards.")) return;
     setPending(true);
     setError("");
     try {
@@ -165,7 +165,7 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
   }
 
   const exitCase = data?.exitCase;
-  const canStart = !exitCase || ["rejected", "withdrawn", "cancelled", "settled"].includes(exitCase.status);
+  const canStart = !exitCase || ["rejected", "withdrawn", "cancelled", "settled", "withdrawal_requested"].includes(exitCase.status);
   const canWithdraw = Boolean(
     data?.flow === "people" &&
     exitCase &&
