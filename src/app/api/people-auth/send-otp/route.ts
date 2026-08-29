@@ -1,12 +1,9 @@
-import { sendMobileLoginOtp } from "@/lib/mobile-login-otp";
-import { findAuthorizedPeopleProfileByMobile } from "@/lib/people/auth";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request) {
-  return sendMobileLoginOtp(request, {
-    appName: "DropX People",
-    findProfile: findAuthorizedPeopleProfileByMobile,
-    purpose: "people_login"
-  });
+export async function POST() {
+  return NextResponse.json({
+    error: "Mobile OTP login is not available for DropX People. Continue with your authorised DropX Google account."
+  }, { status: 403 });
 }

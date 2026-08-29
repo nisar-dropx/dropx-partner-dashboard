@@ -1,16 +1,9 @@
-import { verifyMobileLoginOtp } from "@/lib/mobile-login-otp";
-import { findAuthorizedPeopleProfileByMobile, safePeopleNextPath } from "@/lib/people/auth";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request) {
-  return verifyMobileLoginOtp(request, {
-    appName: "DropX People",
-    findProfile: findAuthorizedPeopleProfileByMobile,
-    forceOpsStorage: false,
-    inactiveMessage: "Your People access is no longer active.",
-    purpose: "people_login",
-    redirectTo: "https://people.dropxlogistics.com/",
-    safeNextPath: safePeopleNextPath
-  });
+export async function POST() {
+  return NextResponse.json({
+    error: "Mobile OTP login is not available for DropX People. Continue with your authorised DropX Google account."
+  }, { status: 403 });
 }
