@@ -924,7 +924,7 @@ export async function loadAttendanceReportRows({
       workerType: row.worker_type === "employee" || biometricWorker?.profileType === "employee" ? "Employee" : "Individual Contract",
       locationId: row.location_id ?? biometricWorker?.location_id ?? null,
       location: station?.station_code ?? row.station_code ?? "-",
-      designation: designation?.code ?? executive?.designation ?? biometricDesignation?.code ?? biometricWorker?.designation ?? "-",
+      designation: designation?.name ?? designation?.code ?? executive?.designation ?? biometricDesignation?.name ?? biometricDesignation?.code ?? biometricWorker?.designation ?? "-",
       punchDate: row.punch_date,
       inTime: formatTime(row.in_time),
       outTime: formatTime(row.out_time),

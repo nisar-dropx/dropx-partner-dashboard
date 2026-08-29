@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/app-shell";
+import { DateRangeField } from "@/components/date-range-field";
 import { PageHead } from "@/components/page-head";
 import { SearchableSelect } from "@/components/searchable-select";
 import { StatusPill } from "@/components/status-pill";
@@ -20,18 +21,8 @@ type LocationRow = {
   hide_from_location_list?: boolean | null;
 };
 
-type ReportMode = "daily" | "monthly" | "periodic";
+type ReportMode = "monthly" | "periodic";
 type SortMode = "workforce_type" | "designation" | "location";
-
-const dailyReportOptions: Array<{ value: AttendanceReportType; label: string }> = [
-  { value: "performance", label: "Daily Performance" },
-  { value: "absent", label: "Daily Absent" },
-  { value: "in_out", label: "Daily In/Out" },
-  { value: "late_in", label: "Daily Late IN" },
-  { value: "present", label: "Daily Present Report" },
-  { value: "early_out", label: "Daily Early OUT Report" },
-  { value: "mis_punch", label: "Daily Mis Punch Report" }
-];
 
 const monthlyReportOptions: Array<{ value: AttendanceReportType; label: string }> = [
   { value: "performance", label: "Month Performance" },
@@ -44,19 +35,18 @@ const monthlyReportOptions: Array<{ value: AttendanceReportType; label: string }
 ];
 
 const periodicReportOptions: Array<{ value: AttendanceReportType; label: string }> = [
-  { value: "performance", label: "Periodic Report" },
-  { value: "in_out", label: "Periodic IN/OUT Report" },
-  { value: "present", label: "Periodic Present Report" },
-  { value: "absent", label: "Periodic Absent Report" },
-  { value: "late_in", label: "Periodic Late IN Report" },
-  { value: "early_out", label: "Periodic Early OUT Report" },
-  { value: "mis_punch", label: "Periodic Mis Punch Report" }
+  { value: "performance", label: "Performance" },
+  { value: "in_out", label: "IN/OUT Report" },
+  { value: "present", label: "Present Report" },
+  { value: "absent", label: "Absent Report" },
+  { value: "late_in", label: "Late IN Report" },
+  { value: "early_out", label: "Early OUT Report" },
+  { value: "mis_punch", label: "Mis Punch Report" }
 ];
 
 const modeOptions = [
-  { value: "daily", label: "Daily Report" },
-  { value: "monthly", label: "Monthly Report" },
-  { value: "periodic", label: "Periodic Report" }
+  { value: "periodic", label: "Date Range Report" },
+  { value: "monthly", label: "Monthly Report" }
 ];
 
 const sortingOptions = [
@@ -68,7 +58,7 @@ const sortingOptions = [
 const inOutColumns = ["Out1", "In2", "Out2", "In3", "Out3", "In4", "Out4", "In5", "Out5", "In6", "Out6", "In7", "Out7", "In8", "Out8"];
 
 function safeMode(value: string | undefined): ReportMode {
-  return value === "monthly" || value === "periodic" ? value : "daily";
+  return value === "monthly" ? "monthly" : "periodic";
 }
 
 function safeSort(value: string | undefined): SortMode {
@@ -81,8 +71,7 @@ function normalizedRange(fromDate: string, toDate: string) {
 
 function optionsForMode(mode: ReportMode) {
   if (mode === "monthly") return monthlyReportOptions;
-  if (mode === "periodic") return periodicReportOptions;
-  return dailyReportOptions;
+  return periodicReportOptions;
 }
 
 function safeReportType(value: string | undefined, mode: ReportMode): AttendanceReportType {
@@ -154,10 +143,10 @@ export default async function AttendanceReportsPage({
   const authorization = await requirePagePermission(pageCode, "access");
   const companyId = requireCompanyId(authorization);
   const mode = safeMode(searchParams?.mode);
-  const date = safeDate(searchParams?.date);
+  const legacyDate = safeDate(searchParams?.date);
   const month = safeMonth(searchParams?.month);
-  const fromDate = safeDate(searchParams?.from_date);
-  const toDate = safeDate(searchParams?.to_date);
+  const fromDate = safeDate(searchParams?.from_date ?? legacyDate);
+  const toDate = safeDate(searchParams?.to_date ?? legacyDate);
   const reportType = safeReportType(searchParams?.report, mode);
   const reportOptions = optionsForMode(mode);
   const reportMeta = reportOptions.find((option) => option.value === reportType) ?? reportOptions[0];
@@ -168,9 +157,7 @@ export default async function AttendanceReportsPage({
   const workerType = String(searchParams?.worker_type ?? "");
   const activeRange = mode === "monthly"
     ? monthBounds(month)
-    : mode === "periodic"
-      ? normalizedRange(fromDate, toDate)
-      : { fromDate: date, toDate: date };
+    : normalizedRange(fromDate, toDate);
 
   let rows: Awaited<ReturnType<typeof loadAttendanceReportRows>> = [];
   let locations: LocationRow[] = [];
@@ -205,7 +192,9 @@ export default async function AttendanceReportsPage({
     .filter((entry) => entry.time && entry.time !== "--:--")
     .at(-1);
   const locationOptions = [
-    { value: "", label: "All locations", helper: "Company-wide report" },
+    authorization.hasAllLocationAccess
+      ? { value: "", label: "All locations", helper: "Company-wide report" }
+      : { value: "", label: "All assigned locations", helper: "Only your allocated location scope" },
     ...locations.map((location) => ({
       value: location.id,
       label: location.station_code,
@@ -240,13 +229,8 @@ export default async function AttendanceReportsPage({
           </label>
           {mode === "monthly" ? (
             <label>Month<input className="field" name="month" type="month" defaultValue={month} /></label>
-          ) : mode === "periodic" ? (
-            <>
-              <label>From date<input className="field" name="from_date" type="date" defaultValue={fromDate} /></label>
-              <label>To date<input className="field" name="to_date" type="date" defaultValue={toDate} /></label>
-            </>
           ) : (
-            <label>Report date<input className="field" name="date" type="date" defaultValue={date} /></label>
+            <DateRangeField defaultFrom={activeRange.fromDate} defaultTo={activeRange.toDate} />
           )}
           <label>Sorting
             <SearchableSelect name="sort" options={sortingOptions} defaultValue={sort} placeholder="Select sorting" required />
@@ -277,8 +261,8 @@ export default async function AttendanceReportsPage({
           </fieldset>
 
           <div className="span-3 helper-card">
-            <strong>{mode === "periodic" ? "Date range report" : mode === "monthly" ? "Monthly report" : "Daily report"}</strong>
-            {mode === "periodic" ? " Select From date and To date, then export the same range to Excel or PDF." : mode === "monthly" ? " Select a month and export the month-level attendance summary." : " Select one punch date and export the daily attendance report."}
+            <strong>{mode === "monthly" ? "Monthly report" : "Date range report"}</strong>
+            {mode === "monthly" ? " Select a month and export the month-level attendance summary." : " Select one date or a From–To range in the same field; the screen, Excel, and PDF use the identical range."}
           </div>
 
           <div className="form-actions span-3 align-right">

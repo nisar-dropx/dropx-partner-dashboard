@@ -31,6 +31,7 @@ export function SearchableSelect({ name, options, defaultValue, value: controlle
   const inputRef = useRef<HTMLInputElement>(null);
   const valueRef = useRef(initialValue);
   const queryRef = useRef(initialOption?.label ?? "");
+  const defaultValueRef = useRef(defaultValue ?? "");
   const optionsRef = useRef(options);
   const disabledRef = useRef(disabled);
   const onValueChangeRef = useRef(onValueChange);
@@ -117,6 +118,20 @@ export function SearchableSelect({ name, options, defaultValue, value: controlle
     disabledRef.current = disabled;
     onValueChangeRef.current = onValueChange;
   }, [disabled, onValueChange, options]);
+
+  useEffect(() => {
+    if (isControlled) return;
+    const nextDefaultValue = defaultValue ?? "";
+    if (nextDefaultValue === defaultValueRef.current) return;
+
+    defaultValueRef.current = nextDefaultValue;
+    const selected = options.find((option) => option.value === nextDefaultValue);
+    valueRef.current = nextDefaultValue;
+    queryRef.current = selected?.label ?? "";
+    setValue(nextDefaultValue);
+    setQuery(selected?.label ?? "");
+    setOpen(false);
+  }, [defaultValue, isControlled, options]);
 
   useEffect(() => {
     if (!isControlled) return;

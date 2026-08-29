@@ -12,7 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
-type ReportMode = "daily" | "monthly" | "periodic";
+type ReportMode = "monthly" | "periodic";
 type SortMode = "workforce_type" | "designation" | "location";
 
 type ReportBuild = {
@@ -34,7 +34,7 @@ const reportLabels: Record<AttendanceReportType, string> = {
 };
 
 function safeMode(value: string | null): ReportMode {
-  return value === "monthly" || value === "periodic" ? value : "daily";
+  return value === "monthly" ? "monthly" : "periodic";
 }
 
 function safeSort(value: string | null): SortMode {
@@ -83,9 +83,8 @@ function displayMonth(month: string) {
 }
 
 function reportTitle(mode: ReportMode, reportType: AttendanceReportType) {
-  if (mode === "daily") return reportLabels[reportType];
   const base = reportLabels[reportType].replace(/^Daily /, "");
-  return `${mode === "monthly" ? "Monthly" : "Periodic"} ${base}`;
+  return `${mode === "monthly" ? "Monthly" : "Date Range"} ${base}`;
 }
 
 function merge(startRow: number, startCol: number, endRow: number, endCol: number): XLSX.Range {
@@ -414,10 +413,10 @@ export async function GET(request: Request) {
     const companyName = authorization.companyName?.trim() || "Company";
     const params = new URL(request.url).searchParams;
     const mode = safeMode(params.get("mode"));
-    const date = safeDate(params.get("date"));
+    const legacyDate = safeDate(params.get("date"));
     const month = safeMonth(params.get("month"));
-    const fromDate = safeDate(params.get("from_date"));
-    const toDate = safeDate(params.get("to_date"));
+    const fromDate = safeDate(params.get("from_date") ?? legacyDate);
+    const toDate = safeDate(params.get("to_date") ?? legacyDate);
     const periodicRange = normalizedRange(fromDate, toDate);
     const sort = safeSort(params.get("sort"));
     const reportType = safeReportType(params.get("report"));
@@ -428,9 +427,7 @@ export async function GET(request: Request) {
     const format = params.get("format") === "pdf" ? "pdf" : "xlsx";
     const range = mode === "monthly"
       ? monthBounds(month)
-      : mode === "periodic"
-        ? { ...periodicRange, label: `${periodicRange.fromDate}-to-${periodicRange.toDate}` }
-        : { fromDate: date, toDate: date, label: date };
+      : { ...periodicRange, label: `${periodicRange.fromDate}-to-${periodicRange.toDate}` };
 
     const stationResult = await supabaseAdmin
       .from("stations")

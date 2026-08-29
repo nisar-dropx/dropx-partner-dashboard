@@ -12853,6 +12853,125 @@ tbody tr:hover td {
   align-items: end;
 }
 
+.date-range-field {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.date-range-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.date-range-trigger {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.date-range-trigger:hover,
+.date-range-trigger.open {
+  border-color: var(--orange);
+  box-shadow: 0 0 0 3px rgb(249 115 22 / 10%);
+}
+
+.date-range-trigger b {
+  margin: 0 3px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.date-range-chevron {
+  color: var(--muted);
+  transition: transform 160ms ease;
+}
+
+.date-range-trigger.open .date-range-chevron {
+  transform: rotate(180deg);
+}
+
+.date-range-popover {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 7px);
+  left: 0;
+  display: grid;
+  gap: 12px;
+  width: min(390px, calc(100vw - 48px));
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 18px 42px rgb(15 23 42 / 18%);
+}
+
+.date-range-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.date-range-inputs label {
+  display: grid;
+  gap: 6px;
+}
+
+.date-range-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.date-range-quick-actions button {
+  padding: 6px 9px;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  color: #9a3412;
+  background: #fff7ed;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.date-range-apply {
+  justify-self: end;
+  min-height: 36px;
+  padding: 7px 13px;
+}
+
+@media (max-width: 640px) {
+  .date-range-popover {
+    position: fixed;
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+  }
+
+  .date-range-inputs {
+    grid-template-columns: 1fr;
+  }
+}
+
 .report-choice-panel {
   margin: 0;
   padding: 14px;
