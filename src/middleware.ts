@@ -111,6 +111,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));
   }
 
+  if (!isPlatformAdminHost && path === "/platform-admin") {
+    return NextResponse.redirect(surfaceDeniedUrl(request, "platform_admin_portal", path));
+  }
+
   if (isOpsHost && (path === "/ops-pulse" || path.startsWith("/ops-pulse/"))) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = cleanOpsPath(path);
@@ -155,14 +159,6 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = request.nextUrl.pathname.replace(/^\/partner/, "") || "/";
     return NextResponse.redirect(redirectUrl);
-  }
-
-  if (!isPlatformAdminHost && path === "/platform-admin") {
-    return NextResponse.redirect(surfaceDeniedUrl(
-      request,
-      isOpsHost ? "ops_portal" : isPeopleHost ? "people_portal" : "dashboard_portal",
-      path
-    ));
   }
 
   if (isPublicAppPath(path)) {
