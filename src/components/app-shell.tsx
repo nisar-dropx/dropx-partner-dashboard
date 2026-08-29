@@ -11,8 +11,9 @@ import { OpsAiChat } from "@/components/ops-ai-chat";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { UserMenu } from "@/components/user-menu";
 import { redirect } from "next/navigation";
-import { getAuthorization, hasPermission } from "@/lib/authorization";
-import { navItems } from "@/lib/app-navigation";
+import { opsAccessPageCodes } from "@/lib/access-surface";
+import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
+import { firstAllowedHref, navItems } from "@/lib/app-navigation";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
@@ -20,7 +21,7 @@ import { operatingModeForLocation } from "@/lib/ops-pulse/operating-context";
 import { loadPaymentNotificationSnapshot } from "@/lib/payment-notification-counts";
 import { opsNavItemsForMode } from "@/lib/ops-pulse/navigation";
 import { isCustomWorkforceCategoryCode, workforceCategoryPageCode } from "@/lib/dynamic-workforce";
-import { peopleNavItems } from "@/lib/people/navigation";
+import { hasPeoplePortalAccess, peopleNavItems } from "@/lib/people/navigation";
 import { isPeopleHostName } from "@/lib/people/surface";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -30,6 +31,14 @@ export async function AppShell({ children, active, pageCode }: { children: React
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
   const isOpsHost = host === "ops.dropxlogistics.com" || host.startsWith("ops-");
   const isPeopleHost = isPeopleHostName(host);
+  const hasCurrentPortalAccess = isOpsHost
+    ? isCompanyOwner(authorization) || opsAccessPageCodes.some((code) => hasPermission(authorization, code, "access"))
+    : isPeopleHost
+      ? hasPeoplePortalAccess(authorization)
+      : Boolean(firstAllowedHref(authorization));
+  if (!hasCurrentPortalAccess) {
+    redirect(`/unauthorized?page=${isOpsHost ? "ops_portal" : isPeopleHost ? "people_portal" : "dashboard_portal"}&reason=access`);
+  }
   const opsAppUrl = process.env.OPS_APP_URL?.trim();
   const opsLocationsResult = isOpsHost
     ? await loadCodLocations(
@@ -77,7 +86,9 @@ export async function AppShell({ children, active, pageCode }: { children: React
 
   const activeItem = shellNavItems.find((item) => item.label === active || item.children?.some((child) => child.label === active));
   const currentPageCode = pageCode ?? activeItem?.code;
-  if (currentPageCode && !hasPermission(authorization, currentPageCode, "access")) redirect("/unauthorized");
+  if (currentPageCode && !hasPermission(authorization, currentPageCode, "access")) {
+    redirect(`/unauthorized?page=${encodeURIComponent(currentPageCode)}&reason=access`);
+  }
   const visibleNavItems = shellNavItems
     .map((item) => item.children?.length ? {
       ...item,

@@ -83,7 +83,7 @@ export async function sendMobileLoginOtp(request: Request, options: MobileLoginO
     const profile = await options.findProfile(body.mobile, countryCode);
     if (!profile) {
       return NextResponse.json(
-        { error: `This mobile number is not enabled for ${options.appName}.` },
+        { error: `You don't have access to ${options.appName}. Contact HR or your platform administrator for access.` },
         { status: 403 }
       );
     }

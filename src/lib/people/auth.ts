@@ -1,7 +1,7 @@
 import "server-only";
 import { normalizeMobile } from "@/lib/connect-otp";
 import type { AuthorizedMobileLoginProfile } from "@/lib/mobile-login-otp";
-import { peoplePrimaryPageCodes } from "@/lib/people/navigation";
+import { isPeoplePortalPageCode } from "@/lib/people/navigation";
 import { safePeopleNextPath } from "@/lib/people/surface";
 import { loadEffectivePositionAccess } from "@/lib/position-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -55,10 +55,7 @@ async function hasAuthorizedPeopleRole(profile: ProfileRow) {
     .eq("is_active", true);
   if (pagesResult.error) throw new Error(pagesResult.error.message);
   const peoplePageIds = (pagesResult.data ?? [])
-    .filter((page) => (
-      peoplePrimaryPageCodes.includes(page.code as (typeof peoplePrimaryPageCodes)[number]) ||
-      String(page.code ?? "").startsWith("workforce_category_")
-    ))
+    .filter((page) => isPeoplePortalPageCode(String(page.code ?? "")))
     .map((page) => page.id);
   if (!peoplePageIds.length) return false;
 

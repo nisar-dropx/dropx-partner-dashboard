@@ -116,6 +116,15 @@ export const peopleNavItems: NavItem[] = [
   }
 ];
 
+const peoplePageCodes = new Set(peopleNavItems.flatMap((item) => [
+  item.code,
+  ...(item.children ?? []).flatMap((child) => child.code ? [child.code] : [])
+]));
+
+export function isPeoplePortalPageCode(code: string) {
+  return peoplePageCodes.has(code) || code.startsWith(workforceCategoryPagePrefix);
+}
+
 function canAccess(authorization: AuthorizationContext, code?: string) {
   if (!code) return true;
   const permission = authorization.permissions[code];
@@ -125,7 +134,7 @@ function canAccess(authorization: AuthorizationContext, code?: string) {
 export function hasPeoplePortalAccess(authorization: AuthorizationContext) {
   if (isCompanyOwner(authorization)) return true;
   return Object.entries(authorization.permissions).some(([code, permission]) => (
-    (peoplePrimaryPageCodes.includes(code as (typeof peoplePrimaryPageCodes)[number]) || code.startsWith(workforceCategoryPagePrefix)) &&
+    isPeoplePortalPageCode(code) &&
     Boolean(permission.canView || permission.canAdd || permission.canEdit)
   ));
 }

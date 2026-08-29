@@ -33,7 +33,7 @@ export default async function DashboardPage() {
     redirect(firstAllowedPeopleHref(authorization) ?? "/unauthorized?page=people_portal&reason=access");
   }
   if (!hasPermission(authorization, "dashboard", "access")) {
-    redirect(firstAllowedHref(authorization) ?? "/unauthorized?page=dashboard&action=access");
+    redirect(firstAllowedHref(authorization) ?? "/unauthorized?page=dashboard_portal&reason=access");
   }
 
   return (

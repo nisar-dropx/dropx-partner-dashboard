@@ -8,6 +8,7 @@ import { firstAllowedHref } from "@/lib/app-navigation";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { opsAccessPageCodes } from "@/lib/access-surface";
 import { safeOpsNextPath } from "@/lib/ops-pulse/auth";
+import { firstAllowedOpsHref } from "@/lib/ops-pulse/navigation";
 import { safePeopleNextPath } from "@/lib/people/auth";
 import { firstAllowedPeopleHref, hasPeoplePortalAccess } from "@/lib/people/navigation";
 import { isPeopleHostName } from "@/lib/people/surface";
@@ -34,7 +35,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         isCompanyOwner(authorization) ||
         opsAccessPageCodes.some((code) => hasPermission(authorization, code, "access"))
       ));
-      redirect(hasOpsAccess ? safeOpsNextPath(searchParams?.next) : "/unauthorized?reason=access");
+      if (!hasOpsAccess || !authorization) redirect("/unauthorized?page=ops_portal&reason=access");
+      const requestedPath = safeOpsNextPath(searchParams?.next);
+      redirect(requestedPath === "/"
+        ? firstAllowedOpsHref(authorization) ?? "/unauthorized?page=ops_portal&reason=access"
+        : requestedPath);
     }
     if (isPeopleHost) {
       if (!authorization || !hasPeoplePortalAccess(authorization)) {
@@ -45,7 +50,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         ? firstAllowedPeopleHref(authorization) ?? "/unauthorized?page=people_portal&reason=access"
         : requestedPath);
     }
-    redirect(authorization ? firstAllowedHref(authorization) ?? "/unauthorized" : "/dashboard");
+    redirect(authorization
+      ? firstAllowedHref(authorization) ?? "/unauthorized?page=dashboard_portal&reason=access"
+      : "/unauthorized?page=dashboard_portal&reason=access");
   }
 
   const message = searchParams?.error ?? searchParams?.reason;
