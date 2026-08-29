@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
-import { pageBelongsToSurface, type AccessSurface } from "@/lib/access-surface";
+import { pageBelongsToSurface, type AdminAccessSurface } from "@/lib/access-surface";
 import { isCompanyOwner, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { cleanCountryCode } from "@/lib/country-codes";
@@ -41,8 +41,9 @@ function locationAccessMode(value: FormDataEntryValue | null) {
   return clean(value) === "all_locations" ? "all_locations" : "role_based";
 }
 
-function accessSurfaceFromForm(value: FormDataEntryValue | null): AccessSurface {
-  return clean(value) === "ops" ? "ops" : "dashboard";
+function accessSurfaceFromForm(value: FormDataEntryValue | null): AdminAccessSurface {
+  const surface = clean(value);
+  return surface === "ops" || surface === "people" ? surface : "dashboard";
 }
 
 function appBaseUrl() {

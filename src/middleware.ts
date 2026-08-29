@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isPeopleHostName, isPeoplePortalPath } from "@/lib/people/surface";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -48,6 +49,15 @@ function isPublicOpsInstallAsset(path: string) {
     path.startsWith("/.well-known/");
 }
 
+function isPublicAppPath(path: string) {
+  return path === "/login" ||
+    path.startsWith("/api/") ||
+    path.startsWith("/auth/") ||
+    path.startsWith("/_next/") ||
+    isPublicOpsInstallAsset(path) ||
+    isAssetPath(path);
+}
+
 function encodeCookieValue(value: string) {
   const bytes = new TextEncoder().encode(value);
   let binary = "";
@@ -76,6 +86,7 @@ export async function middleware(request: NextRequest) {
   const host = request.headers.get("host")?.split(":")[0].toLowerCase() ?? "";
   const isPlatformAdminHost = host === "admin-panel.dropxlogistics.com";
   const isOpsHost = host === "ops.dropxlogistics.com";
+  const isPeopleHost = isPeopleHostName(host);
   const isDashboardHost = host === "dashboard.dropxlogistics.com";
   const isSharedOpsPath = path === "/fleet" || path.startsWith("/fleet/") ||
     path === "/business-documents" || path.startsWith("/business-documents/");
@@ -101,6 +112,13 @@ export async function middleware(request: NextRequest) {
 
   if (isOpsHost && path.startsWith("/payments/") && !isMovedOpsPaymentPath(path)) {
     return NextResponse.redirect(new URL(path + request.nextUrl.search, "https://dashboard.dropxlogistics.com"));
+  }
+
+  if (isPeopleHost && !isPublicAppPath(path) && !isPeoplePortalPath(path)) {
+    const peopleHomeUrl = request.nextUrl.clone();
+    peopleHomeUrl.pathname = "/";
+    peopleHomeUrl.search = "";
+    return NextResponse.redirect(peopleHomeUrl);
   }
 
   if (
@@ -136,7 +154,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("https://admin-panel.dropxlogistics.com/", request.url));
   }
 
-  if (path === "/login" || path.startsWith("/api/") || path.startsWith("/auth/") || path.startsWith("/_next/") || isPublicOpsInstallAsset(path) || isAssetPath(path)) {
+  if (isPublicAppPath(path)) {
     return NextResponse.next();
   }
 

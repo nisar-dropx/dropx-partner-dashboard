@@ -636,6 +636,22 @@ a {
   gap: 6px;
 }
 
+.people-brand-lockup {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+  padding-left: 10px;
+  border-left: 1px solid #e4e7ec;
+}
+
+.people-brand-lockup strong {
+  color: #d51f3d;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
 .ops-brand-mark {
   width: 24px;
   height: 24px;

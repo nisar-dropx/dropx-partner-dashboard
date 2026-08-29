@@ -11,6 +11,7 @@ const pageNames: Record<string, string> = {
   capacity_master: "Capacity Master",
   performance: "Performance",
   performance_master: "Performance Master",
+  people_portal: "DropX People",
   ops_reports: "Reports",
   service_network: "Network Planning",
   service_network_master: "Network Planning Master"

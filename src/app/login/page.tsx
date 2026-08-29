@@ -9,6 +9,8 @@ import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authoriza
 import { opsAccessPageCodes } from "@/lib/access-surface";
 import { safeOpsNextPath } from "@/lib/ops-pulse/auth";
 import { safePeopleNextPath } from "@/lib/people/auth";
+import { firstAllowedPeopleHref, hasPeoplePortalAccess } from "@/lib/people/navigation";
+import { isPeopleHostName } from "@/lib/people/surface";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { signInWithGoogle } from "./actions";
 
@@ -21,7 +23,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     headers().get("host")?.split(":")[0].toLowerCase() ??
     "";
   const isOpsHost = host === "ops.dropxlogistics.com";
-  const isPeopleHost = host === "people.dropxlogistics.com" || host.startsWith("people-") || host.startsWith("people.");
+  const isPeopleHost = isPeopleHostName(host);
   const supabase = createServerSupabaseClient(undefined, isOpsHost ? true : undefined);
   const { data } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
   if (data.user) {
@@ -33,6 +35,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         opsAccessPageCodes.some((code) => hasPermission(authorization, code, "access"))
       ));
       redirect(hasOpsAccess ? safeOpsNextPath(searchParams?.next) : "/unauthorized?reason=access");
+    }
+    if (isPeopleHost) {
+      if (!authorization || !hasPeoplePortalAccess(authorization)) {
+        redirect("/unauthorized?page=people_portal&reason=access");
+      }
+      const requestedPath = safePeopleNextPath(searchParams?.next);
+      redirect(requestedPath === "/"
+        ? firstAllowedPeopleHref(authorization) ?? "/unauthorized?page=people_portal&reason=access"
+        : requestedPath);
     }
     redirect(authorization ? firstAllowedHref(authorization) ?? "/unauthorized" : "/dashboard");
   }

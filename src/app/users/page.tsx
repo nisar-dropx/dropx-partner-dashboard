@@ -8,7 +8,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 import { UserRolesListPanel } from "@/components/user-roles-list-panel";
 import { UsersListPanel } from "@/components/users-list-panel";
-import { accessSurfaceLabel, currentAccessSurface, pageBelongsToSurface } from "@/lib/access-surface";
+import { accessSurfaceLabel, currentAdminAccessSurface, pageBelongsToSurface } from "@/lib/access-surface";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -213,7 +213,7 @@ function sectionHref(section: "roles" | "users", params?: Record<string, string>
 
 async function loadAccessData(
   companyId: string,
-  surface: ReturnType<typeof currentAccessSurface>,
+  surface: ReturnType<typeof currentAdminAccessSurface>,
   options: { includeUsers: boolean; includeRoleEditorData: boolean }
 ) {
   if (!supabaseAdmin) {
@@ -414,7 +414,7 @@ export const dynamic = "force-dynamic";
 export default async function UsersPage({ searchParams }: UsersPageProps) {
   const authorization = await requirePagePermission("users", "access");
   const companyId = requireCompanyId(authorization);
-  const accessSurface = currentAccessSurface();
+  const accessSurface = currentAdminAccessSurface();
   const pagePermission = authorization.permissions.users;
   const activeSection = searchParams?.section === "roles" || searchParams?.addRole || searchParams?.editRole ? "roles" : "users";
   const showUsersSection = activeSection === "users";

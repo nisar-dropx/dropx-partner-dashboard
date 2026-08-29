@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import type { AccessSurface } from "@/lib/access-surface";
+import type { AdminAccessSurface } from "@/lib/access-surface";
 
 type PermissionPage = {
   id: string;
@@ -67,6 +67,24 @@ const opsGroups: PermissionGroup[] = [
   { key: "users", label: "Users & Access", codes: ["users"] }
 ];
 
+const peopleGroups: PermissionGroup[] = [
+  {
+    key: "people",
+    label: "People",
+    codes: ["people_all", "people_review", "people_exceptions"],
+    matches: (page) => workforceCategoryCodes.has(page.code) || page.code.startsWith("workforce_category_")
+  },
+  { key: "reports", label: "Attendance", codes: ["attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports"], hiddenCodes: ["reports"] },
+  { key: "inbox", label: "Inbox", codes: ["inbox"] },
+  { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },
+  { key: "payments", label: "Payments", codes: ["advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "workforce_payouts", "payment_reports"], hiddenCodes: ["payments"] },
+  { key: "imports", label: "Report Imports", codes: ["imports"] },
+  { key: "notifications", label: "Notifications", codes: ["notifications_whatsapp", "notifications_history", "notifications_app"], hiddenCodes: ["notifications"] },
+  { key: "users", label: "Users & Access", codes: ["users"] },
+  { key: "master_data", label: "People Masters", codes: ["master_locations", "master_providers", "payment_methods", "master_payment_banks", "master_payment_heads", "master_contacts", "workforce_categories", "workforce_whatsapp", "designations", "biometric_devices", "master_documents", "master_imports"], hiddenCodes: ["master_data"] },
+  { key: "settings", label: "Settings", codes: ["app_settings"] }
+];
+
 function emptyPermissionState(pages: PermissionPage[]) {
   return Object.fromEntries(pages.map((page) => [page.id, { view: false, add: false, edit: false }])) as Record<string, Record<PermissionAction, boolean>>;
 }
@@ -78,7 +96,7 @@ export function PermissionMatrix({
 }: {
   initialPermissions?: Array<{ page_id: string; can_view: boolean; can_add: boolean; can_edit: boolean }>;
   pages: PermissionPage[];
-  surface: AccessSurface;
+  surface: AdminAccessSurface;
 }) {
   const [search, setSearch] = useState("");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -95,7 +113,7 @@ export function PermissionMatrix({
   });
 
   const groups = useMemo(() => {
-    const definitions = surface === "ops" ? opsGroups : dashboardGroups;
+    const definitions = surface === "ops" ? opsGroups : surface === "people" ? peopleGroups : dashboardGroups;
     const definedGroups = definitions.map((definition) => ({
       ...definition,
       pages: pages.filter((page) => definition.codes.includes(page.code) || definition.matches?.(page)),

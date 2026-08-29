@@ -19,12 +19,17 @@ import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { operatingModeForLocation } from "@/lib/ops-pulse/operating-context";
 import { loadPaymentNotificationSnapshot } from "@/lib/payment-notification-counts";
 import { opsNavItemsForMode } from "@/lib/ops-pulse/navigation";
+import { isCustomWorkforceCategoryCode, workforceCategoryPageCode } from "@/lib/dynamic-workforce";
+import { peopleNavItems } from "@/lib/people/navigation";
+import { isPeopleHostName } from "@/lib/people/surface";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function AppShell({ children, active, pageCode }: { children: ReactNode; active: string; pageCode?: string }) {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
-  const host = headers().get("host")?.split(":")[0].toLowerCase() ?? "";
+  const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
   const isOpsHost = host === "ops.dropxlogistics.com" || host.startsWith("ops-");
+  const isPeopleHost = isPeopleHostName(host);
   const opsAppUrl = process.env.OPS_APP_URL?.trim();
   const opsLocationsResult = isOpsHost
     ? await loadCodLocations(
@@ -36,8 +41,39 @@ export async function AppShell({ children, active, pageCode }: { children: React
   const opsContext = resolveOperatingContext(opsLocationsResult.locations);
   const baseShellNavItems = isOpsHost
     ? opsNavItemsForMode(opsContext.mode)
-    : navItems.map((item) => item.code === "ops_pulse" && opsAppUrl ? { ...item, href: opsAppUrl } : item);
-  const shellNavItems = baseShellNavItems;
+    : isPeopleHost
+      ? peopleNavItems
+      : navItems.map((item) => item.code === "ops_pulse" && opsAppUrl ? { ...item, href: opsAppUrl } : item);
+  let shellNavItems = baseShellNavItems;
+  if (isPeopleHost && supabaseAdmin && authorization.companyId) {
+    const categoryResult = await supabaseAdmin
+      .from("workforce_categories")
+      .select("code, name")
+      .eq("company_id", authorization.companyId)
+      .eq("is_active", true)
+      .order("sort_order")
+      .order("name");
+    const categoryChildren = (categoryResult.data ?? [])
+      .filter((category) => isCustomWorkforceCategoryCode(category.code))
+      .map((category) => ({
+        code: workforceCategoryPageCode(category.code),
+        label: category.name,
+        href: `/people/category/${encodeURIComponent(category.code)}`
+      }));
+    shellNavItems = baseShellNavItems.map((item) => {
+      if (item.code !== "people_all" || !item.children?.length || !categoryChildren.length) return item;
+      const reviewIndex = item.children.findIndex((child) => child.code === "people_review");
+      const insertAt = reviewIndex < 0 ? item.children.length : reviewIndex;
+      return {
+        ...item,
+        children: [
+          ...item.children.slice(0, insertAt),
+          ...categoryChildren,
+          ...item.children.slice(insertAt)
+        ]
+      };
+    });
+  }
 
   const activeItem = shellNavItems.find((item) => item.label === active || item.children?.some((child) => child.label === active));
   const currentPageCode = pageCode ?? activeItem?.code;
@@ -94,6 +130,10 @@ export async function AppShell({ children, active, pageCode }: { children: React
                   <small>Ops intelligence</small>
                 </span>
               </div>
+            ) : isPeopleHost ? (
+              <div className="people-brand-lockup">
+                <strong>People</strong>
+              </div>
             ) : null}
           </div>
 
@@ -107,7 +147,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
         </aside>
       )}
     >
-      <DocumentTitle pageName={active} productName={isOpsHost ? "OpsPulse · DropX" : "DropX Dashboard"} />
+      <DocumentTitle pageName={active} productName={isOpsHost ? "OpsPulse · DropX" : isPeopleHost ? "DropX People" : "DropX Dashboard"} />
       <InboxNotificationListener enabled={inboxNotificationsEnabled} />
       {children}
       {isOpsHost && hasPermission(authorization, "ops_pulse", "access") ? <OpsAiChat /> : null}
