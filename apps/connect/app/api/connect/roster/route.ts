@@ -3,7 +3,17 @@ import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 type WorkerType = "employee" | "contractor";
-type Entry = { id: string; company_id: string; plan_id: string; worker_type: WorkerType; worker_id: string; roster_date: string; day_type: "working" | "weekly_off"; shift_id: string | null; location_id: string | null; hr_shifts?: { id: string; name: string; code: string; start_time: string; end_time: string } | Array<{ id: string; name: string; code: string; start_time: string; end_time: string }> | null; hr_roster_plans?: { status: string } | Array<{ status: string }> | null };
+type Shift = { id: string; name: string; code: string; start_time: string; end_time: string };
+type PlanMeta = { status: string; roster_kind?: string; effective_from?: string; superseded_at?: string | null; revision_no?: number | null };
+type Entry = { id: string; company_id: string; plan_id: string; worker_type: WorkerType; worker_id: string; roster_date: string; day_type: "working" | "weekly_off"; shift_id: string | null; location_id: string | null; hr_shifts?: Shift | Shift[] | null; hr_roster_plans?: PlanMeta | PlanMeta[] | null };
+type SwapRow = {
+  id: string; requester_entry_id: string; partner_entry_id: string;
+  requester_worker_type: WorkerType; requester_worker_id: string;
+  partner_worker_type: WorkerType; partner_worker_id: string;
+  requester_shift_id: string | null; partner_shift_id: string | null;
+  requester_day_type: "working" | "weekly_off"; partner_day_type: "working" | "weekly_off";
+  roster_date: string; status: string; requester_note: string | null; partner_note: string | null; requested_at: string;
+};
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -32,21 +42,19 @@ async function expandRecurringOwnEntries(account: ConnectAccount, workerType: Wo
   }
   if (!locationId) return direct;
 
-  const plansResult = await db().from("hr_roster_plans")
-    .select("id,effective_from,superseded_at,revision_no")
-    .eq("company_id", account.companyId).eq("location_id", locationId).eq("roster_kind", "recurring_weekly").eq("status", "approved");
-  if (plansResult.error || !plansResult.data?.length) return direct;
-
   const patternResult = await db().from("hr_roster_entries")
     .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
     .eq("company_id", account.companyId).eq("worker_type", workerType).eq("worker_id", account.id)
-    .in("plan_id", plansResult.data.map((plan) => plan.id));
+    .eq("location_id", locationId)
+    .eq("hr_roster_plans.status", "approved")
+    .eq("hr_roster_plans.roster_kind", "recurring_weekly");
   if (patternResult.error) throw new Error(patternResult.error.message);
+  if (!patternResult.data?.length) return direct;
 
   const index = new Map<string, Array<{ effectiveFrom: string; supersededAt: string | null; revisionNo: number; entry: Entry }>>();
   for (const row of patternResult.data ?? []) {
     const entry = row as unknown as Entry;
-    const plan = relation(entry.hr_roster_plans) as { effective_from?: string; superseded_at?: string | null; revision_no?: number | null } | null;
+    const plan = relation(entry.hr_roster_plans);
     if (!plan?.effective_from) continue;
     const key = String(isoWeekday(entry.roster_date));
     index.set(key, [...(index.get(key) ?? []), {
@@ -132,22 +140,36 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType) {
     if (colleagues.error) throw new Error(colleagues.error.message);
     colleagueEntries = (colleagues.data ?? []) as unknown as Entry[];
   }
-  const employeeIds = [...new Set(colleagueEntries.filter((item) => item.worker_type === "employee").map((item) => item.worker_id))];
-  const contractorIds = [...new Set(colleagueEntries.filter((item) => item.worker_type === "contractor").map((item) => item.worker_id))];
-  const swapColumns = "id,requester_entry_id,partner_entry_id,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,roster_date,status,requester_note,partner_note,requested_at";
-  const [employees, contractors, requesterSwaps, partnerSwaps] = await Promise.all([
-    employeeIds.length ? db().from("employees").select("id,employee_code,full_name").in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
-    contractorIds.length ? db().from("contractors").select("id,dropx_id,full_name").in("id", contractorIds) : Promise.resolve({ data: [], error: null }),
+  const swapColumns = "id,requester_entry_id,partner_entry_id,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,requester_shift_id,partner_shift_id,requester_day_type,partner_day_type,roster_date,status,requester_note,partner_note,requested_at";
+  const [requesterSwaps, partnerSwaps] = await Promise.all([
     db().from("hr_roster_swap_requests").select(swapColumns).eq("company_id", account.companyId).eq("requester_worker_type", workerType).eq("requester_worker_id", account.id).order("requested_at", { ascending: false }).limit(30),
     db().from("hr_roster_swap_requests").select(swapColumns).eq("company_id", account.companyId).eq("partner_worker_type", workerType).eq("partner_worker_id", account.id).order("requested_at", { ascending: false }).limit(30)
   ]);
-  if (employees.error || contractors.error || requesterSwaps.error || partnerSwaps.error) throw new Error(employees.error?.message ?? contractors.error?.message ?? requesterSwaps.error?.message ?? partnerSwaps.error?.message ?? "Roster could not be loaded.");
+  if (requesterSwaps.error || partnerSwaps.error) throw new Error(requesterSwaps.error?.message ?? partnerSwaps.error?.message ?? "Roster could not be loaded.");
   const swaps = [...new Map([...(requesterSwaps.data ?? []), ...(partnerSwaps.data ?? [])].map((item) => [item.id, item])).values()]
     .sort((left, right) => String(right.requested_at).localeCompare(String(left.requested_at)))
-    .slice(0, 30);
+    .slice(0, 30) as unknown as SwapRow[];
+  const participantEntries = [
+    ...colleagueEntries.map((item) => ({ worker_type: item.worker_type, worker_id: item.worker_id })),
+    ...swaps.flatMap((item) => [
+      { worker_type: item.requester_worker_type, worker_id: item.requester_worker_id },
+      { worker_type: item.partner_worker_type, worker_id: item.partner_worker_id }
+    ])
+  ];
+  const employeeIds = [...new Set(participantEntries.filter((item) => item.worker_type === "employee").map((item) => item.worker_id))];
+  const contractorIds = [...new Set(participantEntries.filter((item) => item.worker_type === "contractor").map((item) => item.worker_id))];
+  const storedShiftIds = [...new Set(swaps.flatMap((item) => [item.requester_shift_id, item.partner_shift_id]).filter(Boolean))] as string[];
+  const [employees, contractors, storedShifts] = await Promise.all([
+    employeeIds.length ? db().from("employees").select("id,employee_code,full_name").in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
+    contractorIds.length ? db().from("contractors").select("id,dropx_id,full_name").in("id", contractorIds) : Promise.resolve({ data: [], error: null }),
+    storedShiftIds.length ? db().from("hr_shifts").select("id,name,code,start_time,end_time").in("id", storedShiftIds) : Promise.resolve({ data: [], error: null })
+  ]);
+  if (employees.error || contractors.error || storedShifts.error) throw new Error(employees.error?.message ?? contractors.error?.message ?? storedShifts.error?.message ?? "Roster could not be loaded.");
   const names = new Map<string, { name: string; code: string }>();
   for (const item of employees.data ?? []) names.set(`employee:${item.id}`, { name: item.full_name, code: item.employee_code });
   for (const item of contractors.data ?? []) names.set(`contractor:${item.id}`, { name: item.full_name, code: item.dropx_id });
+  const shifts = new Map<string, Shift>();
+  for (const item of storedShifts.data ?? []) shifts.set(item.id, item as Shift);
   const leadHours = await swapCutoff(account.companyId);
   const entriesById = new Map([...own, ...colleagueEntries].map((entry) => [entry.id, entry]));
   const days = own.map((entry) => ({
@@ -172,10 +194,10 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType) {
       isRequester,
       isPartner: !isRequester,
       counterpart: names.get(counterpartKey) ?? { name: "Colleague", code: "" },
-      requesterShift: requesterEntry?.day_type === "weekly_off" ? null : requesterEntry ? shiftOf(requesterEntry) : null,
-      partnerShift: partnerEntry?.day_type === "weekly_off" ? null : partnerEntry ? shiftOf(partnerEntry) : null,
-      requesterDayType: requesterEntry?.day_type ?? "working",
-      partnerDayType: partnerEntry?.day_type ?? "working"
+      requesterShift: request.requester_day_type === "weekly_off" ? null : (requesterEntry ? shiftOf(requesterEntry) : null) ?? (request.requester_shift_id ? shifts.get(request.requester_shift_id) ?? null : null),
+      partnerShift: request.partner_day_type === "weekly_off" ? null : (partnerEntry ? shiftOf(partnerEntry) : null) ?? (request.partner_shift_id ? shifts.get(request.partner_shift_id) ?? null : null),
+      requesterDayType: request.requester_day_type,
+      partnerDayType: request.partner_day_type
     };
   });
   return { days, leadHours, requests, self: { workerType, workerId: account.id }, viewDays: ROSTER_VIEW_DAYS };

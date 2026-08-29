@@ -63,6 +63,17 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
 
   useEffect(() => { void load(); }, [load]);
   const selectedPartner = useMemo(() => selectedDay?.partners.find((partner) => partner.id === partnerEntryId) ?? null, [selectedDay, partnerEntryId]);
+  const activeRequests = useMemo(() => (data?.requests ?? []).filter((request) => ["pending_partner", "pending_manager"].includes(request.status)), [data?.requests]);
+  const completedRequests = useMemo(() => (data?.requests ?? []).filter((request) => !["pending_partner", "pending_manager"].includes(request.status)), [data?.requests]);
+
+  function requestRow(request: SwapRequest) {
+    const direction = request.isRequester ? `You requested with ${request.counterpart.name}` : `${request.counterpart.name} requested with you`;
+    return <article key={request.id}>
+      <div><i><ArrowLeftRight /></i><span><strong>{displayDate(request.date)} · {direction}</strong><small>{shiftLabel(request.requesterShift, request.requesterDayType)} ↔ {shiftLabel(request.partnerShift, request.partnerDayType)}</small></span><em className={request.status}>{statusLabel[request.status]}</em></div>
+      {request.status === "pending_partner" && request.isPartner ? <footer><button className="reject" disabled={Boolean(pending)} onClick={() => void decide(request.id, "reject")}><X />Decline</button><button className="accept" disabled={Boolean(pending)} onClick={() => void decide(request.id, "accept")}><Check />Accept</button></footer> : null}
+      {request.isRequester && ["pending_partner", "pending_manager"].includes(request.status) ? <footer><button className="cancel" disabled={Boolean(pending)} onClick={() => void decide(request.id, "cancel")}><X />Cancel request</button></footer> : null}
+    </article>;
+  }
 
   async function requestSwap() {
     if (!selectedDay || !partnerEntryId) return;
@@ -109,10 +120,7 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
       <small className="dx-roster-rule">Both colleagues must agree. Your immediate manager gives final approval.</small>
     </div> : null}
 
-    {!loading && (data?.requests ?? []).length ? <section className="dx-roster-requests"><header><small>Shift changes</small><h2>Swap requests</h2></header>{data?.requests.map((request) => <article key={request.id}>
-      <div><i><ArrowLeftRight /></i><span><strong>{displayDate(request.date)} · {request.counterpart.name}</strong><small>{shiftLabel(request.requesterShift, request.requesterDayType)} ↔ {shiftLabel(request.partnerShift, request.partnerDayType)}</small></span><em className={request.status}>{statusLabel[request.status]}</em></div>
-      {request.status === "pending_partner" && request.isPartner ? <footer><button className="reject" disabled={Boolean(pending)} onClick={() => void decide(request.id, "reject")}><X />Decline</button><button className="accept" disabled={Boolean(pending)} onClick={() => void decide(request.id, "accept")}><Check />Accept</button></footer> : null}
-      {request.isRequester && ["pending_partner", "pending_manager"].includes(request.status) ? <footer><button className="cancel" disabled={Boolean(pending)} onClick={() => void decide(request.id, "cancel")}><X />Cancel request</button></footer> : null}
-    </article>)}</section> : null}
+    {!loading && activeRequests.length ? <section className="dx-roster-requests"><header><small>Action needed</small><h2>Active swap requests</h2></header>{activeRequests.map(requestRow)}</section> : null}
+    {!loading && completedRequests.length ? <details className="dx-roster-history"><summary><span><small>Shift changes</small><strong>Recent swap history</strong></span><em>{completedRequests.length}</em></summary><section className="dx-roster-requests">{completedRequests.map(requestRow)}</section></details> : null}
   </section>;
 }
