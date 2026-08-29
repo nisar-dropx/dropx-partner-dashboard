@@ -26,6 +26,31 @@ async function approverUserId(account: ConnectAccount) {
   return (await connectApproverIdentity(account))?.userId ?? null;
 }
 
+async function canConnectFinalizeAttendance(companyId: string, userId: string) {
+  const pageResult = await db().from("hr_permission_pages")
+    .select("id").eq("company_id", companyId).eq("code", "attendance").eq("is_active", true).maybeSingle();
+  if (pageResult.error || !pageResult.data) return false;
+  const permissionResult = await db().from("hr_role_page_permissions")
+    .select("role_id").eq("company_id", companyId).eq("page_id", pageResult.data.id).eq("can_approve", true);
+  if (permissionResult.error) throw new Error(permissionResult.error.message);
+  const roleIds = [...new Set((permissionResult.data ?? []).map((row) => row.role_id))];
+  if (!roleIds.length) return false;
+  const today = todayInIndia();
+  const grantResult = await db().from("hr_access_grants").select("id")
+    .eq("company_id", companyId).eq("user_id", userId).eq("is_active", true).in("role_id", roleIds)
+    .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`).limit(1);
+  if (grantResult.error && !String(grantResult.error.message).toLowerCase().includes("does not exist")) {
+    throw new Error(grantResult.error.message);
+  }
+  if ((grantResult.data ?? []).length) return true;
+  const legacyResult = await db().from("hr_user_access").select("id")
+    .eq("company_id", companyId).eq("user_id", userId).eq("is_active", true).in("role_id", roleIds).limit(1);
+  if (legacyResult.error && !String(legacyResult.error.message).toLowerCase().includes("does not exist")) {
+    throw new Error(legacyResult.error.message);
+  }
+  return Boolean((legacyResult.data ?? []).length);
+}
+
 async function signedEvidence(path: string | null | undefined) {
   if (!path) return null;
   const result = await db().storage.from("employee-profile-documents").createSignedUrl(path, 60 * 15);
@@ -67,8 +92,106 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount) {
     reasonCode: request.reason_code,
     remarks: request.remarks,
     evidenceUrl: await signedEvidence(request.attachment_path),
-    createdAt: request.created_at
+    createdAt: request.created_at,
+    queue: "manager" as const
   })));
+}
+
+export async function listConnectAttendanceHrApprovals(account: ConnectAccount) {
+  const actorUserId = await approverUserId(account);
+  if (!actorUserId) return [];
+  if (!(await canConnectFinalizeAttendance(account.companyId, actorUserId))) return [];
+  const requestsResult = await db().from("attendance_regularization_requests")
+    .select("id,profile_type,profile_id,dropx_id,full_name,attendance_date,current_in_time,current_out_time,requested_in_time,requested_out_time,reason_code,remarks,attachment_path,status,created_at")
+    .eq("company_id", account.companyId).is("request_kind", null)
+    .in("status", ["pending_hr", "pending"])
+    .order("created_at");
+  if (requestsResult.error) throw new Error(requestsResult.error.message);
+  const rows = (requestsResult.data ?? []) as Array<{
+    id: string;
+    profile_type: string;
+    profile_id: string;
+    dropx_id: string | null;
+    full_name: string | null;
+    attendance_date: string;
+    current_in_time: string | null;
+    current_out_time: string | null;
+    requested_in_time: string | null;
+    requested_out_time: string | null;
+    reason_code: string;
+    remarks: string | null;
+    attachment_path: string | null;
+    status: string;
+    created_at: string;
+  }>;
+  const filtered = [];
+  for (const request of rows) {
+    if (request.status === "pending_hr") {
+      filtered.push(request);
+      continue;
+    }
+    const stepsResult = await db().from("attendance_regularization_approval_steps")
+      .select("id").eq("company_id", account.companyId).eq("request_id", request.id).limit(1);
+    if (stepsResult.error) throw new Error(stepsResult.error.message);
+    if (!(stepsResult.data ?? []).length) filtered.push(request);
+  }
+  return Promise.all(filtered.map(async (request) => ({
+    id: request.id,
+    requestId: request.id,
+    stepName: "HR finalization",
+    stepOrder: 0,
+    workerName: request.full_name || "Team member",
+    workerCode: request.dropx_id || "",
+    profileType: request.profile_type === "contractor" ? "contractor" as const : "employee" as const,
+    attendanceDate: request.attendance_date,
+    currentInTime: request.current_in_time,
+    currentOutTime: request.current_out_time,
+    requestedInTime: request.requested_in_time,
+    requestedOutTime: request.requested_out_time,
+    reasonCode: request.reason_code,
+    remarks: request.remarks,
+    evidenceUrl: await signedEvidence(request.attachment_path),
+    createdAt: request.created_at,
+    queue: "hr" as const
+  })));
+}
+
+export async function decideConnectAttendanceHrApproval(
+  account: ConnectAccount,
+  requestIdValue: unknown,
+  decisionValue: unknown,
+  noteValue: unknown
+) {
+  const actorUserId = await approverUserId(account);
+  if (!actorUserId) throw new Error("A linked People login is required to finalize attendance.");
+  if (!(await canConnectFinalizeAttendance(account.companyId, actorUserId))) {
+    throw new Error("Attendance finalization is not enabled for this account.");
+  }
+  const requestId = clean(requestIdValue);
+  const decision = clean(decisionValue);
+  const note = clean(noteValue);
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !["approved", "returned", "rejected"].includes(decision)) {
+    throw new Error("Choose Apply correction, Return, or Reject.");
+  }
+  if (decision !== "approved" && note.length < 3) throw new Error("Add a note when returning or rejecting.");
+  const request = await db().from("attendance_regularization_requests").select("attachment_path")
+    .eq("company_id", account.companyId).eq("id", requestId).is("request_kind", null).maybeSingle();
+  if (request.error || !request.data) throw new Error(request.error?.message ?? "Attendance request was not found.");
+  if (decision === "approved" && !(await signedEvidence(request.data.attachment_path))) {
+    throw new Error("Correction cannot be applied. Workplace CCTV proof is missing or unavailable.");
+  }
+  const result = await db().rpc("hr_review_attendance_regularization", {
+    p_company_id: account.companyId,
+    p_request_id: requestId,
+    p_decision: decision,
+    p_review_remarks: note,
+    p_reviewer_id: actorUserId,
+    p_reviewer_name: account.name ?? account.reference ?? "HR reviewer"
+  });
+  if (result.error) throw new Error(result.error.message);
+  if (decision === "approved") return "Attendance correction applied to the register.";
+  if (decision === "returned") return "Attendance correction returned to the worker.";
+  return "Attendance correction rejected.";
 }
 
 export async function decideConnectAttendanceApproval(account: ConnectAccount, requestIdValue: unknown, decisionValue: unknown, noteValue: unknown) {

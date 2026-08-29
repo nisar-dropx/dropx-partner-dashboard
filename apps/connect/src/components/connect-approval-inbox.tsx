@@ -75,6 +75,7 @@ type AttendanceApproval = {
   remarks: string | null;
   evidenceUrl: string | null;
   createdAt: string;
+  queue?: "manager" | "hr";
 };
 
 type ApprovalSection = "time-off" | "attendance" | "location-integrity" | "reimbursements";
@@ -192,6 +193,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [reimbursements, setReimbursements] = useState<ReimbursementApproval[]>([]);
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
   const [attendanceApprovals, setAttendanceApprovals] = useState<AttendanceApproval[]>([]);
+  const [attendanceHrApprovals, setAttendanceHrApprovals] = useState<AttendanceApproval[]>([]);
   const [supportPackages, setSupportPackages] = useState<LocationSupportPackage[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -214,10 +216,11 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       setReimbursements(reimbursementPayload.approvals ?? []);
       setLeaveApprovals(leavePayload.leaveApprovals ?? []);
       setAttendanceApprovals(leavePayload.attendanceApprovals ?? []);
+      setAttendanceHrApprovals(leavePayload.attendanceHrApprovals ?? []);
       setSupportPackages(leavePayload.locationSupportPackages ?? []);
       setSection((current) => {
         if (current === "time-off" && !(leavePayload.leaveApprovals ?? []).length) {
-          if ((leavePayload.attendanceApprovals ?? []).length) return "attendance";
+          if ((leavePayload.attendanceApprovals ?? []).length || (leavePayload.attendanceHrApprovals ?? []).length) return "attendance";
           if ((leavePayload.locationSupportPackages ?? []).length) return "location-integrity";
           if ((reimbursementPayload.approvals ?? []).length) return "reimbursements";
         }
@@ -263,13 +266,20 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     finally { setSaving(false); }
   }
 
-  async function decideAttendance(requestId: string, decision: "approved" | "rejected") {
+  async function decideAttendance(requestId: string, decision: "approved" | "rejected" | "returned", queue: "manager" | "hr" = "manager") {
     setSaving(true); setError(""); setNotice("");
     try {
       const response = await fetch("/api/connect/approvals", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: account.id, profileType: account.profileType, attendanceRequestId: requestId, decision, note: notes[requestId] ?? "" })
+        body: JSON.stringify({
+          accountId: account.id,
+          profileType: account.profileType,
+          attendanceRequestId: requestId,
+          attendanceQueue: queue,
+          decision,
+          note: notes[requestId] ?? ""
+        })
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update attendance approval.");
@@ -293,6 +303,73 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     finally { setSaving(false); }
   }
 
+  const attendanceCount = attendanceApprovals.length + attendanceHrApprovals.length;
+
+  function renderAttendanceCard(approval: AttendanceApproval, queue: "manager" | "hr") {
+    const noteRequired = queue === "hr";
+    return (
+      <article className="dx-approval-card" key={`${queue}:${approval.id}`}>
+        <ApprovalHead
+          badge={<span className="dx-approval-badge">{displayDate(approval.attendanceDate)}</span>}
+          eyebrow={`${regularizationReasonLabel(approval.reasonCode)} · ${approval.stepName}`}
+          meta={`${approval.workerCode || "—"} · ${profileLabel(approval.profileType)}`}
+          name={approval.workerName}
+        />
+        <div className="dx-approval-time-grid">
+          <div>
+            <small>Current record</small>
+            <p><span>IN</span><strong>{displayTime(approval.currentInTime)}</strong></p>
+            <p><span>OUT</span><strong>{displayTime(approval.currentOutTime)}</strong></p>
+          </div>
+          <div className="requested">
+            <small>Requested</small>
+            <p><span>IN</span><strong>{displayTime(approval.requestedInTime)}</strong></p>
+            <p><span>OUT</span><strong>{displayTime(approval.requestedOutTime)}</strong></p>
+          </div>
+        </div>
+        {approval.remarks ? <p className="dx-approval-inline-note">{approval.remarks}</p> : null}
+        {approval.evidenceUrl ? (
+          <div className="dx-approval-evidence compact">
+            <a aria-label="View CCTV proof" className="dx-approval-evidence-photo" href={approval.evidenceUrl} rel="noreferrer" target="_blank">
+              <img alt="" src={approval.evidenceUrl} />
+              <Camera />
+            </a>
+            <div className="dx-approval-evidence-copy">
+              <p className="dx-approval-evidence-note">Workplace CCTV proof attached</p>
+              <div className="dx-approval-evidence-foot">
+                <small>Submitted {dateTime(approval.createdAt)}</small>
+                <a href={approval.evidenceUrl} rel="noreferrer" target="_blank"><FileText />Open proof</a>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="dx-approval-inline-note warn">Proof missing — approval will be blocked until evidence is available.</p>
+        )}
+        <ApprovalNote
+          id={approval.requestId}
+          notes={notes}
+          onChange={(value) => setNote(approval.requestId, value)}
+          placeholder={noteRequired ? "Required when returning or rejecting" : "Note for worker (optional)"}
+        />
+        {queue === "hr" ? (
+          <ApprovalToolbar
+            onApprove={() => void decideAttendance(approval.requestId, "approved", "hr")}
+            onReject={() => void decideAttendance(approval.requestId, "rejected", "hr")}
+            onReturn={() => void decideAttendance(approval.requestId, "returned", "hr")}
+            saving={saving}
+          />
+        ) : (
+          <ApprovalToolbar
+            onApprove={() => void decideAttendance(approval.requestId, "approved", "manager")}
+            onReject={() => void decideAttendance(approval.requestId, "rejected", "manager")}
+            saving={saving}
+            showReturn={false}
+          />
+        )}
+      </article>
+    );
+  }
+
   return (
     <section className="dx-approval-inbox">
       <header className="dx-page-intro">
@@ -307,7 +384,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
           Time off<span>{leaveApprovals.length}</span>
         </button>
         <button className={section === "attendance" ? "active" : ""} onClick={() => setSection("attendance")} type="button">
-          Attendance<span>{attendanceApprovals.length}</span>
+          Attendance<span>{attendanceCount}</span>
         </button>
         <button className={section === "location-integrity" ? "active" : ""} onClick={() => setSection("location-integrity")} type="button">
           Location<span>{supportPackages.length}</span>
@@ -348,55 +425,27 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
 
       {!loading && section === "attendance" ? (
         <div className="dx-approval-list">
-          {attendanceApprovals.length ? attendanceApprovals.map((approval) => (
-            <article className="dx-approval-card" key={approval.id}>
-              <ApprovalHead
-                badge={<span className="dx-approval-badge">{displayDate(approval.attendanceDate)}</span>}
-                eyebrow={`${regularizationReasonLabel(approval.reasonCode)} · ${approval.stepName}`}
-                meta={`${approval.workerCode || "—"} · ${profileLabel(approval.profileType)}`}
-                name={approval.workerName}
-              />
-              <div className="dx-approval-time-grid">
-                <div>
-                  <small>Current record</small>
-                  <p><span>IN</span><strong>{displayTime(approval.currentInTime)}</strong></p>
-                  <p><span>OUT</span><strong>{displayTime(approval.currentOutTime)}</strong></p>
-                </div>
-                <div className="requested">
-                  <small>Requested</small>
-                  <p><span>IN</span><strong>{displayTime(approval.requestedInTime)}</strong></p>
-                  <p><span>OUT</span><strong>{displayTime(approval.requestedOutTime)}</strong></p>
-                </div>
-              </div>
-              {approval.remarks ? <p className="dx-approval-inline-note">{approval.remarks}</p> : null}
-              {approval.evidenceUrl ? (
-                <div className="dx-approval-evidence compact">
-                  <a aria-label="View CCTV proof" className="dx-approval-evidence-photo" href={approval.evidenceUrl} rel="noreferrer" target="_blank">
-                    <img alt="" src={approval.evidenceUrl} />
-                    <Camera />
-                  </a>
-                  <div className="dx-approval-evidence-copy">
-                    <p className="dx-approval-evidence-note">Workplace CCTV proof attached</p>
-                    <div className="dx-approval-evidence-foot">
-                      <small>Submitted {dateTime(approval.createdAt)}</small>
-                      <a href={approval.evidenceUrl} rel="noreferrer" target="_blank"><FileText />Open proof</a>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <p className="dx-approval-inline-note warn">Proof missing — approval will be blocked until evidence is available.</p>
-              )}
-              <ApprovalNote id={approval.requestId} notes={notes} onChange={(value) => setNote(approval.requestId, value)} placeholder="Note for worker (optional)" />
-              <ApprovalToolbar
-                onApprove={() => void decideAttendance(approval.requestId, "approved")}
-                onReject={() => void decideAttendance(approval.requestId, "rejected")}
-                saving={saving}
-                showReturn={false}
-              />
-            </article>
-          )) : (
-            <div className="dx-empty"><CalendarClock /><strong>No attendance regularizations</strong><small>Correction requests from your team will appear here.</small></div>
-          )}
+          {attendanceApprovals.length ? (
+            <>
+              <header className="dx-approval-section-head">
+                <strong>Reporting manager</strong>
+                <span>{attendanceApprovals.length} pending</span>
+              </header>
+              {attendanceApprovals.map((approval) => renderAttendanceCard(approval, "manager"))}
+            </>
+          ) : null}
+          {attendanceHrApprovals.length ? (
+            <>
+              <header className="dx-approval-section-head">
+                <strong>HR finalization</strong>
+                <span>{attendanceHrApprovals.length} pending</span>
+              </header>
+              {attendanceHrApprovals.map((approval) => renderAttendanceCard(approval, "hr"))}
+            </>
+          ) : null}
+          {!attendanceApprovals.length && !attendanceHrApprovals.length ? (
+            <div className="dx-empty"><CalendarClock /><strong>No attendance regularizations</strong><small>Manager steps and HR finalizations assigned to you will appear here.</small></div>
+          ) : null}
         </div>
       ) : null}
 

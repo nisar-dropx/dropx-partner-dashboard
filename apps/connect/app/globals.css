@@ -14671,6 +14671,32 @@ body {
   height: 72px;
 }
 
+.dx-approval-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 2px 0;
+  padding: 0 2px;
+}
+
+.dx-approval-section-head strong {
+  color: #344054;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dx-approval-section-head span {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.dx-approval-section-head + .dx-approval-card,
+.dx-approval-section-head + header + .dx-approval-card {
+  margin-top: 0;
+}
+
 .dx-approval-note-input {
   width: 100%;
   min-height: 68px;
