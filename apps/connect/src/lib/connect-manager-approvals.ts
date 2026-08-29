@@ -95,11 +95,10 @@ export async function decideConnectAttendanceApproval(account: ConnectAccount, r
     p_note: note
   });
   if (result.error) throw new Error(result.error.message);
-  return result.data === "pending_manager"
-    ? "Attendance step approved and routed to the next manager."
-    : result.data === "pending_hr"
-      ? "Manager approvals complete. People will perform final attendance validation."
-      : "Attendance correction rejected.";
+  if (result.data === "approved") return "Attendance regularization approved.";
+  if (result.data === "pending_manager") return "Attendance step approved and routed to the next manager.";
+  if (result.data === "pending_hr") return "Manager approvals complete. People will perform final attendance validation.";
+  return "Attendance regularization rejected.";
 }
 
 async function canApproveUnassignedRosterHr(account: ConnectAccount) {
