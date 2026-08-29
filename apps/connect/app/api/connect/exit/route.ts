@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
-import { notifyEmployeeExitSubmitted, notifyEmployeeExitWithdrawal, notifyExitApprovalRequired } from "../../../../src/lib/connect-exit-notifications";
+import { notifyEmployeeExitSubmitted, notifyExitApprovalRequired } from "../../../../src/lib/connect-exit-notifications";
 import { createAppNotification } from "../../../../src/lib/app-notifications";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { todayInIndia } from "../../../../src/lib/india-date";
@@ -396,11 +396,27 @@ export async function POST(request: Request) {
       if (!policyResult.data?.withdrawal_allowed) throw new Error("Withdrawal requests are disabled by company policy.");
       const exitCase = caseResult.data;
       if (!exitCase || ["documents_ready", "closed"].includes(exitCase.status)) throw new Error("This exit request can no longer be withdrawn.");
-      const updated = await db().from("hr_exit_cases").update({ status: "withdrawal_requested", updated_at: new Date().toISOString() }).eq("id", exitCase.id);
+      const now = new Date().toISOString();
+      const updated = await db().from("hr_exit_cases").update({
+        status: "withdrawn",
+        current_stage: "closed",
+        updated_at: now
+      }).eq("id", exitCase.id);
       if (updated.error) throw new Error(updated.error.message);
-      await db().from("hr_exit_events").insert({ company_id: context.account.companyId, case_id: exitCase.id, event_code: "WITHDRAWAL_REQUESTED", title: "Withdrawal requested", actor_name: context.account.name ?? context.worker.full_name, details: {} });
-      await notifyEmployeeExitWithdrawal({ companyId: context.account.companyId, caseId: exitCase.id, employee: context.worker, requestedDate: exitCase.requested_last_working_date ?? "" });
-      return NextResponse.json({ ok: true, notice: "Withdrawal request sent to the configured reviewers." });
+      const skipped = await db().from("hr_exit_approvals").update({ status: "skipped", updated_at: now })
+        .eq("case_id", exitCase.id).in("status", ["pending", "waiting"]);
+      if (skipped.error && !String(skipped.error.message).toLowerCase().includes("does not exist")) {
+        throw new Error(skipped.error.message);
+      }
+      await db().from("hr_exit_events").insert({
+        company_id: context.account.companyId,
+        case_id: exitCase.id,
+        event_code: "WITHDRAWN",
+        title: "Resignation withdrawn",
+        actor_name: context.account.name ?? context.worker.full_name,
+        details: {}
+      });
+      return NextResponse.json({ ok: true, notice: "Resignation withdrawn. You can submit a new request when ready." });
     }
 
     const reasonId = clean(body.reasonId);
@@ -419,7 +435,7 @@ export async function POST(request: Request) {
     const [reasonResult, policyResult, existingResult] = await Promise.all([
       db().from("hr_exit_reasons").select("id, name, comment_required, default_rehire_eligible").eq("company_id", context.account.companyId).eq("scenario", "resignation").eq("employee_selectable", true).eq("is_active", true).eq("id", reasonId).maybeSingle(),
       db().from("hr_exit_policies").select("*").eq("company_id", context.account.companyId).maybeSingle(),
-      caseQuery(context).not("status", "in", '("closed","rejected","withdrawn","cancelled")').limit(1)
+      caseQuery(context).not("status", "in", '("closed","rejected","withdrawn","cancelled","withdrawal_requested")').limit(1)
     ]);
     if (reasonResult.error || policyResult.error || existingResult.error) throw new Error(reasonResult.error?.message ?? policyResult.error?.message ?? existingResult.error?.message ?? "Unable to validate exit request.");
     if (!context.worker.is_active || !reasonResult.data) throw new Error("Profile or resignation reason is unavailable.");

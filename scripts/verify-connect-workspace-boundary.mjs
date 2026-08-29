@@ -44,6 +44,18 @@ requireSource(
   "IC logins must swap to contractor self-service without adding extra profiles"
 );
 requireSource(
+  auth.includes("loadPeopleAssignmentMetadata") && auth.includes("peopleModuleByDesignationId"),
+  "People/Workforce selection must follow the active assignment and designation-category master"
+);
+requireSource(
+  loginFlow.includes("!isManagerAccount(account) && !isWorkforceWorkspace(account)"),
+  "People independent contractors must receive the full People self-service experience"
+);
+requireSource(
+  !loginFlow.includes('account?.profileType === "employee" && !isWorkforceWorkspace(account)'),
+  "People self-service must not be restricted to payroll employees"
+);
+requireSource(
   peopleDashboard.includes('variant?: "people" | "workforce"'),
   "the shared dashboard variant prop is missing"
 );

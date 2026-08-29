@@ -3,9 +3,6 @@
 
 with target_reference as (
   select lower(btrim('D0905')) as reference
-),
-target_mobile as (
-  select regexp_replace('9645881397', '\D', '', 'g') as digits
 )
 select
   'profiles'::text as register,
@@ -90,6 +87,10 @@ where (
   );
 
 -- Same person by mobile (helps when profile.employee_id does not match any register).
+-- Run this as a separate query (Supabase SQL editor: select only this block, or run after query 1).
+with target_mobile as (
+  select regexp_replace('9645881397', '\D', '', 'g') as digits
+)
 select
   'profiles_by_mobile'::text as register,
   profile.id::text,

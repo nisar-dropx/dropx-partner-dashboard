@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "crypto";
 import { cookies } from "next/headers";
 import { normalizeMobile } from "@/lib/connect-otp";
+import { todayInIndia } from "@/lib/india-date";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import {
   type NonEmployeeProfileType,
@@ -68,8 +69,37 @@ type DesignationAccessRow = {
   company_id: string;
   code: string;
   name: string;
+  designation_category_id?: string | null;
   onboarding_categories: string[] | null;
   app_page_access?: string[] | null;
+};
+
+type DesignationCategoryRow = {
+  id: string;
+  company_id: string;
+  code: string;
+  people_module: string | null;
+};
+
+type PeopleEngagementRow = {
+  id: string;
+  company_id: string;
+  worker_type: string;
+  employee_id: string | null;
+  contractor_id: string | null;
+};
+
+type PeopleAssignmentRow = {
+  engagement_id: string;
+  company_id: string;
+  designation_id: string | null;
+  position_title: string | null;
+  effective_from: string;
+};
+
+type PeopleAssignmentMetadata = {
+  designationId: string | null;
+  positionTitle: string | null;
 };
 
 export const connectSessionCookieName = "dropx_connect_session";
@@ -103,6 +133,19 @@ function accountLabel(account: AccountRow, companyNameById: Map<string, string>)
 
 function normalizeWorkforceReference(value: unknown) {
   return String(value ?? "").trim();
+}
+
+const nonEmployeeBaseSelect = "id,company_id,full_name,email,dropx_id,biometric_id,designation,onboarding_status,lifecycle_status,profile_photo_path,is_active";
+
+function nonEmployeeSelect(profileType: NonEmployeeProfileType, includeMobile = false) {
+  const mobileColumns = includeMobile ? ",mobile,mobile_country_code" : "";
+  if (profileType === "workforce") {
+    return `${nonEmployeeBaseSelect}${mobileColumns},source_profile_type,source_profile_id,deleted_at`;
+  }
+  if (profileType === "contractor") {
+    return `${nonEmployeeBaseSelect}${mobileColumns},deleted_at`;
+  }
+  return `${nonEmployeeBaseSelect}${mobileColumns}`;
 }
 
 function icContractorReferenceKey(companyId: string, reference: string) {
@@ -157,6 +200,70 @@ function rowMatchesReferences(
 
 function accountIdentityKey(account: Pick<AccountRow, "profile_type" | "company_id" | "id">) {
   return `${account.profile_type}:${account.company_id}:${account.id}`;
+}
+
+function peopleWorkerKey(profileType: AccountRow["profile_type"], companyId: string, id: string) {
+  if (profileType !== "employee" && profileType !== "contractor") return "";
+  return `${profileType}:${companyId}:${id}`;
+}
+
+async function loadPeopleAssignmentMetadata(accounts: AccountRow[]) {
+  if (!supabaseAdmin) return new Map<string, PeopleAssignmentMetadata>();
+  const employeeIds = [...new Set(accounts.filter((account) => account.profile_type === "employee").map((account) => account.id))];
+  const contractorIds = [...new Set(accounts.filter((account) => account.profile_type === "contractor").map((account) => account.id))];
+  const empty = { data: [] as PeopleEngagementRow[], error: null as { message?: string } | null };
+  const [employeeResult, contractorResult] = await Promise.all([
+    employeeIds.length
+      ? supabaseAdmin.from("hr_engagements")
+        .select("id,company_id,worker_type,employee_id,contractor_id")
+        .eq("worker_type", "employee").eq("status", "active").in("employee_id", employeeIds)
+      : Promise.resolve(empty),
+    contractorIds.length
+      ? supabaseAdmin.from("hr_engagements")
+        .select("id,company_id,worker_type,employee_id,contractor_id")
+        .eq("worker_type", "contractor").eq("status", "active").in("contractor_id", contractorIds)
+      : Promise.resolve(empty)
+  ]);
+  if (employeeResult.error && !isMissingColumnError(employeeResult.error)) throw new Error(employeeResult.error.message);
+  if (contractorResult.error && !isMissingColumnError(contractorResult.error)) throw new Error(contractorResult.error.message);
+  const engagements = [
+    ...((employeeResult.data ?? []) as PeopleEngagementRow[]),
+    ...((contractorResult.data ?? []) as PeopleEngagementRow[])
+  ];
+  if (!engagements.length) return new Map<string, PeopleAssignmentMetadata>();
+
+  const today = todayInIndia();
+  const assignmentResult = await supabaseAdmin.from("hr_work_assignments")
+    .select("engagement_id,company_id,designation_id,position_title,effective_from")
+    .in("engagement_id", engagements.map((engagement) => engagement.id))
+    .eq("is_primary", true)
+    .lte("effective_from", today)
+    .or(`effective_to.is.null,effective_to.gte.${today}`)
+    .order("effective_from", { ascending: false });
+  if (assignmentResult.error && !isMissingColumnError(assignmentResult.error)) throw new Error(assignmentResult.error.message);
+  const assignmentByEngagement = new Map<string, PeopleAssignmentRow>();
+  for (const assignment of (assignmentResult.data ?? []) as PeopleAssignmentRow[]) {
+    if (!assignmentByEngagement.has(assignment.engagement_id)) {
+      assignmentByEngagement.set(assignment.engagement_id, assignment);
+    }
+  }
+
+  const metadata = new Map<string, PeopleAssignmentMetadata>();
+  for (const engagement of engagements) {
+    const workerId = engagement.worker_type === "contractor" ? engagement.contractor_id : engagement.employee_id;
+    if (!workerId) continue;
+    const assignment = assignmentByEngagement.get(engagement.id);
+    if (!assignment) continue;
+    metadata.set(peopleWorkerKey(
+      engagement.worker_type === "contractor" ? "contractor" : "employee",
+      engagement.company_id,
+      workerId
+    ), {
+      designationId: assignment.designation_id,
+      positionTitle: assignment.position_title
+    });
+  }
+  return metadata;
 }
 
 function mapEmployeeAccountRow(employee: EmployeeAccountRow): AccountRow {
@@ -250,14 +357,14 @@ async function resolveIcSelfServiceByReference(
   async function resolveContractor(requireActive: boolean) {
     let query = supabaseAdmin!
       .from("contractors")
-      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
+      .select(nonEmployeeSelect("contractor"))
       .eq("company_id", companyId);
     if (requireActive) query = query.eq("is_active", true);
     const result = await query;
     if (result.error && !isMissingColumnError(result.error)) {
       throw new Error(result.error.message);
     }
-    for (const row of (result.data ?? []) as WorkforceRegisterRow[]) {
+    for (const row of (result.data ?? []) as unknown as WorkforceRegisterRow[]) {
       if (!rowMatchesReferences(row, references)) continue;
       if (
         ["rejected", "cancelled"].includes(String(row.onboarding_status ?? "pending").toLowerCase()) ||
@@ -280,12 +387,12 @@ async function resolveIcSelfServiceByReference(
     const table = workforceTable(profileType);
     const result = await supabaseAdmin
       .from(table)
-      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
+      .select(nonEmployeeSelect(profileType))
       .eq("company_id", companyId);
     if (result.error && !isMissingColumnError(result.error)) {
       throw new Error(result.error.message);
     }
-    for (const row of (result.data ?? []) as WorkforceRegisterRow[]) {
+    for (const row of (result.data ?? []) as unknown as WorkforceRegisterRow[]) {
       if (!rowMatchesReferences(row, references) || !isActiveWorkforceRegisterRow(row)) continue;
       if (profileType === "field_executive") {
         const mirrorResult = await supabaseAdmin
@@ -318,14 +425,14 @@ async function resolveIcSelfServiceByReference(
 
   const contractorByMobile = await supabaseAdmin
     .from("contractors")
-    .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
+    .select(nonEmployeeSelect("contractor"))
     .eq("company_id", companyId)
     .eq("is_active", true)
     .or(mobileOr);
   if (contractorByMobile.error && !isMissingColumnError(contractorByMobile.error)) {
     throw new Error(contractorByMobile.error.message);
   }
-  const contractorMatch = ((contractorByMobile.data ?? []) as WorkforceRegisterRow[]).find(isActiveWorkforceRegisterRow);
+  const contractorMatch = ((contractorByMobile.data ?? []) as unknown as WorkforceRegisterRow[]).find(isActiveWorkforceRegisterRow);
   if (contractorMatch) return mapNonEmployeeAccountRow(contractorMatch, "contractor");
 
   return null;
@@ -422,8 +529,18 @@ async function signedProfilePhotoUrl(path?: string | null) {
 const defaultPageAccess = ["dashboard", "attendance", "roster", "leave", "performance", "settings"];
 const managerPageAccess = ["dashboard", "approvals", "settings"];
 
-export function connectWorkspace(profileType: ConnectAccount["profileType"]) {
-  return profileType === "user" || profileType === "employee" ? "people" as const : "workforce" as const;
+export function connectWorkspace(
+  profileType: ConnectAccount["profileType"],
+  peopleModule?: string | null
+) {
+  if (profileType === "user" || profileType === "employee") return "people" as const;
+  // The designation-category master owns the People/Workforce boundary. This
+  // keeps independent contractors in People when their active assignment is a
+  // People role, without carrying a list of designation codes in the app.
+  if (String(peopleModule ?? "").trim().toLowerCase().startsWith("people")) {
+    return "people" as const;
+  }
+  return "workforce" as const;
 }
 
 function categoryCodeForProfile(profileType: ConnectAccount["profileType"]) {
@@ -482,11 +599,11 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     const table = workforceTable(profileType);
     let query = supabaseAdmin!
       .from(table)
-      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, mobile_country_code, source_profile_type, source_profile_id, deleted_at")
+      .select(nonEmployeeSelect(profileType, true))
       .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
       .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
     if (!["workforce", "field_executive"].includes(profileType)) query = query.eq("is_active", true);
-    let result: MatchResult<NonEmployeeMatch> = await query;
+    let result = await query as unknown as MatchResult<NonEmployeeMatch>;
     if (!["workforce", "field_executive"].includes(profileType) && isMissingColumnError(result.error)) {
       return { data: [], error: null };
     }
@@ -638,6 +755,14 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     if (resolved) loginAccounts = [resolved];
   }
 
+  const assignmentMetadata = await loadPeopleAssignmentMetadata(loginAccounts);
+  for (const account of loginAccounts) {
+    const metadata = assignmentMetadata.get(peopleWorkerKey(account.profile_type, account.company_id, account.id));
+    if (!metadata) continue;
+    account.designation_id = metadata.designationId;
+    account.role = metadata.positionTitle || account.role;
+  }
+
   const companyIds = Array.from(new Set(loginAccounts.map((account) => account.company_id)));
   const companiesResult = companyIds.length
     ? await supabaseAdmin.from("companies").select("id, name, code").in("id", companyIds).eq("is_active", true)
@@ -663,7 +788,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   const designationResult = companyIds.length
     ? await supabaseAdmin
       .from("designations")
-      .select("id, company_id, code, name, onboarding_categories, app_page_access")
+      .select("id, company_id, code, name, designation_category_id, onboarding_categories, app_page_access")
       .in("company_id", companyIds)
       .eq("is_active", true)
     : { data: [], error: null };
@@ -674,7 +799,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     const fallbackResult = companyIds.length
       ? await supabaseAdmin
         .from("designations")
-        .select("id, company_id, code, name, onboarding_categories")
+        .select("id, company_id, code, name, designation_category_id, onboarding_categories")
         .in("company_id", companyIds)
         .eq("is_active", true)
       : { data: [], error: null };
@@ -691,12 +816,33 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   const pageAccessByDesignationId = new Map<string, string[] | null>();
   const designationNameById = new Map<string, string>();
   const pageAccessByDesignationKey = new Map<string, string[] | null>();
+  const categoryIds = [...new Set(designationRows.map((designation) => designation.designation_category_id).filter(Boolean))] as string[];
+  const designationCategoryResult = categoryIds.length
+    ? await supabaseAdmin.from("designation_categories")
+      .select("id,company_id,code,people_module")
+      .in("id", categoryIds)
+      .eq("is_active", true)
+    : { data: [], error: null };
+  if (designationCategoryResult.error && !isMissingColumnError(designationCategoryResult.error)) {
+    throw new Error(designationCategoryResult.error.message);
+  }
+  const peopleModuleByCategoryId = new Map(
+    ((designationCategoryResult.data ?? []) as DesignationCategoryRow[])
+      .map((category) => [category.id, category.people_module] as const)
+  );
+  const peopleModuleByDesignationId = new Map<string, string | null>();
   for (const designation of designationRows) {
     const pages = designationAccessAvailable && Array.isArray((designation as { app_page_access?: unknown }).app_page_access)
       ? (designation as { app_page_access: unknown[] }).app_page_access.map(String)
       : null;
     pageAccessByDesignationId.set(String(designation.id), pages);
     designationNameById.set(String(designation.id), String(designation.name || designation.code));
+    peopleModuleByDesignationId.set(
+      String(designation.id),
+      designation.designation_category_id
+        ? peopleModuleByCategoryId.get(designation.designation_category_id) ?? null
+        : null
+    );
     const categories = Array.isArray(designation.onboarding_categories)
       ? designation.onboarding_categories.map(String)
       : [];
@@ -734,6 +880,10 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         : account.role
           ? pageAccessByDesignationKey.get(designationLookupKey(account.company_id, categoryCode, account.role))
           : undefined;
+      const workspace = connectWorkspace(
+        account.profile_type,
+        account.designation_id ? peopleModuleByDesignationId.get(account.designation_id) : null
+      );
 
       return {
       id: account.id,
@@ -758,8 +908,8 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         defaultPreference?.default_account_id === account.id,
       companyName: companyNameById.get(account.company_id) ?? "Company",
       label: accountLabel(account, companyNameById),
-      workspace: connectWorkspace(account.profile_type),
-      workspaceLabel: connectWorkspace(account.profile_type) === "people" ? "People workspace" : "Workforce workspace"
+      workspace,
+      workspaceLabel: workspace === "people" ? "People workspace" : "Workforce workspace"
       };
     }));
 }

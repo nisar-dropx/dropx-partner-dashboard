@@ -21,8 +21,41 @@ type ResolvedRoute = {
   registration_enabled: boolean;
 };
 
+type DesignationWorkspaceRule = {
+  designationId: string;
+  onboardingCategories: string[];
+  peopleModule: string | null;
+};
+
 function isPhysicalRegisterTable(value: unknown): value is PhysicalRegisterTable {
   return physicalRegisterTables.includes(String(value) as PhysicalRegisterTable);
+}
+
+async function loadDesignationWorkspaceRule(companyId: string, designationId?: string | null) {
+  if (!supabaseAdmin || !designationId) return null;
+  const designationResult = await supabaseAdmin.from("designations")
+    .select("id,designation_category_id,onboarding_categories")
+    .eq("company_id", companyId).eq("id", designationId).eq("is_active", true).maybeSingle();
+  if (designationResult.error) throw new Error(designationResult.error.message);
+  if (!designationResult.data) return null;
+  const categoryResult = designationResult.data.designation_category_id
+    ? await supabaseAdmin.from("designation_categories")
+      .select("people_module")
+      .eq("company_id", companyId).eq("id", designationResult.data.designation_category_id)
+      .eq("is_active", true).maybeSingle()
+    : { data: null, error: null };
+  if (categoryResult.error) throw new Error(categoryResult.error.message);
+  return {
+    designationId: designationResult.data.id,
+    onboardingCategories: Array.isArray(designationResult.data.onboarding_categories)
+      ? designationResult.data.onboarding_categories.map(String)
+      : [],
+    peopleModule: categoryResult.data?.people_module ?? null
+  } satisfies DesignationWorkspaceRule;
+}
+
+function isPeopleModule(value: string | null | undefined) {
+  return String(value ?? "").trim().toLowerCase().startsWith("people");
 }
 
 export async function resolveDesignationRegister({
@@ -62,6 +95,22 @@ export async function assertDesignationRegister({
   designationValue?: string | null;
   expectedTables: PhysicalRegisterTable[];
 }) {
+  const workspaceRule = await loadDesignationWorkspaceRule(companyId, designationId);
+  if (workspaceRule && isPeopleModule(workspaceRule.peopleModule)) {
+    const peopleTables = expectedTables.filter((table) => table === "employees" || table === "contractors");
+    const selected = peopleTables.find((table) => workspaceRule.onboardingCategories.includes(table));
+    if (!selected) {
+      throw new Error("This People designation is not enabled for the selected employee or independent-contractor register.");
+    }
+    return {
+      designation_id: workspaceRule.designationId,
+      register_id: "master-category",
+      register_code: selected,
+      table_name: selected,
+      profile_type: selected === "employees" ? "employee" : "contractor",
+      registration_enabled: true
+    } satisfies ResolvedRoute;
+  }
   const route = await resolveDesignationRegister({ companyId, designationId, designationValue });
   if (!route) {
     throw new Error("This designation is not mapped in Workforce Master. Map it before registration.");
