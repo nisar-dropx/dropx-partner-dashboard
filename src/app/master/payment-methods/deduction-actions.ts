@@ -21,6 +21,9 @@ function deductionValues(formData: FormData) {
   if (calculationType === "percentage" && defaultValue > 100) {
     throw new Error("Percentage cannot be more than 100.");
   }
+  if (calculationType === "percentage" && text(formData, "calculation_base") !== "gross_earnings") {
+    throw new Error("Select a valid calculation base.");
+  }
   return {
     calculation_type: calculationType as "fixed" | "percentage" | "manual",
     default_value: defaultValue,
