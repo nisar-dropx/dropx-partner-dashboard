@@ -516,6 +516,49 @@ export async function listConnectRosterSwapApprovals(account: ConnectAccount) {
   }));
 }
 
+async function notifyRosterSwapWorkers(input: {
+  companyId: string;
+  requesterWorkerType: string;
+  requesterWorkerId: string;
+  partnerWorkerType: string;
+  partnerWorkerId: string;
+  requestId: string;
+  rosterDate: string;
+  approved: boolean;
+}) {
+  const event = input.approved ? "roster_swap_approved" : "roster_swap_rejected";
+  const title = input.approved ? "Shift swap approved" : "Shift swap rejected";
+  const body = input.approved
+    ? `Your manager approved the shift swap for ${input.rosterDate}.`
+    : `Your manager rejected the shift swap for ${input.rosterDate}.`;
+  await Promise.all([
+    db().from("mob_app_notifications").upsert({
+      company_id: input.companyId,
+      recipient_profile_type: input.requesterWorkerType,
+      recipient_account_id: input.requesterWorkerId,
+      event_code: event,
+      source_key: input.requestId,
+      title,
+      body,
+      route: "roster",
+      data: { requestId: input.requestId, rosterDate: input.rosterDate },
+      push_status: "not_configured"
+    }, { onConflict: "company_id,event_code,source_key,recipient_account_id", ignoreDuplicates: true }),
+    db().from("mob_app_notifications").upsert({
+      company_id: input.companyId,
+      recipient_profile_type: input.partnerWorkerType,
+      recipient_account_id: input.partnerWorkerId,
+      event_code: event,
+      source_key: input.requestId,
+      title,
+      body,
+      route: "roster",
+      data: { requestId: input.requestId, rosterDate: input.rosterDate },
+      push_status: "not_configured"
+    }, { onConflict: "company_id,event_code,source_key,recipient_account_id", ignoreDuplicates: true })
+  ]);
+}
+
 export async function decideConnectRosterSwapApproval(account: ConnectAccount, requestIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
   const actorUserId = await approverUserId(account);
   if (!actorUserId) throw new Error("A linked People login is required to approve a shift swap.");
@@ -524,14 +567,77 @@ export async function decideConnectRosterSwapApproval(account: ConnectAccount, r
   const note = clean(noteValue).slice(0, 500);
   if (!/^[0-9a-f-]{36}$/i.test(requestId)) throw new Error("Shift swap request is invalid.");
   if (decision !== "approved" && decision !== "rejected") throw new Error("Choose Approve or Reject.");
+  const accept = decision === "approved";
 
   const rpc = await db().rpc("hr_manager_decide_roster_swap", {
     p_company_id: account.companyId,
     p_request_id: requestId,
     p_actor_user_id: actorUserId,
-    p_accept: decision === "approved",
+    p_accept: accept,
     p_note: note || null
   });
-  if (rpc.error) throw new Error(rpc.error.message);
-  return decision === "approved" ? "Shift swap approved." : "Shift swap rejected.";
+  if (!rpc.error) {
+    return accept ? "Shift swap approved." : "Shift swap rejected.";
+  }
+  const missingRpc = /Could not find the function|schema cache|does not exist/i.test(rpc.error.message);
+  if (!missingRpc) throw new Error(rpc.error.message);
+
+  const current = await db().from("hr_roster_swap_requests")
+    .select("id,status,approver_user_id,roster_date,requester_entry_id,partner_entry_id,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,requester_shift_id,partner_shift_id,requester_day_type,partner_day_type")
+    .eq("company_id", account.companyId)
+    .eq("id", requestId)
+    .maybeSingle();
+  if (current.error || !current.data) throw new Error(current.error?.message ?? "Shift swap request was not found.");
+  const swap = current.data;
+  if (swap.status !== "pending_manager") throw new Error("This shift swap is no longer awaiting manager approval.");
+  if (swap.approver_user_id !== actorUserId) throw new Error("This shift swap belongs to another approver.");
+
+  const now = new Date().toISOString();
+  if (accept) {
+    const [requesterUpdate, partnerUpdate] = await Promise.all([
+      db().from("hr_roster_entries").update({
+        shift_id: swap.partner_shift_id,
+        day_type: swap.partner_day_type,
+        updated_at: now
+      }).eq("company_id", account.companyId).eq("id", swap.requester_entry_id),
+      db().from("hr_roster_entries").update({
+        shift_id: swap.requester_shift_id,
+        day_type: swap.requester_day_type,
+        updated_at: now
+      }).eq("company_id", account.companyId).eq("id", swap.partner_entry_id)
+    ]);
+    if (requesterUpdate.error || partnerUpdate.error) {
+      throw new Error(requesterUpdate.error?.message ?? partnerUpdate.error?.message ?? "Roster could not be updated.");
+    }
+  }
+
+  const finished = await db().from("hr_roster_swap_requests").update({
+    status: accept ? "approved" : "rejected",
+    updated_at: now,
+    ...(note ? { manager_note: note } : {})
+  }).eq("company_id", account.companyId).eq("id", requestId).eq("status", "pending_manager");
+  if (finished.error) {
+    if (/manager_note/i.test(finished.error.message)) {
+      const retry = await db().from("hr_roster_swap_requests").update({
+        status: accept ? "approved" : "rejected",
+        updated_at: now
+      }).eq("company_id", account.companyId).eq("id", requestId).eq("status", "pending_manager");
+      if (retry.error) throw new Error(retry.error.message);
+    } else {
+      throw new Error(finished.error.message);
+    }
+  }
+
+  await notifyRosterSwapWorkers({
+    companyId: account.companyId,
+    requesterWorkerType: swap.requester_worker_type,
+    requesterWorkerId: swap.requester_worker_id,
+    partnerWorkerType: swap.partner_worker_type,
+    partnerWorkerId: swap.partner_worker_id,
+    requestId,
+    rosterDate: swap.roster_date,
+    approved: accept
+  });
+
+  return accept ? "Shift swap approved." : "Shift swap rejected.";
 }
