@@ -36,8 +36,10 @@ const active = (account?: AppAccount | null) => account?.status?.toLowerCase() =
 const defaultPageAccess = ["dashboard", "attendance", "roster", "leave", "performance", "settings"];
 const isManagerAccount = (account: AppAccount | null) => account?.profileType === "user";
 const isContractorAccount = (account: AppAccount | null) => account?.profileType === "contractor";
-const isWorkforceWorkspace = (account: AppAccount | null) => account?.workspace === "workforce" || Boolean(account && !["user", "employee"].includes(account.profileType));
-const peopleSelfService = (account: AppAccount | null) => account?.profileType === "employee" && !isWorkforceWorkspace(account);
+const isWorkforceWorkspace = (account: AppAccount | null) => account?.workspace
+  ? account.workspace === "workforce"
+  : Boolean(account && !["user", "employee"].includes(account.profileType));
+const peopleSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account) && !isWorkforceWorkspace(account));
 const sharedSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account));
 const canViewApprovals = (account: AppAccount | null) => Boolean(account && !isWorkforceWorkspace(account) && (isManagerAccount(account) || peopleSelfService(account) || account.pageAccess?.includes("approvals")));
 const allowed = (account: AppAccount | null, page: "dashboard" | "attendance" | "roster" | "leave" | "performance" | "settings") =>
