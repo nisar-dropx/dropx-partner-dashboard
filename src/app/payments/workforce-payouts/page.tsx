@@ -5,6 +5,7 @@ import { WorkforcePayoutTable, type WorkforcePayoutRow } from "@/components/work
 import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { calculateAutomaticDeductions, type AutomaticDeductionHead } from "@/lib/workforce-deductions";
 
 const EMPTY_SCOPE = "00000000-0000-0000-0000-000000000000";
 type ReportPeriod = { mode: "monthly" | "daily" | "range"; month: string; day: string; from: string; to: string };
@@ -37,12 +38,13 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   if (!supabaseAdmin) return { rows: [] as WorkforcePayoutRow[], error: "Database connection is not configured." };
   let locationsQuery = supabaseAdmin.from("stations").select("id, station_code, station_name, location_model_id").eq("company_id", companyId);
   if (!authorization.hasAllLocationAccess) locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
-  const [locationsResult, mappingsResult, allocationResult] = await Promise.all([
+  const [locationsResult, mappingsResult, allocationResult, deductionHeadsResult] = await Promise.all([
     locationsQuery,
     supabaseAdmin.from("field_executive_provider_mappings").select("id, provider_member_id, station_id, provider_id, contractor_id, employee_id, field_executive_id, payment_method_id, payment_values, effective_from, effective_to, status, providers(name), payment_methods(name)").eq("company_id", companyId).eq("status", "active").not("payment_method_id", "is", null),
-    supabaseAdmin.from("payment_field_provider_metrics").select("payment_field_id, provider_id, provider_model_id, provider_production_metrics(source_key), payment_fields(code, label, field_type)").eq("company_id", companyId)
+    supabaseAdmin.from("payment_field_provider_metrics").select("payment_field_id, provider_id, provider_model_id, provider_production_metrics(source_key), payment_fields(code, label, field_type)").eq("company_id", companyId),
+    supabaseAdmin.from("workforce_deduction_heads").select("calculation_type, default_value, applies_to_all, is_active").eq("company_id", companyId).eq("is_active", true).eq("applies_to_all", true)
   ]);
-  const error = locationsResult.error?.message || mappingsResult.error?.message || allocationResult.error?.message;
+  const error = locationsResult.error?.message || mappingsResult.error?.message || allocationResult.error?.message || deductionHeadsResult.error?.message;
   if (error) return { rows: [] as WorkforcePayoutRow[], error };
   const locations = locationsResult.data ?? [];
   const allowed = new Set(locations.map((row) => row.id));
@@ -59,6 +61,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   const locationById = new Map(locations.map((row: any) => [row.id, row])); const modelById = new Map((modelsResult.data ?? []).map((row: any) => [row.id, row]));
   const metricsByProviderMember = new Map<string, any[]>(); (metricsResult.data ?? []).forEach((row: any) => metricsByProviderMember.set(row.provider_employee_id, [...(metricsByProviderMember.get(row.provider_employee_id) ?? []), row]));
   const allocations = allocationResult.data ?? [];
+  const automaticDeductions = (deductionHeadsResult.data ?? []) as AutomaticDeductionHead[];
   const rows = mappings.map((mapping: any) => {
     const sourceId = mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id);
     let baseAmount = 0; let production = 0;
@@ -71,7 +74,8 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       production += count; baseAmount += amount;
       productionBreakdown.push({ code: field.code, label: field.label || field.code, count, rate, amount });
     });
-    return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, productionBreakdown, baseAmount, additions: 0, deductions: 0, netAmount: baseAmount, status: production > 0 ? "Ready for review" : "Awaiting production" } satisfies WorkforcePayoutRow;
+    const deductions = calculateAutomaticDeductions(baseAmount, automaticDeductions);
+    return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, productionBreakdown, baseAmount, additions: 0, deductions, netAmount: baseAmount - deductions, status: production > 0 ? "Ready for review" : "Awaiting production" } satisfies WorkforcePayoutRow;
   });
   return { rows, error: null };
 }
