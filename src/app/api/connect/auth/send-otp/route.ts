@@ -124,7 +124,9 @@ export async function POST(request: Request) {
       ...(employeeMatches.data ?? []).map((employee) => employee.company_id)
     ].filter(Boolean)));
     if (!companyIds.length) {
-      return NextResponse.json({ error: "No active account found for this mobile number." }, { status: 404 });
+      return NextResponse.json({
+        error: "You don't have access to DropX Connect. Contact HR or your platform administrator for access."
+      }, { status: 403 });
     }
 
     const configsResult = await supabaseAdmin

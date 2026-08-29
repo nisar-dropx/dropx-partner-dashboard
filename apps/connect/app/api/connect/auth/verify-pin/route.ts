@@ -40,8 +40,13 @@ export async function POST(request: Request) {
       updated_at: new Date().toISOString()
     }).eq("id", pinRow.id);
 
-    await createConnectSession({ countryCode, mobile, request });
     const accounts = await findConnectAccounts(countryCode, mobile);
+    if (!accounts.length) {
+      return NextResponse.json({
+        error: "You don't have access to DropX One. Contact HR or your platform administrator for access."
+      }, { status: 403 });
+    }
+    await createConnectSession({ countryCode, mobile, request });
     return NextResponse.json({ ok: true, accounts });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to verify PIN." }, { status: 500 });

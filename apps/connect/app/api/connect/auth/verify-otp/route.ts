@@ -79,6 +79,11 @@ export async function POST(request: Request) {
     }).eq("id", otpRow.id);
 
     const accounts = await findConnectAccounts(countryCode, mobile);
+    if (!accounts.length) {
+      return NextResponse.json({
+        error: "You don't have access to DropX One. Contact HR or your platform administrator for access."
+      }, { status: 403 });
+    }
 
     return NextResponse.json({
       ok: true,

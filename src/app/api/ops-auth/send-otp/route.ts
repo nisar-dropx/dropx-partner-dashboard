@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     const profile = await findAuthorizedOpsProfileByMobile(body.mobile, countryCode);
     if (!profile) {
       return NextResponse.json(
-        { error: "This mobile number is not enabled for OpsPulse." },
+        { error: "You don't have access to OpsPulse. Contact HR or your platform administrator for access." },
         { status: 403 }
       );
     }
