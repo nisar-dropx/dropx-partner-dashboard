@@ -17,6 +17,35 @@ function clean(value: unknown) {
   return String(value ?? "").trim();
 }
 
+const TEAM_LEAD_DESIGNATION_CODES = new Set(["TL", "ATL", "TEAM_LEAD", "ASST_TEAM_LEAD"]);
+
+function isTeamLeadManagerAssignment(
+  designationCode: string | null | undefined,
+  positionTitle: string | null | undefined
+) {
+  const code = String(designationCode ?? "").trim().toUpperCase();
+  if (code && TEAM_LEAD_DESIGNATION_CODES.has(code)) return true;
+  const title = String(positionTitle ?? "").trim().toUpperCase();
+  if (!title) return false;
+  return /\b(TL|ATL|TEAM LEAD|ASST\.?\s*TEAM LEAD|ASSISTANT TEAM LEAD)\b/.test(title);
+}
+
+async function isTeamLeadRegularizationApprover(account: ConnectAccount) {
+  try {
+    const identity = await connectApproverIdentity(account);
+    let designationCode: string | null = null;
+    if (identity.assignment.designation_id) {
+      const designation = await db().from("designations").select("code")
+        .eq("company_id", account.companyId).eq("id", identity.assignment.designation_id).maybeSingle();
+      if (designation.error) throw new Error(designation.error.message);
+      designationCode = designation.data?.code ?? null;
+    }
+    return isTeamLeadManagerAssignment(designationCode, identity.assignment.position_title);
+  } catch {
+    return false;
+  }
+}
+
 function one<T>(value: T | T[] | null | undefined): T | null {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
@@ -60,6 +89,7 @@ async function signedEvidence(path: string | null | undefined) {
 export async function listConnectAttendanceApprovals(account: ConnectAccount) {
   const actorUserId = await approverUserId(account);
   if (!actorUserId) return [];
+  if (await isTeamLeadRegularizationApprover(account)) return [];
   const stepsResult = await db().from("attendance_regularization_approval_steps")
     .select("id,request_id,step_order,step_name")
     .eq("company_id", account.companyId).eq("approver_user_id", actorUserId).eq("status", "pending")
@@ -197,6 +227,9 @@ export async function decideConnectAttendanceHrApproval(
 export async function decideConnectAttendanceApproval(account: ConnectAccount, requestIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
   const actorUserId = await approverUserId(account);
   if (!actorUserId) throw new Error("A linked People login is required to approve attendance.");
+  if (await isTeamLeadRegularizationApprover(account)) {
+    throw new Error("Team leads cannot approve attendance regularizations.");
+  }
   const requestId = clean(requestIdValue);
   const decision = clean(decisionValue);
   const note = clean(noteValue);

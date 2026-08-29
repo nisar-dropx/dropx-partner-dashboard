@@ -8,6 +8,19 @@ export type AttendanceApprovalStep = {
   approver_person_id: string;
 };
 
+const TEAM_LEAD_DESIGNATION_CODES = new Set(["TL", "ATL", "TEAM_LEAD", "ASST_TEAM_LEAD"]);
+
+export function isTeamLeadManagerAssignment(
+  designationCode: string | null | undefined,
+  positionTitle: string | null | undefined
+): boolean {
+  const code = String(designationCode ?? "").trim().toUpperCase();
+  if (code && TEAM_LEAD_DESIGNATION_CODES.has(code)) return true;
+  const title = String(positionTitle ?? "").trim().toUpperCase();
+  if (!title) return false;
+  return /\b(TL|ATL|TEAM LEAD|ASST\.?\s*TEAM LEAD|ASSISTANT TEAM LEAD)\b/.test(title);
+}
+
 type PermissionUser = {
   userId: string;
   scopeType: string;
@@ -115,8 +128,9 @@ export async function resolveAttendanceApprovalSteps({
   const steps: AttendanceApprovalStep[] = [];
   const seenPeople = new Set<string>([engagementResult.data.person_id]);
   let subjectAssignmentId = workerAssignment.id;
+  const maxChainHops = managerLevels + 6;
 
-  for (let level = 1; level <= managerLevels; level += 1) {
+  for (let hop = 0; hop < maxChainHops && steps.length < managerLevels; hop += 1) {
     const relationshipResult = await db().from("hr_reporting_relationships").select("manager_assignment_id")
       .eq("company_id", companyId).eq("subject_assignment_id", subjectAssignmentId)
       .eq("relationship_type", "solid_line").eq("is_primary", true)
@@ -125,21 +139,34 @@ export async function resolveAttendanceApprovalSteps({
     if (relationshipResult.error) throw new Error(relationshipResult.error.message);
     if (!relationshipResult.data) {
       if (steps.length) break;
-      throw new Error("Reporting manager level 1 is not configured for your profile.");
+      throw new Error("No reporting manager above team-lead level is configured for your profile.");
     }
 
     const managerAssignment = await db().from("hr_work_assignments")
-      .select("id,engagement_id,position_title,effective_from,effective_to")
+      .select("id,engagement_id,position_title,designation_id,effective_from,effective_to")
       .eq("company_id", companyId).eq("id", relationshipResult.data.manager_assignment_id).maybeSingle();
     if (managerAssignment.error || !managerAssignment.data
       || managerAssignment.data.effective_from > today
       || (managerAssignment.data.effective_to && managerAssignment.data.effective_to < today)) {
-      throw new Error(`Reporting manager level ${level} does not have an active assignment.`);
+      throw new Error("A reporting manager in your chain does not have an active assignment.");
     }
+    subjectAssignmentId = managerAssignment.data.id;
+
+    let designationCode: string | null = null;
+    if (managerAssignment.data.designation_id) {
+      const designationResult = await db().from("designations").select("code")
+        .eq("company_id", companyId).eq("id", managerAssignment.data.designation_id).maybeSingle();
+      if (designationResult.error) throw new Error(designationResult.error.message);
+      designationCode = designationResult.data?.code ?? null;
+    }
+    if (isTeamLeadManagerAssignment(designationCode, managerAssignment.data.position_title)) {
+      continue;
+    }
+
     const managerEngagement = await db().from("hr_engagements").select("person_id,status")
       .eq("company_id", companyId).eq("id", managerAssignment.data.engagement_id).maybeSingle();
     if (managerEngagement.error || !managerEngagement.data || managerEngagement.data.status !== "active") {
-      throw new Error(`Reporting manager level ${level} is not active.`);
+      throw new Error("A reporting manager above team-lead level is not active.");
     }
     if (seenPeople.has(managerEngagement.data.person_id)) throw new Error("The reporting chain contains a cycle.");
     seenPeople.add(managerEngagement.data.person_id);
@@ -152,22 +179,23 @@ export async function resolveAttendanceApprovalSteps({
       throw new Error(personResult.error?.message ?? linkResult.error?.message ?? "Manager account could not be resolved.");
     }
     if (!linkResult.data || linkResult.data.status !== "active") {
-      throw new Error(`${personResult.data?.display_name ?? `Manager level ${level}`} does not have an active People login.`);
+      throw new Error(`${personResult.data?.display_name ?? "Reporting manager"} does not have an active People login.`);
     }
     const grants = permittedApprovers.filter((item) => item.userId === linkResult.data?.user_id);
     const mayApprove = grants.some((grant) => grant.scopeType === "company"
       || (grant.scopeType === "location" && grant.scopeId === workerAssignment.location_id)
       || grant.scopeType === "direct_reports" || grant.scopeType === "reporting_subtree");
     if (!mayApprove) {
-      throw new Error(`${personResult.data?.display_name ?? `Manager level ${level}`} is not enabled for Approval Inbox approval.`);
+      throw new Error(`${personResult.data?.display_name ?? "Reporting manager"} is not enabled for Approval Inbox approval.`);
     }
     steps.push({
       step_name: `${managerAssignment.data.position_title} approval`,
       approver_user_id: linkResult.data.user_id,
       approver_person_id: managerEngagement.data.person_id
     });
-    subjectAssignmentId = managerAssignment.data.id;
   }
-  if (!steps.length) throw new Error("No reporting manager is configured for attendance regularization.");
+  if (!steps.length) {
+    throw new Error("No reporting manager above team-lead level is configured for attendance regularization.");
+  }
   return steps;
 }
