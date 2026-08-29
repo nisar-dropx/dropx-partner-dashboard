@@ -21,7 +21,7 @@ type SwapRequest = {
   requesterDayType: "working" | "weekly_off";
   partnerDayType: "working" | "weekly_off";
 };
-type RosterPayload = { days: RosterDay[]; requests: SwapRequest[]; leadHours: number };
+type RosterPayload = { days: RosterDay[]; requests: SwapRequest[]; leadHours: number; viewDays?: number };
 
 function displayDate(value: string) {
   return new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "2-digit", month: "short" }).format(new Date(`${value}T00:00:00`));
@@ -88,7 +88,7 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
   }
 
   return <section className="dx-roster">
-    <header className="dx-page-intro"><small>My work plan</small><h1>Roster</h1><p>Your next seven days, shift changes and approvals.</p></header>
+    <header className="dx-page-intro"><small>My work plan</small><h1>Roster</h1><p>Your next {data?.viewDays ?? 7} days, shift changes and approvals.</p></header>
     {error ? <div className="dx-alert error"><span>{error}</span><button onClick={() => void load()}><RefreshCw /></button></div> : null}
     {notice ? <div className="dx-alert success"><span>{notice}</span><button onClick={() => setNotice("")}><X /></button></div> : null}
     {loading ? <div className="dx-loader"><span /><small>Loading roster…</small></div> : null}

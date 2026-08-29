@@ -10,9 +10,68 @@ function clean(value: unknown) { return String(value ?? "").trim(); }
 function relation<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
 function todayIndia() { return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
 function addDays(value: string, days: number) { const date = new Date(`${value}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); }
+// Temporary testing window — revert to 7 after roster approval testing is complete.
+const ROSTER_VIEW_DAYS = Number(process.env.CONNECT_ROSTER_VIEW_DAYS ?? 30);
 function appWorkerType(profileType: string): WorkerType | null { return profileType === "employee" || profileType === "contractor" ? profileType : null; }
 function shiftOf(entry: Entry) { return relation(entry.hr_shifts); }
 function planOf(entry: Entry) { return relation(entry.hr_roster_plans); }
+function isoWeekday(date: string) {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+async function expandRecurringOwnEntries(account: ConnectAccount, workerType: WorkerType, start: string, direct: Entry[]) {
+  if (ROSTER_VIEW_DAYS <= 7) return direct;
+  const byDate = new Map(direct.map((entry) => [entry.roster_date, entry]));
+  let locationId = direct.find((entry) => entry.location_id)?.location_id ?? null;
+  if (!locationId) {
+    const today = todayIndia();
+    const workerColumn = workerType === "employee" ? "employee_id" : "contractor_id";
+    const engagement = await db().from("hr_engagements").select("id").eq("company_id", account.companyId).eq("worker_type", workerType).eq(workerColumn, account.id).eq("status", "active").maybeSingle();
+    if (!engagement.data) return direct;
+    const assignment = await db().from("hr_work_assignments").select("location_id").eq("company_id", account.companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true).lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`).order("effective_from", { ascending: false }).limit(1).maybeSingle();
+    locationId = assignment.data?.location_id ?? null;
+  }
+  if (!locationId) return direct;
+
+  const plansResult = await db().from("hr_roster_plans")
+    .select("id,effective_from,superseded_at,revision_no")
+    .eq("company_id", account.companyId).eq("location_id", locationId).eq("roster_kind", "recurring_weekly").eq("status", "approved");
+  if (plansResult.error || !plansResult.data?.length) return direct;
+
+  const patternResult = await db().from("hr_roster_entries")
+    .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
+    .eq("company_id", account.companyId).eq("worker_type", workerType).eq("worker_id", account.id)
+    .in("plan_id", plansResult.data.map((plan) => plan.id));
+  if (patternResult.error) throw new Error(patternResult.error.message);
+
+  const index = new Map<string, Array<{ effectiveFrom: string; supersededAt: string | null; revisionNo: number; entry: Entry }>>();
+  for (const row of patternResult.data ?? []) {
+    const entry = row as unknown as Entry;
+    const plan = relation(entry.hr_roster_plans) as { effective_from?: string; superseded_at?: string | null; revision_no?: number | null } | null;
+    if (!plan?.effective_from) continue;
+    const key = String(isoWeekday(entry.roster_date));
+    index.set(key, [...(index.get(key) ?? []), {
+      effectiveFrom: plan.effective_from,
+      supersededAt: plan.superseded_at ?? null,
+      revisionNo: Number(plan.revision_no ?? 0),
+      entry
+    }]);
+  }
+  for (const values of index.values()) {
+    values.sort((left, right) => right.effectiveFrom.localeCompare(left.effectiveFrom) || right.revisionNo - left.revisionNo);
+  }
+
+  const expanded = [...direct];
+  for (let offset = 0; offset < ROSTER_VIEW_DAYS; offset += 1) {
+    const date = addDays(start, offset);
+    if (byDate.has(date)) continue;
+    const match = index.get(String(isoWeekday(date)))?.find((candidate) => candidate.effectiveFrom <= date && (!candidate.supersededAt || date < candidate.supersededAt));
+    if (!match) continue;
+    expanded.push({ ...match.entry, id: `preview:${date}`, roster_date: date });
+  }
+  return expanded.sort((left, right) => left.roster_date.localeCompare(right.roster_date));
+}
 
 async function accountFrom(url: URL, body?: Record<string, unknown>) {
   const accountId = clean(body?.accountId ?? url.searchParams.get("accountId"));
@@ -59,13 +118,13 @@ async function notifyWorker(input: { companyId: string; workerType: WorkerType; 
 
 async function rosterPayload(account: ConnectAccount, workerType: WorkerType) {
   const start = todayIndia();
-  const end = addDays(start, 6);
+  const end = addDays(start, ROSTER_VIEW_DAYS - 1);
   const entryResult = await db().from("hr_roster_entries")
     .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status)")
     .eq("company_id", account.companyId).eq("worker_type", workerType).eq("worker_id", account.id)
     .gte("roster_date", start).lte("roster_date", end).eq("hr_roster_plans.status", "approved").order("roster_date");
   if (entryResult.error) throw new Error(entryResult.error.message);
-  const own = (entryResult.data ?? []) as unknown as Entry[];
+  const own = await expandRecurringOwnEntries(account, workerType, start, (entryResult.data ?? []) as unknown as Entry[]);
   const locations = [...new Set(own.map((entry) => entry.location_id).filter(Boolean))] as string[];
   let colleagueEntries: Entry[] = [];
   if (locations.length) {
@@ -96,7 +155,7 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType) {
   const days = own.map((entry) => ({
     id: entry.id, date: entry.roster_date, dayType: entry.day_type, locationId: entry.location_id,
     shift: entry.day_type === "weekly_off" ? null : shiftOf(entry),
-    canSwap: (() => { try { assertBeforeCutoff(entry, leadHours); return true; } catch { return false; } })(),
+    canSwap: !entry.id.startsWith("preview:") && (() => { try { assertBeforeCutoff(entry, leadHours); return true; } catch { return false; } })(),
     partners: colleagueEntries.filter((candidate) => candidate.id !== entry.id && candidate.roster_date === entry.roster_date && candidate.location_id === entry.location_id && !(candidate.worker_type === workerType && candidate.worker_id === account.id)).map((candidate) => ({ id: candidate.id, workerType: candidate.worker_type, workerId: candidate.worker_id, ...names.get(`${candidate.worker_type}:${candidate.worker_id}`), dayType: candidate.day_type, shift: candidate.day_type === "weekly_off" ? null : shiftOf(candidate) }))
   }));
   const requests = swaps.map((request) => {
@@ -121,7 +180,7 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType) {
       partnerDayType: partnerEntry?.day_type ?? "working"
     };
   });
-  return { days, leadHours, requests, self: { workerType, workerId: account.id } };
+  return { days, leadHours, requests, self: { workerType, workerId: account.id }, viewDays: ROSTER_VIEW_DAYS };
 }
 
 export async function GET(request: Request) {

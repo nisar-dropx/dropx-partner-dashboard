@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, Camera, Check, ClipboardCheck, Clock3, FileText, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
+import { CalendarClock, CalendarDays, Camera, Check, ClipboardCheck, Clock3, FileText, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 
@@ -78,7 +78,22 @@ type AttendanceApproval = {
   queue?: "manager" | "hr";
 };
 
-type ApprovalSection = "time-off" | "attendance" | "location-integrity" | "reimbursements";
+type RosterApproval = {
+  id: string;
+  planId: string;
+  stepId: string | null;
+  stageType: string;
+  stageNumber: number;
+  name: string;
+  stationCode: string;
+  stationName: string;
+  effectiveFrom: string;
+  periodEnd: string;
+  revision: number;
+  rowCount: number;
+};
+
+type ApprovalSection = "time-off" | "attendance" | "rosters" | "location-integrity" | "reimbursements";
 
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
 function money(value: number | null | undefined) { return `₹${Number(value ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
@@ -110,6 +125,14 @@ function regularizationReasonLabel(reasonCode: string) {
     case "incorrect_in": return "Incorrect IN time";
     case "incorrect_out": return "Incorrect OUT time";
     default: return "Other correction";
+  }
+}
+function rosterStageLabel(stageType: string) {
+  switch (stageType) {
+    case "level_1": return "Level 1 approval";
+    case "level_2": return "Level 2 approval";
+    case "hr": return "HR approval";
+    default: return "Roster approval";
   }
 }
 
@@ -194,6 +217,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
   const [attendanceApprovals, setAttendanceApprovals] = useState<AttendanceApproval[]>([]);
   const [attendanceHrApprovals, setAttendanceHrApprovals] = useState<AttendanceApproval[]>([]);
+  const [rosterApprovals, setRosterApprovals] = useState<RosterApproval[]>([]);
   const [supportPackages, setSupportPackages] = useState<LocationSupportPackage[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -217,10 +241,12 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       setLeaveApprovals(leavePayload.leaveApprovals ?? []);
       setAttendanceApprovals(leavePayload.attendanceApprovals ?? []);
       setAttendanceHrApprovals(leavePayload.attendanceHrApprovals ?? []);
+      setRosterApprovals(leavePayload.rosterApprovals ?? []);
       setSupportPackages(leavePayload.locationSupportPackages ?? []);
       setSection((current) => {
         if (current === "time-off" && !(leavePayload.leaveApprovals ?? []).length) {
           if ((leavePayload.attendanceApprovals ?? []).length || (leavePayload.attendanceHrApprovals ?? []).length) return "attendance";
+          if ((leavePayload.rosterApprovals ?? []).length) return "rosters";
           if ((leavePayload.locationSupportPackages ?? []).length) return "location-integrity";
           if ((reimbursementPayload.approvals ?? []).length) return "reimbursements";
         }
@@ -300,6 +326,28 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       if (!response.ok) throw new Error(payload.error || "Unable to update support package.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [reviewId]: "" })); await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update support package."); }
+    finally { setSaving(false); }
+  }
+
+  async function decideRoster(approval: RosterApproval, decision: "approved" | "returned" | "rejected") {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/approvals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: account.id,
+          profileType: account.profileType,
+          rosterPlanId: approval.planId,
+          rosterStepId: approval.stepId,
+          decision,
+          note: notes[approval.id] ?? ""
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to update roster approval.");
+      setNotice(payload.notice); setNotes((current) => ({ ...current, [approval.id]: "" })); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update roster approval."); }
     finally { setSaving(false); }
   }
 
@@ -386,6 +434,9 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
         <button className={section === "attendance" ? "active" : ""} onClick={() => setSection("attendance")} type="button">
           Attendance<span>{attendanceCount}</span>
         </button>
+        <button className={section === "rosters" ? "active" : ""} onClick={() => setSection("rosters")} type="button">
+          Rosters<span>{rosterApprovals.length}</span>
+        </button>
         <button className={section === "location-integrity" ? "active" : ""} onClick={() => setSection("location-integrity")} type="button">
           Location<span>{supportPackages.length}</span>
         </button>
@@ -446,6 +497,40 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
           {!attendanceApprovals.length && !attendanceHrApprovals.length ? (
             <div className="dx-empty"><CalendarClock /><strong>No attendance regularizations</strong><small>Manager steps and HR finalizations assigned to you will appear here.</small></div>
           ) : null}
+        </div>
+      ) : null}
+
+      {!loading && section === "rosters" ? (
+        <div className="dx-approval-list">
+          {rosterApprovals.length ? rosterApprovals.map((approval) => (
+            <article className="dx-approval-card" key={approval.id}>
+              <ApprovalHead
+                badge={<span className="dx-approval-badge">Rev {approval.revision}</span>}
+                eyebrow={`${approval.stationCode} · ${rosterStageLabel(approval.stageType)}`}
+                meta={`${approval.rowCount} roster cell${approval.rowCount === 1 ? "" : "s"} · Step ${approval.stageNumber}`}
+                name={approval.name || `${approval.stationName || approval.stationCode} weekly roster`}
+              />
+              <dl className="dx-approval-facts">
+                <div><dt>Station</dt><dd>{approval.stationCode}{approval.stationName ? ` · ${approval.stationName}` : ""}</dd></div>
+                <div><dt>Effective week</dt><dd>{displayDate(approval.effectiveFrom)} – {displayDate(approval.periodEnd)}</dd></div>
+                <div><dt>Pattern</dt><dd>Recurring Monday–Sunday roster change</dd></div>
+              </dl>
+              <ApprovalNote
+                id={approval.id}
+                notes={notes}
+                onChange={(value) => setNote(approval.id, value)}
+                placeholder="Required when returning or rejecting"
+              />
+              <ApprovalToolbar
+                onApprove={() => void decideRoster(approval, "approved")}
+                onReject={() => void decideRoster(approval, "rejected")}
+                onReturn={() => void decideRoster(approval, "returned")}
+                saving={saving}
+              />
+            </article>
+          )) : (
+            <div className="dx-empty"><CalendarDays /><strong>No roster approvals</strong><small>Weekly roster changes assigned to you will appear here after submission from People.</small></div>
+          )}
         </div>
       ) : null}
 
