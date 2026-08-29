@@ -40,7 +40,7 @@ export function ConnectPeopleWorkspace({
       setCounts({
         leave: workflow.leaveApprovals?.length ?? 0,
         attendance: workflow.attendanceApprovals?.length ?? 0,
-        rosters: workflow.rosterApprovals?.length ?? 0,
+        rosters: (workflow.rosterApprovals?.length ?? 0) + (workflow.rosterSwapApprovals?.length ?? 0),
         exits: workflow.exitApprovals?.length ?? 0,
         location: workflow.locationSupportPackages?.length ?? 0,
         claims: reimbursements.approvals?.length ?? 0

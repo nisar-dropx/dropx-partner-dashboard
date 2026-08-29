@@ -460,3 +460,75 @@ export async function decideConnectExitApproval(account: ConnectAccount, approva
   await notifyConnectExitOutcome({ companyId: account.companyId, caseId: approval.case_id, event: "CASE_APPROVED" });
   return "Exit request fully approved and the requester was notified.";
 }
+
+async function workerDisplay(companyId: string, workerType: string, workerId: string) {
+  if (workerType === "employee") {
+    const result = await db().from("employees").select("full_name,employee_code").eq("id", workerId).maybeSingle();
+    if (result.error) throw new Error(result.error.message);
+    return { name: result.data?.full_name ?? "Team member", code: result.data?.employee_code ?? "" };
+  }
+  const result = await db().from("contractors").select("full_name,dropx_id").eq("id", workerId).maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  return { name: result.data?.full_name ?? "Team member", code: result.data?.dropx_id ?? "" };
+}
+
+export async function listConnectRosterSwapApprovals(account: ConnectAccount) {
+  const actorUserId = await approverUserId(account);
+  if (!actorUserId) return [];
+  const result = await db().from("hr_roster_swap_requests")
+    .select("id,roster_date,status,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,requester_day_type,partner_day_type,requester_shift_id,partner_shift_id,requester_note,partner_note,requested_at")
+    .eq("company_id", account.companyId)
+    .eq("approver_user_id", actorUserId)
+    .eq("status", "pending_manager")
+    .order("requested_at", { ascending: false });
+  if (result.error) throw new Error(result.error.message);
+  const shiftIds = [...new Set((result.data ?? []).flatMap((row) => [row.requester_shift_id, row.partner_shift_id]).filter(Boolean))] as string[];
+  const shiftsResult = shiftIds.length
+    ? await db().from("hr_shifts").select("id,name,code,start_time,end_time").in("id", shiftIds)
+    : { data: [], error: null };
+  if (shiftsResult.error) throw new Error(shiftsResult.error.message);
+  const shifts = new Map((shiftsResult.data ?? []).map((shift) => [shift.id, shift]));
+  return Promise.all((result.data ?? []).map(async (row) => {
+    const [requester, partner] = await Promise.all([
+      workerDisplay(account.companyId, row.requester_worker_type, row.requester_worker_id),
+      workerDisplay(account.companyId, row.partner_worker_type, row.partner_worker_id)
+    ]);
+    const requesterShift = row.requester_shift_id ? shifts.get(row.requester_shift_id) ?? null : null;
+    const partnerShift = row.partner_shift_id ? shifts.get(row.partner_shift_id) ?? null : null;
+    return {
+      id: row.id,
+      rosterDate: row.roster_date,
+      requestedAt: row.requested_at,
+      requesterName: requester.name,
+      requesterCode: requester.code,
+      partnerName: partner.name,
+      partnerCode: partner.code,
+      requesterDayType: row.requester_day_type,
+      partnerDayType: row.partner_day_type,
+      requesterShift,
+      partnerShift,
+      requesterNote: row.requester_note,
+      partnerNote: row.partner_note
+    };
+  }));
+}
+
+export async function decideConnectRosterSwapApproval(account: ConnectAccount, requestIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
+  const actorUserId = await approverUserId(account);
+  if (!actorUserId) throw new Error("A linked People login is required to approve a shift swap.");
+  const requestId = clean(requestIdValue);
+  const decision = clean(decisionValue);
+  const note = clean(noteValue).slice(0, 500);
+  if (!/^[0-9a-f-]{36}$/i.test(requestId)) throw new Error("Shift swap request is invalid.");
+  if (decision !== "approved" && decision !== "rejected") throw new Error("Choose Approve or Reject.");
+
+  const rpc = await db().rpc("hr_manager_decide_roster_swap", {
+    p_company_id: account.companyId,
+    p_request_id: requestId,
+    p_actor_user_id: actorUserId,
+    p_accept: decision === "approved",
+    p_note: note || null
+  });
+  if (rpc.error) throw new Error(rpc.error.message);
+  return decision === "approved" ? "Shift swap approved." : "Shift swap rejected.";
+}

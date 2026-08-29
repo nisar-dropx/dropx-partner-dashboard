@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { connectApproverIdentity } from "../../../../src/lib/connect-expense-data";
-import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval } from "../../../../src/lib/connect-manager-approvals";
+import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval } from "../../../../src/lib/connect-manager-approvals";
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
@@ -64,14 +64,15 @@ async function listLeaveApprovals(account: ConnectAccount) {
 export async function GET(request: Request) {
   try {
     const account = await selectedAccount(request);
-    const [leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals] = await Promise.all([
+    const [leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals] = await Promise.all([
       listLeaveApprovals(account),
       listConnectLocationSupportPackages(account),
       listConnectAttendanceApprovals(account),
       listConnectAttendanceHrApprovals(account),
-      listConnectRosterApprovals(account)
+      listConnectRosterApprovals(account),
+      listConnectRosterSwapApprovals(account)
     ]);
-    return NextResponse.json({ leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({ leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load approvals." }, { status: 400 });
   }
@@ -103,6 +104,13 @@ export async function PATCH(request: Request) {
       const decision = clean(body.decision);
       const note = clean(body.note);
       const notice = await decideConnectRosterApproval(account, rosterPlanId, body.rosterStepId ?? null, decision, note);
+      return NextResponse.json({ ok: true, notice });
+    }
+    const rosterSwapRequestId = clean(body.rosterSwapRequestId);
+    if (rosterSwapRequestId) {
+      const decision = clean(body.decision);
+      const note = clean(body.note);
+      const notice = await decideConnectRosterSwapApproval(account, rosterSwapRequestId, decision, note);
       return NextResponse.json({ ok: true, notice });
     }
     const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);

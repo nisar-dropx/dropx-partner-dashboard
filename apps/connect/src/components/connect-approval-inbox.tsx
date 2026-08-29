@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, CalendarDays, Camera, Check, ClipboardCheck, Clock3, FileText, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ClipboardCheck, Clock3, FileText, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 
@@ -93,6 +93,22 @@ type RosterApproval = {
   rowCount: number;
 };
 
+type RosterSwapApproval = {
+  id: string;
+  rosterDate: string;
+  requestedAt: string;
+  requesterName: string;
+  requesterCode: string;
+  partnerName: string;
+  partnerCode: string;
+  requesterDayType: string;
+  partnerDayType: string;
+  requesterShift: { id: string; name: string; code: string; start_time: string; end_time: string } | null;
+  partnerShift: { id: string; name: string; code: string; start_time: string; end_time: string } | null;
+  requesterNote: string | null;
+  partnerNote: string | null;
+};
+
 type ApprovalSection = "time-off" | "attendance" | "rosters" | "location-integrity" | "reimbursements";
 
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
@@ -134,6 +150,11 @@ function rosterStageLabel(stageType: string) {
     case "hr": return "HR approval";
     default: return "Roster approval";
   }
+}
+function rosterSwapShiftLabel(shift: RosterSwapApproval["requesterShift"], dayType: string) {
+  if (dayType === "weekly_off") return "Weekly off";
+  if (!shift) return "Shift not assigned";
+  return `${shift.start_time.slice(0, 5)}–${shift.end_time.slice(0, 5)}`;
 }
 
 function ApprovalHead({
@@ -218,6 +239,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [attendanceApprovals, setAttendanceApprovals] = useState<AttendanceApproval[]>([]);
   const [attendanceHrApprovals, setAttendanceHrApprovals] = useState<AttendanceApproval[]>([]);
   const [rosterApprovals, setRosterApprovals] = useState<RosterApproval[]>([]);
+  const [rosterSwapApprovals, setRosterSwapApprovals] = useState<RosterSwapApproval[]>([]);
   const [supportPackages, setSupportPackages] = useState<LocationSupportPackage[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -242,11 +264,12 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       setAttendanceApprovals(leavePayload.attendanceApprovals ?? []);
       setAttendanceHrApprovals(leavePayload.attendanceHrApprovals ?? []);
       setRosterApprovals(leavePayload.rosterApprovals ?? []);
+      setRosterSwapApprovals(leavePayload.rosterSwapApprovals ?? []);
       setSupportPackages(leavePayload.locationSupportPackages ?? []);
       setSection((current) => {
         if (current === "time-off" && !(leavePayload.leaveApprovals ?? []).length) {
           if ((leavePayload.attendanceApprovals ?? []).length || (leavePayload.attendanceHrApprovals ?? []).length) return "attendance";
-          if ((leavePayload.rosterApprovals ?? []).length) return "rosters";
+          if ((leavePayload.rosterSwapApprovals ?? []).length || (leavePayload.rosterApprovals ?? []).length) return "rosters";
           if ((leavePayload.locationSupportPackages ?? []).length) return "location-integrity";
           if ((reimbursementPayload.approvals ?? []).length) return "reimbursements";
         }
@@ -351,7 +374,29 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     finally { setSaving(false); }
   }
 
+  async function decideRosterSwap(requestId: string, decision: "approved" | "rejected") {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/approvals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: account.id,
+          profileType: account.profileType,
+          rosterSwapRequestId: requestId,
+          decision,
+          note: notes[requestId] ?? ""
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to update shift swap.");
+      setNotice(payload.notice); setNotes((current) => ({ ...current, [requestId]: "" })); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update shift swap."); }
+    finally { setSaving(false); }
+  }
+
   const attendanceCount = attendanceApprovals.length + attendanceHrApprovals.length;
+  const rosterCount = rosterApprovals.length + rosterSwapApprovals.length;
 
   function renderAttendanceCard(approval: AttendanceApproval, queue: "manager" | "hr") {
     const noteRequired = queue === "hr";
@@ -435,7 +480,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
           Attendance<span>{attendanceCount}</span>
         </button>
         <button className={section === "rosters" ? "active" : ""} onClick={() => setSection("rosters")} type="button">
-          Rosters<span>{rosterApprovals.length}</span>
+          Rosters<span>{rosterCount}</span>
         </button>
         <button className={section === "location-integrity" ? "active" : ""} onClick={() => setSection("location-integrity")} type="button">
           Location<span>{supportPackages.length}</span>
@@ -502,6 +547,29 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
 
       {!loading && section === "rosters" ? (
         <div className="dx-approval-list">
+          {rosterSwapApprovals.length ? rosterSwapApprovals.map((approval) => (
+            <article className="dx-approval-card" key={`swap:${approval.id}`}>
+              <ApprovalHead
+                badge={<span className="dx-approval-badge">Swap</span>}
+                eyebrow={`Shift swap · ${displayDate(approval.rosterDate)}`}
+                meta={`${approval.requesterCode || "—"} ↔ ${approval.partnerCode || "—"}`}
+                name={`${approval.requesterName} ↔ ${approval.partnerName}`}
+              />
+              <dl className="dx-approval-facts">
+                <div><dt>Exchange</dt><dd>{rosterSwapShiftLabel(approval.requesterShift, approval.requesterDayType)} ↔ {rosterSwapShiftLabel(approval.partnerShift, approval.partnerDayType)}</dd></div>
+                <div><dt>Requested</dt><dd>{dateTime(approval.requestedAt)}</dd></div>
+                {approval.requesterNote ? <div><dt>Requester note</dt><dd>{approval.requesterNote}</dd></div> : null}
+                {approval.partnerNote ? <div><dt>Partner note</dt><dd>{approval.partnerNote}</dd></div> : null}
+              </dl>
+              <ApprovalNote id={approval.id} notes={notes} onChange={(value) => setNote(approval.id, value)} placeholder="Note for colleagues (optional)" />
+              <ApprovalToolbar
+                onApprove={() => void decideRosterSwap(approval.id, "approved")}
+                onReject={() => void decideRosterSwap(approval.id, "rejected")}
+                saving={saving}
+                showReturn={false}
+              />
+            </article>
+          )) : null}
           {rosterApprovals.length ? rosterApprovals.map((approval) => (
             <article className="dx-approval-card" key={approval.id}>
               <ApprovalHead
@@ -528,9 +596,10 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
                 saving={saving}
               />
             </article>
-          )) : (
-            <div className="dx-empty"><CalendarDays /><strong>No roster approvals</strong><small>Weekly roster changes assigned to you will appear here after submission from People.</small></div>
-          )}
+          )) : null}
+          {!rosterSwapApprovals.length && !rosterApprovals.length ? (
+            <div className="dx-empty"><ArrowLeftRight /><strong>No roster approvals</strong><small>Shift swaps and weekly roster changes assigned to you will appear here.</small></div>
+          ) : null}
         </div>
       ) : null}
 
