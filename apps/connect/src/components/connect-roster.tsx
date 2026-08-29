@@ -6,7 +6,7 @@ import type { AppAccount } from "./connect-profile-app";
 
 type Shift = { id: string; name: string; code: string; start_time: string; end_time: string };
 type Partner = { id: string; workerType: string; workerId: string; name?: string; code?: string; dayType: "working" | "weekly_off"; shift: Shift | null };
-type RosterDay = { id: string; date: string; dayType: "working" | "weekly_off"; locationId: string | null; shift: Shift | null; canSwap: boolean; partners: Partner[] };
+type RosterDay = { id: string; date: string; dayType: "working" | "weekly_off"; locationId: string | null; shift: Shift | null; isProjected: boolean; canSwap: boolean; partners: Partner[] };
 type SwapRequest = {
   id: string;
   date: string;
@@ -107,7 +107,7 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
       {(data?.days ?? []).length ? data?.days.map((day) => <article className={day.dayType === "weekly_off" ? "off" : ""} key={day.id}>
         <div className="dx-roster-date"><CalendarDays /><span><strong>{displayDate(day.date)}</strong><small>{day.dayType === "weekly_off" ? "Rest day" : day.shift?.name || "Working day"}</small></span></div>
         <div className="dx-roster-shift"><Clock3 /><strong>{shiftLabel(day.shift, day.dayType)}</strong></div>
-        <button disabled={!day.canSwap || !day.partners.length} onClick={() => { setSelectedDay(day); setPartnerEntryId(""); setNote(""); }}><ArrowLeftRight />{day.canSwap ? day.partners.length ? "Request swap" : "No partner available" : `Closed ${data?.leadHours ?? 24}h before`}</button>
+        <button disabled={!day.canSwap || !day.partners.length} onClick={() => { setSelectedDay(day); setPartnerEntryId(""); setNote(""); }}><ArrowLeftRight />{day.isProjected ? "Recurring schedule" : day.canSwap ? day.partners.length ? "Request swap" : "No partner available" : `Closed ${data?.leadHours ?? 24}h before`}</button>
       </article>) : <div className="dx-roster-empty"><CalendarDays /><strong>No approved roster yet</strong><small>Your published shifts will appear here.</small></div>}
     </div> : null}
 

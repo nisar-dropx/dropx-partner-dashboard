@@ -175,6 +175,7 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType) {
   const days = own.map((entry) => ({
     id: entry.id, date: entry.roster_date, dayType: entry.day_type, locationId: entry.location_id,
     shift: entry.day_type === "weekly_off" ? null : shiftOf(entry),
+    isProjected: entry.id.startsWith("preview:"),
     canSwap: !entry.id.startsWith("preview:") && (() => { try { assertBeforeCutoff(entry, leadHours); return true; } catch { return false; } })(),
     partners: colleagueEntries.filter((candidate) => candidate.id !== entry.id && candidate.roster_date === entry.roster_date && candidate.location_id === entry.location_id && !(candidate.worker_type === workerType && candidate.worker_id === account.id)).map((candidate) => ({ id: candidate.id, workerType: candidate.worker_type, workerId: candidate.worker_id, ...names.get(`${candidate.worker_type}:${candidate.worker_id}`), dayType: candidate.day_type, shift: candidate.day_type === "weekly_off" ? null : shiftOf(candidate) }))
   }));
