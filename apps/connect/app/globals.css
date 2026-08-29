@@ -14341,6 +14341,53 @@ body {
   max-width: 28rem;
 }
 
+.dx-approval-scope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #e4e7ec;
+  border-radius: 13px;
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.04);
+}
+
+.dx-approval-scope-switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 3px;
+  padding: 3px;
+  background: #f2f4f7;
+  border-radius: 9px;
+}
+
+.dx-approval-scope-switch button {
+  min-height: 32px;
+  padding: 0 11px;
+  color: #667085;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.dx-approval-scope-switch button.active {
+  color: #fff;
+  background: #172033;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.18);
+}
+
+.dx-approval-scope > p {
+  margin: 0;
+  color: #667085;
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: right;
+}
+
 .dx-approval-tabs {
   display: flex;
   gap: 6px;
@@ -14827,6 +14874,25 @@ body {
 @media (max-width: 719px) {
   .dx-approval-inbox {
     gap: 12px;
+  }
+
+  .dx-approval-scope {
+    display: grid;
+    gap: 7px;
+  }
+
+  .dx-approval-scope-switch {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dx-approval-scope-switch button {
+    padding-inline: 8px;
+  }
+
+  .dx-approval-scope > p {
+    padding: 0 3px 2px;
+    text-align: left;
   }
 
   .dx-approval-card {

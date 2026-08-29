@@ -94,6 +94,7 @@ type RosterApproval = {
 };
 
 type ApprovalSection = "time-off" | "attendance" | "rosters" | "location-integrity" | "reimbursements";
+type ReporteeScope = "immediate" | "team";
 
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
 function money(value: number | null | undefined) { return `₹${Number(value ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
@@ -213,6 +214,7 @@ function ApprovalToolbar({
 
 export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [section, setSection] = useState<ApprovalSection>("time-off");
+  const [reporteeScope, setReporteeScope] = useState<ReporteeScope>("immediate");
   const [reimbursements, setReimbursements] = useState<ReimbursementApproval[]>([]);
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
   const [attendanceApprovals, setAttendanceApprovals] = useState<AttendanceApproval[]>([]);
@@ -228,7 +230,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
+      const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType, reporteeScope });
       const [reimbursementResponse, leaveResponse] = await Promise.all([
         fetch(`/api/connect/reimbursements?${query}`, { cache: "no-store" }),
         fetch(`/api/connect/approvals?${query}`, { cache: "no-store" })
@@ -254,7 +256,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       });
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load approvals."); }
     finally { setLoading(false); }
-  }, [account.id, account.profileType]);
+  }, [account.id, account.profileType, reporteeScope]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -320,7 +322,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const response = await fetch("/api/connect/approvals", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: account.id, profileType: account.profileType, reviewId, decision, note: notes[reviewId] ?? "" })
+        body: JSON.stringify({ accountId: account.id, profileType: account.profileType, reporteeScope, reviewId, decision, note: notes[reviewId] ?? "" })
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update support package.");
@@ -352,6 +354,14 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   }
 
   const attendanceCount = attendanceApprovals.length + attendanceHrApprovals.length;
+  const scopeName = reporteeScope === "immediate" ? "immediate reportees" : "entire reporting team";
+
+  function selectReporteeScope(scope: ReporteeScope) {
+    if (scope === reporteeScope) return;
+    setError("");
+    setNotice("");
+    setReporteeScope(scope);
+  }
 
   function renderAttendanceCard(approval: AttendanceApproval, queue: "manager" | "hr") {
     const noteRequired = queue === "hr";
@@ -423,8 +433,31 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       <header className="dx-page-intro">
         <small>Manager workspace</small>
         <h1>Approval inbox</h1>
-        <p>Review workflow steps assigned to you.</p>
+        <p>Review workflow steps from your reporting hierarchy.</p>
       </header>
+      <div className="dx-approval-scope">
+        <div aria-label="Choose reportee view" className="dx-approval-scope-switch" role="group">
+          <button
+            aria-pressed={reporteeScope === "immediate"}
+            className={reporteeScope === "immediate" ? "active" : ""}
+            onClick={() => selectReporteeScope("immediate")}
+            type="button"
+          >
+            Immediate reportees
+          </button>
+          <button
+            aria-pressed={reporteeScope === "team"}
+            className={reporteeScope === "team" ? "active" : ""}
+            onClick={() => selectReporteeScope("team")}
+            type="button"
+          >
+            Entire team
+          </button>
+        </div>
+        <p>{reporteeScope === "immediate"
+          ? "Showing only people who report directly to you."
+          : "Showing everyone below you in the active Org Chart tree."}</p>
+      </div>
       {error ? <div className="dx-alert error">{error}</div> : null}
       {notice ? <div className="dx-alert success">{notice}</div> : null}
       <nav aria-label="Approval sections" className="dx-approval-tabs">
@@ -469,7 +502,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
               />
             </article>
           )) : (
-            <div className="dx-empty"><Clock3 /><strong>No time-off approvals</strong><small>Assigned leave requests will appear here.</small></div>
+            <div className="dx-empty"><Clock3 /><strong>No time-off approvals</strong><small>No requests from your {scopeName} are waiting.</small></div>
           )}
         </div>
       ) : null}
@@ -495,7 +528,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
             </>
           ) : null}
           {!attendanceApprovals.length && !attendanceHrApprovals.length ? (
-            <div className="dx-empty"><CalendarClock /><strong>No attendance regularizations</strong><small>Manager steps and HR finalizations assigned to you will appear here.</small></div>
+            <div className="dx-empty"><CalendarClock /><strong>No attendance regularizations</strong><small>No requests from your {scopeName} are waiting.</small></div>
           ) : null}
         </div>
       ) : null}
@@ -574,7 +607,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
               />
             </article>
           )) : (
-            <div className="dx-empty"><LocateFixed /><strong>No location checks</strong><small>Support packages from your team will appear here.</small></div>
+            <div className="dx-empty"><LocateFixed /><strong>No location checks</strong><small>No support packages from your {scopeName} are waiting.</small></div>
           )}
         </div>
       ) : null}
@@ -611,12 +644,12 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
               />
             </article>
           )) : (
-            <div className="dx-empty"><Clock3 /><strong>No claims waiting</strong><small>Reimbursement approvals will appear here.</small></div>
+            <div className="dx-empty"><Clock3 /><strong>No claims waiting</strong><small>No claims from your {scopeName} are waiting.</small></div>
           )}
         </div>
       ) : null}
 
-      <p className="dx-approval-footnote"><ClipboardCheck /> Routed by active policy and reporting hierarchy.</p>
+      <p className="dx-approval-footnote"><ClipboardCheck /> Scope follows active primary reporting lines in the Org Chart.</p>
     </section>
   );
 }
