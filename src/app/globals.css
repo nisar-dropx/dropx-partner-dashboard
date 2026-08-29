@@ -12853,6 +12853,59 @@ tbody tr:hover td {
   align-items: end;
 }
 
+.attendance-multi-select {
+  margin-top: 6px;
+}
+
+.attendance-multi-select-menu {
+  z-index: 90;
+  width: min(360px, calc(100vw - 48px));
+}
+
+.attendance-multi-select .multi-select-search {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.attendance-multi-select-empty {
+  margin: 0;
+  padding: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.attendance-shift-cell {
+  min-width: 128px;
+}
+
+.attendance-shift-cell strong,
+.attendance-shift-cell small {
+  display: block;
+}
+
+.attendance-shift-cell small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.attendance-date-cell {
+  white-space: nowrap;
+}
+
+.attendance-check {
+  min-width: 148px;
+  font-weight: 700;
+}
+
+.attendance-check.good {
+  color: #15803d;
+}
+
+.attendance-check.warn {
+  color: #b45309;
+}
+
 .date-range-field {
   position: relative;
   display: grid;

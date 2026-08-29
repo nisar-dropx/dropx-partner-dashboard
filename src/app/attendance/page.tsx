@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/app-shell";
+import { AttendanceMultiSelect } from "@/components/attendance-multi-select";
 import { DateRangeField } from "@/components/date-range-field";
 import { PageHead } from "@/components/page-head";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -107,6 +108,26 @@ function monthBounds(month: string) {
   };
 }
 
+function paramValues(value: string | string[] | undefined) {
+  return (Array.isArray(value) ? value : value ? [value] : [])
+    .map((item) => String(item).trim())
+    .filter(Boolean);
+}
+
+function displayDate(value: string) {
+  const [year, month, day] = value.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function varianceText(lateMinutes: number, earlyOutMinutes: number, remark: string) {
+  const parts = [
+    lateMinutes > 0 ? `Late ${lateMinutes}m` : "",
+    earlyOutMinutes > 0 ? `Early out ${earlyOutMinutes}m` : "",
+    remark
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "On time";
+}
+
 async function loadLocations(companyId: string, locationScopeIds: string[], hasAllLocationAccess: boolean) {
   if (!supabaseAdmin) return [] as LocationRow[];
   const { data, error } = await supabaseAdmin
@@ -136,8 +157,8 @@ export default async function AttendanceReportsPage({
     report?: string;
     sort?: string;
     search?: string;
-    designation?: string;
-    worker_type?: string;
+    designation?: string | string[];
+    worker_type?: string | string[];
     to_date?: string;
   };
 }) {
@@ -156,8 +177,8 @@ export default async function AttendanceReportsPage({
   const sort = safeSort(searchParams?.sort);
   const locationId = String(searchParams?.location_id ?? "");
   const search = String(searchParams?.search ?? "").trim();
-  const designation = String(searchParams?.designation ?? "");
-  const workerType = String(searchParams?.worker_type ?? "");
+  const designations = paramValues(searchParams?.designation);
+  const workerTypes = paramValues(searchParams?.worker_type);
   const activeRange = mode === "monthly"
     ? monthBounds(month)
     : normalizedRange(fromDate, toDate);
@@ -179,7 +200,7 @@ export default async function AttendanceReportsPage({
     const allowedLocationIds = new Set(locations.map((location) => location.id));
     const selectedLocationIds = locationId && allowedLocationIds.has(locationId)
       ? [locationId]
-      : authorization.hasAllLocationAccess ? undefined : locations.map((location) => location.id);
+      : isOpsSurface || !authorization.hasAllLocationAccess ? locations.map((location) => location.id) : undefined;
     const scopedRows = await loadAttendanceReportRows({
       companyId,
       fromDate: activeRange.fromDate,
@@ -188,14 +209,16 @@ export default async function AttendanceReportsPage({
       toDate: activeRange.toDate
     });
     filterOptions = attendanceReportFilterOptions(scopedRows);
-    rows = filterAttendanceReportRows(scopedRows, { designation, search, workerType });
+    rows = filterAttendanceReportRows(scopedRows, { designations, search, workerTypes });
   } catch (loadError) {
     error = loadError instanceof Error ? loadError.message : "Unable to load attendance reports.";
   }
 
   const presentCount = rows.filter((row) => row.status === "P").length;
-  const absentCount = rows.filter((row) => row.status === "A").length;
-  const misPunchCount = rows.filter((row) => row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length;
+  const fullDayCount = rows.filter((row) => row.attendanceStatus === "Full Day").length;
+  const halfDayCount = rows.filter((row) => row.attendanceStatus === "Half Day").length;
+  const absentCount = rows.filter((row) => row.attendanceStatus === "Absent").length;
+  const misPunchCount = rows.filter((row) => row.punchCount % 2 === 1 || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length;
   const punchLabelOrder = ["In1", "Out1", "In2", "Out2", "In3", "Out3", "In4", "Out4", "In5", "Out5", "In6", "Out6", "In7", "Out7", "In8", "Out8"];
   const lastPunch = rows
     .flatMap((row) => punchLabelOrder.map((label) => ({ row, label, time: row.labels[label] })))
@@ -250,11 +273,11 @@ export default async function AttendanceReportsPage({
           <label>Location
             <SearchableSelect name="location_id" options={locationOptions} defaultValue={locations.some((location) => location.id === locationId) ? locationId : ""} placeholder={isOpsSurface ? "Selected OpsPulse locations" : "All locations"} />
           </label>
-          <label>Designation
-            <SearchableSelect name="designation" options={[{ value: "", label: "All designations" }, ...filterOptions.designations.map((value) => ({ value, label: value }))]} defaultValue={designation} placeholder="All designations" />
+          <label>Designation / role
+            <AttendanceMultiSelect allLabel="All designations" defaultValues={designations} label="designation" name="designation" options={filterOptions.designations} />
           </label>
-          <label>Workforce type
-            <SearchableSelect name="worker_type" options={[{ value: "", label: "All workforce types" }, ...filterOptions.workerTypes.map((value) => ({ value, label: value }))]} defaultValue={workerType} placeholder="All workforce types" />
+          <label>Workforce category
+            <AttendanceMultiSelect allLabel="All People categories" defaultValues={workerTypes} label="workforce category" name="worker_type" options={filterOptions.workerTypes} />
           </label>
           <label className="span-3">Search
             <input className="field" name="search" defaultValue={search} placeholder="Name, DropX ID, biometric ID, location or designation" />
@@ -294,12 +317,12 @@ export default async function AttendanceReportsPage({
         <div className="metric-card">
           <span>Present</span>
           <strong>{presentCount}</strong>
-          <small>Calculated from active punches</small>
+          <small>{fullDayCount} full day · {halfDayCount} half day</small>
         </div>
         <div className="metric-card">
           <span>Absent</span>
           <strong>{absentCount}</strong>
-          <small>Attendance daily status</small>
+          <small>Based on People attendance rules</small>
         </div>
         <div className="metric-card">
           <span>Mis punch</span>
@@ -322,36 +345,44 @@ export default async function AttendanceReportsPage({
           <table>
             <thead>
               <tr>
+                <th>Date</th>
                 <th>Empcode</th>
                 <th>Name</th>
+                <th>Workforce</th>
                 <th>Location</th>
                 <th>Designation</th>
-                <th>INTime</th>
+                <th>Shift</th>
+                <th>Scheduled</th>
+                <th>First in</th>
                 {reportType === "in_out" ? inOutColumns.map((column) => <th key={column}>{column}</th>) : null}
-                <th>OUTTime</th>
-                <th>Work+OT</th>
+                <th>Last out</th>
+                <th>Work</th>
                 <th>Punches</th>
-                <th>Status</th>
-                <th>Remark</th>
+                <th>Day status</th>
+                <th>Attendance checks</th>
               </tr>
             </thead>
             <tbody>
               {rows.length ? rows.map((row) => (
                 <tr key={`${row.enrolmentId}-${row.punchDate}-${row.workerCode}`}>
+                  <td className="attendance-date-cell">{displayDate(row.punchDate)}</td>
                   <td><strong>{row.workerCode}</strong></td>
                   <td>{row.workerName}</td>
+                  <td>{row.workerType}</td>
                   <td>{row.location}</td>
                   <td>{row.designation}</td>
+                  <td className="attendance-shift-cell"><strong>{row.shiftName}</strong><small>{row.shiftSource}</small></td>
+                  <td>{row.scheduledStart}–{row.scheduledEnd}</td>
                   <td>{row.labels.In1 ?? row.inTime}</td>
                   {reportType === "in_out" ? inOutColumns.map((column) => <td key={column}>{row.labels[column] ?? "--:--"}</td>) : null}
                   <td>{row.outTime}</td>
                   <td>{row.workHours}</td>
                   <td>{row.punchCount}</td>
-                  <td><StatusPill status={row.status === "P" ? "Present" : "Absent"} /></td>
-                  <td>{row.remark || "-"}</td>
+                  <td><StatusPill status={row.attendanceStatus} /></td>
+                  <td className={row.lateMinutes || row.earlyOutMinutes || row.remark ? "attendance-check warn" : "attendance-check good"}>{varianceText(row.lateMinutes, row.earlyOutMinutes, row.remark)}</td>
                 </tr>
               )) : (
-                <tr><td className="empty-cell" colSpan={reportType === "in_out" ? 24 : 10}>No attendance rows found.</td></tr>
+                <tr><td className="empty-cell" colSpan={reportType === "in_out" ? 29 : 14}>No attendance rows found.</td></tr>
               )}
             </tbody>
           </table>

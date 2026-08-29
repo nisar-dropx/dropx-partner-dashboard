@@ -17,6 +17,12 @@ export type AttendanceReportRow = {
   locationId: string | null;
   location: string;
   designation: string;
+  shiftName: string;
+  shiftCode: string;
+  shiftSource: string;
+  scheduledStart: string;
+  scheduledEnd: string;
+  scheduledMinutes: number;
   punchDate: string;
   inTime: string;
   outTime: string;
@@ -24,6 +30,9 @@ export type AttendanceReportRow = {
   workHours: string;
   punchCount: number;
   status: string;
+  attendanceStatus: string;
+  lateMinutes: number;
+  earlyOutMinutes: number;
   remark: string;
   deviceSerial: string;
   labels: Record<string, string>;
@@ -39,6 +48,7 @@ type PunchRow = {
 };
 
 type BiometricWorkerLookupRow = {
+  id: string;
   biometric_id: string | null;
   designation?: string | null;
   designation_id?: string | null;
@@ -49,7 +59,7 @@ type BiometricWorkerLookupRow = {
 };
 
 type BiometricWorkerLookup = BiometricWorkerLookupRow & {
-  profileType: "employee" | "field_executive" | "contractor" | "vendor" | "worker";
+  profileType: "employee" | "field_executive" | "contractor" | "vendor" | "worker" | "helper" | "picker";
 };
 
 type DailyRow = {
@@ -75,6 +85,7 @@ type EmployeeLookupRow = {
   employee_code: string | null;
   full_name: string | null;
   designation_id: string | null;
+  org_position_id?: string | null;
 };
 
 type ExecutiveLookupRow = {
@@ -166,6 +177,38 @@ function istDateTime(date: string, time: string) {
 type ShiftWindow = {
   startTime: string;
   endTime: string;
+};
+
+type ShiftDefinition = {
+  id?: string | null;
+  code?: string | null;
+  name?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  break_minutes?: number | null;
+  grace_in_minutes?: number | null;
+  grace_out_minutes?: number | null;
+};
+
+type ShiftSchedule = {
+  shift: ShiftDefinition | null;
+  source: "Roster" | "Assigned shift" | "Unassigned";
+  dayType: string;
+};
+
+type AttendanceRules = {
+  attendance_grace_minutes?: number | null;
+  below_half_day_treatment?: string | null;
+  full_day_minutes?: number | null;
+  full_day_percent?: number | null;
+  half_day_minutes?: number | null;
+  half_day_percent?: number | null;
+  no_punch_treatment?: string | null;
+  odd_punch_treatment?: string | null;
+  partial_day_treatment?: string | null;
+  single_punch_treatment?: string | null;
+  unassigned_shift_treatment?: string | null;
+  work_duration_basis?: string | null;
 };
 
 async function loadWorkerShiftWindow({
@@ -332,6 +375,211 @@ export function punchLabel(position: number) {
   const safePosition = Math.max(1, Math.trunc(position));
   const pair = Math.ceil(safePosition / 2);
   return safePosition % 2 === 1 ? `In${pair}` : `Out${pair}`;
+}
+
+function relationFirst<T>(value: T | T[] | null | undefined): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+function formatClock(value: string | null | undefined) {
+  return value ? value.slice(0, 5) : "--:--";
+}
+
+function clockMinutes(value: string | null | undefined) {
+  const [hours, minutes] = String(value ?? "").split(":").map(Number);
+  return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : null;
+}
+
+function scheduledDuration(shift: ShiftDefinition | null) {
+  const start = clockMinutes(shift?.start_time);
+  const end = clockMinutes(shift?.end_time);
+  if (start == null || end == null) return 0;
+  const elapsed = end <= start ? end + 1440 - start : end - start;
+  return Math.max(0, elapsed - Math.max(0, Number(shift?.break_minutes ?? 0)));
+}
+
+function treatmentLabel(value: string | null | undefined, fallback: string) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "absent") return "Absent";
+  if (normalized === "half_day" || normalized === "half day") return "Half Day";
+  if (normalized === "full_day" || normalized === "full day") return "Full Day";
+  if (normalized === "present") return "Present";
+  if (normalized === "review" || normalized === "needs_review") return "Needs Review";
+  return fallback;
+}
+
+function attendanceDayStatus({
+  dayType,
+  punchCount,
+  rules,
+  scheduledMinutes,
+  status,
+  workMinutes
+}: {
+  dayType: string;
+  punchCount: number;
+  rules: AttendanceRules;
+  scheduledMinutes: number;
+  status: string;
+  workMinutes: number;
+}) {
+  if (dayType && dayType !== "working" && dayType !== "unassigned") {
+    const dayLabel = dayType.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+    return punchCount > 0 ? `Present (${dayLabel})` : dayLabel;
+  }
+  if (status === "A" || punchCount === 0) return treatmentLabel(rules.no_punch_treatment, "Absent");
+  if (punchCount === 1) return treatmentLabel(rules.single_punch_treatment, "Needs Review");
+  if (punchCount % 2 === 1) return treatmentLabel(rules.odd_punch_treatment, "Needs Review");
+
+  const percentageBasis = String(rules.work_duration_basis ?? "").toLowerCase().includes("percent");
+  const fullThreshold = percentageBasis && scheduledMinutes > 0
+    ? Math.round(scheduledMinutes * Math.max(0, Number(rules.full_day_percent ?? 100)) / 100)
+    : Math.max(1, Number(rules.full_day_minutes ?? 540));
+  const halfThreshold = percentageBasis && scheduledMinutes > 0
+    ? Math.round(scheduledMinutes * Math.max(0, Number(rules.half_day_percent ?? 50)) / 100)
+    : Math.max(1, Number(rules.half_day_minutes ?? 270));
+  if (workMinutes >= fullThreshold) return "Full Day";
+  if (workMinutes >= halfThreshold) return treatmentLabel(rules.partial_day_treatment, "Half Day");
+  return treatmentLabel(rules.below_half_day_treatment, "Absent");
+}
+
+function attendanceVariance({
+  inTime,
+  outTime,
+  punchDate,
+  rules,
+  shift
+}: {
+  inTime: string | null;
+  outTime: string | null;
+  punchDate: string;
+  rules: AttendanceRules;
+  shift: ShiftDefinition | null;
+}) {
+  if (!shift?.start_time || !shift.end_time) return { earlyOutMinutes: 0, lateMinutes: 0 };
+  const scheduledStart = istDateTime(punchDate, shift.start_time);
+  let scheduledEnd = istDateTime(punchDate, shift.end_time);
+  if (scheduledEnd <= scheduledStart) scheduledEnd = istDateTime(addIsoDateDays(punchDate, 1), shift.end_time);
+  const actualIn = inTime ? new Date(inTime) : null;
+  const actualOut = outTime ? new Date(outTime) : null;
+  const companyGrace = Math.max(0, Number(rules.attendance_grace_minutes ?? 0));
+  const inGrace = Math.max(companyGrace, Math.max(0, Number(shift.grace_in_minutes ?? 0)));
+  const outGrace = Math.max(companyGrace, Math.max(0, Number(shift.grace_out_minutes ?? 0)));
+  return {
+    lateMinutes: actualIn && !Number.isNaN(actualIn.getTime())
+      ? Math.max(0, Math.floor((actualIn.getTime() - scheduledStart.getTime()) / 60000) - inGrace)
+      : 0,
+    earlyOutMinutes: actualOut && !Number.isNaN(actualOut.getTime())
+      ? Math.max(0, Math.floor((scheduledEnd.getTime() - actualOut.getTime()) / 60000) - outGrace)
+      : 0
+  };
+}
+
+async function loadAttendanceScheduleContext({
+  companyId,
+  fromDate,
+  toDate,
+  workers
+}: {
+  companyId: string;
+  fromDate: string;
+  toDate: string;
+  workers: Array<{ profileId: string; profileType: BiometricWorkerLookup["profileType"] }>;
+}) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const workerIds = Array.from(new Set(workers.map((worker) => worker.profileId).filter(Boolean)));
+  const employeeIds = Array.from(new Set(workers.filter((worker) => worker.profileType === "employee").map((worker) => worker.profileId)));
+  const contractorIds = Array.from(new Set(workers.filter((worker) => worker.profileType !== "employee").map((worker) => worker.profileId)));
+  const shiftColumns = "id, code, name, start_time, end_time, break_minutes, grace_in_minutes, grace_out_minutes";
+
+  const [settingsResult, rosterResult, employeeAssignmentResult, contractorAssignmentResult] = await Promise.all([
+    supabaseAdmin
+      .from("hr_company_settings")
+      .select("attendance_grace_minutes, below_half_day_treatment, full_day_minutes, full_day_percent, half_day_minutes, half_day_percent, no_punch_treatment, odd_punch_treatment, partial_day_treatment, single_punch_treatment, unassigned_shift_treatment, work_duration_basis")
+      .eq("company_id", companyId)
+      .maybeSingle(),
+    workerIds.length
+      ? supabaseAdmin
+        .from("hr_roster_entries")
+        .select(`worker_id, roster_date, day_type, hr_shifts(${shiftColumns}), hr_roster_plans(status)`)
+        .eq("company_id", companyId)
+        .gte("roster_date", fromDate)
+        .lte("roster_date", toDate)
+        .in("worker_id", workerIds)
+      : Promise.resolve({ data: [], error: null }),
+    employeeIds.length
+      ? supabaseAdmin
+        .from("hr_employee_shift_assignments")
+        .select(`employee_id, effective_from, effective_to, hr_shifts(${shiftColumns})`)
+        .eq("company_id", companyId)
+        .lte("effective_from", toDate)
+        .or(`effective_to.is.null,effective_to.gte.${fromDate}`)
+        .in("employee_id", employeeIds)
+        .order("effective_from", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+    contractorIds.length
+      ? supabaseAdmin
+        .from("hr_contractor_shift_assignments")
+        .select(`contractor_id, effective_from, effective_to, hr_shifts(${shiftColumns})`)
+        .eq("company_id", companyId)
+        .lte("effective_from", toDate)
+        .or(`effective_to.is.null,effective_to.gte.${fromDate}`)
+        .in("contractor_id", contractorIds)
+        .order("effective_from", { ascending: false })
+      : Promise.resolve({ data: [], error: null })
+  ]);
+  if (settingsResult.error) throw new Error(settingsResult.error.message);
+  if (rosterResult.error) throw new Error(rosterResult.error.message);
+  if (employeeAssignmentResult.error) throw new Error(employeeAssignmentResult.error.message);
+  // Older non-employee categories do not all have contractor shift records; an empty result is valid.
+  if (contractorAssignmentResult.error && !isMissingColumnError(contractorAssignmentResult.error)) throw new Error(contractorAssignmentResult.error.message);
+
+  type RosterRow = {
+    worker_id: string;
+    roster_date: string;
+    day_type: string | null;
+    hr_shifts: ShiftDefinition | ShiftDefinition[] | null;
+    hr_roster_plans: { status?: string | null } | Array<{ status?: string | null }> | null;
+  };
+  type AssignmentRow = {
+    employee_id?: string;
+    contractor_id?: string;
+    effective_from: string;
+    effective_to: string | null;
+    hr_shifts: ShiftDefinition | ShiftDefinition[] | null;
+  };
+  const rosterByWorkerDate = new Map<string, ShiftSchedule>();
+  ((rosterResult.data ?? []) as unknown as RosterRow[]).forEach((row) => {
+    if (relationFirst(row.hr_roster_plans)?.status !== "approved") return;
+    rosterByWorkerDate.set(`${row.worker_id}:${row.roster_date}`, {
+      dayType: row.day_type ?? "working",
+      shift: relationFirst(row.hr_shifts),
+      source: "Roster"
+    });
+  });
+  const assignmentsByWorker = new Map<string, AssignmentRow[]>();
+  ([...(employeeAssignmentResult.data ?? []), ...(contractorAssignmentResult.data ?? [])] as unknown as AssignmentRow[]).forEach((assignment) => {
+    const workerId = assignment.employee_id ?? assignment.contractor_id;
+    if (!workerId) return;
+    const values = assignmentsByWorker.get(workerId) ?? [];
+    values.push(assignment);
+    assignmentsByWorker.set(workerId, values);
+  });
+
+  return {
+    rules: (settingsResult.data ?? {}) as AttendanceRules,
+    scheduleFor(profileId: string | null, punchDate: string): ShiftSchedule {
+      if (!profileId) return { dayType: "unassigned", shift: null, source: "Unassigned" };
+      const roster = rosterByWorkerDate.get(`${profileId}:${punchDate}`);
+      if (roster) return roster;
+      const assignment = (assignmentsByWorker.get(profileId) ?? []).find((candidate) => (
+        candidate.effective_from <= punchDate && (!candidate.effective_to || candidate.effective_to >= punchDate)
+      ));
+      return assignment
+        ? { dayType: "working", shift: relationFirst(assignment.hr_shifts), source: "Assigned shift" }
+        : { dayType: "unassigned", shift: null, source: "Unassigned" };
+    }
+  };
 }
 
 function summarizeFirstInLastOut(punchTimes: string[]) {
@@ -683,10 +931,10 @@ export async function backfillHistoricalPunches({
 
 function reportMatchesType(row: AttendanceReportRow, type: AttendanceReportType) {
   if (type === "present") return row.status === "P";
-  if (type === "absent") return row.status === "A";
-  if (type === "late_in") return row.remark.toLowerCase().includes("late");
-  if (type === "early_out") return row.remark.toLowerCase().includes("early out");
-  if (type === "mis_punch") return row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing");
+  if (type === "absent") return row.attendanceStatus === "Absent";
+  if (type === "late_in") return row.lateMinutes > 0 || row.remark.toLowerCase().includes("late");
+  if (type === "early_out") return row.earlyOutMinutes > 0 || row.remark.toLowerCase().includes("early out");
+  if (type === "mis_punch") return row.punchCount % 2 === 1 || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing");
   return true;
 }
 
@@ -775,7 +1023,7 @@ export async function loadAttendanceReportRows({
     employeeIds.length
       ? supabaseAdmin
         .from("employees")
-        .select("id, employee_code, full_name, designation_id")
+        .select("id, employee_code, full_name, designation_id, org_position_id")
         .eq("company_id", companyId)
         .in("id", employeeIds)
       : Promise.resolve({ data: [], error: null }),
@@ -796,49 +1044,49 @@ export async function loadAttendanceReportRows({
     biometricVariants.length
       ? supabaseAdmin
         .from("employees")
-        .select("employee_code, full_name, biometric_id, designation_id, location_id")
+        .select("id, employee_code, full_name, biometric_id, designation_id, location_id, org_position_id")
         .eq("company_id", companyId)
         .in("biometric_id", biometricVariants)
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
       ? supabaseAdmin
         .from("field_executives")
-        .select("dropx_id, full_name, biometric_id, designation, location_id")
+        .select("id, dropx_id, full_name, biometric_id, designation, location_id")
         .eq("company_id", companyId)
         .in("biometric_id", biometricVariants)
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
       ? supabaseAdmin
         .from("contractors")
-        .select("dropx_id, full_name, biometric_id, designation, location_id")
+        .select("id, dropx_id, full_name, biometric_id, designation, location_id")
         .eq("company_id", companyId)
         .in("biometric_id", biometricVariants)
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
       ? supabaseAdmin
         .from("vendors")
-        .select("dropx_id, full_name, biometric_id, designation, location_id")
+        .select("id, dropx_id, full_name, biometric_id, designation, location_id")
         .eq("company_id", companyId)
         .in("biometric_id", biometricVariants)
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
       ? supabaseAdmin
         .from("workers")
-        .select("dropx_id, full_name, biometric_id, designation, location_id")
+        .select("id, dropx_id, full_name, biometric_id, designation, location_id")
         .eq("company_id", companyId)
         .in("biometric_id", biometricVariants)
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
       ? supabaseAdmin
         .from("workforce_helpers")
-        .select("dropx_id, full_name, biometric_id, designation, location_id")
+        .select("id, dropx_id, full_name, biometric_id, designation, location_id")
         .eq("company_id", companyId)
         .in("biometric_id", biometricVariants)
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
       ? supabaseAdmin
         .from("workforce_pickers")
-        .select("dropx_id, full_name, biometric_id, designation, location_id")
+        .select("id, dropx_id, full_name, biometric_id, designation, location_id")
         .eq("company_id", companyId)
         .in("biometric_id", biometricVariants)
       : Promise.resolve({ data: [], error: null })
@@ -862,8 +1110,8 @@ export async function loadAttendanceReportRows({
     ...((biometricContractorResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "contractor" as const })),
     ...((biometricVendorResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "vendor" as const })),
     ...((biometricWorkerResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "worker" as const })),
-    ...((biometricHelperResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "worker" as const })),
-    ...((biometricPickerResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "worker" as const })),
+    ...((biometricHelperResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "helper" as const })),
+    ...((biometricPickerResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "picker" as const })),
     ...((biometricExecutiveResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "field_executive" as const }))
   ];
   const biometricWorkersById = new Map<string, BiometricWorkerLookup>();
@@ -905,6 +1153,32 @@ export async function loadAttendanceReportRows({
     }, new Map<string, PunchRow[]>());
   }
 
+  const reportWorkers = dailyRows.map((row) => {
+    const biometricWorker = biometricWorkersById.get(normalizeBiometricId(row.enrolment_id));
+    const profileType = row.employee_id || row.worker_type === "employee"
+      ? "employee" as const
+      : biometricWorker?.profileType ?? "field_executive" as const;
+    return {
+      profileId: row.employee_id ?? biometricWorker?.id ?? row.field_executive_id ?? "",
+      profileType
+    };
+  }).filter((worker) => worker.profileId);
+  const scheduleContext = await loadAttendanceScheduleContext({
+    companyId,
+    fromDate: fromDate ?? date ?? punchFilterDates.at(-1) ?? istDate(new Date()),
+    toDate: toDate ?? date ?? punchFilterDates[0] ?? istDate(new Date()),
+    workers: reportWorkers
+  });
+  const categoryLabel = (profileType: BiometricWorkerLookup["profileType"]) => {
+    if (profileType === "employee") return "Employees";
+    if (profileType === "field_executive") return "Field Executives";
+    if (profileType === "contractor") return "Independent Contractor";
+    if (profileType === "vendor") return "Vendors";
+    if (profileType === "helper") return "Helpers";
+    if (profileType === "picker") return "Pickers";
+    return "Workers";
+  };
+
   return dailyRows.map((row) => {
     const employee = row.employee_id ? employeesById.get(row.employee_id) : null;
     const executive = row.field_executive_id ? executivesById.get(row.field_executive_id) : null;
@@ -917,14 +1191,41 @@ export async function loadAttendanceReportRows({
     const punches = punchesByKey.get(`${row.enrolment_id}:${row.punch_date}`) ?? [];
     const labels = Object.fromEntries(punches.map((punch) => [punch.punch_label, formatTime(punch.punch_time)]));
     const firstDevice = punches.find((punch) => punch.device_serial)?.device_serial ?? "";
+    const profileType = row.employee_id || row.worker_type === "employee"
+      ? "employee" as const
+      : biometricWorker?.profileType ?? "field_executive" as const;
+    const profileId = row.employee_id ?? biometricWorker?.id ?? row.field_executive_id ?? null;
+    const schedule = scheduleContext.scheduleFor(profileId, row.punch_date);
+    const scheduledMinutes = scheduledDuration(schedule.shift);
+    const variance = attendanceVariance({
+      inTime: row.in_time,
+      outTime: row.out_time,
+      punchDate: row.punch_date,
+      rules: scheduleContext.rules,
+      shift: schedule.shift
+    });
+    const attendanceStatus = attendanceDayStatus({
+      dayType: schedule.dayType,
+      punchCount: Number(row.punch_count ?? 0),
+      rules: scheduleContext.rules,
+      scheduledMinutes,
+      status: row.status ?? "P",
+      workMinutes: Number(row.work_minutes ?? 0)
+    });
     const reportRow: AttendanceReportRow = {
       enrolmentId: row.enrolment_id,
       workerCode: employee?.employee_code ?? executive?.dropx_id ?? biometricWorker?.employee_code ?? biometricWorker?.dropx_id ?? row.employee_code ?? row.enrolment_id,
       workerName: employee?.full_name ?? executive?.full_name ?? biometricWorker?.full_name ?? row.worker_name ?? "Unknown",
-      workerType: row.worker_type === "employee" || biometricWorker?.profileType === "employee" ? "Employee" : "Individual Contract",
+      workerType: categoryLabel(profileType),
       locationId: row.location_id ?? biometricWorker?.location_id ?? null,
       location: station?.station_code ?? row.station_code ?? "-",
       designation: designation?.name ?? designation?.code ?? executive?.designation ?? biometricDesignation?.name ?? biometricDesignation?.code ?? biometricWorker?.designation ?? "-",
+      shiftName: schedule.shift?.name ?? schedule.shift?.code ?? (schedule.dayType !== "unassigned" && schedule.dayType !== "working" ? schedule.dayType.replaceAll("_", " ") : "Unassigned"),
+      shiftCode: schedule.shift?.code ?? "",
+      shiftSource: schedule.source,
+      scheduledStart: formatClock(schedule.shift?.start_time),
+      scheduledEnd: formatClock(schedule.shift?.end_time),
+      scheduledMinutes,
       punchDate: row.punch_date,
       inTime: formatTime(row.in_time),
       outTime: formatTime(row.out_time),
@@ -932,6 +1233,9 @@ export async function loadAttendanceReportRows({
       workHours: formatDuration(row.work_minutes),
       punchCount: Number(row.punch_count ?? 0),
       status: row.status ?? "P",
+      attendanceStatus,
+      lateMinutes: variance.lateMinutes,
+      earlyOutMinutes: variance.earlyOutMinutes,
       remark: row.remark ?? "",
       deviceSerial: firstDevice,
       labels

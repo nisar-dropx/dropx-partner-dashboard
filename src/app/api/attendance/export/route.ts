@@ -126,9 +126,9 @@ function groupKey(row: AttendanceReportRow, sort: SortMode) {
 
 function totals(rows: AttendanceReportRow[]) {
   return {
-    absent: rows.filter((row) => row.status === "A").length,
-    late: rows.filter((row) => row.remark.toLowerCase().includes("late")).length,
-    misPunch: rows.filter((row) => row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length,
+    absent: rows.filter((row) => row.attendanceStatus === "Absent").length,
+    late: rows.filter((row) => row.lateMinutes > 0).length,
+    misPunch: rows.filter((row) => row.punchCount % 2 === 1 || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length,
     present: rows.filter((row) => row.status === "P").length
   };
 }
@@ -137,38 +137,48 @@ function label(row: AttendanceReportRow, name: string) {
   return row.labels[name] && row.labels[name] !== "--:--" ? row.labels[name] : "";
 }
 
+function scheduleLabel(row: AttendanceReportRow) {
+  return row.scheduledStart === "--:--" ? "Unassigned" : `${row.scheduledStart}-${row.scheduledEnd}`;
+}
+
+function varianceLabel(minutesValue: number, fallback = "00:00") {
+  return minutesValue > 0 ? duration(minutesValue) : fallback;
+}
+
 function inOutHeader() {
-  const columns = ["Empcode", "Name", "Shift", "INTime"];
+  const columns = ["Date", "Empcode", "Name", "Workforce", "Designation", "Location", "Shift", "Scheduled", "INTime"];
   for (let index = 1; index <= inOutPairs; index += 1) {
     columns.push(`Out${index}`);
   }
-  columns.push("OUTTime", "Work+OT", "OT", "Break");
+  columns.push("OUTTime", "Work", "Day Status", "Late In", "Early Out", "Remark");
   return columns;
 }
 
 function inOutRow(row: AttendanceReportRow) {
-  const values = [row.workerCode, row.workerName, "-", label(row, "In1") || row.inTime];
+  const values = [displayDate(row.punchDate), row.workerCode, row.workerName, row.workerType, row.designation, row.location, row.shiftName, scheduleLabel(row), label(row, "In1") || row.inTime];
   for (let index = 1; index <= inOutPairs; index += 1) {
     values.push(label(row, `Out${index}`));
   }
-  values.push(row.outTime, row.workHours, "00:00", "00:00");
+  values.push(row.outTime, row.workHours, row.attendanceStatus, varianceLabel(row.lateMinutes), varianceLabel(row.earlyOutMinutes), row.remark || "-");
   return values;
 }
 
 function performanceHeader(reportType: AttendanceReportType) {
-  if (reportType === "absent") return ["Empcode", "Name", "Shift", "IN Time", "Out Time", "Work+OT", "Status", "Remark"];
-  if (reportType === "late_in") return ["Empcode", "Name", "Shift", "IN Time", "Late IN"];
-  if (reportType === "early_out") return ["Empcode", "Name", "Shift", "IN Time", "OUT Time", "Early Out"];
-  if (reportType === "mis_punch") return ["Empcode", "Name", "Shift", "INTime", "OUTTime", "Punches", "Remark"];
-  return ["Empcode", "Name", "Shift", "INTime", "Late In", "Erl Out", "OUTTime", "Work+OT", "Over Time", "Status", "Remark"];
+  const people = ["Date", "Empcode", "Name", "Workforce", "Designation", "Location", "Shift", "Scheduled"];
+  if (reportType === "absent") return [...people, "IN Time", "Out Time", "Work", "Day Status", "Remark"];
+  if (reportType === "late_in") return [...people, "IN Time", "Late IN", "Day Status"];
+  if (reportType === "early_out") return [...people, "IN Time", "OUT Time", "Early Out", "Day Status"];
+  if (reportType === "mis_punch") return [...people, "INTime", "OUTTime", "Punches", "Day Status", "Remark"];
+  return [...people, "INTime", "OUTTime", "Work", "Day Status", "Late In", "Early Out", "Punches", "Remark"];
 }
 
 function performanceRow(row: AttendanceReportRow, reportType: AttendanceReportType) {
-  if (reportType === "absent") return [row.workerCode, row.workerName, "-", row.inTime, row.outTime, row.workHours, row.status, row.remark || "-"];
-  if (reportType === "late_in") return [row.workerCode, row.workerName, "-", row.inTime, row.remark.toLowerCase().includes("late") ? row.remark : "00:00"];
-  if (reportType === "early_out") return [row.workerCode, row.workerName, "-", row.inTime, row.outTime, row.remark.toLowerCase().includes("early out") ? row.remark : "00:00"];
-  if (reportType === "mis_punch") return [row.workerCode, row.workerName, "-", row.inTime, row.outTime, String(row.punchCount), row.remark || "-"];
-  return [row.workerCode, row.workerName, "-", row.inTime, "00:00", "00:00", row.outTime, row.workHours, "00:00", row.status, row.remark || "-"];
+  const people = [displayDate(row.punchDate), row.workerCode, row.workerName, row.workerType, row.designation, row.location, row.shiftName, scheduleLabel(row)];
+  if (reportType === "absent") return [...people, row.inTime, row.outTime, row.workHours, row.attendanceStatus, row.remark || "-"];
+  if (reportType === "late_in") return [...people, row.inTime, varianceLabel(row.lateMinutes), row.attendanceStatus];
+  if (reportType === "early_out") return [...people, row.inTime, row.outTime, varianceLabel(row.earlyOutMinutes), row.attendanceStatus];
+  if (reportType === "mis_punch") return [...people, row.inTime, row.outTime, String(row.punchCount), row.attendanceStatus, row.remark || "-"];
+  return [...people, row.inTime, row.outTime, row.workHours, row.attendanceStatus, varianceLabel(row.lateMinutes), varianceLabel(row.earlyOutMinutes), String(row.punchCount), row.remark || "-"];
 }
 
 function dailyBuild(title: string, dateLabel: string, rows: AttendanceReportRow[], reportType: AttendanceReportType, sort: SortMode, companyName: string): ReportBuild {
@@ -202,7 +212,15 @@ function dailyBuild(title: string, dateLabel: string, rows: AttendanceReportRow[
   aoa.push(["Total For Whole Company", "", `Total Present:- ${allTotals.present}    Total Absent:- ${allTotals.absent}    Total Late In:- ${allTotals.late}`, ...blank(Math.max(0, width - 3))]);
   merges.push(merge(aoa.length - 1, 0, aoa.length - 1, 1));
   merges.push(merge(aoa.length - 1, 2, aoa.length - 1, width - 1));
-  return { aoa, merges, widths: isInOut ? [14, 24, 8, 9, ...Array(15).fill(8), 9, 9, 7, 7] : [14, 24, 8, 9, 9, 9, 9, 10, 10, 8, 18] };
+  const widths = header.map((column) => {
+    if (column === "Name") return 24;
+    if (column === "Designation" || column === "Workforce") return 20;
+    if (column === "Remark") return 22;
+    if (column === "Shift" || column === "Scheduled") return 14;
+    if (column === "Date" || column === "Empcode" || column === "Day Status") return 13;
+    return 9;
+  });
+  return { aoa, merges, widths };
 }
 
 function dateRange(fromDate: string, toDate: string) {
@@ -229,7 +247,7 @@ function duration(totalMinutes: number) {
 
 function monthlyPerformanceBuild(title: string, monthLabel: string, fromDate: string, toDate: string, rows: AttendanceReportRow[], sort: SortMode, companyName: string): ReportBuild {
   const dates = dateRange(fromDate, toDate);
-  const width = 6 + dates.length;
+  const width = 10 + dates.length;
   const aoa: string[][] = [
     [title, ...blank(Math.max(0, width - 4)), "Report Month:-", monthLabel],
     [companyName, ...blank(width - 1)]
@@ -241,23 +259,31 @@ function monthlyPerformanceBuild(title: string, monthLabel: string, fromDate: st
   Array.from(byDesignation.entries()).forEach(([designation, workers]) => {
     aoa.push([groupLabel(sort), designation, ...blank(width - 2)]);
     merges.push(merge(aoa.length - 1, 1, aoa.length - 1, width - 1));
-    aoa.push(["Empcode", "Name", "Present", "Absent", "Tot. Work+OT", "Total OT", ...dates.map((date) => String(dateParts(date).day).padStart(2, "0"))]);
+    aoa.push(["Empcode", "Name", "Workforce", "Designation", "Shift", "Present", "Full Day", "Half Day", "Absent", "Total Work", ...dates.map((date) => String(dateParts(date).day).padStart(2, "0"))]);
     workers.forEach(([workerKey, workerRows]) => {
       const [code, name] = workerKey.split("|");
       const byDate = new Map(workerRows.map((row) => [row.punchDate, row]));
       const present = dates.filter((date) => byDate.get(date)?.status === "P").length;
+      const fullDay = dates.filter((date) => byDate.get(date)?.attendanceStatus === "Full Day").length;
+      const halfDay = dates.filter((date) => byDate.get(date)?.attendanceStatus === "Half Day").length;
       const work = workerRows.reduce((sum, row) => sum + minutes(row.workHours), 0);
       aoa.push([
         code,
         name,
+        workerRows[0].workerType,
+        workerRows[0].designation,
+        workerRows[0].shiftName,
         String(present),
+        String(fullDay),
+        String(halfDay),
         String(Math.max(0, dates.length - present)),
         duration(work),
-        "00:00",
         ...dates.map((date) => {
           const row = byDate.get(date);
           if (!row) return "A";
-          if (row.remark?.toLowerCase().includes("single") || row.remark?.toLowerCase().includes("missing")) return "MIS";
+          if (row.punchCount % 2 === 1 || row.remark?.toLowerCase().includes("single") || row.remark?.toLowerCase().includes("missing")) return "MIS";
+          if (row.attendanceStatus === "Full Day") return "FD";
+          if (row.attendanceStatus === "Half Day") return "HD";
           return row.status === "P" ? "P" : "A";
         })
       ]);
@@ -269,12 +295,12 @@ function monthlyPerformanceBuild(title: string, monthLabel: string, fromDate: st
     merges.push(merge(aoa.length - 1, 1, aoa.length - 1, width - 1));
   }
 
-  return { aoa, merges, widths: [14, 24, 8, 8, 12, 10, ...dates.map(() => 6)] };
+  return { aoa, merges, widths: [14, 24, 18, 20, 14, 8, 8, 8, 8, 12, ...dates.map(() => 6)] };
 }
 
 function monthlyInOutBuild(title: string, monthLabel: string, fromDate: string, toDate: string, rows: AttendanceReportRow[], sort: SortMode, companyName: string): ReportBuild {
   const dates = dateRange(fromDate, toDate);
-  const header = ["Date", "Shift", "INTime", ...inOutHeader().slice(4)];
+  const header = ["Date", "Shift", "Scheduled", ...inOutHeader().slice(8)];
   const width = header.length;
   const aoa: string[][] = [
     [title, ...blank(Math.max(0, width - 4)), "Report Month:-", monthLabel],
@@ -294,10 +320,10 @@ function monthlyInOutBuild(title: string, monthLabel: string, fromDate: string, 
     dates.forEach((date) => {
       const row = byDate.get(date);
       if (!row) {
-        aoa.push([displayDate(date), "X", "--:--", ...blank(width - 3)]);
+        aoa.push([displayDate(date), "Unassigned", "--:--", "--:--", ...blank(width - 4)]);
         return;
       }
-      aoa.push([displayDate(date), "-", label(row, "In1") || row.inTime, ...inOutRow(row).slice(4)]);
+      aoa.push([displayDate(date), row.shiftName, scheduleLabel(row), label(row, "In1") || row.inTime, ...inOutRow(row).slice(9)]);
     });
     const totalWork = workerRows.reduce((sum, row) => sum + minutes(row.workHours), 0);
     aoa.push(["", "", `Total Work+OT Hrs:- ${duration(totalWork)}`, "Total OT Hrs:- 00:00", "Total Break Hrs:- 00:00", ...blank(Math.max(0, width - 5))]);
@@ -309,7 +335,7 @@ function monthlyInOutBuild(title: string, monthLabel: string, fromDate: string, 
     merges.push(merge(aoa.length - 1, 2, aoa.length - 1, width - 1));
   }
 
-  return { aoa, merges, widths: [12, 8, 9, ...Array(width - 3).fill(8)] };
+  return { aoa, merges, widths: [12, 14, 14, 9, ...Array(width - 4).fill(8)] };
 }
 
 function buildReport(mode: ReportMode, reportType: AttendanceReportType, label: string, fromDate: string, toDate: string, rows: AttendanceReportRow[], sort: SortMode, companyName: string) {
@@ -424,8 +450,8 @@ export async function GET(request: Request) {
     const reportType = safeReportType(params.get("report"));
     const locationId = params.get("location_id");
     const search = params.get("search") ?? "";
-    const designation = params.get("designation") ?? "";
-    const workerType = params.get("worker_type") ?? "";
+    const designations = params.getAll("designation").map((value) => value.trim()).filter(Boolean);
+    const workerTypes = params.getAll("worker_type").map((value) => value.trim()).filter(Boolean);
     const format = params.get("format") === "pdf" ? "pdf" : "xlsx";
     const range = mode === "monthly"
       ? monthBounds(month)
@@ -447,7 +473,7 @@ export async function GET(request: Request) {
       reportType,
       toDate: range.toDate
     });
-    const rows = filterAttendanceReportRows(scopedRows, { designation, search, workerType });
+    const rows = filterAttendanceReportRows(scopedRows, { designations, search, workerTypes });
     const build = buildReport(mode, reportType, range.label, range.fromDate, range.toDate, rows, sort, companyName);
     const filenameBase = `${reportTitle(mode, reportType).toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${range.label}`;
 

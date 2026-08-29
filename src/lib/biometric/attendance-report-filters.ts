@@ -2,14 +2,16 @@ import type { AttendanceReportRow } from "@/lib/biometric/attendance";
 
 export function filterAttendanceReportRows(
   rows: AttendanceReportRow[],
-  filters: { designation?: string; search?: string; workerType?: string }
+  filters: { designations?: string[]; search?: string; workerTypes?: string[] }
 ) {
   const search = String(filters.search ?? "").trim().toLowerCase();
+  const designations = new Set(filters.designations ?? []);
+  const workerTypes = new Set(filters.workerTypes ?? []);
   return rows.filter((row) => {
-    if (filters.designation && row.designation !== filters.designation) return false;
-    if (filters.workerType && row.workerType !== filters.workerType) return false;
+    if (designations.size && !designations.has(row.designation)) return false;
+    if (workerTypes.size && !workerTypes.has(row.workerType)) return false;
     if (!search) return true;
-    return [row.workerCode, row.workerName, row.enrolmentId, row.location, row.designation]
+    return [row.workerCode, row.workerName, row.enrolmentId, row.location, row.designation, row.workerType, row.shiftName]
       .some((value) => value.toLowerCase().includes(search));
   });
 }
