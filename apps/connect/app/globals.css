@@ -14361,10 +14361,13 @@ body {
   place-items: center;
   width: 72px;
   height: 72px;
+  padding: 0;
   overflow: hidden;
   color: var(--one-brand-strong);
+  border: 0;
   border-radius: 18px;
   background: var(--one-brand-soft);
+  cursor: pointer;
 }
 
 .dx-verified-photo-preview > img { width: 100%; height: 100%; object-fit: cover; }
@@ -14389,7 +14392,7 @@ body {
 .dx-verified-photo-card small { color: var(--one-brand-strong); font-size: 8px; font-weight: 700; letter-spacing: .09em; }
 .dx-verified-photo-card strong { font-size: 14px; }
 .dx-verified-photo-card p { margin: 0; color: var(--one-muted); font-size: 10px; line-height: 1.45; }
-.dx-verified-photo-card > button {
+.dx-verified-photo-action {
   display: inline-flex;
   gap: 7px;
   align-items: center;
@@ -14402,16 +14405,36 @@ body {
   font-size: 11px;
   font-weight: 680;
 }
-.dx-verified-photo-card > button svg { width: 15px; }
+.dx-verified-photo-action svg { width: 15px; }
 .dx-verified-photo-card em { display: flex; gap: 5px; align-items: center; font-size: 10px; font-style: normal; }
 .dx-verified-photo-card em svg { width: 13px; }
 .dx-verified-photo-card em.error { color: #b4233f; }
 .dx-verified-photo-card em.success { color: #16875c; }
 
+.dx-profile-photo-jump {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 11px;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, .34);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .12);
+  font-size: 10px;
+  font-weight: 680;
+  text-decoration: none;
+}
+.dx-profile-photo-jump svg { width: 14px; }
+
 @media(max-width: 620px) {
   .dx-verified-photo-card { grid-template-columns: 62px minmax(0, 1fr); }
   .dx-verified-photo-preview { width: 62px; height: 62px; }
-  .dx-verified-photo-card > button { grid-column: 1 / -1; justify-content: center; width: 100%; }
+  .dx-verified-photo-action { grid-column: 1 / -1; justify-content: center; width: 100%; }
+  .dx-verified-photo-card > .dx-verified-photo-preview { grid-column: auto; width: 62px; }
 }
 
 .dx-approval-scope {

@@ -91,20 +91,26 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
     }
   }
 
-  return <section className="dx-verified-photo-card">
-    <div className="dx-verified-photo-preview">
+  return <section className="dx-verified-photo-card" id="profile-photo-update">
+    <button
+      aria-label="Choose a new profile photo"
+      className="dx-verified-photo-preview"
+      disabled={busy}
+      onClick={() => inputRef.current?.click()}
+      type="button"
+    >
       {currentPhotoUrl ? <img alt="Current profile" src={currentPhotoUrl} /> : <Camera />}
       <span><ShieldCheck />Face verified update</span>
-    </div>
+    </button>
     <div>
       <small>PROFILE IDENTITY</small>
-      <strong>Profile photo</strong>
-      <p>Upload a clear photo, then complete a live face scan. The photo changes only after the configured match and liveness checks pass.</p>
+      <strong>Update profile photo</strong>
+      <p>Choose a clear photo and complete the live face scan. Your photo changes only after the configured match and liveness checks pass.</p>
       {error ? <em className="error"><X />{error}</em> : null}
       {notice ? <em className="success"><CheckCircle2 />{notice}</em> : null}
     </div>
     <input accept="image/*" hidden onChange={(event) => choose(event.target.files?.[0])} ref={inputRef} type="file" />
-    <button disabled={busy} onClick={() => inputRef.current?.click()} type="button"><ImagePlus />{busy ? "Preparing…" : "Change photo"}</button>
+    <button className="dx-verified-photo-action" disabled={busy} onClick={() => inputRef.current?.click()} type="button"><ImagePlus />{busy ? "Preparing…" : "Choose photo & verify"}</button>
     {scanning && candidateUrl && challenge ? <SelfieCapturePanel
       hint={`Match must be ${challenge.required_match_percent}% or higher. Complete the live checks before the new photo is activated.`}
       onCapture={finish}

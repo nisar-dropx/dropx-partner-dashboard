@@ -2,7 +2,7 @@
 
 import {
   BadgeCheck, BriefcaseBusiness, CalendarDays, ChevronRight, CircleX, DoorOpen, Download, Fingerprint,
-  Mail, MapPin, Phone, ShieldCheck, TriangleAlert, UserRound, WalletCards
+  ImagePlus, Mail, MapPin, Phone, ShieldCheck, TriangleAlert, UserRound, WalletCards
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { minimumAgeError } from "../lib/profile-age";
@@ -692,7 +692,10 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     const exitDestination = ["employee", "user", "contractor"].includes(account.profileType) ? "People workflow" : "Workforce lifecycle";
     return <div className="dx-profile-view">
       {notice ? <div className="dx-alert success">{notice}</div> : null}
-      <div className="dx-profile-hero"><small>DROPX LOGISTICS</small><h1>Profile details</h1><i><UserRound /></i></div>
+      <div className="dx-profile-hero">
+        <small>DROPX LOGISTICS</small><h1>Profile details</h1><i><UserRound /></i>
+        <a className="dx-profile-photo-jump" href="#profile-photo-update"><ImagePlus />Update photo</a>
+      </div>
       <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
         setProfile((current) => current ? { ...current, profilePhotoUrl: url, uploads: { ...current.uploads, photo: true }, uploadUrls: { ...current.uploadUrls, photo: url } } : current);
         onPhoto?.(url);
@@ -795,6 +798,10 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
 
   return <form className="dx-profile-form" onSubmit={prepareSubmit} ref={formRef}>
     <p className="dx-company">{account.companyName}</p>
+    <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
+      setProfile((current) => current ? { ...current, profilePhotoUrl: url, uploads: { ...current.uploads, photo: true }, uploadUrls: { ...current.uploadUrls, photo: url } } : current);
+      onPhoto?.(url);
+    }} />
     {profile.status.trim().toLowerCase() === "returned" && profile.returnRemarks ? (
       <aside className="dx-return-notice">
         <strong>Profile returned for correction</strong>
