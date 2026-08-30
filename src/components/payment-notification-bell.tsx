@@ -26,7 +26,7 @@ export function PaymentNotificationBell() {
   return (
     <div className="payment-notification-wrap" ref={rootRef}>
       <button
-        aria-label="Payment notifications"
+        aria-label="System notifications"
         className={`payment-notification-trigger ${isRefreshing ? "loading" : ""}`}
         onClick={toggle}
         type="button"
@@ -59,7 +59,7 @@ export function PaymentNotificationBell() {
               ))}
             </div>
           ) : (
-            <div className="payment-notification-empty">No payment notifications.</div>
+            <div className="payment-notification-empty">No open notifications.</div>
           )}
         </div>
       ) : null}

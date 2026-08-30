@@ -57,6 +57,7 @@ type WorkspaceAccountRow = {
   group_emails: string[];
   suspended: boolean;
   deletion_eligible_at: string | null;
+  metadata: Record<string, unknown>;
 };
 
 type WorkspaceJobRow = {
@@ -408,9 +409,36 @@ async function saveDirectoryUser(companyId: string, user: GoogleDirectoryUser, r
   ]);
   if (profileResult.error) throw new Error(profileResult.error.message);
   if (stationResult.error) throw new Error(stationResult.error.message);
-  const accountType = existing?.source_type === "employee" || existing?.person_id || profileResult.data?.id
+  const existingMetadata = existing?.metadata && typeof existing.metadata === "object" ? existing.metadata : {};
+  const manuallyClassified = existingMetadata.mapping_source === "manual_super_admin";
+  const mappedEmployee = existing?.source_type === "employee" && Boolean(existing.source_record_id);
+  const mappedLocation = existing?.source_type === "location" && Boolean(existing.source_record_id);
+  const mappedStandalone = manuallyClassified && !existing?.source_type && ["service", "unmatched"].includes(existing?.account_type ?? "");
+  const accountType = mappedEmployee
     ? "person"
-    : stationResult.data?.id ? "location" : existing?.account_type ?? "unmatched";
+    : mappedLocation
+      ? "location"
+      : mappedStandalone
+        ? existing!.account_type
+        : profileResult.data?.id
+          ? "person"
+          : stationResult.data?.id
+            ? "location"
+            : existing?.account_type ?? "unmatched";
+  const sourceType = mappedEmployee || mappedLocation
+    ? existing!.source_type
+    : mappedStandalone
+      ? null
+      : profileResult.data?.id
+        ? "profile"
+        : stationResult.data?.id
+          ? "location"
+          : existing?.source_type ?? null;
+  const sourceRecordId = mappedEmployee || mappedLocation
+    ? existing!.source_record_id
+    : mappedStandalone
+      ? null
+      : profileResult.data?.id ?? stationResult.data?.id ?? existing?.source_record_id ?? null;
   const result = await db().from("google_workspace_accounts").upsert({
     company_id: companyId,
     google_user_id: user.id,
@@ -419,10 +447,16 @@ async function saveDirectoryUser(companyId: string, user: GoogleDirectoryUser, r
     org_unit_path: user.orgUnitPath || "/",
     account_type: accountType,
     account_state: user.suspended ? "suspended" : "active",
-    profile_id: profileResult.data?.id ?? existing?.profile_id ?? null,
-    location_id: stationResult.data?.id ?? existing?.location_id ?? null,
-    source_type: stationResult.data?.id ? "location" : existing?.source_type ?? null,
-    source_record_id: stationResult.data?.id ?? existing?.source_record_id ?? null,
+    profile_id: mappedLocation || mappedStandalone ? null : profileResult.data?.id ?? existing?.profile_id ?? null,
+    location_id: mappedLocation
+      ? existing?.location_id ?? existing?.source_record_id ?? null
+      : mappedEmployee
+        ? existing?.location_id ?? null
+        : mappedStandalone
+          ? null
+          : stationResult.data?.id ?? existing?.location_id ?? null,
+    source_type: sourceType,
+    source_record_id: sourceRecordId,
     person_id: existing?.person_id ?? null,
     designation_id: existing?.designation_id ?? null,
     group_emails: existing?.group_emails ?? [],

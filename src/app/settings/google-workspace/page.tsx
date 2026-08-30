@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
+import {
+  GoogleWorkspaceDirectoryMapping,
+  type WorkspaceDirectoryAccount,
+  type WorkspaceEmployeeOption,
+  type WorkspaceLocationOption
+} from "@/components/google-workspace-directory-mapping";
 import { PageHead } from "@/components/page-head";
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
@@ -62,10 +68,30 @@ type AccountRow = {
   full_name: string;
   account_type: string;
   account_state: string;
+  source_type: string | null;
+  source_record_id: string | null;
+  profile_id: string | null;
   org_unit_path: string;
   suspended: boolean;
   last_synced_at: string | null;
+  metadata: Record<string, unknown> | null;
+};
+
+type EmployeeRow = {
+  id: string;
+  employee_code: string;
+  full_name: string;
+  is_active: boolean;
   designations: { code: string; name: string } | Array<{ code: string; name: string }> | null;
+  stations: { station_code: string; station_name: string | null } | Array<{ station_code: string; station_name: string | null }> | null;
+};
+
+type LocationRow = {
+  id: string;
+  station_code: string;
+  station_name: string | null;
+  station_email: string | null;
+  is_active: boolean;
 };
 
 type JobRow = {
@@ -120,19 +146,23 @@ function schemaMissing(error: unknown) {
 
 async function loadPage(companyId: string) {
   if (!supabaseAdmin) return { error: "Supabase service role key is not configured.", setupPending: false } as const;
-  const [settings, designations, roles, policies, accounts, jobs, deletions] = await Promise.all([
+  const [settings, designations, roles, policies, accounts, employees, locations, jobs, deletions] = await Promise.all([
     supabaseAdmin.from("google_workspace_settings").select("*").eq("company_id", companyId).maybeSingle(),
     supabaseAdmin.from("designations").select("id,code,name,is_active").eq("company_id", companyId).eq("is_active", true).order("name"),
     supabaseAdmin.from("user_roles").select("id,code,name").eq("company_id", companyId).eq("is_active", true).order("name"),
     supabaseAdmin.from("google_workspace_designation_policies").select("*").eq("company_id", companyId).order("updated_at", { ascending: false }),
-    supabaseAdmin.from("google_workspace_accounts").select("id,primary_email,full_name,account_type,account_state,org_unit_path,suspended,last_synced_at,designations(code,name)")
+    supabaseAdmin.from("google_workspace_accounts").select("id,primary_email,full_name,account_type,account_state,source_type,source_record_id,profile_id,org_unit_path,suspended,last_synced_at,metadata")
       .eq("company_id", companyId).order("primary_email").limit(250),
+    supabaseAdmin.from("employees").select("id,employee_code,full_name,is_active,designations(code,name),stations(station_code,station_name)")
+      .eq("company_id", companyId).order("is_active", { ascending: false }).order("full_name").limit(5000),
+    supabaseAdmin.from("stations").select("id,station_code,station_name,station_email,is_active")
+      .eq("company_id", companyId).order("is_active", { ascending: false }).order("station_code").limit(5000),
     supabaseAdmin.from("google_workspace_jobs").select("id,job_type,status,attempt_count,last_error,created_at,google_workspace_accounts(primary_email,full_name)")
       .eq("company_id", companyId).order("created_at", { ascending: false }).limit(50),
     supabaseAdmin.from("google_workspace_deletion_requests").select("id,account_id,status,eligible_at,legal_hold,data_transfer_status,note,google_workspace_accounts(primary_email,full_name)")
       .eq("company_id", companyId).neq("status", "completed").order("eligible_at", { ascending: true }).limit(100)
   ]);
-  const results = [settings, designations, roles, policies, accounts, jobs, deletions];
+  const results = [settings, designations, roles, policies, accounts, employees, locations, jobs, deletions];
   const missing = results.find((result) => result.error && schemaMissing(result.error));
   if (missing) return { error: null, setupPending: true } as const;
   const failed = results.find((result) => result.error);
@@ -145,6 +175,8 @@ async function loadPage(companyId: string) {
     roles: (roles.data ?? []) as RoleRow[],
     policies: (policies.data ?? []) as PolicyRow[],
     accounts: (accounts.data ?? []) as AccountRow[],
+    employees: (employees.data ?? []) as EmployeeRow[],
+    locations: (locations.data ?? []) as LocationRow[],
     jobs: (jobs.data ?? []) as JobRow[],
     deletions: (deletions.data ?? []) as DeletionRow[]
   } as const;
@@ -159,7 +191,7 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
 
   if (data.setupPending || data.error || !("settings" in data)) {
     return (
-      <AppShell active="Google Workspace" pageCode="workspace_identity">
+      <AppShell active="Google Mail IDs & Mapping" pageCode="workspace_identity">
         <PageHead eyebrow="Central Identity" title="Google Workspace" subtitle="Directory, identity issuance and offboarding controls for every DropX portal." />
         <section className={`panel message-panel ${data.error ? "error" : "warning"}`}>
           <div className="panel-body">
@@ -176,6 +208,8 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
   const roles = data.roles ?? [];
   const policies = data.policies ?? [];
   const accounts = data.accounts ?? [];
+  const employees = data.employees ?? [];
+  const locations = data.locations ?? [];
   const jobs = data.jobs ?? [];
   const deletions = data.deletions ?? [];
   const selectedDesignationId = searchParams?.designation || designations[0]?.id || "";
@@ -185,9 +219,52 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
   const suspendedAccounts = accounts.filter((row) => row.suspended || row.account_state === "suspended").length;
   const failedJobs = jobs.filter((row) => ["failed", "blocked"].includes(row.status)).length;
   const eligibleDeletions = deletions.filter((row) => !row.legal_hold && new Date(row.eligible_at).getTime() <= Date.now()).length;
+  const directoryAccounts: WorkspaceDirectoryAccount[] = accounts.map((account) => {
+    const mappingSource = typeof account.metadata?.mapping_source === "string"
+      ? "Manual Super Admin mapping"
+      : account.source_type === "employee" || account.source_type === "location"
+        ? "DropX master linked"
+        : account.profile_id
+          ? "Portal email matched"
+          : "Not mapped";
+    return {
+      id: account.id,
+      primaryEmail: account.primary_email,
+      fullName: account.full_name,
+      accountType: account.account_type,
+      accountState: account.account_state,
+      sourceType: account.source_type,
+      sourceRecordId: account.source_record_id,
+      profileId: account.profile_id,
+      orgUnitPath: account.org_unit_path,
+      lastSyncedAt: account.last_synced_at,
+      mappingSource
+    };
+  });
+  const directoryEmployees: WorkspaceEmployeeOption[] = employees.map((employee) => {
+    const designation = first(employee.designations);
+    const location = first(employee.stations);
+    return {
+      id: employee.id,
+      employeeCode: employee.employee_code,
+      fullName: employee.full_name,
+      designationCode: designation?.code ?? null,
+      designationName: designation?.name ?? null,
+      locationCode: location?.station_code ?? null,
+      locationName: location?.station_name ?? null,
+      isActive: employee.is_active
+    };
+  });
+  const directoryLocations: WorkspaceLocationOption[] = locations.map((location) => ({
+    id: location.id,
+    locationCode: location.station_code,
+    locationName: location.station_name,
+    email: location.station_email,
+    isActive: location.is_active
+  }));
 
   return (
-    <AppShell active="Google Workspace" pageCode="workspace_identity">
+    <AppShell active="Google Mail IDs & Mapping" pageCode="workspace_identity">
       <PageHead
         eyebrow="Central Identity"
         title="Google Workspace"
@@ -269,15 +346,14 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
         </div>
       </section>
 
-      <section className="panel">
-        <div className="panel-head"><div><h2>Workspace directory</h2><p className="subtle">Official Workspace accounts mapped to people, locations and service identities. Unmatched accounts remain visible but receive no DropX access.</p></div></div>
-        <div className="table-wrap"><table><thead><tr><th>Account</th><th>Type</th><th>Designation</th><th>OU</th><th>State</th><th>Last synced</th></tr></thead><tbody>
-          {accounts.map((account) => { const designation = first(account.designations); return <tr key={account.id}><td><strong>{account.full_name}</strong><small>{account.primary_email}</small></td><td>{account.account_type}</td><td>{designation ? `${designation.name} (${designation.code})` : "—"}</td><td>{account.org_unit_path}</td><td><StatusPill status={account.account_state} /></td><td>{dateTime(account.last_synced_at)}</td></tr>; })}
-          {!accounts.length ? <tr><td className="empty-cell" colSpan={6}>No Workspace directory has been synced yet.</td></tr> : null}
-        </tbody></table></div>
-      </section>
+      <GoogleWorkspaceDirectoryMapping
+        accounts={directoryAccounts}
+        canEdit={Boolean(permission?.canEdit)}
+        employees={directoryEmployees}
+        locations={directoryLocations}
+      />
 
-      <section className="panel">
+      <section className="panel" id="lifecycle-queue">
         <div className="panel-head"><div><h2>Lifecycle queue</h2><p className="subtle">Automatic retries are bounded. Manual policies and unresolved errors stay blocked for an administrator.</p></div></div>
         <div className="table-wrap"><table><thead><tr><th>Created</th><th>Account</th><th>Action</th><th>Status</th><th>Attempts / error</th><th>Control</th></tr></thead><tbody>
           {jobs.map((job) => { const account = first(job.google_workspace_accounts); const manualApproval = job.status === "blocked" && job.job_type === "provision" && (!job.last_error || job.last_error.toLowerCase().includes("approval")); return <tr key={job.id}><td>{dateTime(job.created_at)}</td><td><strong>{account?.full_name ?? "Pending mapping"}</strong><small>{account?.primary_email ?? job.id.slice(0, 8)}</small></td><td>{job.job_type.replaceAll("_", " ")}</td><td><StatusPill status={job.status} /></td><td>{job.attempt_count}<small>{job.last_error ?? "—"}</small></td><td>{manualApproval ? <form action={approveWorkspaceJob}><input name="job_id" type="hidden" value={job.id} /><SubmitButton className="button compact" disabled={!permission?.canEdit}>Approve</SubmitButton></form> : ["failed", "blocked"].includes(job.status) ? <form action={retryWorkspaceJob}><input name="job_id" type="hidden" value={job.id} /><SubmitButton className="button secondary compact" disabled={!permission?.canEdit}>Retry</SubmitButton></form> : "—"}</td></tr>; })}
@@ -285,7 +361,7 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
         </tbody></table></div>
       </section>
 
-      <section className="panel">
+      <section className="panel" id="deletion-queue">
         <div className="panel-head"><div><h2>Offboarding deletion queue</h2><p className="subtle">Suspension and DropX access revocation are immediate. Permanent deletion requires elapsed retention, completed data transfer, no legal hold and explicit approval.</p></div><StatusPill status={`${deletions.length} open`} /></div>
         <div className="table-wrap"><table><thead><tr><th>Account</th><th>Eligible after</th><th>Status</th><th>Safeguards</th><th>Review</th><th>Final action</th></tr></thead><tbody>
           {deletions.map((deletion) => { const account = first(deletion.google_workspace_accounts); const eligible = new Date(deletion.eligible_at).getTime() <= Date.now(); const canDelete = eligible && !deletion.legal_hold && ["completed", "not_required"].includes(deletion.data_transfer_status) && deletion.status !== "approved"; return <tr key={deletion.id}><td><strong>{account?.full_name ?? "Workspace account"}</strong><small>{account?.primary_email ?? deletion.account_id}</small></td><td>{dateTime(deletion.eligible_at)}</td><td><StatusPill status={deletion.status} /></td><td><StatusPill status={deletion.legal_hold ? "Legal hold" : "No hold"} /><small>Transfer: {deletion.data_transfer_status.replaceAll("_", " ")}</small></td><td><form action={updateWorkspaceDeletionReview} style={{ display: "grid", gap: 6, minWidth: 220 }}><input name="deletion_id" type="hidden" value={deletion.id} /><select className="field" defaultValue={deletion.data_transfer_status} name="data_transfer_status"><option value="pending">Transfer pending</option><option value="in_progress">Transfer in progress</option><option value="completed">Transfer completed</option><option value="not_required">Transfer not required</option></select><label className="checkbox-row"><input defaultChecked={deletion.legal_hold} name="legal_hold" type="checkbox" value="true" /> Legal hold</label><input className="field" defaultValue={deletion.note ?? ""} name="note" placeholder="Review note" /><SubmitButton className="button secondary compact" disabled={!permission?.canEdit}>Save review</SubmitButton></form></td><td><div style={{ display: "grid", gap: 6 }}><form action={approveWorkspaceDeletion}><input name="deletion_id" type="hidden" value={deletion.id} /><SubmitButton className="button danger compact" confirmationBlocked={!canDelete} confirmDescription="Google Workspace deletion cannot be undone." confirmMessage={`Permanently delete ${account?.primary_email ?? "this Workspace account"}? Retention and transfer safeguards must already be complete.`} confirmSubmitText="Approve permanent deletion" confirmTitle="Approve Workspace deletion" disabled={!permission?.canEdit || deletion.status === "approved"}>{deletion.status === "approved" ? "Queued" : "Approve delete"}</SubmitButton></form><form action={cancelWorkspaceDeletion}><input name="deletion_id" type="hidden" value={deletion.id} /><SubmitButton className="button secondary compact" confirmMessage="Cancel this deletion request? The Google account will remain suspended." confirmTitle="Cancel deletion" disabled={!permission?.canEdit}>Cancel</SubmitButton></form></div></td></tr>; })}

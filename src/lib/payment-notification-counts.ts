@@ -51,6 +51,10 @@ type PaymentNotificationRequest = {
 const EMPTY_BADGES = {
   people_review: 0,
   people_exceptions: 0,
+  workspace_identity: 0,
+  workspace_jobs: 0,
+  workspace_retention: 0,
+  workspace_deletions: 0,
   payments: 0,
   expense_requests: 0,
   payment_requests: 0,
@@ -168,6 +172,28 @@ async function loadPeopleReviewCount(authorization: AuthorizationContext) {
   return results.reduce((total, count) => total + count, 0);
 }
 
+async function loadWorkspaceAttention(authorization: AuthorizationContext) {
+  const empty = { jobs: 0, retention: 0, deletions: 0 };
+  if (!supabaseAdmin || !authorization.companyId || !hasPermission(authorization, "workspace_identity", "access")) return empty;
+  const [jobsResult, deletionResult] = await Promise.all([
+    supabaseAdmin.from("google_workspace_jobs").select("id", { count: "exact", head: true })
+      .eq("company_id", authorization.companyId).in("status", ["failed", "blocked"]),
+    supabaseAdmin.from("google_workspace_deletion_requests")
+      .select("status,eligible_at,legal_hold,data_transfer_status")
+      .eq("company_id", authorization.companyId)
+      .not("status", "in", "(completed,cancelled)")
+      .limit(1000)
+  ]);
+  if (jobsResult.error || deletionResult.error) return empty;
+  const now = Date.now();
+  const rows = deletionResult.data ?? [];
+  return {
+    jobs: jobsResult.count ?? 0,
+    retention: rows.filter((row) => row.legal_hold || ["pending", "in_progress"].includes(String(row.data_transfer_status))).length,
+    deletions: rows.filter((row) => !row.legal_hold && new Date(row.eligible_at).getTime() <= now && ["completed", "not_required"].includes(String(row.data_transfer_status))).length
+  };
+}
+
 export async function loadPaymentNotificationSnapshot(authorization: AuthorizationContext): Promise<PaymentNotificationSnapshot> {
   if (!authorization.companyId) return emptyPaymentNotificationSnapshot();
 
@@ -176,8 +202,21 @@ export async function loadPaymentNotificationSnapshot(authorization: Authorizati
   const items: PaymentNotificationItem[] = [];
   badges.people_review = await loadPeopleReviewCount(authorization);
   badges.people_exceptions = await loadPeopleExceptionCount(authorization);
+  addItem(items, "people_review", "Profile review", `${badges.people_review} profile${badges.people_review === 1 ? "" : "s"} waiting for review`, "/people/review", badges.people_review);
+  addItem(items, "people_exceptions", "People exceptions", `${badges.people_exceptions} active profile exception${badges.people_exceptions === 1 ? "" : "s"}`, "/people/exceptions", badges.people_exceptions);
+
+  if (accessSurface === "dashboard") {
+    const workspace = await loadWorkspaceAttention(authorization);
+    badges.workspace_jobs = workspace.jobs;
+    badges.workspace_retention = workspace.retention;
+    badges.workspace_deletions = workspace.deletions;
+    badges.workspace_identity = workspace.jobs + workspace.retention + workspace.deletions;
+    addItem(items, "workspace_jobs", "Workspace lifecycle", `${workspace.jobs} failed or approval-blocked job${workspace.jobs === 1 ? "" : "s"}`, "/settings/google-workspace#lifecycle-queue", workspace.jobs);
+    addItem(items, "workspace_retention", "Mailbox retention", `${workspace.retention} suspended account${workspace.retention === 1 ? "" : "s"} need transfer or hold review`, "/settings/google-workspace#deletion-queue", workspace.retention);
+    addItem(items, "workspace_deletions", "Ready for deletion", `${workspace.deletions} account${workspace.deletions === 1 ? " is" : "s are"} eligible for Super Admin approval`, "/settings/google-workspace#deletion-queue", workspace.deletions);
+  }
   const canSeePayments = hasPermission(authorization, "payments", "access");
-  if (!canSeePayments || !supabaseAdmin) return { total: 0, badges, items };
+  if (!canSeePayments || !supabaseAdmin) return { total: items.reduce((sum, item) => sum + item.count, 0), badges, items };
 
   const { data, error } = await supabaseAdmin
     .from("payment_requests")
@@ -212,7 +251,7 @@ export async function loadPaymentNotificationSnapshot(authorization: Authorizati
     .order("created_at", { ascending: false })
     .limit(1000);
 
-  if (error || !data) return { total: 0, badges, items };
+  if (error || !data) return { total: items.reduce((sum, item) => sum + item.count, 0), badges, items };
 
   const requests = data as PaymentNotificationRequest[];
   const ownRequests = authorization.userId
@@ -283,7 +322,7 @@ export async function loadPaymentNotificationSnapshot(authorization: Authorizati
   badges.payments = badges.expense_requests + badges.payment_requests + badges.payment_approvals + badges.payment_process;
 
   return {
-    total: badges.payments,
+    total: items.reduce((sum, item) => sum + item.count, 0),
     badges,
     items
   };

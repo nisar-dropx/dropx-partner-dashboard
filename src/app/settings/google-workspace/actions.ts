@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { processWorkspaceJobs, queueWorkspaceJob, syncWorkspaceDirectory } from "@/lib/google-workspace-service";
+import { ensureLocationMailboxMapping } from "@/lib/ops-pulse/location-mail";
 import { isProductCode } from "@/lib/product-ownership";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -67,6 +68,16 @@ function friendly(error: unknown) {
 function database() {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   return supabaseAdmin;
+}
+
+function objectValue(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function validUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 export async function saveWorkspaceSettings(formData: FormData) {
@@ -189,6 +200,164 @@ export async function saveDesignationWorkspacePolicy(formData: FormData) {
   } catch (error) {
     if (isNextRedirect(error)) throw error;
     flash({ error: friendly(error) }, designationId ? `?designation=${designationId}` : "");
+  }
+}
+
+export async function saveWorkspaceAccountMapping(formData: FormData) {
+  const authorization = await requirePagePermission("workspace_identity", "edit");
+  const companyId = requireCompanyId(authorization);
+  try {
+    const accountId = required(formData.get("account_id"), "Google mail ID");
+    const mappingTarget = required(formData.get("mapping_target"), "Identity mapping");
+    const accountResult = await database().from("google_workspace_accounts")
+      .select("id,primary_email,full_name,account_type,source_type,source_record_id,profile_id,metadata")
+      .eq("company_id", companyId).eq("id", accountId).maybeSingle();
+    if (accountResult.error || !accountResult.data) throw new Error(accountResult.error?.message ?? "Google Workspace account was not found.");
+    const account = accountResult.data;
+    const mappedAt = new Date().toISOString();
+    const metadata = {
+      ...objectValue(account.metadata),
+      mapping_source: "manual_super_admin",
+      mapping_target: mappingTarget,
+      mapped_at: mappedAt,
+      mapped_by: authorization.userId
+    };
+
+    let update: Record<string, unknown>;
+    let auditTarget: Record<string, unknown>;
+    let mailboxLocationId: string | null = null;
+
+    if (mappingTarget.startsWith("employee:")) {
+      const employeeId = mappingTarget.slice("employee:".length);
+      if (!validUuid(employeeId)) throw new Error("Select a valid employee mapping.");
+      const [employeeResult, duplicateResult, profileResult, engagementResult] = await Promise.all([
+        database().from("employees").select("id,employee_code,full_name,designation_id,location_id,is_active")
+          .eq("company_id", companyId).eq("id", employeeId).maybeSingle(),
+        database().from("google_workspace_accounts").select("id,primary_email")
+          .eq("company_id", companyId).eq("source_type", "employee").eq("source_record_id", employeeId).neq("id", accountId).limit(1).maybeSingle(),
+        database().from("profiles").select("id").eq("company_id", companyId)
+          .ilike("email", account.primary_email).eq("is_active", true).limit(1).maybeSingle(),
+        database().from("hr_engagements").select("person_id").eq("company_id", companyId)
+          .eq("employee_id", employeeId).order("created_at", { ascending: false }).limit(1).maybeSingle()
+      ]);
+      if (employeeResult.error || !employeeResult.data) throw new Error(employeeResult.error?.message ?? "Selected employee is unavailable.");
+      if (duplicateResult.error) throw new Error(duplicateResult.error.message);
+      if (duplicateResult.data) throw new Error(`Employee ${employeeResult.data.employee_code} is already mapped to ${duplicateResult.data.primary_email}.`);
+      if (profileResult.error) throw new Error(profileResult.error.message);
+      if (engagementResult.error) throw new Error(engagementResult.error.message);
+      update = {
+        account_type: "person",
+        source_type: "employee",
+        source_record_id: employeeResult.data.id,
+        person_id: engagementResult.data?.person_id ?? null,
+        profile_id: profileResult.data?.id ?? account.profile_id ?? null,
+        designation_id: employeeResult.data.designation_id,
+        location_id: employeeResult.data.location_id,
+        metadata,
+        updated_at: mappedAt
+      };
+      auditTarget = {
+        type: "employee",
+        employee_id: employeeResult.data.id,
+        employee_code: employeeResult.data.employee_code,
+        employee_name: employeeResult.data.full_name,
+        employee_active: employeeResult.data.is_active
+      };
+    } else if (mappingTarget.startsWith("location:")) {
+      const locationId = mappingTarget.slice("location:".length);
+      if (!validUuid(locationId)) throw new Error("Select a valid location mapping.");
+      const [locationResult, duplicateResult] = await Promise.all([
+        database().from("stations").select("id,station_code,station_name,is_active")
+          .eq("company_id", companyId).eq("id", locationId).maybeSingle(),
+        database().from("google_workspace_accounts").select("id,primary_email")
+          .eq("company_id", companyId).eq("source_type", "location").eq("source_record_id", locationId).neq("id", accountId).limit(1).maybeSingle()
+      ]);
+      if (locationResult.error || !locationResult.data) throw new Error(locationResult.error?.message ?? "Selected location is unavailable.");
+      if (duplicateResult.error) throw new Error(duplicateResult.error.message);
+      if (duplicateResult.data) throw new Error(`Location ${locationResult.data.station_code} is already mapped to ${duplicateResult.data.primary_email}.`);
+      update = {
+        account_type: "location",
+        source_type: "location",
+        source_record_id: locationResult.data.id,
+        person_id: null,
+        profile_id: null,
+        designation_id: null,
+        location_id: locationResult.data.id,
+        metadata,
+        updated_at: mappedAt
+      };
+      auditTarget = {
+        type: "location",
+        location_id: locationResult.data.id,
+        location_code: locationResult.data.station_code,
+        location_name: locationResult.data.station_name,
+        location_active: locationResult.data.is_active
+      };
+      mailboxLocationId = locationResult.data.id;
+    } else if (mappingTarget === "service" || mappingTarget === "unmatched") {
+      update = {
+        account_type: mappingTarget,
+        source_type: null,
+        source_record_id: null,
+        person_id: null,
+        profile_id: null,
+        designation_id: null,
+        location_id: null,
+        metadata,
+        updated_at: mappedAt
+      };
+      auditTarget = { type: mappingTarget };
+    } else {
+      throw new Error("Select an employee, location, service identity or deliberate unmapped status.");
+    }
+
+    const saved = await database().from("google_workspace_accounts").update(update)
+      .eq("company_id", companyId).eq("id", accountId).select("id").single();
+    if (saved.error) {
+      if (saved.error.code === "23505") throw new Error("That employee or location is already linked to another Google mail ID.");
+      throw new Error(saved.error.message);
+    }
+
+    if (mailboxLocationId) {
+      await ensureLocationMailboxMapping({
+        actorId: authorization.userId,
+        companyId,
+        locationId: mailboxLocationId,
+        workspaceAccountId: accountId
+      });
+    } else if (account.source_type === "location" && account.source_record_id) {
+      const mailbox = await database().from("ops_location_mailboxes").select("id")
+        .eq("company_id", companyId).eq("workspace_account_id", accountId).maybeSingle();
+      if (!mailbox.error && mailbox.data) {
+        await database().from("ops_location_mailbox_addresses").update({ is_active: false, updated_at: mappedAt })
+          .eq("company_id", companyId).eq("mailbox_id", mailbox.data.id).eq("station_id", account.source_record_id);
+      }
+    }
+
+    const audit = await database().from("google_workspace_audit_log").insert({
+      company_id: companyId,
+      account_id: accountId,
+      actor_user_id: authorization.userId,
+      action: "identity_mapping_updated",
+      status: "success",
+      detail: {
+        google_email: account.primary_email,
+        previous: {
+          account_type: account.account_type,
+          source_type: account.source_type,
+          source_record_id: account.source_record_id
+        },
+        next: auditTarget
+      }
+    });
+    if (audit.error) throw new Error(audit.error.message);
+
+    revalidatePath(pagePath);
+    revalidatePath("/ops-pulse/mail");
+    flash({ notice: `${account.primary_email} mapping saved.` }, "#workspace-directory");
+  } catch (error) {
+    if (isNextRedirect(error)) throw error;
+    flash({ error: friendly(error) }, "#workspace-directory");
   }
 }
 

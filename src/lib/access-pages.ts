@@ -31,6 +31,7 @@ export const accessPages = [
   { code: "capacity_hiring", name: "Hiring Review", sort_order: 84 },
   { code: "ops_reports", name: "Ops Reports", sort_order: 84 },
   { code: "ops_attendance_reports", name: "Attendance Reports", sort_order: 85 },
+  { code: "ops_location_mail", name: "Location Mail", sort_order: 85 },
   { code: "service_network", name: "Network Planning", sort_order: 92 },
   { code: "service_network_master", name: "Network Planning Master", sort_order: 93 },
   { code: "daily_submission", name: "Daily Submission", sort_order: 85 },

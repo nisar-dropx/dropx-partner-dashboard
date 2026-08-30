@@ -21,6 +21,7 @@ const commonStart: NavItem[] = [
 
 const reports: NavItem = { code: "ops_reports", label: "Reports", href: "/reports", icon: "R" };
 const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Attendance", href: "/attendance", icon: "T" };
+const locationMail: NavItem = { code: "ops_location_mail", label: "Location Mail", href: "/mail", icon: "M" };
 
 const businessDocuments: NavItem = {
   code: "business_documents",
@@ -125,7 +126,7 @@ function modelOperations(mode: OperatingMode): NavItem {
 const eddDashboard: NavItem = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd", icon: "E" };
 
 export function opsNavItemsForMode(mode: OperatingMode): NavItem[] {
-  return [...commonStart, modelOperations(mode), eddDashboard, businessDocuments, payments, cps, fleetNavItem, attendanceReports, reports, ...administration];
+  return [...commonStart, modelOperations(mode), eddDashboard, locationMail, businessDocuments, payments, cps, fleetNavItem, attendanceReports, reports, ...administration];
 }
 
 export function firstAllowedOpsHref(authorization: AuthorizationContext) {
