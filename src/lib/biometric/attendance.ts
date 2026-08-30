@@ -228,6 +228,7 @@ async function loadWorkerShiftWindow({
 }): Promise<ShiftWindow | null> {
   if (!supabaseAdmin) return null;
   const isEmployee = profileType === "employee" || Boolean(employeeId);
+  const isWorkforce = profileType === "workforce";
   const workerId = isEmployee ? employeeId : (accountId ?? fieldExecutiveId);
   if (!workerId) return null;
 
@@ -253,7 +254,7 @@ async function loadWorkerShiftWindow({
   const assignmentTable = isEmployee
     ? "hr_employee_shift_assignments"
     : "hr_contractor_shift_assignments";
-  const profileColumn = isEmployee ? "employee_id" : "contractor_id";
+  const profileColumn = isEmployee ? "employee_id" : isWorkforce ? "workforce_id" : "contractor_id";
   const assignment = await supabaseAdmin
     .from(assignmentTable)
     .select("hr_shifts(start_time, end_time)")
@@ -489,10 +490,11 @@ async function loadAttendanceScheduleContext({
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const workerIds = Array.from(new Set(workers.map((worker) => worker.profileId).filter(Boolean)));
   const employeeIds = Array.from(new Set(workers.filter((worker) => worker.profileType === "employee").map((worker) => worker.profileId)));
-  const contractorIds = Array.from(new Set(workers.filter((worker) => worker.profileType !== "employee").map((worker) => worker.profileId)));
+  const contractorIds = Array.from(new Set(workers.filter((worker) => worker.profileType === "contractor").map((worker) => worker.profileId)));
+  const workforceIds = Array.from(new Set(workers.filter((worker) => worker.profileType === "workforce").map((worker) => worker.profileId)));
   const shiftColumns = "id, code, name, start_time, end_time, break_minutes, grace_in_minutes, grace_out_minutes";
 
-  const [settingsResult, rosterResult, employeeAssignmentResult, contractorAssignmentResult] = await Promise.all([
+  const [settingsResult, rosterResult, employeeAssignmentResult, contractorAssignmentResult, workforceAssignmentResult] = await Promise.all([
     supabaseAdmin
       .from("hr_company_settings")
       .select("attendance_grace_minutes, below_half_day_treatment, full_day_minutes, full_day_percent, half_day_minutes, half_day_percent, no_punch_treatment, odd_punch_treatment, partial_day_treatment, single_punch_treatment, unassigned_shift_treatment, work_duration_basis")
@@ -526,6 +528,16 @@ async function loadAttendanceScheduleContext({
         .or(`effective_to.is.null,effective_to.gte.${fromDate}`)
         .in("contractor_id", contractorIds)
         .order("effective_from", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+    workforceIds.length
+      ? supabaseAdmin
+        .from("hr_contractor_shift_assignments")
+        .select(`workforce_id, effective_from, effective_to, hr_shifts(${shiftColumns})`)
+        .eq("company_id", companyId)
+        .lte("effective_from", toDate)
+        .or(`effective_to.is.null,effective_to.gte.${fromDate}`)
+        .in("workforce_id", workforceIds)
+        .order("effective_from", { ascending: false })
       : Promise.resolve({ data: [], error: null })
   ]);
   if (settingsResult.error) throw new Error(settingsResult.error.message);
@@ -533,6 +545,7 @@ async function loadAttendanceScheduleContext({
   if (employeeAssignmentResult.error) throw new Error(employeeAssignmentResult.error.message);
   // Older non-employee categories do not all have contractor shift records; an empty result is valid.
   if (contractorAssignmentResult.error && !isMissingColumnError(contractorAssignmentResult.error)) throw new Error(contractorAssignmentResult.error.message);
+  if (workforceAssignmentResult.error && !isMissingColumnError(workforceAssignmentResult.error)) throw new Error(workforceAssignmentResult.error.message);
 
   type RosterRow = {
     worker_id: string;
@@ -544,6 +557,7 @@ async function loadAttendanceScheduleContext({
   type AssignmentRow = {
     employee_id?: string;
     contractor_id?: string;
+    workforce_id?: string;
     effective_from: string;
     effective_to: string | null;
     hr_shifts: ShiftDefinition | ShiftDefinition[] | null;
@@ -558,8 +572,8 @@ async function loadAttendanceScheduleContext({
     });
   });
   const assignmentsByWorker = new Map<string, AssignmentRow[]>();
-  ([...(employeeAssignmentResult.data ?? []), ...(contractorAssignmentResult.data ?? [])] as unknown as AssignmentRow[]).forEach((assignment) => {
-    const workerId = assignment.employee_id ?? assignment.contractor_id;
+  ([...(employeeAssignmentResult.data ?? []), ...(contractorAssignmentResult.data ?? []), ...(workforceAssignmentResult.data ?? [])] as unknown as AssignmentRow[]).forEach((assignment) => {
+    const workerId = assignment.employee_id ?? assignment.contractor_id ?? assignment.workforce_id;
     if (!workerId) return;
     const values = assignmentsByWorker.get(workerId) ?? [];
     values.push(assignment);

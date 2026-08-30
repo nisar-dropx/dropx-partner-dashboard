@@ -89,7 +89,11 @@ export async function loadOutsideStationPolicy({
   const assignmentTable = profileType === "employee"
     ? "hr_employee_shift_assignments"
     : "hr_contractor_shift_assignments";
-  const profileColumn = profileType === "employee" ? "employee_id" : "contractor_id";
+  const profileColumn = profileType === "employee"
+    ? "employee_id"
+    : profileType === "workforce"
+      ? "workforce_id"
+      : "contractor_id";
   const assignment = await supabaseAdmin
     .from(assignmentTable)
     .select("hr_shifts(break_minutes)")
