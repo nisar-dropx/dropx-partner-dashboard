@@ -79,8 +79,8 @@ function selectedModules(formData: FormData) {
 
 async function requirePlatformAdmin(action: "add" | "edit") {
   const authorization = await requirePagePermission("company_master", action);
-  if (!authorization.isMasterOwner && !authorization.isMasterCompany) {
-    platformRedirect({ error: "Only master company users can manage platform companies." });
+  if (!authorization.isMasterOwner) {
+    platformRedirect({ error: "Only Super Admin can manage platform masters." });
   }
   return authorization;
 }

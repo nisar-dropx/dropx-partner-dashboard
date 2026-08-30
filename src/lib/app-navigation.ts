@@ -27,7 +27,14 @@ export const fleetNavItem: NavItem = {
 
 export const navItems: NavItem[] = [
   { code: "dashboard", label: "Platform Control", href: "/", icon: "#" },
-  { code: "company_master", label: "Companies & Product Owners", href: "https://admin-panel.dropxlogistics.com/platform-admin", icon: "O" },
+  {
+    code: "company_master",
+    label: "Masters",
+    icon: "M",
+    children: [
+      { code: "company_master", label: "Companies & Product Owners", href: "https://admin-panel.dropxlogistics.com/platform-admin" }
+    ]
+  },
   {
     code: "reports",
     label: "Platform Audit",

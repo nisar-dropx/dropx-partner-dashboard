@@ -5,7 +5,7 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { firstAllowedFinanceHref, hasFinancePortalAccess } from "@/lib/finance/navigation";
 import { isFinanceHostName } from "@/lib/finance/surface";
-import { getAuthorization, isCompanyOwner } from "@/lib/authorization";
+import { getAuthorization } from "@/lib/authorization";
 import { firstAllowedPeopleHref, hasPeoplePortalAccess } from "@/lib/people/navigation";
 import { isPeopleHostName } from "@/lib/people/surface";
 import { capabilityOwnership, productDefinitions } from "@/lib/product-ownership";
@@ -29,7 +29,7 @@ export default async function PlatformControlPage() {
     if (!hasFinancePortalAccess(authorization)) redirect("/unauthorized?page=finance_portal&reason=access");
     redirect(firstAllowedFinanceHref(authorization) ?? "/unauthorized?page=finance_portal&reason=access");
   }
-  if (!isCompanyOwner(authorization)) {
+  if (!authorization.isMasterOwner) {
     redirect("/unauthorized?page=dashboard_portal&reason=super_admin_only");
   }
 
@@ -39,7 +39,7 @@ export default async function PlatformControlPage() {
         eyebrow="Super Admin"
         title="DropX platform control"
         subtitle="Assign Product Owners, open each independent portal, and manage only cross-product technical controls here. Daily business masters are owned inside their respective products."
-        action={<Link className="button" href="https://admin-panel.dropxlogistics.com/platform-admin">Manage Product Owners</Link>}
+        action={<Link className="button" href="https://admin-panel.dropxlogistics.com/platform-admin">Open Masters</Link>}
       />
 
       <section className="grid three">

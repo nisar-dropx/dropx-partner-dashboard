@@ -62,7 +62,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         ? firstAllowedFinanceHref(authorization) ?? "/unauthorized?page=finance_portal&reason=access"
         : requestedPath);
     }
-    if (host === "dashboard.dropxlogistics.com" && (!authorization || !isCompanyOwner(authorization))) {
+    if (host === "dashboard.dropxlogistics.com" && (!authorization || !authorization.isMasterOwner)) {
       redirect("/unauthorized?page=dashboard_portal&reason=super_admin_only");
     }
     redirect(authorization

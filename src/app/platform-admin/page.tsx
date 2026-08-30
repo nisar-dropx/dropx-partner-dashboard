@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
@@ -325,7 +326,8 @@ export default async function PlatformAdminPage({
 }: {
   searchParams?: { add?: string; edit?: string; addUser?: string; editUser?: string; q?: string };
 }) {
-  await requirePagePermission("company_master", "access");
+  const authorization = await requirePagePermission("company_master", "access");
+  if (!authorization.isMasterOwner) redirect("/unauthorized?page=platform_masters&reason=super_admin_only");
   const { companies, moduleRows, controlUsers, companyUsers, productOwners, productOwnerSetupPending, error } = await loadPlatformData();
   const flash = loadFlash();
   const query = String(searchParams?.q ?? "").trim().toLowerCase();
@@ -343,8 +345,8 @@ export default async function PlatformAdminPage({
         <div className="platform-admin-brand">
           <Image src="/dropx-logo.png" alt="DropX" width={112} height={40} priority />
           <div>
-            <p className="eyebrow">Platform Admin</p>
-            <h1>Company Control Panel</h1>
+            <p className="eyebrow">Super Admin</p>
+            <h1>Platform Masters</h1>
           </div>
         </div>
         <div className="platform-admin-actions">

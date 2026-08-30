@@ -35,7 +35,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
   const isPeopleHost = isPeopleHostName(host);
   const isFinanceHost = isFinanceHostName(host);
   const isDashboardHost = host === "dashboard.dropxlogistics.com";
-  if (isDashboardHost && !isCompanyOwner(authorization)) {
+  if (isDashboardHost && !authorization.isMasterOwner) {
     redirect("/unauthorized?page=dashboard_portal&reason=super_admin_only");
   }
   const hasCurrentPortalAccess = isOpsHost

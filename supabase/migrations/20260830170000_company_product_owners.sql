@@ -128,56 +128,6 @@ set product_code = lower(regexp_replace(code, '_OWNER$', ''))
 where product_code is null
   and code ~ '^(OPERATIONS|PEOPLE|WORKFORCE|RECRUIT|FINANCE|TECH)_OWNER$';
 
-with configured_owners(product_code, email) as (
-  values
-    ('operations', 'akhilkso@dropxlogistics.com'),
-    ('finance', 'nisar@dropxlogistics.com'),
-    ('people', 'suja@dropxlogistics.com'),
-    ('recruit', 'suja@dropxlogistics.com'),
-    ('tech', 'tech@dropxlogistics.com'),
-    ('workforce', 'jamsheer@dropxlogistics.com')
-)
-insert into public.user_roles (
-  company_id, product_code, code, name, location_access_mode, is_active, is_system
-)
-select distinct
-  profile.company_id,
-  owner.product_code,
-  upper(owner.product_code) || '_OWNER',
-  initcap(owner.product_code) || ' Product Owner',
-  'all_locations',
-  true,
-  false
-from configured_owners owner
-join public.profiles profile on lower(profile.email) = owner.email
-where profile.company_id is not null and profile.is_active
-  and not exists (
-    select 1 from public.user_roles existing
-    where existing.company_id = profile.company_id
-      and existing.code = upper(owner.product_code) || '_OWNER'
-  );
-
-with configured_owners(product_code, email) as (
-  values
-    ('operations', 'akhilkso@dropxlogistics.com'),
-    ('finance', 'nisar@dropxlogistics.com'),
-    ('people', 'suja@dropxlogistics.com'),
-    ('recruit', 'suja@dropxlogistics.com'),
-    ('tech', 'tech@dropxlogistics.com'),
-    ('workforce', 'jamsheer@dropxlogistics.com')
-)
-insert into public.company_product_owners (company_id, product_code, user_id, role_id, is_active)
-select profile.company_id, owner.product_code, profile.id, role.id, true
-from configured_owners owner
-join public.profiles profile on lower(profile.email) = owner.email and profile.is_active
-join public.user_roles role on role.company_id = profile.company_id
-  and role.code = upper(owner.product_code) || '_OWNER'
-where profile.company_id is not null
-on conflict (company_id, product_code, user_id) do update set
-  role_id = excluded.role_id,
-  is_active = true,
-  updated_at = now();
-
 with product_pages(product_code, page_codes) as (
   values
     ('operations', array['users','ops_pulse','performance','capacity','capacity_overview','capacity_associates','capacity_delivery','capacity_hiring','ops_reports','ops_attendance_reports','daily_submission','cod','cod_executive_reconciliation','cod_submission','cod_validation','cod_reports','cod_portal_checks','cod_cash_in_associate','edd_dashboard','cps','cps_overview','cps_daily','cps_monthly','cps_cost_breakup','cps_stations','cps_shipments','cps_associates','cps_reports','cps_inputs','cps_unmapped','service_network','service_network_master','master_locations','master_providers','master_models','cod_master','performance_master','capacity_master','imports','fleet','fleet_action_center','fleet_vehicle_view','fleet_date_view','fleet_station_view','fleet_tracking','fleet_fuel_log','fleet_live_gps','fleet_maintenance','fleet_reports']::text[]),
