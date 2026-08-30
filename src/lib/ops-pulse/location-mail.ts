@@ -174,6 +174,100 @@ export function locationAddressForStation(stationCode: string, domain: string) {
   return `${localPart}@${domain}`;
 }
 
+export async function configureCentralLocationMailboxPilotMapping(input: {
+  actorId: string;
+  companyId: string;
+  routeResult: { email: string; error?: string | null; state: "active" | "conflict" | "error" | "pending" };
+  stationId: string;
+  workspaceAccountId: string;
+}) {
+  const [accountResult, stationResult, existingCentralResult] = await Promise.all([
+    database().from("google_workspace_accounts").select("id,primary_email,full_name,suspended,account_state,metadata")
+      .eq("company_id", input.companyId).eq("id", input.workspaceAccountId).maybeSingle(),
+    database().from("stations").select("id,station_code,station_name,is_active")
+      .eq("company_id", input.companyId).eq("id", input.stationId).maybeSingle(),
+    database().from("ops_location_mailboxes").select("id")
+      .eq("company_id", input.companyId).eq("mailbox_mode", "central_routed").neq("status", "inactive").maybeSingle()
+  ]);
+  if (accountResult.error || !accountResult.data) throw new Error(accountResult.error?.message ?? "Central Workspace account was not found.");
+  if (stationResult.error || !stationResult.data?.is_active) throw new Error(stationResult.error?.message ?? "Choose an active pilot station.");
+  if (existingCentralResult.error) throw new Error(existingCentralResult.error.message);
+  if (accountResult.data.suspended || accountResult.data.account_state === "deleted") throw new Error("A suspended or deleted Google account cannot be the central location inbox.");
+
+  const now = new Date().toISOString();
+  const credentialEmail = cleanEmail(accountResult.data.primary_email);
+  let mailboxId = existingCentralResult.data?.id ?? null;
+  if (mailboxId) {
+    const updated = await database().from("ops_location_mailboxes").update({
+      workspace_account_id: input.workspaceAccountId,
+      credential_email: credentialEmail,
+      display_name: "Central Location Mailbox · Pilot",
+      status: "active",
+      sync_enabled: true,
+      mailbox_mode: "central_routed",
+      last_sync_error: null,
+      updated_at: now
+    }).eq("company_id", input.companyId).eq("id", mailboxId).select("id").single();
+    if (updated.error) throw new Error(updated.error.message);
+  } else {
+    const inserted = await database().from("ops_location_mailboxes").insert({
+      company_id: input.companyId,
+      workspace_account_id: input.workspaceAccountId,
+      credential_email: credentialEmail,
+      display_name: "Central Location Mailbox · Pilot",
+      status: "active",
+      sync_enabled: true,
+      mailbox_mode: "central_routed",
+      created_by: input.actorId,
+      updated_at: now
+    }).select("id").single();
+    if (inserted.error) throw new Error(inserted.error.message);
+    mailboxId = inserted.data.id;
+  }
+
+  const disabled = await database().from("ops_location_mailbox_addresses").update({
+    is_active: false,
+    updated_at: now
+  }).eq("company_id", input.companyId).eq("mailbox_id", mailboxId);
+  if (disabled.error) throw new Error(disabled.error.message);
+
+  const address = await database().from("ops_location_mailbox_addresses").upsert({
+    company_id: input.companyId,
+    mailbox_id: mailboxId,
+    station_id: input.stationId,
+    email_address: cleanEmail(input.routeResult.email),
+    address_type: "group",
+    route_state: input.routeResult.state,
+    route_error: input.routeResult.error ?? null,
+    last_provisioned_at: now,
+    is_active: true,
+    updated_at: now
+  }, { onConflict: "company_id,station_id,email_address" });
+  if (address.error) throw new Error(address.error.message);
+
+  const oldMetadata = accountResult.data.metadata && typeof accountResult.data.metadata === "object"
+    ? accountResult.data.metadata as Record<string, unknown>
+    : {};
+  const accountSaved = await database().from("google_workspace_accounts").update({
+    account_type: "service",
+    source_type: null,
+    source_record_id: null,
+    location_id: null,
+    metadata: {
+      ...oldMetadata,
+      central_location_mailbox: true,
+      rollout_mode: "pilot",
+      pilot_station_id: input.stationId,
+      configured_at: now,
+      configured_by: input.actorId
+    },
+    updated_at: now
+  }).eq("company_id", input.companyId).eq("id", input.workspaceAccountId);
+  if (accountSaved.error) throw new Error(accountSaved.error.message);
+
+  return { mailboxId, credentialEmail };
+}
+
 export async function configureCentralLocationMailboxMapping(input: {
   actorId: string;
   routeResults?: Array<{ email: string; error?: string | null; state: "active" | "conflict" | "error" | "pending" }>;

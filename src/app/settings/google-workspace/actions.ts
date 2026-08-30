@@ -121,12 +121,13 @@ export async function provisionCentralLocationMailboxAction(formData: FormData) 
     const result = await provisionCentralLocationMailbox({
       actorId: authorization.userId,
       companyId,
-      localPart: required(formData.get("mailbox_local_part"), "Central mailbox name")
+      localPart: required(formData.get("mailbox_local_part"), "Central mailbox name"),
+      stationId: required(formData.get("station_id"), "Pilot station")
     });
     revalidatePath(pagePath);
     revalidatePath("/ops-pulse/mail");
     flash({
-      notice: `${result.centralEmail} configured as the only physical location inbox. ${result.activeRoutes} station routes are ready, ${result.pendingRoutes} pending and ${result.issues} need review.`
+      notice: `Pilot configured: ${result.stationCode} uses ${result.stationAddress} through ${result.centralEmail}. Existing location accounts remain unchanged. ${result.activeRoutes} route ready, ${result.pendingRoutes} pending and ${result.issues} need review.`
     }, "#central-location-mailbox");
   } catch (error) {
     if (isNextRedirect(error)) throw error;

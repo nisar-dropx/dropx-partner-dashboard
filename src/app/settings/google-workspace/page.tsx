@@ -125,6 +125,8 @@ type CentralMailboxRow = {
   last_sync_error: string | null;
   ops_location_mailbox_addresses: Array<{
     id: string;
+    station_id: string;
+    email_address: string;
     is_active: boolean;
     route_state: string;
     route_error: string | null;
@@ -178,7 +180,7 @@ async function loadPage(companyId: string) {
     supabaseAdmin.from("google_workspace_deletion_requests").select("id,account_id,status,eligible_at,legal_hold,data_transfer_status,note,google_workspace_accounts(primary_email,full_name)")
       .eq("company_id", companyId).neq("status", "completed").order("eligible_at", { ascending: true }).limit(100),
     supabaseAdmin.from("ops_location_mailboxes")
-      .select("id,credential_email,status,sync_enabled,last_synced_at,last_sync_error,ops_location_mailbox_addresses(id,is_active,route_state,route_error)")
+      .select("id,credential_email,status,sync_enabled,last_synced_at,last_sync_error,ops_location_mailbox_addresses(id,station_id,email_address,is_active,route_state,route_error)")
       .eq("company_id", companyId).eq("mailbox_mode", "central_routed").neq("status", "inactive").maybeSingle()
   ]);
   const results = [settings, designations, roles, policies, accounts, employees, locations, jobs, deletions, centralMailbox];
@@ -244,6 +246,13 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
   const suspendedAccounts = accounts.filter((row) => row.suspended || row.account_state === "suspended").length;
   const failedJobs = jobs.filter((row) => ["failed", "blocked"].includes(row.status)).length;
   const eligibleDeletions = deletions.filter((row) => !row.legal_hold && new Date(row.eligible_at).getTime() <= Date.now()).length;
+  const workspaceDomain = settings?.primary_domain ?? "dropxlogistics.com";
+  const existingUserEmails = new Set(accounts.filter((account) => account.account_state !== "deleted").map((account) => account.primary_email.toLowerCase()));
+  const pilotLocations = locations.filter((location) => {
+    const routeAddress = `${location.station_code.trim().toLowerCase()}@${workspaceDomain}`;
+    return location.is_active && routeAddress !== centralMailbox?.credential_email.toLowerCase() && !existingUserEmails.has(routeAddress);
+  });
+  const selectedPilotStationId = activeCentralAddresses[0]?.station_id ?? pilotLocations[0]?.id ?? "";
   const directoryAccounts: WorkspaceDirectoryAccount[] = accounts.map((account) => {
     const mappingSource = typeof account.metadata?.mapping_source === "string"
       ? "Manual Super Admin mapping"
@@ -336,33 +345,33 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
       <section className="panel" id="central-location-mailbox">
         <div className="panel-head toolbar">
           <div>
-            <h2>Central location mailbox</h2>
-            <p className="subtle">One licensed Google inbox receives every station Group route. OpsPulse separates mail by station and replies from the original station address.</p>
+            <h2>Central location mailbox pilot</h2>
+            <p className="subtle">Test one station through the central inbox without suspending, renaming, deleting or cutting over any existing location account.</p>
           </div>
           <StatusPill status={centralMailbox ? `${activeCentralAddresses.length} station addresses` : "Not configured"} />
         </div>
         <div className="panel-body">
           {centralMailbox ? (
             <div className="summary-grid" style={{ marginBottom: 18 }}>
-              <div className="metric-card"><span>Physical inbox</span><strong style={{ fontSize: 18 }}>{centralMailbox.credential_email}</strong><small>Hidden behind station addresses</small></div>
-              <div className="metric-card"><span>Ready routes</span><strong>{readyCentralAddresses.length}</strong><small>Inbound and outbound identity ready</small></div>
+              <div className="metric-card"><span>Physical test inbox</span><strong style={{ fontSize: 18 }}>{centralMailbox.credential_email}</strong><small>Existing accounts stay active</small></div>
+              <div className="metric-card"><span>Pilot routes</span><strong>{readyCentralAddresses.length}</strong><small>Inbound and outbound identity ready</small></div>
               <div className="metric-card"><span>Route issues</span><strong>{centralAddressIssues.length}</strong><small>Conflicting users or Google configuration</small></div>
               <div className="metric-card"><span>Last sync</span><strong style={{ fontSize: 18 }}>{dateTime(centralMailbox.last_synced_at)}</strong><small>{centralMailbox.last_sync_error ?? centralMailbox.status}</small></div>
             </div>
           ) : null}
           <form action={provisionCentralLocationMailboxAction} className="form-grid three">
             <label>Central mailbox name<input className="field" defaultValue={centralMailbox?.credential_email.split("@")[0] ?? "locations"} name="mailbox_local_part" placeholder="locations" required /></label>
-            <label>Station address rule<input className="field" disabled value={`{station_code}@${settings?.primary_domain ?? "dropxlogistics.com"}`} /></label>
-            <label>Google identity model<input className="field" disabled value="One user · Google Group routes" /></label>
+            <label>Pilot station<select className="field" defaultValue={selectedPilotStationId} name="station_id" required>{pilotLocations.map((location) => <option key={location.id} value={location.id}>{location.station_code} · {location.station_name ?? "Station"} · {location.station_code.trim().toLowerCase()}@{workspaceDomain}</option>)}</select></label>
+            <label>Google identity model<input className="field" disabled value="One test user · One unlicensed Group route" /></label>
             <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
               <SubmitButton
-                confirmDescription="This creates or reuses one Google Workspace user, creates one address-only Google Group route per active station, and pauses legacy per-station OpsPulse mailboxes. It does not delete existing Google accounts."
-                confirmMessage="Configure the central location mailbox now?"
-                confirmSubmitText="Create and configure"
-                confirmTitle="Centralize location email"
+                confirmDescription="This creates or reuses one unlicensed Google Group route for the selected pilot station. No existing Google account is suspended, renamed, deleted or cut over."
+                confirmMessage="Configure this one-station pilot now?"
+                confirmSubmitText="Configure pilot"
+                confirmTitle="Start location-mail pilot"
                 disabled={!permission?.canEdit || !workspaceCredentialsConfigured()}
-                pendingText="Configuring central inbox"
-              >Create / configure central inbox</SubmitButton>
+                pendingText="Configuring pilot"
+              >Create / configure pilot</SubmitButton>
             </div>
             {!workspaceCredentialsConfigured() ? <div className="message-panel warning" style={{ gridColumn: "1 / -1" }}>Google Workspace workload identity must be connected before the central account and station routes can be created.</div> : null}
           </form>
