@@ -6,6 +6,7 @@ import { DeductionHeadForm, type DeductionHead } from "@/components/deduction-he
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
 import { PendingLink } from "@/components/pending-link";
+import type { WorkforceCategoryOption } from "@/components/workforce-category-multi-select";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
@@ -143,10 +144,22 @@ async function loadProviderModels(companyId: string) {
 async function loadDeductionHeads(companyId: string) {
   if (!supabaseAdmin) return [] as DeductionHead[];
   const result = await supabaseAdmin.from("workforce_deduction_heads")
-    .select("id, code, name, description, calculation_type, default_value, applies_to_all, is_active")
+    .select("id, code, name, description, calculation_type, default_value, percentage_without_pan, workforce_category_codes, applies_to_all, is_system, is_active")
     .eq("company_id", companyId).order("name");
   if (result.error) return [] as DeductionHead[];
   return (result.data ?? []) as DeductionHead[];
+}
+
+async function loadWorkforceCategories(companyId: string) {
+  if (!supabaseAdmin) return [] as WorkforceCategoryOption[];
+  const result = await supabaseAdmin.from("workforce_categories")
+    .select("code, name")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .order("sort_order")
+    .order("name");
+  if (result.error) return [] as WorkforceCategoryOption[];
+  return (result.data ?? []).map((row) => ({ code: String(row.code), name: String(row.name) }));
 }
 
 function loadPaymentMethodFlash() {
@@ -174,6 +187,7 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
   const providerMetrics = await loadProviderMetrics(companyId);
   const providerModels = await loadProviderModels(companyId);
   const deductionHeads = await loadDeductionHeads(companyId);
+  const workforceCategories = await loadWorkforceCategories(companyId);
   const flash = loadPaymentMethodFlash();
   const editMethod = methods.find((method) => method.id === searchParams?.edit) ?? null;
 
@@ -333,11 +347,12 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
             {pagePermission.canAdd ? <DeductionHeadForm action={createDeductionHead} /> : null}
             <div className="deduction-head-list">
               {deductionHeads.length ? deductionHeads.map((head) => pagePermission.canEdit
-                ? <DeductionHeadForm action={updateDeductionHead} compact head={head} key={head.id} />
+                ? <DeductionHeadForm action={updateDeductionHead} compact head={head} key={head.id} workforceCategories={workforceCategories} />
                 : <div className="deduction-head-summary" key={head.id}>
                     <strong>{head.name}</strong>
                     <span>{head.code}</span>
-                    <span>{head.calculation_type === "percentage" ? `${head.default_value}% of Gross Earnings` : `Rs ${head.default_value}`}</span>
+                    <span>{head.is_system && head.code === "TDS" ? `${head.default_value}% with PAN · ${head.percentage_without_pan}% without PAN` : head.calculation_type === "percentage" ? `${head.default_value}% of Gross Earnings` : `Rs ${head.default_value}`}</span>
+                    {head.is_system && head.code === "TDS" ? <span>{head.workforce_category_codes.length ? head.workforce_category_codes.map((code) => workforceCategories.find((category) => category.code === code)?.name ?? code).join(", ") : "No workforce categories selected"}</span> : null}
                     <span>{head.applies_to_all ? "Applies to all workers" : "Individual assignment"}</span>
                   </div>)
                 : <p className="empty-cell">No deduction heads created yet.</p>}
