@@ -54,6 +54,19 @@ type LegacyWorkforceCleanupPreview = {
   unmatched_rows: number;
 };
 
+type LegacyWorkforceReferencePreview = {
+  breakdown: Array<{
+    columns: string;
+    kind: string;
+    profile_type: string;
+    rows: number;
+    table: string;
+  }>;
+  candidate_rows: number;
+  direct_foreign_keys: number;
+  polymorphic_references: number;
+};
+
 type LegacyWorkforceSourceRow = {
   company_id: string;
   designation: string | null;
@@ -278,6 +291,39 @@ async function loadLegacyWorkforceCleanupPreview(companyId: string) {
   };
 }
 
+async function loadLegacyWorkforceReferencePreview() {
+  if (!supabaseAdmin) return { data: null as LegacyWorkforceReferencePreview | null, pending: false, error: "Supabase service role key is not configured." };
+  const result = await supabaseAdmin.rpc("preview_legacy_workforce_reference_blockers");
+  if (result.error) {
+    const message = result.error.message.toLowerCase();
+    const pending = message.includes("preview_legacy_workforce_reference_blockers") && (
+      message.includes("does not exist") || message.includes("schema cache") || message.includes("could not find")
+    );
+    return { data: null as LegacyWorkforceReferencePreview | null, pending, error: pending ? null : result.error.message };
+  }
+  const raw = (result.data ?? {}) as Partial<Record<keyof LegacyWorkforceReferencePreview, unknown>>;
+  const breakdown = Array.isArray(raw.breakdown) ? raw.breakdown : [];
+  return {
+    data: {
+      breakdown: breakdown.map((item) => {
+        const row = item as Partial<LegacyWorkforceReferencePreview["breakdown"][number]>;
+        return {
+          columns: String(row.columns ?? ""),
+          kind: String(row.kind ?? ""),
+          profile_type: String(row.profile_type ?? ""),
+          rows: Number(row.rows ?? 0),
+          table: String(row.table ?? "")
+        };
+      }),
+      candidate_rows: Number(raw.candidate_rows ?? 0),
+      direct_foreign_keys: Number(raw.direct_foreign_keys ?? 0),
+      polymorphic_references: Number(raw.polymorphic_references ?? 0)
+    },
+    pending: false,
+    error: null as string | null
+  };
+}
+
 export const dynamic = "force-dynamic";
 
 export default async function PlatformAccessOwnersPage() {
@@ -287,9 +333,10 @@ export default async function PlatformAccessOwnersPage() {
   }
   const companyId = requireCompanyId(authorization);
 
-  const [{ company, companyUsers, productOwners, setupPending, error }, cleanupPreview] = await Promise.all([
+  const [{ company, companyUsers, productOwners, setupPending, error }, cleanupPreview, referencePreview] = await Promise.all([
     loadPlatformAccessOwners(companyId),
-    loadLegacyWorkforceCleanupPreview(companyId)
+    loadLegacyWorkforceCleanupPreview(companyId),
+    loadLegacyWorkforceReferencePreview()
   ]);
   const flash = loadFlash();
 
@@ -415,6 +462,30 @@ export default async function PlatformAccessOwnersPage() {
                   </div>
                 ) : null}
               </>
+            ) : cleanupPreview.data.legacy_workforce_rows > 0 && referencePreview.data && (
+              referencePreview.data.direct_foreign_keys > 0 || referencePreview.data.polymorphic_references > 0
+            ) ? (
+              <>
+                <div className="message-panel error">
+                  Deletion remains blocked by {referencePreview.data.direct_foreign_keys} direct database reference(s) and {referencePreview.data.polymorphic_references} workflow reference(s). No rows will be deleted until both reach zero.
+                </div>
+                {referencePreview.data.breakdown.length ? (
+                  <div className="table-wrap" style={{ marginTop: 18 }}>
+                    <table>
+                      <thead><tr><th>Kind</th><th>Table</th><th>Columns</th><th>Identity</th><th>Rows</th></tr></thead>
+                      <tbody>{referencePreview.data.breakdown.map((item) => (
+                        <tr key={`${item.kind}:${item.table}:${item.columns}:${item.profile_type}`}>
+                          <td>{item.kind}</td><td><strong>{item.table}</strong></td><td>{item.columns}</td><td>{item.profile_type}</td><td>{item.rows}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </>
+            ) : cleanupPreview.data.legacy_workforce_rows > 0 && referencePreview.pending ? (
+              <div className="message-panel warning">The Workforce reference audit is still deploying. Deletion remains disabled.</div>
+            ) : cleanupPreview.data.legacy_workforce_rows > 0 && referencePreview.error ? (
+              <div className="message-panel error">Unable to verify workflow references: {referencePreview.error}. Deletion remains disabled.</div>
             ) : cleanupPreview.data.legacy_workforce_rows > 0 ? (
               <form action={purgeVerifiedLegacyWorkforceAliases}>
                 <SubmitButton
