@@ -1,4 +1,5 @@
 import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { parseAiMailDraft } from "@/lib/ai-mail-draft";
 import { requireCompanyId } from "@/lib/company-scope";
 import { googleCloudAccessToken } from "@/lib/google-workspace-client";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -19,18 +20,6 @@ function responseText(payload: any) {
 function vertexResponseText(payload: any) {
   return (payload?.candidates?.[0]?.content?.parts ?? [])
     .map((part: any) => part?.text ?? "").filter(Boolean).join("\n");
-}
-
-function parseDraft(value: string) {
-  const normalized = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const objectStart = normalized.indexOf("{");
-  const objectEnd = normalized.lastIndexOf("}");
-  const json = objectStart >= 0 && objectEnd > objectStart ? normalized.slice(objectStart, objectEnd + 1) : normalized;
-  const parsed = JSON.parse(json) as { subject?: unknown; body?: unknown };
-  const subject = clean(parsed.subject, 180);
-  const body = clean(parsed.body, 12000);
-  if (!subject || !body) throw new Error("AI returned an incomplete draft.");
-  return { subject, body };
 }
 
 export async function POST(request: Request) {
@@ -71,7 +60,7 @@ export async function POST(request: Request) {
     action, tone, length, purpose, recipients,
     currentDraft: { subject: currentSubject, body: currentBody }
   });
-  let generated = "";
+  let generated: unknown = "";
   let provider = "";
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (apiKey) {
@@ -103,7 +92,19 @@ export async function POST(request: Request) {
           { role: "user", content: draftContext }
         ],
         max_tokens: 1600,
-        temperature: 0.2
+        temperature: 0.2,
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              subject: { type: "string" },
+              body: { type: "string" }
+            },
+            required: ["subject", "body"]
+          }
+        }
       })
     });
     const payload = await ai.json().catch(() => ({}));
@@ -111,7 +112,7 @@ export async function POST(request: Request) {
       const message = payload?.errors?.[0]?.message || payload?.error?.message || "Cloudflare Workers AI compose request failed.";
       return Response.json({ error: message }, { status: 502 });
     }
-    generated = clean(payload?.result?.response ?? payload?.result, 16000);
+    generated = payload?.result?.response ?? payload?.result;
     provider = "Cloudflare Workers AI";
   } else {
     try {
@@ -145,7 +146,7 @@ export async function POST(request: Request) {
     }
   }
   try {
-    return Response.json({ ...parseDraft(generated), provider });
+    return Response.json({ ...parseAiMailDraft(generated), provider });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "AI returned an invalid draft." }, { status: 502 });
   }
