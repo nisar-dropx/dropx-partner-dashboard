@@ -42,7 +42,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     locationsQuery,
     supabaseAdmin.from("field_executive_provider_mappings").select("id, provider_member_id, station_id, provider_id, contractor_id, employee_id, field_executive_id, payment_method_id, payment_values, effective_from, effective_to, status, providers(name), payment_methods(name)").eq("company_id", companyId).eq("status", "active").not("payment_method_id", "is", null),
     supabaseAdmin.from("payment_field_provider_metrics").select("payment_field_id, provider_id, provider_model_id, provider_production_metrics(source_key), payment_fields(code, label, field_type)").eq("company_id", companyId),
-    supabaseAdmin.from("workforce_deduction_heads").select("calculation_type, default_value, applies_to_all, is_active").eq("company_id", companyId).eq("is_active", true).eq("applies_to_all", true)
+    supabaseAdmin.from("workforce_deduction_heads").select("code, calculation_type, default_value, percentage_without_pan, workforce_category_codes, applies_to_all, is_system, is_active").eq("company_id", companyId).eq("is_active", true).eq("applies_to_all", true)
   ]);
   const error = locationsResult.error?.message || mappingsResult.error?.message || allocationResult.error?.message || deductionHeadsResult.error?.message;
   if (error) return { rows: [] as WorkforcePayoutRow[], error };
@@ -50,14 +50,21 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   const allowed = new Set(locations.map((row) => row.id));
   const mappings = (mappingsResult.data ?? []).filter((row: any) => allowed.has(row.station_id));
   const sourceIds = Array.from(new Set(mappings.flatMap((row: any) => [row.contractor_id,row.employee_id,row.field_executive_id]).filter(Boolean)));
+  const contractorIds = Array.from(new Set(mappings.map((row: any) => row.contractor_id).filter(Boolean)));
+  const employeeIds = Array.from(new Set(mappings.map((row: any) => row.employee_id).filter(Boolean)));
+  const fieldExecutiveIds = Array.from(new Set(mappings.map((row: any) => row.field_executive_id).filter(Boolean)));
   const providerMemberIds = Array.from(new Set(mappings.map((row: any) => row.provider_member_id).filter(Boolean)));
-  const [workforceResult, metricsResult, modelsResult] = await Promise.all([
+  const [workforceResult, metricsResult, modelsResult, contractorsResult, employeesResult, fieldExecutivesResult] = await Promise.all([
     sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, dropx_id, full_name").eq("company_id", companyId).in("source_profile_id", sourceIds) : Promise.resolve({ data: [], error: null }),
     providerMemberIds.length ? supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, work_date, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return").eq("company_id", companyId).in("provider_employee_id", providerMemberIds).gte("work_date", fromDate).lte("work_date", toDate).limit(50000) : Promise.resolve({ data: [], error: null }),
-    supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId)
+    supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId),
+    contractorIds.length ? supabaseAdmin.from("contractors").select("id, pan_number").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [], error: null }),
+    employeeIds.length ? supabaseAdmin.from("employees").select("id, pan_number").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
+    fieldExecutiveIds.length ? supabaseAdmin.from("field_executives").select("id, pan_number").eq("company_id", companyId).in("id", fieldExecutiveIds) : Promise.resolve({ data: [], error: null })
   ]);
-  if (workforceResult.error || metricsResult.error || modelsResult.error) return { rows: [] as WorkforcePayoutRow[], error: workforceResult.error?.message || metricsResult.error?.message || modelsResult.error?.message || "Unable to load payout data." };
+  if (workforceResult.error || metricsResult.error || modelsResult.error || contractorsResult.error || employeesResult.error || fieldExecutivesResult.error) return { rows: [] as WorkforcePayoutRow[], error: workforceResult.error?.message || metricsResult.error?.message || modelsResult.error?.message || contractorsResult.error?.message || employeesResult.error?.message || fieldExecutivesResult.error?.message || "Unable to load payout data." };
   const workerBySource = new Map((workforceResult.data ?? []).map((row: any) => [row.source_profile_id, row]));
+  const panBySource = new Map([...contractorsResult.data ?? [], ...employeesResult.data ?? [], ...fieldExecutivesResult.data ?? []].map((row: any) => [row.id, row.pan_number]));
   const locationById = new Map(locations.map((row: any) => [row.id, row])); const modelById = new Map((modelsResult.data ?? []).map((row: any) => [row.id, row]));
   const metricsByProviderMember = new Map<string, any[]>(); (metricsResult.data ?? []).forEach((row: any) => metricsByProviderMember.set(row.provider_employee_id, [...(metricsByProviderMember.get(row.provider_employee_id) ?? []), row]));
   const allocations = allocationResult.data ?? [];
@@ -74,7 +81,8 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       production += count; baseAmount += amount;
       productionBreakdown.push({ code: field.code, label: field.label || field.code, count, rate, amount });
     });
-    const deductions = calculateAutomaticDeductions(baseAmount, automaticDeductions);
+    const categoryCode = mapping.contractor_id ? "contractors" : mapping.employee_id ? "employees" : "field_executives";
+    const deductions = calculateAutomaticDeductions(baseAmount, automaticDeductions, { categoryCode, panNumber: panBySource.get(sourceId) });
     return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, productionBreakdown, baseAmount, additions: 0, deductions, netAmount: baseAmount - deductions, status: production > 0 ? "Ready for review" : "Awaiting production" } satisfies WorkforcePayoutRow;
   });
   return { rows, error: null };
