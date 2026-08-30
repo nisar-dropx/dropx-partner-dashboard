@@ -1,5 +1,6 @@
 import "server-only";
 
+import { resolveConfiguredApprovalWorkflow } from "@/lib/configured-approval-routing";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export type AttendanceApprovalStep = {
@@ -108,6 +109,21 @@ export async function resolveAttendanceApprovalSteps({
   const workerAssignment = assignmentResult.data;
   if (workerAssignment.is_top_level) {
     throw new Error("Top-level attendance regularization must be finalized directly by People.");
+  }
+
+  const configured = await resolveConfiguredApprovalWorkflow({
+    companyId,
+    workflowCode: "attendance_regularization",
+    workerId,
+    workerType,
+    asOf: today
+  });
+  if (configured) {
+    return configured.steps.map((step) => ({
+      step_name: step.step_name,
+      approver_user_id: step.approver_user_id,
+      approver_person_id: step.approver_person_id
+    }));
   }
 
   const [locationPolicy, companySettings, permittedApprovers] = await Promise.all([
