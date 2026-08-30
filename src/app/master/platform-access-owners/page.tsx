@@ -7,7 +7,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { productDefinitions } from "@/lib/product-ownership";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { assignProductOwner, removeProductOwner } from "@/app/platform-admin/actions";
+import { assignProductOwner, purgeVerifiedLegacyWorkforceAliases, removeProductOwner } from "@/app/platform-admin/actions";
 
 type CompanyRow = {
   id: string;
@@ -27,6 +27,15 @@ type ProductOwnerRow = {
   company_id: string;
   product_code: string;
   user_id: string;
+};
+
+type LegacyWorkforceCleanupPreview = {
+  active_canonical_rows: number;
+  canonical_rows: number;
+  contractor_rows: number;
+  field_executive_rows: number;
+  legacy_workforce_rows: number;
+  unmatched_rows: number;
 };
 
 function loadFlash() {
@@ -107,6 +116,31 @@ async function loadPlatformAccessOwners(companyId: string) {
   };
 }
 
+async function loadLegacyWorkforceCleanupPreview() {
+  if (!supabaseAdmin) return { data: null as LegacyWorkforceCleanupPreview | null, pending: false, error: "Supabase service role key is not configured." };
+  const result = await supabaseAdmin.rpc("preview_legacy_workforce_alias_cleanup");
+  if (result.error) {
+    const message = result.error.message.toLowerCase();
+    const pending = message.includes("preview_legacy_workforce_alias_cleanup") && (
+      message.includes("does not exist") || message.includes("schema cache") || message.includes("could not find")
+    );
+    return { data: null as LegacyWorkforceCleanupPreview | null, pending, error: pending ? null : result.error.message };
+  }
+  const raw = (result.data ?? {}) as Partial<Record<keyof LegacyWorkforceCleanupPreview, unknown>>;
+  return {
+    data: {
+      active_canonical_rows: Number(raw.active_canonical_rows ?? 0),
+      canonical_rows: Number(raw.canonical_rows ?? 0),
+      contractor_rows: Number(raw.contractor_rows ?? 0),
+      field_executive_rows: Number(raw.field_executive_rows ?? 0),
+      legacy_workforce_rows: Number(raw.legacy_workforce_rows ?? 0),
+      unmatched_rows: Number(raw.unmatched_rows ?? 0)
+    },
+    pending: false,
+    error: null as string | null
+  };
+}
+
 export const dynamic = "force-dynamic";
 
 export default async function PlatformAccessOwnersPage() {
@@ -116,7 +150,10 @@ export default async function PlatformAccessOwnersPage() {
   }
   const companyId = requireCompanyId(authorization);
 
-  const { company, companyUsers, productOwners, setupPending, error } = await loadPlatformAccessOwners(companyId);
+  const [{ company, companyUsers, productOwners, setupPending, error }, cleanupPreview] = await Promise.all([
+    loadPlatformAccessOwners(companyId),
+    loadLegacyWorkforceCleanupPreview()
+  ]);
   const flash = loadFlash();
 
   return (
@@ -189,6 +226,45 @@ export default async function PlatformAccessOwnersPage() {
           )}
         </section>
       ) : null}
+
+      <section className="panel">
+        <div className="panel-head toolbar">
+          <div>
+            <h2>Workforce cutover cleanup</h2>
+            <p className="subtle">Super Admin-only reconciliation of canonical Workforce rows and obsolete contractor/field-executive aliases.</p>
+          </div>
+        </div>
+        {cleanupPreview.pending ? (
+          <div className="panel-body message-panel warning">The committed Workforce cleanup migration is still deploying. Refresh after the migration completes.</div>
+        ) : cleanupPreview.error ? (
+          <div className="panel-body message-panel error">Unable to verify Workforce aliases: {cleanupPreview.error}</div>
+        ) : cleanupPreview.data ? (
+          <div className="panel-body">
+            <div className="summary-grid" style={{ marginBottom: 18 }}>
+              <div className="metric-card"><strong>{cleanupPreview.data.legacy_workforce_rows}</strong><span>Legacy aliases</span></div>
+              <div className="metric-card"><strong>{cleanupPreview.data.canonical_rows}</strong><span>Canonical matches</span></div>
+              <div className="metric-card"><strong>{cleanupPreview.data.unmatched_rows}</strong><span>Unmatched</span></div>
+            </div>
+            {cleanupPreview.data.unmatched_rows > 0 ? (
+              <div className="message-panel error">Deletion is blocked because {cleanupPreview.data.unmatched_rows} legacy row(s) do not have an exact canonical Workforce identity.</div>
+            ) : cleanupPreview.data.legacy_workforce_rows > 0 ? (
+              <form action={purgeVerifiedLegacyWorkforceAliases}>
+                <SubmitButton
+                  className="button danger"
+                  confirmDescription={`This will delete ${cleanupPreview.data.contractor_rows} contractor and ${cleanupPreview.data.field_executive_rows} field-executive aliases only after all registration and workflow checks pass.`}
+                  confirmMessage={`Delete ${cleanupPreview.data.legacy_workforce_rows} verified legacy Workforce aliases?`}
+                  confirmSubmitText="Delete verified aliases"
+                  pendingText="Verifying and deleting"
+                >
+                  Delete verified legacy aliases
+                </SubmitButton>
+              </form>
+            ) : (
+              <div className="message-panel success">No duplicate legacy Workforce aliases remain. Canonical Workforce registrations are preserved.</div>
+            )}
+          </div>
+        ) : null}
+      </section>
     </AppShell>
   );
 }

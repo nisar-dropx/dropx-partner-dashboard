@@ -390,6 +390,36 @@ export async function removeProductOwner(formData: FormData) {
   }
 }
 
+export async function purgeVerifiedLegacyWorkforceAliases() {
+  await requirePlatformAccessOwnersAdmin("edit");
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const previewResult = await supabaseAdmin.rpc("preview_legacy_workforce_alias_cleanup");
+    if (previewResult.error) throw new Error(previewResult.error.message);
+    const preview = (previewResult.data ?? {}) as { legacy_workforce_rows?: unknown; unmatched_rows?: unknown };
+    const candidateCount = Number(preview.legacy_workforce_rows ?? 0);
+    const unmatchedCount = Number(preview.unmatched_rows ?? 0);
+    if (unmatchedCount > 0) throw new Error(`${unmatchedCount} legacy Workforce row(s) have no exact canonical identity. Nothing was deleted.`);
+
+    const permissionResult = await supabaseAdmin.rpc("reconcile_product_role_permission_boundaries");
+    if (permissionResult.error) throw new Error(permissionResult.error.message);
+    const cleanupResult = await supabaseAdmin.rpc("purge_verified_legacy_workforce_aliases");
+    if (cleanupResult.error) throw new Error(cleanupResult.error.message);
+    const cleanup = (cleanupResult.data ?? {}) as { deleted_contractors?: unknown; deleted_field_executives?: unknown };
+    const deletedContractors = Number(cleanup.deleted_contractors ?? 0);
+    const deletedExecutives = Number(cleanup.deleted_field_executives ?? 0);
+    revalidatePath(platformAccessOwnersPath);
+    platformAccessOwnersRedirect({
+      notice: candidateCount
+        ? `Deleted ${deletedContractors} contractor and ${deletedExecutives} field-executive aliases. Canonical Workforce rows and live flows were preserved.`
+        : "Product permission boundaries reconciled. No legacy Workforce aliases required deletion."
+    });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    platformAccessOwnersRedirect({ error: error instanceof Error ? error.message : "Unable to complete the verified Workforce cleanup." });
+  }
+}
+
 async function ensureCompanyAdminProfile(companyId: string, fullName: string, email: string, mobile: string | null) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
