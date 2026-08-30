@@ -8,8 +8,9 @@ const DIRECTORY_BASE_URL = "https://admin.googleapis.com/admin/directory/v1";
 const WORKSPACE_SCOPES = [
   "https://www.googleapis.com/auth/admin.directory.user",
   "https://www.googleapis.com/auth/admin.directory.user.security",
-  "https://www.googleapis.com/auth/admin.directory.group.readonly",
-  "https://www.googleapis.com/auth/admin.directory.group.member"
+  "https://www.googleapis.com/auth/admin.directory.group",
+  "https://www.googleapis.com/auth/admin.directory.group.member",
+  "https://www.googleapis.com/auth/apps.groups.settings"
 ];
 
 export type WorkspaceConnectionSettings = {
@@ -21,6 +22,7 @@ export type WorkspaceConnectionSettings = {
 export type GoogleDirectoryUser = {
   id: string;
   primaryEmail: string;
+  aliases?: string[];
   name?: {
     fullName?: string;
     givenName?: string;
@@ -33,6 +35,15 @@ export type GoogleDirectoryUser = {
   etag?: string;
   creationTime?: string;
   lastLoginTime?: string;
+};
+
+export type GoogleDirectoryGroup = {
+  id: string;
+  email: string;
+  name?: string;
+  description?: string;
+  directMembersCount?: string;
+  etag?: string;
 };
 
 type WorkspaceServiceAccount = {
@@ -190,10 +201,10 @@ export class GoogleWorkspaceClient {
     return token.access_token;
   }
 
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+  private async requestUrl<T>(url: string, init?: RequestInit): Promise<T> {
     const token = await this.accessToken();
 
-    const response = await fetch(`${DIRECTORY_BASE_URL}${path}`, {
+    const response = await fetch(url, {
       ...init,
       cache: "no-store",
       headers: {
@@ -215,6 +226,10 @@ export class GoogleWorkspaceClient {
       );
     }
     return body as T;
+  }
+
+  private request<T>(path: string, init?: RequestInit) {
+    return this.requestUrl<T>(`${DIRECTORY_BASE_URL}${path}`, init);
   }
 
   async listUsers() {
@@ -247,13 +262,14 @@ export class GoogleWorkspaceClient {
     familyName: string;
     password: string;
     orgUnitPath: string;
+    changePasswordAtNextLogin?: boolean;
   }) {
     return this.request<GoogleDirectoryUser>("/users", {
       method: "POST",
       body: JSON.stringify({
         primaryEmail: input.primaryEmail,
         password: input.password,
-        changePasswordAtNextLogin: true,
+        changePasswordAtNextLogin: input.changePasswordAtNextLogin ?? true,
         orgUnitPath: input.orgUnitPath,
         name: { givenName: input.givenName, familyName: input.familyName }
       })
@@ -281,6 +297,54 @@ export class GoogleWorkspaceClient {
     return this.request<void>(`/users/${encodeURIComponent(userKey)}`, { method: "DELETE" });
   }
 
+  async listUserAliases(userKey: string) {
+    const result = await this.request<{ aliases?: Array<{ alias: string; primaryEmail: string }> }>(
+      `/users/${encodeURIComponent(userKey)}/aliases`
+    );
+    return result.aliases ?? [];
+  }
+
+  addUserAlias(userKey: string, alias: string) {
+    return this.request<{ alias: string; primaryEmail: string }>(`/users/${encodeURIComponent(userKey)}/aliases`, {
+      method: "POST",
+      body: JSON.stringify({ alias })
+    });
+  }
+
+  async getGroup(groupKey: string) {
+    try {
+      return await this.request<GoogleDirectoryGroup>(`/groups/${encodeURIComponent(groupKey)}`);
+    } catch (error) {
+      if (error instanceof GoogleWorkspaceApiError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  createGroup(input: { email: string; name: string; description?: string }) {
+    return this.request<GoogleDirectoryGroup>("/groups", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  }
+
+  updateGroupSettings(groupKey: string, input: {
+    whoCanPostMessage: "ANYONE_CAN_POST" | "ALL_IN_DOMAIN_CAN_POST" | "ALL_MEMBERS_CAN_POST";
+    messageModerationLevel?: "MODERATE_NONE" | "MODERATE_NON_MEMBERS";
+  }) {
+    return this.requestUrl<Record<string, string>>(
+      `https://www.googleapis.com/groups/v1/groups/${encodeURIComponent(groupKey)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          archiveOnly: "false",
+          isArchived: "false",
+          whoCanPostMessage: input.whoCanPostMessage,
+          messageModerationLevel: input.messageModerationLevel ?? "MODERATE_NONE"
+        })
+      }
+    );
+  }
+
   async listUserGroups(userKey: string) {
     const groups: Array<{ id: string; email: string; name?: string }> = [];
     let pageToken = "";
@@ -294,11 +358,25 @@ export class GoogleWorkspaceClient {
     return groups;
   }
 
-  addGroupMember(groupKey: string, userKey: string) {
+  addGroupMember(groupKey: string, userKey: string, role: "MEMBER" | "MANAGER" | "OWNER" = "MEMBER") {
     return this.request(`/groups/${encodeURIComponent(groupKey)}/members`, {
       method: "POST",
-      body: JSON.stringify({ email: userKey, role: "MEMBER" })
+      body: JSON.stringify({ email: userKey, role })
     });
+  }
+
+  async ensureGroupMember(groupKey: string, userKey: string, role: "MEMBER" | "MANAGER" | "OWNER" = "MEMBER") {
+    try {
+      return await this.request(`/groups/${encodeURIComponent(groupKey)}/members/${encodeURIComponent(userKey)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role })
+      });
+    } catch (error) {
+      if (error instanceof GoogleWorkspaceApiError && error.status === 404) {
+        return this.addGroupMember(groupKey, userKey, role);
+      }
+      throw error;
+    }
   }
 
   async removeGroupMember(groupKey: string, userKey: string) {
@@ -313,8 +391,17 @@ export class GoogleWorkspaceClient {
 
 const LOCATION_MAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.modify",
-  "https://www.googleapis.com/auth/gmail.send"
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.settings.sharing"
 ];
+
+export type GoogleSendAs = {
+  sendAsEmail: string;
+  displayName?: string;
+  isPrimary?: boolean;
+  isDefault?: boolean;
+  verificationStatus?: "accepted" | "pending" | "verificationStatusUnspecified";
+};
 
 export type GoogleMailMessage = {
   id: string;
@@ -408,6 +495,23 @@ export class GoogleLocationMailClient {
     return this.request<{ id: string; threadId: string; labelIds?: string[] }>("/messages/send", {
       method: "POST",
       body: JSON.stringify({ raw, ...(threadId ? { threadId } : {}) })
+    });
+  }
+
+  async listSendAs() {
+    const result = await this.request<{ sendAs?: GoogleSendAs[] }>("/settings/sendAs");
+    return result.sendAs ?? [];
+  }
+
+  createSendAs(input: { email: string; displayName: string }) {
+    return this.request<GoogleSendAs>("/settings/sendAs", {
+      method: "POST",
+      body: JSON.stringify({
+        sendAsEmail: input.email,
+        displayName: input.displayName,
+        replyToAddress: input.email,
+        treatAsAlias: true
+      })
     });
   }
 

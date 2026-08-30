@@ -20,6 +20,7 @@ import {
   approveWorkspaceJob,
   cancelWorkspaceDeletion,
   processWorkspaceQueueNow,
+  provisionCentralLocationMailboxAction,
   retryWorkspaceJob,
   saveDesignationWorkspacePolicy,
   saveWorkspaceSettings,
@@ -115,6 +116,21 @@ type DeletionRow = {
   google_workspace_accounts: { primary_email: string; full_name: string } | Array<{ primary_email: string; full_name: string }> | null;
 };
 
+type CentralMailboxRow = {
+  id: string;
+  credential_email: string;
+  status: string;
+  sync_enabled: boolean;
+  last_synced_at: string | null;
+  last_sync_error: string | null;
+  ops_location_mailbox_addresses: Array<{
+    id: string;
+    is_active: boolean;
+    route_state: string;
+    route_error: string | null;
+  }> | null;
+};
+
 function first<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
@@ -146,7 +162,7 @@ function schemaMissing(error: unknown) {
 
 async function loadPage(companyId: string) {
   if (!supabaseAdmin) return { error: "Supabase service role key is not configured.", setupPending: false } as const;
-  const [settings, designations, roles, policies, accounts, employees, locations, jobs, deletions] = await Promise.all([
+  const [settings, designations, roles, policies, accounts, employees, locations, jobs, deletions, centralMailbox] = await Promise.all([
     supabaseAdmin.from("google_workspace_settings").select("*").eq("company_id", companyId).maybeSingle(),
     supabaseAdmin.from("designations").select("id,code,name,is_active").eq("company_id", companyId).eq("is_active", true).order("name"),
     supabaseAdmin.from("user_roles").select("id,code,name").eq("company_id", companyId).eq("is_active", true).order("name"),
@@ -160,9 +176,12 @@ async function loadPage(companyId: string) {
     supabaseAdmin.from("google_workspace_jobs").select("id,job_type,status,attempt_count,last_error,created_at,google_workspace_accounts(primary_email,full_name)")
       .eq("company_id", companyId).order("created_at", { ascending: false }).limit(50),
     supabaseAdmin.from("google_workspace_deletion_requests").select("id,account_id,status,eligible_at,legal_hold,data_transfer_status,note,google_workspace_accounts(primary_email,full_name)")
-      .eq("company_id", companyId).neq("status", "completed").order("eligible_at", { ascending: true }).limit(100)
+      .eq("company_id", companyId).neq("status", "completed").order("eligible_at", { ascending: true }).limit(100),
+    supabaseAdmin.from("ops_location_mailboxes")
+      .select("id,credential_email,status,sync_enabled,last_synced_at,last_sync_error,ops_location_mailbox_addresses(id,is_active,route_state,route_error)")
+      .eq("company_id", companyId).eq("mailbox_mode", "central_routed").neq("status", "inactive").maybeSingle()
   ]);
-  const results = [settings, designations, roles, policies, accounts, employees, locations, jobs, deletions];
+  const results = [settings, designations, roles, policies, accounts, employees, locations, jobs, deletions, centralMailbox];
   const missing = results.find((result) => result.error && schemaMissing(result.error));
   if (missing) return { error: null, setupPending: true } as const;
   const failed = results.find((result) => result.error);
@@ -178,7 +197,8 @@ async function loadPage(companyId: string) {
     employees: (employees.data ?? []) as EmployeeRow[],
     locations: (locations.data ?? []) as LocationRow[],
     jobs: (jobs.data ?? []) as JobRow[],
-    deletions: (deletions.data ?? []) as DeletionRow[]
+    deletions: (deletions.data ?? []) as DeletionRow[],
+    centralMailbox: centralMailbox.data as CentralMailboxRow | null
   } as const;
 }
 
@@ -212,6 +232,11 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
   const locations = data.locations ?? [];
   const jobs = data.jobs ?? [];
   const deletions = data.deletions ?? [];
+  const centralMailbox = data.centralMailbox ?? null;
+  const centralAddresses = centralMailbox?.ops_location_mailbox_addresses ?? [];
+  const activeCentralAddresses = centralAddresses.filter((address) => address.is_active);
+  const readyCentralAddresses = activeCentralAddresses.filter((address) => ["active", "not_required"].includes(address.route_state));
+  const centralAddressIssues = activeCentralAddresses.filter((address) => ["conflict", "error"].includes(address.route_state));
   const selectedDesignationId = searchParams?.designation || designations[0]?.id || "";
   const selectedDesignation = designations.find((row) => row.id === selectedDesignationId) ?? null;
   const policy = policies.find((row) => row.designation_id === selectedDesignationId) ?? null;
@@ -306,6 +331,42 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
           {settings?.last_sync_error ? <div className="message-panel error" style={{ gridColumn: "1 / -1" }}>{settings.last_sync_error}</div> : null}
           <div className="form-actions" style={{ gridColumn: "1 / -1" }}><SubmitButton disabled={!permission?.canEdit}>Save connection master</SubmitButton></div>
         </form>
+      </section>
+
+      <section className="panel" id="central-location-mailbox">
+        <div className="panel-head toolbar">
+          <div>
+            <h2>Central location mailbox</h2>
+            <p className="subtle">One licensed Google inbox receives every station Group route. OpsPulse separates mail by station and replies from the original station address.</p>
+          </div>
+          <StatusPill status={centralMailbox ? `${activeCentralAddresses.length} station addresses` : "Not configured"} />
+        </div>
+        <div className="panel-body">
+          {centralMailbox ? (
+            <div className="summary-grid" style={{ marginBottom: 18 }}>
+              <div className="metric-card"><span>Physical inbox</span><strong style={{ fontSize: 18 }}>{centralMailbox.credential_email}</strong><small>Hidden behind station addresses</small></div>
+              <div className="metric-card"><span>Ready routes</span><strong>{readyCentralAddresses.length}</strong><small>Inbound and outbound identity ready</small></div>
+              <div className="metric-card"><span>Route issues</span><strong>{centralAddressIssues.length}</strong><small>Conflicting users or Google configuration</small></div>
+              <div className="metric-card"><span>Last sync</span><strong style={{ fontSize: 18 }}>{dateTime(centralMailbox.last_synced_at)}</strong><small>{centralMailbox.last_sync_error ?? centralMailbox.status}</small></div>
+            </div>
+          ) : null}
+          <form action={provisionCentralLocationMailboxAction} className="form-grid three">
+            <label>Central mailbox name<input className="field" defaultValue={centralMailbox?.credential_email.split("@")[0] ?? "locations"} name="mailbox_local_part" placeholder="locations" required /></label>
+            <label>Station address rule<input className="field" disabled value={`{station_code}@${settings?.primary_domain ?? "dropxlogistics.com"}`} /></label>
+            <label>Google identity model<input className="field" disabled value="One user · Google Group routes" /></label>
+            <div className="form-actions" style={{ gridColumn: "1 / -1" }}>
+              <SubmitButton
+                confirmDescription="This creates or reuses one Google Workspace user, creates one address-only Google Group route per active station, and pauses legacy per-station OpsPulse mailboxes. It does not delete existing Google accounts."
+                confirmMessage="Configure the central location mailbox now?"
+                confirmSubmitText="Create and configure"
+                confirmTitle="Centralize location email"
+                disabled={!permission?.canEdit || !workspaceCredentialsConfigured()}
+                pendingText="Configuring central inbox"
+              >Create / configure central inbox</SubmitButton>
+            </div>
+            {!workspaceCredentialsConfigured() ? <div className="message-panel warning" style={{ gridColumn: "1 / -1" }}>Google Workspace workload identity must be connected before the central account and station routes can be created.</div> : null}
+          </form>
+        </div>
       </section>
 
       <section className="panel">

@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { processWorkspaceJobs, queueWorkspaceJob, syncWorkspaceDirectory } from "@/lib/google-workspace-service";
+import { provisionCentralLocationMailbox } from "@/lib/ops-pulse/central-location-mail";
 import { ensureLocationMailboxMapping } from "@/lib/ops-pulse/location-mail";
 import { isProductCode } from "@/lib/product-ownership";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -110,6 +111,26 @@ export async function saveWorkspaceSettings(formData: FormData) {
   } catch (error) {
     if (isNextRedirect(error)) throw error;
     flash({ error: friendly(error) });
+  }
+}
+
+export async function provisionCentralLocationMailboxAction(formData: FormData) {
+  const authorization = await requirePagePermission("workspace_identity", "edit");
+  const companyId = requireCompanyId(authorization);
+  try {
+    const result = await provisionCentralLocationMailbox({
+      actorId: authorization.userId,
+      companyId,
+      localPart: required(formData.get("mailbox_local_part"), "Central mailbox name")
+    });
+    revalidatePath(pagePath);
+    revalidatePath("/ops-pulse/mail");
+    flash({
+      notice: `${result.centralEmail} configured as the only physical location inbox. ${result.activeRoutes} station routes are ready, ${result.pendingRoutes} pending and ${result.issues} need review.`
+    }, "#central-location-mailbox");
+  } catch (error) {
+    if (isNextRedirect(error)) throw error;
+    flash({ error: friendly(error) }, "#central-location-mailbox");
   }
 }
 

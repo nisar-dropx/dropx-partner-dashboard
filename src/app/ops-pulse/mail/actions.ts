@@ -30,7 +30,7 @@ function isRedirect(error: unknown) {
   return String((error as { digest?: unknown })?.digest ?? "").startsWith("NEXT_REDIRECT");
 }
 
-function finish(input: { error?: string; notice?: string; mailboxId?: string; threadId?: string }): never {
+function finish(input: { error?: string; notice?: string; mailboxId?: string; stationAddressId?: string; threadId?: string }): never {
   cookies().set("dropx_location_mail_flash", JSON.stringify({ error: input.error, notice: input.notice }), {
     httpOnly: true,
     maxAge: 45,
@@ -39,8 +39,28 @@ function finish(input: { error?: string; notice?: string; mailboxId?: string; th
   });
   const params = new URLSearchParams();
   if (input.mailboxId) params.set("mailbox", input.mailboxId);
+  if (input.stationAddressId) params.set("station", input.stationAddressId);
   if (input.threadId) params.set("thread", input.threadId);
   redirect(`/mail${params.size ? `?${params}` : ""}`);
+}
+
+async function stationAddressAccess(
+  companyId: string,
+  mailboxId: string,
+  stationAddressId: string,
+  authorization: Awaited<ReturnType<typeof requirePagePermission>>
+) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const result = await supabaseAdmin.from("ops_location_mailbox_addresses").select("id,station_id,email_address,route_state")
+    .eq("company_id", companyId).eq("mailbox_id", mailboxId).eq("id", stationAddressId).eq("is_active", true).maybeSingle();
+  if (result.error || !result.data) throw new Error(result.error?.message ?? "The selected station address is unavailable.");
+  if (!authorization.hasAllLocationAccess && !authorization.isMasterOwner && !authorization.locationScopeIds.includes(result.data.station_id)) {
+    throw new Error("You do not have access to this station address.");
+  }
+  if (!["active", "not_required"].includes(result.data.route_state)) {
+    throw new Error(`The selected station route is ${result.data.route_state} and cannot send mail yet.`);
+  }
+  return result.data;
 }
 
 async function assertMailboxAccess(companyId: string, mailboxId: string, authorization: Awaited<ReturnType<typeof requirePagePermission>>) {
@@ -75,15 +95,18 @@ export async function sendLocationMailAction(formData: FormData) {
   const authorization = await requirePagePermission("ops_location_mail", "edit");
   const companyId = requireCompanyId(authorization);
   const mailboxId = clean(formData.get("mailbox_id"));
+  const stationAddressId = clean(formData.get("station_address_id"));
   const threadId = clean(formData.get("thread_id")) || null;
   try {
     if (!mailboxId) throw new Error("Mailbox is required.");
-    await assertMailboxAccess(companyId, mailboxId, authorization);
+    if (!stationAddressId) throw new Error("Station address is required.");
+    const stationAddress = await stationAddressAccess(companyId, mailboxId, stationAddressId, authorization);
     const to = parseEmails(formData.get("to"));
     if (!to.length) throw new Error("At least one recipient is required.");
     const result = await sendLocationMail({
       companyId,
       mailboxId,
+      fromAddress: stationAddress.email_address,
       to,
       cc: parseEmails(formData.get("cc")),
       subject: required(formData.get("subject"), "Subject"),
@@ -93,9 +116,9 @@ export async function sendLocationMailAction(formData: FormData) {
       references: clean(formData.get("references")) || null
     });
     revalidatePath("/ops-pulse/mail");
-    finish({ mailboxId, threadId: result.threadId, notice: "Email sent from the selected location address." });
+    finish({ mailboxId, stationAddressId, threadId: result.threadId, notice: `Email sent as ${stationAddress.email_address}.` });
   } catch (error) {
     if (isRedirect(error)) throw error;
-    finish({ mailboxId, threadId: threadId ?? undefined, error: error instanceof Error ? error.message : "Email could not be sent." });
+    finish({ mailboxId, stationAddressId, threadId: threadId ?? undefined, error: error instanceof Error ? error.message : "Email could not be sent." });
   }
 }
