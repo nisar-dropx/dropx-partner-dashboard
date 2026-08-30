@@ -469,6 +469,17 @@ export default async function PlatformAccessOwnersPage() {
                 <div className="message-panel error">
                   Deletion remains blocked by {referencePreview.data.direct_foreign_keys} direct database reference(s) and {referencePreview.data.polymorphic_references} workflow reference(s). No rows will be deleted until both reach zero.
                 </div>
+                <form action={reconcileLegacyWorkforceAliases} style={{ marginTop: 18 }}>
+                  <SubmitButton
+                    className="button primary"
+                    confirmDescription="This re-keys verified pay, shift, registration and workflow history to canonical Workforce identities. It does not delete any profile."
+                    confirmMessage="Reconcile the remaining verified Workforce references now?"
+                    confirmSubmitText="Reconcile safely"
+                    pendingText="Reconciling"
+                  >
+                    Reconcile remaining references
+                  </SubmitButton>
+                </form>
                 {referencePreview.data.breakdown.length ? (
                   <div className="table-wrap" style={{ marginTop: 18 }}>
                     <table>
