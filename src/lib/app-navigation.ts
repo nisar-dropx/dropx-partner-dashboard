@@ -63,7 +63,8 @@ export const navItems: NavItem[] = [
     children: [
       { code: "users", label: "Users", href: "/users?section=users" },
       { code: "users", label: "Cross-product Roles", href: "/users?section=roles" },
-      { code: "users", label: "Positions & Delegation", href: "/users/positions" }
+      { code: "users", label: "Positions & Delegation", href: "/users/positions" },
+      { code: "workspace_identity", label: "Google Workspace", href: "/settings/google-workspace" }
     ]
   },
   {

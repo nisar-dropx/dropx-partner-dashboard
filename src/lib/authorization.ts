@@ -150,7 +150,7 @@ function isTrustedFinanceMembership(membership: ProductMembershipRow) {
   // Access deliberately granted from the Finance portal or through Product
   // Ownership is authoritative. Legacy Dashboard grants are retained only for
   // roles whose original business function was Accounts or Finance.
-  if (["manual", "product_owner", "product_admin"].includes(source)) return true;
+  if (["manual", "product_owner", "product_admin", "google_workspace"].includes(source)) return true;
   if (source !== "legacy_dashboard") return false;
 
   const snapshot = String(membership.role_code_snapshot ?? "").trim().toUpperCase();

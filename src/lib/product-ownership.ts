@@ -44,7 +44,7 @@ export const productPageCodes: Record<ProductCode, readonly string[]> = {
   ],
   tech: [
     "company_master", "app_settings", "ai_connector", "amazon_connector", "developer_mode",
-    "raw_punch_reports", "verification_api_reports", "event_log_reports", "biometric_devices", "users"
+    "raw_punch_reports", "verification_api_reports", "event_log_reports", "biometric_devices", "users", "workspace_identity"
   ]
 };
 

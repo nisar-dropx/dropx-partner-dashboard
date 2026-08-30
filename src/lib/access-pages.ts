@@ -70,6 +70,7 @@ export const accessPages = [
   { code: "notifications_email", name: "Email Notifications", sort_order: 110 },
   { code: "notifications_app", name: "App Notifications", sort_order: 111 },
   { code: "users", name: "Users & Access", sort_order: 112 },
+  { code: "workspace_identity", name: "Google Workspace", sort_order: 113 },
   { code: "master_locations", name: "Locations", sort_order: 120 },
   { code: "master_providers", name: "Providers", sort_order: 121 },
   { code: "master_models", name: "Models", sort_order: 122 },
