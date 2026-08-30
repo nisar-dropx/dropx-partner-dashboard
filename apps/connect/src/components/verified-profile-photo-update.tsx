@@ -13,6 +13,12 @@ type Challenge = {
   expires_at: string;
 };
 
+function safePhotoError(value: unknown, fallback: string) {
+  const message = value instanceof Error ? value.message : String(value ?? "");
+  if (/schema|cache|table|relation|column|supabase|service role|permission|public\./i.test(message)) return fallback;
+  return message || fallback;
+}
+
 export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated }: {
   account: AppAccount;
   currentPhotoUrl?: string | null;
@@ -53,7 +59,7 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
       setScanning(true);
     } catch (reason) {
       URL.revokeObjectURL(url);
-      setError(reason instanceof Error ? reason.message : "Photo could not be read.");
+      setError(safePhotoError(reason, "Photo verification is temporarily unavailable. Please try again."));
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -86,6 +92,8 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
       setCandidateUrl("");
       setNotice(`Photo updated after ${payload.matchPercent}% face match.`);
       onUpdated(payload.profilePhotoUrl);
+    } catch (reason) {
+      setError(safePhotoError(reason, "Profile photo could not be updated. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -102,17 +110,16 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
       {currentPhotoUrl ? <img alt="Current profile" src={currentPhotoUrl} /> : <Camera />}
       <span><ShieldCheck />Face verified update</span>
     </button>
-    <div>
-      <small>PROFILE IDENTITY</small>
-      <strong>Update profile photo</strong>
-      <p>Choose a clear photo and complete the live face scan. Your photo changes only after the configured match and liveness checks pass.</p>
+    <div className="dx-verified-photo-copy">
+      <strong>Profile photo</strong>
+      <p>Quick live face check required</p>
       {error ? <em className="error"><X />{error}</em> : null}
       {notice ? <em className="success"><CheckCircle2 />{notice}</em> : null}
     </div>
     <input accept="image/*" hidden onChange={(event) => choose(event.target.files?.[0])} ref={inputRef} type="file" />
-    <button className="dx-verified-photo-action" disabled={busy} onClick={() => inputRef.current?.click()} type="button"><ImagePlus />{busy ? "Preparing…" : "Choose photo & verify"}</button>
+    <button className="dx-verified-photo-action" disabled={busy} onClick={() => inputRef.current?.click()} type="button"><ImagePlus />{busy ? "Preparing…" : "Change"}</button>
     {scanning && candidateUrl && challenge ? <SelfieCapturePanel
-      hint={`Match must be ${challenge.required_match_percent}% or higher. Complete the live checks before the new photo is activated.`}
+      hint={`At least ${challenge.required_match_percent}% face match required.`}
       onCapture={finish}
       onClose={() => setScanning(false)}
       profilePhotoUrl={candidateUrl}

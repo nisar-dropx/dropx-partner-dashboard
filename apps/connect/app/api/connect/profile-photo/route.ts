@@ -9,6 +9,29 @@ const BUCKET = "employee-profile-documents";
 const DEFAULT_MATCH_PERCENT = 60;
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 
+const SAFE_ERROR_PREFIXES = [
+  "Connect session expired",
+  "This profile is not available",
+  "Profile photo changes are not available",
+  "Profile type is invalid",
+  "Face verification session is invalid",
+  "Face verification session expired",
+  "Face verification was already used",
+  "Face match must be",
+  "Face match score is invalid",
+  "Live face checks are required",
+  "New profile photo is required",
+  "New profile photo must be",
+  "Live verification selfie is required",
+  "Live verification selfie must be",
+  "Profile was not found"
+];
+
+function safeError(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message.trim() : "";
+  return SAFE_ERROR_PREFIXES.some((prefix) => message.startsWith(prefix)) ? message : fallback;
+}
+
 function extension(file: File) {
   const fromName = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "");
   if (fromName) return `.${fromName}`;
@@ -105,7 +128,7 @@ export async function PUT(request: Request) {
     if (challenge.error || !challenge.data) throw new Error(challenge.error?.message ?? "Face verification could not be started.");
     return NextResponse.json({ ok: true, challenge: challenge.data });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Face verification could not be started." }, { status: 400 });
+    return NextResponse.json({ error: safeError(error, "Photo verification is temporarily unavailable. Please try again.") }, { status: 400 });
   }
 }
 
@@ -195,6 +218,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, profilePhotoUrl: signed.data?.signedUrl ?? "", matchPercent });
   } catch (error) {
     if (uploadedPaths.length && supabaseAdmin) await supabaseAdmin.storage.from(BUCKET).remove(uploadedPaths);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Profile photo could not be updated." }, { status: 400 });
+    return NextResponse.json({ error: safeError(error, "Profile photo could not be updated. Please try again.") }, { status: 400 });
   }
 }

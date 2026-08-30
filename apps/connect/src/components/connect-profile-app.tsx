@@ -2,7 +2,7 @@
 
 import {
   BadgeCheck, BriefcaseBusiness, CalendarDays, ChevronRight, CircleX, DoorOpen, Download, Fingerprint,
-  ImagePlus, Mail, MapPin, Phone, ShieldCheck, TriangleAlert, UserRound, WalletCards
+  Mail, MapPin, Phone, ShieldCheck, TriangleAlert, UserRound, WalletCards
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { minimumAgeError } from "../lib/profile-age";
@@ -694,7 +694,6 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       {notice ? <div className="dx-alert success">{notice}</div> : null}
       <div className="dx-profile-hero">
         <small>DROPX LOGISTICS</small><h1>Profile details</h1><i><UserRound /></i>
-        <a className="dx-profile-photo-jump" href="#profile-photo-update"><ImagePlus />Update photo</a>
       </div>
       <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
         setProfile((current) => current ? { ...current, profilePhotoUrl: url, uploads: { ...current.uploads, photo: true }, uploadUrls: { ...current.uploadUrls, photo: url } } : current);
