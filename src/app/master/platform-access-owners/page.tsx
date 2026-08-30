@@ -7,7 +7,12 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { productDefinitions } from "@/lib/product-ownership";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { assignProductOwner, purgeVerifiedLegacyWorkforceAliases, removeProductOwner } from "@/app/platform-admin/actions";
+import {
+  assignProductOwner,
+  purgeVerifiedLegacyWorkforceAliases,
+  reconcileLegacyWorkforceAliases,
+  removeProductOwner
+} from "@/app/platform-admin/actions";
 
 type CompanyRow = {
   id: string;
@@ -380,6 +385,17 @@ export default async function PlatformAccessOwnersPage() {
             {cleanupPreview.data.unmatched_rows > 0 ? (
               <>
                 <div className="message-panel error">Deletion is blocked because {cleanupPreview.data.unmatched_rows} legacy row(s) do not have an exact canonical Workforce identity.</div>
+                <form action={reconcileLegacyWorkforceAliases} style={{ marginTop: 18 }}>
+                  <SubmitButton
+                    className="button primary"
+                    confirmDescription="This copies resumable registration state, repairs exact Workforce identity links and re-keys workflow history. It does not delete any profile."
+                    confirmMessage="Reconcile legacy Workforce identities now?"
+                    confirmSubmitText="Reconcile safely"
+                    pendingText="Reconciling"
+                  >
+                    Reconcile before deletion
+                  </SubmitButton>
+                </form>
                 <div className="summary-grid" style={{ marginTop: 18, marginBottom: 18 }}>
                   <div className="metric-card"><strong>{cleanupPreview.data.unmatched_without_link}</strong><span>No identity link</span></div>
                   <div className="metric-card"><strong>{cleanupPreview.data.unmatched_non_workforce_target}</strong><span>Linked outside Workforce</span></div>

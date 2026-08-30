@@ -420,6 +420,36 @@ export async function purgeVerifiedLegacyWorkforceAliases() {
   }
 }
 
+export async function reconcileLegacyWorkforceAliases() {
+  await requirePlatformAccessOwnersAdmin("edit");
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const result = await supabaseAdmin.rpc("reconcile_legacy_workforce_aliases");
+    if (result.error) throw new Error(result.error.message);
+    const summary = (result.data ?? {}) as {
+      exact_canonical_links?: unknown;
+      unmatched_rows?: unknown;
+      remaining_direct_foreign_keys?: unknown;
+      remaining_polymorphic_references?: unknown;
+      ready_for_verified_purge?: unknown;
+    };
+    const exactLinks = Number(summary.exact_canonical_links ?? 0);
+    const unmatched = Number(summary.unmatched_rows ?? 0);
+    const directReferences = Number(summary.remaining_direct_foreign_keys ?? 0);
+    const polymorphicReferences = Number(summary.remaining_polymorphic_references ?? 0);
+    const ready = summary.ready_for_verified_purge === true;
+    revalidatePath(platformAccessOwnersPath);
+    platformAccessOwnersRedirect({
+      notice: ready
+        ? `Reconciliation complete: ${exactLinks} exact canonical Workforce identities are ready for verified deletion.`
+        : `Reconciliation preserved all live data, but deletion remains blocked: ${unmatched} unmatched identities, ${directReferences} direct references and ${polymorphicReferences} workflow references remain.`
+    });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    platformAccessOwnersRedirect({ error: error instanceof Error ? error.message : "Unable to reconcile legacy Workforce aliases." });
+  }
+}
+
 async function ensureCompanyAdminProfile(companyId: string, fullName: string, email: string, mobile: string | null) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
