@@ -61,7 +61,10 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
   }
 
   async function finish(liveSelfie: File, match: FaceMatchResult | null) {
-    if (!candidate || !challenge || !match?.ok) throw new Error("Complete the face match again.");
+    if (!candidate || !challenge) throw new Error("Start the profile photo update again.");
+    if (!match?.ok || match.percent < challenge.required_match_percent) {
+      throw new Error(`Complete the ${challenge.required_match_percent}% face match again.`);
+    }
     setBusy(true);
     const form = new FormData();
     form.set("account_id", account.id);
@@ -71,7 +74,7 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
     form.set("live_selfie", liveSelfie);
     form.set("match_percent", String(match.percent));
     form.set("match_score", String(match.score));
-    form.set("liveness_passed", "true");
+    form.set("liveness_passed", String(challenge.require_liveness));
     try {
       const response = await fetch("/api/connect/profile-photo", { method: "POST", body: form });
       const payload = await response.json();
@@ -109,8 +112,8 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
       profilePhotoUrl={candidateUrl}
       requireFaceMatch
       requireLiveness={challenge.require_liveness}
+      requiredMatchPercent={challenge.required_match_percent}
       title="Verify your new profile photo"
     /> : null}
   </section>;
 }
-
