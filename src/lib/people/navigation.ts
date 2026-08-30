@@ -1,16 +1,11 @@
 import type { NavItem } from "@/lib/app-navigation";
 import { isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
-import { workforceCategoryPagePrefix } from "@/lib/dynamic-workforce";
 
 export const peoplePrimaryPageCodes = [
   "people_all",
   "people_review",
   "people_exceptions",
   "employees",
-  "delivery_associates",
-  "contractors",
-  "vendors",
-  "workers",
   "attendance_reports",
   "attendance_integrity"
 ] as const;
@@ -21,15 +16,10 @@ export const peopleNavItems: NavItem[] = [
     label: "People",
     icon: "P",
     children: [
-      { code: "people_all", label: "All People", href: "/people/all" },
+      { code: "people_all", label: "All Employees", href: "/people/all" },
       { code: "employees", label: "Employees", href: "/employees" },
-      { code: "delivery_associates", label: "Field Executives", href: "/field-executive" },
-      { code: "contractors", label: "Independent Contractors", href: "/contractors" },
-      { code: "vendors", label: "Vendors", href: "/vendors" },
-      { code: "workers", label: "Workers", href: "/workers" },
       { code: "people_review", label: "Under Review", href: "/people/review" },
-      { code: "people_exceptions", label: "Exceptions", href: "/people/exceptions" },
-      { code: "people_review", label: "Workforce Lifecycle", href: "/people/workforce-lifecycle" }
+      { code: "people_exceptions", label: "Exceptions", href: "/people/exceptions" }
     ]
   },
   {
@@ -42,7 +32,6 @@ export const peopleNavItems: NavItem[] = [
     ]
   },
   { code: "inbox", label: "Inbox", href: "/inbox", icon: "I" },
-  { code: "business_documents", label: "Business Docs", href: "/business-documents", icon: "D" },
   { code: "imports", label: "Report Imports", href: "/imports", icon: "^" },
   {
     code: "notifications",
@@ -70,7 +59,6 @@ export const peopleNavItems: NavItem[] = [
     icon: "*",
     children: [
       { code: "designations", label: "HR Designations", href: "/master/designations" },
-      { code: "master_documents", label: "Documents", href: "/master/documents" },
       { code: "master_imports", label: "Import Master", href: "/master/imports" }
     ]
   },
@@ -93,7 +81,7 @@ const peoplePageCodes = new Set(peopleNavItems.flatMap((item) => [
 ]));
 
 export function isPeoplePortalPageCode(code: string) {
-  return peoplePageCodes.has(code) || code.startsWith(workforceCategoryPagePrefix);
+  return peoplePageCodes.has(code);
 }
 
 function canAccess(authorization: AuthorizationContext, code?: string) {
@@ -116,10 +104,5 @@ export function firstAllowedPeopleHref(authorization: AuthorizationContext) {
     const child = item.children?.find((entry) => entry.href && canAccess(authorization, entry.code));
     if (child?.href) return child.href;
   }
-  const dynamicCategoryCode = Object.keys(authorization.permissions).find((code) => (
-    code.startsWith(workforceCategoryPagePrefix) && canAccess(authorization, code)
-  ));
-  return dynamicCategoryCode
-    ? `/people/category/${encodeURIComponent(dynamicCategoryCode.slice(workforceCategoryPagePrefix.length))}`
-    : null;
+  return null;
 }

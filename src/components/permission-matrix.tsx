@@ -25,7 +25,7 @@ const actions: Array<{ key: PermissionAction; label: string }> = [
   { key: "edit", label: "Edit" }
 ];
 
-const workforceCategoryCodes = new Set(["employees", "delivery_associates", "contractors", "vendors", "workers"]);
+const peopleCategoryCodes = new Set(["employees"]);
 
 const dashboardGroups: PermissionGroup[] = [
   { key: "dashboard", label: "Command Center", codes: ["dashboard"] },
@@ -33,7 +33,7 @@ const dashboardGroups: PermissionGroup[] = [
     key: "people",
     label: "People",
     codes: ["people_all", "people_review", "people_exceptions"],
-    matches: (page) => workforceCategoryCodes.has(page.code) || page.code.startsWith("workforce_category_")
+    matches: (page) => peopleCategoryCodes.has(page.code)
   },
   { key: "executive_id_onboarding", label: "Executive ID Onboarding", codes: ["executive_id_onboarding"] },
   { key: "provider_mapping", label: "ID Mapping", codes: ["provider_mapping"] },
@@ -55,7 +55,6 @@ const opsGroups: PermissionGroup[] = [
   { key: "performance", label: "Performance", codes: ["performance"] },
   { key: "capacity", label: "Capacity", codes: ["capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring"], hiddenCodes: ["capacity"] },
   { key: "service_network", label: "Network Planning", codes: ["service_network"] },
-  { key: "workforce_register", label: "Work Force Register", codes: ["contractors", "workers", "vendors"] },
   { key: "operations", label: "Operations", codes: ["daily_submission", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate"], hiddenCodes: ["cod"] },
   { key: "edd_dashboard", label: "Delivery Performance", codes: ["edd_dashboard"] },
   { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },
@@ -63,7 +62,7 @@ const opsGroups: PermissionGroup[] = [
   { key: "cps", label: "CPS", codes: ["cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "imports", "cps_inputs", "cps_unmapped"], hiddenCodes: ["cps"] },
   { key: "fleet", label: "Fleet", codes: ["fleet_action_center", "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking", "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports"], hiddenCodes: ["fleet"] },
   { key: "ops_reports", label: "Reports", codes: ["ops_reports"] },
-  { key: "ops_masters", label: "Ops Masters", codes: ["cod_master", "master_locations", "master_providers", "master_models", "performance_master", "capacity_master", "service_network_master"] },
+  { key: "ops_masters", label: "Ops Masters", codes: ["cod_master", "master_locations", "master_providers", "master_models", "master_documents", "performance_master", "capacity_master", "service_network_master"] },
   { key: "users", label: "Users & Access", codes: ["users"] }
 ];
 
@@ -72,16 +71,14 @@ const peopleGroups: PermissionGroup[] = [
     key: "people",
     label: "People",
     codes: ["people_all", "people_review", "people_exceptions"],
-    matches: (page) => workforceCategoryCodes.has(page.code) || page.code.startsWith("workforce_category_")
+    matches: (page) => peopleCategoryCodes.has(page.code)
   },
-  { key: "reports", label: "Attendance", codes: ["attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports"], hiddenCodes: ["reports"] },
+  { key: "reports", label: "Attendance", codes: ["attendance_reports", "attendance_integrity"], hiddenCodes: ["reports"] },
   { key: "inbox", label: "Inbox", codes: ["inbox"] },
-  { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },
-  { key: "payments", label: "Payments", codes: ["advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "workforce_payouts", "payment_reports"], hiddenCodes: ["payments"] },
   { key: "imports", label: "Report Imports", codes: ["imports"] },
   { key: "notifications", label: "Notifications", codes: ["notifications_whatsapp", "notifications_history", "notifications_app"], hiddenCodes: ["notifications"] },
   { key: "users", label: "Users & Access", codes: ["users"] },
-  { key: "master_data", label: "People Masters", codes: ["master_locations", "master_providers", "payment_methods", "master_payment_banks", "master_payment_heads", "master_contacts", "workforce_categories", "workforce_whatsapp", "designations", "biometric_devices", "master_documents", "master_imports"], hiddenCodes: ["master_data"] },
+  { key: "master_data", label: "People Masters", codes: ["designations", "biometric_devices", "master_imports"], hiddenCodes: ["master_data"] },
   { key: "settings", label: "Settings", codes: ["app_settings"] }
 ];
 

@@ -18,15 +18,15 @@ export const productPageCodes: Record<ProductCode, readonly string[]> = {
     "edd_dashboard", "cps", "cps_overview", "cps_daily", "cps_monthly",
     "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports",
     "cps_inputs", "cps_unmapped", "service_network", "service_network_master",
-    "master_locations", "master_providers", "master_models", "cod_master",
+    "master_locations", "master_providers", "master_models", "cod_master", "business_documents", "master_documents",
     "performance_master", "capacity_master", "imports", "fleet", "fleet_action_center",
     "fleet_vehicle_view", "fleet_date_view", "fleet_station_view", "fleet_tracking",
     "fleet_fuel_log", "fleet_live_gps", "fleet_maintenance", "fleet_reports", "users"
   ],
   people: [
-    "people_all", "people_review", "people_exceptions", "employees", "contractors",
+    "people_all", "people_review", "people_exceptions", "employees",
     "attendance_reports", "attendance_integrity", "inbox",
-    "business_documents", "biometric_devices", "master_documents", "designations", "users"
+    "biometric_devices", "designations", "users"
   ],
   workforce: [
     "delivery_associates", "executive_id_onboarding", "provider_mapping", "people_review",
@@ -52,7 +52,7 @@ export const capabilityOwnership = [
   { capability: "Company setup, product-owner assignment, domains and platform audit", owner: "tech", consumer: "All products" },
   { capability: "Stations, regions, clusters and manager responsibility", owner: "operations", consumer: "People, Workforce, Recruit and Finance" },
   { capability: "Providers, models, operational IDs, fleet and production imports", owner: "operations", consumer: "Workforce and Finance" },
-  { capability: "Departments, employee/contractor designations and HR policies", owner: "people", consumer: "Recruit and Finance" },
+  { capability: "Departments, employee designations and HR policies", owner: "people", consumer: "Recruit and Finance" },
   { capability: "Delivery-network designations, engagement types and registration configuration", owner: "workforce", consumer: "Recruit, Operations and Finance" },
   { capability: "Jobs, sources, candidates, offers and recruitment workflow", owner: "recruit", consumer: "People and Workforce" },
   { capability: "Payment heads, methods, banks, approvals, processing and finance reports", owner: "finance", consumer: "Operations, People and Workforce" },

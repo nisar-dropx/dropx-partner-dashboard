@@ -123,26 +123,26 @@ async function loadDesignations(companyId: string) {
     };
   }
   const fallbackCategories: WorkforceCategoryRow[] = [
-    { code: "employees", name: "Employees", is_active: true },
-    { code: "field_executives", name: "Field Executives", is_active: true },
-    { code: "contractors", name: "Independent Contractor", is_active: true },
-    { code: "vendors", name: "Vendors", is_active: true },
-    { code: "workers", name: "Workers", is_active: true }
+    { code: "employees", name: "Employees", is_active: true }
   ];
 
   return {
     designations: ((designationsResult.data ?? []) as DesignationRow[]).map((designation) => {
       const businessCategory = firstDesignationBusinessCategory(designation.designation_category);
-      const onboardingCategories = normalizeDesignationCategories(designation.onboarding_categories);
+      const onboardingCategories = ["employees"];
       return {
         ...designation,
         onboarding_categories: onboardingCategories,
-        profile_destination: inferDesignationProfileDestination({ onboardingCategories, peopleModule: businessCategory?.people_module ?? null, profileDestination: designation.profile_destination })
+        registration_category_code: "employees",
+        profile_destination: inferDesignationProfileDestination({ onboardingCategories, peopleModule: businessCategory?.people_module ?? null, profileDestination: "employees" }),
+        is_field_operations: false
       };
     }),
     providers: (providersResult.data ?? []) as ProviderRow[],
     models: (modelsResult.data ?? []) as ModelRow[],
-    categories: categoriesResult.error ? fallbackCategories : (categoriesResult.data ?? []) as WorkforceCategoryRow[],
+    categories: categoriesResult.error
+      ? fallbackCategories
+      : ((categoriesResult.data ?? []) as WorkforceCategoryRow[]).filter((category) => category.code === "employees"),
     businessCategories: (businessCategoriesResult.data ?? []) as DesignationBusinessCategory[],
     roles: rolesResult.error ? [] : (rolesResult.data ?? []) as UserRoleRow[],
     error: null
@@ -186,7 +186,7 @@ export default async function DesignationsPage({
       <PageHead
         eyebrow="People master"
         title="HR Designations"
-        subtitle="Manage only employee, HR, contractor and People-owned designations. Workforce roles remain isolated in Workforce."
+        subtitle="Manage only employee and People/HR designations. Workforce roles remain isolated in Workforce."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 

@@ -16,8 +16,7 @@ const commonStart: NavItem[] = [
       { code: "capacity_hiring", label: "Hiring Review", href: "/capacity/hiring" }
     ]
   },
-  { code: "service_network", label: "Network Planning", href: "/service-network", icon: "N" },
-  { code: "contractors", label: "Work Force Register", href: "/work-force-register", icon: "+" }
+  { code: "service_network", label: "Network Planning", href: "/service-network", icon: "N" }
 ];
 
 const reports: NavItem = { code: "ops_reports", label: "Reports", href: "/reports", icon: "R" };
@@ -68,6 +67,7 @@ const administration: NavItem[] = [
       { code: "master_locations", label: "Station Master", href: "/master/location" },
       { code: "master_providers", label: "Client / Provider Master", href: "/master/providers" },
       { code: "master_models", label: "Operation Models", href: "/master/models" }
+      ,{ code: "master_documents", label: "Document Master", href: "/master/documents" }
       ,{ code: "performance_master", label: "Performance Master", href: "/master/performance-targets" }
       ,{ code: "capacity_master", label: "Capacity Master", href: "/master/capacity" }
       ,{ code: "service_network_master", label: "Network Planning Master", href: "/master/service-network" }

@@ -1,15 +1,10 @@
 const peoplePortalRoots = [
   "/people",
   "/employees",
-  "/field-executive",
-  "/contractors",
-  "/vendors",
-  "/workers",
   "/attendance",
   "/imports",
   "/report-upload",
   "/inbox",
-  "/business-documents",
   "/notifications",
   "/users",
   "/master",
@@ -33,6 +28,7 @@ const peoplePortalDeniedRoots = [
   "/master/workforce-categories",
   "/master/workforce-whatsapp",
   "/master/biometric-devices",
+  "/master/documents",
   "/settings/verification-apis",
   "/settings/biometric"
 ] as const;

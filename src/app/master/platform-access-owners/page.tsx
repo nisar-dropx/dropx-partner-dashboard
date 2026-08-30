@@ -4,6 +4,7 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { SubmitButton } from "@/components/submit-button";
 import { requirePagePermission } from "@/lib/authorization";
+import { requireCompanyId } from "@/lib/company-scope";
 import { productDefinitions } from "@/lib/product-ownership";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { assignProductOwner, removeProductOwner } from "@/app/platform-admin/actions";
@@ -42,10 +43,10 @@ function loadFlash() {
   }
 }
 
-async function loadPlatformAccessOwners() {
+async function loadPlatformAccessOwners(companyId: string) {
   if (!supabaseAdmin) {
     return {
-      companies: [] as CompanyRow[],
+      company: null as CompanyRow | null,
       companyUsers: [] as CompanyUserRow[],
       productOwners: [] as ProductOwnerRow[],
       setupPending: false,
@@ -57,24 +58,27 @@ async function loadPlatformAccessOwners() {
     supabaseAdmin
       .from("companies")
       .select("id, name, is_active")
-      .order("name"),
+      .eq("id", companyId)
+      .maybeSingle(),
     supabaseAdmin
       .from("profiles")
       .select("id, company_id, full_name, email")
+      .eq("company_id", companyId)
       .eq("is_active", true)
       .order("full_name"),
     supabaseAdmin
       .from("company_product_owners")
       .select("id, company_id, product_code, user_id")
+      .eq("company_id", companyId)
       .eq("is_active", true)
       .order("product_code")
   ]);
 
   if (companyResult.error) {
-    return { companies: [] as CompanyRow[], companyUsers: [] as CompanyUserRow[], productOwners: [] as ProductOwnerRow[], setupPending: false, error: companyResult.error.message };
+    return { company: null as CompanyRow | null, companyUsers: [] as CompanyUserRow[], productOwners: [] as ProductOwnerRow[], setupPending: false, error: companyResult.error.message };
   }
   if (companyUserResult.error) {
-    return { companies: (companyResult.data ?? []) as CompanyRow[], companyUsers: [] as CompanyUserRow[], productOwners: [] as ProductOwnerRow[], setupPending: false, error: companyUserResult.error.message };
+    return { company: companyResult.data as CompanyRow | null, companyUsers: [] as CompanyUserRow[], productOwners: [] as ProductOwnerRow[], setupPending: false, error: companyUserResult.error.message };
   }
 
   const productOwnerMessage = String(productOwnerResult.error?.message ?? "").toLowerCase();
@@ -86,7 +90,7 @@ async function loadPlatformAccessOwners() {
   ));
   if (productOwnerResult.error && !setupPending) {
     return {
-      companies: (companyResult.data ?? []) as CompanyRow[],
+      company: companyResult.data as CompanyRow | null,
       companyUsers: (companyUserResult.data ?? []) as CompanyUserRow[],
       productOwners: [] as ProductOwnerRow[],
       setupPending: false,
@@ -95,7 +99,7 @@ async function loadPlatformAccessOwners() {
   }
 
   return {
-    companies: (companyResult.data ?? []) as CompanyRow[],
+    company: companyResult.data as CompanyRow | null,
     companyUsers: (companyUserResult.data ?? []) as CompanyUserRow[],
     productOwners: (productOwnerResult.data ?? []) as ProductOwnerRow[],
     setupPending,
@@ -110,8 +114,9 @@ export default async function PlatformAccessOwnersPage() {
   if (!authorization.isMasterOwner) {
     redirect("/unauthorized?page=platform_access_owners&reason=super_admin_only");
   }
+  const companyId = requireCompanyId(authorization);
 
-  const { companies, companyUsers, productOwners, setupPending, error } = await loadPlatformAccessOwners();
+  const { company, companyUsers, productOwners, setupPending, error } = await loadPlatformAccessOwners(companyId);
   const flash = loadFlash();
 
   return (
@@ -139,7 +144,7 @@ export default async function PlatformAccessOwnersPage() {
           <div className="panel-head toolbar">
             <div>
               <h2>Access owner assignments</h2>
-              <p className="subtle">Select a company, platform, and active user. Assignments are stored centrally and are never hardcoded.</p>
+              <p className="subtle">Assign a platform and an active company user. The current company comes from authenticated access and is never hardcoded.</p>
             </div>
           </div>
           {setupPending ? (
@@ -147,13 +152,8 @@ export default async function PlatformAccessOwnersPage() {
           ) : (
             <>
               <div className="panel-body">
-                <form action={assignProductOwner} className="form-grid three">
-                  <label>Company
-                    <select className="field" name="company_id" required defaultValue="">
-                      <option value="" disabled>Select company</option>
-                      {companies.filter((company) => company.is_active).map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-                    </select>
-                  </label>
+                <div className="subtle" style={{ marginBottom: 16 }}>Company: <strong>{company?.name ?? "Company unavailable"}</strong></div>
+                <form action={assignProductOwner} className="form-grid two">
                   <label>Platform
                     <select className="field" name="product_code" required defaultValue="">
                       <option value="" disabled>Select platform</option>
@@ -163,10 +163,7 @@ export default async function PlatformAccessOwnersPage() {
                   <label>Access owner
                     <select className="field" name="user_id" required defaultValue="">
                       <option value="" disabled>Select active user</option>
-                      {companyUsers.map((user) => {
-                        const company = companies.find((item) => item.id === user.company_id);
-                        return <option key={user.id} value={user.id}>{user.full_name ?? user.email ?? "Unnamed"} · {company?.name ?? "Unknown company"}</option>;
-                      })}
+                      {companyUsers.map((user) => <option key={user.id} value={user.id}>{user.full_name ?? user.email ?? "Unnamed"}{user.email ? ` · ${user.email}` : ""}</option>)}
                     </select>
                   </label>
                   <div className="form-actions"><SubmitButton className="button" pendingText="Assigning">Assign Access Owner</SubmitButton></div>
@@ -174,19 +171,17 @@ export default async function PlatformAccessOwnersPage() {
               </div>
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th>Platform</th><th>Access owner</th><th>Company</th><th>Action</th></tr></thead>
+                  <thead><tr><th>Platform</th><th>Access owner</th><th>Action</th></tr></thead>
                   <tbody>
                     {productOwners.length ? productOwners.map((assignment) => {
                       const product = productDefinitions.find((item) => item.code === assignment.product_code);
                       const user = companyUsers.find((item) => item.id === assignment.user_id);
-                      const company = companies.find((item) => item.id === assignment.company_id);
                       return <tr key={assignment.id}>
                         <td><strong>{product?.name ?? assignment.product_code}</strong></td>
                         <td>{user?.full_name ?? user?.email ?? "Unknown user"}<div className="subtle">{user?.email ?? ""}</div></td>
-                        <td>{company?.name ?? "Unknown company"}</td>
                         <td><form action={removeProductOwner}><input type="hidden" name="id" value={assignment.id} /><SubmitButton className="button secondary compact" pendingText="Removing">Remove</SubmitButton></form></td>
                       </tr>;
-                    }) : <tr><td className="empty-cell" colSpan={4}>No access owners assigned yet.</td></tr>}
+                    }) : <tr><td className="empty-cell" colSpan={3}>No access owners assigned yet.</td></tr>}
                   </tbody>
                 </table>
               </div>

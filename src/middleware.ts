@@ -9,7 +9,7 @@ const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env
 const COOKIE_CHUNK_SIZE = 3000;
 const MAX_COOKIE_CHUNKS = 8;
 const ENCODED_COOKIE_PREFIX = "b64-";
-const CLEAN_OPS_ROOTS = ["/attendance", "/daily-submission", "/performance", "/capacity", "/service-network", "/field-executive", "/work-force-register", "/cod", "/edd", "/reports", "/client", "/access", "/unauthorized"];
+const CLEAN_OPS_ROOTS = ["/attendance", "/daily-submission", "/performance", "/capacity", "/service-network", "/cod", "/edd", "/reports", "/client", "/access", "/unauthorized"];
 const MOVED_OPS_PAYMENT_PATHS = [
   "/payments/advance-request",
   "/payments/expense-request",
@@ -24,6 +24,23 @@ const MOVED_WORKFORCE_PATHS = new Map([
   ["/executive-id-onboarding", "/delivery-network/id-onboarding"],
   ["/provider-mapping", "/delivery-network/rate-mapping"]
 ]);
+const MOVED_OPS_WORKFORCE_PATHS = new Map([
+  ["/work-force-register", "/delivery-network/associates"],
+  ["/field-executive", "/delivery-network/associates"]
+]);
+const MOVED_PEOPLE_WORKFORCE_PATHS = [
+  { root: "/people/workforce-lifecycle", destination: "/delivery-network/lifecycle" },
+  { root: "/people/category", destination: "/delivery-network/associates" },
+  { root: "/field-executive", destination: "/delivery-network/associates" },
+  { root: "/contractors", destination: "/delivery-network/associates" },
+  { root: "/vendors", destination: "/delivery-network/associates" },
+  { root: "/workers", destination: "/delivery-network/associates" }
+] as const;
+const MOVED_PEOPLE_OPS_PATHS = [
+  { root: "/business-documents", destination: "/business-documents" },
+  { root: "/api/business-documents", destination: "/api/business-documents" },
+  { root: "/master/documents", destination: "/master/documents" }
+] as const;
 const MOVED_PRODUCT_ADMIN_PATHS = new Map([
   ["/master/designations", { env: "PEOPLE_APP_URL", fallback: "https://people.dropxlogistics.com/settings/designations", path: "/settings/designations" }],
   ["/master/workforce-categories", { env: "WORKFORCE_APP_URL", fallback: "https://workforce.dropxlogistics.com/delivery-network/engagement-types", path: "/delivery-network/engagement-types" }],
@@ -32,6 +49,10 @@ const MOVED_PRODUCT_ADMIN_PATHS = new Map([
 
 function matchesPath(path: string, roots: string[]) {
   return roots.some((root) => path === root || path.startsWith(`${root}/`));
+}
+
+function movedPath(path: string, routes: readonly { root: string; destination: string }[]) {
+  return routes.find((route) => path === route.root || path.startsWith(`${route.root}/`)) ?? null;
 }
 
 function cleanOpsPath(path: string) {
@@ -135,6 +156,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL(targetPath + request.nextUrl.search, opsBase));
   }
 
+  const dashboardWorkforceRoute = isDashboardHost ? movedPath(path, MOVED_PEOPLE_WORKFORCE_PATHS) : null;
+  if (dashboardWorkforceRoute) {
+    const workforceBase = process.env.WORKFORCE_APP_URL?.trim() || "https://workforce.dropxlogistics.com";
+    return NextResponse.redirect(new URL(dashboardWorkforceRoute.destination + request.nextUrl.search, workforceBase));
+  }
+
   const movedWorkforcePath = isDashboardHost ? MOVED_WORKFORCE_PATHS.get(path) : null;
   if (movedWorkforcePath) {
     const workforceBase = process.env.WORKFORCE_APP_URL?.trim() || "https://workforce.dropxlogistics.com";
@@ -183,6 +210,24 @@ export async function middleware(request: NextRequest) {
 
   if (isOpsHost && path.startsWith("/payments/") && !isMovedOpsPaymentPath(path)) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "ops_portal", path));
+  }
+
+  const opsWorkforcePath = isOpsHost ? MOVED_OPS_WORKFORCE_PATHS.get(path) : null;
+  if (opsWorkforcePath) {
+    const workforceBase = process.env.WORKFORCE_APP_URL?.trim() || "https://workforce.dropxlogistics.com";
+    return NextResponse.redirect(new URL(opsWorkforcePath + request.nextUrl.search, workforceBase));
+  }
+
+  const peopleWorkforceRoute = isPeopleHost ? movedPath(path, MOVED_PEOPLE_WORKFORCE_PATHS) : null;
+  if (peopleWorkforceRoute) {
+    const workforceBase = process.env.WORKFORCE_APP_URL?.trim() || "https://workforce.dropxlogistics.com";
+    return NextResponse.redirect(new URL(peopleWorkforceRoute.destination + request.nextUrl.search, workforceBase));
+  }
+
+  const peopleOpsRoute = isPeopleHost ? movedPath(path, MOVED_PEOPLE_OPS_PATHS) : null;
+  if (peopleOpsRoute) {
+    const opsBase = process.env.OPS_APP_URL?.trim() || "https://ops.dropxlogistics.com";
+    return NextResponse.redirect(new URL(peopleOpsRoute.destination + request.nextUrl.search, opsBase));
   }
 
   if (isPeopleHost && !isPublicAppPath(path) && !isPeoplePortalPath(path)) {

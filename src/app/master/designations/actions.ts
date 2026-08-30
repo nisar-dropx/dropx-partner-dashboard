@@ -105,6 +105,9 @@ async function validateOnboardingRoles(companyId: string, roleIds: string[]) {
 function onboardingCategories(formData: FormData) {
   const categories = normalizeDesignationCategories(formData.getAll("onboarding_categories"), []);
   if (!categories.length) throw new Error("Select at least one engagement type.");
+  if (categories.some((category) => category !== "employees")) {
+    throw new Error("People/HR designations can use only the Employee engagement type. Configure Workforce engagement types in Workforce.");
+  }
   return categories;
 }
 
@@ -131,8 +134,8 @@ async function peopleDesignationCategoryId(companyId: string, formData: FormData
 
 function peopleProfileDestination(formData: FormData) {
   const destination = normalizeDesignationProfileDestination(formData.get("profile_destination"));
-  if (!destination || !designationProfileDestinationAllowed("people_hr", destination)) {
-    throw new Error("People Designation Master can route profiles only to People-managed tables.");
+  if (!destination || !designationProfileDestinationAllowed("people_hr", destination) || destination !== "employees") {
+    throw new Error("People Designation Master routes profiles only to Employees. Configure Workforce destinations in Workforce.");
   }
   return destination;
 }

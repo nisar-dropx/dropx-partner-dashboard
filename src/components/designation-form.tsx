@@ -547,7 +547,7 @@ export function DesignationForm({
         <label>
           Engagement type
           <CategoryMultiSelect categories={categories} selected={selectedCategories} setSelected={setSelectedCategories} />
-          <small>Employee, contractor, field executive, worker, or another configured legal relationship.</small>
+          <small>{peopleModule === "people_hr" ? "People/HR employee engagement only." : "Select a configured Workforce engagement type."}</small>
         </label>
         <label>
           Registration policy
@@ -561,7 +561,7 @@ export function DesignationForm({
           Models
           <ModelMultiSelect models={models} selected={selectedModels} setSelected={setSelectedModels} />
         </label>
-        <label className="check-row designation-field-operations">
+        {peopleModule !== "people_hr" ? <label className="check-row designation-field-operations">
           <input
             className="matrix-checkbox"
             defaultChecked={Boolean(initial?.is_field_operations)}
@@ -572,7 +572,7 @@ export function DesignationForm({
             <strong>Field Operations</strong>
             <small>Include people with this designation in ID &amp; Pay Mapping.</small>
           </span>
-        </label>
+        </label> : null}
         {initial ? (
           <label>
             Status

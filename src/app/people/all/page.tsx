@@ -3,18 +3,13 @@ import { AllPeopleRegister, type AllPeopleRow } from "@/components/all-people-re
 import { PageHead } from "@/components/page-head";
 import { getAuthorization, hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { dynamicWorkforceTable, isCustomWorkforceCategoryCode, workforceCategoryPageCode } from "@/lib/dynamic-workforce";
 import { canAccessDesignationPortal } from "@/lib/designation-portal-access";
 import type { AllPeopleExportValues } from "@/lib/all-people-export";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { redirect } from "next/navigation";
 
 const sources = [
-  { categoryCode: "employees", category: "Employees", pageCode: "employees", basePath: "/employees", table: "employees", codeField: "employee_code", statusField: "profile_completion_status", employeeDesignation: true },
-  { categoryCode: "field_executives", category: "Field Executives", pageCode: "delivery_associates", basePath: "/field-executive", table: "field_executives", codeField: "dropx_id", statusField: "onboarding_status", employeeDesignation: false },
-  { categoryCode: "contractors", category: "Independent Contractor", pageCode: "contractors", basePath: "/contractors", table: "contractors", codeField: "dropx_id", statusField: "onboarding_status", employeeDesignation: false },
-  { categoryCode: "vendors", category: "Vendors", pageCode: "vendors", basePath: "/vendors", table: "vendors", codeField: "dropx_id", statusField: "onboarding_status", employeeDesignation: false },
-  { categoryCode: "workers", category: "Workers", pageCode: "workers", basePath: "/workers", table: "workers", codeField: "dropx_id", statusField: "onboarding_status", employeeDesignation: false }
+  { categoryCode: "employees", category: "Employees", pageCode: "employees", basePath: "/employees", table: "employees", codeField: "employee_code", statusField: "profile_completion_status", employeeDesignation: true }
 ] as const;
 
 type PeopleSource = (typeof sources)[number] & { canEdit: boolean };
@@ -144,35 +139,26 @@ async function loadPeople(
     };
   }
   const categoryResult = await supabaseAdmin
-    .from("workforce_categories")
-    .select("code, name")
+    .from("designation_categories")
+    .select("id")
     .eq("company_id", companyId)
+    .eq("people_module", "people_hr")
     .eq("is_active", true)
-    .order("sort_order")
-    .order("name");
-  const categories = (categoryResult.data ?? []) as Array<{ code: string; name: string }>;
-  const designationResult = await supabaseAdmin
+    .order("sort_order");
+  const peopleCategoryIds = (categoryResult.data ?? []).map((category) => category.id);
+  const designationQuery = supabaseAdmin
     .from("designations")
     .select("id, name, portal_permissions")
     .eq("company_id", companyId)
     .eq("is_active", true);
+  const designationResult = peopleCategoryIds.length
+    ? await designationQuery.in("designation_category_id", peopleCategoryIds)
+    : { data: [], error: categoryResult.error };
   const designations = (designationResult.data ?? []) as Array<{ id: string; name: string; portal_permissions: unknown }>;
   const designationById = new Map(designations.map((designation) => [designation.id, designation]));
   const designationByName = new Map(designations.map((designation) => [designation.name.trim().toLowerCase(), designation]));
   const ownerAccess = isCompanyOwner(authorization);
-  const activeCategoryCodes = new Set(categories.map((category) => category.code));
-  const currentSources = allowedSources.filter((source) => activeCategoryCodes.has(source.categoryCode));
-  const customSources = categories
-    .filter((category) => isCustomWorkforceCategoryCode(category.code))
-    .map((category) => ({
-      categoryCode: category.code,
-      category: category.name,
-      table: dynamicWorkforceTable(category.code),
-      codeField: "dropx_id",
-      statusField: "onboarding_status",
-      basePath: `/people/category/${encodeURIComponent(category.code)}`,
-      canEdit: hasPermission(authorization, workforceCategoryPageCode(category.code), "edit")
-    }));
+  const currentSources = allowedSources;
   const results = await Promise.all(currentSources.map(async (source) => {
     const designationFields = source.employeeDesignation ? ", designation_id, designations (id, name)" : ", designation";
     const sourceSpecificFields = source.employeeDesignation ? ", pincode, ifsc" : ", postal_pin, ifsc_code";
@@ -192,6 +178,7 @@ async function loadPeople(
           const designation = source.employeeDesignation
             ? designationById.get(String(row.designation_id ?? joinedDesignation?.id ?? ""))
             : designationByName.get(String(row.designation ?? "").trim().toLowerCase());
+          if (source.employeeDesignation && !designation) return false;
           return canAccessDesignationPortal(designation, "dashboard", "view", { isOwner: ownerAccess });
         })
         .map((row: Record<string, unknown>) => {
@@ -222,50 +209,9 @@ async function loadPeople(
         })
     };
   }));
-  const customResults = await Promise.all(customSources.map(async (source) => {
-    const result = await supabaseAdmin!
-      .from(source.table)
-      .select(`id, ${sharedProfileColumns}, biometric_id, location_id, dropx_id, onboarding_status, postal_pin, ifsc_code, stations (station_code), designation`)
-      .eq("company_id", companyId)
-      .order("created_at", { ascending: false });
-    if (result.error) return { rows: [] as AllPeopleRow[], error: result.error.message };
-    const sourceRows = (result.data ?? []) as unknown as Record<string, unknown>[];
-    return {
-      error: null,
-      rows: sourceRows
-        .filter((row: Record<string, unknown>) => {
-          if (!hasAllLocationAccess && !locationScopeIds.includes(String(row.location_id ?? ""))) return false;
-          const designation = designationByName.get(String(row.designation ?? "").trim().toLowerCase());
-          return canAccessDesignationPortal(designation, "dashboard", "view", { isOwner: ownerAccess });
-        })
-        .map((row: Record<string, unknown>) => {
-          const location = String((first(row.stations as { station_code?: string } | Array<{ station_code?: string }> | null) ?? {}).station_code ?? "-");
-          const designation = String(row.designation ?? "-");
-          const designationRecord = designationByName.get(designation.trim().toLowerCase());
-          const status = displayStatus(row[source.statusField], row.is_active !== false);
-          return {
-            id: String(row.id),
-            category: source.category,
-            categoryCode: source.categoryCode,
-            code: String(row[source.codeField] ?? "-"),
-            biometricId: String(row.biometric_id ?? "-"),
-            fullName: String(row.full_name ?? "-"),
-            mobile: `+${String(row.mobile_country_code ?? "91")} ${String(row.mobile ?? "")}`,
-            email: String(row.email ?? "-"),
-            location,
-            designation,
-            status,
-            viewHref: profileActionHref(source.basePath, "view", row.id),
-            editHref: profileActionHref(source.basePath, "edit", row.id),
-            canEdit: source.canEdit && canAccessDesignationPortal(designationRecord, "dashboard", "edit", { isOwner: ownerAccess }),
-            exportValues: buildExportValues(row, source.codeField, source.category, location, designation, status, false)
-          };
-        })
-    };
-  }));
-  const allResults = [...results, ...customResults];
+  const allResults = results;
   return {
-    categories,
+    categories: [{ code: "employees", name: "Employees" }],
     rows: allResults.flatMap((result) => result.rows),
     error: categoryResult.error?.message ?? designationResult.error?.message ?? allResults.find((result) => result.error)?.error ?? null
   };
@@ -290,8 +236,8 @@ export default async function AllPeoplePage() {
     authorization
   );
   return (
-    <AppShell active="All People" pageCode="people_all">
-      <PageHead eyebrow="People" title="All People" subtitle="View every workforce category in one consolidated register." />
+    <AppShell active="All Employees" pageCode="people_all">
+      <PageHead eyebrow="People" title="All Employees" subtitle="View People and HR employee records in one consolidated register." />
       {data.error ? (
         <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load people</strong><p className="subtle">{data.error}</p></div></section>
       ) : null}

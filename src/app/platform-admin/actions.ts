@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
+import { requireCompanyId } from "@/lib/company-scope";
 import { ensureAccessPages } from "@/lib/access-pages";
 import { platformModules } from "@/lib/platform-modules";
 import { isProductCode, productDefinitions, productPageCodes, type ProductCode } from "@/lib/product-ownership";
@@ -311,7 +312,7 @@ export async function assignProductOwner(formData: FormData) {
   const authorization = await requirePlatformAccessOwnersAdmin("edit");
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-    const companyId = required(formData.get("company_id"), "Company");
+    const companyId = requireCompanyId(authorization);
     const productCodeValue = required(formData.get("product_code"), "Product");
     if (!isProductCode(productCodeValue)) throw new Error("Select a valid product.");
     const userId = required(formData.get("user_id"), "User");
@@ -361,7 +362,7 @@ export async function assignProductOwner(formData: FormData) {
 }
 
 export async function removeProductOwner(formData: FormData) {
-  await requirePlatformAccessOwnersAdmin("edit");
+  const authorization = await requirePlatformAccessOwnersAdmin("edit");
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const id = required(formData.get("id"), "Product Owner assignment");
@@ -369,6 +370,7 @@ export async function removeProductOwner(formData: FormData) {
       .from("company_product_owners")
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq("id", id)
+      .eq("company_id", requireCompanyId(authorization))
       .select("id, company_id, product_code, user_id")
       .maybeSingle();
     if (result.error || !result.data) throw new Error(result.error?.message ?? "Product Owner assignment was not found.");

@@ -13,7 +13,7 @@ export type DesignationProfileDestination = typeof designationProfileDestination
 
 const destinationsByPeopleModule: Record<DesignationPeopleModule, DesignationProfileDestination[]> = {
   delivery_network: ["workforce", "vendors"],
-  people_hr: ["employees", "field_executives", "contractors", "workers"]
+  people_hr: ["employees"]
 };
 
 export function normalizeDesignationProfileDestination(value: unknown): DesignationProfileDestination | null {
@@ -46,9 +46,6 @@ export function inferDesignationProfileDestination({
   if (explicit) return explicit;
   const categories = new Set((onboardingCategories ?? []).map((category) => String(category).trim().toLowerCase()));
   if (peopleModule === "delivery_network") return categories.has("vendors") ? "vendors" : "workforce";
-  for (const destination of ["employees", "field_executives", "contractors", "workers"] as const) {
-    if (categories.has(destination)) return destination;
-  }
   return "employees";
 }
 

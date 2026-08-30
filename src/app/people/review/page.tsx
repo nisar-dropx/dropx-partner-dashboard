@@ -8,11 +8,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDateTime } from "@/lib/date-format";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import {
-  nonEmployeeProfileConfigs,
-  type WorkforceProfileType,
-  workforceProfileTypes
-} from "@/lib/workforce-profiles";
+import type { WorkforceProfileType } from "@/lib/workforce-profiles";
 import { reviewPeopleProfile } from "./actions";
 
 type ReviewIssue = {
@@ -101,23 +97,13 @@ async function loadReviewProfiles(
 
   const attachmentColumns = attachmentFields.map((field) => field.key).join(", ");
   const employeeSelect = `id, employee_code, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc, vehicle_reg_no, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
-  const nonEmployeeSelect = `id, dropx_id, biometric_id, full_name, location_id, designation, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, updated_at, ${attachmentColumns}, stations (station_code, station_name)`;
-  const nonEmployeeTypes = workforceProfileTypes.filter(
-    (profileType): profileType is Exclude<WorkforceProfileType, "employee" | "workforce" | "field_executive"> =>
-      profileType !== "employee" && profileType !== "workforce" && profileType !== "field_executive"
-  );
-  const queryProfileTypes: WorkforceProfileType[] = ["employee", ...nonEmployeeTypes];
+  const queryProfileTypes: WorkforceProfileType[] = ["employee"];
   const profileQueries = [
     admin
       .from("employees")
       .select(employeeSelect)
       .eq("company_id", companyId)
-      .eq("profile_completion_status", "under_review"),
-    ...nonEmployeeTypes.map((profileType) => admin
-      .from(nonEmployeeProfileConfigs[profileType].table)
-      .select(nonEmployeeSelect)
-      .eq("company_id", companyId)
-      .eq("onboarding_status", "under_review"))
+      .eq("profile_completion_status", "under_review")
   ];
   const [verificationResult, ...profileResults] = await Promise.all([
     admin
@@ -133,7 +119,7 @@ async function loadReviewProfiles(
 
   const issuesByProfile = new Map<string, ReviewIssue[]>();
   for (const row of (verificationResult.data ?? []) as ReviewIssue[]) {
-    if (!workforceProfileTypes.includes(row.profile_type)) continue;
+    if (row.profile_type !== "employee") continue;
     const key = reviewKey(row.profile_type, row.account_id);
     issuesByProfile.set(key, [...(issuesByProfile.get(key) ?? []), row]);
   }
