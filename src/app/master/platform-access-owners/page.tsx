@@ -501,8 +501,8 @@ export default async function PlatformAccessOwnersPage() {
               <form action={purgeVerifiedLegacyWorkforceAliases}>
                 <SubmitButton
                   className="button danger"
-                  confirmDescription={`This will delete ${cleanupPreview.data.contractor_rows} contractor and ${cleanupPreview.data.field_executive_rows} field-executive aliases only after all registration and workflow checks pass.`}
-                  confirmMessage={`Delete ${cleanupPreview.data.legacy_workforce_rows} verified legacy Workforce aliases?`}
+                  confirmDescription={`This deletes up to 100 verified aliases per run, only after all identity, registration, database and workflow checks pass. ${cleanupPreview.data.legacy_workforce_rows} remain in total.`}
+                  confirmMessage="Delete the next verified legacy Workforce batch?"
                   confirmSubmitText="Delete verified aliases"
                   pendingText="Verifying and deleting"
                 >

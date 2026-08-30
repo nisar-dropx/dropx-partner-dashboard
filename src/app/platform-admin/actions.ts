@@ -405,13 +405,20 @@ export async function purgeVerifiedLegacyWorkforceAliases() {
     if (permissionResult.error) throw new Error(permissionResult.error.message);
     const cleanupResult = await supabaseAdmin.rpc("purge_verified_legacy_workforce_aliases");
     if (cleanupResult.error) throw new Error(cleanupResult.error.message);
-    const cleanup = (cleanupResult.data ?? {}) as { deleted_contractors?: unknown; deleted_field_executives?: unknown };
+    const cleanup = (cleanupResult.data ?? {}) as {
+      deleted_contractors?: unknown;
+      deleted_field_executives?: unknown;
+      remaining_aliases?: unknown;
+    };
     const deletedContractors = Number(cleanup.deleted_contractors ?? 0);
     const deletedExecutives = Number(cleanup.deleted_field_executives ?? 0);
+    const remainingAliases = Number(cleanup.remaining_aliases ?? 0);
     revalidatePath(platformAccessOwnersPath);
     platformAccessOwnersRedirect({
       notice: candidateCount
-        ? `Deleted ${deletedContractors} contractor and ${deletedExecutives} field-executive aliases. Canonical Workforce rows and live flows were preserved.`
+        ? remainingAliases > 0
+          ? `Deleted a verified batch: ${deletedContractors} contractor and ${deletedExecutives} field-executive aliases. ${remainingAliases} verified aliases remain; canonical Workforce rows and live flows were preserved.`
+          : `Deleted ${deletedContractors} contractor and ${deletedExecutives} field-executive aliases. No duplicate legacy Workforce aliases remain; canonical Workforce rows and live flows were preserved.`
         : "Product permission boundaries reconciled. No legacy Workforce aliases required deletion."
     });
   } catch (error) {
