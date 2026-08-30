@@ -80,6 +80,22 @@ type RawLocationRow = Omit<LocationRow, "providers" | "location_models"> & {
   location_models?: { code: string; name: string } | { code: string; name: string }[] | null;
 };
 
+type PeopleDesignationRow = {
+  id: string;
+  code: string;
+  name: string;
+};
+
+type PeopleEmployeeRow = {
+  id: string;
+  employee_code: string | null;
+  full_name: string | null;
+  email: string | null;
+  mobile_country_code: string | null;
+  mobile: string | null;
+  designation_id: string | null;
+};
+
 type UsersPageProps = {
   searchParams?: {
     addUser?: string;
@@ -216,6 +232,62 @@ function membershipProductCode(surface: ReturnType<typeof currentAdminAccessSurf
   if (surface === "people") return "people";
   if (surface === "finance") return "finance";
   return null;
+}
+
+async function loadPeopleAccessDirectory(companyId: string) {
+  if (!supabaseAdmin) {
+    return {
+      designations: [] as PeopleDesignationRow[],
+      people: [] as PeopleEmployeeRow[],
+      error: "Supabase service role key is not configured."
+    };
+  }
+
+  const categoriesResult = await supabaseAdmin
+    .from("designation_categories")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("people_module", "people_hr")
+    .eq("is_active", true);
+  if (categoriesResult.error) {
+    return { designations: [] as PeopleDesignationRow[], people: [] as PeopleEmployeeRow[], error: categoriesResult.error.message };
+  }
+
+  const categoryIds = (categoriesResult.data ?? []).map((category) => category.id);
+  if (!categoryIds.length) return { designations: [] as PeopleDesignationRow[], people: [] as PeopleEmployeeRow[], error: null };
+
+  const designationsResult = await supabaseAdmin
+    .from("designations")
+    .select("id, code, name")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .in("designation_category_id", categoryIds)
+    .order("name");
+  if (designationsResult.error) {
+    return { designations: [] as PeopleDesignationRow[], people: [] as PeopleEmployeeRow[], error: designationsResult.error.message };
+  }
+
+  const designations = (designationsResult.data ?? []) as PeopleDesignationRow[];
+  if (!designations.length) return { designations, people: [] as PeopleEmployeeRow[], error: null };
+
+  const people: PeopleEmployeeRow[] = [];
+  const pageSize = 1000;
+  for (let offset = 0; ; offset += pageSize) {
+    const peopleResult = await supabaseAdmin
+      .from("employees")
+      .select("id, employee_code, full_name, email, mobile_country_code, mobile, designation_id")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .in("designation_id", designations.map((designation) => designation.id))
+      .order("full_name")
+      .range(offset, offset + pageSize - 1);
+    if (peopleResult.error) return { designations, people: [] as PeopleEmployeeRow[], error: peopleResult.error.message };
+    const rows = (peopleResult.data ?? []) as PeopleEmployeeRow[];
+    people.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+
+  return { designations, people, error: null };
 }
 
 async function loadAccessData(
@@ -474,6 +546,9 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
     : loadedUsers.filter((user) => Boolean(user.role_id && visibleRoleIds.has(user.role_id)));
   const showAddUser = pagePermission.canAdd && searchParams?.addUser === "1";
   const showAddRole = pagePermission.canAdd && searchParams?.addRole === "1";
+  const peopleDirectory = showAddUser
+    ? await loadPeopleAccessDirectory(companyId)
+    : { designations: [] as PeopleDesignationRow[], people: [] as PeopleEmployeeRow[], error: null };
   const editUser = pagePermission.canEdit ? users.find((user) => user.id === searchParams?.editUser) ?? null : null;
   const editRole = pagePermission.canEdit ? roles.find((role) => role.id === searchParams?.editRole) ?? null : null;
   const roleModalError = showAddRole || editRole ? searchParams?.userError ?? null : null;
@@ -630,7 +705,22 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
               <DismissModalButton className="icon-button" aria-label="Close add user">x</DismissModalButton>
             </div>
             <div className="panel-body">
-              <AddUserForm roles={addUserRoles} users={addUserProfiles} locations={locationScopeOptions} />
+              {peopleDirectory.error ? <div className="modal-inline-message error" role="alert">People directory unavailable: {peopleDirectory.error}</div> : null}
+              <AddUserForm
+                designations={peopleDirectory.designations}
+                people={peopleDirectory.people.map((person) => ({
+                  id: person.id,
+                  designationId: person.designation_id ?? "",
+                  employeeId: person.employee_code,
+                  fullName: person.full_name,
+                  email: person.email,
+                  mobileCountryCode: person.mobile_country_code,
+                  mobile: person.mobile
+                }))}
+                roles={addUserRoles}
+                users={addUserProfiles}
+                locations={locationScopeOptions}
+              />
             </div>
           </section>
         </DismissibleModal>

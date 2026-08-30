@@ -59,15 +59,16 @@ export function ManageUserForm({
     return reportingUsersAboveRole(selectedRole, roles, users, user.id);
   }, [roles, selectedRole, user.id, users]);
   const reportingUser = users.find((item) => item.id === reportsToUserId) ?? null;
+  const reportingUserRole = roles.find((role) => role.id === reportingUser?.roleId) ?? null;
   const allowedLocationIds = new Set(reportingUser?.locationScopeIds ?? []);
   const isAllLocationRole = selectedRole?.locationAccessMode === "all_locations";
   const allLocationIds = useMemo(() => locations.map((location) => location.id), [locations]);
   const scopedLocations = !selectedRole
-    ? []
+    ? locations
     : isAllLocationRole
       ? locations
-      : !reportingUser
-        ? []
+      : !reportingUser || reportingUserRole?.locationAccessMode === "all_locations"
+        ? locations
         : allowedLocationIds.size
           ? locations.filter((location) => allowedLocationIds.has(location.id))
           : [];
@@ -126,7 +127,7 @@ export function ManageUserForm({
             ))}
           </select>
         </label>
-        <label className="span-2">Location scope
+        <label className="span-2">Location scope (optional)
           {isAllLocationRole ? (
             <LocationScopeSelect
               key={`manage-all-${roleId}`}
