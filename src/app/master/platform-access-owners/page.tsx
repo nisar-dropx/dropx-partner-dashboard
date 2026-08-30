@@ -35,7 +35,48 @@ type LegacyWorkforceCleanupPreview = {
   contractor_rows: number;
   field_executive_rows: number;
   legacy_workforce_rows: number;
+  unmatched_breakdown: Array<{
+    count: number;
+    designation: string;
+    designation_active: boolean;
+    profile_destination: string;
+    reason: string;
+    source: string;
+  }>;
+  unmatched_missing_canonical: number;
+  unmatched_non_workforce_target: number;
+  unmatched_without_link: number;
   unmatched_rows: number;
+};
+
+type LegacyWorkforceSourceRow = {
+  company_id: string;
+  designation: string | null;
+  id: string;
+};
+
+type LegacyWorkforceDesignationRow = {
+  code: string;
+  company_id: string;
+  is_active: boolean;
+  name: string;
+  profile_destination: string | null;
+  designation_category: { people_module?: string | null } | Array<{ people_module?: string | null }> | null;
+};
+
+type WorkforceIdentityLinkRow = {
+  company_id: string;
+  legacy_profile_id: string;
+  legacy_profile_type: string;
+  target_profile_id: string;
+  target_profile_type: string;
+};
+
+type CanonicalWorkforceRow = {
+  company_id: string;
+  id: string;
+  source_profile_id: string | null;
+  source_profile_type: string;
 };
 
 function loadFlash() {
@@ -116,7 +157,15 @@ async function loadPlatformAccessOwners(companyId: string) {
   };
 }
 
-async function loadLegacyWorkforceCleanupPreview() {
+function firstRelation<T>(value: T | T[] | null | undefined) {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+function identityKey(profileType: string, profileId: string) {
+  return `${profileType}:${profileId}`;
+}
+
+async function loadLegacyWorkforceCleanupPreview(companyId: string) {
   if (!supabaseAdmin) return { data: null as LegacyWorkforceCleanupPreview | null, pending: false, error: "Supabase service role key is not configured." };
   const result = await supabaseAdmin.rpc("preview_legacy_workforce_alias_cleanup");
   if (result.error) {
@@ -126,6 +175,85 @@ async function loadLegacyWorkforceCleanupPreview() {
     );
     return { data: null as LegacyWorkforceCleanupPreview | null, pending, error: pending ? null : result.error.message };
   }
+  const [contractorResult, executiveResult, designationResult, identityLinkResult, workforceResult] = await Promise.all([
+    supabaseAdmin.from("contractors").select("id, company_id, designation").eq("company_id", companyId).limit(5000),
+    supabaseAdmin.from("field_executives").select("id, company_id, designation").eq("company_id", companyId).limit(5000),
+    supabaseAdmin
+      .from("designations")
+      .select("code, company_id, is_active, name, profile_destination, designation_category:designation_categories!designations_designation_category_id_fkey(people_module)")
+      .eq("company_id", companyId)
+      .limit(5000),
+    supabaseAdmin
+      .from("workforce_identity_links")
+      .select("company_id, legacy_profile_id, legacy_profile_type, target_profile_id, target_profile_type")
+      .eq("company_id", companyId)
+      .in("legacy_profile_type", ["contractor", "field_executive"])
+      .limit(5000),
+    supabaseAdmin
+      .from("workforce")
+      .select("company_id, id, source_profile_id, source_profile_type")
+      .eq("company_id", companyId)
+      .limit(5000)
+  ]);
+
+  const diagnosticError = contractorResult.error ?? executiveResult.error ?? designationResult.error ?? identityLinkResult.error ?? workforceResult.error;
+  if (diagnosticError) {
+    return { data: null as LegacyWorkforceCleanupPreview | null, pending: false, error: `Cleanup diagnostic failed: ${diagnosticError.message}` };
+  }
+
+  const designations = (designationResult.data ?? []) as LegacyWorkforceDesignationRow[];
+  const deliveryNetworkDesignations = designations.filter((designation) =>
+    firstRelation(designation.designation_category)?.people_module === "delivery_network"
+  );
+  const links = new Map(
+    ((identityLinkResult.data ?? []) as WorkforceIdentityLinkRow[]).map((link) => [
+      identityKey(link.legacy_profile_type, link.legacy_profile_id),
+      link
+    ])
+  );
+  const canonicalRows = new Map(
+    ((workforceResult.data ?? []) as CanonicalWorkforceRow[]).map((workforce) => [workforce.id, workforce])
+  );
+  const candidates = [
+    ...((contractorResult.data ?? []) as LegacyWorkforceSourceRow[]).map((row) => ({ ...row, source: "contractor" })),
+    ...((executiveResult.data ?? []) as LegacyWorkforceSourceRow[]).map((row) => ({ ...row, source: "field_executive" }))
+  ].flatMap((source) => {
+    const designationValue = String(source.designation ?? "").trim();
+    const designation = deliveryNetworkDesignations.find((item) =>
+      item.code.trim().toLowerCase() === designationValue.toLowerCase() ||
+      item.name.trim().toLowerCase() === designationValue.toLowerCase()
+    );
+    return designation ? [{ source, designation }] : [];
+  });
+
+  const unmatched = candidates.flatMap(({ source, designation }) => {
+    const link = links.get(identityKey(source.source, source.id));
+    if (!link) return [{ source, designation, reason: "No identity link" }];
+    if (link.target_profile_type !== "workforce") {
+      return [{ source, designation, reason: `Linked to ${link.target_profile_type}` }];
+    }
+    const canonical = canonicalRows.get(link.target_profile_id);
+    if (!canonical || canonical.company_id !== source.company_id || canonical.source_profile_type !== source.source || canonical.source_profile_id !== source.id) {
+      return [{ source, designation, reason: "Canonical Workforce row missing" }];
+    }
+    return [];
+  });
+  const grouped = new Map<string, LegacyWorkforceCleanupPreview["unmatched_breakdown"][number]>();
+  for (const item of unmatched) {
+    const designationValue = String(item.source.designation ?? "Unassigned");
+    const destination = String(item.designation.profile_destination ?? "not_set");
+    const key = [item.source.source, designationValue, destination, item.designation.is_active, item.reason].join("|");
+    const existing = grouped.get(key);
+    grouped.set(key, {
+      count: (existing?.count ?? 0) + 1,
+      designation: designationValue,
+      designation_active: item.designation.is_active,
+      profile_destination: destination,
+      reason: item.reason,
+      source: item.source.source
+    });
+  }
+
   const raw = (result.data ?? {}) as Partial<Record<keyof LegacyWorkforceCleanupPreview, unknown>>;
   return {
     data: {
@@ -134,6 +262,10 @@ async function loadLegacyWorkforceCleanupPreview() {
       contractor_rows: Number(raw.contractor_rows ?? 0),
       field_executive_rows: Number(raw.field_executive_rows ?? 0),
       legacy_workforce_rows: Number(raw.legacy_workforce_rows ?? 0),
+      unmatched_breakdown: Array.from(grouped.values()).sort((left, right) => right.count - left.count),
+      unmatched_missing_canonical: unmatched.filter((item) => item.reason === "Canonical Workforce row missing").length,
+      unmatched_non_workforce_target: unmatched.filter((item) => item.reason.startsWith("Linked to ")).length,
+      unmatched_without_link: unmatched.filter((item) => item.reason === "No identity link").length,
       unmatched_rows: Number(raw.unmatched_rows ?? 0)
     },
     pending: false,
@@ -152,7 +284,7 @@ export default async function PlatformAccessOwnersPage() {
 
   const [{ company, companyUsers, productOwners, setupPending, error }, cleanupPreview] = await Promise.all([
     loadPlatformAccessOwners(companyId),
-    loadLegacyWorkforceCleanupPreview()
+    loadLegacyWorkforceCleanupPreview(companyId)
   ]);
   const flash = loadFlash();
 
@@ -246,7 +378,27 @@ export default async function PlatformAccessOwnersPage() {
               <div className="metric-card"><strong>{cleanupPreview.data.unmatched_rows}</strong><span>Unmatched</span></div>
             </div>
             {cleanupPreview.data.unmatched_rows > 0 ? (
-              <div className="message-panel error">Deletion is blocked because {cleanupPreview.data.unmatched_rows} legacy row(s) do not have an exact canonical Workforce identity.</div>
+              <>
+                <div className="message-panel error">Deletion is blocked because {cleanupPreview.data.unmatched_rows} legacy row(s) do not have an exact canonical Workforce identity.</div>
+                <div className="summary-grid" style={{ marginTop: 18, marginBottom: 18 }}>
+                  <div className="metric-card"><strong>{cleanupPreview.data.unmatched_without_link}</strong><span>No identity link</span></div>
+                  <div className="metric-card"><strong>{cleanupPreview.data.unmatched_non_workforce_target}</strong><span>Linked outside Workforce</span></div>
+                  <div className="metric-card"><strong>{cleanupPreview.data.unmatched_missing_canonical}</strong><span>Missing canonical row</span></div>
+                </div>
+                {cleanupPreview.data.unmatched_breakdown.length ? (
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr><th>Source</th><th>Designation</th><th>Destination</th><th>Status</th><th>Reason</th><th>Rows</th></tr></thead>
+                      <tbody>{cleanupPreview.data.unmatched_breakdown.map((item) => (
+                        <tr key={`${item.source}:${item.designation}:${item.profile_destination}:${item.reason}`}>
+                          <td>{item.source}</td><td><strong>{item.designation}</strong></td><td>{item.profile_destination}</td>
+                          <td>{item.designation_active ? "Active" : "Inactive"}</td><td>{item.reason}</td><td>{item.count}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </>
             ) : cleanupPreview.data.legacy_workforce_rows > 0 ? (
               <form action={purgeVerifiedLegacyWorkforceAliases}>
                 <SubmitButton
