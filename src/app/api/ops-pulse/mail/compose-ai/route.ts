@@ -1,5 +1,6 @@
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { googleCloudAccessToken } from "@/lib/google-workspace-client";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,11 @@ function responseText(payload: any) {
   if (typeof payload?.output_text === "string") return payload.output_text;
   return (payload?.output ?? []).flatMap((item: any) => item?.content ?? [])
     .map((item: any) => item?.text ?? "").filter(Boolean).join("\n");
+}
+
+function vertexResponseText(payload: any) {
+  return (payload?.candidates?.[0]?.content?.parts ?? [])
+    .map((part: any) => part?.text ?? "").filter(Boolean).join("\n");
 }
 
 function parseDraft(value: string) {
@@ -30,8 +36,6 @@ export async function POST(request: Request) {
     return Response.json({ error: "Mail edit access is required." }, { status: 403 });
   }
   if (!supabaseAdmin) return Response.json({ error: "Database unavailable." }, { status: 500 });
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) return Response.json({ error: "AI compose is not configured." }, { status: 503 });
   const input = await request.json().catch(() => ({}));
   const stationAddressId = clean(input.stationAddressId, 80);
   const purpose = clean(input.purpose, 2000);
@@ -51,32 +55,68 @@ export async function POST(request: Request) {
   const currentSubject = clean(input.currentSubject, 180);
   const currentBody = clean(input.currentBody, 6000);
   const recipients = clean(input.recipients, 1200);
-  const ai = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      model: process.env.OPENAI_OPS_MODEL || "gpt-5.6-sol",
-      instructions: [
-        "You are DropX Mail AI, an internal business-email drafting assistant for logistics operations.",
-        "Return only valid JSON with exactly two string fields: subject and body.",
-        "Never invent names, dates, shipment volumes, commitments, causes, approvals or client positions.",
-        "Use only details supplied by the user. If an essential fact is missing, use a neutral sentence or an explicit [confirm detail] placeholder.",
-        "Do not add a signature because OpsPulse appends the configured station signature automatically.",
-        "Do not include markdown, commentary or legal claims. Keep the requested tone and length."
-      ].join(" "),
-      input: JSON.stringify({
-        station: { code: station?.station_code ?? null, name: station?.station_name ?? null, sender: addressResult.data.email_address },
-        action, tone, length, purpose, recipients,
-        currentDraft: { subject: currentSubject, body: currentBody }
-      }),
-      max_output_tokens: 1600,
-      text: { verbosity: "low" }
-    })
+  const instructions = [
+    "You are DropX Mail AI, an internal business-email drafting assistant for logistics operations.",
+    "Return only valid JSON with exactly two string fields: subject and body.",
+    "Never invent names, dates, shipment volumes, commitments, causes, approvals or client positions.",
+    "Use only details supplied by the user. If an essential fact is missing, use a neutral sentence or an explicit [confirm detail] placeholder.",
+    "Do not add a signature because OpsPulse appends the configured station signature automatically.",
+    "Do not include markdown, commentary or legal claims. Keep the requested tone and length."
+  ].join(" ");
+  const draftContext = JSON.stringify({
+    station: { code: station?.station_code ?? null, name: station?.station_name ?? null, sender: addressResult.data.email_address },
+    action, tone, length, purpose, recipients,
+    currentDraft: { subject: currentSubject, body: currentBody }
   });
-  const payload = await ai.json().catch(() => ({}));
-  if (!ai.ok) return Response.json({ error: payload?.error?.message ?? "AI compose request failed." }, { status: 502 });
+  let generated = "";
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (apiKey) {
+    const ai = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: process.env.OPENAI_OPS_MODEL || "gpt-5.6-sol",
+        instructions,
+        input: draftContext,
+        max_output_tokens: 1600,
+        text: { verbosity: "low" }
+      })
+    });
+    const payload = await ai.json().catch(() => ({}));
+    if (!ai.ok) return Response.json({ error: payload?.error?.message ?? "AI compose request failed." }, { status: 502 });
+    generated = responseText(payload);
+  } else {
+    try {
+      const cloud = await googleCloudAccessToken();
+      const model = process.env.GOOGLE_VERTEX_MAIL_MODEL?.trim() || "gemini-2.5-flash";
+      const url = `https://aiplatform.googleapis.com/v1/projects/${encodeURIComponent(cloud.projectId)}/locations/global/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
+      const ai = await fetch(url, {
+        method: "POST",
+        headers: { authorization: `Bearer ${cloud.accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: instructions }] },
+          contents: [{ role: "user", parts: [{ text: draftContext }] }],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 1600,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              required: ["subject", "body"],
+              properties: { subject: { type: "STRING" }, body: { type: "STRING" } }
+            }
+          }
+        })
+      });
+      const payload = await ai.json().catch(() => ({}));
+      if (!ai.ok) return Response.json({ error: payload?.error?.message ?? "Google Vertex AI compose request failed." }, { status: 502 });
+      generated = vertexResponseText(payload);
+    } catch (error) {
+      return Response.json({ error: error instanceof Error ? error.message : "AI compose is not configured." }, { status: 503 });
+    }
+  }
   try {
-    return Response.json(parseDraft(responseText(payload)));
+    return Response.json(parseDraft(generated));
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "AI returned an invalid draft." }, { status: 502 });
   }

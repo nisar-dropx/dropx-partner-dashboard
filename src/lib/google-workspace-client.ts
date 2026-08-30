@@ -106,7 +106,7 @@ async function jsonResponse<T>(response: Response, fallback: string) {
   return body;
 }
 
-async function federatedWorkspaceAccessToken(federation: WorkspaceFederation, delegatedAdminEmail: string, scopes = WORKSPACE_SCOPES) {
+async function federatedSecurityToken(federation: WorkspaceFederation) {
   const oidcToken = await getVercelOidcToken();
   const audience = `//iam.googleapis.com/projects/${federation.projectNumber}/locations/global/workloadIdentityPools/${federation.poolId}/providers/${federation.providerId}`;
   const stsBody = new URLSearchParams({
@@ -117,12 +117,33 @@ async function federatedWorkspaceAccessToken(federation: WorkspaceFederation, de
     subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
     subject_token: oidcToken
   });
-  const sts = await jsonResponse<{ access_token: string }>(await fetch("https://sts.googleapis.com/v1/token", {
+  return jsonResponse<{ access_token: string }>(await fetch("https://sts.googleapis.com/v1/token", {
     method: "POST",
     body: stsBody,
     headers: { "content-type": "application/x-www-form-urlencoded" },
     cache: "no-store"
   }), "Google Security Token Service rejected the Vercel workload identity.");
+}
+
+export async function googleCloudAccessToken() {
+  const federation = federationFromEnvironment();
+  if (!federation) throw new Error("Google Cloud workload identity is not configured.");
+  const sts = await federatedSecurityToken(federation);
+  const tokenUrl = `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(federation.serviceAccountEmail)}:generateAccessToken`;
+  const token = await jsonResponse<{ accessToken: string; expireTime: string }>(await fetch(tokenUrl, {
+    method: "POST",
+    body: JSON.stringify({ scope: ["https://www.googleapis.com/auth/cloud-platform"], lifetime: "3600s" }),
+    headers: { authorization: `Bearer ${sts.access_token}`, "content-type": "application/json" },
+    cache: "no-store"
+  }), "Google IAM could not issue a Cloud access token.");
+  const projectId = process.env.GCP_PROJECT_ID?.trim()
+    || federation.serviceAccountEmail.split("@")[1]?.replace(/\.iam\.gserviceaccount\.com$/i, "")
+    || federation.projectNumber;
+  return { accessToken: token.accessToken, projectId, projectNumber: federation.projectNumber };
+}
+
+async function federatedWorkspaceAccessToken(federation: WorkspaceFederation, delegatedAdminEmail: string, scopes = WORKSPACE_SCOPES) {
+  const sts = await federatedSecurityToken(federation);
 
   const issuedAt = Math.floor(Date.now() / 1000);
   const claim = JSON.stringify({
