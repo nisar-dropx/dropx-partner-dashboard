@@ -39,7 +39,7 @@ export default async function PlatformControlPage() {
         eyebrow="Super Admin"
         title="DropX platform control"
         subtitle="Assign Product Owners, open each independent portal, and manage only cross-product technical controls here. Daily business masters are owned inside their respective products."
-        action={<Link className="button" href="https://admin-panel.dropxlogistics.com/platform-admin">Open Masters</Link>}
+        action={<Link className="button" href="/master/platform-access-owners">Manage Platform & Access Owners</Link>}
       />
 
       <section className="grid three">

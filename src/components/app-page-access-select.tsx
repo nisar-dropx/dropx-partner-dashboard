@@ -6,17 +6,21 @@ import { ChevronDown, X } from "lucide-react";
 export const appPageOptions = [
   { value: "dashboard", label: "Dashboard" },
   { value: "attendance", label: "Attendance" },
-  { value: "leave", label: "Leave" }
+  { value: "roster", label: "Roster" },
+  { value: "leave", label: "Leave" },
+  { value: "performance", label: "Performance" }
 ] as const;
 
 export const defaultAppPageAccess = appPageOptions.map((page) => page.value);
 
 export function AppPageAccessSelect({
   initialPages,
-  name = "app_page_access"
+  name = "app_page_access",
+  onChange
 }: {
   initialPages: string[];
   name?: string;
+  onChange?: (pages: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -30,6 +34,10 @@ export function AppPageAccessSelect({
     if (!normalizedQuery) return appPageOptions;
     return appPageOptions.filter((page) => page.label.toLowerCase().includes(normalizedQuery));
   }, [query]);
+
+  useEffect(() => {
+    onChange?.(selected);
+  }, [onChange, selected]);
 
   useEffect(() => {
     if (!open) return;

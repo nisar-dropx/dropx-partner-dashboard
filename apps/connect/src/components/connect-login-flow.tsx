@@ -42,8 +42,11 @@ const isWorkforceWorkspace = (account: AppAccount | null) => account?.workspace
 const peopleSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account) && !isWorkforceWorkspace(account));
 const sharedSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account));
 const canViewApprovals = (account: AppAccount | null) => Boolean(account && !isWorkforceWorkspace(account) && (isManagerAccount(account) || peopleSelfService(account) || account.pageAccess?.includes("approvals")));
-const allowed = (account: AppAccount | null, page: "dashboard" | "attendance" | "roster" | "leave" | "performance" | "settings") =>
-  page === "settings" || page === "roster" || (page === "performance" && peopleSelfService(account)) || (account?.pageAccess ?? defaultPageAccess).includes(page);
+const allowed = (account: AppAccount | null, page: "dashboard" | "attendance" | "roster" | "leave" | "performance" | "settings") => {
+  if (page === "settings") return true;
+  if (page === "performance" && !peopleSelfService(account)) return false;
+  return (account?.pageAccess ?? defaultPageAccess).includes(page);
+};
 const showLeaveNav = (account: AppAccount | null) => Boolean(account && active(account) && (allowed(account, "leave") || account.profileType === "contractor"));
 
 function landingPage(account: AppAccount): Step {
@@ -262,7 +265,7 @@ export function ConnectLoginFlow() {
       }
     }
     const destination = notification.route as Step | null | undefined;
-    if (destination && ["dashboard", "profile", "documents", "approvals", "advances", "reimbursements", "attendance", "roster", "leave", "lop", "settings"].includes(destination)) {
+    if (destination && ["dashboard", "profile", "documents", "approvals", "advances", "reimbursements", "attendance", "roster", "leave", "lop", "performance", "settings"].includes(destination)) {
       setNotificationMenu(false);
       open(destination);
     } else if (destination) {

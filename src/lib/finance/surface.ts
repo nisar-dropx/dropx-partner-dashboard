@@ -1,4 +1,5 @@
 const financePortalRoots = [
+  "/finance",
   "/payments",
   "/master/payment-methods",
   "/master/payment-banks",

@@ -67,6 +67,18 @@ function platformRedirect(params: { error?: string; notice?: string }) {
   redirect("/platform-admin");
 }
 
+const platformAccessOwnersPath = "/master/platform-access-owners";
+
+function platformAccessOwnersRedirect(params: { error?: string; notice?: string }) {
+  cookies().set("dropx_platform_access_owners_flash", JSON.stringify(params), {
+    httpOnly: true,
+    maxAge: 20,
+    path: platformAccessOwnersPath,
+    sameSite: "lax"
+  });
+  redirect(platformAccessOwnersPath);
+}
+
 function selectedModules(formData: FormData) {
   const allowed = new Set(platformModules.map((module) => module.code));
   return new Set(
@@ -81,6 +93,14 @@ async function requirePlatformAdmin(action: "add" | "edit") {
   const authorization = await requirePagePermission("company_master", action);
   if (!authorization.isMasterOwner) {
     platformRedirect({ error: "Only Super Admin can manage platform masters." });
+  }
+  return authorization;
+}
+
+async function requirePlatformAccessOwnersAdmin(action: "add" | "edit") {
+  const authorization = await requirePagePermission("company_master", action);
+  if (!authorization.isMasterOwner) {
+    platformAccessOwnersRedirect({ error: "Only Super Admin can manage platform and access owners." });
   }
   return authorization;
 }
@@ -288,7 +308,7 @@ async function ensureProductOwnerRole(companyId: string, productCode: ProductCod
 }
 
 export async function assignProductOwner(formData: FormData) {
-  const authorization = await requirePlatformAdmin("edit");
+  const authorization = await requirePlatformAccessOwnersAdmin("edit");
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const companyId = required(formData.get("company_id"), "Company");
@@ -332,16 +352,16 @@ export async function assignProductOwner(formData: FormData) {
         updated_at: new Date().toISOString()
       }, { onConflict: "company_id,product_code,user_id" });
     if (membershipResult.error) throw new Error(membershipResult.error.message);
-    revalidatePath("/platform-admin");
-    platformRedirect({ notice: `${productDefinitions.find((item) => item.code === productCodeValue)!.name} Product Owner assigned.` });
+    revalidatePath(platformAccessOwnersPath);
+    platformAccessOwnersRedirect({ notice: `${productDefinitions.find((item) => item.code === productCodeValue)!.name} access owner assigned.` });
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
-    platformRedirect({ error: error instanceof Error ? error.message : "Unable to assign Product Owner." });
+    platformAccessOwnersRedirect({ error: error instanceof Error ? error.message : "Unable to assign the access owner." });
   }
 }
 
 export async function removeProductOwner(formData: FormData) {
-  await requirePlatformAdmin("edit");
+  await requirePlatformAccessOwnersAdmin("edit");
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const id = required(formData.get("id"), "Product Owner assignment");
@@ -360,11 +380,11 @@ export async function removeProductOwner(formData: FormData) {
       .eq("user_id", result.data.user_id)
       .eq("source_system", "product_owner");
     if (membershipResult.error) throw new Error(membershipResult.error.message);
-    revalidatePath("/platform-admin");
-    platformRedirect({ notice: "Product Owner access removed." });
+    revalidatePath(platformAccessOwnersPath);
+    platformAccessOwnersRedirect({ notice: "Platform access owner removed." });
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
-    platformRedirect({ error: error instanceof Error ? error.message : "Unable to remove Product Owner." });
+    platformAccessOwnersRedirect({ error: error instanceof Error ? error.message : "Unable to remove the platform access owner." });
   }
 }
 

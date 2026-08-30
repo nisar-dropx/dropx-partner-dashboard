@@ -137,6 +137,28 @@ function isOptionalProductOwnerSchemaError(error: unknown) {
     (message.includes("does not exist") || message.includes("schema cache"));
 }
 
+type ProductMembershipRow = {
+  role_id: string | null;
+  role_code_snapshot?: string | null;
+  source_system?: string | null;
+  has_all_location_access: boolean | null;
+  location_scope_ids: string[] | null;
+};
+
+function isTrustedFinanceMembership(membership: ProductMembershipRow) {
+  const source = String(membership.source_system ?? "").trim().toLowerCase();
+  // Access deliberately granted from the Finance portal or through Product
+  // Ownership is authoritative. Legacy Dashboard grants are retained only for
+  // roles whose original business function was Accounts or Finance.
+  if (["manual", "product_owner", "product_admin"].includes(source)) return true;
+  if (source !== "legacy_dashboard") return false;
+
+  const snapshot = String(membership.role_code_snapshot ?? "").trim().toUpperCase();
+  if (snapshot === "FINANCE_HEAD" || snapshot === "ACCOUNTS_HEAD" || snapshot === "ACCOUNTS_EXECUTIVE") return true;
+  const originalCode = snapshot.replace(/^FINANCE_/, "");
+  return /(^|_)(FINANCE|ACCOUNT|ACCOUNTS|ACCOUNTANT)(_|$)/.test(originalCode);
+}
+
 function inheritGroupedParentPermissions(permissions: Record<string, PagePermission>) {
   for (const [parentCode, childCodes] of Object.entries(groupedParentPermissions)) {
     const inherited = childCodes.reduce<PagePermission>((acc, code) => {
@@ -265,6 +287,20 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   ]));
   hasAllLocationAccess = positionAccess.hasAllLocationAccess;
 
+  let hasBaseCompanyOwnerRole = false;
+  if (effectiveRoleIds.length) {
+    const ownerRoleResult = await supabaseAdmin
+      .from("user_roles")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("code", "OWNER")
+      .eq("is_active", true)
+      .in("id", effectiveRoleIds)
+      .limit(1);
+    if (ownerRoleResult.error) return null;
+    hasBaseCompanyOwnerRole = Boolean(ownerRoleResult.data?.length);
+  }
+
   const requestHost = (
     headers().get("x-forwarded-host") ??
     headers().get("host") ??
@@ -274,20 +310,35 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   if (productCode) {
     const membershipResult = await supabaseAdmin
       .from("company_product_memberships")
-      .select("role_id, has_all_location_access, location_scope_ids")
+      .select("role_id, role_code_snapshot, source_system, has_all_location_access, location_scope_ids")
       .eq("company_id", companyId)
       .eq("user_id", profile.id)
       .eq("product_code", productCode)
       .eq("is_active", true);
     if (membershipResult.error && !isOptionalProductOwnerSchemaError(membershipResult.error)) return null;
+    const productMemberships = ((membershipResult.data ?? []) as ProductMembershipRow[])
+      .filter((membership) => productCode !== "finance" || isTrustedFinanceMembership(membership));
+
+    // Finance is an explicit-membership product. Legacy Dashboard roles such
+    // as Cluster Manager, Regional Manager and Business Head must not leak
+    // Finance permissions merely because they could submit/approve an Ops
+    // payment request. Product-owner assignments are added immediately below.
+    if (productCode === "finance" && !isMasterOwner && !hasBaseCompanyOwnerRole) {
+      effectiveRoleIds = productMemberships
+        .map((membership) => membership.role_id)
+        .filter((roleId): roleId is string => Boolean(roleId));
+      primaryRoleId = effectiveRoleIds[0] ?? null;
+      hasAllLocationAccess = productMemberships.some((membership) => membership.has_all_location_access);
+      locationScopeIds = Array.from(new Set(productMemberships.flatMap((membership) => membership.location_scope_ids ?? [])));
+    }
     effectiveRoleIds = Array.from(new Set([
       ...effectiveRoleIds,
-      ...(membershipResult.data ?? []).map((membership) => membership.role_id).filter((roleId): roleId is string => Boolean(roleId))
+      ...productMemberships.map((membership) => membership.role_id).filter((roleId): roleId is string => Boolean(roleId))
     ]));
-    hasAllLocationAccess = hasAllLocationAccess || (membershipResult.data ?? []).some((membership) => membership.has_all_location_access);
+    hasAllLocationAccess = hasAllLocationAccess || productMemberships.some((membership) => membership.has_all_location_access);
     locationScopeIds = Array.from(new Set([
       ...locationScopeIds,
-      ...(membershipResult.data ?? []).flatMap((membership) => membership.location_scope_ids ?? [])
+      ...productMemberships.flatMap((membership) => membership.location_scope_ids ?? [])
     ]));
 
     const productOwnerResult = await supabaseAdmin
@@ -298,10 +349,17 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
       .eq("product_code", productCode)
       .eq("is_active", true);
     if (productOwnerResult.error && !isOptionalProductOwnerSchemaError(productOwnerResult.error)) return null;
+    const productOwnerRoleIds = (productOwnerResult.data ?? [])
+      .map((assignment) => assignment.role_id)
+      .filter((roleId): roleId is string => Boolean(roleId));
     effectiveRoleIds = Array.from(new Set([
       ...effectiveRoleIds,
-      ...(productOwnerResult.data ?? []).map((assignment) => assignment.role_id).filter((roleId): roleId is string => Boolean(roleId))
+      ...productOwnerRoleIds
     ]));
+    if (productCode === "finance" && productOwnerRoleIds.length) {
+      primaryRoleId = productOwnerRoleIds[0];
+      hasAllLocationAccess = true;
+    }
   }
 
   if (effectiveRoleIds.length) {

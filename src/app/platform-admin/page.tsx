@@ -8,7 +8,6 @@ import { SubmitButton } from "@/components/submit-button";
 import { requirePagePermission } from "@/lib/authorization";
 import { formatDashboardDate } from "@/lib/date-format";
 import { platformModules } from "@/lib/platform-modules";
-import { productDefinitions } from "@/lib/product-ownership";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { signOut } from "@/app/login/actions";
 import {
@@ -16,8 +15,6 @@ import {
   createPlatformCompany,
   deleteControlPanelUser,
   deletePlatformCompany,
-  assignProductOwner,
-  removeProductOwner,
   updateControlPanelUser,
   updatePlatformCompany
 } from "./actions";
@@ -47,20 +44,6 @@ type ControlUserRow = {
   is_active: boolean;
 };
 
-type CompanyUserRow = {
-  id: string;
-  company_id: string;
-  full_name: string | null;
-  email: string | null;
-};
-
-type ProductOwnerRow = {
-  id: string;
-  company_id: string;
-  product_code: string;
-  user_id: string;
-};
-
 function loadFlash() {
   const raw = cookies().get("dropx_platform_admin_flash")?.value;
   if (!raw) return { error: null as string | null, notice: null as string | null };
@@ -85,9 +68,6 @@ async function loadPlatformData() {
       companies: [] as CompanyRow[],
       moduleRows: [] as CompanyModuleRow[],
       controlUsers: [] as ControlUserRow[],
-      companyUsers: [] as CompanyUserRow[],
-      productOwners: [] as ProductOwnerRow[],
-      productOwnerSetupPending: false,
       error: "Supabase service role key is not configured."
     };
   }
@@ -104,10 +84,10 @@ async function loadPlatformData() {
   ]);
 
   if (companyResult.error) {
-    return { companies: [] as CompanyRow[], moduleRows: [] as CompanyModuleRow[], controlUsers: [] as ControlUserRow[], companyUsers: [] as CompanyUserRow[], productOwners: [] as ProductOwnerRow[], productOwnerSetupPending: false, error: companyResult.error.message };
+    return { companies: [] as CompanyRow[], moduleRows: [] as CompanyModuleRow[], controlUsers: [] as ControlUserRow[], error: companyResult.error.message };
   }
   if (moduleResult.error) {
-    return { companies: companyResult.data as CompanyRow[] ?? [], moduleRows: [] as CompanyModuleRow[], controlUsers: [] as ControlUserRow[], companyUsers: [] as CompanyUserRow[], productOwners: [] as ProductOwnerRow[], productOwnerSetupPending: false, error: moduleResult.error.message };
+    return { companies: companyResult.data as CompanyRow[] ?? [], moduleRows: [] as CompanyModuleRow[], controlUsers: [] as ControlUserRow[], error: moduleResult.error.message };
   }
 
   const companies = (companyResult.data ?? []) as CompanyRow[];
@@ -121,44 +101,15 @@ async function loadPlatformData() {
       .eq("is_master_owner", true)
       .order("full_name", { ascending: true });
     if (controlUserError) {
-      return { companies, moduleRows: (moduleResult.data ?? []) as CompanyModuleRow[], controlUsers: [] as ControlUserRow[], companyUsers: [] as CompanyUserRow[], productOwners: [] as ProductOwnerRow[], productOwnerSetupPending: false, error: controlUserError.message };
+      return { companies, moduleRows: (moduleResult.data ?? []) as CompanyModuleRow[], controlUsers: [] as ControlUserRow[], error: controlUserError.message };
     }
     controlUsers = (data ?? []) as ControlUserRow[];
-  }
-
-  const [companyUserResult, productOwnerResult] = await Promise.all([
-    supabaseAdmin
-      .from("profiles")
-      .select("id, company_id, full_name, email")
-      .eq("is_active", true)
-      .order("full_name"),
-    supabaseAdmin
-      .from("company_product_owners")
-      .select("id, company_id, product_code, user_id")
-      .eq("is_active", true)
-      .order("product_code")
-  ]);
-  if (companyUserResult.error) {
-    return { companies, moduleRows: (moduleResult.data ?? []) as CompanyModuleRow[], controlUsers, companyUsers: [] as CompanyUserRow[], productOwners: [] as ProductOwnerRow[], productOwnerSetupPending: false, error: companyUserResult.error.message };
-  }
-  const productOwnerMessage = String(productOwnerResult.error?.message ?? "").toLowerCase();
-  const productOwnerSetupPending = Boolean(productOwnerResult.error && (
-    productOwnerResult.error.code === "42P01" ||
-    productOwnerResult.error.code === "PGRST205" ||
-    productOwnerMessage.includes("does not exist") ||
-    productOwnerMessage.includes("schema cache")
-  ));
-  if (productOwnerResult.error && !productOwnerSetupPending) {
-    return { companies, moduleRows: (moduleResult.data ?? []) as CompanyModuleRow[], controlUsers, companyUsers: (companyUserResult.data ?? []) as CompanyUserRow[], productOwners: [] as ProductOwnerRow[], productOwnerSetupPending: false, error: productOwnerResult.error.message };
   }
 
   return {
     companies,
     moduleRows: (moduleResult.data ?? []) as CompanyModuleRow[],
     controlUsers,
-    companyUsers: (companyUserResult.data ?? []) as CompanyUserRow[],
-    productOwners: (productOwnerResult.data ?? []) as ProductOwnerRow[],
-    productOwnerSetupPending,
     error: null
   };
 }
@@ -328,7 +279,7 @@ export default async function PlatformAdminPage({
 }) {
   const authorization = await requirePagePermission("company_master", "access");
   if (!authorization.isMasterOwner) redirect("/unauthorized?page=platform_masters&reason=super_admin_only");
-  const { companies, moduleRows, controlUsers, companyUsers, productOwners, productOwnerSetupPending, error } = await loadPlatformData();
+  const { companies, moduleRows, controlUsers, error } = await loadPlatformData();
   const flash = loadFlash();
   const query = String(searchParams?.q ?? "").trim().toLowerCase();
   const filteredCompanies = companies.filter((company) =>
@@ -428,69 +379,6 @@ export default async function PlatformAdminPage({
               </tbody>
             </table>
           </div>
-        </section>
-      ) : null}
-
-      {!error ? (
-        <section className="panel">
-          <div className="panel-head toolbar">
-            <div>
-              <h2>Product Owners</h2>
-              <p className="subtle">Super Admin assigns the accountable owner. Each owner can administer users and roles only inside that product portal.</p>
-            </div>
-          </div>
-          {productOwnerSetupPending ? (
-            <div className="panel-body message-panel warning">
-              Apply the committed company product-owner migration before assigning owners.
-            </div>
-          ) : (
-            <>
-              <div className="panel-body">
-                <form action={assignProductOwner} className="form-grid three">
-                  <label>Company
-                    <select className="field" name="company_id" required defaultValue="">
-                      <option value="" disabled>Select company</option>
-                      {companies.filter((company) => company.is_active).map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-                    </select>
-                  </label>
-                  <label>Product
-                    <select className="field" name="product_code" required defaultValue="">
-                      <option value="" disabled>Select product</option>
-                      {productDefinitions.map((product) => <option key={product.code} value={product.code}>{product.name}</option>)}
-                    </select>
-                  </label>
-                  <label>User
-                    <select className="field" name="user_id" required defaultValue="">
-                      <option value="" disabled>Select active user</option>
-                      {companyUsers.map((user) => {
-                        const company = companies.find((item) => item.id === user.company_id);
-                        return <option key={user.id} value={user.id}>{user.full_name ?? user.email ?? "Unnamed"} · {company?.name ?? "Unknown company"}</option>;
-                      })}
-                    </select>
-                  </label>
-                  <div className="form-actions"><SubmitButton className="button" pendingText="Assigning">Assign Product Owner</SubmitButton></div>
-                </form>
-              </div>
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Product</th><th>Owner</th><th>Company</th><th>Action</th></tr></thead>
-                  <tbody>
-                    {productOwners.length ? productOwners.map((assignment) => {
-                      const product = productDefinitions.find((item) => item.code === assignment.product_code);
-                      const user = companyUsers.find((item) => item.id === assignment.user_id);
-                      const company = companies.find((item) => item.id === assignment.company_id);
-                      return <tr key={assignment.id}>
-                        <td><strong>{product?.name ?? assignment.product_code}</strong></td>
-                        <td>{user?.full_name ?? user?.email ?? "Unknown user"}<div className="subtle">{user?.email ?? ""}</div></td>
-                        <td>{company?.name ?? "Unknown company"}</td>
-                        <td><form action={removeProductOwner}><input type="hidden" name="id" value={assignment.id} /><SubmitButton className="button secondary compact" pendingText="Removing">Remove</SubmitButton></form></td>
-                      </tr>;
-                    }) : <tr><td className="empty-cell" colSpan={4}>No Product Owners assigned yet.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
         </section>
       ) : null}
 

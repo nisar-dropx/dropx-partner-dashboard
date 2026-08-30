@@ -32,7 +32,7 @@ export const navItems: NavItem[] = [
     label: "Masters",
     icon: "M",
     children: [
-      { code: "company_master", label: "Companies & Product Owners", href: "https://admin-panel.dropxlogistics.com/platform-admin" }
+      { code: "company_master", label: "Platform & Access Owners", href: "/master/platform-access-owners" }
     ]
   },
   {
@@ -40,6 +40,7 @@ export const navItems: NavItem[] = [
     label: "Platform Audit",
     icon: "R",
     children: [
+      { code: "raw_punch_reports", label: "Raw Punches", href: "/reports/raw-punches" },
       { code: "verification_api_reports", label: "Verification API", href: "/reports/verification-api" },
       { code: "event_log_reports", label: "Event Log", href: "/reports/event-log" }
     ]
@@ -73,6 +74,8 @@ export const navItems: NavItem[] = [
       { code: "app_settings", label: "General", href: "/settings" },
       { code: "app_settings", label: "App Notification", href: "/settings/app-notifications" },
       { code: "app_settings", label: "Verification APIs", href: "/settings/verification-apis" },
+      { code: "biometric_devices", label: "Biometric Devices", href: "/master/biometric-devices" },
+      { code: "app_settings", label: "Biometric Config", href: "/settings/biometric" },
       { code: "ai_connector", label: "AI Connector", href: "/settings/ai" },
       { code: "amazon_connector", label: "Amazon Connector", href: "/settings/amazon" },
       { code: "developer_mode", label: "Developer Mode", href: "/developer" }

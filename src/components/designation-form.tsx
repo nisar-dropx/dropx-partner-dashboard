@@ -7,13 +7,22 @@ import {
   appPageOptions,
   defaultAppPageAccess
 } from "@/components/app-page-access-select";
+import { DropxOneDesignationPreview } from "@/components/dropx-one-designation-preview";
 import { SubmitButton } from "@/components/submit-button";
+import type { DesignationBusinessCategory } from "@/lib/designation-business-categories";
 import { normalizeDesignationCategories, type DesignationCategory } from "@/lib/designation-categories";
+import {
+  designationProfileDestinationsForModule,
+  inferDesignationProfileDestination,
+  type DesignationProfileDestination
+} from "@/lib/designation-profile-destination";
 import {
   designationPortalOptions,
   normalizeDesignationPortalPermissions
 } from "@/lib/designation-portal-access";
 import {
+  intersectProfileFieldChannelRules,
+  normalizeCategoryProfileFieldRules,
   profileFieldRulesForCategory,
   type ProfileFieldChannelRules,
   type ProfileFieldRule,
@@ -39,6 +48,9 @@ type DesignationInitial = {
   id: string;
   code: string;
   name: string;
+  designation_category_id?: string | null;
+  profile_destination?: DesignationProfileDestination | null;
+  registration_category_code?: string | null;
   provider_ids: string[];
   model_ids?: string[] | null;
   onboarding_categories?: string[] | null;
@@ -157,6 +169,8 @@ function OnboardingRoleMultiSelect({ options, selectedValues }: { options: Onboa
 export type WorkforceCategoryOption = {
   code: string;
   name: string;
+  profile_field_rules?: unknown;
+  app_page_access?: string[] | null;
 };
 
 function CategoryMultiSelect({
@@ -248,13 +262,19 @@ function CategoryMultiSelect({
 }
 
 export function FieldRuleMatrix({
+  categoryRules,
+  designationName = "Engagement type",
   fields,
   namePrefix,
+  pageAccess = defaultAppPageAccess,
   rules,
   title
 }: {
+  categoryRules?: unknown;
+  designationName?: string;
   fields: ProfileFieldRule[];
   namePrefix?: string;
+  pageAccess?: string[];
   rules: ProfileFieldChannelRules;
   title: string;
 }) {
@@ -289,6 +309,10 @@ export function FieldRuleMatrix({
     acc[field.group] = [...(acc[field.group] ?? []), field];
     return acc;
   }, {});
+  const effectiveRules = intersectProfileFieldChannelRules(
+    normalizeCategoryProfileFieldRules(categoryRules),
+    { dropx_one: dropxOne, dashboard }
+  );
 
   return (
     <section className="designation-field-rules">
@@ -341,6 +365,13 @@ export function FieldRuleMatrix({
           </div>
         </div>
       ))}
+      <DropxOneDesignationPreview
+        designationName={designationName}
+        fields={fields}
+        pageAccess={pageAccess}
+        rules={effectiveRules}
+        scopeLabel={title.replace(/ fields$/i, "")}
+      />
     </section>
   );
 }
@@ -451,17 +482,21 @@ function ModelMultiSelect({
 
 export function DesignationForm({
   action,
+  businessCategories,
   categories,
   initial,
   models,
+  peopleModule,
   roles,
   submitLabel = "Add designation"
 }: {
   action: (formData: FormData) => void;
+  businessCategories: DesignationBusinessCategory[];
   categories: WorkforceCategoryOption[];
   initial?: DesignationInitial | null;
   providers?: ProviderOption[];
   models: ModelOption[];
+  peopleModule: DesignationBusinessCategory["people_module"] | null;
   roles: OnboardingRoleOption[];
   submitLabel?: string;
 }) {
@@ -469,8 +504,27 @@ export function DesignationForm({
   const [selectedCategories, setSelectedCategories] = useState<DesignationCategory[]>(
     normalizeDesignationCategories(initial?.onboarding_categories)
   );
-  const selectedPages = (initial?.app_page_access ?? defaultAppPageAccess)
-    .filter((page) => appPageOptions.some((option) => option.value === page));
+  const [designationName, setDesignationName] = useState(initial?.name ?? "");
+  const [registrationCategory, setRegistrationCategory] = useState(() => {
+    const initialCategories = normalizeDesignationCategories(initial?.onboarding_categories);
+    const configured = String(initial?.registration_category_code ?? "");
+    return initialCategories.includes(configured) ? configured : initialCategories[0] ?? "";
+  });
+  const [selectedPages, setSelectedPages] = useState<string[]>(() => (
+    (initial?.app_page_access ?? defaultAppPageAccess)
+      .filter((page) => appPageOptions.some((option) => option.value === page))
+  ));
+  const destinationOptions = designationProfileDestinationsForModule(peopleModule);
+  const defaultDestination = inferDesignationProfileDestination({
+    onboardingCategories: initial?.onboarding_categories,
+    peopleModule,
+    profileDestination: initial?.profile_destination
+  });
+
+  useEffect(() => {
+    if (selectedCategories.includes(registrationCategory)) return;
+    setRegistrationCategory(selectedCategories[0] ?? "");
+  }, [registrationCategory, selectedCategories]);
 
   return (
     <form action={action} className="designation-form">
@@ -488,11 +542,20 @@ export function DesignationForm({
         </label>
         <label>
           Designation name
-          <input className="field" defaultValue={initial?.name ?? ""} name="name" placeholder="Enter designation name" required />
+          <input className="field" name="name" onChange={(event) => setDesignationName(event.target.value)} placeholder="Enter designation name" required value={designationName} />
         </label>
         <label>
-          Category
+          Engagement type
           <CategoryMultiSelect categories={categories} selected={selectedCategories} setSelected={setSelectedCategories} />
+          <small>Employee, contractor, field executive, worker, or another configured legal relationship.</small>
+        </label>
+        <label>
+          Registration policy
+          <select className="field" disabled={!selectedCategories.length} name="registration_category_code" onChange={(event) => setRegistrationCategory(event.target.value)} required value={registrationCategory}>
+            {!selectedCategories.length ? <option value="">Select an engagement type first</option> : null}
+            {selectedCategories.map((category) => <option key={category} value={category}>{categories.find((option) => option.code === category)?.name ?? category}</option>)}
+          </select>
+          <small>Controls registration requirements and DropX One access.</small>
         </label>
         <label>
           Models
@@ -520,12 +583,34 @@ export function DesignationForm({
           </label>
         ) : null}
       </div>
+      <section className="workforce-category-page-access designation-classification">
+        <div>
+          <strong>Designation classification</strong>
+          <p className="subtle">People can select only HR categories and People-managed profile tables.</p>
+        </div>
+        <div className="designation-classification-fields">
+          <label>
+            HR category
+            <select className="field" defaultValue={initial?.designation_category_id ?? (businessCategories.length === 1 ? businessCategories[0].id : "")} name="designation_category_id" required>
+              <option value="">Select HR category</option>
+              {businessCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+            </select>
+          </label>
+          <label>
+            Profile destination
+            <select className="field" defaultValue={defaultDestination} name="profile_destination" required>
+              {destinationOptions.map((option) => <option key={option.value} value={option.value}>{option.label} table</option>)}
+            </select>
+            <small>New and continuing registrations are written to this People table.</small>
+          </label>
+        </div>
+      </section>
       <section className="workforce-category-page-access">
         <div>
           <strong>DropX One page access</strong>
-          <p className="subtle">A page is available only when enabled for both this designation and its workforce category. My Profile and Settings are always available.</p>
+          <p className="subtle">A page is available only when enabled for both this designation and its engagement type. My Profile and Settings are always available.</p>
         </div>
-        <AppPageAccessSelect initialPages={selectedPages} />
+        <AppPageAccessSelect initialPages={selectedPages} onChange={setSelectedPages} />
       </section>
       <section className="workforce-category-page-access">
         <div>
@@ -542,18 +627,24 @@ export function DesignationForm({
         <PortalAccessMatrix initialValue={initial?.portal_permissions} />
       </section>
       {!selectedCategories.length ? (
-        <div className="designation-field-rule-empty">Select one or more workforce categories.</div>
+        <div className="designation-field-rule-empty">Select one or more engagement types.</div>
       ) : (
         <div className={`designation-field-rule-grid ${selectedCategories.length === 1 ? "single" : ""}`}>
-          {selectedCategories.map((category) => (
-            <FieldRuleMatrix
+          {selectedCategories.map((category) => {
+            const categoryOption = categories.find((option) => option.code === category);
+            const categoryPages = categoryOption?.app_page_access ?? defaultAppPageAccess;
+            const effectivePages = selectedPages.filter((page) => categoryPages.includes(page));
+            return <FieldRuleMatrix
+              categoryRules={categoryOption?.profile_field_rules}
+              designationName={designationName}
               fields={workforceProfileFields}
               key={category}
               namePrefix={category}
+              pageAccess={effectivePages}
               rules={profileFieldRulesForCategory(initial?.profile_field_rules, category)}
               title={`${categories.find((option) => option.code === category)?.name ?? category} fields`}
-            />
-          ))}
+            />;
+          })}
         </div>
       )}
       <div className="form-actions right">

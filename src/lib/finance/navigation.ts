@@ -3,9 +3,10 @@ import type { AuthorizationContext } from "@/lib/authorization";
 import { financeAccessPageCodes } from "@/lib/finance/surface";
 
 export const financeNavItems: NavItem[] = [
+  { code: "payments", label: "Finance Dashboard", href: "/finance", icon: "#" },
   {
     code: "payments",
-    label: "Finance",
+    label: "Finance Operations",
     icon: "₹",
     children: [
       { code: "advance_requests", label: "Advance Requests", href: "/payments/advance-request" },

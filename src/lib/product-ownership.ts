@@ -25,7 +25,7 @@ export const productPageCodes: Record<ProductCode, readonly string[]> = {
   ],
   people: [
     "people_all", "people_review", "people_exceptions", "employees", "contractors",
-    "attendance_reports", "attendance_integrity", "raw_punch_reports", "inbox",
+    "attendance_reports", "attendance_integrity", "inbox",
     "business_documents", "biometric_devices", "master_documents", "designations", "users"
   ],
   workforce: [
@@ -44,7 +44,7 @@ export const productPageCodes: Record<ProductCode, readonly string[]> = {
   ],
   tech: [
     "company_master", "app_settings", "ai_connector", "amazon_connector", "developer_mode",
-    "verification_api_reports", "event_log_reports", "users"
+    "raw_punch_reports", "verification_api_reports", "event_log_reports", "biometric_devices", "users"
   ]
 };
 

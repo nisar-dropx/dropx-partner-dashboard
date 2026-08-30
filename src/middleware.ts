@@ -158,6 +158,14 @@ export async function middleware(request: NextRequest) {
   }
 
   if (
+    host.endsWith("dropxlogistics.com") &&
+    !isDashboardHost &&
+    (path === "/master/platform-access-owners" || path.startsWith("/master/platform-access-owners/"))
+  ) {
+    return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));
+  }
+
+  if (
     isPlatformAdminHost &&
     !isPublicAppPath(path) &&
     path !== "/" &&

@@ -5,7 +5,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
+import { firstDesignationBusinessCategory, normalizeDesignationPeopleModule } from "@/lib/designation-business-categories";
 import { normalizeDesignationCategories } from "@/lib/designation-categories";
+import { designationProfileDestinationAllowed, normalizeDesignationProfileDestination } from "@/lib/designation-profile-destination";
 import { designationPortalOptions } from "@/lib/designation-portal-access";
 import { normalizeCategoryProfileFieldRules } from "@/lib/profile-field-rules";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -53,6 +55,12 @@ function friendlyError(error: unknown, fallback: string) {
   if (message.toLowerCase().includes("is_field_operations")) {
     return "Field Operations setup is pending. Apply the field operations mapping migration, then try again.";
   }
+  if (message.toLowerCase().includes("designation_category")) {
+    return "HR designation classification is not available yet. Apply the committed designation-isolation migration, then try again.";
+  }
+  if (message.toLowerCase().includes("profile_destination")) {
+    return "Profile destination setup is not available yet. Apply the committed designation-isolation migration, then try again.";
+  }
   return message;
 }
 
@@ -96,8 +104,51 @@ async function validateOnboardingRoles(companyId: string, roleIds: string[]) {
 
 function onboardingCategories(formData: FormData) {
   const categories = normalizeDesignationCategories(formData.getAll("onboarding_categories"), []);
-  if (!categories.length) throw new Error("Select at least one workforce category.");
+  if (!categories.length) throw new Error("Select at least one engagement type.");
   return categories;
+}
+
+function registrationCategoryCode(formData: FormData, categories: string[]) {
+  const code = required(formData.get("registration_category_code"), "Registration policy").toLowerCase();
+  if (!categories.includes(code)) throw new Error("Registration policy must be one of the selected engagement types.");
+  return code;
+}
+
+async function peopleDesignationCategoryId(companyId: string, formData: FormData) {
+  const categoryId = required(formData.get("designation_category_id"), "Designation category");
+  const { data, error } = await supabaseAdmin!
+    .from("designation_categories")
+    .select("id, people_module")
+    .eq("id", categoryId)
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const peopleModule = normalizeDesignationPeopleModule(data?.people_module);
+  if (!data || peopleModule !== "people_hr") throw new Error("People Designation Master accepts HR designations only.");
+  return data.id as string;
+}
+
+function peopleProfileDestination(formData: FormData) {
+  const destination = normalizeDesignationProfileDestination(formData.get("profile_destination"));
+  if (!destination || !designationProfileDestinationAllowed("people_hr", destination)) {
+    throw new Error("People Designation Master can route profiles only to People-managed tables.");
+  }
+  return destination;
+}
+
+async function requirePeopleDesignation(companyId: string, designationId: string) {
+  const { data, error } = await supabaseAdmin!
+    .from("designations")
+    .select("id, designation_category:designation_categories!designations_designation_category_id_fkey(id, code, name, people_module, is_active)")
+    .eq("id", designationId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Designation was not found.");
+  if (firstDesignationBusinessCategory(data.designation_category)?.people_module !== "people_hr") {
+    throw new Error("This designation is owned by Workforce and cannot be changed from People.");
+  }
 }
 
 async function validateOnboardingCategories(companyId: string, categories: string[]) {
@@ -109,7 +160,7 @@ async function validateOnboardingCategories(companyId: string, categories: strin
     .in("code", categories);
   if (error) throw new Error(error.message);
   if ((data ?? []).length !== categories.length) {
-    throw new Error("Remove deleted workforce categories before saving this designation.");
+    throw new Error("Remove deleted engagement types before saving this designation.");
   }
 }
 
@@ -117,7 +168,7 @@ function appPageAccess(formData: FormData) {
   return Array.from(new Set(
     formData.getAll("app_page_access")
       .map((value) => String(value ?? "").trim().toLowerCase())
-      .filter((value) => ["dashboard", "attendance", "leave"].includes(value))
+      .filter((value) => ["dashboard", "attendance", "roster", "leave", "performance"].includes(value))
   ));
 }
 
@@ -145,17 +196,23 @@ export async function createDesignation(formData: FormData) {
 
     const code = required(formData.get("code"), "Designation code").toUpperCase();
     const name = required(formData.get("name"), "Designation name");
+    const designationCategoryId = await peopleDesignationCategoryId(companyId, formData);
+    const destination = peopleProfileDestination(formData);
     const categories = onboardingCategories(formData);
+    const registrationCategory = registrationCategoryCode(formData, categories);
     await validateOnboardingCategories(companyId, categories);
     const roleIds = onboardingRoleIds(formData);
     await validateOnboardingRoles(companyId, roleIds);
     const { error } = await supabaseAdmin.from("designations").insert(withCompany({
       code,
       name,
+      designation_category_id: designationCategoryId,
+      profile_destination: destination,
       provider_ids: providerIds(formData),
       model_ids: modelIds(formData),
       location_ids: [],
       onboarding_categories: categories,
+      registration_category_code: registrationCategory,
       profile_field_rules: profileFieldRules(formData, categories),
       app_page_access: appPageAccess(formData),
       onboarding_role_ids: roleIds,
@@ -180,10 +237,14 @@ export async function updateDesignation(formData: FormData) {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
     const id = required(formData.get("id"), "Designation");
+    await requirePeopleDesignation(companyId, id);
     const code = required(formData.get("code"), "Designation code").toUpperCase();
     const name = required(formData.get("name"), "Designation name");
+    const designationCategoryId = await peopleDesignationCategoryId(companyId, formData);
+    const destination = peopleProfileDestination(formData);
     const status = clean(formData.get("status")) === "inactive" ? false : true;
     const categories = onboardingCategories(formData);
+    const registrationCategory = registrationCategoryCode(formData, categories);
     await validateOnboardingCategories(companyId, categories);
     const roleIds = onboardingRoleIds(formData);
     await validateOnboardingRoles(companyId, roleIds);
@@ -193,10 +254,13 @@ export async function updateDesignation(formData: FormData) {
       .update({
         code,
         name,
+        designation_category_id: designationCategoryId,
+        profile_destination: destination,
         provider_ids: providerIds(formData),
         model_ids: modelIds(formData),
         location_ids: [],
         onboarding_categories: categories,
+        registration_category_code: registrationCategory,
         profile_field_rules: profileFieldRules(formData, categories),
         app_page_access: appPageAccess(formData),
         onboarding_role_ids: roleIds,
@@ -223,6 +287,7 @@ export async function deleteDesignation(formData: FormData) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const id = required(formData.get("id"), "Designation");
+    await requirePeopleDesignation(companyId, id);
     const { error } = await supabaseAdmin.from("designations").delete().eq("id", id).eq("company_id", companyId);
     if (error) throw new Error(error.message);
 

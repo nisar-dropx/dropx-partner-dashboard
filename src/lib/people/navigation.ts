@@ -12,8 +12,7 @@ export const peoplePrimaryPageCodes = [
   "vendors",
   "workers",
   "attendance_reports",
-  "attendance_integrity",
-  "raw_punch_reports"
+  "attendance_integrity"
 ] as const;
 
 export const peopleNavItems: NavItem[] = [
@@ -39,28 +38,11 @@ export const peopleNavItems: NavItem[] = [
     icon: "A",
     children: [
       { code: "attendance_reports", label: "Attendance Reports", href: "/attendance" },
-      { code: "attendance_integrity", label: "Attendance Integrity", href: "/attendance/integrity" },
-      { code: "raw_punch_reports", label: "Raw Punches", href: "/reports/raw-punches" },
-      { code: "verification_api_reports", label: "Verification API", href: "/reports/verification-api" },
-      { code: "event_log_reports", label: "Event Log", href: "/reports/event-log" }
+      { code: "attendance_integrity", label: "Attendance Integrity", href: "/attendance/integrity" }
     ]
   },
   { code: "inbox", label: "Inbox", href: "/inbox", icon: "I" },
   { code: "business_documents", label: "Business Docs", href: "/business-documents", icon: "D" },
-  {
-    code: "payments",
-    label: "Payments",
-    icon: "₹",
-    children: [
-      { code: "advance_requests", label: "Advance Request", href: "/payments/advance-request" },
-      { code: "expense_requests", label: "Expense Request", href: "/payments/expense-request" },
-      { code: "payment_requests", label: "Payment Requests", href: "/payments/requests" },
-      { code: "payment_approvals", label: "Approvals", href: "/payments/approvals" },
-      { code: "payment_process", label: "Process", href: "/payments/process" },
-      { code: "workforce_payouts", label: "Workforce Payouts", href: "/payments/workforce-payouts" },
-      { code: "payment_reports", label: "Report", href: "/payments/report" }
-    ]
-  },
   { code: "imports", label: "Report Imports", href: "/imports", icon: "^" },
   {
     code: "notifications",
@@ -87,16 +69,7 @@ export const peopleNavItems: NavItem[] = [
     label: "People Masters",
     icon: "*",
     children: [
-      { code: "master_locations", label: "Locations", href: "/master/location" },
-      { code: "master_providers", label: "Providers", href: "/master/providers" },
-      { code: "payment_methods", label: "Payment Methods", href: "/master/payment-methods" },
-      { code: "master_payment_banks", label: "Payment Banks", href: "/master/payment-banks" },
-      { code: "master_payment_heads", label: "Payment Heads", href: "/master/payment-heads" },
-      { code: "master_contacts", label: "Contacts", href: "/master/contacts" },
-      { code: "workforce_categories", label: "Workforce Categories", href: "/master/workforce-categories" },
-      { code: "workforce_whatsapp", label: "Workforce WhatsApp", href: "/master/workforce-whatsapp" },
-      { code: "designations", label: "Designations", href: "/master/designations" },
-      { code: "biometric_devices", label: "Device Master", href: "/master/biometric-devices" },
+      { code: "designations", label: "HR Designations", href: "/master/designations" },
       { code: "master_documents", label: "Documents", href: "/master/documents" },
       { code: "master_imports", label: "Import Master", href: "/master/imports" }
     ]
@@ -109,9 +82,7 @@ export const peopleNavItems: NavItem[] = [
       { code: "app_settings", label: "General", href: "/settings" },
       { code: "app_settings", label: "DropX ID Generation", href: "/settings/dropx-id-generation?type=dropx_id" },
       { code: "app_settings", label: "Biometric ID Generation", href: "/settings/dropx-id-generation?type=biometric_id" },
-      { code: "app_settings", label: "App Notification", href: "/settings/app-notifications" },
-      { code: "app_settings", label: "Verification APIs", href: "/settings/verification-apis" },
-      { code: "app_settings", label: "Biometric Config", href: "/settings/biometric" }
+      { code: "app_settings", label: "App Notification", href: "/settings/app-notifications" }
     ]
   }
 ];
