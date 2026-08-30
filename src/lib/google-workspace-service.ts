@@ -269,7 +269,8 @@ async function ensureDropxAccess(input: {
   const officialEmail = normalizeEmail(account.primary_email);
   let userId = account.profile_id ?? await linkedUserId(source.companyId, source.personId);
   if (!userId) {
-    const profile = await db().from("profiles").select("id").eq("company_id", source.companyId).ilike("email", officialEmail).maybeSingle();
+    const profile = await db().from("profiles").select("id").eq("company_id", source.companyId)
+      .ilike("email", officialEmail).eq("is_active", true).limit(1).maybeSingle();
     if (profile.error) throw new Error(profile.error.message);
     userId = profile.data?.id ?? await findAuthUserId(officialEmail);
   }
@@ -400,8 +401,10 @@ async function syncManagedGroups(client: GoogleWorkspaceClient, account: Workspa
 async function saveDirectoryUser(companyId: string, user: GoogleDirectoryUser, existing?: WorkspaceAccountRow | null) {
   const email = normalizeEmail(user.primaryEmail);
   const [profileResult, stationResult] = await Promise.all([
-    db().from("profiles").select("id").eq("company_id", companyId).ilike("email", email).maybeSingle(),
-    db().from("stations").select("id").eq("company_id", companyId).ilike("station_email", email).maybeSingle()
+    db().from("profiles").select("id").eq("company_id", companyId)
+      .ilike("email", email).eq("is_active", true).limit(1).maybeSingle(),
+    db().from("stations").select("id").eq("company_id", companyId)
+      .ilike("station_email", email).eq("is_active", true).limit(1).maybeSingle()
   ]);
   if (profileResult.error) throw new Error(profileResult.error.message);
   if (stationResult.error) throw new Error(stationResult.error.message);
