@@ -52,6 +52,27 @@ function cleanEmail(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function decodeMimeHeader(value: string) {
+  return value.replace(/=\?([^?]+)\?([bqBQ])\?([^?]+)\?=/g, (_match, charset: string, encoding: string, data: string) => {
+    try {
+      if (!/^utf-?8$/i.test(charset) && !/^us-ascii$/i.test(charset)) return data;
+      if (encoding.toLowerCase() === "b") return Buffer.from(data, "base64").toString("utf8");
+      return Buffer.from(data.replace(/_/g, " ").replace(/=([0-9a-f]{2})/gi, (_value, hex: string) => String.fromCharCode(Number.parseInt(hex, 16))), "binary").toString("utf8");
+    } catch {
+      return data;
+    }
+  }).trim();
+}
+
+function senderFromHeader(value: string) {
+  const decoded = decodeMimeHeader(value);
+  const bracketed = decoded.match(/^(.*?)\s*<([^>]+)>/);
+  const email = cleanEmail(bracketed?.[2] ?? emailsFromHeader(decoded)[0] ?? decoded);
+  const rawName = (bracketed?.[1] ?? "").trim().replace(/^['"]|['"]$/g, "").trim();
+  const name = rawName && cleanEmail(rawName) !== email ? rawName : "";
+  return { email, name };
+}
+
 function emailsFromHeader(value: string) {
   return value.split(",").map((entry) => {
     const bracketed = entry.match(/<([^>]+)>/);
@@ -97,7 +118,8 @@ function messageRecord(input: {
   message: GoogleMailMessage;
 }) {
   const headers = headersFor(input.message);
-  const from = cleanEmail(emailsFromHeader(headers.get("from") ?? "")[0] ?? headers.get("from"));
+  const sender = senderFromHeader(headers.get("from") ?? "");
+  const from = sender.email;
   const to = emailsFromHeader(headers.get("to") ?? "");
   const cc = emailsFromHeader(headers.get("cc") ?? "");
   const bcc = emailsFromHeader(headers.get("bcc") ?? "");
@@ -119,6 +141,7 @@ function messageRecord(input: {
     google_thread_id: input.message.threadId,
     direction: outbound ? "outbound" : "inbound",
     from_email: from || "unknown",
+    from_name: sender.name,
     to_emails: to,
     cc_emails: cc,
     bcc_emails: bcc,
@@ -134,6 +157,7 @@ function messageRecord(input: {
       in_reply_to: headers.get("in-reply-to") ?? null,
       references: headers.get("references") ?? null,
       delivered_to: headers.get("delivered-to") ?? null,
+      from_header: headers.get("from") ?? null,
       station_address: matchedAddress?.email_address ?? null,
       history_id: input.message.historyId ?? null,
       attachments
@@ -642,19 +666,103 @@ export async function sendLocationMail(input: {
   return sent;
 }
 
+type ScheduledMailRow = {
+  id: string;
+  company_id: string;
+  mailbox_id: string;
+  mailbox_address_id: string;
+  google_thread_id: string | null;
+  in_reply_to: string | null;
+  reference_ids: string | null;
+  to_emails: string[];
+  cc_emails: string[];
+  bcc_emails: string[];
+  subject: string;
+  body_text: string;
+  ops_location_mailbox_addresses: { email_address: string } | Array<{ email_address: string }> | null;
+};
+
+export async function processScheduledLocationMail(limit = 20) {
+  const due = await database().from("ops_mail_scheduled_messages")
+    .select("id,company_id,mailbox_id,mailbox_address_id,google_thread_id,in_reply_to,reference_ids,to_emails,cc_emails,bcc_emails,subject,body_text,ops_location_mailbox_addresses(email_address)")
+    .eq("status", "scheduled").lte("scheduled_for", new Date().toISOString())
+    .order("scheduled_for", { ascending: true }).limit(limit);
+  if (due.error) throw new Error(due.error.message);
+  const summary = { sent: 0, failed: 0, errors: [] as string[] };
+  for (const row of (due.data ?? []) as unknown as ScheduledMailRow[]) {
+    const claimed = await database().from("ops_mail_scheduled_messages").update({
+      status: "sending",
+      last_error: null,
+      updated_at: new Date().toISOString()
+    }).eq("id", row.id).eq("status", "scheduled").select("id").maybeSingle();
+    if (claimed.error || !claimed.data) continue;
+    try {
+      const address = Array.isArray(row.ops_location_mailbox_addresses)
+        ? row.ops_location_mailbox_addresses[0]
+        : row.ops_location_mailbox_addresses;
+      if (!address?.email_address) throw new Error("Scheduled sender address is unavailable.");
+      const sent = await sendLocationMail({
+        companyId: row.company_id,
+        mailboxId: row.mailbox_id,
+        fromAddress: address.email_address,
+        to: row.to_emails,
+        cc: row.cc_emails,
+        bcc: row.bcc_emails,
+        subject: row.subject,
+        body: row.body_text,
+        threadId: row.google_thread_id,
+        inReplyTo: row.in_reply_to,
+        references: row.reference_ids
+      });
+      const completed = await database().from("ops_mail_scheduled_messages").update({
+        status: "sent",
+        google_message_id: sent.id,
+        sent_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }).eq("id", row.id);
+      if (completed.error) throw new Error(completed.error.message);
+      summary.sent += 1;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Scheduled email failed.";
+      await database().from("ops_mail_scheduled_messages").update({
+        status: "failed",
+        last_error: message,
+        updated_at: new Date().toISOString()
+      }).eq("id", row.id);
+      summary.failed += 1;
+      summary.errors.push(`${row.id}: ${message}`);
+    }
+  }
+  return summary;
+}
+
 export async function updateLocationMailMessage(input: {
-  action: "archive" | "mark_read" | "mark_unread" | "star" | "trash" | "unstar" | "untrash";
+  action: "archive" | "mark_read" | "mark_unread" | "snooze" | "star" | "trash" | "unsnooze" | "unstar" | "untrash";
   companyId: string;
   mailboxId: string;
   messageId: string;
+  snoozedUntil?: string | null;
   stationId: string;
 }) {
   const { mailbox } = await loadMailbox(input.companyId, input.mailboxId);
   const result = await database().from("ops_location_mail_messages")
-    .select("id,google_message_id,label_ids,is_read")
+    .select("id,google_message_id,google_thread_id,label_ids,is_read")
     .eq("company_id", input.companyId).eq("mailbox_id", input.mailboxId)
     .eq("station_id", input.stationId).eq("id", input.messageId).maybeSingle();
   if (result.error || !result.data) throw new Error(result.error?.message ?? "Mail message was not found.");
+  if (input.action === "snooze" || input.action === "unsnooze") {
+    const snoozedUntil = input.action === "snooze" ? input.snoozedUntil : null;
+    if (input.action === "snooze" && (!snoozedUntil || new Date(snoozedUntil).getTime() <= Date.now())) {
+      throw new Error("Choose a future snooze time.");
+    }
+    const snoozed = await database().from("ops_location_mail_messages").update({
+      snoozed_until: snoozedUntil,
+      updated_at: new Date().toISOString()
+    }).eq("company_id", input.companyId).eq("mailbox_id", input.mailboxId)
+      .eq("station_id", input.stationId).eq("google_thread_id", result.data.google_thread_id);
+    if (snoozed.error) throw new Error(snoozed.error.message);
+    return;
+  }
   const client = new GoogleLocationMailClient(mailbox.credential_email);
   const current = new Set<string>((result.data.label_ids as string[] | null) ?? []);
   if (input.action === "trash") {

@@ -211,15 +211,20 @@ export async function updateMailMessageAction(formData: FormData) {
   const mailboxId = clean(formData.get("mailbox_id"));
   const stationAddressId = clean(formData.get("station_address_id"));
   const folder = clean(formData.get("folder")) || "inbox";
-  const action = clean(formData.get("mail_action")) as "archive" | "mark_read" | "mark_unread" | "star" | "trash" | "unstar" | "untrash";
+  const action = clean(formData.get("mail_action")) as "archive" | "mark_read" | "mark_unread" | "snooze" | "star" | "trash" | "unsnooze" | "unstar" | "untrash";
   try {
     const stationAddress = await stationAddressAccess(companyId, mailboxId, stationAddressId, authorization);
-    if (!["archive", "mark_read", "mark_unread", "star", "trash", "unstar", "untrash"].includes(action)) throw new Error("Choose a valid mail action.");
+    if (!["archive", "mark_read", "mark_unread", "snooze", "star", "trash", "unsnooze", "unstar", "untrash"].includes(action)) throw new Error("Choose a valid mail action.");
+    const snoozeFor = clean(formData.get("snooze_for"));
+    const snoozedUntil = action === "snooze"
+      ? new Date(Date.now() + (snoozeFor === "week" ? 7 * 24 : snoozeFor === "tomorrow" ? 24 : 3) * 60 * 60 * 1000).toISOString()
+      : null;
     await updateLocationMailMessage({
       action,
       companyId,
       mailboxId,
       messageId: required(formData.get("message_id"), "Message"),
+      snoozedUntil,
       stationId: stationAddress.station_id
     });
     revalidatePath("/ops-pulse/mail");
@@ -227,6 +232,180 @@ export async function updateMailMessageAction(formData: FormData) {
   } catch (error) {
     if (isRedirect(error)) throw error;
     finish({ mailboxId, stationAddressId, folder, error: error instanceof Error ? error.message : "Mail could not be updated." });
+  }
+}
+
+function scheduledInstant(value: FormDataEntryValue | null) {
+  const raw = required(value, "Scheduled date and time");
+  const parsed = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw) ? new Date(`${raw}:00+05:30`) : new Date(raw);
+  if (Number.isNaN(parsed.getTime())) throw new Error("Choose a valid scheduled date and time.");
+  if (parsed.getTime() < Date.now() + 5 * 60 * 1000) throw new Error("Schedule mail at least 5 minutes from now.");
+  if (parsed.getTime() > Date.now() + 90 * 24 * 60 * 60 * 1000) throw new Error("Scheduled mail is limited to the next 90 days.");
+  return parsed.toISOString();
+}
+
+export async function scheduleLocationMailAction(formData: FormData) {
+  const authorization = await requirePagePermission("ops_location_mail", "edit");
+  const companyId = requireCompanyId(authorization);
+  const mailboxId = clean(formData.get("mailbox_id"));
+  const stationAddressId = clean(formData.get("station_address_id"));
+  const threadId = clean(formData.get("thread_id")) || null;
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const stationAddress = await stationAddressAccess(companyId, mailboxId, stationAddressId, authorization);
+    const attached = formData.getAll("attachments").some((value) => value instanceof File && value.size > 0);
+    if (attached) throw new Error("Scheduled emails cannot include attachments yet. Remove the files or send the email now.");
+    const to = parseEmails(formData.get("to"));
+    if (!to.length) throw new Error("At least one recipient is required.");
+    const saved = await supabaseAdmin.from("ops_mail_scheduled_messages").insert({
+      company_id: companyId,
+      mailbox_id: mailboxId,
+      mailbox_address_id: stationAddressId,
+      station_id: stationAddress.station_id,
+      google_thread_id: threadId,
+      in_reply_to: clean(formData.get("in_reply_to")) || null,
+      reference_ids: clean(formData.get("references")) || null,
+      to_emails: to,
+      cc_emails: parseEmails(formData.get("cc")),
+      bcc_emails: parseEmails(formData.get("bcc")),
+      subject: required(formData.get("subject"), "Subject"),
+      body_text: required(formData.get("body"), "Message"),
+      scheduled_for: scheduledInstant(formData.get("scheduled_for")),
+      status: "scheduled",
+      created_by: authorization.userId,
+      updated_at: new Date().toISOString()
+    }).select("id").single();
+    if (saved.error) throw new Error(saved.error.message);
+    const draftId = clean(formData.get("draft_id"));
+    if (draftId) {
+      const removed = await supabaseAdmin.from("ops_mail_drafts").delete()
+        .eq("company_id", companyId).eq("id", draftId).eq("mailbox_address_id", stationAddressId);
+      if (removed.error) throw new Error(removed.error.message);
+    }
+    revalidatePath("/ops-pulse/mail");
+    finish({ mailboxId, stationAddressId, folder: "scheduled", notice: "Email scheduled successfully." });
+  } catch (error) {
+    if (isRedirect(error)) throw error;
+    finish({ mailboxId, stationAddressId, compose: true, threadId: threadId ?? undefined, error: error instanceof Error ? error.message : "Email could not be scheduled." });
+  }
+}
+
+export async function cancelScheduledMailAction(formData: FormData) {
+  const authorization = await requirePagePermission("ops_location_mail", "edit");
+  const companyId = requireCompanyId(authorization);
+  const mailboxId = clean(formData.get("mailbox_id"));
+  const stationAddressId = clean(formData.get("station_address_id"));
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    await stationAddressAccess(companyId, mailboxId, stationAddressId, authorization);
+    const saved = await supabaseAdmin.from("ops_mail_scheduled_messages").update({
+      status: "cancelled",
+      cancelled_by: authorization.userId,
+      updated_at: new Date().toISOString()
+    }).eq("company_id", companyId).eq("mailbox_address_id", stationAddressId)
+      .eq("id", required(formData.get("scheduled_id"), "Scheduled email")).in("status", ["scheduled", "failed"]);
+    if (saved.error) throw new Error(saved.error.message);
+    revalidatePath("/ops-pulse/mail");
+    finish({ mailboxId, stationAddressId, folder: "scheduled", notice: "Scheduled email cancelled." });
+  } catch (error) {
+    if (isRedirect(error)) throw error;
+    finish({ mailboxId, stationAddressId, folder: "scheduled", error: error instanceof Error ? error.message : "Scheduled email could not be cancelled." });
+  }
+}
+
+export async function bulkUpdateMailMessagesAction(formData: FormData) {
+  const authorization = await requirePagePermission("ops_location_mail", "edit");
+  const companyId = requireCompanyId(authorization);
+  const mailboxId = clean(formData.get("mailbox_id"));
+  const stationAddressId = clean(formData.get("station_address_id"));
+  const folder = clean(formData.get("folder")) || "inbox";
+  const action = clean(formData.get("bulk_action")) as "archive" | "mark_read" | "mark_unread" | "star" | "trash";
+  try {
+    const stationAddress = await stationAddressAccess(companyId, mailboxId, stationAddressId, authorization);
+    if (!["archive", "mark_read", "mark_unread", "star", "trash"].includes(action)) throw new Error("Choose a valid bulk action.");
+    const messageIds = Array.from(new Set(formData.getAll("message_ids").map((value) => clean(value)).filter(Boolean))).slice(0, 100);
+    if (!messageIds.length) throw new Error("Select at least one conversation.");
+    for (const messageId of messageIds) {
+      await updateLocationMailMessage({ action, companyId, mailboxId, messageId, stationId: stationAddress.station_id });
+    }
+    revalidatePath("/ops-pulse/mail");
+    finish({ mailboxId, stationAddressId, folder, notice: `${messageIds.length} conversation${messageIds.length === 1 ? "" : "s"} updated.` });
+  } catch (error) {
+    if (isRedirect(error)) throw error;
+    finish({ mailboxId, stationAddressId, folder, error: error instanceof Error ? error.message : "Bulk mail action failed." });
+  }
+}
+
+export async function updateMailThreadStateAction(formData: FormData) {
+  const authorization = await requirePagePermission("ops_location_mail", "edit");
+  const companyId = requireCompanyId(authorization);
+  const mailboxId = clean(formData.get("mailbox_id"));
+  const stationAddressId = clean(formData.get("station_address_id"));
+  const folder = clean(formData.get("folder")) || "inbox";
+  const threadId = required(formData.get("thread_id"), "Conversation");
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const stationAddress = await stationAddressAccess(companyId, mailboxId, stationAddressId, authorization);
+    const workflowStatus = clean(formData.get("workflow_status")) || "open";
+    const priority = clean(formData.get("priority")) || "normal";
+    if (!["open", "pending", "resolved"].includes(workflowStatus)) throw new Error("Choose a valid conversation status.");
+    if (!["normal", "high", "urgent"].includes(priority)) throw new Error("Choose a valid priority.");
+    const assignedTo = clean(formData.get("assigned_to")) || null;
+    if (assignedTo) {
+      const assignee = await supabaseAdmin.from("profiles").select("id").eq("company_id", companyId).eq("id", assignedTo).maybeSingle();
+      if (assignee.error || !assignee.data) throw new Error("Choose a valid DropX assignee.");
+    }
+    const followUpRaw = clean(formData.get("follow_up_at"));
+    const followUpAt = followUpRaw ? new Date(`${followUpRaw}:00+05:30`) : null;
+    if (followUpAt && Number.isNaN(followUpAt.getTime())) throw new Error("Choose a valid follow-up time.");
+    const saved = await supabaseAdmin.from("ops_mail_thread_states").upsert({
+      company_id: companyId,
+      mailbox_address_id: stationAddressId,
+      station_id: stationAddress.station_id,
+      google_thread_id: threadId,
+      workflow_status: workflowStatus,
+      priority,
+      assigned_to: assignedTo,
+      follow_up_at: followUpAt?.toISOString() ?? null,
+      created_by: authorization.userId,
+      updated_by: authorization.userId,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "company_id,mailbox_address_id,google_thread_id" });
+    if (saved.error) throw new Error(saved.error.message);
+    revalidatePath("/ops-pulse/mail");
+    finish({ mailboxId, stationAddressId, folder, threadId, notice: "Conversation ownership updated." });
+  } catch (error) {
+    if (isRedirect(error)) throw error;
+    finish({ mailboxId, stationAddressId, folder, threadId, error: error instanceof Error ? error.message : "Conversation ownership could not be updated." });
+  }
+}
+
+export async function addMailThreadNoteAction(formData: FormData) {
+  const authorization = await requirePagePermission("ops_location_mail", "edit");
+  const companyId = requireCompanyId(authorization);
+  const mailboxId = clean(formData.get("mailbox_id"));
+  const stationAddressId = clean(formData.get("station_address_id"));
+  const folder = clean(formData.get("folder")) || "inbox";
+  const threadId = required(formData.get("thread_id"), "Conversation");
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const stationAddress = await stationAddressAccess(companyId, mailboxId, stationAddressId, authorization);
+    const note = required(formData.get("note"), "Internal note");
+    if (note.length > 2000) throw new Error("Internal notes are limited to 2,000 characters.");
+    const saved = await supabaseAdmin.from("ops_mail_thread_notes").insert({
+      company_id: companyId,
+      mailbox_address_id: stationAddressId,
+      station_id: stationAddress.station_id,
+      google_thread_id: threadId,
+      note,
+      created_by: authorization.userId
+    });
+    if (saved.error) throw new Error(saved.error.message);
+    revalidatePath("/ops-pulse/mail");
+    finish({ mailboxId, stationAddressId, folder, threadId, notice: "Internal note added." });
+  } catch (error) {
+    if (isRedirect(error)) throw error;
+    finish({ mailboxId, stationAddressId, folder, threadId, error: error instanceof Error ? error.message : "Internal note could not be added." });
   }
 }
 

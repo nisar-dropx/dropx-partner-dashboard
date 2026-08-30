@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { workspaceCredentialsConfigured } from "@/lib/google-workspace-client";
-import { syncLocationMailbox } from "@/lib/ops-pulse/location-mail";
+import { processScheduledLocationMail, syncLocationMailbox } from "@/lib/ops-pulse/location-mail";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +18,12 @@ export async function GET(request: Request) {
     .eq("sync_enabled", true).in("status", ["active", "error"]).order("last_synced_at", { ascending: true, nullsFirst: true }).limit(20);
   if (result.error) return NextResponse.json({ error: result.error.message }, { status: 500 });
 
-  const summary = { mailboxes: 0, messages: 0, errors: [] as string[] };
+  const scheduled = await processScheduledLocationMail(20).catch((error) => ({
+    sent: 0,
+    failed: 1,
+    errors: [error instanceof Error ? error.message : "Scheduled mail processing failed."]
+  }));
+  const summary = { mailboxes: 0, messages: 0, scheduledSent: scheduled.sent, scheduledFailed: scheduled.failed, errors: [...scheduled.errors] as string[] };
   for (const mailbox of result.data ?? []) {
     try {
       const sync = await syncLocationMailbox(mailbox.company_id, mailbox.id);
