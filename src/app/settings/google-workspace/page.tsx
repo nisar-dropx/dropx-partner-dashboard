@@ -345,7 +345,7 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
       <section className="panel" id="central-location-mailbox">
         <div className="panel-head toolbar">
           <div>
-            <h2>Central location mailbox pilot</h2>
+            <h2>Central operational mailbox pilot</h2>
             <p className="subtle">Test one station through the central inbox without suspending, renaming, deleting or cutting over any existing location account.</p>
           </div>
           <StatusPill status={centralMailbox ? `${activeCentralAddresses.length} station addresses` : "Not configured"} />
@@ -368,7 +368,7 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
                 confirmDescription="This creates or reuses one unlicensed Google Group route for the selected pilot station. No existing Google account is suspended, renamed, deleted or cut over."
                 confirmMessage="Configure this one-station pilot now?"
                 confirmSubmitText="Configure pilot"
-                confirmTitle="Start location-mail pilot"
+                confirmTitle="Start Mail pilot"
                 disabled={!permission?.canEdit || !workspaceCredentialsConfigured()}
                 pendingText="Configuring pilot"
               >Create / configure pilot</SubmitButton>

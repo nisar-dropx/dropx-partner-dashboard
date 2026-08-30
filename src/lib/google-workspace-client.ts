@@ -413,13 +413,18 @@ export type GoogleMailMessage = {
   payload?: {
     mimeType?: string;
     headers?: Array<{ name: string; value: string }>;
-    body?: { data?: string };
+    body?: { attachmentId?: string; data?: string; size?: number };
     parts?: Array<{
       mimeType?: string;
       filename?: string;
       headers?: Array<{ name: string; value: string }>;
-      body?: { data?: string };
-      parts?: Array<{ mimeType?: string; body?: { data?: string } }>;
+      body?: { attachmentId?: string; data?: string; size?: number };
+      parts?: Array<{
+        mimeType?: string;
+        filename?: string;
+        headers?: Array<{ name: string; value: string }>;
+        body?: { attachmentId?: string; data?: string; size?: number };
+      }>;
     }>;
   };
 };
@@ -498,6 +503,27 @@ export class GoogleLocationMailClient {
     });
   }
 
+  getAttachment(messageId: string, attachmentId: string) {
+    return this.request<{ attachmentId?: string; data: string; size?: number }>(
+      `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`
+    );
+  }
+
+  modifyMessage(messageId: string, input: { addLabelIds?: string[]; removeLabelIds?: string[] }) {
+    return this.request<GoogleMailMessage>(`/messages/${encodeURIComponent(messageId)}/modify`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  }
+
+  trashMessage(messageId: string) {
+    return this.request<GoogleMailMessage>(`/messages/${encodeURIComponent(messageId)}/trash`, { method: "POST" });
+  }
+
+  untrashMessage(messageId: string) {
+    return this.request<GoogleMailMessage>(`/messages/${encodeURIComponent(messageId)}/untrash`, { method: "POST" });
+  }
+
   async listSendAs() {
     const result = await this.request<{ sendAs?: GoogleSendAs[] }>("/settings/sendAs");
     return result.sendAs ?? [];
@@ -515,10 +541,18 @@ export class GoogleLocationMailClient {
     });
   }
 
-  markRead(messageId: string) {
-    return this.request<void>(`/messages/${encodeURIComponent(messageId)}/modify`, {
-      method: "POST",
-      body: JSON.stringify({ removeLabelIds: ["UNREAD"] })
+  updateSendAs(input: { email: string; displayName: string }) {
+    return this.request<GoogleSendAs>(`/settings/sendAs/${encodeURIComponent(input.email)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        displayName: input.displayName,
+        replyToAddress: input.email,
+        treatAsAlias: true
+      })
     });
+  }
+
+  markRead(messageId: string) {
+    return this.modifyMessage(messageId, { removeLabelIds: ["UNREAD"] });
   }
 }

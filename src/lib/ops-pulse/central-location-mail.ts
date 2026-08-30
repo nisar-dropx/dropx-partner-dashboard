@@ -66,7 +66,7 @@ export async function provisionCentralLocationMailbox(input: {
     googleUser = await directory.createUser({
       primaryEmail: centralEmail,
       givenName: "DropX",
-      familyName: "Location Desk",
+      familyName: "Mail Desk",
       password: `${randomBytes(30).toString("base64url")}Aa1!`,
       orgUnitPath: settingsResult.data.default_org_unit_path || "/",
       changePasswordAtNextLogin: false
@@ -78,7 +78,7 @@ export async function provisionCentralLocationMailbox(input: {
     company_id: input.companyId,
     google_user_id: googleUser.id,
     primary_email: clean(googleUser.primaryEmail),
-    full_name: googleUser.name?.fullName || "DropX Location Desk",
+    full_name: googleUser.name?.fullName || "DropX Mail Desk",
     org_unit_path: googleUser.orgUnitPath || settingsResult.data.default_org_unit_path || "/",
     account_type: "service",
     account_state: googleUser.suspended ? "suspended" : "active",
@@ -131,7 +131,7 @@ export async function provisionCentralLocationMailbox(input: {
       if (!verificationStatus) {
         const sendAs = await gmail.createSendAs({
           email: stationRoute.email,
-          displayName: `${stationRoute.station.station_code} · ${stationRoute.station.station_name || "DropX Location"}`
+          displayName: `${stationRoute.station.station_code} DropX Logistics`
         });
         verificationStatus = sendAs.verificationStatus ?? "pending";
       }

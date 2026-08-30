@@ -21,7 +21,7 @@ const commonStart: NavItem[] = [
 
 const reports: NavItem = { code: "ops_reports", label: "Reports", href: "/reports", icon: "R" };
 const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Attendance", href: "/attendance", icon: "T" };
-const locationMail: NavItem = { code: "ops_location_mail", label: "Location Mail", href: "/mail", icon: "M" };
+const locationMail: NavItem = { code: "ops_location_mail", label: "Mail", href: "/mail", icon: "M" };
 
 const businessDocuments: NavItem = {
   code: "business_documents",

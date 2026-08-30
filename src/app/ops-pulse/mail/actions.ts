@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { sendLocationMail, syncLocationMailbox } from "@/lib/ops-pulse/location-mail";
+import { GoogleLocationMailClient } from "@/lib/google-workspace-client";
+import { sendLocationMail, syncLocationMailbox, updateLocationMailMessage } from "@/lib/ops-pulse/location-mail";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function clean(value: FormDataEntryValue | null) {
@@ -30,7 +31,7 @@ function isRedirect(error: unknown) {
   return String((error as { digest?: unknown })?.digest ?? "").startsWith("NEXT_REDIRECT");
 }
 
-function finish(input: { error?: string; notice?: string; mailboxId?: string; stationAddressId?: string; threadId?: string }): never {
+function finish(input: { compose?: boolean; draftId?: string; error?: string; folder?: string; notice?: string; mailboxId?: string; stationAddressId?: string; threadId?: string }): never {
   cookies().set("dropx_location_mail_flash", JSON.stringify({ error: input.error, notice: input.notice }), {
     httpOnly: true,
     maxAge: 45,
@@ -41,7 +42,22 @@ function finish(input: { error?: string; notice?: string; mailboxId?: string; st
   if (input.mailboxId) params.set("mailbox", input.mailboxId);
   if (input.stationAddressId) params.set("station", input.stationAddressId);
   if (input.threadId) params.set("thread", input.threadId);
+  if (input.folder) params.set("folder", input.folder);
+  if (input.compose) params.set("compose", "1");
+  if (input.draftId) params.set("draft", input.draftId);
   redirect(`/mail${params.size ? `?${params}` : ""}`);
+}
+
+async function attachments(formData: FormData) {
+  const values = formData.getAll("attachments").filter((value): value is File => value instanceof File && value.size > 0);
+  if (values.length > 10) throw new Error("Attach a maximum of 10 files.");
+  const total = values.reduce((sum, file) => sum + file.size, 0);
+  if (total > 20 * 1024 * 1024) throw new Error("Attachments must total 20 MB or less.");
+  return Promise.all(values.map(async (file) => ({
+    content: Buffer.from(await file.arrayBuffer()),
+    filename: file.name || "attachment",
+    mimeType: file.type || "application/octet-stream"
+  })));
 }
 
 async function stationAddressAccess(
@@ -109,16 +125,148 @@ export async function sendLocationMailAction(formData: FormData) {
       fromAddress: stationAddress.email_address,
       to,
       cc: parseEmails(formData.get("cc")),
+      bcc: parseEmails(formData.get("bcc")),
       subject: required(formData.get("subject"), "Subject"),
       body: required(formData.get("body"), "Message"),
+      attachments: await attachments(formData),
       threadId,
       inReplyTo: clean(formData.get("in_reply_to")) || null,
       references: clean(formData.get("references")) || null
     });
+    const draftId = clean(formData.get("draft_id"));
+    if (draftId && supabaseAdmin) {
+      const removed = await supabaseAdmin.from("ops_mail_drafts").delete()
+        .eq("company_id", companyId).eq("id", draftId).eq("mailbox_address_id", stationAddressId);
+      if (removed.error) throw new Error(removed.error.message);
+    }
     revalidatePath("/ops-pulse/mail");
     finish({ mailboxId, stationAddressId, threadId: result.threadId, notice: `Email sent as ${stationAddress.email_address}.` });
   } catch (error) {
     if (isRedirect(error)) throw error;
     finish({ mailboxId, stationAddressId, threadId: threadId ?? undefined, error: error instanceof Error ? error.message : "Email could not be sent." });
+  }
+}
+
+export async function saveMailDraftAction(formData: FormData) {
+  const authorization = await requirePagePermission("ops_location_mail", "edit");
+  const companyId = requireCompanyId(authorization);
+  const mailboxId = clean(formData.get("mailbox_id"));
+  const stationAddressId = clean(formData.get("station_address_id"));
+  const draftId = clean(formData.get("draft_id"));
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    if (!mailboxId || !stationAddressId) throw new Error("Mailbox and station address are required.");
+    const stationAddress = await stationAddressAccess(companyId, mailboxId, stationAddressId, authorization);
+    const values = {
+      company_id: companyId,
+      mailbox_id: mailboxId,
+      mailbox_address_id: stationAddressId,
+      station_id: stationAddress.station_id,
+      google_thread_id: clean(formData.get("thread_id")) || null,
+      in_reply_to: clean(formData.get("in_reply_to")) || null,
+      reference_ids: clean(formData.get("references")) || null,
+      to_emails: parseEmails(formData.get("to")),
+      cc_emails: parseEmails(formData.get("cc")),
+      bcc_emails: parseEmails(formData.get("bcc")),
+      subject: clean(formData.get("subject")),
+      body_text: clean(formData.get("body")),
+      updated_by: authorization.userId,
+      updated_at: new Date().toISOString()
+    };
+    const result = draftId
+      ? await supabaseAdmin.from("ops_mail_drafts").update(values).eq("company_id", companyId).eq("id", draftId).select("id").single()
+      : await supabaseAdmin.from("ops_mail_drafts").insert({ ...values, created_by: authorization.userId }).select("id").single();
+    if (result.error) throw new Error(result.error.message);
+    revalidatePath("/ops-pulse/mail");
+    finish({ mailboxId, stationAddressId, draftId: result.data.id, folder: "drafts", notice: "Draft saved." });
+  } catch (error) {
+    if (isRedirect(error)) throw error;
+    finish({ mailboxId, stationAddressId, compose: true, draftId: draftId || undefined, error: error instanceof Error ? error.message : "Draft could not be saved." });
+  }
+}
+
+export async function deleteMailDraftAction(formData: FormData) {
+  const authorization = await requirePagePermission("ops_location_mail", "edit");
+  const companyId = requireCompanyId(authorization);
+  const mailboxId = clean(formData.get("mailbox_id"));
+  const stationAddressId = clean(formData.get("station_address_id"));
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    await stationAddressAccess(companyId, mailboxId, stationAddressId, authorization);
+    const result = await supabaseAdmin.from("ops_mail_drafts").delete()
+      .eq("company_id", companyId).eq("id", required(formData.get("draft_id"), "Draft"))
+      .eq("mailbox_address_id", stationAddressId);
+    if (result.error) throw new Error(result.error.message);
+    revalidatePath("/ops-pulse/mail");
+    finish({ mailboxId, stationAddressId, folder: "drafts", notice: "Draft deleted." });
+  } catch (error) {
+    if (isRedirect(error)) throw error;
+    finish({ mailboxId, stationAddressId, folder: "drafts", error: error instanceof Error ? error.message : "Draft could not be deleted." });
+  }
+}
+
+export async function updateMailMessageAction(formData: FormData) {
+  const authorization = await requirePagePermission("ops_location_mail", "edit");
+  const companyId = requireCompanyId(authorization);
+  const mailboxId = clean(formData.get("mailbox_id"));
+  const stationAddressId = clean(formData.get("station_address_id"));
+  const folder = clean(formData.get("folder")) || "inbox";
+  const action = clean(formData.get("mail_action")) as "archive" | "mark_read" | "mark_unread" | "star" | "trash" | "unstar" | "untrash";
+  try {
+    const stationAddress = await stationAddressAccess(companyId, mailboxId, stationAddressId, authorization);
+    if (!["archive", "mark_read", "mark_unread", "star", "trash", "unstar", "untrash"].includes(action)) throw new Error("Choose a valid mail action.");
+    await updateLocationMailMessage({
+      action,
+      companyId,
+      mailboxId,
+      messageId: required(formData.get("message_id"), "Message"),
+      stationId: stationAddress.station_id
+    });
+    revalidatePath("/ops-pulse/mail");
+    finish({ mailboxId, stationAddressId, folder, notice: "Mail updated." });
+  } catch (error) {
+    if (isRedirect(error)) throw error;
+    finish({ mailboxId, stationAddressId, folder, error: error instanceof Error ? error.message : "Mail could not be updated." });
+  }
+}
+
+export async function saveMailSenderProfileAction(formData: FormData) {
+  const authorization = await requirePagePermission("ops_location_mail", "edit");
+  const companyId = requireCompanyId(authorization);
+  const mailboxId = clean(formData.get("mailbox_id"));
+  const stationAddressId = clean(formData.get("station_address_id"));
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const address = await stationAddressAccess(companyId, mailboxId, stationAddressId, authorization);
+    const senderDisplayName = required(formData.get("sender_display_name"), "Sender display name");
+    const accentColor = clean(formData.get("accent_color"));
+    if (!/^#[0-9a-f]{6}$/i.test(accentColor)) throw new Error("Choose a valid signature accent colour.");
+    const logoUrl = clean(formData.get("logo_url"));
+    if (logoUrl && (!URL.canParse(logoUrl) || new URL(logoUrl).protocol !== "https:")) throw new Error("Logo URL must be a secure HTTPS address.");
+    const mailbox = await supabaseAdmin.from("ops_location_mailboxes").select("credential_email")
+      .eq("company_id", companyId).eq("id", mailboxId).maybeSingle();
+    if (mailbox.error || !mailbox.data) throw new Error(mailbox.error?.message ?? "Mailbox was not found.");
+    const gmail = new GoogleLocationMailClient(mailbox.data.credential_email);
+    await gmail.updateSendAs({ email: address.email_address, displayName: senderDisplayName });
+    const saved = await supabaseAdmin.from("ops_mail_sender_profiles").upsert({
+      company_id: companyId,
+      mailbox_address_id: stationAddressId,
+      sender_display_name: senderDisplayName,
+      station_label: required(formData.get("station_label"), "Station name"),
+      contact_name: required(formData.get("contact_name"), "TL name"),
+      contact_title: required(formData.get("contact_title"), "Contact title"),
+      contact_mobile: required(formData.get("contact_mobile"), "TL mobile number"),
+      logo_url: logoUrl,
+      accent_color: accentColor,
+      signature_enabled: formData.get("signature_enabled") === "true",
+      updated_by: authorization.userId,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "company_id,mailbox_address_id" });
+    if (saved.error) throw new Error(saved.error.message);
+    revalidatePath("/ops-pulse/mail");
+    finish({ mailboxId, stationAddressId, notice: `Sender identity updated to ${senderDisplayName}.` });
+  } catch (error) {
+    if (isRedirect(error)) throw error;
+    finish({ mailboxId, stationAddressId, error: error instanceof Error ? error.message : "Sender identity could not be saved." });
   }
 }

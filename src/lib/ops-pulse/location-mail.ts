@@ -21,8 +21,26 @@ type MailboxAddressRow = {
 
 type MimePart = {
   mimeType?: string;
-  body?: { data?: string };
+  filename?: string;
+  body?: { attachmentId?: string; data?: string; size?: number };
   parts?: MimePart[];
+};
+
+export type MailAttachmentInput = {
+  content: Buffer;
+  filename: string;
+  mimeType: string;
+};
+
+export type MailSenderProfile = {
+  accent_color: string;
+  contact_mobile: string;
+  contact_name: string;
+  contact_title: string;
+  logo_url: string;
+  sender_display_name: string;
+  signature_enabled: boolean;
+  station_label: string;
 };
 
 function database() {
@@ -54,6 +72,20 @@ function collectBodies(part: MimePart | undefined, result = { text: "", html: ""
   return result;
 }
 
+function collectAttachments(part: MimePart | undefined, result: Array<{ attachmentId: string; filename: string; mimeType: string; size: number }> = []) {
+  if (!part) return result;
+  if (part.filename && part.body?.attachmentId) {
+    result.push({
+      attachmentId: part.body.attachmentId,
+      filename: part.filename,
+      mimeType: part.mimeType || "application/octet-stream",
+      size: Number(part.body.size ?? 0)
+    });
+  }
+  for (const child of part.parts ?? []) collectAttachments(child, result);
+  return result;
+}
+
 function headersFor(message: GoogleMailMessage) {
   return new Map((message.payload?.headers ?? []).map((header) => [header.name.toLowerCase(), header.value]));
 }
@@ -68,12 +100,14 @@ function messageRecord(input: {
   const from = cleanEmail(emailsFromHeader(headers.get("from") ?? "")[0] ?? headers.get("from"));
   const to = emailsFromHeader(headers.get("to") ?? "");
   const cc = emailsFromHeader(headers.get("cc") ?? "");
+  const bcc = emailsFromHeader(headers.get("bcc") ?? "");
   const deliveredTo = emailsFromHeader(headers.get("delivered-to") ?? "");
   const recipients = new Set([...to, ...cc, ...deliveredTo]);
   const outboundAddress = input.addresses.find((address) => cleanEmail(address.email_address) === from);
   const matchedAddress = outboundAddress ?? input.addresses.find((address) => recipients.has(cleanEmail(address.email_address)));
   const outbound = from === cleanEmail(input.mailbox.credential_email) || Boolean(outboundAddress);
   const bodies = collectBodies(input.message.payload as MimePart | undefined);
+  const attachments = collectAttachments(input.message.payload as MimePart | undefined);
   const sentAt = input.message.internalDate && /^\d+$/.test(input.message.internalDate)
     ? new Date(Number(input.message.internalDate)).toISOString()
     : new Date(headers.get("date") ?? Date.now()).toISOString();
@@ -87,19 +121,22 @@ function messageRecord(input: {
     from_email: from || "unknown",
     to_emails: to,
     cc_emails: cc,
+    bcc_emails: bcc,
     subject: headers.get("subject") ?? "(no subject)",
     snippet: input.message.snippet ?? "",
     body_text: bodies.text || null,
     body_html: bodies.html || null,
     sent_at: sentAt,
     is_read: !(input.message.labelIds ?? []).includes("UNREAD"),
+    label_ids: input.message.labelIds ?? [],
     metadata: {
       message_id: headers.get("message-id") ?? null,
       in_reply_to: headers.get("in-reply-to") ?? null,
       references: headers.get("references") ?? null,
       delivered_to: headers.get("delivered-to") ?? null,
       station_address: matchedAddress?.email_address ?? null,
-      history_id: input.message.historyId ?? null
+      history_id: input.message.historyId ?? null,
+      attachments
     },
     updated_at: new Date().toISOString()
   };
@@ -201,7 +238,7 @@ export async function configureCentralLocationMailboxPilotMapping(input: {
     const updated = await database().from("ops_location_mailboxes").update({
       workspace_account_id: input.workspaceAccountId,
       credential_email: credentialEmail,
-      display_name: "Central Location Mailbox · Pilot",
+      display_name: "Central Ops Mailbox · Pilot",
       status: "active",
       sync_enabled: true,
       mailbox_mode: "central_routed",
@@ -214,7 +251,7 @@ export async function configureCentralLocationMailboxPilotMapping(input: {
       company_id: input.companyId,
       workspace_account_id: input.workspaceAccountId,
       credential_email: credentialEmail,
-      display_name: "Central Location Mailbox · Pilot",
+      display_name: "Central Ops Mailbox · Pilot",
       status: "active",
       sync_enabled: true,
       mailbox_mode: "central_routed",
@@ -305,7 +342,7 @@ export async function configureCentralLocationMailboxMapping(input: {
     const updated = await database().from("ops_location_mailboxes").update({
       workspace_account_id: input.workspaceAccountId,
       credential_email: credentialEmail,
-      display_name: "Central Location Mailbox",
+      display_name: "Central Ops Mailbox",
       status: "active",
       sync_enabled: true,
       mailbox_mode: "central_routed",
@@ -318,7 +355,7 @@ export async function configureCentralLocationMailboxMapping(input: {
       company_id: input.companyId,
       workspace_account_id: input.workspaceAccountId,
       credential_email: credentialEmail,
-      display_name: "Central Location Mailbox",
+      display_name: "Central Ops Mailbox",
       status: "active",
       sync_enabled: true,
       mailbox_mode: "central_routed",
@@ -414,7 +451,7 @@ export async function syncLocationMailbox(companyId: string, mailboxId: string) 
   if (!mailbox.sync_enabled || mailbox.status === "inactive") throw new Error("Location mailbox sync is disabled.");
   const client = new GoogleLocationMailClient(mailbox.credential_email);
   try {
-    const listed = await client.listMessages({ maxResults: 75, query: "newer_than:45d" });
+    const listed = await client.listMessages({ maxResults: 100, query: "in:anywhere newer_than:90d" });
     const records = [];
     for (let index = 0; index < (listed.messages ?? []).length; index += 10) {
       const batch = (listed.messages ?? []).slice(index, index + 10);
@@ -449,23 +486,114 @@ function safeHeader(value: string) {
   return value.replace(/[\r\n]+/g, " ").trim();
 }
 
-function rawEmail(input: { from: string; to: string[]; cc: string[]; subject: string; body: string; inReplyTo?: string | null; references?: string | null }) {
+function quoteHeader(value: string) {
+  return `"${safeHeader(value).replace(/["\\]/g, "\\$&")}"`;
+}
+
+function htmlEscape(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+function safeLogoUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+export function renderMailSignature(profile: MailSenderProfile) {
+  if (!profile.signature_enabled) return { html: "", text: "" };
+  const logoUrl = safeLogoUrl(profile.logo_url);
+  const accent = /^#[0-9a-f]{6}$/i.test(profile.accent_color) ? profile.accent_color : "#ef6c00";
+  const contactLines = [profile.contact_name, profile.contact_title, profile.contact_mobile].map((entry) => entry.trim()).filter(Boolean);
+  const text = ["Regards,", profile.station_label, ...contactLines, "DropX Logistics"].filter(Boolean).join("\n");
+  const contactHtml = contactLines.map((entry, index) => index === 0
+    ? `<strong style="font-size:16px;color:#172033">${htmlEscape(entry)}</strong>`
+    : `<span style="font-size:13px;line-height:1.6;color:${index === 1 ? accent : "#344054"}">${htmlEscape(entry)}</span>`).join("");
+  const html = [
+    '<div style="margin-top:24px;font-family:Arial,sans-serif;color:#172033">',
+    '<div style="margin-bottom:12px;font-size:13px">Regards,</div>',
+    `<div style="display:inline-flex;align-items:stretch;gap:22px;min-width:470px;border-top:3px solid ${accent};padding-top:12px">`,
+    '<div style="display:flex;min-width:250px;flex-direction:column;gap:2px">',
+    `<strong style="font-size:15px;color:#172033">${htmlEscape(profile.station_label)}</strong>`,
+    contactHtml,
+    '</div>',
+    `<div style="border-left:2px dotted ${accent};padding-left:22px;display:flex;align-items:center">`,
+    logoUrl ? `<img src="${htmlEscape(logoUrl)}" alt="DropX Logistics" style="display:block;width:132px;height:auto;max-height:52px;object-fit:contain" />` : '<strong style="color:#f15a24;font-size:22px">DropX Logistics</strong>',
+    '</div></div></div>'
+  ].join("");
+  return { html, text };
+}
+
+function base64Lines(value: Buffer) {
+  return value.toString("base64").replace(/.{1,76}/g, "$&\r\n").trimEnd();
+}
+
+function rawEmail(input: {
+  attachments: MailAttachmentInput[];
+  bcc: string[];
+  body: string;
+  cc: string[];
+  from: string;
+  inReplyTo?: string | null;
+  references?: string | null;
+  senderName: string;
+  signature: { html: string; text: string };
+  subject: string;
+  to: string[];
+}) {
+  const mixedBoundary = `dropx-mixed-${crypto.randomUUID()}`;
+  const alternativeBoundary = `dropx-alt-${crypto.randomUUID()}`;
+  const plainBody = `${input.body.trim()}${input.signature.text ? `\n\n${input.signature.text}` : ""}`;
+  const htmlBody = `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#172033">${htmlEscape(input.body.trim()).replace(/\n/g, "<br>")}</div>${input.signature.html}`;
   const headers = [
-    `From: ${safeHeader(input.from)}`,
+    `From: ${quoteHeader(input.senderName)} <${safeHeader(input.from)}>`,
     `To: ${input.to.map(safeHeader).join(", ")}`,
     ...(input.cc.length ? [`Cc: ${input.cc.map(safeHeader).join(", ")}`] : []),
+    ...(input.bcc.length ? [`Bcc: ${input.bcc.map(safeHeader).join(", ")}`] : []),
     `Subject: ${safeHeader(input.subject)}`,
     ...(input.inReplyTo ? [`In-Reply-To: ${safeHeader(input.inReplyTo)}`] : []),
     ...(input.references ? [`References: ${safeHeader(input.references)}`] : []),
     "MIME-Version: 1.0",
-    "Content-Type: text/plain; charset=UTF-8",
-    "Content-Transfer-Encoding: 8bit"
+    `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`
   ];
-  return Buffer.from(`${headers.join("\r\n")}\r\n\r\n${input.body}`, "utf8")
+  const parts = [
+    `--${mixedBoundary}`,
+    `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
+    "",
+    `--${alternativeBoundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: 8bit",
+    "",
+    plainBody,
+    `--${alternativeBoundary}`,
+    "Content-Type: text/html; charset=UTF-8",
+    "Content-Transfer-Encoding: 8bit",
+    "",
+    htmlBody,
+    `--${alternativeBoundary}--`
+  ];
+  for (const attachment of input.attachments) {
+    const filename = safeHeader(attachment.filename).replace(/"/g, "'") || "attachment";
+    parts.push(
+      `--${mixedBoundary}`,
+      `Content-Type: ${safeHeader(attachment.mimeType || "application/octet-stream")}; name="${filename}"`,
+      `Content-Disposition: attachment; filename="${filename}"`,
+      "Content-Transfer-Encoding: base64",
+      "",
+      base64Lines(attachment.content)
+    );
+  }
+  parts.push(`--${mixedBoundary}--`);
+  return Buffer.from(`${headers.join("\r\n")}\r\n\r\n${parts.join("\r\n")}`, "utf8")
     .toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 export async function sendLocationMail(input: {
+  attachments?: MailAttachmentInput[];
+  bcc: string[];
   body: string;
   cc: string[];
   companyId: string;
@@ -483,13 +611,25 @@ export async function sendLocationMail(input: {
   if (!addresses.some((address) => cleanEmail(address.email_address) === fromAddress)) {
     throw new Error("The selected station address is not assigned to this central mailbox.");
   }
+  const profileResult = await database().from("ops_mail_sender_profiles")
+    .select("sender_display_name,station_label,contact_name,contact_title,contact_mobile,logo_url,accent_color,signature_enabled")
+    .eq("company_id", input.companyId)
+    .eq("mailbox_address_id", addresses.find((address) => cleanEmail(address.email_address) === fromAddress)?.id ?? "")
+    .maybeSingle();
+  if (profileResult.error) throw new Error(profileResult.error.message);
+  if (!profileResult.data) throw new Error("Configure the station sender identity and signature before sending mail.");
+  const profile = profileResult.data as MailSenderProfile;
   const client = new GoogleLocationMailClient(mailbox.credential_email);
   const sent = await client.sendRaw(rawEmail({
+    attachments: input.attachments ?? [],
+    bcc: input.bcc,
     from: fromAddress,
     to: input.to,
     cc: input.cc,
     subject: input.subject,
     body: input.body,
+    senderName: profile.sender_display_name,
+    signature: renderMailSignature(profile),
     inReplyTo: input.inReplyTo,
     references: input.references
   }), input.threadId ?? undefined);
@@ -500,4 +640,55 @@ export async function sendLocationMail(input: {
   });
   if (saved.error) throw new Error(saved.error.message);
   return sent;
+}
+
+export async function updateLocationMailMessage(input: {
+  action: "archive" | "mark_read" | "mark_unread" | "star" | "trash" | "unstar" | "untrash";
+  companyId: string;
+  mailboxId: string;
+  messageId: string;
+  stationId: string;
+}) {
+  const { mailbox } = await loadMailbox(input.companyId, input.mailboxId);
+  const result = await database().from("ops_location_mail_messages")
+    .select("id,google_message_id,label_ids,is_read")
+    .eq("company_id", input.companyId).eq("mailbox_id", input.mailboxId)
+    .eq("station_id", input.stationId).eq("id", input.messageId).maybeSingle();
+  if (result.error || !result.data) throw new Error(result.error?.message ?? "Mail message was not found.");
+  const client = new GoogleLocationMailClient(mailbox.credential_email);
+  const current = new Set<string>((result.data.label_ids as string[] | null) ?? []);
+  if (input.action === "trash") {
+    await client.trashMessage(result.data.google_message_id);
+    current.add("TRASH");
+    current.delete("INBOX");
+  } else if (input.action === "untrash") {
+    await client.untrashMessage(result.data.google_message_id);
+    current.delete("TRASH");
+  } else {
+    const addLabelIds: string[] = [];
+    const removeLabelIds: string[] = [];
+    if (input.action === "archive") removeLabelIds.push("INBOX");
+    if (input.action === "mark_read") removeLabelIds.push("UNREAD");
+    if (input.action === "mark_unread") addLabelIds.push("UNREAD");
+    if (input.action === "star") addLabelIds.push("STARRED");
+    if (input.action === "unstar") removeLabelIds.push("STARRED");
+    await client.modifyMessage(result.data.google_message_id, { addLabelIds, removeLabelIds });
+    for (const label of addLabelIds) current.add(label);
+    for (const label of removeLabelIds) current.delete(label);
+  }
+  const saved = await database().from("ops_location_mail_messages").update({
+    is_read: !current.has("UNREAD"),
+    label_ids: Array.from(current),
+    updated_at: new Date().toISOString()
+  }).eq("company_id", input.companyId).eq("id", input.messageId);
+  if (saved.error) throw new Error(saved.error.message);
+}
+
+export async function locationMailAttachment(input: { companyId: string; mailboxId: string; messageId: string }) {
+  const { mailbox } = await loadMailbox(input.companyId, input.mailboxId);
+  const result = await database().from("ops_location_mail_messages")
+    .select("google_message_id,metadata,station_id")
+    .eq("company_id", input.companyId).eq("mailbox_id", input.mailboxId).eq("id", input.messageId).maybeSingle();
+  if (result.error || !result.data) throw new Error(result.error?.message ?? "Mail attachment was not found.");
+  return { client: new GoogleLocationMailClient(mailbox.credential_email), message: result.data };
 }

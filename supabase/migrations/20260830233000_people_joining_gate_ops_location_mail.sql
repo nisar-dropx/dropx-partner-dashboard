@@ -3,7 +3,7 @@
 -- location-mail data model; mailbox access is derived from station scope.
 
 insert into public.app_pages (company_id, code, name, sort_order, is_active, created_at, updated_at)
-select company.id, 'ops_location_mail', 'Location Mail', 85, true, now(), now()
+select company.id, 'ops_location_mail', 'Mail', 85, true, now(), now()
 from public.companies company
 on conflict (company_id, code) do update
 set name = excluded.name, sort_order = excluded.sort_order, is_active = true, updated_at = now();
