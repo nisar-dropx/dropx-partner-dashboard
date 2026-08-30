@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 
-type DraftResponse = { subject?: string; body?: string; error?: string };
+type DraftResponse = { subject?: string; body?: string; error?: string; provider?: string };
 
 export function AiMailAssistant({ stationAddressId }: { stationAddressId: string }) {
   const rootRef = useRef<HTMLDetailsElement>(null);
@@ -46,7 +46,7 @@ export function AiMailAssistant({ stationAddressId }: { stationAddressId: string
       if (body && payload.body) body.value = payload.body;
       subject?.dispatchEvent(new Event("input", { bubbles: true }));
       body?.dispatchEvent(new Event("input", { bubbles: true }));
-      setNotice("Draft inserted. Review it before sending.");
+      setNotice(`Draft inserted${payload.provider ? ` using ${payload.provider}` : ""}. Review it before sending.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "AI draft generation failed.");
     } finally {

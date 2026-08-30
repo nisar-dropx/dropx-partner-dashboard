@@ -23,7 +23,10 @@ function vertexResponseText(payload: any) {
 
 function parseDraft(value: string) {
   const normalized = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const parsed = JSON.parse(normalized) as { subject?: unknown; body?: unknown };
+  const objectStart = normalized.indexOf("{");
+  const objectEnd = normalized.lastIndexOf("}");
+  const json = objectStart >= 0 && objectEnd > objectStart ? normalized.slice(objectStart, objectEnd + 1) : normalized;
+  const parsed = JSON.parse(json) as { subject?: unknown; body?: unknown };
   const subject = clean(parsed.subject, 180);
   const body = clean(parsed.body, 12000);
   if (!subject || !body) throw new Error("AI returned an incomplete draft.");
@@ -69,6 +72,7 @@ export async function POST(request: Request) {
     currentDraft: { subject: currentSubject, body: currentBody }
   });
   let generated = "";
+  let provider = "";
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (apiKey) {
     const ai = await fetch("https://api.openai.com/v1/responses", {
@@ -85,6 +89,30 @@ export async function POST(request: Request) {
     const payload = await ai.json().catch(() => ({}));
     if (!ai.ok) return Response.json({ error: payload?.error?.message ?? "AI compose request failed." }, { status: 502 });
     generated = responseText(payload);
+    provider = "OpenAI";
+  } else if (process.env.CLOUDFLARE_AI_API_TOKEN?.trim() && process.env.CLOUDFLARE_ACCOUNT_ID?.trim()) {
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID.trim();
+    const cloudflareToken = process.env.CLOUDFLARE_AI_API_TOKEN.trim();
+    const model = process.env.CLOUDFLARE_AI_MODEL?.trim() || "@cf/meta/llama-3.1-8b-instruct";
+    const ai = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/run/${model}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${cloudflareToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        messages: [
+          { role: "system", content: instructions },
+          { role: "user", content: draftContext }
+        ],
+        max_tokens: 1600,
+        temperature: 0.2
+      })
+    });
+    const payload = await ai.json().catch(() => ({}));
+    if (!ai.ok || payload?.success === false) {
+      const message = payload?.errors?.[0]?.message || payload?.error?.message || "Cloudflare Workers AI compose request failed.";
+      return Response.json({ error: message }, { status: 502 });
+    }
+    generated = clean(payload?.result?.response ?? payload?.result, 16000);
+    provider = "Cloudflare Workers AI";
   } else {
     try {
       const cloud = await googleCloudAccessToken();
@@ -111,12 +139,13 @@ export async function POST(request: Request) {
       const payload = await ai.json().catch(() => ({}));
       if (!ai.ok) return Response.json({ error: payload?.error?.message ?? "Google Vertex AI compose request failed." }, { status: 502 });
       generated = vertexResponseText(payload);
+      provider = "Google Vertex AI";
     } catch (error) {
       return Response.json({ error: error instanceof Error ? error.message : "AI compose is not configured." }, { status: 503 });
     }
   }
   try {
-    return Response.json(parseDraft(generated));
+    return Response.json({ ...parseDraft(generated), provider });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "AI returned an invalid draft." }, { status: 502 });
   }
