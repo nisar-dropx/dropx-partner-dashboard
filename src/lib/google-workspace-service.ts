@@ -398,7 +398,7 @@ async function syncManagedGroups(client: GoogleWorkspaceClient, account: Workspa
   }
 }
 
-async function saveDirectoryUser(companyId: string, user: GoogleDirectoryUser, existing?: WorkspaceAccountRow | null) {
+async function saveDirectoryUser(companyId: string, user: GoogleDirectoryUser, retentionDays: number, existing?: WorkspaceAccountRow | null) {
   const email = normalizeEmail(user.primaryEmail);
   const [profileResult, stationResult] = await Promise.all([
     db().from("profiles").select("id").eq("company_id", companyId)
@@ -436,7 +436,37 @@ async function saveDirectoryUser(companyId: string, user: GoogleDirectoryUser, e
     updated_at: new Date().toISOString()
   }, { onConflict: "company_id,primary_email" }).select("id").single();
   if (result.error) throw new Error(result.error.message);
-  return result.data.id as string;
+  const accountId = result.data.id as string;
+
+  if (user.suspended) {
+    const eligibleAt = existing?.deletion_eligible_at ?? new Date(Date.now() + retentionDays * 86400000).toISOString();
+    const accountUpdate = await db().from("google_workspace_accounts")
+      .update({ deletion_eligible_at: eligibleAt, updated_at: new Date().toISOString() })
+      .eq("id", accountId).is("deletion_eligible_at", null);
+    if (accountUpdate.error) throw new Error(accountUpdate.error.message);
+
+    if (profileResult.data?.id) {
+      const revoke = await db().rpc("revoke_dropx_workspace_access", {
+        p_company_id: companyId,
+        p_profile_id: profileResult.data.id,
+        p_person_id: existing?.person_id ?? null,
+        p_reason: "google_directory_suspended"
+      });
+      if (revoke.error) throw new Error(revoke.error.message);
+    }
+
+    const deletion = await db().from("google_workspace_deletion_requests").upsert({
+      company_id: companyId,
+      account_id: accountId,
+      status: "retention",
+      eligible_at: eligibleAt,
+      data_transfer_status: "pending",
+      note: "Created during Google directory reconciliation for an already suspended account."
+    }, { onConflict: "company_id,account_id", ignoreDuplicates: true });
+    if (deletion.error) throw new Error(deletion.error.message);
+  }
+
+  return accountId;
 }
 
 export async function syncWorkspaceDirectory(companyId: string, actorId?: string | null) {
@@ -453,7 +483,12 @@ export async function syncWorkspaceDirectory(companyId: string, actorId?: string
     const existingByGoogleId = new Map((existingResult.data ?? []).map((row) => [row.google_user_id, row as WorkspaceAccountRow]));
     const existingByEmail = new Map((existingResult.data ?? []).map((row) => [normalizeEmail(row.primary_email), row as WorkspaceAccountRow]));
     for (const user of users) {
-      await saveDirectoryUser(companyId, user, existingByGoogleId.get(user.id) ?? existingByEmail.get(normalizeEmail(user.primaryEmail)) ?? null);
+      await saveDirectoryUser(
+        companyId,
+        user,
+        setting.default_retention_days,
+        existingByGoogleId.get(user.id) ?? existingByEmail.get(normalizeEmail(user.primaryEmail)) ?? null
+      );
     }
     const now = new Date().toISOString();
     await db().from("google_workspace_settings").update({ last_sync_status: "success", last_sync_at: now, last_sync_error: null, updated_at: now }).eq("company_id", companyId);
