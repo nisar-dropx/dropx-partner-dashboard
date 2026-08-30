@@ -353,7 +353,7 @@ export default async function PlatformAdminPage({
           <span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>
             {isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}
           </span>
-          <Link href="https://dashboard.dropxlogistics.com/dashboard" className="button secondary compact">Dashboard</Link>
+          <Link href="https://dashboard.dropxlogistics.com/" className="button secondary compact">Dashboard</Link>
           <form action={signOut} className="platform-signout-form">
             <button className="button secondary compact" type="submit">Sign out</button>
           </form>
