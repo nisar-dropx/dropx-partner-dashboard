@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isFinanceHostName, isFinancePortalPath } from "@/lib/finance/surface";
+import { dashboardPaymentDestination } from "@/lib/payment-surface-routing";
 import { isPeopleHostName, isPeoplePortalPath } from "@/lib/people/surface";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -17,6 +19,16 @@ const MOVED_OPS_PAYMENT_PATHS = [
 ];
 const DEPRECATED_MAIN_PEOPLE_PATHS = ["/people", "/field-executive", "/vendors", "/workers"];
 const DEPRECATED_MAIN_HR_PATHS = ["/employees", "/contractors"];
+const MOVED_OPS_PATHS = ["/dashboard", "/fleet", "/imports", "/business-documents", "/master/location", "/master/providers", "/master/models"];
+const MOVED_WORKFORCE_PATHS = new Map([
+  ["/executive-id-onboarding", "/delivery-network/id-onboarding"],
+  ["/provider-mapping", "/delivery-network/rate-mapping"]
+]);
+const MOVED_PRODUCT_ADMIN_PATHS = new Map([
+  ["/master/designations", { env: "PEOPLE_APP_URL", fallback: "https://people.dropxlogistics.com/settings/designations", path: "/settings/designations" }],
+  ["/master/workforce-categories", { env: "WORKFORCE_APP_URL", fallback: "https://workforce.dropxlogistics.com/delivery-network/engagement-types", path: "/delivery-network/engagement-types" }],
+  ["/master/workforce-whatsapp", { env: "WORKFORCE_APP_URL", fallback: "https://workforce.dropxlogistics.com/delivery-network/communications/whatsapp", path: "/delivery-network/communications/whatsapp" }]
+]);
 
 function matchesPath(path: string, roots: string[]) {
   return roots.some((root) => path === root || path.startsWith(`${root}/`));
@@ -95,9 +107,39 @@ export async function middleware(request: NextRequest) {
   const isPlatformAdminHost = host === "admin-panel.dropxlogistics.com";
   const isOpsHost = host === "ops.dropxlogistics.com";
   const isPeopleHost = isPeopleHostName(host);
+  const isFinanceHost = isFinanceHostName(host);
   const isDashboardHost = host === "dashboard.dropxlogistics.com";
   const isSharedOpsPath = path === "/fleet" || path.startsWith("/fleet/") ||
     path === "/business-documents" || path.startsWith("/business-documents/");
+
+  const movedProductAdmin = isDashboardHost ? MOVED_PRODUCT_ADMIN_PATHS.get(path) : null;
+  if (movedProductAdmin) {
+    const configuredBase = process.env[movedProductAdmin.env]?.trim();
+    const destination = configuredBase
+      ? new URL(movedProductAdmin.path + request.nextUrl.search, configuredBase)
+      : new URL(movedProductAdmin.fallback + request.nextUrl.search);
+    return NextResponse.redirect(destination);
+  }
+
+  const paymentDestination = isDashboardHost ? dashboardPaymentDestination(path) : null;
+  if (paymentDestination) {
+    const destinationBase = paymentDestination.product === "operations"
+      ? process.env.OPS_APP_URL?.trim() || "https://ops.dropxlogistics.com"
+      : process.env.FINANCE_APP_URL?.trim() || "https://fin.dropxlogistics.com";
+    return NextResponse.redirect(new URL(paymentDestination.path + request.nextUrl.search, destinationBase));
+  }
+
+  if (isDashboardHost && matchesPath(path, MOVED_OPS_PATHS)) {
+    const opsBase = process.env.OPS_APP_URL?.trim() || "https://ops.dropxlogistics.com";
+    const targetPath = path === "/dashboard" ? "/" : path;
+    return NextResponse.redirect(new URL(targetPath + request.nextUrl.search, opsBase));
+  }
+
+  const movedWorkforcePath = isDashboardHost ? MOVED_WORKFORCE_PATHS.get(path) : null;
+  if (movedWorkforcePath) {
+    const workforceBase = process.env.WORKFORCE_APP_URL?.trim() || "https://workforce.dropxlogistics.com";
+    return NextResponse.redirect(new URL(movedWorkforcePath + request.nextUrl.search, workforceBase));
+  }
 
   if (isDashboardHost && (path === "/ops-pulse" || path.startsWith("/ops-pulse/"))) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));
@@ -140,6 +182,10 @@ export async function middleware(request: NextRequest) {
     peopleHomeUrl.pathname = "/";
     peopleHomeUrl.search = "";
     return NextResponse.redirect(peopleHomeUrl);
+  }
+
+  if (isFinanceHost && !isPublicAppPath(path) && !isFinancePortalPath(path)) {
+    return NextResponse.redirect(surfaceDeniedUrl(request, "finance_portal", path));
   }
 
   if (

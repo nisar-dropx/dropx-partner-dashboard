@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { unstable_cache } from "next/cache";
 import { cache } from "react";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
 import { loadEffectivePositionAccess } from "@/lib/position-access";
+import { productCodeForHost } from "@/lib/product-ownership";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
@@ -125,6 +127,14 @@ function normalizeEmail(value: string | null | undefined) {
 function isMissingColumnError(error: unknown) {
   const message = String((error as { message?: unknown })?.message ?? "").toLowerCase();
   return message.includes("column") && (message.includes("does not exist") || message.includes("schema cache"));
+}
+
+function isOptionalProductOwnerSchemaError(error: unknown) {
+  const code = String((error as { code?: unknown })?.code ?? "");
+  const message = String((error as { message?: unknown })?.message ?? "").toLowerCase();
+  return ["42P01", "PGRST204", "PGRST205"].includes(code) ||
+    (message.includes("company_product_owners") || message.includes("company_product_memberships")) &&
+    (message.includes("does not exist") || message.includes("schema cache"));
 }
 
 function inheritGroupedParentPermissions(permissions: Record<string, PagePermission>) {
@@ -254,6 +264,45 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     ...positionAccess.locationScopeIds
   ]));
   hasAllLocationAccess = positionAccess.hasAllLocationAccess;
+
+  const requestHost = (
+    headers().get("x-forwarded-host") ??
+    headers().get("host") ??
+    ""
+  ).split(":")[0].toLowerCase();
+  const productCode = productCodeForHost(requestHost);
+  if (productCode) {
+    const membershipResult = await supabaseAdmin
+      .from("company_product_memberships")
+      .select("role_id, has_all_location_access, location_scope_ids")
+      .eq("company_id", companyId)
+      .eq("user_id", profile.id)
+      .eq("product_code", productCode)
+      .eq("is_active", true);
+    if (membershipResult.error && !isOptionalProductOwnerSchemaError(membershipResult.error)) return null;
+    effectiveRoleIds = Array.from(new Set([
+      ...effectiveRoleIds,
+      ...(membershipResult.data ?? []).map((membership) => membership.role_id).filter((roleId): roleId is string => Boolean(roleId))
+    ]));
+    hasAllLocationAccess = hasAllLocationAccess || (membershipResult.data ?? []).some((membership) => membership.has_all_location_access);
+    locationScopeIds = Array.from(new Set([
+      ...locationScopeIds,
+      ...(membershipResult.data ?? []).flatMap((membership) => membership.location_scope_ids ?? [])
+    ]));
+
+    const productOwnerResult = await supabaseAdmin
+      .from("company_product_owners")
+      .select("role_id")
+      .eq("company_id", companyId)
+      .eq("user_id", profile.id)
+      .eq("product_code", productCode)
+      .eq("is_active", true);
+    if (productOwnerResult.error && !isOptionalProductOwnerSchemaError(productOwnerResult.error)) return null;
+    effectiveRoleIds = Array.from(new Set([
+      ...effectiveRoleIds,
+      ...(productOwnerResult.data ?? []).map((assignment) => assignment.role_id).filter((roleId): roleId is string => Boolean(roleId))
+    ]));
+  }
 
   if (effectiveRoleIds.length) {
     const rolesResult = await supabaseAdmin

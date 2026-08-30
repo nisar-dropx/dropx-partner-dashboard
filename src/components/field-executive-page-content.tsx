@@ -12,6 +12,10 @@ import { SubmitButton } from "@/components/submit-button";
 import { isCompanyOwner, type AuthorizationContext, requirePagePermission } from "@/lib/authorization";
 import { currentAccessSurface, type AccessSurface } from "@/lib/access-surface";
 import { requireCompanyId } from "@/lib/company-scope";
+import {
+  filterContractorRegisterRows,
+  type ContractorRegisterView
+} from "@/lib/contractor-register-visibility";
 import { countryCodeOptions } from "@/lib/country-codes";
 import { formatDashboardDate } from "@/lib/date-format";
 import { canOnboardDesignation } from "@/lib/designation-onboarding-access";
@@ -201,6 +205,15 @@ function fieldExecutiveStatus(executive: Pick<ExecutiveRow, "is_active" | "onboa
   if (executive.onboarding_status === "under_review") return "Under review";
   if (executive.onboarding_status === "returned") return "Returned";
   return executive.onboarding_status === "active" ? "Active" : "Pending";
+}
+
+function isMissingRelationError(error: unknown, relation: string) {
+  const message = String((error as { message?: unknown })?.message ?? "").toLowerCase();
+  return message.includes(relation.toLowerCase()) && (
+    message.includes("does not exist") ||
+    message.includes("schema cache") ||
+    message.includes("could not find")
+  );
 }
 
 function textValue(value: string | null | undefined) {
@@ -605,6 +618,7 @@ async function loadFieldExecutiveData(
   table: "field_executives" | "contractors" | "workforce" | "vendors" | "workers",
   targetRegister: PhysicalRegisterTable,
   accessSurface: AccessSurface,
+  recordView?: ContractorRegisterView,
   editId?: string,
   viewId?: string
 ) {
@@ -719,6 +733,22 @@ async function loadFieldExecutiveData(
       .order("created_at", { ascending: false });
   }
 
+  const compatibilityResult = table === "contractors"
+    ? await supabaseAdmin
+        .from("person_register_links")
+        .select("source_profile_id")
+        .eq("company_id", companyId)
+        .eq("source_register", "contractors")
+        .eq("target_register", "workforce")
+        .eq("compatibility_active", true)
+    : { data: [], error: null };
+  const compatibilityError = isMissingRelationError(compatibilityResult.error, "person_register_links")
+    ? null
+    : compatibilityResult.error;
+  const compatibilitySourceIds = new Set(
+    (compatibilityResult.data ?? []).map((link) => String(link.source_profile_id))
+  );
+
   const rawLocations = (locationsResult.data ?? []) as unknown as LocationRow[];
   const locations = filterOnboardingLocations(rawLocations, authorization).map((location) => ({
     ...location,
@@ -731,9 +761,12 @@ async function loadFieldExecutiveData(
   const allowedDesignationNames = new Set(designations
     .filter((designation) => canAccessDesignationPortal(designation, accessSurface, "view", { isOwner: ownerAccess }))
     .map((designation) => designation.name));
-  const visibleExecutiveRows = ((executivesResult.data ?? []) as unknown as ExecutiveRow[])
+  const scopedExecutiveRows = ((executivesResult.data ?? []) as unknown as ExecutiveRow[])
     .filter((executive) => authorization.hasAllLocationAccess || allowedLocationIds.has(executive.location_id))
     .filter((executive) => allowedDesignationNames.has(String(executive.designation ?? "")));
+  const visibleExecutiveRows = table === "contractors" && recordView
+    ? filterContractorRegisterRows(scopedExecutiveRows, compatibilitySourceIds, recordView)
+    : scopedExecutiveRows;
   const executives = visibleExecutiveRows
     .map((executive) => {
     const location = firstRelation(executive.stations);
@@ -786,7 +819,7 @@ async function loadFieldExecutiveData(
     designations,
     editExecutive,
     viewExecutive,
-    error: executivesResult.error?.message || locationsResult.error?.message || designationsResult.error?.message || null
+    error: executivesResult.error?.message || locationsResult.error?.message || designationsResult.error?.message || compatibilityError?.message || null
   };
 }
 
@@ -808,6 +841,7 @@ export async function FieldExecutivePageContent({
   pageCode = "delivery_associates",
   pageSubtitle = "Register and maintain field executives by location.",
   pageTitle = "Field Executive",
+  recordView,
   registerNavigation,
   returnPath = "/field-executive",
   viewId
@@ -829,6 +863,7 @@ export async function FieldExecutivePageContent({
   pageCode?: FieldExecutivePageCode;
   pageSubtitle?: string;
   pageTitle?: string;
+  recordView?: ContractorRegisterView;
   registerNavigation?: ReactNode;
   returnPath?: FieldExecutiveRoute;
   viewId?: string;
@@ -849,6 +884,7 @@ export async function FieldExecutivePageContent({
     displayTable,
     targetRegisterForWorkforceRoute(returnPath),
     accessSurface,
+    recordView,
     editId,
     viewId
   );
@@ -868,6 +904,8 @@ export async function FieldExecutivePageContent({
     workforceConfig.designationCategory
   );
   const directActivate = workforceConfig.profileType !== "field_executive" && configuredDirectActivate;
+  const canMaintainRecordView = recordView !== "compatibility";
+  const canAddToRecordView = !recordView || recordView === "active";
   const activeMessage = error ?? errorMessage ?? notice;
   const needsOperationModeMigration = Boolean(activeMessage?.toLowerCase().includes("operation_mode_id"));
   const locationOptions = locations.map((location) => ({
@@ -930,7 +968,7 @@ export async function FieldExecutivePageContent({
         </section>
       ) : null}
 
-      {permission.canAdd ? (
+      {permission.canAdd && canAddToRecordView ? (
         <section className="panel">
           <div className="panel-head"><h2>{addTitle}</h2></div>
           {directActivate ? (
@@ -950,10 +988,10 @@ export async function FieldExecutivePageContent({
         </section>
       ) : null}
 
-      {permission.canAdd && accessSurface !== "ops" ? <FieldExecutiveBulkImportPanel description={bulkImportDescription} entityLabel={entityLabel} returnPath={returnPath} title={bulkImportTitle} /> : null}
-      {ownerAccess && accessSurface !== "ops" && returnPath === "/contractors" ? <CompensationBulkUpload kind="contractor_remuneration" /> : null}
+      {permission.canAdd && canAddToRecordView && accessSurface !== "ops" ? <FieldExecutiveBulkImportPanel description={bulkImportDescription} entityLabel={entityLabel} returnPath={returnPath} title={bulkImportTitle} /> : null}
+      {ownerAccess && canAddToRecordView && accessSurface !== "ops" && returnPath === "/contractors" ? <CompensationBulkUpload kind="contractor_remuneration" /> : null}
 
-      {permission.canView || permission.canEdit ? <FieldExecutiveList basePath={returnPath} canEdit={permission.canEdit} emptyLabel={emptyListLabel} rows={executives} title={listTitle} /> : null}
+      {permission.canView || permission.canEdit ? <FieldExecutiveList basePath={returnPath} canEdit={permission.canEdit && canMaintainRecordView} emptyLabel={emptyListLabel} rows={executives} title={listTitle} /> : null}
 
       {(permission.canView || permission.canEdit) && viewExecutive ? (
         <div className="modal-backdrop">
@@ -970,7 +1008,7 @@ export async function FieldExecutivePageContent({
         </div>
       ) : null}
 
-      {permission.canEdit && editExecutive && editDesignationOptions.some((option) => option.value === editExecutive.designation) ? (
+      {permission.canEdit && canMaintainRecordView && editExecutive && editDesignationOptions.some((option) => option.value === editExecutive.designation) ? (
         <div className="modal-backdrop">
           <section className="modal-panel wide" aria-label="Edit field executive">
             <div className="panel-head">

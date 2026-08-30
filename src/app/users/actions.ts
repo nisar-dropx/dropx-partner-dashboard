@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
-import { pageBelongsToSurface, type AdminAccessSurface } from "@/lib/access-surface";
+import { currentAdminAccessSurface, pageBelongsToSurface, type AdminAccessSurface } from "@/lib/access-surface";
 import { isCompanyOwner, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { cleanCountryCode } from "@/lib/country-codes";
@@ -41,9 +41,45 @@ function locationAccessMode(value: FormDataEntryValue | null) {
   return clean(value) === "all_locations" ? "all_locations" : "role_based";
 }
 
-function accessSurfaceFromForm(value: FormDataEntryValue | null): AdminAccessSurface {
-  const surface = clean(value);
-  return surface === "ops" || surface === "people" ? surface : "dashboard";
+function membershipProductCode(surface: AdminAccessSurface) {
+  if (surface === "ops") return "operations";
+  if (surface === "people") return "people";
+  if (surface === "finance") return "finance";
+  return surface === "dashboard" ? null : surface;
+}
+
+async function upsertProductMembership(input: {
+  companyId: string;
+  surface: AdminAccessSurface;
+  userId: string;
+  roleId: string;
+  roleCode: string;
+  hasAllLocationAccess: boolean;
+  locationScopeIds: string[];
+  reportsToUserId: string | null;
+  isActive: boolean;
+  assignedBy: string;
+}) {
+  const productCode = membershipProductCode(input.surface);
+  if (!productCode) return;
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  const result = await supabaseAdmin
+    .from("company_product_memberships")
+    .upsert({
+      company_id: input.companyId,
+      product_code: productCode,
+      user_id: input.userId,
+      role_id: input.roleId,
+      role_code_snapshot: input.roleCode,
+      source_system: "manual",
+      has_all_location_access: input.hasAllLocationAccess,
+      location_scope_ids: input.locationScopeIds,
+      reports_to_user_id: input.reportsToUserId,
+      is_active: input.isActive,
+      assigned_by: input.assignedBy,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "company_id,product_code,user_id" });
+  if (result.error) throw new Error(result.error.message);
 }
 
 function appBaseUrl() {
@@ -118,7 +154,39 @@ async function isLinkedLocationEmail(email: string | null | undefined, companyId
   return (count ?? 0) > 0;
 }
 
-async function validateReportingManager(roleId: string, reportsToUserId: string | null, companyId: string) {
+async function managerAccessForSurface(
+  userId: string,
+  companyId: string,
+  surface: AdminAccessSurface
+) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  const profileResult = await supabaseAdmin
+    .from("profiles")
+    .select("role_id, location_scope_ids, is_active")
+    .eq("id", userId)
+    .eq("company_id", companyId)
+    .single();
+  if (profileResult.error || !profileResult.data?.is_active) {
+    throw new Error("Reporting manager was not found or is inactive.");
+  }
+
+  const productCode = membershipProductCode(surface);
+  if (!productCode) return profileResult.data;
+  const membershipResult = await supabaseAdmin
+    .from("company_product_memberships")
+    .select("role_id, location_scope_ids, is_active")
+    .eq("company_id", companyId)
+    .eq("product_code", productCode)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (membershipResult.error) throw new Error(membershipResult.error.message);
+  if (!membershipResult.data?.is_active) {
+    throw new Error("Select an active reporting manager from this portal.");
+  }
+  return membershipResult.data;
+}
+
+async function validateReportingManager(roleId: string, reportsToUserId: string | null, companyId: string, surface: AdminAccessSurface) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
 
   const { data: roles, error: rolesError } = await supabaseAdmin
@@ -135,14 +203,7 @@ async function validateReportingManager(roleId: string, reportsToUserId: string 
   if (roleCodesById.get(roleId) === "LOCATION") {
     if (!reportsToUserId) throw new Error("Reporting manager is required for a Location user.");
 
-    const { data: manager, error: managerError } = await supabaseAdmin
-      .from("profiles")
-      .select("role_id, is_active")
-      .eq("id", reportsToUserId)
-      .eq("company_id", companyId)
-      .single();
-
-    if (managerError || !manager?.is_active) throw new Error("Reporting manager was not found or is inactive.");
+    const manager = await managerAccessForSurface(reportsToUserId, companyId, surface);
     if (!manager.role_id || roleCodesById.get(manager.role_id) === "LOCATION") {
       throw new Error("Select an active manager from a non-Location role.");
     }
@@ -166,14 +227,7 @@ async function validateReportingManager(roleId: string, reportsToUserId: string 
     currentRoleId = rolesById.get(currentRoleId);
   }
 
-  const { data: manager, error: managerError } = await supabaseAdmin
-    .from("profiles")
-    .select("role_id, is_active")
-    .eq("id", reportsToUserId)
-    .eq("company_id", companyId)
-    .single();
-
-  if (managerError || !manager?.is_active) throw new Error("Reporting manager was not found or is inactive.");
+  const manager = await managerAccessForSurface(reportsToUserId, companyId, surface);
   if (!manager.role_id || !validManagerRoleIds.has(manager.role_id)) {
     throw new Error("Select a reporting manager from this role or any higher role in its hierarchy.");
   }
@@ -183,7 +237,8 @@ async function validateLocationScope(
   roleId: string,
   reportsToUserId: string | null,
   locationScopeIds: string[],
-  companyId: string
+  companyId: string,
+  surface: AdminAccessSurface
 ) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
 
@@ -198,13 +253,7 @@ async function validateLocationScope(
   if (!locationScopeIds.length) throw new Error("Select at least one location.");
   if (!reportsToUserId) throw new Error("Reporting manager is required before selecting locations.");
 
-  const { data: manager, error: managerError } = await supabaseAdmin
-    .from("profiles")
-    .select("role_id, location_scope_ids")
-    .eq("id", reportsToUserId)
-    .eq("company_id", companyId)
-    .single();
-  if (managerError) throw new Error(managerError.message);
+  const manager = await managerAccessForSurface(reportsToUserId, companyId, surface);
 
   const { data: managerRole, error: managerRoleError } = await supabaseAdmin
     .from("user_roles")
@@ -245,6 +294,133 @@ function permissionsFromForm(formData: FormData): PermissionPayload {
 
 function permissionHasAccess(permission?: PermissionPayload[number] | null) {
   return Boolean(permission?.can_view || permission?.can_add || permission?.can_edit);
+}
+
+const operationsMasterPageCodes = new Set([
+  "service_network_master",
+  "master_locations",
+  "master_providers",
+  "master_models",
+  "cod_master",
+  "performance_master",
+  "capacity_master"
+]);
+
+function isElevatedOperationsRole(code: string) {
+  return new Set([
+    "OWNER",
+    "TECH",
+    "NATIONAL_HEAD",
+    "PROGRAM_HEAD",
+    "OPS_ADMIN",
+    "OPERATIONS_ADMIN",
+    "OPERATIONS_OWNER",
+    "OPERATIONS_NATIONAL_HEAD",
+    "OPERATIONS_PROGRAM_HEAD"
+  ]).has(code.trim().toUpperCase());
+}
+
+async function assertOperationsMasterPolicy(
+  companyId: string,
+  roleCode: string,
+  submittedPermissions: PermissionPayload
+) {
+  if (!supabaseAdmin || isElevatedOperationsRole(roleCode)) return;
+  const grantedPageIds = submittedPermissions.filter(permissionHasAccess).map((permission) => permission.page_id);
+  if (!grantedPageIds.length) return;
+  const result = await supabaseAdmin
+    .from("app_pages")
+    .select("code")
+    .eq("company_id", companyId)
+    .in("id", grantedPageIds);
+  if (result.error) throw new Error(result.error.message);
+  if ((result.data ?? []).some((page) => operationsMasterPageCodes.has(page.code))) {
+    throw new Error("Operations masters can only be assigned to the Product Owner, Program Head, National Head, Ops Admin, Tech, or Super Admin.");
+  }
+}
+
+async function assertRoleAssignableForSurface(
+  companyId: string,
+  roleId: string,
+  surface: AdminAccessSurface,
+  authorization: AuthorizationContext
+) {
+  if (isCompanyOwner(authorization)) return;
+  if (surface === "dashboard") throw new Error("Only Super Admin can manage central Dashboard roles.");
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+
+  const roleResult = await supabaseAdmin
+    .from("user_roles")
+    .select("id, code, is_system")
+    .eq("company_id", companyId)
+    .eq("id", roleId)
+    .maybeSingle();
+  if (roleResult.error || !roleResult.data) throw new Error(roleResult.error?.message ?? "Role was not found.");
+  if (roleResult.data.is_system || roleResult.data.code === "OWNER") {
+    throw new Error("System and Super Admin roles can only be managed centrally.");
+  }
+
+  let pagesResult = await supabaseAdmin
+    .from("app_pages")
+    .select("id, code")
+    .eq("company_id", companyId)
+    .eq("is_active", true);
+  if (!pagesResult.error && !(pagesResult.data ?? []).length) {
+    pagesResult = await supabaseAdmin.from("app_pages").select("id, code").eq("is_active", true);
+  }
+  if (pagesResult.error) throw new Error(pagesResult.error.message);
+
+  const permissionResult = await supabaseAdmin
+    .from("role_page_permissions")
+    .select("page_id, can_view, can_add, can_edit")
+    .eq("company_id", companyId)
+    .eq("role_id", roleId);
+  if (permissionResult.error) throw new Error(permissionResult.error.message);
+
+  const pageCodeById = new Map((pagesResult.data ?? []).map((page) => [String(page.id), String(page.code)]));
+  const grantedCodes = (permissionResult.data ?? [])
+    .filter((permission) => permission.can_view || permission.can_add || permission.can_edit)
+    .map((permission) => pageCodeById.get(String(permission.page_id)))
+    .filter((code): code is string => Boolean(code));
+  if (!grantedCodes.length || grantedCodes.some((code) => !pageBelongsToSurface(code, surface))) {
+    throw new Error(`Select a role owned entirely by the ${surface} portal.`);
+  }
+}
+
+async function assertUserManagedForSurface(
+  companyId: string,
+  userId: string,
+  surface: AdminAccessSurface,
+  authorization: AuthorizationContext
+) {
+  if (isCompanyOwner(authorization)) return;
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  const productCode = membershipProductCode(surface);
+  if (productCode) {
+    const membershipResult = await supabaseAdmin
+      .from("company_product_memberships")
+      .select("role_id")
+      .eq("company_id", companyId)
+      .eq("product_code", productCode)
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (membershipResult.error) throw new Error(membershipResult.error.message);
+    if (membershipResult.data?.role_id) {
+      await assertRoleAssignableForSurface(companyId, membershipResult.data.role_id, surface, authorization);
+      return;
+    }
+  }
+  const userResult = await supabaseAdmin
+    .from("profiles")
+    .select("role_id")
+    .eq("company_id", companyId)
+    .eq("id", userId)
+    .maybeSingle();
+  if (userResult.error || !userResult.data?.role_id) {
+    throw new Error(userResult.error?.message ?? "The user does not have a product-owned role.");
+  }
+  await assertRoleAssignableForSurface(companyId, userResult.data.role_id, surface, authorization);
 }
 
 async function assertDeveloperPermissionChangeAllowed(
@@ -314,13 +490,25 @@ export async function createUserRole(formData: FormData) {
     const name = required(formData.get("name"), "Role name");
     const parentRoleId = required(formData.get("parent_role_id"), "Reporting role");
     const mode = locationAccessMode(required(formData.get("location_access_mode"), "Location access"));
+    const submittedPermissions = permissionsFromForm(formData);
+    await assertOperationsMasterPolicy(companyId, code, submittedPermissions);
 
     await ensureAccessPages(supabaseAdmin, companyId);
-    const surface = accessSurfaceFromForm(formData.get("surface"));
+    const surface = currentAdminAccessSurface();
+    if (!isCompanyOwner(authorization)) {
+      await assertRoleAssignableForSurface(companyId, parentRoleId, surface, authorization);
+    }
 
     const { data: role, error: roleError } = await supabaseAdmin
       .from("user_roles")
-      .insert(withCompany({ code, name, parent_role_id: parentRoleId, location_access_mode: mode, is_active: true }, companyId))
+      .insert(withCompany({
+        code,
+        name,
+        parent_role_id: parentRoleId,
+        location_access_mode: mode,
+        product_code: membershipProductCode(surface),
+        is_active: true
+      }, companyId))
       .select("id")
       .single();
 
@@ -343,7 +531,6 @@ export async function createUserRole(formData: FormData) {
 
     if (pagesError) throw new Error(pagesError.message);
 
-    const submittedPermissions = permissionsFromForm(formData);
     await assertDeveloperPermissionChangeAllowed(companyId, authorization, submittedPermissions);
     const submittedByPage = new Map(submittedPermissions.map((permission) => [permission.page_id, permission]));
 
@@ -386,7 +573,8 @@ export async function updateUserRole(formData: FormData) {
     }
 
     const roleId = required(formData.get("id"), "Role ID");
-    const surface = accessSurfaceFromForm(formData.get("surface"));
+    const surface = currentAdminAccessSurface();
+    await assertRoleAssignableForSurface(companyId, roleId, surface, authorization);
 
     const { data: existingRole, error: existingRoleError } = await supabaseAdmin
       .from("user_roles")
@@ -397,6 +585,8 @@ export async function updateUserRole(formData: FormData) {
 
     if (existingRoleError) throw new Error(existingRoleError.message);
     if (existingRole?.is_system || existingRole?.code === "OWNER") throw new Error("OWNER cannot be edited.");
+    const submittedPermissions = permissionsFromForm(formData);
+    await assertOperationsMasterPolicy(companyId, existingRole.code, submittedPermissions);
 
     const isLocationRole = existingRole?.code === "LOCATION";
     const name = isLocationRole
@@ -411,6 +601,7 @@ export async function updateUserRole(formData: FormData) {
     const parentRoleId = existingRole?.code === "LOCATION"
       ? null
       : required(formData.get("parent_role_id"), "Reporting role");
+    if (parentRoleId) await assertRoleAssignableForSurface(companyId, parentRoleId, surface, authorization);
 
     if (parentRoleId === roleId) {
       throw new Error("A role cannot report to itself.");
@@ -429,7 +620,6 @@ export async function updateUserRole(formData: FormData) {
 
     if (error) throw new Error(error.message);
 
-    const submittedPermissions = permissionsFromForm(formData);
     await assertDeveloperPermissionChangeAllowed(companyId, authorization, submittedPermissions, roleId);
     const { data: surfacePages, error: surfacePagesError } = await supabaseAdmin
       .from("app_pages")
@@ -477,29 +667,35 @@ export async function updateUserRole(formData: FormData) {
   usersRedirect({ section: "roles", userNotice: "Role saved successfully." });
 }
 
-async function performDeleteUserRole(formData: FormData, companyId: string) {
+async function performDeleteUserRole(formData: FormData, companyId: string, authorization: AuthorizationContext) {
   if (!supabaseAdmin) {
     throw new Error("Supabase service role key is not configured");
   }
 
   const id = required(formData.get("id"), "Role ID");
   const replacementRoleId = clean(formData.get("replacement_role_id"));
+  const surface = currentAdminAccessSurface();
+  const productCode = membershipProductCode(surface);
+  await assertRoleAssignableForSurface(companyId, id, surface, authorization);
+  if (replacementRoleId) await assertRoleAssignableForSurface(companyId, replacementRoleId, surface, authorization);
 
-  const [{ count: assignedUsers, error: usersError }, { count: childRoles, error: childError }, { data: role, error: roleError }, { data: roles, error: rolesError }] = await Promise.all([
+  const [{ count: assignedUsers, error: usersError }, { count: assignedMemberships, error: membershipsError }, { count: childRoles, error: childError }, { data: role, error: roleError }, { data: roles, error: rolesError }] = await Promise.all([
     supabaseAdmin.from("profiles").select("id", { count: "exact", head: true }).eq("role_id", id).eq("company_id", companyId),
+    supabaseAdmin.from("company_product_memberships").select("id", { count: "exact", head: true }).eq("role_id", id).eq("company_id", companyId).eq("product_code", productCode ?? ""),
     supabaseAdmin.from("user_roles").select("id", { count: "exact", head: true }).eq("parent_role_id", id).eq("company_id", companyId),
     supabaseAdmin.from("user_roles").select("code, is_system").eq("id", id).eq("company_id", companyId).single(),
     supabaseAdmin.from("user_roles").select("id, parent_role_id").eq("company_id", companyId)
   ]);
 
   if (usersError) throw new Error(usersError.message);
+  if (membershipsError) throw new Error(membershipsError.message);
   if (childError) throw new Error(childError.message);
   if (roleError) throw new Error(roleError.message);
   if (rolesError) throw new Error(rolesError.message);
   if (role?.is_system) throw new Error("System roles cannot be deleted.");
   if (role?.code === "LOCATION") throw new Error("LOCATION is a built-in role and cannot be deleted.");
 
-  const hasDependencies = (assignedUsers ?? 0) > 0 || (childRoles ?? 0) > 0;
+  const hasDependencies = (assignedUsers ?? 0) > 0 || (assignedMemberships ?? 0) > 0 || (childRoles ?? 0) > 0;
   if (hasDependencies && !replacementRoleId) {
     throw new Error("Select a replacement role to transfer assigned users and reporting roles.");
   }
@@ -528,6 +724,16 @@ async function performDeleteUserRole(formData: FormData, companyId: string) {
       .eq("company_id", companyId);
     if (usersTransferError) throw new Error(usersTransferError.message);
 
+    if (productCode) {
+      const { error: membershipsTransferError } = await supabaseAdmin
+        .from("company_product_memberships")
+        .update({ role_id: replacementRoleId, updated_at: new Date().toISOString() })
+        .eq("role_id", id)
+        .eq("company_id", companyId)
+        .eq("product_code", productCode);
+      if (membershipsTransferError) throw new Error(membershipsTransferError.message);
+    }
+
     const { error: rolesTransferError } = await supabaseAdmin
       .from("user_roles")
       .update({ parent_role_id: replacementRoleId })
@@ -550,7 +756,7 @@ export async function deleteUserRole(formData: FormData) {
   const authorization = await requirePagePermission("users", "edit");
   const companyId = requireCompanyId(authorization);
   try {
-    await performDeleteUserRole(formData, companyId);
+    await performDeleteUserRole(formData, companyId, authorization);
   } catch (error) {
     usersRedirect({ section: "roles", userError: error instanceof Error ? error.message : "Unable to delete role." });
   }
@@ -575,29 +781,42 @@ export async function createUser(formData: FormData) {
     const mobileCountryCode = cleanCountryCode(formData.get("mobile_country_code"));
     const mobile = clean(formData.get("mobile"))?.replace(/\D/g, "") ?? null;
     const roleId = required(formData.get("role_id"), "Role");
+    const surface = currentAdminAccessSurface();
+    await assertRoleAssignableForSurface(companyId, roleId, surface, authorization);
     const reportsToUserId = clean(formData.get("reports_to_user_id"));
     const sendInvitation = formData.get("send_invitation") === "yes";
     const locationScopeIds = locationScopeFromForm(formData);
     if (mobile && !/^\d{6,15}$/.test(mobile)) throw new Error("Mobile number must contain 6 to 15 digits.");
 
-    await validateReportingManager(roleId, reportsToUserId, companyId);
-    await validateLocationScope(roleId, reportsToUserId, locationScopeIds, companyId);
+    const existingProfile = await admin
+      .from("profiles")
+      .select("id")
+      .eq("company_id", companyId)
+      .ilike("email", email)
+      .maybeSingle();
+    if (existingProfile.error) throw new Error(existingProfile.error.message);
+
+    await validateReportingManager(roleId, reportsToUserId, companyId, surface);
+    await validateLocationScope(roleId, reportsToUserId, locationScopeIds, companyId, surface);
 
     const { data: role, error: roleError } = await admin
       .from("user_roles")
-      .select("id, name")
+      .select("id, name, code, location_access_mode")
       .eq("id", roleId)
       .eq("company_id", companyId)
       .single();
 
     if (roleError) throw new Error(roleError.message);
 
-    const authResult = sendInvitation
-      ? await admin.auth.admin.inviteUserByEmail(email, {
+    const productCode = membershipProductCode(surface);
+    const authResult = existingProfile.data && productCode
+      ? { data: { user: { id: existingProfile.data.id } }, error: null }
+      : sendInvitation
+        ? await admin.auth.admin.inviteUserByEmail(email, {
           data: { full_name: fullName, employee_id: employeeId },
           redirectTo: `${appBaseUrl()}/login`
         })
-      : await admin.auth.admin.createUser({
+        : await admin.auth.admin.createUser({
           email,
           password: randomPassword(),
           email_confirm: true,
@@ -616,9 +835,9 @@ export async function createUser(formData: FormData) {
       throw new Error("This email already exists in Supabase Auth, but the user ID could not be found.");
     }
 
-    const { error } = await admin
-      .from("profiles")
-      .upsert({
+    const profileWrite = existingProfile.data && productCode
+      ? { error: null }
+      : await admin.from("profiles").upsert({
         id: userId,
         employee_id: employeeId,
         full_name: fullName,
@@ -633,12 +852,26 @@ export async function createUser(formData: FormData) {
         is_active: true
       }, { onConflict: "id" });
 
-    if (error) {
-      if (error.message.toLowerCase().includes("duplicate") || error.message.toLowerCase().includes("unique")) {
+    if (profileWrite.error) {
+      if (profileWrite.error.message.toLowerCase().includes("duplicate") || profileWrite.error.message.toLowerCase().includes("unique")) {
         throw new Error("Employee ID or email is already used by another profile.");
       }
-      throw new Error(error.message);
+      throw new Error(profileWrite.error.message);
     }
+
+    await upsertProductMembership({
+      companyId,
+      surface,
+      userId,
+      roleId: role.id,
+      roleCode: role.code,
+      hasAllLocationAccess: role.location_access_mode === "all_locations",
+      locationScopeIds,
+      reportsToUserId,
+      isActive: true,
+      assignedBy: authorization.userId
+    });
+    if (existingProfile.data && productCode) notice = "Existing DropX user added to this product without changing their other access.";
 
     revalidatePath("/users");
   } catch (error) {
@@ -657,6 +890,8 @@ export async function updateUser(formData: FormData) {
 
   const returnHref = safeUsersReturnHref(formData.get("return_href"));
   const id = required(formData.get("id"), "User ID");
+  const surface = currentAdminAccessSurface();
+  await assertUserManagedForSurface(companyId, id, surface, authorization);
   const { data: existingUser, error: existingUserError } = await supabaseAdmin
     .from("profiles")
     .select("email, invite_method")
@@ -676,17 +911,35 @@ export async function updateUser(formData: FormData) {
   const mobileCountryCode = cleanCountryCode(formData.get("mobile_country_code"));
   const mobile = clean(formData.get("mobile"))?.replace(/\D/g, "") ?? null;
   const roleId = required(formData.get("role_id"), "Role");
+  await assertRoleAssignableForSurface(companyId, roleId, surface, authorization);
   const reportsToUserId = clean(formData.get("reports_to_user_id"));
   const locationScopeIds = locationScopeFromForm(formData);
   const isActive = formData.get("is_active") !== "inactive";
+  if (!isActive && !isCompanyOwner(authorization) && !membershipProductCode(surface)) {
+    throw new Error("Only Super Admin can deactivate a shared DropX identity. Remove product access instead.");
+  }
   if (mobile && !/^\d{6,15}$/.test(mobile)) throw new Error("Mobile number must contain 6 to 15 digits.");
 
-  await validateReportingManager(roleId, reportsToUserId, companyId);
-  await validateLocationScope(roleId, reportsToUserId, locationScopeIds, companyId);
+  await validateReportingManager(roleId, reportsToUserId, companyId, surface);
+  await validateLocationScope(roleId, reportsToUserId, locationScopeIds, companyId, surface);
 
-  const { error } = await supabaseAdmin
-    .from("profiles")
-    .update({
+  const roleResult = await supabaseAdmin
+    .from("user_roles")
+    .select("code, location_access_mode")
+    .eq("company_id", companyId)
+    .eq("id", roleId)
+    .single();
+  if (roleResult.error) throw new Error(roleResult.error.message);
+
+  const productCode = membershipProductCode(surface);
+  const profileUpdate = productCode
+    ? await supabaseAdmin.from("profiles").update({
+      employee_id: employeeId,
+      full_name: fullName,
+      mobile_country_code: mobileCountryCode,
+      mobile
+    }).eq("id", id).eq("company_id", companyId)
+    : await supabaseAdmin.from("profiles").update({
       employee_id: employeeId,
       full_name: fullName,
       mobile_country_code: mobileCountryCode,
@@ -695,11 +948,21 @@ export async function updateUser(formData: FormData) {
       reports_to_user_id: reportsToUserId,
       location_scope_ids: locationScopeIds,
       is_active: isActive
-    })
-    .eq("id", id)
-    .eq("company_id", companyId);
+    }).eq("id", id).eq("company_id", companyId);
 
-  if (error) throw new Error(error.message);
+  if (profileUpdate.error) throw new Error(profileUpdate.error.message);
+  await upsertProductMembership({
+    companyId,
+    surface,
+    userId: id,
+    roleId,
+    roleCode: roleResult.data.code,
+    hasAllLocationAccess: roleResult.data.location_access_mode === "all_locations",
+    locationScopeIds,
+    reportsToUserId,
+    isActive,
+    assignedBy: authorization.userId
+  });
   revalidatePath("/users");
   redirect(returnHref);
 }
@@ -713,6 +976,7 @@ export async function resendUserInvitation(formData: FormData) {
 
   try {
     const id = required(formData.get("id"), "User ID");
+    await assertUserManagedForSurface(companyId, id, currentAdminAccessSurface(), authorization);
 
     const { data: profile, error: profileError } = await supabaseAdmin
       .from("profiles")
@@ -887,6 +1151,9 @@ export async function deleteUser(formData: FormData) {
   const authorization = await requirePagePermission("users", "edit");
   const companyId = requireCompanyId(authorization);
   try {
+    if (!isCompanyOwner(authorization)) {
+      throw new Error("Only Super Admin can permanently delete a shared DropX identity.");
+    }
     await performDeleteUser(formData, companyId);
   } catch (error) {
     usersRedirect({ section: "users", userError: error instanceof Error ? error.message : "Unable to delete user." });

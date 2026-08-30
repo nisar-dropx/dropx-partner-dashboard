@@ -1,8 +1,9 @@
 import { headers } from "next/headers";
 import { isPeopleHostName } from "@/lib/people/surface";
+import { financeAccessPageCodes, isFinanceHostName } from "@/lib/finance/surface";
 
 export type AccessSurface = "dashboard" | "ops";
-export type AdminAccessSurface = AccessSurface | "people";
+export type AdminAccessSurface = AccessSurface | "people" | "finance";
 
 export const opsAccessPageCodes = [
   "ops_pulse",
@@ -142,6 +143,8 @@ const peoplePageCodes = new Set([
   "app_settings"
 ]);
 
+const financePageCodes = new Set<string>(financeAccessPageCodes);
+
 export function currentAccessSurface(): AccessSurface {
   const host = (
     headers().get("x-forwarded-host") ??
@@ -157,16 +160,18 @@ export function currentAdminAccessSurface(): AdminAccessSurface {
     headers().get("host") ??
     ""
   ).split(":")[0].toLowerCase();
+  if (isFinanceHostName(host)) return "finance";
   if (isPeopleHostName(host)) return "people";
   return host === "ops.dropxlogistics.com" || host.startsWith("ops-") ? "ops" : "dashboard";
 }
 
 export function pageBelongsToSurface(code: string, surface: AdminAccessSurface) {
+  if (surface === "finance") return financePageCodes.has(code);
   if (surface === "people") return peoplePageCodes.has(code) || code.startsWith("workforce_category_");
   if (sharedPageCodes.has(code)) return true;
   return surface === "ops" ? opsPageCodes.has(code) : !opsPageCodes.has(code);
 }
 
 export function accessSurfaceLabel(surface: AdminAccessSurface) {
-  return surface === "ops" ? "Ops" : surface === "people" ? "People" : "Dashboard";
+  return surface === "ops" ? "Ops" : surface === "people" ? "People" : surface === "finance" ? "Finance" : "Dashboard";
 }

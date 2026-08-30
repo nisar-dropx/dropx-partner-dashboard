@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensureAccessPages } from "@/lib/access-pages";
 import { createOpsAuthTransfer } from "@/lib/ops-auth-transfer";
+import { isFinanceHostName, safeFinanceNextPath } from "@/lib/finance/surface";
 import { isPeopleHostName, safePeopleNextPath } from "@/lib/people/surface";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
@@ -226,6 +227,7 @@ export async function GET(request: NextRequest) {
     const host = request.nextUrl.host.split(":")[0].toLowerCase();
     const isPlatformAdminHost = host === "admin-panel.dropxlogistics.com";
     const isPeopleHost = isPeopleHostName(host);
+    const isFinanceHost = isFinanceHostName(host);
 
     const { data: profileById } = await supabaseAdmin
     .from("profiles")
@@ -392,10 +394,14 @@ export async function GET(request: NextRequest) {
   }
 
     const requestedNextPath = request.nextUrl.searchParams.get("next");
-    const nextPath = isPeopleHost ? safePeopleNextPath(requestedNextPath) : safeNextPath(requestedNextPath);
+    const nextPath = isPeopleHost
+      ? safePeopleNextPath(requestedNextPath)
+      : isFinanceHost
+        ? safeFinanceNextPath(requestedNextPath)
+        : safeNextPath(requestedNextPath);
     const destinationPath = isPlatformAdminHost
       ? (nextPath.startsWith("/platform-admin") ? nextPath : "/platform-admin")
-      : (returnToOps ? "/ops-pulse" : (isPeopleHost ? nextPath : (nextPath || "/dashboard")));
+      : (returnToOps ? "/ops-pulse" : ((isPeopleHost || isFinanceHost) ? nextPath : (nextPath || "/dashboard")));
     if (returnToOps && data.session) {
       const opsUrl = new URL("/auth/ops-transfer", process.env.OPS_APP_URL?.trim() || "https://ops.dropxlogistics.com");
       opsUrl.searchParams.set(

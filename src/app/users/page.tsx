@@ -10,7 +10,7 @@ import { UserRolesListPanel } from "@/components/user-roles-list-panel";
 import { UsersListPanel } from "@/components/users-list-panel";
 import { accessSurfaceLabel, currentAdminAccessSurface, pageBelongsToSurface } from "@/lib/access-surface";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
-import { requirePagePermission } from "@/lib/authorization";
+import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createUserRole, deleteUser, deleteUserRole, updateUserRole } from "./actions";
@@ -211,6 +211,13 @@ function sectionHref(section: "roles" | "users", params?: Record<string, string>
   return `/users?${search.toString()}`;
 }
 
+function membershipProductCode(surface: ReturnType<typeof currentAdminAccessSurface>) {
+  if (surface === "ops") return "operations";
+  if (surface === "people") return "people";
+  if (surface === "finance") return "finance";
+  return null;
+}
+
 async function loadAccessData(
   companyId: string,
   surface: ReturnType<typeof currentAdminAccessSurface>,
@@ -330,6 +337,16 @@ async function loadAccessData(
     return result;
   })();
 
+  const membershipsPromise = (async () => {
+    const productCode = membershipProductCode(surface);
+    if (!productCode || !options.includeUsers) return { data: [], error: null };
+    return client
+      .from("company_product_memberships")
+      .select("user_id, role_id, reports_to_user_id, location_scope_ids, is_active")
+      .eq("company_id", companyId)
+      .eq("product_code", productCode);
+  })();
+
   const locationsPromise = (async (): Promise<{ data: RawLocationRow[] | null; error: { message?: string } | null }> => {
     if (!options.includeUsers && !options.includeRoleEditorData) return { data: [], error: null };
     const locationSelect = `
@@ -381,16 +398,31 @@ async function loadAccessData(
     return result;
   })();
 
-  const [pagesResult, rolesResult, permissionsResult, usersResult, locationsResult] = await Promise.all([
+  const [pagesResult, rolesResult, permissionsResult, usersResult, membershipsResult, locationsResult] = await Promise.all([
     pagesPromise,
     rolesPromise,
     permissionsPromise,
     usersPromise,
+    membershipsPromise,
     locationsPromise
   ]);
 
   const rawLocations = (locationsResult.data ?? []) as unknown as RawLocationRow[];
-  const users = (usersResult.data ?? []) as UserRow[];
+  const profileUsers = (usersResult.data ?? []) as UserRow[];
+  const memberships = membershipsResult.error ? [] : membershipsResult.data ?? [];
+  const membershipByUserId = new Map(memberships.map((membership) => [membership.user_id, membership]));
+  const users = memberships.length
+    ? profileUsers.filter((user) => membershipByUserId.has(user.id)).map((user) => {
+      const membership = membershipByUserId.get(user.id)!;
+      return {
+        ...user,
+        role_id: membership.role_id,
+        reports_to_user_id: membership.reports_to_user_id,
+        location_scope_ids: membership.location_scope_ids,
+        is_active: membership.is_active
+      };
+    })
+    : profileUsers;
 
   return {
     pages: ((pagesResult.data ?? []) as AppPageRow[])
@@ -421,10 +453,25 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
   const showRolesSection = activeSection === "roles";
   const needsUserData = showUsersSection || Boolean(searchParams?.addUser || searchParams?.editUser);
   const needsRoleEditorData = Boolean(searchParams?.addRole || searchParams?.editRole);
-  const { pages, roles, permissions, users, locations, error } = await loadAccessData(companyId, accessSurface, {
+  const { pages, roles: loadedRoles, permissions, users: loadedUsers, locations, error } = await loadAccessData(companyId, accessSurface, {
     includeUsers: needsUserData,
     includeRoleEditorData: needsRoleEditorData
   });
+  const surfacePageIds = new Set(pages.map((page) => page.id));
+  const roles = isCompanyOwner(authorization)
+    ? loadedRoles
+    : loadedRoles.filter((role) => {
+      if (role.is_system || role.code === "OWNER") return false;
+      const grants = permissions.filter((permission) => (
+        permission.role_id === role.id &&
+        (permission.can_view || permission.can_add || permission.can_edit)
+      ));
+      return grants.length > 0 && grants.every((permission) => surfacePageIds.has(permission.page_id));
+    });
+  const visibleRoleIds = new Set(roles.map((role) => role.id));
+  const users = isCompanyOwner(authorization)
+    ? loadedUsers
+    : loadedUsers.filter((user) => Boolean(user.role_id && visibleRoleIds.has(user.role_id)));
   const showAddUser = pagePermission.canAdd && searchParams?.addUser === "1";
   const showAddRole = pagePermission.canAdd && searchParams?.addRole === "1";
   const editUser = pagePermission.canEdit ? users.find((user) => user.id === searchParams?.editUser) ?? null : null;

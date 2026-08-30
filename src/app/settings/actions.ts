@@ -51,6 +51,65 @@ function isMissingSchemaError(message: string) {
   return normalized.includes("does not exist") || normalized.includes("could not find") || normalized.includes("schema cache");
 }
 
+type StationResponsibilityCode =
+  | "station_manager"
+  | "cluster_manager"
+  | "regional_manager"
+  | "ops_program_manager";
+
+async function syncStationResponsibilities(input: {
+  stationId: string;
+  companyId: string;
+  assignedBy: string;
+  assignments: Record<StationResponsibilityCode, string | null>;
+}) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+
+  const activeResult = await supabaseAdmin
+    .from("station_responsibility_assignments")
+    .select("id, responsibility_code, assignee_email")
+    .eq("company_id", input.companyId)
+    .eq("station_id", input.stationId)
+    .is("effective_to", null);
+  if (activeResult.error) {
+    if (isMissingSchemaError(activeResult.error.message)) return;
+    throw new Error(activeResult.error.message);
+  }
+
+  const activeByCode = new Map(
+    (activeResult.data ?? []).map((row) => [String(row.responsibility_code), row])
+  );
+
+  for (const [responsibilityCode, rawEmail] of Object.entries(input.assignments)) {
+    const email = normalizeEmail(rawEmail) || null;
+    const active = activeByCode.get(responsibilityCode);
+    if (normalizeEmail(active?.assignee_email) === email) continue;
+
+    if (active?.id) {
+      const closeResult = await supabaseAdmin
+        .from("station_responsibility_assignments")
+        .update({ effective_to: new Date().toISOString() })
+        .eq("id", active.id)
+        .eq("company_id", input.companyId);
+      if (closeResult.error) throw new Error(closeResult.error.message);
+    }
+
+    if (!email) continue;
+    const profile = await findProfileByEmail(email, input.companyId);
+    const insertResult = await supabaseAdmin
+      .from("station_responsibility_assignments")
+      .insert({
+        company_id: input.companyId,
+        station_id: input.stationId,
+        responsibility_code: responsibilityCode,
+        assignee_user_id: profile?.id ?? null,
+        assignee_email: email,
+        assigned_by: input.assignedBy
+      });
+    if (insertResult.error) throw new Error(insertResult.error.message);
+  }
+}
+
 function pluralize(count: number, singular: string, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
@@ -549,6 +608,11 @@ export async function createLocation(formData: FormData) {
   const stationEmail = clean(formData.get("station_email"));
   const parentStationId = clean(formData.get("parent_station_id"));
   const stationManagerEmail = required(formData.get("station_manager_email"), "Manager").toLowerCase();
+  const clusterManagerEmail = normalizeEmail(clean(formData.get("cluster_manager_email"))) || null;
+  const regionalManagerEmail = normalizeEmail(clean(formData.get("ops_manager_email"))) || null;
+  const opsProgramManagerEmail = normalizeEmail(clean(formData.get("ops_program_manager_email"))) || null;
+  const region = clean(formData.get("region"));
+  const cluster = clean(formData.get("cluster"));
   const stationReportingEmail = stationManagerEmail;
   const hideFromLocationList = formData.get("hide_from_location_list") === "on";
   const address = [addressLine1, addressLine2, city, state, postalCode].filter(Boolean).join(", ");
@@ -564,20 +628,24 @@ export async function createLocation(formData: FormData) {
     address_line2: addressLine2,
     city,
     state,
-    cluster: null,
+    region,
+    cluster,
     postal_code: postalCode,
     latitude,
     longitude,
     geofence_radius_m: geofenceRadiusM,
     station_email: stationEmail,
     station_manager_email: stationManagerEmail,
+    cluster_manager_email: clusterManagerEmail,
+    ops_manager_email: regionalManagerEmail,
+    ops_program_manager_email: opsProgramManagerEmail,
     parent_station_id: parentStationId,
     hide_from_location_list: hideFromLocationList,
     is_active: true
   }, companyId);
   let { data: location, error } = await supabaseAdmin.from("stations").insert(payload).select("id").single();
-  if (error && /geofence_radius_m|does not exist|schema cache/i.test(error.message)) {
-    const { geofence_radius_m: _radius, ...legacyPayload } = payload as Record<string, unknown>;
+  if (error && /geofence_radius_m|ops_program_manager_email|does not exist|schema cache/i.test(error.message)) {
+    const { geofence_radius_m: _radius, ops_program_manager_email: _programManager, ...legacyPayload } = payload as Record<string, unknown>;
     const fallback = await supabaseAdmin.from("stations").insert(legacyPayload).select("id").single();
     location = fallback.data;
     error = fallback.error;
@@ -585,6 +653,17 @@ export async function createLocation(formData: FormData) {
 
   if (error) throw new Error(error.message);
   if (!location) throw new Error("Unable to create location.");
+  await syncStationResponsibilities({
+    stationId: location.id,
+    companyId,
+    assignedBy: authorization.userId,
+    assignments: {
+      station_manager: stationManagerEmail,
+      cluster_manager: clusterManagerEmail,
+      regional_manager: regionalManagerEmail,
+      ops_program_manager: opsProgramManagerEmail
+    }
+  });
   await addLocationAccess(location.id, accessProfiles, companyId);
   const syncError = await trySyncLocationEmailProfile(location.id, stationEmail, stationName, stationReportingEmail, companyId);
   revalidatePath("/master/location");
@@ -618,6 +697,11 @@ export async function updateLocation(formData: FormData) {
   const stationEmail = clean(formData.get("station_email"));
   const parentStationId = clean(formData.get("parent_station_id"));
   const stationManagerEmail = required(formData.get("station_manager_email"), "Manager").toLowerCase();
+  const clusterManagerEmail = normalizeEmail(clean(formData.get("cluster_manager_email"))) || null;
+  const regionalManagerEmail = normalizeEmail(clean(formData.get("ops_manager_email"))) || null;
+  const opsProgramManagerEmail = normalizeEmail(clean(formData.get("ops_program_manager_email"))) || null;
+  const region = clean(formData.get("region"));
+  const cluster = clean(formData.get("cluster"));
   const stationReportingEmail = stationManagerEmail;
   const isActive = formData.get("is_active") !== "inactive";
   const hideFromLocationList = formData.get("hide_from_location_list") === "on";
@@ -641,13 +725,17 @@ export async function updateLocation(formData: FormData) {
       address_line2: addressLine2,
       city,
       state,
-      cluster: null,
+      region,
+      cluster,
       postal_code: postalCode,
       latitude,
       longitude,
       geofence_radius_m: geofenceRadiusM,
       station_email: stationEmail,
       station_manager_email: stationManagerEmail,
+      cluster_manager_email: clusterManagerEmail,
+      ops_manager_email: regionalManagerEmail,
+      ops_program_manager_email: opsProgramManagerEmail,
       parent_station_id: parentStationId,
       hide_from_location_list: hideFromLocationList,
       is_active: isActive
@@ -657,8 +745,8 @@ export async function updateLocation(formData: FormData) {
     .update(updatePayload)
     .eq("id", id)
     .eq("company_id", companyId);
-  if (error && /geofence_radius_m|does not exist|schema cache/i.test(error.message)) {
-    const { geofence_radius_m: _radius, ...legacyPayload } = updatePayload;
+  if (error && /geofence_radius_m|ops_program_manager_email|does not exist|schema cache/i.test(error.message)) {
+    const { geofence_radius_m: _radius, ops_program_manager_email: _programManager, ...legacyPayload } = updatePayload;
     const fallback = await supabaseAdmin
       .from("stations")
       .update(legacyPayload)
@@ -668,6 +756,17 @@ export async function updateLocation(formData: FormData) {
   }
 
   if (error) throw new Error(error.message);
+  await syncStationResponsibilities({
+    stationId: id,
+    companyId,
+    assignedBy: authorization.userId,
+    assignments: {
+      station_manager: stationManagerEmail,
+      cluster_manager: clusterManagerEmail,
+      regional_manager: regionalManagerEmail,
+      ops_program_manager: opsProgramManagerEmail
+    }
+  });
   await addLocationAccess(id, accessProfiles, companyId);
   if (normalizeEmail(existingLocation?.station_email) !== normalizeEmail(stationEmail)) {
     await removeLocationEmailProfileScope(id, existingLocation?.station_email ?? null, companyId);

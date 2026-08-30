@@ -53,6 +53,9 @@ type LocationRow = {
   geofence_radius_m?: number | null;
   station_email: string | null;
   station_manager_email: string | null;
+  cluster_manager_email?: string | null;
+  ops_manager_email?: string | null;
+  ops_program_manager_email?: string | null;
   parent_station_id: string | null;
   hide_from_location_list: boolean;
   is_active: boolean;
@@ -148,7 +151,7 @@ async function loadMasterData(companyId: string) {
     };
   }
 
-  const locationSelect = `
+  const responsibilityLocationSelect = `
     id,
     provider_id,
     location_model_id,
@@ -169,12 +172,19 @@ async function loadMasterData(companyId: string) {
     geofence_radius_m,
     station_email,
     station_manager_email,
+    cluster_manager_email,
+    ops_manager_email,
+    ops_program_manager_email,
     parent_station_id,
     hide_from_location_list,
     is_active,
     providers (code, name),
     location_models (code, name)
   `;
+  const locationSelect = responsibilityLocationSelect.replace(
+    "    cluster_manager_email,\n    ops_manager_email,\n    ops_program_manager_email,\n",
+    ""
+  );
   const legacyLocationSelect = `
     id,
     provider_id,
@@ -230,11 +240,18 @@ async function loadMasterData(companyId: string) {
       .order("name"),
     supabaseAdmin
       .from("stations")
-      .select(locationSelect)
+      .select(responsibilityLocationSelect)
       .eq("company_id", companyId)
       .order("station_code")
   ]);
   let locationsResult: { data: unknown[] | null; error: { message?: string } | null } = initialLocationsResult;
+  if (isMissingColumnError(locationsResult.error)) {
+    locationsResult = await supabaseAdmin
+      .from("stations")
+      .select(locationSelect)
+      .eq("company_id", companyId)
+      .order("station_code");
+  }
   if (isMissingColumnError(locationsResult.error)) {
     locationsResult = await supabaseAdmin
       .from("stations")
@@ -385,7 +402,12 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               <label>Address line 2<input className="field" name="address_line2" placeholder="Enter address line 2" /></label>
               <label>City<input className="field" name="city" placeholder="Enter city" /></label>
               <label>State<SearchableSelect name="state" options={[...indiaStateOptions]} placeholder="Select state" required /></label>
-              <label>Manager<SearchableSelect name="station_manager_email" options={hierarchyUserOptions} placeholder="Select manager" required /></label>
+              <label>Station manager<SearchableSelect name="station_manager_email" options={hierarchyUserOptions} placeholder="Select manager" required /></label>
+              <label>Cluster<input className="field" name="cluster" placeholder="Enter cluster" /></label>
+              <label>Cluster manager<SearchableSelect name="cluster_manager_email" options={hierarchyUserOptions} placeholder="Select cluster manager" /></label>
+              <label>Region<input className="field" name="region" placeholder="Enter region" /></label>
+              <label>Regional manager<SearchableSelect name="ops_manager_email" options={hierarchyUserOptions} placeholder="Select regional manager" /></label>
+              <label>Ops program manager<SearchableSelect name="ops_program_manager_email" options={hierarchyUserOptions} placeholder="Select program manager" /></label>
               <label>Postal code<input className="field" name="postal_code" placeholder="Enter postal code" /></label>
               <label>Latitude<input className="field" name="latitude" placeholder="Enter latitude" step="any" type="number" min="-90" max="90" /></label>
               <label>Longitude<input className="field" name="longitude" placeholder="Enter longitude" step="any" type="number" min="-180" max="180" /></label>
@@ -427,7 +449,12 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               <label>Address line 2<input className="field" name="address_line2" defaultValue={editLocation.address_line2 ?? ""} /></label>
               <label>City<input className="field" name="city" defaultValue={editLocation.city ?? ""} /></label>
               <label>State<SearchableSelect name="state" options={[...indiaStateOptions]} defaultValue={indiaStateCode(editLocation.state)} placeholder="Select state" required /></label>
-              <label>Manager<SearchableSelect name="station_manager_email" options={hierarchyUserOptions} defaultValue={editLocation.station_manager_email ?? ""} placeholder="Select manager" required /></label>
+              <label>Station manager<SearchableSelect name="station_manager_email" options={hierarchyUserOptions} defaultValue={editLocation.station_manager_email ?? ""} placeholder="Select manager" required /></label>
+              <label>Cluster<input className="field" name="cluster" defaultValue={editLocation.cluster ?? ""} placeholder="Enter cluster" /></label>
+              <label>Cluster manager<SearchableSelect name="cluster_manager_email" options={hierarchyUserOptions} defaultValue={editLocation.cluster_manager_email ?? ""} placeholder="Select cluster manager" /></label>
+              <label>Region<input className="field" name="region" defaultValue={editLocation.region ?? ""} placeholder="Enter region" /></label>
+              <label>Regional manager<SearchableSelect name="ops_manager_email" options={hierarchyUserOptions} defaultValue={editLocation.ops_manager_email ?? ""} placeholder="Select regional manager" /></label>
+              <label>Ops program manager<SearchableSelect name="ops_program_manager_email" options={hierarchyUserOptions} defaultValue={editLocation.ops_program_manager_email ?? ""} placeholder="Select program manager" /></label>
               <label>Postal code<input className="field" name="postal_code" defaultValue={editLocation.postal_code ?? ""} /></label>
               <label>Latitude<input className="field" name="latitude" defaultValue={editLocation.latitude ?? ""} step="any" type="number" min="-90" max="90" /></label>
               <label>Longitude<input className="field" name="longitude" defaultValue={editLocation.longitude ?? ""} step="any" type="number" min="-180" max="180" /></label>

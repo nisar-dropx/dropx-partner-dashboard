@@ -85,6 +85,15 @@ const peopleGroups: PermissionGroup[] = [
   { key: "settings", label: "Settings", codes: ["app_settings"] }
 ];
 
+const financeGroups: PermissionGroup[] = [
+  { key: "requests", label: "Requests", codes: ["advance_requests", "expense_requests", "payment_requests"] },
+  { key: "approvals", label: "Approvals & Processing", codes: ["payment_approvals", "payment_process", "workforce_payouts"] },
+  { key: "reports", label: "Finance Reports", codes: ["payment_reports"], hiddenCodes: ["payments"] },
+  { key: "masters", label: "Finance Masters", codes: ["payment_methods", "master_payment_banks", "master_payment_heads", "master_contacts"] },
+  { key: "settings", label: "Finance Settings", codes: ["payment_settings"] },
+  { key: "users", label: "Users & Access", codes: ["users"] }
+];
+
 function emptyPermissionState(pages: PermissionPage[]) {
   return Object.fromEntries(pages.map((page) => [page.id, { view: false, add: false, edit: false }])) as Record<string, Record<PermissionAction, boolean>>;
 }
@@ -113,7 +122,13 @@ export function PermissionMatrix({
   });
 
   const groups = useMemo(() => {
-    const definitions = surface === "ops" ? opsGroups : surface === "people" ? peopleGroups : dashboardGroups;
+    const definitions = surface === "ops"
+      ? opsGroups
+      : surface === "people"
+        ? peopleGroups
+        : surface === "finance"
+          ? financeGroups
+          : dashboardGroups;
     const definedGroups = definitions.map((definition) => ({
       ...definition,
       pages: pages.filter((page) => definition.codes.includes(page.code) || definition.matches?.(page)),

@@ -4,7 +4,9 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
+import { ensureAccessPages } from "@/lib/access-pages";
 import { platformModules } from "@/lib/platform-modules";
+import { isProductCode, productDefinitions, productPageCodes, type ProductCode } from "@/lib/product-ownership";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function clean(value: FormDataEntryValue | null) {
@@ -213,6 +215,157 @@ async function ensureOwnerRoleId(companyId: string) {
     return duplicateRole.id as string;
   }
   return createdRole.id as string;
+}
+
+async function ensureProductOwnerRole(companyId: string, productCode: ProductCode) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const product = productDefinitions.find((item) => item.code === productCode)!;
+  const roleCode = `${productCode.toUpperCase()}_OWNER`;
+  const ownerRoleId = await ensureOwnerRoleId(companyId);
+
+  let roleResult = await supabaseAdmin
+    .from("user_roles")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("code", roleCode)
+    .maybeSingle();
+  if (roleResult.error) throw new Error(roleResult.error.message);
+  if (!roleResult.data) {
+    roleResult = await supabaseAdmin
+      .from("user_roles")
+      .insert({
+        company_id: companyId,
+        code: roleCode,
+        name: `${product.name} Owner`,
+        product_code: productCode,
+        parent_role_id: ownerRoleId,
+        location_access_mode: "all_locations",
+        is_active: true,
+        is_system: false
+      })
+      .select("id")
+      .single();
+    if (roleResult.error || !roleResult.data) throw new Error(roleResult.error?.message ?? "Product Owner role could not be created.");
+  } else {
+    const productRoleResult = await supabaseAdmin
+      .from("user_roles")
+      .update({ product_code: productCode })
+      .eq("id", roleResult.data.id)
+      .eq("company_id", companyId);
+    if (productRoleResult.error) throw new Error(productRoleResult.error.message);
+  }
+
+  await ensureAccessPages(supabaseAdmin, companyId);
+  let pagesResult = await supabaseAdmin
+    .from("app_pages")
+    .select("id, code")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .in("code", [...productPageCodes[productCode]]);
+  if (!pagesResult.error && !(pagesResult.data ?? []).length) {
+    pagesResult = await supabaseAdmin
+      .from("app_pages")
+      .select("id, code")
+      .eq("is_active", true)
+      .in("code", [...productPageCodes[productCode]]);
+  }
+  if (pagesResult.error) throw new Error(pagesResult.error.message);
+  if (!(pagesResult.data ?? []).length) throw new Error(`${product.name} access pages are not configured.`);
+
+  const permissionRows = (pagesResult.data ?? []).map((page) => ({
+    company_id: companyId,
+    role_id: roleResult.data!.id,
+    page_id: page.id,
+    can_view: true,
+    can_add: true,
+    can_edit: true
+  }));
+  const permissionResult = await supabaseAdmin
+    .from("role_page_permissions")
+    .upsert(permissionRows, { onConflict: "company_id,role_id,page_id" });
+  if (permissionResult.error) throw new Error(permissionResult.error.message);
+  return roleResult.data.id as string;
+}
+
+export async function assignProductOwner(formData: FormData) {
+  const authorization = await requirePlatformAdmin("edit");
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const companyId = required(formData.get("company_id"), "Company");
+    const productCodeValue = required(formData.get("product_code"), "Product");
+    if (!isProductCode(productCodeValue)) throw new Error("Select a valid product.");
+    const userId = required(formData.get("user_id"), "User");
+
+    const [companyResult, userResult] = await Promise.all([
+      supabaseAdmin.from("companies").select("id").eq("id", companyId).eq("is_active", true).maybeSingle(),
+      supabaseAdmin.from("profiles").select("id").eq("id", userId).eq("company_id", companyId).eq("is_active", true).maybeSingle()
+    ]);
+    if (companyResult.error || !companyResult.data) throw new Error(companyResult.error?.message ?? "Company was not found or is inactive.");
+    if (userResult.error || !userResult.data) throw new Error(userResult.error?.message ?? "Select an active user from this company.");
+
+    const roleId = await ensureProductOwnerRole(companyId, productCodeValue);
+    const assignmentResult = await supabaseAdmin
+      .from("company_product_owners")
+      .upsert({
+        company_id: companyId,
+        product_code: productCodeValue,
+        user_id: userId,
+        role_id: roleId,
+        is_active: true,
+        assigned_by: authorization.userId,
+        updated_at: new Date().toISOString()
+      }, { onConflict: "company_id,product_code,user_id" });
+    if (assignmentResult.error) throw new Error(assignmentResult.error.message);
+    const membershipResult = await supabaseAdmin
+      .from("company_product_memberships")
+      .upsert({
+        company_id: companyId,
+        product_code: productCodeValue,
+        user_id: userId,
+        role_id: roleId,
+        role_code_snapshot: `${productCodeValue.toUpperCase()}_OWNER`,
+        source_system: "product_owner",
+        has_all_location_access: true,
+        location_scope_ids: [],
+        is_active: true,
+        assigned_by: authorization.userId,
+        updated_at: new Date().toISOString()
+      }, { onConflict: "company_id,product_code,user_id" });
+    if (membershipResult.error) throw new Error(membershipResult.error.message);
+    revalidatePath("/platform-admin");
+    platformRedirect({ notice: `${productDefinitions.find((item) => item.code === productCodeValue)!.name} Product Owner assigned.` });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    platformRedirect({ error: error instanceof Error ? error.message : "Unable to assign Product Owner." });
+  }
+}
+
+export async function removeProductOwner(formData: FormData) {
+  await requirePlatformAdmin("edit");
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const id = required(formData.get("id"), "Product Owner assignment");
+    const result = await supabaseAdmin
+      .from("company_product_owners")
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("id, company_id, product_code, user_id")
+      .maybeSingle();
+    if (result.error || !result.data) throw new Error(result.error?.message ?? "Product Owner assignment was not found.");
+    const membershipResult = await supabaseAdmin
+      .from("company_product_memberships")
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq("company_id", result.data.company_id)
+      .eq("product_code", result.data.product_code)
+      .eq("user_id", result.data.user_id)
+      .eq("source_system", "product_owner");
+    if (membershipResult.error) throw new Error(membershipResult.error.message);
+    revalidatePath("/platform-admin");
+    platformRedirect({ notice: "Product Owner access removed." });
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    platformRedirect({ error: error instanceof Error ? error.message : "Unable to remove Product Owner." });
+  }
 }
 
 async function ensureCompanyAdminProfile(companyId: string, fullName: string, email: string, mobile: string | null) {

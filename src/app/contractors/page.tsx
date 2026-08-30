@@ -1,4 +1,6 @@
 import { FieldExecutivePageContent } from "@/components/field-executive-page-content";
+import { PendingLink } from "@/components/pending-link";
+import { contractorRegisterViewFrom } from "@/lib/contractor-register-visibility";
 
 export default function ContractorsPage({
   searchParams
@@ -15,8 +17,28 @@ export default function ContractorsPage({
     date_of_join?: string;
     location_id?: string;
     designation?: string;
+    records?: string;
   };
 }) {
+  const recordView = contractorRegisterViewFrom(searchParams?.records);
+  const viewCopy = recordView === "compatibility"
+    ? {
+        empty: "No Workforce compatibility records found.",
+        list: "Legacy Workforce compatibility",
+        subtitle: "Read-only contractor source rows retained for registration, history, and DropX One compatibility."
+      }
+    : recordView === "inactive"
+      ? {
+          empty: "No inactive independent contractors found.",
+          list: "Inactive independent contractors",
+          subtitle: "Review genuine inactive independent-contractor records. Workforce compatibility rows are kept separately."
+        }
+      : {
+          empty: "No active independent contractors found.",
+          list: "Active independent contractors",
+          subtitle: "Register and maintain current independent contractors. Workforce compatibility rows are excluded."
+        };
+
   return (
     <FieldExecutivePageContent
       activeLabel="Independent Contractor"
@@ -27,15 +49,23 @@ export default function ContractorsPage({
       detailSubtitle="Complete Independent Contractor profile"
       editId={searchParams?.edit}
       editTitle="Edit independent contractor"
-      emptyListLabel="No independent contractors added yet."
+      emptyListLabel={viewCopy.empty}
       entityLabel="Independent Contractor"
       errorMessage={searchParams?.error}
-      listTitle="Independent Contractor register"
+      listTitle={viewCopy.list}
       notice={searchParams?.notice}
       pageCode="contractors"
-      pageSubtitle="Register and maintain independent contractors by model."
+      pageSubtitle={viewCopy.subtitle}
       pageTitle="Independent Contractor"
       returnPath="/contractors"
+      recordView={recordView}
+      registerNavigation={(
+        <nav className="tabs" aria-label="Independent contractor record views">
+          <PendingLink className={`tab${recordView === "active" ? " active" : ""}`} href="/contractors">Active</PendingLink>
+          <PendingLink className={`tab${recordView === "inactive" ? " active" : ""}`} href="/contractors?records=inactive">Inactive</PendingLink>
+          <PendingLink className={`tab${recordView === "compatibility" ? " active" : ""}`} href="/contractors?records=compatibility">Legacy compatibility</PendingLink>
+        </nav>
+      )}
       viewId={searchParams?.view}
       addFormValues={{
         fullName: searchParams?.full_name,

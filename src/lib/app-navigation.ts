@@ -26,35 +26,13 @@ export const fleetNavItem: NavItem = {
 };
 
 export const navItems: NavItem[] = [
-  { code: "dashboard", label: "Command Center", href: "/dashboard", icon: "#" },
-  { code: "executive_id_onboarding", label: "Executive ID Onboarding", href: "/executive-id-onboarding", icon: "ID" },
-  { code: "provider_mapping", label: "ID Mapping", href: "/provider-mapping", icon: "<>" },
-  fleetNavItem,
-  { code: "imports", label: "Report Imports", href: "/imports", icon: "^" },
-  { code: "inbox", label: "Inbox", href: "/inbox", icon: "I" },
-  { code: "business_documents", label: "Business Docs", href: "/business-documents", icon: "D" },
-  {
-    code: "payments",
-    label: "Payments",
-    icon: "P",
-    children: [
-      { code: "advance_requests", label: "Advance Request", href: "/payments/advance-request" },
-      { code: "expense_requests", label: "Expense Request", href: "/payments/expense-request" },
-      { code: "payment_requests", label: "Payment Requests", href: "/payments/requests" },
-      { code: "payment_approvals", label: "Approvals", href: "/payments/approvals" },
-      { code: "payment_process", label: "Process", href: "/payments/process" },
-      { code: "workforce_payouts", label: "Workforce Payouts", href: "/payments/workforce-payouts" },
-      { code: "payment_reports", label: "Report", href: "/payments/report" }
-    ]
-  },
+  { code: "dashboard", label: "Platform Control", href: "/", icon: "#" },
+  { code: "company_master", label: "Companies & Product Owners", href: "https://admin-panel.dropxlogistics.com/platform-admin", icon: "O" },
   {
     code: "reports",
-    label: "Reports",
+    label: "Platform Audit",
     icon: "R",
     children: [
-      { code: "attendance_reports", label: "Attendance", href: "/attendance" },
-      { code: "attendance_integrity", label: "Attendance Integrity", href: "/attendance/integrity" },
-      { code: "raw_punch_reports", label: "Raw Punches", href: "/reports/raw-punches" },
       { code: "verification_api_reports", label: "Verification API", href: "/reports/verification-api" },
       { code: "event_log_reports", label: "Event Log", href: "/reports/event-log" }
     ]
@@ -62,7 +40,7 @@ export const navItems: NavItem[] = [
   { code: "trash", label: "Trash", href: "/trash", icon: "T" },
   {
     code: "notifications",
-    label: "Notifications",
+    label: "System Communications",
     icon: "N",
     children: [
       { code: "notifications_whatsapp", label: "WhatsApp", href: "/notifications/whatsapp" },
@@ -72,46 +50,22 @@ export const navItems: NavItem[] = [
   },
   {
     code: "users",
-    label: "Users & Access",
+    label: "Central Identity",
     icon: "@",
     children: [
       { code: "users", label: "Users", href: "/users?section=users" },
-      { code: "users", label: "User Roles", href: "/users?section=roles" },
+      { code: "users", label: "Cross-product Roles", href: "/users?section=roles" },
       { code: "users", label: "Positions & Delegation", href: "/users/positions" }
     ]
   },
   {
-    code: "master_data",
-    label: "Master Data",
-    icon: "*",
-    children: [
-      { code: "master_locations", label: "Locations", href: "/master/location" },
-      { code: "master_providers", label: "Providers", href: "/master/providers" },
-      { code: "master_models", label: "Models", href: "/master/models" },
-      { code: "payment_methods", label: "Payment Methods", href: "/master/payment-methods" },
-      { code: "master_payment_banks", label: "Payment Banks", href: "/master/payment-banks" },
-      { code: "master_payment_heads", label: "Payment Heads", href: "/master/payment-heads" },
-      { code: "master_contacts", label: "Contacts", href: "/master/contacts" },
-      { code: "workforce_categories", label: "Workforce Categories", href: "/master/workforce-categories" },
-      { code: "workforce_whatsapp", label: "Workforce WhatsApp", href: "/master/workforce-whatsapp" },
-      { code: "designations", label: "Designations", href: "/master/designations" },
-      { code: "biometric_devices", label: "Device Master", href: "/master/biometric-devices" },
-      { code: "master_documents", label: "Documents", href: "/master/documents" },
-      { code: "master_imports", label: "Import Master", href: "/master/imports" }
-    ]
-  },
-  {
     code: "app_settings",
-    label: "Settings",
+    label: "Tech Configuration",
     icon: "S",
     children: [
       { code: "app_settings", label: "General", href: "/settings" },
-      { code: "app_settings", label: "DropX ID Generation", href: "/settings/dropx-id-generation?type=dropx_id" },
-      { code: "app_settings", label: "Biometric ID Generation", href: "/settings/dropx-id-generation?type=biometric_id" },
       { code: "app_settings", label: "App Notification", href: "/settings/app-notifications" },
       { code: "app_settings", label: "Verification APIs", href: "/settings/verification-apis" },
-      { code: "app_settings", label: "Biometric Config", href: "/settings/biometric" },
-      { code: "app_settings", label: "Biometric Monitor", href: "/biometric" },
       { code: "ai_connector", label: "AI Connector", href: "/settings/ai" },
       { code: "amazon_connector", label: "Amazon Connector", href: "/settings/amazon" },
       { code: "developer_mode", label: "Developer Mode", href: "/developer" }
