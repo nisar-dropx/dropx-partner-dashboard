@@ -111,13 +111,16 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
       </article>) : <div className="dx-roster-empty"><CalendarDays /><strong>No approved roster yet</strong><small>Your published shifts will appear here.</small></div>}
     </div> : null}
 
-    {selectedDay ? <div className="dx-roster-swap-card">
-      <header><span><small>Swap {displayDate(selectedDay.date)}</small><strong>{shiftLabel(selectedDay.shift, selectedDay.dayType)}</strong></span><button aria-label="Close swap request" onClick={() => setSelectedDay(null)}><X /></button></header>
-      <label>Swap with<select onChange={(event) => setPartnerEntryId(event.target.value)} value={partnerEntryId}><option value="">Choose colleague and shift</option>{selectedDay.partners.map((partner) => <option key={partner.id} value={partner.id}>{partner.name || partner.code || "Colleague"} · {shiftLabel(partner.shift, partner.dayType)}</option>)}</select></label>
-      {selectedPartner ? <div className="dx-roster-exchange"><span><UserRound /><small>You receive</small><strong>{shiftLabel(selectedPartner.shift, selectedPartner.dayType)}</strong></span><ArrowLeftRight /><span><UserRound /><small>{selectedPartner.name} receives</small><strong>{shiftLabel(selectedDay.shift, selectedDay.dayType)}</strong></span></div> : null}
-      <label>Note <span>(optional)</span><textarea maxLength={500} onChange={(event) => setNote(event.target.value)} placeholder="Add useful context" rows={2} value={note} /></label>
-      <button className="dx-roster-primary" disabled={!partnerEntryId || pending === "request"} onClick={() => void requestSwap()}>{pending === "request" ? "Sending…" : "Send swap request"}</button>
-      <small className="dx-roster-rule">Both colleagues must agree. Your immediate manager gives final approval.</small>
+    {selectedDay ? <div aria-labelledby="roster-swap-title" aria-modal="true" className="dx-roster-swap-modal" role="dialog">
+      <button aria-label="Close swap form" className="dx-roster-swap-scrim" onClick={() => setSelectedDay(null)} />
+      <div className="dx-roster-swap-card">
+        <header><span><small>Swap {displayDate(selectedDay.date)}</small><strong id="roster-swap-title">{shiftLabel(selectedDay.shift, selectedDay.dayType)}</strong></span><button aria-label="Close swap request" onClick={() => setSelectedDay(null)}><X /></button></header>
+        <label>Swap with<select autoFocus onChange={(event) => setPartnerEntryId(event.target.value)} value={partnerEntryId}><option value="">Choose colleague and shift</option>{selectedDay.partners.map((partner) => <option key={partner.id} value={partner.id}>{partner.name || partner.code || "Colleague"} · {shiftLabel(partner.shift, partner.dayType)}</option>)}</select></label>
+        {selectedPartner ? <div className="dx-roster-exchange"><span><UserRound /><small>You receive</small><strong>{shiftLabel(selectedPartner.shift, selectedPartner.dayType)}</strong></span><ArrowLeftRight /><span><UserRound /><small>{selectedPartner.name} receives</small><strong>{shiftLabel(selectedDay.shift, selectedDay.dayType)}</strong></span></div> : null}
+        <label>Note <span>(optional)</span><textarea maxLength={500} onChange={(event) => setNote(event.target.value)} placeholder="Add useful context" rows={2} value={note} /></label>
+        <button className="dx-roster-primary" disabled={!partnerEntryId || pending === "request"} onClick={() => void requestSwap()}>{pending === "request" ? "Sending…" : "Send swap request"}</button>
+        <small className="dx-roster-rule">Both colleagues must agree. Your immediate manager gives final approval.</small>
+      </div>
     </div> : null}
 
     {!loading && activeRequests.length ? <section className="dx-roster-requests"><header><small>Action needed</small><h2>Active swap requests</h2></header>{activeRequests.map(requestRow)}</section> : null}

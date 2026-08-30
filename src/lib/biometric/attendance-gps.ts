@@ -345,6 +345,30 @@ export function evaluateGeofence(
   };
 }
 
+function mergeIntegrityDetails(
+  existingDetails: unknown,
+  nextDetails: Record<string, unknown>,
+  existingPunchId?: string | null,
+  nextPunchId?: string | null
+) {
+  const existing = existingDetails && typeof existingDetails === "object" && !Array.isArray(existingDetails)
+    ? existingDetails as Record<string, unknown>
+    : {};
+  const previousPunchIds = Array.isArray(existing.punchIds)
+    ? existing.punchIds.map(String)
+    : [];
+  const punchIds = Array.from(new Set([
+    ...previousPunchIds,
+    ...(existingPunchId ? [existingPunchId] : []),
+    ...(nextPunchId ? [nextPunchId] : [])
+  ]));
+  return {
+    ...existing,
+    ...nextDetails,
+    ...(punchIds.length ? { punchIds } : {})
+  };
+}
+
 export async function openIntegrityFlag({
   companyId,
   enrolmentId,
@@ -387,7 +411,7 @@ export async function openIntegrityFlag({
   const now = new Date().toISOString();
   const existing = await supabaseAdmin
     .from("attendance_integrity_flags")
-    .select("id, status")
+    .select("id, status, punch_id, details")
     .eq("company_id", companyId)
     .eq("enrolment_id", enrolmentId)
     .eq("punch_date", punchDate)
@@ -402,7 +426,7 @@ export async function openIntegrityFlag({
       .from("attendance_integrity_flags")
       .update({
         message,
-        details,
+        details: mergeIntegrityDetails(existing.data.details, details, existing.data.punch_id, punchId),
         severity,
         punch_id: punchId ?? null,
         location_id: locationId ?? null,
@@ -428,7 +452,7 @@ export async function openIntegrityFlag({
       flag_type: flagType,
       severity,
       message,
-      details,
+      details: mergeIntegrityDetails(null, details, null, punchId),
       status: "open",
       updated_at: now
     })

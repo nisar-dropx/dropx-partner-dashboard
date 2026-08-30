@@ -450,7 +450,7 @@ export function ConnectLoginFlow() {
         <i>{avatar ? <img alt="" src={avatar} /> : <b>{(account.name || "U")[0]}</b>}</i>
         <span>
           <strong>{account.name || account.reference}</strong>
-          <small>{account.workspaceLabel || (isWorkforceWorkspace(account) ? "Workforce workspace" : "People workspace")} · {account.role || account.reference}</small>
+          <small>{account.role || account.reference || "Profile"}</small>
         </span>
         {accounts.length > 1 ? <button aria-label="Switch accounts" onClick={() => open("accounts")}><SwitchCamera /></button> : null}
       </div>
@@ -487,7 +487,7 @@ export function ConnectLoginFlow() {
           </button>)}
         </div> : <div className="dx-notification-empty"><Bell /><span>No notifications</span></div>}
       </aside> : null}
-      {profileMenu ? <aside className="dx-profile-pop"><strong>{account?.name || account?.reference}</strong><small>{account?.workspaceLabel || (isWorkforceWorkspace(account) ? "Workforce workspace" : "People workspace")}</small>{accountIdentity(account) ? <small>{accountIdentity(account)}</small> : null}{!isManagerAccount(account) ? <button onClick={() => open("profile")}><UserRound />My Profile</button> : <button onClick={() => open("settings")}><Settings />Account settings</button>}<button onClick={logout}><LogOut />Sign out</button></aside> : null}
+      {profileMenu ? <aside className="dx-profile-pop"><strong>{account?.name || account?.reference}</strong><small>{account?.role || account?.reference || "Profile"}</small>{!isManagerAccount(account) ? <button onClick={() => open("profile")}><UserRound />My Profile</button> : <button onClick={() => open("settings")}><Settings />Account settings</button>}<button onClick={logout}><LogOut />Sign out</button></aside> : null}
     </header> : null}
     {drawer && account ? <><button aria-label="Close menu" className="dx-scrim" onClick={() => setDrawer(false)} /><aside className="dx-drawer">
       <div><Image alt="DropX" height={44} src="/dropx-logo.png" width={126} /><button aria-label="Switch accounts" onClick={() => open("accounts")}><SwitchCamera /></button><button aria-label="Close" onClick={() => setDrawer(false)}><X /></button></div>
@@ -495,7 +495,7 @@ export function ConnectLoginFlow() {
         <i>{avatar ? <img alt="" src={avatar} /> : <b>{(account.name || "U")[0]}</b>}</i>
         <span>
           <strong>{account.name || account.reference}</strong>
-          <small>{account.workspaceLabel || (isWorkforceWorkspace(account) ? "Workforce workspace" : "People workspace")} · {account.role || account.reference}</small>
+          <small>{account.role || account.reference || "Profile"}</small>
         </span>
       </section>
       <nav>

@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
-import { loadAttendanceReportRows } from "@/lib/biometric/attendance";
+import { formatTime, loadAttendanceReportRows } from "@/lib/biometric/attendance";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
 import { resolveAttendanceApprovalSteps } from "@/lib/connect-attendance-approval";
@@ -46,6 +46,20 @@ const regularizationProofTypes = new Map([
   ["image/png", ".png"],
   ["image/webp", ".webp"]
 ]);
+
+type ConnectAttendanceResponseRow = {
+  date: string;
+  status: string;
+  inTime: string;
+  outTime: string;
+  punches: string[];
+  workHours: string;
+  punchCount: number;
+  remark: string;
+  regularization: Record<string, unknown> | null;
+  pendingReview?: boolean;
+  statusLabel?: string;
+};
 
 async function activeSession() {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
@@ -123,7 +137,31 @@ export async function GET(request: NextRequest) {
     })).filter(worker.filter);
     const present = rows.filter((row) => row.status === "P").length;
     const absent = rows.filter((row) => row.status === "A").length;
-    const misPunch = rows.filter((row) => row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length;
+    const heldPunchResult = await supabaseAdmin
+      .from("attendance_punches")
+      .select("punch_date, punch_time")
+      .eq("company_id", worker.companyId)
+      .in("enrolment_id", Array.from(new Set([
+        worker.biometricId,
+        cleanEnrolmentId(worker.biometricId),
+        cleanEnrolmentId(worker.biometricId).padStart(6, "0"),
+        cleanEnrolmentId(worker.biometricId).padStart(8, "0")
+      ].filter(Boolean))))
+      .gte("punch_date", range.fromDate)
+      .lte("punch_date", range.toDate)
+      .eq("calculated", false)
+      .eq("is_flagged", true)
+      .order("punch_time", { ascending: true });
+    if (heldPunchResult.error) throw new Error(heldPunchResult.error.message);
+    const heldPunchesByDate = new Map<string, string[]>();
+    for (const punch of heldPunchResult.data ?? []) {
+      const date = String(punch.punch_date ?? "");
+      const time = formatTime(punch.punch_time);
+      if (!date || time === "--:--") continue;
+      const times = heldPunchesByDate.get(date) ?? [];
+      times.push(time);
+      heldPunchesByDate.set(date, times);
+    }
     const requestsResult = await supabaseAdmin
       .from("attendance_regularization_requests")
       .select("id, attendance_date, requested_in_time, requested_out_time, reason_code, remarks, attachment_path, status, review_remarks, created_at")
@@ -153,7 +191,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const responseRows = rows.map((row) => ({
+    const responseRows: ConnectAttendanceResponseRow[] = rows.map((row) => ({
       date: row.punchDate,
       status: row.status,
       inTime: row.inTime,
@@ -164,6 +202,35 @@ export async function GET(request: NextRequest) {
       remark: row.remark,
       regularization: requestByDate.get(row.punchDate) ?? null
     }));
+    for (const [date, heldTimes] of heldPunchesByDate) {
+      const existing = responseRows.find((row) => row.date === date);
+      const combinedPunches = Array.from(new Set([...(existing?.punches ?? []), ...heldTimes])).sort();
+      if (existing) {
+        existing.punches = combinedPunches;
+        existing.punchCount = combinedPunches.length;
+        existing.inTime = combinedPunches[0] ?? existing.inTime;
+        existing.outTime = combinedPunches.length > 1 ? combinedPunches[combinedPunches.length - 1] : existing.outTime;
+        Object.assign(existing, {
+          pendingReview: true,
+          statusLabel: "Verification pending",
+          remark: "Biometric punch captured · attendance integrity review pending"
+        });
+      } else {
+        responseRows.push({
+          date,
+          status: "",
+          inTime: combinedPunches[0] ?? "",
+          outTime: combinedPunches.length > 1 ? combinedPunches[combinedPunches.length - 1] : "",
+          punches: combinedPunches,
+          workHours: "00:00",
+          punchCount: combinedPunches.length,
+          remark: "Biometric punch captured · attendance integrity review pending",
+          regularization: requestByDate.get(date) ?? null,
+          pendingReview: true,
+          statusLabel: "Verification pending"
+        });
+      }
+    }
     const attendanceDates = new Set(responseRows.map((row) => row.date));
     for (const [date, regularization] of requestByDate) {
       if (!attendanceDates.has(date)) {
@@ -182,13 +249,20 @@ export async function GET(request: NextRequest) {
     }
     responseRows.sort((left, right) => left.date.localeCompare(right.date));
 
+    const misPunchDates = new Set([
+      ...rows
+        .filter((row) => row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing"))
+        .map((row) => row.punchDate),
+      ...heldPunchesByDate.keys()
+    ]);
+
     return NextResponse.json({
       month: range.label,
       summary: {
         totalRows: rows.length,
         present,
         absent,
-        misPunch
+        misPunch: misPunchDates.size
       },
       rows: responseRows
     });

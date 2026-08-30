@@ -37,6 +37,7 @@ type Row = {
   status: string;
   statusLabel?: string | null;
   statusKind?: "attendance" | "leave";
+  pendingReview?: boolean;
   inTime: string;
   outTime: string;
   punches: string[];
@@ -172,6 +173,7 @@ function dayStatus(row: Row | undefined, future: boolean) {
   if (future || !row) return "off";
   if (row.status === "A") return "absent";
   if (row.statusKind === "leave") return "leave";
+  if (row.pendingReview) return "miss";
   if (row.remark.toLowerCase().match(/single|missing/)) return "miss";
   return row.status === "P" ? "present" : "off";
 }

@@ -213,7 +213,7 @@ async function openIntegrityFlag({
   const now = new Date().toISOString();
   const existing = await supabaseAdmin
     .from("attendance_integrity_flags")
-    .select("id")
+    .select("id, punch_id, details")
     .eq("company_id", companyId)
     .eq("enrolment_id", enrolmentId)
     .eq("punch_date", punchDate)
@@ -221,9 +221,27 @@ async function openIntegrityFlag({
     .eq("status", "open")
     .maybeSingle();
   if (existing.data?.id) {
+    const previousDetails = existing.data.details && typeof existing.data.details === "object" && !Array.isArray(existing.data.details)
+      ? existing.data.details as Record<string, unknown>
+      : {};
+    const previousPunchIds = Array.isArray(previousDetails.punchIds)
+      ? previousDetails.punchIds.map(String)
+      : [];
+    const punchIds = Array.from(new Set([
+      ...previousPunchIds,
+      ...(existing.data.punch_id ? [String(existing.data.punch_id)] : []),
+      ...(punchId ? [punchId] : [])
+    ]));
     await supabaseAdmin
       .from("attendance_integrity_flags")
-      .update({ message, details, severity, punch_id: punchId ?? null, location_id: locationId ?? null, updated_at: now })
+      .update({
+        message,
+        details: { ...previousDetails, ...details, ...(punchIds.length ? { punchIds } : {}) },
+        severity,
+        punch_id: punchId ?? null,
+        location_id: locationId ?? null,
+        updated_at: now
+      })
       .eq("id", existing.data.id);
     return { id: String(existing.data.id), created: false };
   }
@@ -240,7 +258,7 @@ async function openIntegrityFlag({
       flag_type: flagType,
       severity,
       message,
-      details,
+      details: { ...details, ...(punchId ? { punchIds: [punchId] } : {}) },
       status: "open",
       updated_at: now
     })

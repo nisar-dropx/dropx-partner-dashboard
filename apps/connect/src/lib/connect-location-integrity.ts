@@ -104,7 +104,7 @@ async function activateHeldPunchMinimal(punchId: string) {
 async function resolveIntegrityFlagMinimal(flagId: string, resolvedBy: string | null) {
   const now = new Date().toISOString();
   const existing = await db().from("attendance_integrity_flags")
-    .select("id, punch_id")
+    .select("id, punch_id, company_id, enrolment_id, punch_date, details")
     .eq("id", flagId)
     .maybeSingle();
   if (existing.error) throw new Error(existing.error.message);
@@ -125,8 +125,34 @@ async function resolveIntegrityFlagMinimal(flagId: string, resolvedBy: string | 
 
   const punchIds = new Set<string>();
   if (existing.data?.punch_id) punchIds.add(String(existing.data.punch_id));
+  const details = existing.data?.details && typeof existing.data.details === "object" && !Array.isArray(existing.data.details)
+    ? existing.data.details as Record<string, unknown>
+    : {};
+  if (Array.isArray(details.punchIds)) {
+    details.punchIds.forEach((punchId) => punchIds.add(String(punchId)));
+  }
   for (const row of reviews.data ?? []) {
     if (row.punch_id) punchIds.add(String(row.punch_id));
+  }
+  if (existing.data?.company_id && existing.data.enrolment_id && existing.data.punch_date) {
+    const remainingFlags = await db().from("attendance_integrity_flags")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", existing.data.company_id)
+      .eq("enrolment_id", existing.data.enrolment_id)
+      .eq("punch_date", existing.data.punch_date)
+      .eq("status", "open");
+    if (remainingFlags.error) throw new Error(remainingFlags.error.message);
+    if ((remainingFlags.count ?? 0) === 0) {
+      const heldPunches = await db().from("attendance_punches")
+        .select("id")
+        .eq("company_id", existing.data.company_id)
+        .eq("enrolment_id", existing.data.enrolment_id)
+        .eq("punch_date", existing.data.punch_date)
+        .eq("calculated", false)
+        .eq("is_flagged", true);
+      if (heldPunches.error) throw new Error(heldPunches.error.message);
+      heldPunches.data?.forEach((punch) => punchIds.add(String(punch.id)));
+    }
   }
   for (const punchId of punchIds) {
     await activateHeldPunchMinimal(punchId);
