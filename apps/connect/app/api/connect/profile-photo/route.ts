@@ -66,6 +66,26 @@ async function policy(companyId: string) {
   return created.data;
 }
 
+export async function GET() {
+  if (!supabaseAdmin) {
+    return NextResponse.json({ healthy: false, feature: "verified-profile-photo" }, { status: 503 });
+  }
+  const admin = supabaseAdmin;
+  const tables = [
+    "connect_identity_verification_policies",
+    "connect_profile_photo_challenges",
+    "connect_profile_photo_verifications"
+  ] as const;
+  const results = await Promise.all(tables.map((table) =>
+    admin.from(table).select("id", { count: "exact", head: true }).limit(1)
+  ));
+  const healthy = results.every((result) => !result.error);
+  return NextResponse.json(
+    { healthy, feature: "verified-profile-photo", policySource: "master" },
+    { status: healthy ? 200 : 503 }
+  );
+}
+
 export async function PUT(request: Request) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
