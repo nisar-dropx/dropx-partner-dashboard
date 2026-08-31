@@ -5,14 +5,17 @@ const checks = [
   {
     file: "src/lib/app-navigation.ts",
     required: [
-      'label: "People"',
+      'label: "Platform Control"',
+      'label: "Platform & Access Owners", href: "/master/platform-access-owners"',
+      'label: "Locations & Station Mail", href: "/master/location"',
+      'label: "Google Mail IDs & Mapping", href: "/settings/google-workspace"'
+    ],
+    forbidden: [
       'label: "All People", href: "/people/all"',
       'label: "Under Review", href: "/people/review"',
       'label: "Exception", href: "/people/exceptions"',
-      'label: "Workforce Lifecycle", href: "/people/workforce-lifecycle"',
-      'label: "Attendance Integrity", href: "/attendance/integrity"'
-    ],
-    forbidden: []
+      'label: "Workforce Lifecycle", href: "/people/workforce-lifecycle"'
+    ]
   },
   {
     file: "src/lib/people/navigation.ts",
@@ -67,6 +70,25 @@ const checks = [
     file: "src/app/master/platform-access-owners/page.tsx",
     required: ["requireCompanyId(authorization)", "Company:", 'className="form-grid two"'],
     forbidden: ['name="company_id"', "Select company"]
+  },
+  {
+    file: "src/app/master/location/page.tsx",
+    required: [
+      'title="Locations"',
+      'Location Google Mail ID',
+      'People owns manager scope, cluster responsibility and escalation assignments.'
+    ],
+    forbidden: [
+      'name="station_manager_email"',
+      'name="cluster_manager_email"',
+      'name="ops_manager_email"',
+      'name="ops_program_manager_email"'
+    ]
+  },
+  {
+    file: "src/lib/ops-pulse/location-mail.ts",
+    required: ['station_email: email', 'Never overwrite an existing different address.'],
+    forbidden: []
   }
 ];
 
