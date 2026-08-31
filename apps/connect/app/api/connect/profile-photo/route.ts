@@ -12,6 +12,7 @@ import { isNonEmployeeProfileType, workforceTable } from "../../../../src/lib/wo
 
 const BUCKET = "employee-profile-documents";
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
+const CHALLENGE_TTL_MS = 30 * 60 * 1000;
 
 const SAFE_ERROR_PREFIXES = [
   "Connect session expired",
@@ -23,6 +24,7 @@ const SAFE_ERROR_PREFIXES = [
   "Profile type is invalid",
   "Face verification session is invalid",
   "Face verification session expired",
+  "Face verification was already used",
   "Face verification was already used",
   "Face match must be",
   "Face match score is invalid",
@@ -73,6 +75,40 @@ function workforceUpdateTable(profileType: string) {
   if (profileType === "employee") return "employees" as const;
   if (isNonEmployeeProfileType(profileType)) return workforceTable(profileType);
   throw new Error("Profile type is invalid.");
+}
+
+async function signedProfilePhoto(path: string) {
+  if (!supabaseAdmin) return "";
+  const signed = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(path, 60 * 60);
+  return signed.data?.signedUrl ?? "";
+}
+
+async function completedVerificationResponse({
+  companyId,
+  challengeId,
+  settings,
+  updatesUsed
+}: {
+  companyId: string;
+  challengeId: string;
+  settings: Awaited<ReturnType<typeof loadConnectProfilePhotoPolicy>>;
+  updatesUsed: number;
+}) {
+  const existing = await supabaseAdmin!.from("connect_profile_photo_verifications")
+    .select("verified_photo_path,match_percent")
+    .eq("company_id", companyId)
+    .eq("challenge_id", challengeId)
+    .maybeSingle();
+  if (existing.error || !existing.data?.verified_photo_path) return null;
+  const usage = connectProfilePhotoUsage(settings, updatesUsed);
+  return NextResponse.json({
+    ok: true,
+    profilePhotoUrl: await signedProfilePhoto(existing.data.verified_photo_path),
+    matchPercent: Number(existing.data.match_percent),
+    monthlyLimit: usage.monthlyLimit,
+    updatesUsed: usage.updatesUsed,
+    updatesRemaining: usage.updatesRemaining
+  });
 }
 
 export async function GET(request: Request) {
@@ -152,13 +188,39 @@ export async function PUT(request: Request) {
       })
     ]);
     const usage = assertConnectProfilePhotoUpdateAllowed(settings, updatesUsed);
+    const nowIso = new Date().toISOString();
+    const openChallenge = await supabaseAdmin.from("connect_profile_photo_challenges")
+      .select("id,required_match_percent,require_liveness,expires_at")
+      .eq("company_id", account.companyId)
+      .eq("account_id", account.id)
+      .eq("profile_type", profileType)
+      .is("consumed_at", null)
+      .gt("expires_at", nowIso)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (openChallenge.error) {
+      if (isConnectProfilePhotoSchemaError(openChallenge.error.message)) {
+        throw new Error("Profile photo verification is not configured on the server yet. Ask HR to apply the latest Connect database update.");
+      }
+      throw new Error(openChallenge.error.message);
+    }
+    if (openChallenge.data) {
+      return NextResponse.json({
+        ok: true,
+        challenge: openChallenge.data,
+        monthlyLimit: usage.monthlyLimit,
+        updatesUsed: usage.updatesUsed,
+        updatesRemaining: usage.updatesRemaining
+      });
+    }
     const challenge = await supabaseAdmin.from("connect_profile_photo_challenges").insert({
       company_id: account.companyId,
       account_id: account.id,
       profile_type: profileType,
       required_match_percent: settings.profile_photo_match_percent,
       require_liveness: settings.require_profile_photo_liveness,
-      expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString()
+      expires_at: new Date(Date.now() + CHALLENGE_TTL_MS).toISOString()
     }).select("id,required_match_percent,require_liveness,expires_at").single();
     if (challenge.error || !challenge.data) {
       if (isConnectProfilePhotoSchemaError(challenge.error?.message ?? "")) {
@@ -205,7 +267,17 @@ export async function POST(request: Request) {
       .eq("profile_type", profileType)
       .maybeSingle();
     if (challenge.error || !challenge.data) throw new Error("Face verification session is invalid. Start again.");
-    if (challenge.data.consumed_at || new Date(challenge.data.expires_at).getTime() < Date.now()) {
+    if (challenge.data.consumed_at) {
+      const replay = await completedVerificationResponse({
+        companyId: account.companyId,
+        challengeId,
+        settings,
+        updatesUsed
+      });
+      if (replay) return replay;
+      throw new Error("Face verification was already used. Start again.");
+    }
+    if (new Date(challenge.data.expires_at).getTime() < Date.now()) {
       throw new Error("Face verification session expired. Start again.");
     }
 
@@ -261,16 +333,23 @@ export async function POST(request: Request) {
     const consumed = await supabaseAdmin.from("connect_profile_photo_challenges").update({ consumed_at: updatedAt })
       .eq("id", challengeId).is("consumed_at", null).select("id").maybeSingle();
     if (consumed.error || !consumed.data) {
+      const replay = await completedVerificationResponse({
+        companyId: account.companyId,
+        challengeId,
+        settings,
+        updatesUsed: updatesUsed + 1
+      });
+      if (replay) return replay;
       await supabaseAdmin.from(table).update({ profile_photo_path: current.data.profile_photo_path, updated_at: updatedAt })
         .eq("company_id", account.companyId).eq("id", account.id);
       await supabaseAdmin.from("connect_profile_photo_verifications").delete().eq("id", verification.data.id);
       throw new Error(consumed.error?.message ?? "Face verification was already used. Start again.");
     }
-    const signed = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(photoPath, 60 * 60);
-    const nextUsage = assertConnectProfilePhotoUpdateAllowed(settings, updatesUsed + 1);
+    const signedUrl = await signedProfilePhoto(photoPath);
+    const nextUsage = connectProfilePhotoUsage(settings, updatesUsed + 1);
     return NextResponse.json({
       ok: true,
-      profilePhotoUrl: signed.data?.signedUrl ?? "",
+      profilePhotoUrl: signedUrl,
       matchPercent,
       monthlyLimit: nextUsage.monthlyLimit,
       updatesUsed: nextUsage.updatesUsed,

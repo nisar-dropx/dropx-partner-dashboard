@@ -50,6 +50,7 @@ export function SelfieCapturePanel({
   const trackerRef = useRef<ReturnType<typeof createLivenessTracker> | null>(null);
   const challengeIndexRef = useRef(0);
   const matchOkStreakRef = useRef(0);
+  const submitLockRef = useRef(false);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(Boolean(needMatch || needLiveness));
@@ -353,7 +354,7 @@ export function SelfieCapturePanel({
   }
 
   async function confirm() {
-    if (!previewBlob) return;
+    if (!previewBlob || submitLockRef.current) return;
     if (needMatch && !matchAccepted(liveMatch)) {
       setError(`Face match must be ${requiredMatchPercent}%+ before using this selfie.`);
       return;
@@ -363,6 +364,7 @@ export function SelfieCapturePanel({
       return;
     }
     const file = new File([previewBlob], `attendance-selfie-${Date.now()}.jpg`, { type: "image/jpeg" });
+    submitLockRef.current = true;
     setCapturing(true);
     setError("");
     try {
@@ -370,6 +372,7 @@ export function SelfieCapturePanel({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to use this selfie.");
     } finally {
+      submitLockRef.current = false;
       setCapturing(false);
     }
   }
@@ -422,7 +425,6 @@ export function SelfieCapturePanel({
 
   return createPortal(
     <div className="dx-selfie-modal-root">
-      <button aria-label="Close verification dialog" className="dx-sheet-scrim" onClick={onClose} type="button" />
       <aside className="dx-selfie-panel" role="dialog" aria-modal="true" aria-labelledby="selfie-panel-title">
         <header>
           <div>

@@ -133,6 +133,7 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
       setScanning(false);
       setCandidate(null);
       setChallenge(null);
+      setError("");
       if (candidateUrl) URL.revokeObjectURL(candidateUrl);
       setCandidateUrl("");
       if (payload.monthlyLimit != null) {
@@ -145,7 +146,9 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
         await loadUsage();
       }
       setNotice(`Photo updated after ${payload.matchPercent}% face match.`);
-      onUpdated(payload.profilePhotoUrl);
+      const nextPhotoUrl = payload.profilePhotoUrl
+        || (candidate ? URL.createObjectURL(candidate) : currentPhotoUrl || "");
+      onUpdated(nextPhotoUrl);
     } catch (reason) {
       setError(safePhotoError(reason, "Profile photo could not be updated. Please try again."));
     } finally {
