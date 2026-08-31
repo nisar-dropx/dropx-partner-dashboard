@@ -19,7 +19,6 @@ export async function POST() {
     .eq("company_id", companyId)
     .ilike("designation", "picker")
     .eq("onboarding_status", "active")
-    .is("deleted_at", null)
     .eq("is_active", false)
     .select("id");
   if (completedPickers.error) {
@@ -32,7 +31,6 @@ export async function POST() {
     .eq("company_id", companyId)
     .ilike("designation", "picker")
     .eq("onboarding_status", "active")
-    .is("deleted_at", null)
     .eq("is_active", true);
   if (activePickerIds.error) {
     return NextResponse.json({ error: activePickerIds.error.message }, { status: 500 });

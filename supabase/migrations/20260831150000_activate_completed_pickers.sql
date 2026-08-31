@@ -11,7 +11,6 @@ begin
         updated_at = now()
     where lower(btrim(coalesce(designation, ''))) = 'picker'
       and lower(btrim(coalesce(onboarding_status, ''))) = 'active'
-      and deleted_at is null
       and not is_active;
 
     update public.contractors contractor
@@ -27,7 +26,6 @@ begin
         where picker.company_id = contractor.company_id
           and upper(btrim(coalesce(picker.dropx_id, ''))) = upper(btrim(coalesce(contractor.dropx_id, '')))
           and lower(btrim(coalesce(picker.onboarding_status, ''))) = 'active'
-          and picker.deleted_at is null
       );
   else
     update public.contractors
