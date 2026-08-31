@@ -46,7 +46,7 @@ const checks = [
   },
   {
     file: "src/middleware.ts",
-    required: ["MOVED_DASHBOARD_PEOPLE_PATHS", "MOVED_PEOPLE_WORKFORCE_PATHS", "MOVED_PEOPLE_OPS_PATHS", "MOVED_OPS_WORKFORCE_PATHS"],
+    required: ["RESTORED_DASHBOARD_PEOPLE_PATHS", "isRestoredDashboardPeoplePath", "MOVED_PEOPLE_WORKFORCE_PATHS", "MOVED_PEOPLE_OPS_PATHS", "MOVED_OPS_WORKFORCE_PATHS"],
     forbidden: []
   },
   {
