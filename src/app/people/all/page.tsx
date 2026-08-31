@@ -5,6 +5,7 @@ import { getAuthorization, hasPermission, isCompanyOwner, type AuthorizationCont
 import { requireCompanyId } from "@/lib/company-scope";
 import { dynamicWorkforceTable, isCustomWorkforceCategoryCode, workforceCategoryPageCode } from "@/lib/dynamic-workforce";
 import { canAccessDesignationPortal } from "@/lib/designation-portal-access";
+import { loadCanonicalWorkforcePeople } from "@/lib/canonical-workforce-people";
 import type { AllPeopleExportValues } from "@/lib/all-people-export";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { redirect } from "next/navigation";
@@ -263,11 +264,12 @@ async function loadPeople(
         })
     };
   }));
+  const workforceResult = await loadCanonicalWorkforcePeople(companyId, locationScopeIds, hasAllLocationAccess);
   const allResults = [...results, ...customResults];
   return {
     categories,
-    rows: allResults.flatMap((result) => result.rows),
-    error: categoryResult.error?.message ?? designationResult.error?.message ?? allResults.find((result) => result.error)?.error ?? null
+    rows: [...allResults.flatMap((result) => result.rows), ...workforceResult.rows],
+    error: categoryResult.error?.message ?? designationResult.error?.message ?? allResults.find((result) => result.error)?.error ?? workforceResult.error ?? null
   };
 }
 

@@ -19,6 +19,7 @@ const DEPRECATED_MAIN_PEOPLE_PATHS = ["/people", "/field-executive", "/vendors",
 const DEPRECATED_MAIN_HR_PATHS = ["/employees", "/contractors"];
 const RESTORED_DASHBOARD_PEOPLE_PATHS = [
   "/people/all",
+  "/people/workforce",
   "/people/review",
   "/people/exceptions",
   "/people/workforce-lifecycle",
