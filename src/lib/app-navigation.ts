@@ -27,6 +27,18 @@ export const fleetNavItem: NavItem = {
 
 export const navItems: NavItem[] = [
   { code: "dashboard", label: "Command Center", href: "/dashboard", icon: "#" },
+  {
+    code: "people_all",
+    label: "People",
+    icon: "+",
+    children: [
+      { code: "people_all", label: "All People", href: "/people/all" },
+      { code: "people_review", label: "Under Review", href: "/people/review" },
+      { code: "people_exceptions", label: "Exception", href: "/people/exceptions" },
+      { code: "people_review", label: "Workforce Lifecycle", href: "/people/workforce-lifecycle" },
+      { code: "attendance_integrity", label: "Attendance Integrity", href: "/attendance/integrity" }
+    ]
+  },
   { code: "executive_id_onboarding", label: "Executive ID Onboarding", href: "/executive-id-onboarding", icon: "ID" },
   { code: "provider_mapping", label: "ID Mapping", href: "/provider-mapping", icon: "<>" },
   fleetNavItem,

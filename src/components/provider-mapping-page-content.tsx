@@ -51,6 +51,17 @@ type FieldOperationsDesignationRow = {
   name: string;
 };
 
+type WorkforceRow = {
+  id: string;
+  source_profile_type: "employee" | "contractor" | "field_executive" | string | null;
+  source_profile_id: string | null;
+  full_name: string;
+  date_of_join: string | null;
+  location_id: string | null;
+  dropx_id: string | null;
+  is_active: boolean;
+};
+
 type MappingRow = {
   id: string;
   field_executive_id: string | null;
@@ -121,7 +132,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
   }
 
   const companyId = requireCompanyId(authorization);
-  const [locationsResult, executivesResult, employeesResult, contractorsResult, designationsResult, mappingsResult, paymentMethodsResult] = await Promise.all([
+  const [locationsResult, executivesResult, employeesResult, contractorsResult, workforceResult, designationsResult, mappingsResult, paymentMethodsResult] = await Promise.all([
     supabaseAdmin
       .from("stations")
       .select("id, station_code, station_name, provider_id")
@@ -155,6 +166,14 @@ async function loadMappingData(authorization: AuthorizationContext) {
       .eq("company_id", companyId)
       .eq("is_active", true)
       .is("deleted_at", null)
+      .order("full_name"),
+    supabaseAdmin
+      .from("workforce")
+      .select("id, source_profile_type, source_profile_id, full_name, date_of_join, location_id, dropx_id, is_active, designations!inner(is_field_operations)")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .is("deleted_at", null)
+      .eq("designations.is_field_operations", true)
       .order("full_name"),
     supabaseAdmin
       .from("designations")
@@ -255,7 +274,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
       .flatMap((designation) => [designation.code, designation.name])
       .map((value) => value.trim().toLowerCase())
   );
-  const workers = [
+  const legacyWorkers = [
     ...((employeesResult.data ?? []) as unknown as EmployeeRow[]).filter((employee) => isAllocatedLocation(employee.location_id)).map((employee) => ({
       id: employee.id,
       sourceType: "employee" as const,
@@ -283,6 +302,26 @@ async function loadMappingData(authorization: AuthorizationContext) {
       dropxId: executive.dropx_id || executiveDropxId(executive.id)
     }))
   ];
+  const canonicalWorkers = ((workforceResult.data ?? []) as unknown as WorkforceRow[])
+    .filter((worker) =>
+      Boolean(worker.source_profile_id) &&
+      (worker.source_profile_type === "employee" || worker.source_profile_type === "contractor" || worker.source_profile_type === "field_executive") &&
+      isAllocatedLocation(worker.location_id)
+    )
+    .map((worker) => ({
+      id: worker.source_profile_id!,
+      sourceType: worker.source_profile_type as "employee" | "contractor" | "field_executive",
+      fullName: worker.full_name,
+      dateOfJoin: worker.date_of_join ?? new Date().toISOString().slice(0, 10),
+      locationId: worker.location_id ?? "",
+      dropxId: worker.dropx_id ?? ""
+    }));
+  const workers = Array.from(
+    [...legacyWorkers, ...canonicalWorkers].reduce((bySource, worker) => {
+      bySource.set(`${worker.sourceType}:${worker.id}`, worker);
+      return bySource;
+    }, new Map<string, (typeof legacyWorkers)[number]>()).values()
+  );
 
   const mappings = workers.map((worker) => {
       const mapping = latestMappingByWorkerKey.get(`${worker.sourceType}:${worker.id}`);
@@ -315,7 +354,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
     locations,
     mappings,
     paymentMethods,
-    error: mappingsResult.error?.message || employeesResult.error?.message || contractorsResult.error?.message || designationsResult.error?.message || executivesResult.error?.message || locationsResult.error?.message || paymentMethodsResult.error?.message || null
+    error: mappingsResult.error?.message || employeesResult.error?.message || contractorsResult.error?.message || workforceResult.error?.message || designationsResult.error?.message || executivesResult.error?.message || locationsResult.error?.message || paymentMethodsResult.error?.message || null
   };
 }
 

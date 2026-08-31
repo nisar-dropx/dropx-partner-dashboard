@@ -17,6 +17,13 @@ const MOVED_OPS_PAYMENT_PATHS = [
 ];
 const DEPRECATED_MAIN_PEOPLE_PATHS = ["/people", "/field-executive", "/vendors", "/workers"];
 const DEPRECATED_MAIN_HR_PATHS = ["/employees", "/contractors"];
+const RESTORED_DASHBOARD_PEOPLE_PATHS = [
+  "/people/all",
+  "/people/review",
+  "/people/exceptions",
+  "/people/workforce-lifecycle",
+  "/attendance/integrity"
+];
 
 function matchesPath(path: string, roots: string[]) {
   return roots.some((root) => path === root || path.startsWith(`${root}/`));
@@ -103,7 +110,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));
   }
 
-  if (isDashboardHost && matchesPath(path, DEPRECATED_MAIN_PEOPLE_PATHS)) {
+  const isRestoredDashboardPeoplePath = isDashboardHost && matchesPath(path, RESTORED_DASHBOARD_PEOPLE_PATHS);
+
+  if (isDashboardHost && !isRestoredDashboardPeoplePath && matchesPath(path, DEPRECATED_MAIN_PEOPLE_PATHS)) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));
   }
 
