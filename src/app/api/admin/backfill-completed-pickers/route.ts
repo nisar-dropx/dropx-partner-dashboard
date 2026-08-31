@@ -3,6 +3,13 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { NextResponse } from "next/server";
 
+export async function GET() {
+  return new Response(
+    '<!doctype html><html><body><form method="post"><button type="submit">Activate completed Pickers</button></form></body></html>',
+    { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } }
+  );
+}
+
 export async function POST() {
   const authorization = await getAuthorization();
   if (!authorization || !isCompanyOwner(authorization)) {
