@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, CreditCard, Files, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
+import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, ClipboardList, CreditCard, Files, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
 import { AttendanceLocationMonitor } from "./attendance-location-monitor";
@@ -14,11 +14,12 @@ import { ConnectAdvances } from "./connect-advances";
 import { ConnectPerformance } from "./connect-performance";
 import { ConnectReimbursements } from "./connect-reimbursements";
 import { ConnectApprovalInbox } from "./connect-approval-inbox";
+import { ConnectMyRequests } from "./connect-my-requests";
 import { ConnectPeopleWorkspace } from "./connect-people-workspace";
 import { AppAccount, ConnectProfileApp } from "./connect-profile-app";
 import { countryCodeOptions } from "@/lib/country-codes";
 
-type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "approvals" | "payments" | "advances" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "performance" | "settings";
+type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "approvals" | "requests" | "payments" | "advances" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "performance" | "settings";
 type ConnectNotification = {
   id: string;
   title: string;
@@ -41,7 +42,14 @@ const isWorkforceWorkspace = (account: AppAccount | null) => account?.workspace
   : Boolean(account && !["user", "employee"].includes(account.profileType));
 const peopleSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account) && !isWorkforceWorkspace(account));
 const sharedSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account));
-const canViewApprovals = (account: AppAccount | null) => Boolean(account && !isWorkforceWorkspace(account) && (isManagerAccount(account) || peopleSelfService(account) || account.pageAccess?.includes("approvals")));
+// The Approval Inbox is for people who actually have someone reporting to
+// them (live org-chart membership, checked server-side) or who hold an
+// explicit "approvals" page grant (e.g. an HR finalization role that reviews
+// company-wide without being anyone's direct manager). Account type alone
+// (dashboard "user" vs. self-service employee/contractor) is not enough —
+// most People accounts have zero reportees and should never see this tab.
+const canViewApprovals = (account: AppAccount | null, hasReportees: boolean) =>
+  Boolean(account && !isWorkforceWorkspace(account) && (hasReportees || account.pageAccess?.includes("approvals")));
 const allowed = (account: AppAccount | null, page: "dashboard" | "attendance" | "roster" | "leave" | "performance" | "settings") => {
   if (page === "settings") return true;
   if (page === "performance" && !peopleSelfService(account)) return false;
@@ -88,6 +96,7 @@ export function ConnectLoginFlow() {
   const [notice, setNotice] = useState("");
   const [avatar, setAvatar] = useState("");
   const [lockedAccounts, setLockedAccounts] = useState<AppAccount[]>([]);
+  const [hasReportees, setHasReportees] = useState(false);
   const lastLoggedScreen = useRef("");
 
   function route(rows: AppAccount[]) {
@@ -124,6 +133,16 @@ export function ConnectLoginFlow() {
     setNotifications([]);
     setUnreadNotifications(0);
     if (account) void loadNotifications(false);
+  }, [account?.id, account?.profileType]);
+  useEffect(() => {
+    setHasReportees(false);
+    if (!account || isWorkforceWorkspace(account)) return;
+    let cancelled = false;
+    fetch(`/api/connect/approver-status?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`)
+      .then((response) => response.json())
+      .then((payload) => { if (!cancelled) setHasReportees(Boolean(payload?.hasReportees)); })
+      .catch(() => { if (!cancelled) setHasReportees(false); });
+    return () => { cancelled = true; };
   }, [account?.id, account?.profileType]);
   useEffect(() => {
     if (!account || ["mobile", "pin", "otp", "createPin", "unlock", "accounts"].includes(step)) return;
@@ -402,7 +421,8 @@ export function ConnectLoginFlow() {
     if (next === "leave" && !showLeaveNav(account)) return;
     if (next === "performance" && !allowed(account, "performance")) return;
     if (next === "documents" && !peopleSelfService(account)) return;
-    if (next === "approvals" && !canViewApprovals(account)) return;
+    if (next === "requests" && !peopleSelfService(account)) return;
+    if (next === "approvals" && !canViewApprovals(account, hasReportees)) return;
     if (next === "advances" && !sharedSelfService(account)) return;
     if (next === "reimbursements" && !peopleSelfService(account)) return;
     if (next === "profile" && isManagerAccount(account)) {
@@ -424,13 +444,14 @@ export function ConnectLoginFlow() {
     setStep(refreshed ? landingPage(refreshed) : "accounts");
   }
 
-  const loggedIn = ["accounts","dashboard","profile","documents","approvals","payments","advances","reimbursements","attendance","roster","leave","lop","performance","settings"].includes(step);
+  const loggedIn = ["accounts","dashboard","profile","documents","approvals","requests","payments","advances","reimbursements","attendance","roster","leave","lop","performance","settings"].includes(step);
   const screenLabel: Partial<Record<Step, string>> = {
     accounts: "Accounts",
     dashboard: "Today",
     profile: "My profile",
     documents: "Documents",
     approvals: "Approvals",
+    requests: "My requests",
     payments: "Payments",
     advances: "Pay advances",
     reimbursements: "Reimbursements",
@@ -462,7 +483,8 @@ export function ConnectLoginFlow() {
         {allowed(account, "dashboard") ? <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Gauge />Dashboard</button> : null}
         {!isManagerAccount(account) ? <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />My Profile</button> : null}
         {peopleSelfService(account) ? <button aria-current={step === "documents" ? "page" : undefined} className={step === "documents" ? "active" : ""} onClick={() => open("documents")}><Files />Documents</button> : null}
-        {canViewApprovals(account) ? <button aria-current={step === "approvals" ? "page" : undefined} className={step === "approvals" ? "active" : ""} onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox</button> : null}
+        {peopleSelfService(account) ? <button aria-current={step === "requests" ? "page" : undefined} className={step === "requests" ? "active" : ""} onClick={() => open("requests")}><ClipboardList />My Requests</button> : null}
+        {canViewApprovals(account, hasReportees) ? <button aria-current={step === "approvals" ? "page" : undefined} className={step === "approvals" ? "active" : ""} onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox</button> : null}
         {sharedSelfService(account) ? <button aria-expanded={paymentsExpanded} className={`payments-toggle${step === "advances" || step === "reimbursements" ? " active" : ""}${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard /><span>Payments</span><ChevronRight /></button> : null}
         {sharedSelfService(account) && paymentsExpanded ? <button aria-current={step === "advances" ? "page" : undefined} className={`desktop-subitem${step === "advances" ? " active" : ""}`} onClick={() => open("advances")}><IndianRupee />Advances</button> : null}
         {peopleSelfService(account) && paymentsExpanded ? <button aria-current={step === "reimbursements" ? "page" : undefined} className={`desktop-subitem${step === "reimbursements" ? " active" : ""}`} onClick={() => open("reimbursements")}><ReceiptText />Reimbursements</button> : null}
@@ -505,7 +527,8 @@ export function ConnectLoginFlow() {
         {allowed(account, "dashboard") ? <button onClick={() => open("dashboard")}><Gauge />Dashboard<ChevronRight /></button> : null}
         {!isManagerAccount(account) ? <button onClick={() => open("profile")}><UserRound />My Profile<ChevronRight /></button> : null}
         {peopleSelfService(account) ? <button onClick={() => open("documents")}><Files />Documents<ChevronRight /></button> : null}
-        {canViewApprovals(account) ? <button onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox<ChevronRight /></button> : null}
+        {peopleSelfService(account) ? <button onClick={() => open("requests")}><ClipboardList />My Requests<ChevronRight /></button> : null}
+        {canViewApprovals(account, hasReportees) ? <button onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox<ChevronRight /></button> : null}
         {sharedSelfService(account) ? <button aria-expanded={paymentsExpanded} className={`payments-toggle${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard />Payments<ChevronRight /></button> : null}
         {sharedSelfService(account) && paymentsExpanded ? <button className="subitem" onClick={() => open("advances")}><span />Advances<ChevronRight /></button> : null}
         {peopleSelfService(account) && paymentsExpanded ? <button className="subitem" onClick={() => open("reimbursements")}><span />Reimbursements<ChevronRight /></button> : null}
@@ -551,7 +574,8 @@ export function ConnectLoginFlow() {
       {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onLeave={() => open("leave")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRoster={() => open("roster")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
       {step === "profile" && account && !isManagerAccount(account) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "documents" && account && peopleSelfService(account) ? <ConnectDocuments account={account} /> : null}
-      {step === "approvals" && account && canViewApprovals(account) ? <ConnectApprovalInbox account={account} /> : null}
+      {step === "requests" && account && peopleSelfService(account) ? <ConnectMyRequests account={account} /> : null}
+      {step === "approvals" && account && canViewApprovals(account, hasReportees) ? <ConnectApprovalInbox account={account} /> : null}
       {step === "advances" && account && sharedSelfService(account) ? <ConnectAdvances account={account} /> : null}
       {step === "reimbursements" && account && peopleSelfService(account) ? <ConnectReimbursements account={account} /> : null}
       {step === "attendance" && account && allowed(account, "attendance") ? <ConnectAttendance account={account} /> : null}
@@ -574,7 +598,7 @@ export function ConnectLoginFlow() {
       {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint /><span>Attendance</span></button> : null}
       {allowed(account, "roster") ? <button aria-current={step === "roster" ? "page" : undefined} className={step === "roster" ? "active" : ""} onClick={() => open("roster")}><ArrowLeftRight /><span>Roster</span></button> : null}
       {showLeaveNav(account) ? <button aria-current={step === "leave" ? "page" : undefined} className={step === "leave" ? "active" : ""} onClick={() => open("leave")}><CalendarDays /><span>Leave</span></button> : null}
-      {canViewApprovals(account) && isManagerAccount(account) ? <button aria-current={step === "approvals" ? "page" : undefined} className={step === "approvals" ? "active" : ""} onClick={() => open("approvals")}><ClipboardCheck /><span>Approvals</span></button> : null}
+      {canViewApprovals(account, hasReportees) && isManagerAccount(account) ? <button aria-current={step === "approvals" ? "page" : undefined} className={step === "approvals" ? "active" : ""} onClick={() => open("approvals")}><ClipboardCheck /><span>Approvals</span></button> : null}
       {!isManagerAccount(account) ? <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound /><span>Profile</span></button> : <button aria-current={step === "settings" ? "page" : undefined} className={step === "settings" ? "active" : ""} onClick={() => open("settings")}><Settings /><span>Settings</span></button>}
     </nav> : null}
   </div>;

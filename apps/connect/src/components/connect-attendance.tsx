@@ -19,6 +19,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { SelfieCapturePanel } from "./selfie-capture-panel";
 import { stampSupportSelfieBlob } from "@/lib/support-selfie-stamp";
+import { readResilientPosition } from "@/lib/read-geolocation";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
 type Regularization = {
@@ -205,21 +206,7 @@ function emptyAttendanceRow(date: string): Row {
   };
 }
 
-function readPosition(): Promise<GeolocationPosition> {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error("Location is not supported on this device."));
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(resolve, (error) => {
-      reject(new Error(error.message || "Unable to read device location. Allow location access."));
-    }, {
-      enableHighAccuracy: true,
-      maximumAge: 10_000,
-      timeout: 20_000
-    });
-  });
-}
+const readPosition = () => readResilientPosition(10_000);
 
 export function ConnectAttendance({ account }: { account: Account }) {
   const now = new Date();

@@ -120,6 +120,52 @@ async function resolveWorker({
   throw new Error("Attendance is available for workforce accounts only.");
 }
 
+async function loadRegularizationHistory(companyId: string, profileType: string, profileId: string) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const requestsResult = await supabaseAdmin
+    .from("attendance_regularization_requests")
+    .select("id, attendance_date, requested_in_time, requested_out_time, reason_code, remarks, attachment_path, status, review_remarks, created_at")
+    .eq("company_id", companyId)
+    .eq("profile_type", profileType)
+    .eq("profile_id", profileId)
+    .is("request_kind", null)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (requestsResult.error) {
+    if (isMissingRegularizationTable(requestsResult.error.message)) return [];
+    throw new Error(requestsResult.error.message);
+  }
+  const requests = requestsResult.data ?? [];
+  if (!requests.length) return [];
+  const stepsResult = await supabaseAdmin
+    .from("attendance_regularization_approval_steps")
+    .select("id, request_id, step_order, step_name, status, decided_at")
+    .in("request_id", requests.map((item) => item.id))
+    .order("step_order", { ascending: true });
+  if (stepsResult.error && !isMissingRegularizationTable(stepsResult.error.message)) {
+    throw new Error(stepsResult.error.message);
+  }
+  const stepsByRequest = new Map<string, Array<{ id: string; stepOrder: number; stepName: string; status: string; decidedAt: string | null }>>();
+  for (const step of stepsResult.data ?? []) {
+    const list = stepsByRequest.get(step.request_id) ?? [];
+    list.push({ id: step.id, stepOrder: step.step_order, stepName: step.step_name, status: step.status, decidedAt: step.decided_at });
+    stepsByRequest.set(step.request_id, list);
+  }
+  return requests.map((item) => ({
+    id: item.id,
+    attendanceDate: item.attendance_date,
+    requestedInTime: String(item.requested_in_time ?? "").slice(0, 5),
+    requestedOutTime: String(item.requested_out_time ?? "").slice(0, 5),
+    reasonCode: item.reason_code,
+    remarks: item.remarks,
+    hasAttachment: Boolean(item.attachment_path),
+    status: item.status,
+    reviewRemarks: item.review_remarks,
+    createdAt: item.created_at,
+    steps: stepsByRequest.get(item.id) ?? []
+  }));
+}
+
 export async function GET(request: NextRequest) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
@@ -256,6 +302,11 @@ export async function GET(request: NextRequest) {
       ...heldPunchesByDate.keys()
     ]);
 
+    const withHistory = request.nextUrl.searchParams.get("withHistory") === "1";
+    const regularizationHistory = withHistory
+      ? await loadRegularizationHistory(worker.companyId, worker.profileType, worker.profileId)
+      : undefined;
+
     return NextResponse.json({
       month: range.label,
       summary: {
@@ -264,7 +315,8 @@ export async function GET(request: NextRequest) {
         absent,
         misPunch: misPunchDates.size
       },
-      rows: responseRows
+      rows: responseRows,
+      ...(regularizationHistory ? { regularizationHistory } : {})
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load attendance.";
