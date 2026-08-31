@@ -22,18 +22,12 @@ begin
    and category.company_id = designation.company_id
   where designation.company_id = new.company_id
     and designation.is_active
+    and nullif(btrim(new.designation), '') is not null
     and (
-      (new.designation_id is not null and designation.id = new.designation_id)
-      or (
-        new.designation_id is null
-        and nullif(btrim(new.designation), '') is not null
-        and (
-          upper(designation.code) = upper(btrim(new.designation))
-          or lower(btrim(designation.name)) = lower(btrim(new.designation))
-        )
-      )
+      upper(designation.code) = upper(btrim(new.designation))
+      or lower(btrim(designation.name)) = lower(btrim(new.designation))
     )
-  order by case when new.designation_id is not null and designation.id = new.designation_id then 0 else 1 end
+  order by case when lower(btrim(designation.name)) = lower(btrim(new.designation)) then 0 else 1 end
   limit 1;
 
   if lower(coalesce(people_module_value, '')) like 'people%'
@@ -52,7 +46,7 @@ $$;
 drop trigger if exists contractors_enforce_people_active_state
   on public.contractors;
 create trigger contractors_enforce_people_active_state
-before insert or update of designation, designation_id, onboarding_status, is_active, deleted_at
+before insert or update of designation, onboarding_status, is_active, deleted_at
 on public.contractors
 for each row execute function public.enforce_people_contractor_active_state();
 

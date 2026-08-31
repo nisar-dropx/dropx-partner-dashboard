@@ -13,11 +13,14 @@ export async function GET() {
   const companyId = requireCompanyId(authorization);
   const designationResult = await supabaseAdmin
     .from("designations")
-    .select("id")
+    .select("id, code, name")
     .eq("company_id", companyId)
     .ilike("name", "picker");
   if (designationResult.error) return new Response(designationResult.error.message, { status: 500 });
   const designationIds = (designationResult.data ?? []).map((row) => row.id);
+  const designationValues = Array.from(new Set(
+    (designationResult.data ?? []).flatMap((row) => [row.code, row.name]).filter(Boolean)
+  ));
   if (!designationIds.length) return new Response("No Picker designation was found.", { status: 404 });
 
   const activated = await supabaseAdmin
@@ -35,7 +38,7 @@ export async function GET() {
     .from("contractors")
     .update({ is_active: true, updated_at: new Date().toISOString() })
     .eq("company_id", companyId)
-    .in("designation_id", designationIds)
+    .in("designation", designationValues)
     .eq("onboarding_status", "active")
     .is("deleted_at", null)
     .eq("is_active", false)
