@@ -67,5 +67,10 @@ export async function POST() {
 }
 
 export async function GET() {
-  return POST();
+  const result = await POST();
+  const payload = await result.json();
+  return new Response(
+    `<!doctype html><html><body><h1>Picker activation result</h1><pre>${JSON.stringify(payload)}</pre></body></html>`,
+    { status: result.status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } }
+  );
 }
