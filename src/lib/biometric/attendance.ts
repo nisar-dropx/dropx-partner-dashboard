@@ -305,52 +305,73 @@ export async function resolveAttendanceWorkDate({
     .maybeSingle();
   if (settings.error || settings.data?.overnight_shift_pairing_enabled === false) return calendarDate;
 
-  const currentDayPunches = await supabaseAdmin
-    .from("attendance_punches")
-    .select("id")
-    .eq("company_id", companyId)
-    .eq("enrolment_id", enrolmentId)
-    .eq("punch_date", calendarDate)
-    .eq("calculated", true)
-    .limit(1);
-  if (currentDayPunches.error || (currentDayPunches.data?.length ?? 0) > 0) return calendarDate;
-
   const previousPunches = await supabaseAdmin
     .from("attendance_punches")
-    .select("punch_time")
+    .select("punch_time, account_id, employee_id, field_executive_id, profile_type")
     .eq("company_id", companyId)
     .eq("enrolment_id", enrolmentId)
     .eq("punch_date", previousDate)
-    .eq("calculated", true)
+    .or("calculated.eq.true,is_flagged.eq.true")
     .order("punch_time", { ascending: true });
   if (previousPunches.error || !previousPunches.data?.length) {
     return calendarDate;
   }
 
+  const latestPreviousPunch = previousPunches.data[previousPunches.data.length - 1];
+  const resolvedAccountId = accountId ?? latestPreviousPunch.account_id ?? null;
+  const resolvedEmployeeId = employeeId ?? latestPreviousPunch.employee_id ?? null;
+  const resolvedFieldExecutiveId = fieldExecutiveId ?? latestPreviousPunch.field_executive_id ?? null;
+  const resolvedProfileType = profileType ?? latestPreviousPunch.profile_type ?? null;
+
+  const [previousShift, currentShift] = await Promise.all([
+    loadWorkerShiftWindow({
+      accountId: resolvedAccountId,
+      companyId,
+      employeeId: resolvedEmployeeId,
+      fieldExecutiveId: resolvedFieldExecutiveId,
+      profileType: resolvedProfileType,
+      workDate: previousDate
+    }),
+    loadWorkerShiftWindow({
+      accountId: resolvedAccountId,
+      companyId,
+      employeeId: resolvedEmployeeId,
+      fieldExecutiveId: resolvedFieldExecutiveId,
+      profileType: resolvedProfileType,
+      workDate: calendarDate
+    })
+  ]);
+
+  // An assigned/rostered shift is the source of truth for the attendance day:
+  // scans after midnight remain on the date that shift started until the next
+  // assigned shift begins (and never beyond the configured overnight window).
+  // This remains stable even after the first post-midnight scan is stored, so
+  // breaks and repeated device scans cannot split one shift across two dates.
+  if (previousShift) {
+    const previousShiftStart = istDateTime(previousDate, previousShift.startTime);
+    let previousShiftEnd = istDateTime(previousDate, previousShift.endTime);
+    if (previousShiftEnd <= previousShiftStart) {
+      previousShiftEnd = istDateTime(calendarDate, previousShift.endTime);
+    }
+    const pairingWindowMinutes = Math.max(0, Number(settings.data?.overnight_pairing_window_minutes ?? 180));
+    const latestScheduledCheckout = previousShiftEnd.getTime() + pairingWindowMinutes * 60000;
+    if (punchTime.getTime() > latestScheduledCheckout) return calendarDate;
+
+    if (currentShift) {
+      const currentShiftStart = istDateTime(calendarDate, currentShift.startTime);
+      if (punchTime.getTime() >= currentShiftStart.getTime()) return calendarDate;
+    }
+    return previousDate;
+  }
+
+  // For legacy/unassigned workers, retain the conservative fallback: only an
+  // unmatched prior punch may cross midnight and it must stay inside the
+  // company's maximum work span.
   const firstPunch = new Date(previousPunches.data[0].punch_time);
   const elapsedMinutes = (punchTime.getTime() - firstPunch.getTime()) / 60000;
   const maximumDailyMinutes = Math.max(1, Number(settings.data?.maximum_daily_minutes ?? 960));
   if (elapsedMinutes <= 0 || elapsedMinutes > maximumDailyMinutes) return calendarDate;
-
-  const shift = await loadWorkerShiftWindow({
-    accountId,
-    companyId,
-    employeeId,
-    fieldExecutiveId,
-    profileType,
-    workDate: previousDate
-  });
-  // Without a shift, only an unmatched prior punch is safe to pair. With a
-  // shift, every scan inside the configured workday window belongs together,
-  // including post-midnight break scans and duplicate device reads.
-  if (!shift) return previousPunches.data.length % 2 === 1 ? previousDate : calendarDate;
-
-  const shiftStart = istDateTime(previousDate, shift.startTime);
-  let shiftEnd = istDateTime(previousDate, shift.endTime);
-  if (shiftEnd <= shiftStart) shiftEnd = istDateTime(calendarDate, shift.endTime);
-  const pairingWindowMinutes = Math.max(0, Number(settings.data?.overnight_pairing_window_minutes ?? 180));
-  const latestScheduledCheckout = shiftEnd.getTime() + pairingWindowMinutes * 60000;
-  return punchTime.getTime() <= latestScheduledCheckout ? previousDate : calendarDate;
+  return previousPunches.data.length % 2 === 1 ? previousDate : calendarDate;
 }
 
 export function formatTime(value: string | Date | null | undefined) {
@@ -729,6 +750,17 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
   if (error) throw new Error(error.message);
 
   const punches = data ?? [];
+  if (punches.length === 0) {
+    const removeStaleDay = await supabaseAdmin
+      .from("attendance_daily")
+      .delete()
+      .eq("company_id", companyId)
+      .eq("enrolment_id", enrolmentId)
+      .eq("punch_date", punchDate);
+    if (removeStaleDay.error) throw new Error(removeStaleDay.error.message);
+    return;
+  }
+
   // Freeze punch times before order updates so rebuild never picks up approval/server "now".
   const punchTimes = punches.map((punch) => punch.punch_time).filter(Boolean) as string[];
   for (let index = 0; index < punches.length; index += 1) {
@@ -889,12 +921,24 @@ export async function backfillHistoricalPunches({
   if (!rawPunches.length) return 0;
 
   const affectedDates = new Set<string>();
-  for (let offset = 0; offset < rawPunches.length; offset += pageSize) {
-    const page = rawPunches.slice(offset, offset + pageSize);
-    const rows = page.map((rawPunch) => {
-      const punchDate = istDate(new Date(rawPunch.punch_time));
-      affectedDates.add(punchDate);
-      return {
+  // Backfills are intentionally processed chronologically. The work-date
+  // resolver can then see each earlier scan and applies the same overnight
+  // rule as live biometric and GPS ingestion instead of using calendar dates.
+  for (const rawPunch of rawPunches) {
+    const punchTime = new Date(rawPunch.punch_time);
+    const punchDate = await resolveAttendanceWorkDate({
+      accountId,
+      companyId,
+      employeeId,
+      enrolmentId,
+      fieldExecutiveId,
+      profileType,
+      punchTime
+    });
+    affectedDates.add(punchDate);
+    const insert = await supabaseAdmin
+      .from("attendance_punches")
+      .upsert({
         company_id: companyId,
         raw_event_id: rawPunch.id,
         device_id: rawPunch.device_id,
@@ -912,13 +956,7 @@ export async function backfillHistoricalPunches({
         punch_label: punchLabel(1),
         worker_status: workerStatus,
         calculated: isActive
-      };
-    });
-
-    const insert = await supabaseAdmin
-      .from("attendance_punches")
-      .upsert(rows, {
-        ignoreDuplicates: true,
+      }, {
         onConflict: "company_id,device_serial,enrolment_id,punch_time"
       });
     if (insert.error) throw new Error(insert.error.message);

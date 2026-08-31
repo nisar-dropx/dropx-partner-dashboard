@@ -600,30 +600,14 @@ export async function loadOpenShift({
     dutyByDate.set(rowDate, rows);
   }
 
-  let selectedDate = date;
-  let dutyPunches = dutyByDate.get(date) ?? [];
-  if (!dutyPunches.length && !punchDate) {
-    const priorPunches = dutyByDate.get(previousDate) ?? [];
-    if (priorPunches.length % 2 === 1 && priorPunches[0]?.punch_time) {
-      const settings = await supabaseAdmin
-        .from("hr_company_settings")
-        .select("overnight_shift_pairing_enabled, maximum_daily_minutes")
-        .eq("company_id", companyId)
-        .maybeSingle();
-      if (settings.error) throw new Error(settings.error.message);
-      const elapsedMinutes =
-        (Date.now() - new Date(String(priorPunches[0].punch_time)).getTime()) / 60_000;
-      const maximumDailyMinutes = Math.max(1, Number(settings.data?.maximum_daily_minutes ?? 960));
-      if (
-        settings.data?.overnight_shift_pairing_enabled !== false &&
-        elapsedMinutes > 0 &&
-        elapsedMinutes <= maximumDailyMinutes
-      ) {
-        selectedDate = previousDate;
-        dutyPunches = priorPunches;
-      }
-    }
-  }
+  const selectedDate = punchDate
+    ? date
+    : await resolveAttendanceWorkDate({
+      companyId,
+      enrolmentId,
+      punchTime: new Date()
+    });
+  const dutyPunches = dutyByDate.get(selectedDate) ?? [];
 
   if (dutyPunches.length || dutyResult.error) {
     const pendingApproval = dutyPunches.some((row) => row.calculated === false);
@@ -658,24 +642,7 @@ export async function loadOpenShift({
     .order("punch_date", { ascending: false });
   if (daily.error) throw new Error(daily.error.message);
   const openRows = (daily.data ?? []).filter((row) => row.in_time && Number(row.punch_count ?? 0) % 2 === 1);
-  let selected = openRows.find((row) => row.punch_date === date) ?? null;
-
-  if (!selected && !punchDate) {
-    const prior = openRows.find((row) => row.punch_date === previousDate) ?? null;
-    if (prior?.in_time) {
-      const settings = await supabaseAdmin
-        .from("hr_company_settings")
-        .select("overnight_shift_pairing_enabled, maximum_daily_minutes")
-        .eq("company_id", companyId)
-        .maybeSingle();
-      if (settings.error) throw new Error(settings.error.message);
-      const elapsedMinutes = (Date.now() - new Date(prior.in_time).getTime()) / 60_000;
-      const maximumDailyMinutes = Math.max(1, Number(settings.data?.maximum_daily_minutes ?? 960));
-      if (settings.data?.overnight_shift_pairing_enabled !== false && elapsedMinutes > 0 && elapsedMinutes <= maximumDailyMinutes) {
-        selected = prior;
-      }
-    }
-  }
+  const selected = openRows.find((row) => row.punch_date === selectedDate) ?? null;
 
   const inTime = selected?.in_time ? new Date(selected.in_time) : null;
   const outTime = selected?.out_time ? new Date(selected.out_time) : null;

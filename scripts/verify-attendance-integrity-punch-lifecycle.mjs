@@ -45,6 +45,31 @@ requireText(
   "biometric ingestion auto-maps canonical Workforce profiles"
 );
 requireText(
+  "src/lib/biometric/attendance.ts",
+  "const [previousShift, currentShift] = await Promise.all([",
+  "overnight work dates follow the previous and current assigned shift boundaries"
+);
+requireText(
+  "src/lib/biometric/attendance.ts",
+  "const punchDate = await resolveAttendanceWorkDate({",
+  "historical biometric backfills use the shared overnight resolver"
+);
+requireText(
+  "src/lib/biometric/attendance-integrity-resolution.ts",
+  "const resolvedPunchDate = await resolveAttendanceWorkDate({",
+  "approved held punches are reassigned through the shared overnight resolver"
+);
+requireText(
+  "supabase/migrations/20260831123000_attendance_shift_work_date.sql",
+  "create trigger attendance_punches_set_work_date",
+  "the database protects every punch ingestion path with the permanent work-date trigger"
+);
+
+if (source("src/lib/biometric/attendance.ts").includes("const currentDayPunches")) {
+  throw new Error("FAIL a previously misfiled current-day punch must not disable overnight pairing");
+}
+console.log("PASS previously misfiled current-day punches cannot disable overnight pairing");
+requireText(
   "apps/connect/src/components/connect-roster.tsx",
   'className="dx-roster-swap-modal" role="dialog"',
   "the swap form opens immediately as an accessible dialog"
@@ -55,4 +80,3 @@ if (loginFlow.includes('workspaceLabel || (isWorkforceWorkspace(account) ? "Work
   throw new Error("FAIL profile cards must show designation only, without workspace text");
 }
 console.log("PASS profile cards show designation without workspace text");
-

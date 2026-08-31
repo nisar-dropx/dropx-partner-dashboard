@@ -1,7 +1,7 @@
 import "server-only";
 
 import { supabaseAdmin } from "../supabase-admin";
-import { rebuildAttendanceDay } from "./attendance";
+import { rebuildAttendanceDay, resolveAttendanceWorkDate } from "./attendance";
 
 function asIsoTime(value: string | null | undefined) {
   if (!value) return null;
@@ -20,7 +20,7 @@ export async function activateHeldAttendancePunch(punchId: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   let punch = await supabaseAdmin
     .from("attendance_punches")
-    .select("id, company_id, enrolment_id, punch_date, punch_time, client_captured_at, calculated")
+    .select("id, company_id, enrolment_id, punch_date, punch_time, client_captured_at, calculated, account_id, employee_id, field_executive_id, profile_type")
     .eq("id", punchId)
     .maybeSingle();
   if (punch.error && /client_captured_at|does not exist|schema cache/i.test(punch.error.message)) {
@@ -38,17 +38,34 @@ export async function activateHeldAttendancePunch(punchId: string) {
     throw new Error("Held punch is missing the original punch time.");
   }
 
+  const originalPunchDate = String(punch.data.punch_date);
+  const resolvedPunchDate = await resolveAttendanceWorkDate({
+    accountId: punch.data.account_id ?? null,
+    companyId: String(punch.data.company_id),
+    employeeId: punch.data.employee_id ?? null,
+    enrolmentId: String(punch.data.enrolment_id),
+    fieldExecutiveId: punch.data.field_executive_id ?? null,
+    profileType: punch.data.profile_type ?? null,
+    punchTime: new Date(originalPunchTime)
+  });
+
   const update = await supabaseAdmin
     .from("attendance_punches")
-    .update({ calculated: true, is_flagged: false, punch_time: originalPunchTime })
+    .update({
+      calculated: true,
+      is_flagged: false,
+      punch_date: resolvedPunchDate,
+      punch_time: originalPunchTime
+    })
     .eq("id", punchId);
   if (update.error) throw new Error(update.error.message);
 
-  await rebuildAttendanceDay(
-    String(punch.data.company_id),
-    String(punch.data.enrolment_id),
-    String(punch.data.punch_date)
-  );
+  const companyId = String(punch.data.company_id);
+  const enrolmentId = String(punch.data.enrolment_id);
+  await rebuildAttendanceDay(companyId, enrolmentId, resolvedPunchDate);
+  if (originalPunchDate !== resolvedPunchDate) {
+    await rebuildAttendanceDay(companyId, enrolmentId, originalPunchDate);
+  }
   return true;
 }
 
