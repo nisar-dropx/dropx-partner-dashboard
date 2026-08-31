@@ -25,35 +25,15 @@ export async function POST() {
     return NextResponse.json({ error: completedPickers.error.message }, { status: 500 });
   }
 
-  const activePickerIds = await supabaseAdmin
-    .from("workforce_pickers")
-    .select("dropx_id")
-    .eq("company_id", companyId)
-    .ilike("designation", "picker")
-    .eq("onboarding_status", "active")
-    .eq("is_active", true);
-  if (activePickerIds.error) {
-    return NextResponse.json({ error: activePickerIds.error.message }, { status: 500 });
-  }
-  const authoritativeIds = new Set((activePickerIds.data ?? []).map((row) => String(row.dropx_id ?? "").trim().toUpperCase()).filter(Boolean));
-
-  const legacyCandidates = await supabaseAdmin
+  const activatedLegacy = await supabaseAdmin
     .from("contractors")
-    .select("id, dropx_id")
+    .update({ is_active: true, updated_at: new Date().toISOString() })
     .eq("company_id", companyId)
     .ilike("designation", "picker")
     .eq("onboarding_status", "active")
     .is("deleted_at", null)
-    .eq("is_active", false);
-  if (legacyCandidates.error) {
-    return NextResponse.json({ error: legacyCandidates.error.message }, { status: 500 });
-  }
-  const legacyIds = (legacyCandidates.data ?? [])
-    .filter((row) => !authoritativeIds.has(String(row.dropx_id ?? "").trim().toUpperCase()))
-    .map((row) => row.id);
-  const activatedLegacy = legacyIds.length
-    ? await supabaseAdmin.from("contractors").update({ is_active: true, updated_at: new Date().toISOString() }).in("id", legacyIds).select("id")
-    : { data: [], error: null };
+    .eq("is_active", false)
+    .select("id");
   if (activatedLegacy.error) {
     return NextResponse.json({ error: activatedLegacy.error.message }, { status: 500 });
   }

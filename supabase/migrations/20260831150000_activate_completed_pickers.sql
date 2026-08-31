@@ -19,14 +19,7 @@ begin
     where lower(btrim(coalesce(contractor.designation, ''))) = 'picker'
       and lower(btrim(coalesce(contractor.onboarding_status, ''))) = 'active'
       and contractor.deleted_at is null
-      and not contractor.is_active
-      and not exists (
-        select 1
-        from public.workforce_pickers picker
-        where picker.company_id = contractor.company_id
-          and upper(btrim(coalesce(picker.dropx_id, ''))) = upper(btrim(coalesce(contractor.dropx_id, '')))
-          and lower(btrim(coalesce(picker.onboarding_status, ''))) = 'active'
-      );
+      and not contractor.is_active;
   else
     update public.contractors
     set is_active = true,
