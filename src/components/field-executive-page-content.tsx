@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { bulkImportFieldExecutives, createFieldExecutive, reviewFieldExecutiveProfile, updateFieldExecutive } from "@/app/field-executive/actions";
+import { bulkImportFieldExecutives, changeContractorLifecycleStatus, createFieldExecutive, reviewFieldExecutiveProfile, updateFieldExecutive } from "@/app/field-executive/actions";
 import { AppShell } from "@/components/app-shell";
 import { CompensationBulkUpload } from "@/components/compensation-bulk-upload";
 import { FieldExecutiveList, type FieldExecutiveListRow } from "@/components/field-executive-list";
@@ -130,6 +130,28 @@ type FieldExecutiveAddFormValues = {
   designation?: string;
 };
 
+type ProfileLifecycleStatusRow = {
+  status: "active" | "suspended" | "offboarded";
+  reason: string | null;
+  suspended_from: string | null;
+  suspended_until: string | null;
+  changed_at: string;
+  changed_by: string | null;
+  changed_by_name?: string | null;
+};
+
+type ProfileLifecycleHistoryRow = {
+  id: string;
+  from_status: string | null;
+  to_status: string;
+  reason: string;
+  effective_from: string;
+  effective_until: string | null;
+  changed_by: string | null;
+  changed_by_name?: string | null;
+  created_at: string;
+};
+
 function firstRelation<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
@@ -223,6 +245,17 @@ function textValue(value: string | null | undefined) {
 function displayValue(value: string | boolean | null | undefined) {
   if (typeof value === "boolean") return value ? "Yes" : "No";
   return value || "-";
+}
+
+function formatLifecycleDateTime(value: string | null | undefined) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Asia/Kolkata"
+  }).format(date);
 }
 
 async function signedDocumentUrl(path: string | null | undefined) {
@@ -355,6 +388,100 @@ function FieldExecutiveDetails({
   );
 }
 
+function ContractorLifecyclePanel({
+  contractor,
+  history,
+  status
+}: {
+  contractor: ExecutiveRow;
+  history: ProfileLifecycleHistoryRow[];
+  status: ProfileLifecycleStatusRow;
+}) {
+  const suspended = status.status === "suspended";
+  const offboarded = status.status === "offboarded";
+
+  return (
+    <section className="profile-lifecycle-panel">
+      <div className="profile-lifecycle-head">
+        <div>
+          <span className="profile-review-eyebrow">Profile status</span>
+          <h3>{status.status === "active" ? "Active" : status.status === "suspended" ? "Suspended" : "Offboarded"}</h3>
+          <p>Status is controlled here and is independent of designation or register routing.</p>
+        </div>
+        <dl className="profile-lifecycle-summary">
+          <div><dt>Last changed</dt><dd>{formatLifecycleDateTime(status.changed_at)}</dd></div>
+          <div><dt>Changed by</dt><dd>{status.changed_by_name || "System"}</dd></div>
+          {suspended ? <div><dt>Suspended until</dt><dd>{formatLifecycleDateTime(status.suspended_until)}</dd></div> : null}
+          {status.reason ? <div><dt>Reason</dt><dd>{status.reason}</dd></div> : null}
+        </dl>
+      </div>
+
+      {!offboarded ? (
+        suspended ? (
+          <form action={changeContractorLifecycleStatus} className="profile-lifecycle-form">
+            <input name="id" type="hidden" value={contractor.id} />
+            <input name="return_path" type="hidden" value="/contractors" />
+            <input name="lifecycle_status" type="hidden" value="active" />
+            <label className="span-2">Reactivation reason
+              <textarea className="field" name="lifecycle_reason" placeholder="Explain why this contractor is being reactivated" required rows={3} />
+            </label>
+            <SubmitButton
+              className="button"
+              confirmDescription="The profile will regain active operational access. The reason will be saved in history."
+              confirmMessage={`Reactivate ${contractor.full_name}?`}
+              confirmSubmitText="Reactivate"
+              confirmTitle="Confirm reactivation"
+              pendingText="Reactivating..."
+            >Reactivate profile</SubmitButton>
+          </form>
+        ) : (
+          <form action={changeContractorLifecycleStatus} className="profile-lifecycle-form">
+            <input name="id" type="hidden" value={contractor.id} />
+            <input name="return_path" type="hidden" value="/contractors" />
+            <input name="lifecycle_status" type="hidden" value="suspended" />
+            <label>Suspended until
+              <input className="field" name="suspended_until" required type="datetime-local" />
+            </label>
+            <label className="span-2">Suspension reason
+              <textarea className="field" name="lifecycle_reason" placeholder="State the operational or disciplinary reason" required rows={3} />
+            </label>
+            <SubmitButton
+              className="button danger"
+              confirmDescription="The profile will remain suspended until the selected time or an authorised user reactivates it."
+              confirmMessage={`Suspend ${contractor.full_name}?`}
+              confirmSubmitText="Suspend"
+              confirmTitle="Confirm suspension"
+              pendingText="Suspending..."
+            >Suspend profile</SubmitButton>
+          </form>
+        )
+      ) : (
+        <div className="message-panel warning">This profile is offboarded. Complete the formal rejoining process before restoring access.</div>
+      )}
+
+      <div className="profile-lifecycle-history">
+        <h4>Status history</h4>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Changed at</th><th>Change</th><th>Reason</th><th>Period</th><th>Changed by</th></tr></thead>
+            <tbody>
+              {history.length ? history.map((item) => (
+                <tr key={item.id}>
+                  <td>{formatLifecycleDateTime(item.created_at)}</td>
+                  <td>{item.from_status ? `${item.from_status} → ${item.to_status}` : item.to_status}</td>
+                  <td>{item.reason}</td>
+                  <td>{item.effective_until ? `${formatLifecycleDateTime(item.effective_from)} – ${formatLifecycleDateTime(item.effective_until)}` : formatLifecycleDateTime(item.effective_from)}</td>
+                  <td>{item.changed_by_name || "System"}</td>
+                </tr>
+              )) : <tr><td className="empty-cell" colSpan={5}>No status changes recorded yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function FieldExecutiveForm({
   action,
   executive,
@@ -481,7 +608,7 @@ function FieldExecutiveForm({
         </>
       ) : null}
 
-      {mode === "edit" ? (
+      {mode === "edit" && workforceConfig.profileType !== "contractor" ? (
         <label>Status
           <SearchableSelect name="is_active" options={statusOptions} defaultValue={executive?.is_active ? "true" : "false"} placeholder="Select status" required={!optionalEditFields} />
         </label>
@@ -630,6 +757,8 @@ async function loadFieldExecutiveData(
       designations: [] as DesignationRow[],
       editExecutive: null as ExecutiveRow | null,
       viewExecutive: null as ExecutiveRow | null,
+      lifecycleStatus: null as ProfileLifecycleStatusRow | null,
+      lifecycleHistory: [] as ProfileLifecycleHistoryRow[],
       error: "Supabase service role key is not configured."
     };
   }
@@ -813,12 +942,65 @@ async function loadFieldExecutiveData(
         .find((executive) => executive.id === viewId && (authorization.hasAllLocationAccess || allowedLocationIds.has(executive.location_id))) ?? null
     : null;
 
+  const lifecycleProfile = table === "contractors" ? (editExecutive ?? viewExecutive) : null;
+  let lifecycleStatus: ProfileLifecycleStatusRow | null = lifecycleProfile
+    ? {
+        status: lifecycleProfile.is_active ? "active" : "suspended",
+        reason: null,
+        suspended_from: null,
+        suspended_until: null,
+        changed_at: new Date().toISOString(),
+        changed_by: null,
+        changed_by_name: null
+      }
+    : null;
+  let lifecycleHistory: ProfileLifecycleHistoryRow[] = [];
+
+  if (lifecycleProfile) {
+    await supabaseAdmin.rpc("reactivate_expired_profile_suspensions");
+    const [statusResult, historyResult] = await Promise.all([
+      supabaseAdmin
+        .from("people_profile_lifecycle_status")
+        .select("status,reason,suspended_from,suspended_until,changed_at,changed_by")
+        .eq("company_id", companyId)
+        .eq("profile_type", "contractor")
+        .eq("profile_id", lifecycleProfile.id)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("people_profile_lifecycle_history")
+        .select("id,from_status,to_status,reason,effective_from,effective_until,changed_by,created_at")
+        .eq("company_id", companyId)
+        .eq("profile_type", "contractor")
+        .eq("profile_id", lifecycleProfile.id)
+        .order("created_at", { ascending: false })
+        .limit(50)
+    ]);
+    if (statusResult.data) lifecycleStatus = statusResult.data as ProfileLifecycleStatusRow;
+    lifecycleHistory = (historyResult.data ?? []) as ProfileLifecycleHistoryRow[];
+
+    const actorIds = Array.from(new Set([
+      lifecycleStatus?.changed_by,
+      ...lifecycleHistory.map((item) => item.changed_by)
+    ].filter((value): value is string => Boolean(value))));
+    if (actorIds.length) {
+      const actorsResult = await supabaseAdmin.from("profiles").select("id,full_name").in("id", actorIds);
+      const actorNames = new Map((actorsResult.data ?? []).map((actor) => [String(actor.id), String(actor.full_name ?? "")]));
+      if (lifecycleStatus) lifecycleStatus.changed_by_name = lifecycleStatus.changed_by ? actorNames.get(lifecycleStatus.changed_by) ?? null : null;
+      lifecycleHistory = lifecycleHistory.map((item) => ({
+        ...item,
+        changed_by_name: item.changed_by ? actorNames.get(item.changed_by) ?? null : null
+      }));
+    }
+  }
+
   return {
     executives,
     locations,
     designations,
     editExecutive,
     viewExecutive,
+    lifecycleStatus,
+    lifecycleHistory,
     error: executivesResult.error?.message || locationsResult.error?.message || designationsResult.error?.message || compatibilityError?.message || null
   };
 }
@@ -878,7 +1060,7 @@ export async function FieldExecutivePageContent({
   };
   const workforceConfig = nonEmployeeConfigForRoute(returnPath);
   const displayTable = returnPath === "/work-force-register" ? "workforce" : workforceConfig.table;
-  const { executives, locations, designations, editExecutive, viewExecutive, error } = await loadFieldExecutiveData(
+  const { executives, locations, designations, editExecutive, viewExecutive, lifecycleStatus, lifecycleHistory, error } = await loadFieldExecutiveData(
     authorization,
     designationCategoryFilter,
     displayTable,
@@ -1028,6 +1210,9 @@ export async function FieldExecutivePageContent({
               returnPath={returnPath}
               statutoryEnabled={statutoryEnabled}
             />
+            {workforceConfig.profileType === "contractor" && lifecycleStatus && editExecutive.onboarding_status === "active" ? (
+              <ContractorLifecyclePanel contractor={editExecutive} history={lifecycleHistory} status={lifecycleStatus} />
+            ) : null}
             {workforceConfig.profileType !== "field_executive" && editExecutive.onboarding_status === "under_review" ? (
               <section className="profile-review-panel">
                 <div className="profile-review-head">
