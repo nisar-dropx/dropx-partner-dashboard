@@ -751,13 +751,25 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
 
   const punches = data ?? [];
   if (punches.length === 0) {
-    const removeStaleDay = await supabaseAdmin
+    // Preserve the daily row identity because leave exceptions and other audit
+    // records may reference it. Clearing the calculated values also makes a
+    // moved overnight punch visible as an absent/no-punch day without breaking
+    // those links.
+    const clearStaleDay = await supabaseAdmin
       .from("attendance_daily")
-      .delete()
+      .update({
+        in_time: null,
+        out_time: null,
+        punch_count: 0,
+        work_minutes: 0,
+        status: "A",
+        remark: "No punch",
+        updated_at: new Date().toISOString()
+      })
       .eq("company_id", companyId)
       .eq("enrolment_id", enrolmentId)
       .eq("punch_date", punchDate);
-    if (removeStaleDay.error) throw new Error(removeStaleDay.error.message);
+    if (clearStaleDay.error) throw new Error(clearStaleDay.error.message);
     return;
   }
 

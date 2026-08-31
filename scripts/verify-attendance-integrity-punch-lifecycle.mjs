@@ -69,6 +69,16 @@ if (source("src/lib/biometric/attendance.ts").includes("const currentDayPunches"
   throw new Error("FAIL a previously misfiled current-day punch must not disable overnight pairing");
 }
 console.log("PASS previously misfiled current-day punches cannot disable overnight pairing");
+
+const attendanceSource = source("src/lib/biometric/attendance.ts");
+if (attendanceSource.includes('.from("attendance_daily")\n      .delete()')) {
+  throw new Error("FAIL moving an overnight punch must preserve linked attendance-day records");
+}
+requireText(
+  "src/lib/biometric/attendance.ts",
+  'remark: "No punch"',
+  "moving an overnight punch preserves and clears the old attendance day"
+);
 requireText(
   "apps/connect/src/components/connect-roster.tsx",
   'className="dx-roster-swap-modal" role="dialog"',
