@@ -1,5 +1,17 @@
 begin;
 
+update public.workforce workforce_profile
+set is_active = true,
+    synced_at = now(),
+    updated_at = now()
+from public.designations designation
+where designation.id = workforce_profile.designation_id
+  and designation.company_id = workforce_profile.company_id
+  and lower(btrim(designation.name)) = 'picker'
+  and lower(btrim(coalesce(workforce_profile.onboarding_status, ''))) = 'active'
+  and workforce_profile.deleted_at is null
+  and not workforce_profile.is_active;
+
 -- Picker registration is complete only after onboarding reaches the existing
 -- terminal "active" state. Keep the custom Picker register authoritative when
 -- it contains the profile; otherwise reactivate the completed legacy record.
