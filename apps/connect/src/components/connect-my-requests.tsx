@@ -1,10 +1,10 @@
 "use client";
 
-import { ArrowLeftRight, CalendarClock, CalendarDays, Check, ClipboardList, DoorOpen, FileText, ReceiptText, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, DoorOpen, FileText, LocateFixed, ReceiptText, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 
-type RequestKind = "attendance" | "leave" | "reimbursement" | "roster_swap" | "exit";
+type RequestKind = "attendance" | "location_flag" | "leave" | "reimbursement" | "roster_swap" | "exit";
 
 type StepTrail = { name: string; status: string; note?: string | null };
 
@@ -39,6 +39,24 @@ function statusBadgeClass(status: string) {
 function money(value: number | null | undefined) {
   return `₹${Number(value ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
+function reviewNoteLabel(status: string) {
+  if (status === "returned") return "Return reason";
+  if (status === "rejected") return "Rejection reason";
+  return "Reviewer note";
+}
+function currentMonthKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+function monthLabel(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  return new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+}
+function shiftMonth(value: string, amount: number) {
+  const [year, month] = value.split("-").map(Number);
+  const next = new Date(year, month - 1 + amount, 1);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
+}
 function regularizationReasonLabel(reasonCode: string) {
   switch (reasonCode) {
     case "missed_in": return "Missed IN punch";
@@ -52,6 +70,7 @@ function regularizationReasonLabel(reasonCode: string) {
 
 const kindMeta: Record<RequestKind, { label: string; icon: ReactNode }> = {
   attendance: { label: "Attendance", icon: <CalendarClock /> },
+  location_flag: { label: "Location check", icon: <LocateFixed /> },
   leave: { label: "Time off", icon: <CalendarDays /> },
   reimbursement: { label: "Reimbursement", icon: <ReceiptText /> },
   roster_swap: { label: "Shift swap", icon: <ArrowLeftRight /> },
@@ -65,6 +84,7 @@ async function safeJson(response: Response) {
 export function ConnectMyRequests({ account }: { account: AppAccount }) {
   const [requests, setRequests] = useState<UnifiedRequest[]>([]);
   const [filter, setFilter] = useState<"all" | RequestKind>("all");
+  const [month, setMonth] = useState(currentMonthKey());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -72,8 +92,11 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
     setLoading(true);
     setError("");
     const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
-    const [attendanceResult, leaveResult, reimbursementResult, rosterResult, exitResult] = await Promise.allSettled([
-      fetch(`/api/connect/attendance?${query}&withHistory=1`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
+    const [attendanceResult, flagResult, leaveResult, reimbursementResult, rosterResult, exitResult] = await Promise.allSettled([
+      // These two are answered locally (not proxied to the dashboard app) so they
+      // don't depend on that separate deployment being up to date.
+      fetch(`/api/connect/attendance/requests?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
+      fetch(`/api/connect/attendance/flags?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
       fetch(`/api/connect/leave?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
       fetch(`/api/connect/reimbursements?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
       fetch(`/api/connect/roster?${query}`, { cache: "no-store" }).then(async (r) => (r.ok ? safeJson(r) : null)),
@@ -83,7 +106,7 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
     const unified: UnifiedRequest[] = [];
 
     const attendance = attendanceResult.status === "fulfilled" ? attendanceResult.value : null;
-    for (const item of attendance?.regularizationHistory ?? []) {
+    for (const item of attendance?.requests ?? []) {
       unified.push({
         id: `attendance:${item.id}`,
         kind: "attendance",
@@ -94,9 +117,26 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
         facts: [
           { label: "Requested IN", value: item.requestedInTime || "—" },
           { label: "Requested OUT", value: item.requestedOutTime || "—" },
-          ...(item.reviewRemarks ? [{ label: "Reviewer note", value: item.reviewRemarks }] : [])
+          ...(item.reviewRemarks ? [{ label: reviewNoteLabel(item.status), value: item.reviewRemarks }] : [])
         ],
         steps: (item.steps ?? []).map((step: { stepName: string; status: string }) => ({ name: step.stepName, status: step.status }))
+      });
+    }
+
+    const flags = flagResult.status === "fulfilled" ? flagResult.value : null;
+    for (const item of flags?.flags ?? []) {
+      unified.push({
+        id: `location_flag:${item.id}`,
+        kind: "location_flag",
+        title: `${displayDate(item.punchDate)} location check`,
+        eyebrow: "Punch outside station geofence",
+        submittedAt: item.createdAt,
+        status: item.status,
+        facts: [
+          ...(item.remarks ? [{ label: "Note", value: item.remarks }] : []),
+          ...(item.reviewRemarks ? [{ label: reviewNoteLabel(item.status), value: item.reviewRemarks }] : [])
+        ],
+        steps: []
       });
     }
 
@@ -111,7 +151,7 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
         status: item.status,
         facts: [
           { label: "Reason", value: item.reason || "—" },
-          ...(item.reviewerNote ? [{ label: "Reviewer note", value: item.reviewerNote }] : [])
+          ...(item.reviewerNote ? [{ label: reviewNoteLabel(item.status), value: item.reviewerNote }] : [])
         ],
         steps: []
       });
@@ -175,20 +215,25 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
 
     unified.sort((left, right) => new Date(right.submittedAt || 0).getTime() - new Date(left.submittedAt || 0).getTime());
     setRequests(unified);
-    const failedAll = [attendanceResult, leaveResult, reimbursementResult, rosterResult, exitResult].every((result) => result.status === "rejected");
+    const failedAll = [attendanceResult, flagResult, leaveResult, reimbursementResult, rosterResult, exitResult].every((result) => result.status === "rejected");
     if (failedAll) setError("Unable to load your requests.");
     setLoading(false);
   }, [account.id, account.profileType]);
 
   useEffect(() => { void load(); }, [load]);
 
-  const counts = useMemo(() => {
-    const tally: Record<string, number> = { all: requests.length };
-    for (const request of requests) tally[request.kind] = (tally[request.kind] ?? 0) + 1;
-    return tally;
-  }, [requests]);
+  const monthRequests = useMemo(
+    () => requests.filter((request) => String(request.submittedAt ?? "").slice(0, 7) === month),
+    [requests, month]
+  );
 
-  const visible = filter === "all" ? requests : requests.filter((request) => request.kind === filter);
+  const counts = useMemo(() => {
+    const tally: Record<string, number> = { all: monthRequests.length };
+    for (const request of monthRequests) tally[request.kind] = (tally[request.kind] ?? 0) + 1;
+    return tally;
+  }, [monthRequests]);
+
+  const visible = filter === "all" ? monthRequests : monthRequests.filter((request) => request.kind === filter);
   const activeKinds = (Object.keys(kindMeta) as RequestKind[]).filter((kind) => counts[kind]);
 
   return (
@@ -199,6 +244,13 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
         <p>Every request you have submitted, with its current status and approval flow.</p>
       </header>
       {error ? <div className="dx-alert error">{error}</div> : null}
+      <div className="dx-approval-scope">
+        <div aria-label="Choose month" className="dx-approval-scope-switch" role="group">
+          <button aria-label="Previous month" onClick={() => setMonth((current) => shiftMonth(current, -1))} type="button"><ChevronLeft /></button>
+          <span style={{ display: "flex", alignItems: "center", padding: "0 8px", fontSize: 12, fontWeight: 650, color: "#172033", whiteSpace: "nowrap" }}>{monthLabel(month)}</span>
+          <button aria-label="Next month" disabled={month >= currentMonthKey()} onClick={() => setMonth((current) => shiftMonth(current, 1))} type="button"><ChevronRight /></button>
+        </div>
+      </div>
       <nav aria-label="Request type" className="dx-approval-tabs">
         <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")} type="button">
           All<span>{counts.all ?? 0}</span>
@@ -246,8 +298,10 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
           )) : (
             <div className="dx-empty">
               <FileText />
-              <strong>No requests yet</strong>
-              <small>Leave, attendance corrections, reimbursements, shift swaps and exit requests you submit will show up here.</small>
+              <strong>{requests.length ? `No requests in ${monthLabel(month)}` : "No requests yet"}</strong>
+              <small>{requests.length
+                ? "Try another month, or the All tab, to see other requests."
+                : "Leave, attendance corrections, location checks, reimbursements, shift swaps and exit requests you submit will show up here."}</small>
             </div>
           )}
         </div>
