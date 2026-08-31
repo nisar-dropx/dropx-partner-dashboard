@@ -22,6 +22,11 @@ const RESTORED_DASHBOARD_PEOPLE_PATHS = [
   "/people/review",
   "/people/exceptions",
   "/people/workforce-lifecycle",
+  "/field-executive",
+  "/employees",
+  "/contractors",
+  "/workers",
+  "/vendors",
   "/attendance/integrity"
 ];
 

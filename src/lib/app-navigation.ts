@@ -33,8 +33,13 @@ export const navItems: NavItem[] = [
     icon: "+",
     children: [
       { code: "people_all", label: "All People", href: "/people/all" },
-      { code: "people_review", label: "Under Review", href: "/people/review" },
-      { code: "people_exceptions", label: "Exception", href: "/people/exceptions" },
+      { code: "delivery_associates", label: "Field Executives", href: "/field-executive" },
+      { code: "employees", label: "Employees", href: "/employees" },
+      { code: "contractors", label: "Independent Contractors", href: "/contractors" },
+      { code: "workers", label: "Helpers", href: "/workers" },
+      { code: "vendors", label: "Vendors", href: "/vendors" },
+      { code: "people_review", label: "Profile Review", href: "/people/review" },
+      { code: "people_exceptions", label: "Exceptions", href: "/people/exceptions" },
       { code: "people_review", label: "Workforce Lifecycle", href: "/people/workforce-lifecycle" },
       { code: "attendance_integrity", label: "Attendance Integrity", href: "/attendance/integrity" }
     ]
