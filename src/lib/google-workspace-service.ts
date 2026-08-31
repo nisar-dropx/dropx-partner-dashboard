@@ -187,6 +187,53 @@ async function employeeSource(companyId: string, employeeId: string): Promise<Em
   };
 }
 
+async function contractorSource(companyId: string, contractorId: string): Promise<EmployeeSource> {
+  const result = await db().from("contractors")
+    .select("id,company_id,full_name,email,dropx_id,designation,location_id,is_active,stations(station_code)")
+    .eq("company_id", companyId).eq("id", contractorId).maybeSingle();
+  if (result.error || !result.data) throw new Error(result.error?.message ?? "Contractor was not found.");
+  const station = Array.isArray(result.data.stations) ? result.data.stations[0] : result.data.stations;
+  const engagement = await db().from("hr_engagements").select("id,person_id")
+    .eq("company_id", companyId).eq("contractor_id", contractorId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (engagement.error && !isMissingRelationError(engagement.error)) throw new Error(engagement.error.message);
+  const assignment = engagement.data?.id ? await db().from("hr_work_assignments").select("designation_id")
+    .eq("company_id", companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true)
+    .order("effective_from", { ascending: false }).limit(1).maybeSingle() : { data: null, error: null };
+  if (assignment.error && !isMissingRelationError(assignment.error)) throw new Error(assignment.error.message);
+  let designationId = assignment.data?.designation_id ?? null;
+  let designationCode: string | null = null;
+  if (designationId) {
+    const designation = await db().from("designations").select("code").eq("company_id", companyId).eq("id", designationId).maybeSingle();
+    if (designation.error) throw new Error(designation.error.message);
+    designationCode = designation.data?.code ?? null;
+  } else if (result.data.designation) {
+    const designation = await db().from("designations").select("id,code").eq("company_id", companyId).ilike("name", result.data.designation).eq("is_active", true).limit(1).maybeSingle();
+    if (designation.error) throw new Error(designation.error.message);
+    designationId = designation.data?.id ?? null;
+    designationCode = designation.data?.code ?? null;
+  }
+  if (!designationId) throw new Error("The contractor has no active designation mapping for Workspace restoration.");
+  return {
+    id: result.data.id,
+    companyId,
+    fullName: result.data.full_name,
+    personalEmail: normalizeEmail(result.data.email) || null,
+    employeeCode: result.data.dropx_id,
+    designationId,
+    designationCode,
+    locationId: result.data.location_id,
+    locationCode: station?.station_code ?? null,
+    active: Boolean(result.data.is_active),
+    personId: engagement.data?.person_id ?? null
+  };
+}
+
+async function workerSource(companyId: string, sourceRecordId: string, sourceType: string | null) {
+  return sourceType === "contractor"
+    ? contractorSource(companyId, sourceRecordId)
+    : employeeSource(companyId, sourceRecordId);
+}
+
 function splitName(fullName: string) {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
   const givenName = parts[0] || "DropX";
@@ -714,7 +761,7 @@ async function restoreAccount(job: WorkspaceJobRow) {
   const setting = await loadSettings(job.company_id, true);
   const account = await getAccount(job.account_id);
   if (account.google_user_id) await clientFor(setting).restoreUser(account.google_user_id);
-  const source = await employeeSource(job.company_id, job.source_record_id);
+  const source = await workerSource(job.company_id, job.source_record_id, job.source_type);
   const policy = await getPolicy(job.company_id, source.designationId);
   if (!policy) throw new Error("The current designation has no active Workspace policy.");
   await ensureDropxAccess({ account: { ...account, suspended: false }, source, policy });
