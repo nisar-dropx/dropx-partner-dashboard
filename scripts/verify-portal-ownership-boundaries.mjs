@@ -32,7 +32,9 @@ const checks = [
       'table: "contractors"',
       'table: "vendors"',
       'table: "workers"',
-      "dynamicWorkforceTable"
+      "dynamicWorkforceTable",
+      '.from("workforce")',
+      'category: "Workforce"'
     ],
     forbidden: ['title="All Employees"']
   },

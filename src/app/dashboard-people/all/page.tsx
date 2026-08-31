@@ -261,13 +261,68 @@ async function loadPeople(
             exportValues: buildExportValues(row, source.codeField, source.category, location, designation, status, false)
           };
         })
-    };
+      };
   }));
+  const workforceResult = await supabaseAdmin
+    .from("workforce")
+    .select("id, dropx_id, biometric_id, full_name, mobile_country_code, mobile, email, date_of_join, is_active, onboarding_status, location_id, designation_id, source_profile_type, source_profile_id, created_at, updated_at, stations (station_code), designations (id, name)")
+    .eq("company_id", companyId)
+    .order("created_at", { ascending: false });
+  const workforceRows = (workforceResult.data ?? []) as unknown as Record<string, unknown>[];
+  const canonicalLegacyKeys = new Set(workforceRows.flatMap((row) => {
+    const sourceType = String(row.source_profile_type ?? "");
+    const sourceId = String(row.source_profile_id ?? "");
+    return sourceType && sourceType !== "canonical" && sourceId ? [`${sourceType}:${sourceId}`] : [];
+  }));
+  const legacyTypeByCategory: Record<string, string> = {
+    field_executives: "field_executive",
+    contractors: "contractor",
+    vendors: "vendor",
+    workers: "worker"
+  };
   const allResults = [...results, ...customResults];
+  const legacyRows = allResults
+    .flatMap((result) => result.rows)
+    .filter((row) => {
+      const legacyType = legacyTypeByCategory[row.categoryCode];
+      return !legacyType || !canonicalLegacyKeys.has(`${legacyType}:${row.id}`);
+    });
+  const canonicalRows = workforceRows
+    .filter((row) => hasAllLocationAccess || locationScopeIds.includes(String(row.location_id ?? "")))
+    .filter((row) => {
+      const joinedDesignation = first(row.designations as { id?: string; name?: string } | Array<{ id?: string; name?: string }> | null);
+      const designation = designationById.get(String(row.designation_id ?? joinedDesignation?.id ?? ""));
+      return canAccessDesignationPortal(designation, "dashboard", "view", { isOwner: ownerAccess });
+    })
+    .map((row) => {
+      const location = String((first(row.stations as { station_code?: string } | Array<{ station_code?: string }> | null) ?? {}).station_code ?? "-");
+      const joinedDesignation = first(row.designations as { id?: string; name?: string } | Array<{ id?: string; name?: string }> | null);
+      const designationRecord = designationById.get(String(row.designation_id ?? joinedDesignation?.id ?? ""));
+      const designation = String(joinedDesignation?.name ?? designationRecord?.name ?? "-");
+      const status = displayStatus(row.onboarding_status, row.is_active !== false);
+      const dropxId = String(row.dropx_id ?? "-");
+      return {
+        id: String(row.id),
+        category: "Workforce",
+        categoryCode: "workforce",
+        code: dropxId,
+        biometricId: String(row.biometric_id ?? "-"),
+        fullName: String(row.full_name ?? "-"),
+        mobile: `+${String(row.mobile_country_code ?? "91")} ${String(row.mobile ?? "")}`,
+        email: String(row.email ?? "-"),
+        location,
+        designation,
+        status,
+        viewHref: `https://workforce.dropxlogistics.com/delivery-network/associates?search=${encodeURIComponent(dropxId)}`,
+        editHref: `https://workforce.dropxlogistics.com/delivery-network/associates?search=${encodeURIComponent(dropxId)}`,
+        canEdit: false,
+        exportValues: buildExportValues(row, "dropx_id", "Workforce", location, designation, status, false)
+      } satisfies AllPeopleRow;
+    });
   return {
     categories,
-    rows: allResults.flatMap((result) => result.rows),
-    error: categoryResult.error?.message ?? designationResult.error?.message ?? allResults.find((result) => result.error)?.error ?? null
+    rows: [...canonicalRows, ...legacyRows],
+    error: categoryResult.error?.message ?? designationResult.error?.message ?? workforceResult.error?.message ?? allResults.find((result) => result.error)?.error ?? null
   };
 }
 
@@ -299,4 +354,3 @@ export default async function AllPeoplePage() {
     </AppShell>
   );
 }
-
