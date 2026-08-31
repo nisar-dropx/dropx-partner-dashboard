@@ -1,8 +1,8 @@
 "use client";
 
 import { Camera, CheckCircle2, ImagePlus, ShieldCheck, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { getProfileDescriptor, type FaceMatchResult } from "@/lib/face-match";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ensureFaceModels, getProfileDescriptor, type FaceMatchResult } from "@/lib/face-match";
 import type { AppAccount } from "./connect-profile-app";
 import { SelfieCapturePanel } from "./selfie-capture-panel";
 
@@ -13,9 +13,17 @@ type Challenge = {
   expires_at: string;
 };
 
+type PhotoUsage = {
+  monthlyLimit: number;
+  updatesUsed: number;
+  updatesRemaining: number;
+};
+
 function safePhotoError(value: unknown, fallback: string) {
   const message = value instanceof Error ? value.message : String(value ?? "");
-  if (/schema|cache|table|relation|column|supabase|service role|permission|public\./i.test(message)) return fallback;
+  if (/schema cache|could not find the table|relation .* does not exist|column .* does not exist|supabase|service role|permission denied|public\./i.test(message)) {
+    return fallback;
+  }
   return message || fallback;
 }
 
@@ -28,12 +36,38 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
   const [candidate, setCandidate] = useState<File | null>(null);
   const [candidateUrl, setCandidateUrl] = useState("");
   const [challenge, setChallenge] = useState<Challenge | null>(null);
+  const [usage, setUsage] = useState<PhotoUsage | null>(null);
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loadingUsage, setLoadingUsage] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   useEffect(() => () => { if (candidateUrl) URL.revokeObjectURL(candidateUrl); }, [candidateUrl]);
+
+  const loadUsage = useCallback(async () => {
+    setLoadingUsage(true);
+    try {
+      const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
+      const response = await fetch(`/api/connect/profile-photo?${query}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (payload.monthlyLimit != null) {
+        setUsage({
+          monthlyLimit: Number(payload.monthlyLimit),
+          updatesUsed: Number(payload.updatesUsed ?? 0),
+          updatesRemaining: Number(payload.updatesRemaining ?? 0)
+        });
+      }
+      if (payload.error) setError(payload.error);
+      else setError("");
+    } catch {
+      setError("Unable to load photo update limits.");
+    } finally {
+      setLoadingUsage(false);
+    }
+  }, [account.id, account.profileType]);
+
+  useEffect(() => { void loadUsage(); }, [loadUsage]);
 
   async function choose(file?: File) {
     setError("");
@@ -41,9 +75,13 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
     if (!file) return;
     if (!file.type.startsWith("image/")) return setError("Choose an image file.");
     if (file.size > 8 * 1024 * 1024) return setError("Photo must be smaller than 8 MB.");
+    if (usage && usage.updatesRemaining <= 0) {
+      return setError(`You have reached the limit of ${usage.monthlyLimit} profile photo update${usage.monthlyLimit === 1 ? "" : "s"} this month.`);
+    }
     setBusy(true);
     const url = URL.createObjectURL(file);
     try {
+      await ensureFaceModels();
       await getProfileDescriptor(url);
       const response = await fetch("/api/connect/profile-photo", {
         method: "PUT",
@@ -56,6 +94,13 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
       setCandidate(file);
       setCandidateUrl(url);
       setChallenge(payload.challenge);
+      if (payload.monthlyLimit != null) {
+        setUsage({
+          monthlyLimit: Number(payload.monthlyLimit),
+          updatesUsed: Number(payload.updatesUsed ?? 0),
+          updatesRemaining: Number(payload.updatesRemaining ?? 0)
+        });
+      }
       setScanning(true);
     } catch (reason) {
       URL.revokeObjectURL(url);
@@ -90,6 +135,15 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
       setChallenge(null);
       if (candidateUrl) URL.revokeObjectURL(candidateUrl);
       setCandidateUrl("");
+      if (payload.monthlyLimit != null) {
+        setUsage({
+          monthlyLimit: Number(payload.monthlyLimit),
+          updatesUsed: Number(payload.updatesUsed ?? 0),
+          updatesRemaining: Number(payload.updatesRemaining ?? 0)
+        });
+      } else {
+        await loadUsage();
+      }
       setNotice(`Photo updated after ${payload.matchPercent}% face match.`);
       onUpdated(payload.profilePhotoUrl);
     } catch (reason) {
@@ -99,11 +153,13 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
     }
   }
 
+  const changeDisabled = busy || loadingUsage || Boolean(usage && usage.updatesRemaining <= 0);
+
   return <section className="dx-verified-photo-card" id="profile-photo-update">
     <button
       aria-label="Choose a new profile photo"
       className="dx-verified-photo-preview"
-      disabled={busy}
+      disabled={changeDisabled}
       onClick={() => inputRef.current?.click()}
       type="button"
     >
@@ -112,12 +168,20 @@ export function VerifiedProfilePhotoUpdate({ account, currentPhotoUrl, onUpdated
     </button>
     <div className="dx-verified-photo-copy">
       <strong>Profile photo</strong>
-      <p>Quick live face check required</p>
+      <p>
+        {loadingUsage
+          ? "Checking monthly update limit…"
+          : usage
+            ? `${usage.updatesRemaining} of ${usage.monthlyLimit} update${usage.monthlyLimit === 1 ? "" : "s"} left this month`
+            : "Quick live face check required"}
+      </p>
       {error ? <em className="error"><X />{error}</em> : null}
       {notice ? <em className="success"><CheckCircle2 />{notice}</em> : null}
     </div>
-    <input accept="image/*" hidden onChange={(event) => choose(event.target.files?.[0])} ref={inputRef} type="file" />
-    <button className="dx-verified-photo-action" disabled={busy} onClick={() => inputRef.current?.click()} type="button"><ImagePlus />{busy ? "Preparing…" : "Change"}</button>
+    <input accept="image/*" hidden onChange={(event) => void choose(event.target.files?.[0])} ref={inputRef} type="file" />
+    <button className="dx-verified-photo-action" disabled={changeDisabled} onClick={() => inputRef.current?.click()} type="button">
+      <ImagePlus />{busy ? "Preparing…" : changeDisabled && usage && usage.updatesRemaining <= 0 ? "Limit reached" : "Change"}
+    </button>
     {scanning && candidateUrl && challenge ? <SelfieCapturePanel
       hint={`At least ${challenge.required_match_percent}% face match required.`}
       onCapture={finish}
