@@ -25,6 +25,18 @@ const checks = [
     forbidden: ['table: "contractors"', 'table: "field_executives"', "dynamicWorkforceTable"]
   },
   {
+    file: "src/app/dashboard-people/all/page.tsx",
+    required: [
+      'title="All People"',
+      'table: "employees"',
+      'table: "contractors"',
+      'table: "vendors"',
+      'table: "workers"',
+      "dynamicWorkforceTable"
+    ],
+    forbidden: ['title="All Employees"']
+  },
+  {
     file: "src/app/people/review/page.tsx",
     required: ['queryProfileTypes: WorkforceProfileType[] = ["employee"]'],
     forbidden: ["nonEmployeeProfileConfigs", "nonEmployeeTypes.map"]
@@ -46,7 +58,7 @@ const checks = [
   },
   {
     file: "src/middleware.ts",
-    required: ["RESTORED_DASHBOARD_PEOPLE_PATHS", "isRestoredDashboardPeoplePath", "MOVED_PEOPLE_WORKFORCE_PATHS", "MOVED_PEOPLE_OPS_PATHS", "MOVED_OPS_WORKFORCE_PATHS"],
+    required: ["RESTORED_DASHBOARD_PEOPLE_PATHS", "isRestoredDashboardPeoplePath", "MOVED_PEOPLE_WORKFORCE_PATHS", "MOVED_PEOPLE_OPS_PATHS", "MOVED_OPS_WORKFORCE_PATHS", 'rewriteUrl.pathname = "/dashboard-people/all"'],
     forbidden: []
   },
   {

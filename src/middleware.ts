@@ -350,6 +350,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  if (isDashboardHost && path === "/people/all") {
+    const rewriteUrl = request.nextUrl.clone();
+    rewriteUrl.pathname = "/dashboard-people/all";
+    const rewriteResponse = NextResponse.rewrite(rewriteUrl);
+    response.cookies.getAll().forEach((cookie) => rewriteResponse.cookies.set(cookie));
+    return rewriteResponse;
+  }
+
   if (isPlatformAdminHost && path === "/") {
     const rewriteUrl = request.nextUrl.clone();
     rewriteUrl.pathname = "/platform-admin";
