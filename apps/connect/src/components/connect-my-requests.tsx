@@ -244,12 +244,10 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
         <p>Every request you have submitted, with its current status and approval flow.</p>
       </header>
       {error ? <div className="dx-alert error">{error}</div> : null}
-      <div className="dx-approval-scope">
-        <div aria-label="Choose month" className="dx-approval-scope-switch" role="group">
-          <button aria-label="Previous month" onClick={() => setMonth((current) => shiftMonth(current, -1))} type="button"><ChevronLeft /></button>
-          <span style={{ display: "flex", alignItems: "center", padding: "0 8px", fontSize: 12, fontWeight: 650, color: "#172033", whiteSpace: "nowrap" }}>{monthLabel(month)}</span>
-          <button aria-label="Next month" disabled={month >= currentMonthKey()} onClick={() => setMonth((current) => shiftMonth(current, 1))} type="button"><ChevronRight /></button>
-        </div>
+      <div aria-label="Choose month" className="dx-requests-month" role="group">
+        <button aria-label="Previous month" onClick={() => setMonth((current) => shiftMonth(current, -1))} type="button"><ChevronLeft /></button>
+        <strong>{monthLabel(month)}</strong>
+        <button aria-label="Next month" disabled={month >= currentMonthKey()} onClick={() => setMonth((current) => shiftMonth(current, 1))} type="button"><ChevronRight /></button>
       </div>
       <nav aria-label="Request type" className="dx-approval-tabs">
         <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")} type="button">
