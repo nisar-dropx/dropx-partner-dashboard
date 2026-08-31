@@ -6,7 +6,7 @@ import { EmployeeList } from "@/components/employee-list";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
 import { SubmitButton } from "@/components/submit-button";
-import { isCompanyOwner, type AuthorizationContext, requirePagePermission } from "@/lib/authorization";
+import { getAuthorization, hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate } from "@/lib/date-format";
 import { canOnboardDesignation } from "@/lib/designation-onboarding-access";
@@ -17,6 +17,7 @@ import { isMissingPositionAccessSchema } from "@/lib/position-access";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules, loadWorkforceCategoryStatutoryEnabled } from "@/lib/workforce-category-rules";
 import { bulkImportEmployees, createEmployee, reviewEmployeeProfile, updateEmployee } from "./actions";
+import { redirect } from "next/navigation";
 
 type LocationRow = {
   id: string;
@@ -443,13 +444,18 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
 export const dynamic = "force-dynamic";
 
 export default async function EmployeesPage({ searchParams }: { searchParams?: { edit?: string; view?: string } }) {
-  const authorization = await requirePagePermission("employees", "access");
+  const authorization = await getAuthorization();
+  if (!authorization) redirect("/login");
+  const hasEmployeeAccess = hasPermission(authorization, "employees", "access");
+  const hasPeopleAccess = hasPermission(authorization, "people_all", "access");
+  if (!hasEmployeeAccess && !hasPeopleAccess) redirect("/unauthorized?page=employees&action=access");
   const ownerAccess = isCompanyOwner(authorization);
   const companyId = requireCompanyId(authorization);
-  const pagePermission = authorization.permissions.employees ?? {
-    canView: false,
-    canAdd: false,
-    canEdit: false
+  const employeePermission = authorization.permissions.employees;
+  const pagePermission = {
+    canView: hasPermission(authorization, "employees", "view") || hasPeopleAccess,
+    canAdd: employeePermission?.canAdd ?? false,
+    canEdit: employeePermission?.canEdit ?? false
   };
   const { employees, editEmployee, locations, designations, positions, error, viewEmployee } = await loadEmployees(companyId, authorization, searchParams?.edit, searchParams?.view);
   const flash = loadFlash();
