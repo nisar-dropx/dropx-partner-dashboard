@@ -3,6 +3,18 @@ import { readFileSync } from "node:fs";
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const checks = [
   {
+    file: "src/lib/app-navigation.ts",
+    required: [
+      'label: "People"',
+      'label: "All People", href: "/people/all"',
+      'label: "Under Review", href: "/people/review"',
+      'label: "Exception", href: "/people/exceptions"',
+      'label: "Workforce Lifecycle", href: "/people/workforce-lifecycle"',
+      'label: "Attendance Integrity", href: "/attendance/integrity"'
+    ],
+    forbidden: []
+  },
+  {
     file: "src/lib/people/navigation.ts",
     required: ['label: "All Employees"', 'label: "HR Designations"'],
     forbidden: ["Independent Contractors", "Field Executives", "Workforce Lifecycle", "Business Docs", "master_documents"]
@@ -34,7 +46,7 @@ const checks = [
   },
   {
     file: "src/middleware.ts",
-    required: ["MOVED_PEOPLE_WORKFORCE_PATHS", "MOVED_PEOPLE_OPS_PATHS", "MOVED_OPS_WORKFORCE_PATHS"],
+    required: ["MOVED_DASHBOARD_PEOPLE_PATHS", "MOVED_PEOPLE_WORKFORCE_PATHS", "MOVED_PEOPLE_OPS_PATHS", "MOVED_OPS_WORKFORCE_PATHS"],
     forbidden: []
   },
   {

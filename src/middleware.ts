@@ -36,6 +36,12 @@ const MOVED_PEOPLE_WORKFORCE_PATHS = [
   { root: "/vendors", destination: "/delivery-network/associates" },
   { root: "/workers", destination: "/delivery-network/associates" }
 ] as const;
+const MOVED_DASHBOARD_PEOPLE_PATHS = [
+  { root: "/people/all", destination: "/people/all" },
+  { root: "/people/review", destination: "/people/review" },
+  { root: "/people/exceptions", destination: "/people/exceptions" },
+  { root: "/attendance/integrity", destination: "/attendance/integrity" }
+] as const;
 const MOVED_PEOPLE_OPS_PATHS = [
   { root: "/business-documents", destination: "/business-documents" },
   { root: "/api/business-documents", destination: "/api/business-documents" },
@@ -160,6 +166,12 @@ export async function middleware(request: NextRequest) {
   if (dashboardWorkforceRoute) {
     const workforceBase = process.env.WORKFORCE_APP_URL?.trim() || "https://workforce.dropxlogistics.com";
     return NextResponse.redirect(new URL(dashboardWorkforceRoute.destination + request.nextUrl.search, workforceBase));
+  }
+
+  const dashboardPeopleRoute = isDashboardHost ? movedPath(path, MOVED_DASHBOARD_PEOPLE_PATHS) : null;
+  if (dashboardPeopleRoute) {
+    const peopleBase = process.env.PEOPLE_APP_URL?.trim() || "https://people.dropxlogistics.com";
+    return NextResponse.redirect(new URL(dashboardPeopleRoute.destination + request.nextUrl.search, peopleBase));
   }
 
   const movedWorkforcePath = isDashboardHost ? MOVED_WORKFORCE_PATHS.get(path) : null;
