@@ -2,6 +2,7 @@
 
 import { Camera, Check, RefreshCw, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   FACE_MATCH_REQUIRED_PERCENT,
   ensureFaceModels,
@@ -63,8 +64,18 @@ export function SelfieCapturePanel({
   const [livenessHint, setLivenessHint] = useState("");
   const [livenessProgress, setLivenessProgress] = useState(0);
   const [matchProgress, setMatchProgress] = useState(0);
+  const [mounted, setMounted] = useState(false);
 
   challengeIndexRef.current = challengeIndex;
+
+  useEffect(() => {
+    setMounted(true);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
 
   const matchAccepted = (match: FaceMatchResult | null | undefined) =>
     Boolean(match?.ok && match.percent >= requiredMatchPercent);
@@ -407,9 +418,11 @@ export function SelfieCapturePanel({
         ? Math.round(livenessProgress * 100)
         : 100;
 
-  return (
-    <>
-      <button aria-label="Close selfie panel" className="dx-sheet-scrim" onClick={onClose} type="button" />
+  if (!mounted) return null;
+
+  return createPortal(
+    <div className="dx-selfie-modal-root">
+      <button aria-label="Close verification dialog" className="dx-sheet-scrim" onClick={onClose} type="button" />
       <aside className="dx-selfie-panel" role="dialog" aria-modal="true" aria-labelledby="selfie-panel-title">
         <header>
           <div>
@@ -492,6 +505,7 @@ export function SelfieCapturePanel({
           )}
         </div>
       </aside>
-    </>
+    </div>,
+    document.body
   );
 }
