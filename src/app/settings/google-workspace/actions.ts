@@ -9,7 +9,6 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { processWorkspaceJobs, queueWorkspaceJob, syncWorkspaceDirectory } from "@/lib/google-workspace-service";
 import { provisionCentralLocationMailbox } from "@/lib/ops-pulse/central-location-mail";
 import { ensureLocationMailboxMapping } from "@/lib/ops-pulse/location-mail";
-import { isProductCode } from "@/lib/product-ownership";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const pagePath = "/settings/google-workspace";
@@ -141,13 +140,8 @@ export async function saveDesignationWorkspacePolicy(formData: FormData) {
   let designationId = "";
   try {
     designationId = required(formData.get("designation_id"), "Designation");
-    const issueAccount = checked(formData, "issue_workspace_account");
     const approvalMode = clean(formData.get("approval_mode"));
     if (!["automatic", "manual"].includes(approvalMode)) throw new Error("Select a valid approval mode.");
-    const locationMode = clean(formData.get("location_access_mode"));
-    if (!["assignment", "all_locations", "none"].includes(locationMode)) throw new Error("Select a valid location access mode.");
-    const productCodes = Array.from(new Set(formData.getAll("product_codes").map(String).filter(isProductCode)));
-    const accessRoleId = clean(formData.get("access_role_id")) || null;
     const orgUnit = required(formData.get("org_unit_path"), "Organisational unit");
     if (!orgUnit.startsWith("/")) throw new Error("The organisational unit path must start with /. ");
     const emailPattern = required(formData.get("email_pattern"), "Email pattern").toLowerCase();
@@ -156,12 +150,16 @@ export async function saveDesignationWorkspacePolicy(formData: FormData) {
     if (/[^a-z0-9._-]/.test(withoutTokens)) throw new Error("The email pattern contains an unsupported token or character.");
     if (!allowedTokens.some((token) => emailPattern.includes(token))) throw new Error("Use at least one supported token in the email pattern.");
 
-    const designation = await database().from("designations").select("id").eq("company_id", companyId).eq("id", designationId).maybeSingle();
+    const designation = await database().from("designations").select("id,workspace_account_requirement").eq("company_id", companyId).eq("id", designationId).maybeSingle();
     if (designation.error || !designation.data) throw new Error(designation.error?.message ?? "Designation is unavailable.");
-    if (accessRoleId) {
-      const role = await database().from("user_roles").select("id").eq("company_id", companyId).eq("id", accessRoleId).eq("is_active", true).maybeSingle();
-      if (role.error || !role.data) throw new Error(role.error?.message ?? "Selected access role is unavailable.");
-    }
+    const accessPolicies = await database().from("designation_product_access_policies")
+      .select("id,product_code,default_role_id,location_access_mode")
+      .eq("company_id", companyId).eq("designation_id", designationId).eq("is_enabled", true);
+    if (accessPolicies.error) throw new Error(accessPolicies.error.message);
+    const inheritedProducts = accessPolicies.data ?? [];
+    const primaryAccess = inheritedProducts.find((item) => item.product_code === "people") ?? inheritedProducts[0] ?? null;
+    const workspaceRequirement = String(designation.data.workspace_account_requirement ?? "optional");
+    const issueAccount = workspaceRequirement !== "not_required";
 
     const saved = await database().from("google_workspace_designation_policies").upsert({
       company_id: companyId,
@@ -171,9 +169,9 @@ export async function saveDesignationWorkspacePolicy(formData: FormData) {
       email_pattern: emailPattern,
       org_unit_path: orgUnit,
       group_emails: emails(formData.get("group_emails")),
-      access_role_id: accessRoleId,
-      product_codes: productCodes,
-      location_access_mode: locationMode,
+      access_role_id: primaryAccess?.default_role_id ?? null,
+      product_codes: inheritedProducts.map((item) => item.product_code),
+      location_access_mode: primaryAccess?.location_access_mode === "all_locations" ? "all_locations" : primaryAccess?.location_access_mode === "none" ? "none" : "assignment",
       send_activation_email: checked(formData, "send_activation_email"),
       retention_days: clean(formData.get("retention_days"))
         ? positiveInteger(formData.get("retention_days"), "Retention days", 1, 3650)
@@ -184,18 +182,56 @@ export async function saveDesignationWorkspacePolicy(formData: FormData) {
     }, { onConflict: "company_id,designation_id" }).select("id").single();
     if (saved.error) throw new Error(saved.error.message);
 
-    if (issueAccount && checked(formData, "is_active")) {
-      const [employees, accounts] = await Promise.all([
-        database().from("employees").select("id").eq("company_id", companyId).eq("designation_id", designationId).eq("is_active", true),
-        database().from("google_workspace_accounts").select("id,source_record_id,google_user_id,suspended")
-          .eq("company_id", companyId).eq("source_type", "employee").eq("designation_id", designationId)
+    if (workspaceRequirement === "required" && checked(formData, "is_active")) {
+      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+      const [assignments, accounts] = await Promise.all([
+        database().from("hr_work_assignments").select("engagement_id")
+          .eq("company_id", companyId).eq("designation_id", designationId).eq("is_primary", true)
+          .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`),
+        database().from("google_workspace_accounts").select("id,source_type,source_record_id,google_user_id,suspended")
+          .eq("company_id", companyId).eq("designation_id", designationId)
+      ]);
+      if (assignments.error) throw new Error(assignments.error.message);
+      if (accounts.error) throw new Error(accounts.error.message);
+      const engagementIds = [...new Set((assignments.data ?? []).map((assignment) => assignment.engagement_id).filter(Boolean))];
+      const engagements = engagementIds.length
+        ? await database().from("hr_engagements").select("worker_type,employee_id,contractor_id,person_id")
+          .eq("company_id", companyId).eq("status", "active").in("id", engagementIds)
+        : { data: [], error: null };
+      if (engagements.error) throw new Error(engagements.error.message);
+      const employeeIds = (engagements.data ?? []).filter((engagement) => engagement.worker_type === "employee" && engagement.employee_id).map((engagement) => engagement.employee_id!);
+      const contractorIds = (engagements.data ?? []).filter((engagement) => engagement.worker_type === "contractor" && engagement.contractor_id).map((engagement) => engagement.contractor_id!);
+      const [employees, contractors] = await Promise.all([
+        employeeIds.length
+          ? database().from("employees").select("id").eq("company_id", companyId).in("id", employeeIds).eq("is_active", true).is("deleted_at", null)
+          : Promise.resolve({ data: [], error: null }),
+        contractorIds.length
+          ? database().from("contractors").select("id").eq("company_id", companyId).in("id", contractorIds).eq("is_active", true).is("deleted_at", null)
+          : Promise.resolve({ data: [], error: null })
       ]);
       if (employees.error) throw new Error(employees.error.message);
-      if (accounts.error) throw new Error(accounts.error.message);
-      const accountByEmployee = new Map((accounts.data ?? []).map((account) => [account.source_record_id, account]));
+      if (contractors.error) throw new Error(contractors.error.message);
+      const personIds = (engagements.data ?? []).map((engagement) => engagement.person_id).filter(Boolean);
+      const scopes = personIds.length
+        ? await database().from("people_person_access_scopes").select("person_id,workspace_identity_override").eq("company_id", companyId).in("person_id", personIds)
+        : { data: [], error: null };
+      if (scopes.error) throw new Error(scopes.error.message);
+      const people = [
+        ...(employees.data ?? []).map((employee) => ({ workerType: "employee", workerId: employee.id })),
+        ...(contractors.data ?? []).map((contractor) => ({ workerType: "contractor", workerId: contractor.id }))
+      ];
+      const personByWorker = new Map((engagements.data ?? []).map((engagement) => [
+        `${engagement.worker_type}:${engagement.worker_type === "employee" ? engagement.employee_id : engagement.contractor_id}`,
+        engagement.person_id
+      ]));
+      const overrideByPerson = new Map((scopes.data ?? []).map((scope) => [scope.person_id, scope.workspace_identity_override]));
+      const accountByWorker = new Map((accounts.data ?? []).map((account) => [`${account.source_type}:${account.source_record_id}`, account]));
       const now = new Date().toISOString();
-      const jobs = (employees.data ?? []).map((employee) => {
-        const account = accountByEmployee.get(employee.id);
+      const jobs = people.filter((person) => {
+        const personId = personByWorker.get(`${person.workerType}:${person.workerId}`);
+        return !personId || overrideByPerson.get(personId) !== "not_required";
+      }).map((person) => {
+        const account = accountByWorker.get(`${person.workerType}:${person.workerId}`);
         const jobType = account?.suspended ? "restore" : account?.google_user_id ? "update_access" : "provision";
         return {
           company_id: companyId,
@@ -203,10 +239,10 @@ export async function saveDesignationWorkspacePolicy(formData: FormData) {
           job_type: jobType,
           status: approvalMode === "automatic" ? "queued" : "blocked",
           priority: 50,
-          idempotency_key: `${jobType}:employee:${employee.id}:policy:${saved.data.id}:${randomUUID()}`,
-          source_type: "employee",
-          source_record_id: employee.id,
-          payload: { policy_id: saved.data.id, reason: "designation_policy_saved" },
+          idempotency_key: `${jobType}:${person.workerType}:${person.workerId}:policy:${saved.data.id}:${randomUUID()}`,
+          source_type: person.workerType,
+          source_record_id: person.workerId,
+          payload: { policy_id: saved.data.id, reason: "designation_policy_saved", approved: approvalMode === "automatic" },
           requested_by: authorization.userId,
           next_attempt_at: now
         };
@@ -218,7 +254,7 @@ export async function saveDesignationWorkspacePolicy(formData: FormData) {
     }
 
     revalidatePath(pagePath);
-    flash({ notice: "Designation Workspace policy saved and eligible active profiles queued." }, `?designation=${designationId}`);
+    flash({ notice: workspaceRequirement === "required" ? "Workspace connector policy saved and eligible required profiles queued." : "Workspace connector policy saved. Optional or not-required profiles were not auto-provisioned." }, `?designation=${designationId}`);
   } catch (error) {
     if (isNextRedirect(error)) throw error;
     flash({ error: friendly(error) }, designationId ? `?designation=${designationId}` : "");
