@@ -84,7 +84,14 @@ export async function POST(request: Request) {
     if (!supabaseAdmin) return NextResponse.json({ error: "Supabase service role key is not configured." }, { status: 500 });
 
     const companyId = requireCompanyId(authorization);
-    const body = await request.json() as { ids?: unknown; apply?: unknown; operation?: unknown };
+    const contentType = request.headers.get("content-type") ?? "";
+    const body = contentType.includes("application/json")
+      ? await request.json() as { ids?: unknown; apply?: unknown; operation?: unknown }
+      : await request.formData().then((formData) => ({
+        ids: String(formData.get("ids") ?? "").split(/[\s,]+/),
+        apply: formData.get("apply") === "true",
+        operation: formData.get("operation")
+      }));
     const ids = normalizedIds(body.ids);
     if (!ids.length) return NextResponse.json({ error: "Provide at least one valid DropX ID." }, { status: 400 });
     const apply = body.apply === true;
