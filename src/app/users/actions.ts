@@ -504,6 +504,7 @@ export async function saveLocationPortalAccess(formData: FormData) {
 }
 
 export async function reconcilePeopleAccessArchitecture() {
+  let successNotice = "Access reconciliation completed.";
   try {
     const authorization = await requirePagePermission("users", "edit");
     const companyId = requireCompanyId(authorization);
@@ -527,13 +528,11 @@ export async function reconcilePeopleAccessArchitecture() {
       reason: "People designation and Dashboard location access cutover"
     });
     revalidatePath("/users");
-    usersRedirect({
-      section: "roles",
-      userNotice: `Access reconciled: ${counts.designation_memberships_migrated ?? 0} designation memberships, ${counts.location_memberships_migrated ?? 0} location memberships, ${counts.payment_requests_remapped ?? 0} payment requests.`
-    });
+    successNotice = `Access reconciled: ${counts.designation_memberships_migrated ?? 0} designation memberships, ${counts.location_memberships_migrated ?? 0} location memberships, ${counts.payment_requests_remapped ?? 0} payment requests.`;
   } catch (error) {
     usersRedirect({ section: "roles", userError: error instanceof Error ? error.message : "Central access reconciliation failed." });
   }
+  usersRedirect({ section: "roles", userNotice: successNotice });
 }
 
 export async function createUserRole(formData: FormData) {
