@@ -16,7 +16,7 @@ begin
   if normalized_code !~ '^[a-z0-9_]+$' then
     raise exception 'Invalid workforce category code.';
   end if;
-  if normalized_code in ('employees', 'field_executives', 'contractors', 'vendors', 'workers') then
+  if normalized_code in ('employees', 'workforce', 'contractors', 'vendors', 'workers') then
     raise exception 'System workforce categories use their existing tables.';
   end if;
   if not exists (
@@ -31,7 +31,7 @@ begin
 
   table_name := 'workforce_' || normalized_code;
   execute format(
-    'create table if not exists public.%I (like public.field_executives including all)',
+    'create table if not exists public.%I (like public.workforce including all)',
     table_name
   );
   execute format('alter table public.%I enable row level security', table_name);
@@ -102,7 +102,7 @@ begin
     select company_id, code
     from public.workforce_categories
     where is_active = true
-      and code not in ('employees', 'field_executives', 'contractors', 'vendors', 'workers')
+      and code not in ('employees', 'workforce', 'contractors', 'vendors', 'workers')
   loop
     perform public.provision_workforce_category_table(category.company_id, category.code);
   end loop;
