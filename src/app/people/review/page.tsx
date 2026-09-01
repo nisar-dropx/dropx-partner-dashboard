@@ -101,18 +101,24 @@ async function loadReviewProfiles(
 
   const attachmentColumns = attachmentFields.map((field) => field.key).join(", ");
   const employeeSelect = `id, employee_code, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc, vehicle_reg_no, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
+  const workforceSelect = `id, dropx_id, biometric_id, full_name, location_id, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, updated_at, ${attachmentColumns}, stations (station_code, station_name), designations (name)`;
   const nonEmployeeSelect = `id, dropx_id, biometric_id, full_name, location_id, designation, pan_number, aadhaar_number, driving_license_no, pf_uan, bank_account_no, ifsc_code, vehicle_reg_no, updated_at, ${attachmentColumns}, stations (station_code, station_name)`;
   const nonEmployeeTypes = workforceProfileTypes.filter(
     (profileType): profileType is Exclude<WorkforceProfileType, "employee" | "workforce" | "field_executive"> =>
       profileType !== "employee" && profileType !== "workforce" && profileType !== "field_executive"
   );
-  const queryProfileTypes: WorkforceProfileType[] = ["employee", ...nonEmployeeTypes];
+  const queryProfileTypes: WorkforceProfileType[] = ["employee", "workforce", ...nonEmployeeTypes];
   const profileQueries = [
     admin
       .from("employees")
       .select(employeeSelect)
       .eq("company_id", companyId)
       .eq("profile_completion_status", "under_review"),
+    admin
+      .from("workforce")
+      .select(workforceSelect)
+      .eq("company_id", companyId)
+      .eq("onboarding_status", "under_review"),
     ...nonEmployeeTypes.map((profileType) => admin
       .from(nonEmployeeProfileConfigs[profileType].table)
       .select(nonEmployeeSelect)
@@ -145,7 +151,7 @@ async function loadReviewProfiles(
       const locationId = text(raw.location_id) || null;
       if (!hasAllLocationAccess && (!locationId || !locationScopeIds.includes(locationId))) continue;
       const station = firstRelation(raw.stations as { station_code?: string } | Array<{ station_code?: string }> | null);
-      const designation = profileType === "employee"
+      const designation = profileType === "employee" || profileType === "workforce"
         ? firstRelation(raw.designations as { name?: string } | Array<{ name?: string }> | null)?.name
         : raw.designation;
       const id = text(raw.id);
