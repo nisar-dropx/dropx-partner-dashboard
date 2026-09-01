@@ -809,7 +809,7 @@ export async function FieldExecutivePageContent({
   pageSubtitle = "Register and maintain field executives by location.",
   pageTitle = "Field Executive",
   registerNavigation,
-  returnPath = "/field-executive",
+  returnPath = "/workforce",
   viewId
 }: {
   activeLabel?: string;

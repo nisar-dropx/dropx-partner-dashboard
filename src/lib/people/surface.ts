@@ -2,6 +2,7 @@ const peoplePortalRoots = [
   "/people",
   "/employees",
   "/field-executive",
+  "/workforce",
   "/contractors",
   "/vendors",
   "/workers",

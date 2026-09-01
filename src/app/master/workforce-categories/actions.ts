@@ -73,7 +73,7 @@ function revalidateWorkforceCategoryPaths() {
   revalidatePath("/settings/meta");
   revalidatePath("/people/all");
   revalidatePath("/employees");
-  revalidatePath("/field-executive");
+  revalidatePath("/workforce");
   revalidatePath("/contractors");
   revalidatePath("/vendors");
   revalidatePath("/workers");

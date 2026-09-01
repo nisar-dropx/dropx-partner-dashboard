@@ -96,7 +96,7 @@ function MultiCheckFilter({
 }
 
 export function FieldExecutiveList({
-  basePath = "/field-executive",
+  basePath = "/workforce",
   canEdit,
   emptyLabel = "No field executives added yet.",
   rows,

@@ -84,8 +84,8 @@ export async function loadCanonicalWorkforcePeople(
         location,
         designation,
         status,
-        viewHref: actions.canView ? `/field-executive?view=${encodeURIComponent(String(row.id))}` : undefined,
-        editHref: actions.canEdit ? `/field-executive?edit=${encodeURIComponent(String(row.id))}` : undefined,
+        viewHref: actions.canView ? `/workforce?view=${encodeURIComponent(String(row.id))}` : undefined,
+        editHref: actions.canEdit ? `/workforce?edit=${encodeURIComponent(String(row.id))}` : undefined,
         canEdit: actions.canEdit,
         exportValues: exportValues(row, location, status, designation)
       } satisfies AllPeopleRow;

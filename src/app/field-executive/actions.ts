@@ -56,7 +56,7 @@ function tableForReturnPath(returnPath: FieldExecutiveReturnPath) {
   return nonEmployeeConfigForRoute(returnPath).table;
 }
 
-function fieldExecutiveRedirect(params?: Record<string, string>, returnPath: FieldExecutiveReturnPath = "/field-executive"): never {
+function fieldExecutiveRedirect(params?: Record<string, string>, returnPath: FieldExecutiveReturnPath = "/workforce"): never {
   const query = params ? `?${new URLSearchParams(params).toString()}` : "";
   redirect(`${returnPath}${query}`);
 }
@@ -446,7 +446,7 @@ export async function createFieldExecutive(formData: FormData) {
   }
 
   fieldExecutiveRedirect({
-    notice: returnPath === "/field-executive"
+    notice: returnPath === "/workforce"
       ? `${entityLabel} onboarding request created. The applicant must submit the profile and agreement before HO activation.`
       : `${entityLabel} added successfully.`
   }, returnPath);
