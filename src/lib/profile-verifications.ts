@@ -5,6 +5,10 @@ type VerificationKind = "pan" | "pan_aadhaar" | "dl" | "vehicle" | "bank" | "pf_
 
 type ProfileType = WorkforceProfileType;
 
+function canonicalProfileType(profileType: ProfileType): ProfileType {
+  return profileType === "field_executive" ? "workforce" : profileType;
+}
+
 function text(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -30,7 +34,7 @@ export async function saveProfileVerification({
   if (!supabaseAdmin || !text(result.inputKey)) return;
   const saveResult = await supabaseAdmin.from("connect_profile_verifications").upsert({
     company_id: companyId,
-    profile_type: profileType,
+    profile_type: canonicalProfileType(profileType),
     account_id: accountId,
     kind,
     input_key: text(result.inputKey),

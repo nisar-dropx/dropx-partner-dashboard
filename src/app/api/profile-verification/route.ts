@@ -202,18 +202,28 @@ export async function GET(request: NextRequest) {
     const pageCode = text(request.nextUrl.searchParams.get("pageCode"));
     if (!accountId) throw new Error("Account is required.");
     const account = await dashboardAccount(accountId, profileType, pageCode);
+    const verificationProfileTypes = profileType === "field_executive"
+      ? ["workforce", "field_executive"]
+      : [profileType];
     const result = await supabaseAdmin
       .from("connect_profile_verifications")
       .select("kind, input_key, verified, manual_review, block_submit, display_name, message, details, verified_at")
       .eq("company_id", account.companyId)
-      .eq("profile_type", profileType)
-      .eq("account_id", accountId);
+      .in("profile_type", verificationProfileTypes)
+      .eq("account_id", accountId)
+      .order("updated_at", { ascending: false });
     if (result.error) {
       if (isMissingVerificationTable(result.error)) return ok({ verifications: [] });
       throw new Error(result.error.message);
     }
+    const seenKinds = new Set<string>();
+    const verificationRows = (result.data ?? []).filter((row) => {
+      if (seenKinds.has(row.kind)) return false;
+      seenKinds.add(row.kind);
+      return true;
+    });
     return ok({
-      verifications: (result.data ?? []).map((row) => ({
+      verifications: verificationRows.map((row) => ({
         kind: row.kind,
         inputKey: row.input_key,
         verified: row.verified,
