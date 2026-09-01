@@ -852,16 +852,60 @@ async function updateEmployeeAccess(job: WorkspaceJobRow) {
   if (!policy) throw new Error("The current designation has no active Workspace policy.");
   const account = await getAccount(job.account_id);
   const connection = clientFor(setting);
-  if (account.google_user_id) {
-    const names = splitName(source.fullName);
+  const names = splitName(source.fullName);
+  const requestedPrimaryEmail = normalizeEmail(job.payload.requested_primary_email);
+  const currentPrimaryEmail = normalizeEmail(account.primary_email);
+  const emailChangeRequested = Boolean(requestedPrimaryEmail && requestedPrimaryEmail !== currentPrimaryEmail);
+  let effectiveAccount = account;
+  if (emailChangeRequested) {
+    if (job.payload.workspace_email_change_confirmed !== true) {
+      throw new Error("The primary Workspace email change was not explicitly confirmed in People.");
+    }
+    if (!requestedPrimaryEmail.endsWith(`@${normalizeEmail(setting.primary_domain)}`)) {
+      throw new Error(`The requested Workspace email must use @${setting.primary_domain}.`);
+    }
+    const mapped = await db().from("google_workspace_accounts").select("id")
+      .eq("company_id", job.company_id).ilike("primary_email", requestedPrimaryEmail).maybeSingle();
+    if (mapped.error) throw new Error(mapped.error.message);
+    if (mapped.data && mapped.data.id !== account.id) {
+      throw new Error("The requested Workspace email is already mapped to another DropX identity.");
+    }
+    const targetUser = await connection.getUser(requestedPrimaryEmail);
+    if (targetUser && targetUser.id !== account.google_user_id) {
+      throw new Error("The requested Workspace email already belongs to another Google user.");
+    }
+    const renamed = await connection.patchUser(account.google_user_id || account.primary_email, {
+      primaryEmail: requestedPrimaryEmail,
+      name: { givenName: names.givenName, familyName: names.familyName },
+      orgUnitPath: policy.org_unit_path
+    });
+    const renamedEmail = normalizeEmail(renamed.primaryEmail) || requestedPrimaryEmail;
+    const savedRename = await db().from("google_workspace_accounts").update({
+      google_user_id: renamed.id || account.google_user_id,
+      primary_email: renamedEmail,
+      updated_at: new Date().toISOString()
+    }).eq("id", account.id);
+    if (savedRename.error) throw new Error(savedRename.error.message);
+    effectiveAccount = { ...account, google_user_id: renamed.id || account.google_user_id, primary_email: renamedEmail };
+    await audit({
+      companyId: job.company_id,
+      accountId: account.id,
+      jobId: job.id,
+      actorId: job.requested_by,
+      action: "primary_email_change",
+      status: "success",
+      detail: { previous_primary_email: currentPrimaryEmail, primary_email: renamedEmail }
+    });
+  } else if (account.google_user_id) {
     await connection.patchUser(account.google_user_id, {
       name: { givenName: names.givenName, familyName: names.familyName },
       orgUnitPath: policy.org_unit_path
     });
   }
-  await syncManagedGroups(connection, account, policy.group_emails);
-  await ensureDropxAccess({ account: { ...account, group_emails: policy.group_emails }, source, policy });
+  await syncManagedGroups(connection, effectiveAccount, policy.group_emails);
+  await ensureDropxAccess({ account: { ...effectiveAccount, group_emails: policy.group_emails }, source, policy });
   await db().from("google_workspace_accounts").update({
+    primary_email: effectiveAccount.primary_email,
     full_name: source.fullName,
     org_unit_path: policy.org_unit_path,
     designation_id: source.designationId,
