@@ -62,9 +62,7 @@ export const navItems: NavItem[] = [
     label: "Central Identity",
     icon: "@",
     children: [
-      { code: "users", label: "Users", href: "/users?section=users" },
-      { code: "users", label: "Cross-product Roles", href: "/users?section=roles" },
-      { code: "users", label: "Positions & Delegation", href: "/users/positions" },
+      { code: "users", label: "Access Visibility", href: "/users?section=users" },
       { code: "workspace_identity", label: "Google Mail IDs & Mapping", href: "/settings/google-workspace" }
     ]
   },

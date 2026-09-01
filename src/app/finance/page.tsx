@@ -93,7 +93,7 @@ export default async function FinanceDashboardPage() {
     { code: "master_payment_banks", label: "Payment banks", href: "/master/payment-banks" },
     { code: "payment_settings", label: "Finance settings", href: "/settings/payments" },
     { code: "users", label: "Finance users", href: "/users?section=users" },
-    { code: "users", label: "Finance roles", href: "/users?section=roles" }
+    { code: "users", label: "Finance designation access", href: "/users?section=roles" }
   ].filter((item) => hasPermission(authorization, item.code, "access"));
 
   return (

@@ -36,7 +36,7 @@ export const financeNavItems: NavItem[] = [
     icon: "@",
     children: [
       { code: "users", label: "Users", href: "/users?section=users" },
-      { code: "users", label: "Finance Roles", href: "/users?section=roles" },
+      { code: "users", label: "Designation Access", href: "/users?section=roles" },
       { code: "users", label: "Delegation", href: "/users/positions" }
     ]
   }

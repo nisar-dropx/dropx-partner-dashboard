@@ -45,6 +45,7 @@ type DesignationProductPolicyRow = {
   default_role_id: string | null;
   location_access_mode: "assignment" | "reporting_scope" | "all_locations" | "none";
   is_enabled: boolean;
+  is_system_default?: boolean;
 };
 
 type PersonAccessScopeRow = {
@@ -184,7 +185,7 @@ async function getDesignationAccessPlan(source: EmployeeSource) {
         .eq("company_id", source.companyId).eq("person_id", source.personId).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
     db().from("designation_product_access_policies")
-      .select("id,product_code,default_role_id,location_access_mode,is_enabled")
+      .select("id,product_code,default_role_id,location_access_mode,is_enabled,is_system_default")
       .eq("company_id", source.companyId).eq("designation_id", source.designationId).eq("is_enabled", true)
   ]);
   for (const result of [designationResult, scopeResult, productResult]) {
@@ -199,7 +200,7 @@ async function getDesignationAccessPlan(source: EmployeeSource) {
     workspaceRequirement,
     locationScopeIds,
     hasAllLocationAccess: Boolean(scope?.has_all_location_access),
-    productPolicies: (productResult.data ?? []) as DesignationProductPolicyRow[],
+    productPolicies: (productResult.data ?? []).filter((policy) => !policy.is_system_default || policy.default_role_id) as DesignationProductPolicyRow[],
     usesUnifiedPolicy: !productResult.error && !designationResult.error
   };
 }
@@ -358,7 +359,7 @@ async function ensureDropxAccess(input: {
 }) {
   const { account, source, policy } = input;
   const plan = await getDesignationAccessPlan(source);
-  const usesUnifiedProductPolicies = plan.productPolicies.length > 0;
+  const usesUnifiedProductPolicies = plan.usesUnifiedPolicy;
   const productPolicies = plan.productPolicies.length
     ? plan.productPolicies
     : policy.product_codes.map((productCode) => ({
@@ -369,6 +370,7 @@ async function ensureDropxAccess(input: {
       is_enabled: true
     }));
   const configuredProducts = productPolicies.filter((item) => item.is_enabled && item.default_role_id);
+  if (usesUnifiedProductPolicies && !configuredProducts.length) return null;
   const primaryRoleId = configuredProducts.find((item) => item.product_code === "people")?.default_role_id
     ?? configuredProducts[0]?.default_role_id
     ?? policy.access_role_id;
