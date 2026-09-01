@@ -272,7 +272,10 @@ async function loadPeople(
         })
     };
   }));
-  const workforceResult = await loadCanonicalWorkforcePeople(companyId, locationScopeIds, hasAllLocationAccess);
+  const workforceResult = await loadCanonicalWorkforcePeople(companyId, locationScopeIds, hasAllLocationAccess, {
+    canView: hasPermission(authorization, "delivery_associates", "access"),
+    canEdit: hasPermission(authorization, "delivery_associates", "edit")
+  });
   const allResults = [...results, ...customResults];
   const sourceRows = allResults.flatMap((result) => result.rows);
   const contractorIdentityKeys = new Set(sourceRows

@@ -16,7 +16,11 @@ export default async function WorkforcePage() {
   const data = await loadCanonicalWorkforcePeople(
     requireCompanyId(authorization),
     authorization.locationScopeIds,
-    authorization.hasAllLocationAccess
+    authorization.hasAllLocationAccess,
+    {
+      canView: hasPermission(authorization, "delivery_associates", "access"),
+      canEdit: hasPermission(authorization, "delivery_associates", "edit")
+    }
   );
 
   return (

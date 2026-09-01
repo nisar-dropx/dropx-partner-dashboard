@@ -39,7 +39,8 @@ function exportValues(row: Record<string, unknown>, location: string, status: st
 export async function loadCanonicalWorkforcePeople(
   companyId: string,
   locationScopeIds: string[],
-  hasAllLocationAccess: boolean
+  hasAllLocationAccess: boolean,
+  actions: { canEdit: boolean; canView: boolean } = { canEdit: false, canView: false }
 ): Promise<{ rows: AllPeopleRow[]; error: string | null }> {
   if (!supabaseAdmin) return { rows: [], error: "Supabase service role key is not configured." };
 
@@ -83,7 +84,9 @@ export async function loadCanonicalWorkforcePeople(
         location,
         designation,
         status,
-        canEdit: false,
+        viewHref: actions.canView ? `/field-executive?view=${encodeURIComponent(String(row.id))}` : undefined,
+        editHref: actions.canEdit ? `/field-executive?edit=${encodeURIComponent(String(row.id))}` : undefined,
+        canEdit: actions.canEdit,
         exportValues: exportValues(row, location, status, designation)
       } satisfies AllPeopleRow;
     });
