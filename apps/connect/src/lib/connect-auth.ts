@@ -484,7 +484,6 @@ async function signedProfilePhotoUrl(path?: string | null) {
   return result.data?.signedUrl ?? "";
 }
 
-const defaultPageAccess = ["dashboard", "profile", "attendance", "roster", "leave", "performance", "settings"];
 const managerPageAccess = ["dashboard", "approvals", "settings"];
 
 export function connectWorkspace(
@@ -516,7 +515,7 @@ function designationLookupKey(companyId: string, categoryCode: string, value: st
 }
 
 function intersectPageAccess(categoryPages: string[], designationPages?: string[] | null) {
-  if (!designationPages) return categoryPages;
+  if (!designationPages) return [];
   const allowedByDesignation = new Set(designationPages.map((page) => page.trim().toLowerCase()));
   return categoryPages.filter((page) => allowedByDesignation.has(page.trim().toLowerCase()));
 }
@@ -718,7 +717,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     for (const category of categoryResult.data ?? []) {
       const pages = Array.isArray(category.app_page_access)
         ? category.app_page_access.map(String)
-        : defaultPageAccess;
+        : [];
       pageAccessByCategory.set(`${category.company_id}:${category.code}`, pages);
     }
   }
@@ -811,7 +810,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     .filter((account) => companyNameById.has(account.company_id))
     .map(async (account): Promise<ConnectAccount> => {
       const categoryCode = categoryCodeForProfile(account.profile_type);
-      const categoryPages = pageAccessByCategory.get(`${account.company_id}:${categoryCode}`) ?? defaultPageAccess;
+      const categoryPages = pageAccessByCategory.get(`${account.company_id}:${categoryCode}`) ?? [];
       const designationPages = account.designation_id
         ? pageAccessByDesignationId.get(account.designation_id)
         : account.role

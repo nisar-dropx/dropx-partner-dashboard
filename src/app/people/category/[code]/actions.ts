@@ -12,7 +12,7 @@ import { generateConfiguredBiometricId, generateConfiguredWorkerId } from "@/lib
 import { requireDesignationOnboardingAccess } from "@/lib/designation-onboarding-access";
 import { requireDesignationPortalAccess } from "@/lib/designation-portal-access";
 import { moveProfileDocumentToTrash, uploadProfileDocument } from "@/lib/profile-document-storage";
-import { normalizeCategoryProfileFieldRules } from "@/lib/profile-field-rules";
+import { loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function required(value: FormDataEntryValue | null, label: string) {
@@ -115,8 +115,31 @@ export async function createDynamicWorkforceProfile(formData: FormData) {
     const locationId = required(formData.get("location_id"), "Location");
     const designation = required(formData.get("designation"), "Designation");
     const directActivate = Boolean(categoryResult.data.direct_activate);
-    const dashboardRules = normalizeCategoryProfileFieldRules(categoryResult.data.profile_field_rules).dashboard;
     const profilePayload = directActivate ? directProfilePayload(formData) : {};
+    if (!/^\d{6,15}$/.test(mobile)) throw new Error("Mobile number must contain 6 to 15 digits.");
+    if (Number.isNaN(Date.parse(dateOfJoin))) throw new Error("Enter a valid date of join.");
+    if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) {
+      throw new Error("You do not have access to the selected location.");
+    }
+
+    const [locationResult, designationResult] = await Promise.all([
+      supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("id", locationId).eq("is_active", true).maybeSingle(),
+      supabaseAdmin.from("designations").select("id, onboarding_categories, onboarding_role_ids, portal_permissions, profile_field_rules").eq("company_id", companyId).eq("name", designation).eq("is_active", true).maybeSingle()
+    ]);
+    if (locationResult.error) throw new Error(locationResult.error.message);
+    if (!locationResult.data) throw new Error("Selected location is unavailable.");
+    if (designationResult.error) throw new Error(designationResult.error.message);
+    if (!designationResult.data || !((designationResult.data.onboarding_categories ?? []) as string[]).includes(code)) {
+      throw new Error("Selected designation is unavailable for this category.");
+    }
+    requireDesignationOnboardingAccess(designationResult.data, authorization);
+    requireDesignationPortalAccess(designationResult.data, currentAccessSurface(), "add");
+    const dashboardRules = (await loadWorkforceCategoryRules(
+      companyId,
+      code,
+      designationResult.data.profile_field_rules,
+      code
+    )).dashboard;
     if (directActivate) {
       const profileValues = profilePayload as Record<string, unknown>;
       const aliases: Record<string, string> = { pincode: "postal_pin", ifsc: "ifsc_code" };
@@ -128,24 +151,6 @@ export async function createDynamicWorkforceProfile(formData: FormData) {
         } else if (!String(profileValues[aliases[key] ?? key] ?? "").trim()) throw new Error(`${key.replaceAll("_", " ")} is required.`);
       }
     }
-    if (!/^\d{6,15}$/.test(mobile)) throw new Error("Mobile number must contain 6 to 15 digits.");
-    if (Number.isNaN(Date.parse(dateOfJoin))) throw new Error("Enter a valid date of join.");
-    if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) {
-      throw new Error("You do not have access to the selected location.");
-    }
-
-    const [locationResult, designationResult] = await Promise.all([
-      supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("id", locationId).eq("is_active", true).maybeSingle(),
-      supabaseAdmin.from("designations").select("id, onboarding_categories, onboarding_role_ids, portal_permissions").eq("company_id", companyId).eq("name", designation).eq("is_active", true).maybeSingle()
-    ]);
-    if (locationResult.error) throw new Error(locationResult.error.message);
-    if (!locationResult.data) throw new Error("Selected location is unavailable.");
-    if (designationResult.error) throw new Error(designationResult.error.message);
-    if (!designationResult.data || !((designationResult.data.onboarding_categories ?? []) as string[]).includes(code)) {
-      throw new Error("Selected designation is unavailable for this category.");
-    }
-    requireDesignationOnboardingAccess(designationResult.data, authorization);
-    requireDesignationPortalAccess(designationResult.data, currentAccessSurface(), "add");
 
     const [dropxId, biometricId] = await Promise.all([
       generateConfiguredWorkerId({
@@ -269,7 +274,7 @@ export async function updateDynamicWorkforceProfile(formData: FormData) {
     const designation = optional(formData.get("designation")) ?? String(existing.designation ?? "");
     const [locationResult, designationResult] = await Promise.all([
       supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("id", locationId).eq("is_active", true).maybeSingle(),
-      supabaseAdmin.from("designations").select("onboarding_categories").eq("company_id", companyId).eq("name", designation).eq("is_active", true).maybeSingle()
+      supabaseAdmin.from("designations").select("onboarding_categories, profile_field_rules").eq("company_id", companyId).eq("name", designation).eq("is_active", true).maybeSingle()
     ]);
     if (locationResult.error) throw new Error(locationResult.error.message);
     if (!locationResult.data) throw new Error("Selected location is unavailable.");
@@ -278,7 +283,12 @@ export async function updateDynamicWorkforceProfile(formData: FormData) {
       throw new Error("Selected designation is unavailable for this category.");
     }
 
-    const rules = normalizeCategoryProfileFieldRules(categoryResult.data.profile_field_rules).dashboard;
+    const rules = (await loadWorkforceCategoryRules(
+      companyId,
+      code,
+      designationResult.data.profile_field_rules,
+      code
+    )).dashboard;
     const enabled = new Set(rules.enabled);
     const profileValues = directProfilePayload(formData) as Record<string, unknown>;
     const ruleColumns: Record<string, string> = { pincode: "postal_pin", ifsc: "ifsc_code" };
@@ -300,6 +310,20 @@ export async function updateDynamicWorkforceProfile(formData: FormData) {
       is_active: String(formData.get("is_active") ?? existing.is_active) === "true",
       updated_at: new Date().toISOString()
     };
+    for (const key of rules.required) {
+      const documentField = documentFields.find((field) => field.ruleKey === key);
+      if (documentField) {
+        const file = formData.get(documentField.formKey);
+        if (!existing[documentField.pathKey] && (!(file instanceof File) || file.size === 0)) {
+          throw new Error(`${documentField.label} is required.`);
+        }
+        continue;
+      }
+      const column = ruleColumns[key] ?? key;
+      if (!String(payload[column] ?? existing[column] ?? "").trim()) {
+        throw new Error(`${key.replaceAll("_", " ")} is required.`);
+      }
+    }
     if (categoryResult.data.statutory_enabled) {
       const statutory = formData.getAll("statutory_applicability").map(String).filter(Boolean);
       payload.statutory_applicability = statutory.length ? statutory : ["not_applicable"];
