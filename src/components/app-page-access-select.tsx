@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, LockKeyhole, X } from "lucide-react";
 import { dropxOnePageOptions, requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
 
 export const appPageOptions = dropxOnePageOptions;
@@ -80,19 +80,24 @@ export function AppPageAccessSelect({
           {selected.length ? selected.map((page) => {
             const label = appPageOptions.find((option) => option.value === page)?.label ?? page;
             return (
-              <span className="workforce-page-tag" key={page}>
+              <span className={`workforce-page-tag ${requiredPages.has(page) ? "required" : ""}`} key={page}>
                 {label}
-                <button
-                  aria-label={`Remove ${label}`}
-                  disabled={requiredPages.has(page)}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggle(page);
-                  }}
-                  type="button"
-                >
-                  <X aria-hidden="true" size={13} strokeWidth={2.2} />
-                </button>
+                {requiredPages.has(page) ? (
+                  <span aria-label={`${label} is mandatory`} className="workforce-page-lock" role="img" title="Mandatory page">
+                    <LockKeyhole aria-hidden="true" size={12} strokeWidth={2.2} />
+                  </span>
+                ) : (
+                  <button
+                    aria-label={`Remove ${label}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggle(page);
+                    }}
+                    type="button"
+                  >
+                    <X aria-hidden="true" size={13} strokeWidth={2.2} />
+                  </button>
+                )}
               </span>
             );
           }) : <span className="workforce-page-placeholder">Select app pages</span>}
@@ -137,7 +142,7 @@ export function AppPageAccessSelect({
                   onChange={() => toggle(page.value)}
                   type="checkbox"
                 />
-                <span><strong>{page.label}</strong>{requiredPages.has(page.value) ? <small>Always available</small> : null}</span>
+                <span><strong>{page.label}</strong>{requiredPages.has(page.value) ? <small><LockKeyhole aria-hidden="true" size={11} /> Locked · always available</small> : null}</span>
               </label>
             ))}
             {!visibleOptions.length ? <p className="searchable-empty">No pages found.</p> : null}
