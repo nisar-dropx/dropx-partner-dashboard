@@ -151,7 +151,7 @@ function isTrustedFinanceMembership(membership: ProductMembershipRow) {
   // Access deliberately granted from the Finance portal or through Product
   // Ownership is authoritative. Legacy Dashboard grants are retained only for
   // roles whose original business function was Accounts or Finance.
-  if (["manual", "product_owner", "product_admin", "google_workspace"].includes(source)) return true;
+  if (["manual", "product_owner", "product_admin", "google_workspace", "designation_policy"].includes(source)) return true;
   if (source !== "legacy_dashboard") return false;
 
   const snapshot = String(membership.role_code_snapshot ?? "").trim().toUpperCase();
@@ -238,7 +238,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     const emailMatches = (profileRows ?? []).filter((item) => normalizeEmail(item.email) === signedInEmail);
     const activeEmailMatches = emailMatches.filter((item) => item.is_active);
     const masterOwnerMatch = activeEmailMatches.find((item) => item.is_master_owner);
-    profile = activeEmailMatches.length === 1 ? activeEmailMatches[0] : (masterOwnerMatch && signedInEmail === "nisar@dropxlogistics.com" ? masterOwnerMatch : null);
+    profile = activeEmailMatches.length === 1 ? activeEmailMatches[0] : (masterOwnerMatch ?? null);
   }
 
   if (!profile?.is_active) return null;
@@ -252,8 +252,8 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   let companyId: string | null = typeof profile.company_id === "string" ? profile.company_id : null;
   let companyCode: string | null = null;
   let companyName: string | null = null;
-  let isMasterCompany = signedInEmail === "nisar@dropxlogistics.com";
-  let isMasterOwner = Boolean(profile.is_master_owner) || signedInEmail === "nisar@dropxlogistics.com";
+  let isMasterCompany = false;
+  let isMasterOwner = Boolean(profile.is_master_owner);
   let roleCode: string | null = null;
   let effectiveRoleIds: string[] = profile.role_id ? [profile.role_id] : [];
   let primaryRoleId: string | null = profile.role_id ?? null;
@@ -320,28 +320,6 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     const productMemberships = ((membershipResult.data ?? []) as ProductMembershipRow[])
       .filter((membership) => productCode !== "finance" || isTrustedFinanceMembership(membership));
 
-    // Finance is an explicit-membership product. Legacy Dashboard roles such
-    // as Cluster Manager, Regional Manager and Business Head must not leak
-    // Finance permissions merely because they could submit/approve an Ops
-    // payment request. Product-owner assignments are added immediately below.
-    if (productCode === "finance" && !isMasterOwner && !hasBaseCompanyOwnerRole) {
-      effectiveRoleIds = productMemberships
-        .map((membership) => membership.role_id)
-        .filter((roleId): roleId is string => Boolean(roleId));
-      primaryRoleId = effectiveRoleIds[0] ?? null;
-      hasAllLocationAccess = productMemberships.some((membership) => membership.has_all_location_access);
-      locationScopeIds = Array.from(new Set(productMemberships.flatMap((membership) => membership.location_scope_ids ?? [])));
-    }
-    effectiveRoleIds = Array.from(new Set([
-      ...effectiveRoleIds,
-      ...productMemberships.map((membership) => membership.role_id).filter((roleId): roleId is string => Boolean(roleId))
-    ]));
-    hasAllLocationAccess = hasAllLocationAccess || productMemberships.some((membership) => membership.has_all_location_access);
-    locationScopeIds = Array.from(new Set([
-      ...locationScopeIds,
-      ...productMemberships.flatMap((membership) => membership.location_scope_ids ?? [])
-    ]));
-
     const productOwnerResult = await supabaseAdmin
       .from("company_product_owners")
       .select("role_id")
@@ -353,13 +331,29 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     const productOwnerRoleIds = (productOwnerResult.data ?? [])
       .map((assignment) => assignment.role_id)
       .filter((roleId): roleId is string => Boolean(roleId));
-    effectiveRoleIds = Array.from(new Set([
-      ...effectiveRoleIds,
-      ...productOwnerRoleIds
-    ]));
-    if (productCode === "finance" && productOwnerRoleIds.length) {
-      primaryRoleId = productOwnerRoleIds[0];
+
+    // Every product host is membership-authoritative. A central Dashboard role
+    // cannot leak menus into OpsPulse, Workforce, Finance or Tech. Existing
+    // access remains available through the additive membership backfill.
+    if (!isMasterOwner && !hasBaseCompanyOwnerRole) {
+      const membershipRoleIds = productMemberships
+        .map((membership) => membership.role_id)
+        .filter((roleId): roleId is string => Boolean(roleId));
+      if (!productMemberships.length && !productOwnerRoleIds.length) return null;
+      effectiveRoleIds = Array.from(new Set([...membershipRoleIds, ...productOwnerRoleIds]));
+      primaryRoleId = productOwnerRoleIds[0] ?? membershipRoleIds[0] ?? null;
+      hasAllLocationAccess = Boolean(productOwnerRoleIds.length) || productMemberships.some((membership) => membership.has_all_location_access);
+      locationScopeIds = hasAllLocationAccess
+        ? []
+        : Array.from(new Set(productMemberships.flatMap((membership) => membership.location_scope_ids ?? [])));
+    } else {
+      effectiveRoleIds = Array.from(new Set([
+        ...effectiveRoleIds,
+        ...productMemberships.map((membership) => membership.role_id).filter((roleId): roleId is string => Boolean(roleId)),
+        ...productOwnerRoleIds
+      ]));
       hasAllLocationAccess = true;
+      locationScopeIds = [];
     }
   }
 

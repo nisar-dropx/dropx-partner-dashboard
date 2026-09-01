@@ -44,8 +44,15 @@ type SettingsRow = {
   last_sync_error: string | null;
 };
 
-type DesignationRow = { id: string; code: string; name: string; is_active: boolean };
-type RoleRow = { id: string; code: string; name: string };
+type DesignationRow = { id: string; code: string; name: string; workspace_account_requirement: "required" | "optional" | "not_required"; is_active: boolean };
+type ProductPolicyRow = {
+  designation_id: string;
+  product_code: string;
+  default_role_id: string | null;
+  location_access_mode: string;
+  is_enabled: boolean;
+  user_roles: { name: string; code: string } | Array<{ name: string; code: string }> | null;
+};
 
 type PolicyRow = {
   id: string;
@@ -164,10 +171,12 @@ function schemaMissing(error: unknown) {
 
 async function loadPage(companyId: string) {
   if (!supabaseAdmin) return { error: "Supabase service role key is not configured.", setupPending: false } as const;
-  const [settings, designations, roles, policies, accounts, employees, locations, jobs, deletions, centralMailbox] = await Promise.all([
+  const [settings, designations, productPolicies, policies, accounts, employees, locations, jobs, deletions, centralMailbox] = await Promise.all([
     supabaseAdmin.from("google_workspace_settings").select("*").eq("company_id", companyId).maybeSingle(),
-    supabaseAdmin.from("designations").select("id,code,name,is_active").eq("company_id", companyId).eq("is_active", true).order("name"),
-    supabaseAdmin.from("user_roles").select("id,code,name").eq("company_id", companyId).eq("is_active", true).order("name"),
+    supabaseAdmin.from("designations").select("id,code,name,workspace_account_requirement,is_active").eq("company_id", companyId).eq("is_active", true).order("name"),
+    supabaseAdmin.from("designation_product_access_policies")
+      .select("designation_id,product_code,default_role_id,location_access_mode,is_enabled,user_roles(name,code)")
+      .eq("company_id", companyId).eq("is_enabled", true).order("product_code"),
     supabaseAdmin.from("google_workspace_designation_policies").select("*").eq("company_id", companyId).order("updated_at", { ascending: false }),
     supabaseAdmin.from("google_workspace_accounts").select("id,primary_email,full_name,account_type,account_state,source_type,source_record_id,profile_id,org_unit_path,suspended,last_synced_at,metadata")
       .eq("company_id", companyId).order("primary_email").limit(250),
@@ -183,7 +192,7 @@ async function loadPage(companyId: string) {
       .select("id,credential_email,status,sync_enabled,last_synced_at,last_sync_error,ops_location_mailbox_addresses(id,station_id,email_address,is_active,route_state,route_error)")
       .eq("company_id", companyId).eq("mailbox_mode", "central_routed").neq("status", "inactive").maybeSingle()
   ]);
-  const results = [settings, designations, roles, policies, accounts, employees, locations, jobs, deletions, centralMailbox];
+  const results = [settings, designations, productPolicies, policies, accounts, employees, locations, jobs, deletions, centralMailbox];
   const missing = results.find((result) => result.error && schemaMissing(result.error));
   if (missing) return { error: null, setupPending: true } as const;
   const failed = results.find((result) => result.error);
@@ -193,7 +202,7 @@ async function loadPage(companyId: string) {
     setupPending: false,
     settings: settings.data as SettingsRow | null,
     designations: (designations.data ?? []) as DesignationRow[],
-    roles: (roles.data ?? []) as RoleRow[],
+    productPolicies: (productPolicies.data ?? []) as ProductPolicyRow[],
     policies: (policies.data ?? []) as PolicyRow[],
     accounts: (accounts.data ?? []) as AccountRow[],
     employees: (employees.data ?? []) as EmployeeRow[],
@@ -227,7 +236,7 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
 
   const settings = data.settings ?? null;
   const designations = data.designations ?? [];
-  const roles = data.roles ?? [];
+  const productPolicies = data.productPolicies ?? [];
   const policies = data.policies ?? [];
   const accounts = data.accounts ?? [];
   const employees = data.employees ?? [];
@@ -242,6 +251,7 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
   const selectedDesignationId = searchParams?.designation || designations[0]?.id || "";
   const selectedDesignation = designations.find((row) => row.id === selectedDesignationId) ?? null;
   const policy = policies.find((row) => row.designation_id === selectedDesignationId) ?? null;
+  const selectedProductPolicies = productPolicies.filter((row) => row.designation_id === selectedDesignationId);
   const activeAccounts = accounts.filter((row) => row.account_state === "active" && !row.suspended).length;
   const suspendedAccounts = accounts.filter((row) => row.suspended || row.account_state === "suspended").length;
   const failedJobs = jobs.filter((row) => ["failed", "blocked"].includes(row.status)).length;
@@ -380,7 +390,7 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
 
       <section className="panel">
         <div className="panel-head toolbar">
-          <div><h2>Designation identity policies</h2><p className="subtle">Each designation explicitly defines Gmail issuance, approval, groups, DropX portals, role and location scope.</p></div>
+          <div><h2>Workspace connector policies</h2><p className="subtle">People Designation Master owns mailbox requirement and portal eligibility. This technical master only controls Google issuance, organisational unit, groups and retention.</p></div>
           <StatusPill status={`${policies.filter((row) => row.is_active).length} configured`} />
         </div>
         <div className="panel-body">
@@ -394,20 +404,23 @@ export default async function GoogleWorkspacePage({ searchParams }: { searchPara
             <form action={saveDesignationWorkspacePolicy} className="form-grid three">
               <input name="designation_id" type="hidden" value={selectedDesignation.id} />
               <label>Designation<input className="field" disabled value={`${selectedDesignation.name} (${selectedDesignation.code})`} /></label>
+              <label>Workspace requirement<input className="field" disabled value={selectedDesignation.workspace_account_requirement.replaceAll("_", " ")} /><small>Change this in People → Designation Master.</small></label>
               <label>Issuance approval<select className="field" defaultValue={policy?.approval_mode ?? "manual"} name="approval_mode"><option value="manual">Manual approval</option><option value="automatic">Automatic on active joining</option></select></label>
               <label>Email local-part pattern<input className="field" defaultValue={policy?.email_pattern ?? "{first}.{last}"} name="email_pattern" required /><small>{"Tokens: {first} {last} {employee_code} {designation_code} {location_code}"}</small></label>
               <label>Organisational unit<input className="field" defaultValue={policy?.org_unit_path ?? settings?.default_org_unit_path ?? "/"} name="org_unit_path" required /></label>
               <label>Managed Google Groups<textarea className="textarea" defaultValue={(policy?.group_emails ?? []).join("\n")} name="group_emails" placeholder="group@yourdomain.com" rows={3} /></label>
-              <label>Central DropX role<select className="field" defaultValue={policy?.access_role_id ?? ""} name="access_role_id"><option value="">Gmail only — no DropX portal access</option>{roles.map((role) => <option key={role.id} value={role.id}>{role.name} ({role.code})</option>)}</select></label>
-              <label>Location scope<select className="field" defaultValue={policy?.location_access_mode ?? "assignment"} name="location_access_mode"><option value="assignment">Employee assigned location</option><option value="all_locations">All locations</option><option value="none">No location scope</option></select></label>
               <label>Retention override (days)<input className="field" defaultValue={policy?.retention_days ?? ""} max="3650" min="1" name="retention_days" placeholder={`Company default: ${settings?.default_retention_days ?? 30}`} type="number" /></label>
-              <div style={{ gridColumn: "1 / -1" }}>
-                <strong>DropX portal access</strong>
-                <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10 }}>
-                  {productDefinitions.map((product) => <label className="checkbox-row" key={product.code}><input defaultChecked={(policy?.product_codes ?? []).includes(product.code)} name="product_codes" type="checkbox" value={product.code} /> {product.name}</label>)}
+              <div className="message-panel" style={{ gridColumn: "1 / -1" }}>
+                <strong>Inherited portal plan</strong>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+                  {selectedProductPolicies.length ? selectedProductPolicies.map((item) => {
+                    const role = first(item.user_roles);
+                    const product = productDefinitions.find((definition) => definition.code === item.product_code);
+                    return <span className="badge neutral" key={item.product_code}>{product?.name ?? item.product_code} · {role?.name ?? "Role pending"} · {item.location_access_mode.replaceAll("_", " ")}</span>;
+                  }) : <span className="subtle">No portal is enabled for this designation.</span>}
                 </div>
+                <small>Portal roles and managed locations are changed in People and in each portal&apos;s Access Configuration—not here.</small>
               </div>
-              <label className="checkbox-row"><input defaultChecked={policy?.issue_workspace_account ?? false} name="issue_workspace_account" type="checkbox" value="true" /> Issue Google Workspace account</label>
               <label className="checkbox-row"><input defaultChecked={policy?.send_activation_email ?? true} name="send_activation_email" type="checkbox" value="true" /> Send credentials to personal email</label>
               <label className="checkbox-row"><input defaultChecked={policy?.is_active ?? true} name="is_active" type="checkbox" value="true" /> Policy active</label>
               <div className="form-actions" style={{ gridColumn: "1 / -1" }}><SubmitButton disabled={!permission?.canEdit}>Save designation policy</SubmitButton></div>

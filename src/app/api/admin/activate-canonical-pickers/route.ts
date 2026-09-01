@@ -13,11 +13,14 @@ export async function GET() {
   const companyId = requireCompanyId(authorization);
   const designationResult = await supabaseAdmin
     .from("designations")
-    .select("id")
+    .select("id, code, name")
     .eq("company_id", companyId)
     .ilike("name", "picker");
   if (designationResult.error) return new Response(designationResult.error.message, { status: 500 });
   const designationIds = (designationResult.data ?? []).map((row) => row.id);
+  const designationValues = Array.from(new Set(
+    (designationResult.data ?? []).flatMap((row) => [row.code, row.name]).filter(Boolean)
+  ));
   if (!designationIds.length) return new Response("No Picker designation was found.", { status: 404 });
 
   const activated = await supabaseAdmin
@@ -31,8 +34,19 @@ export async function GET() {
     .select("id");
   if (activated.error) return new Response(activated.error.message, { status: 500 });
 
+  const activatedContractors = await supabaseAdmin
+    .from("contractors")
+    .update({ is_active: true, updated_at: new Date().toISOString() })
+    .eq("company_id", companyId)
+    .in("designation", designationValues)
+    .eq("onboarding_status", "active")
+    .is("deleted_at", null)
+    .eq("is_active", false)
+    .select("id");
+  if (activatedContractors.error) return new Response(activatedContractors.error.message, { status: 500 });
+
   return new Response(
-    `<!doctype html><html><body><h1>Canonical Picker activation complete</h1><p>Activated ${activated.data?.length ?? 0} completed Picker records.</p></body></html>`,
+    `<!doctype html><html><body><h1>Picker activation complete</h1><p>Activated ${activated.data?.length ?? 0} canonical and ${activatedContractors.data?.length ?? 0} People contractor records.</p></body></html>`,
     { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } }
   );
 }

@@ -23,7 +23,6 @@ type ResolvedRoute = {
 
 type DesignationWorkspaceRule = {
   designationId: string;
-  onboardingCategories: string[];
   peopleModule: string | null;
 };
 
@@ -47,9 +46,6 @@ async function loadDesignationWorkspaceRule(companyId: string, designationId?: s
   if (categoryResult.error) throw new Error(categoryResult.error.message);
   return {
     designationId: designationResult.data.id,
-    onboardingCategories: Array.isArray(designationResult.data.onboarding_categories)
-      ? designationResult.data.onboarding_categories.map(String)
-      : [],
     peopleModule: categoryResult.data?.people_module ?? null
   } satisfies DesignationWorkspaceRule;
 }
@@ -98,9 +94,9 @@ export async function assertDesignationRegister({
   const workspaceRule = await loadDesignationWorkspaceRule(companyId, designationId);
   if (workspaceRule && isPeopleModule(workspaceRule.peopleModule)) {
     const peopleTables = expectedTables.filter((table) => table === "employees" || table === "contractors");
-    const selected = peopleTables.find((table) => workspaceRule.onboardingCategories.includes(table));
+    const selected = peopleTables[0];
     if (!selected) {
-      throw new Error("This People designation is not enabled for the selected employee or independent-contractor register.");
+      throw new Error("People designations may be used only for Employees or Independent Contractors.");
     }
     return {
       designation_id: workspaceRule.designationId,

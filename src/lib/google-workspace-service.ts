@@ -39,6 +39,20 @@ type WorkspacePolicyRow = {
   is_active: boolean;
 };
 
+type DesignationProductPolicyRow = {
+  id: string;
+  product_code: string;
+  default_role_id: string | null;
+  location_access_mode: "assignment" | "reporting_scope" | "all_locations" | "none";
+  is_enabled: boolean;
+};
+
+type PersonAccessScopeRow = {
+  location_scope_ids: string[] | null;
+  has_all_location_access: boolean;
+  workspace_identity_override: "required" | "not_required" | null;
+};
+
 type WorkspaceAccountRow = {
   id: string;
   company_id: string;
@@ -158,6 +172,36 @@ async function getPolicy(companyId: string, designationId: string) {
     .eq("company_id", companyId).eq("designation_id", designationId).eq("is_active", true).maybeSingle();
   if (result.error) throw new Error(result.error.message);
   return result.data as WorkspacePolicyRow | null;
+}
+
+async function getDesignationAccessPlan(source: EmployeeSource) {
+  const [designationResult, scopeResult, productResult] = await Promise.all([
+    db().from("designations").select("workspace_account_requirement")
+      .eq("company_id", source.companyId).eq("id", source.designationId).maybeSingle(),
+    source.personId
+      ? db().from("people_person_access_scopes")
+        .select("location_scope_ids,has_all_location_access,workspace_identity_override")
+        .eq("company_id", source.companyId).eq("person_id", source.personId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    db().from("designation_product_access_policies")
+      .select("id,product_code,default_role_id,location_access_mode,is_enabled")
+      .eq("company_id", source.companyId).eq("designation_id", source.designationId).eq("is_enabled", true)
+  ]);
+  for (const result of [designationResult, scopeResult, productResult]) {
+    if (result.error && !isMissingRelationError(result.error)) throw new Error(result.error.message);
+  }
+  const scope = (scopeResult.data ?? null) as PersonAccessScopeRow | null;
+  const designationRequirement = String(designationResult.data?.workspace_account_requirement ?? "optional") as "required" | "optional" | "not_required";
+  const workspaceRequirement = scope?.workspace_identity_override ?? designationRequirement;
+  const locationScopeIds = [...new Set((scope?.location_scope_ids ?? []).filter(Boolean))];
+  if (!locationScopeIds.length && source.locationId) locationScopeIds.push(source.locationId);
+  return {
+    workspaceRequirement,
+    locationScopeIds,
+    hasAllLocationAccess: Boolean(scope?.has_all_location_access),
+    productPolicies: (productResult.data ?? []) as DesignationProductPolicyRow[],
+    usesUnifiedPolicy: !productResult.error && !designationResult.error
+  };
 }
 
 async function employeeSource(companyId: string, employeeId: string): Promise<EmployeeSource> {
@@ -313,7 +357,22 @@ async function ensureDropxAccess(input: {
   policy: WorkspacePolicyRow;
 }) {
   const { account, source, policy } = input;
-  if (!policy.access_role_id) return null;
+  const plan = await getDesignationAccessPlan(source);
+  const usesUnifiedProductPolicies = plan.productPolicies.length > 0;
+  const productPolicies = plan.productPolicies.length
+    ? plan.productPolicies
+    : policy.product_codes.map((productCode) => ({
+      id: null,
+      product_code: productCode,
+      default_role_id: policy.access_role_id,
+      location_access_mode: policy.location_access_mode === "none" ? "none" as const : policy.location_access_mode,
+      is_enabled: true
+    }));
+  const configuredProducts = productPolicies.filter((item) => item.is_enabled && item.default_role_id);
+  const primaryRoleId = configuredProducts.find((item) => item.product_code === "people")?.default_role_id
+    ?? configuredProducts[0]?.default_role_id
+    ?? policy.access_role_id;
+  if (!primaryRoleId) return null;
   const officialEmail = normalizeEmail(account.primary_email);
   let userId = account.profile_id ?? await linkedUserId(source.companyId, source.personId);
   if (!userId) {
@@ -340,19 +399,30 @@ async function ensureDropxAccess(input: {
     if (updated.error) throw new Error(updated.error.message);
   }
 
-  const role = await db().from("user_roles").select("id,code,location_access_mode")
-    .eq("company_id", source.companyId).eq("id", policy.access_role_id).eq("is_active", true).maybeSingle();
-  if (role.error || !role.data) throw new Error(role.error?.message ?? "The Workspace policy access role is inactive or unavailable.");
-  const locationScopeIds = policy.location_access_mode === "assignment" && source.locationId ? [source.locationId] : [];
-  const allLocations = policy.location_access_mode === "all_locations";
+  const roleIds = [...new Set(configuredProducts.map((item) => item.default_role_id).filter((value): value is string => Boolean(value)))];
+  const roles = roleIds.length
+    ? await db().from("user_roles").select("id,code,product_code").eq("company_id", source.companyId).in("id", roleIds).eq("is_active", true)
+    : { data: [], error: null };
+  if (roles.error) throw new Error(roles.error.message);
+  const rolesById = new Map((roles.data ?? []).map((role) => [role.id, role]));
+  for (const item of configuredProducts) {
+    const role = item.default_role_id ? rolesById.get(item.default_role_id) : null;
+    if (!role || role.product_code !== item.product_code) {
+      throw new Error(`${item.product_code} access is enabled for this designation, but its portal role is missing or belongs to another portal.`);
+    }
+  }
+  const primaryRole = rolesById.get(primaryRoleId);
+  if (!primaryRole) throw new Error("The designation's primary portal role is inactive or unavailable.");
+  const profileAllLocations = plan.hasAllLocationAccess;
+  const profileLocationScopeIds = profileAllLocations ? [] : plan.locationScopeIds;
 
   const profileSave = await db().from("profiles").upsert({
     id: userId,
     company_id: source.companyId,
     email: officialEmail,
     full_name: source.fullName,
-    role_id: policy.access_role_id,
-    location_scope_ids: allLocations ? [] : locationScopeIds,
+    role_id: primaryRoleId,
+    location_scope_ids: profileLocationScopeIds,
     invite_method: "Google Workspace",
     is_active: true,
     updated_at: new Date().toISOString()
@@ -371,15 +441,23 @@ async function ensureDropxAccess(input: {
     } else if (!isMissingRelationError(existingLink.error)) throw new Error(existingLink.error.message);
   }
 
-  for (const productCode of policy.product_codes) {
+  for (const productPolicy of configuredProducts) {
+    const role = rolesById.get(productPolicy.default_role_id!);
+    const allLocations = productPolicy.location_access_mode === "all_locations"
+      || (productPolicy.location_access_mode !== "none" && plan.hasAllLocationAccess);
+    const locationScopeIds = productPolicy.location_access_mode === "none" || allLocations
+      ? []
+      : plan.locationScopeIds;
     const membership = await db().from("company_product_memberships").upsert({
       company_id: source.companyId,
-      product_code: productCode,
+      product_code: productPolicy.product_code,
       user_id: userId,
-      role_id: policy.access_role_id,
-      role_code_snapshot: role.data.code,
-      source_system: "google_workspace",
+      role_id: productPolicy.default_role_id,
+      role_code_snapshot: role!.code,
+      source_system: usesUnifiedProductPolicies ? "designation_policy" : "google_workspace",
       source_record_id: account.id,
+      designation_id: source.designationId,
+      designation_policy_id: usesUnifiedProductPolicies ? productPolicy.id : null,
       has_all_location_access: allLocations,
       location_scope_ids: allLocations ? [] : locationScopeIds,
       is_active: true,
@@ -388,10 +466,13 @@ async function ensureDropxAccess(input: {
     if (membership.error) throw new Error(membership.error.message);
   }
   const managedMemberships = await db().from("company_product_memberships").select("id,product_code")
-    .eq("company_id", source.companyId).eq("user_id", userId).eq("source_system", "google_workspace");
+    .eq("company_id", source.companyId).eq("user_id", userId)
+    .in("source_system", ["google_workspace", "designation_policy"])
+    .eq("source_record_id", account.id);
   if (managedMemberships.error) throw new Error(managedMemberships.error.message);
+  const configuredProductCodes = configuredProducts.map((item) => item.product_code);
   const staleIds = (managedMemberships.data ?? [])
-    .filter((membership) => !policy.product_codes.includes(membership.product_code))
+    .filter((membership) => !configuredProductCodes.includes(membership.product_code))
     .map((membership) => membership.id);
   if (staleIds.length) {
     const staleResult = await db().from("company_product_memberships")
@@ -399,17 +480,25 @@ async function ensureDropxAccess(input: {
     if (staleResult.error) throw new Error(staleResult.error.message);
   }
 
-  const includesPeople = policy.product_codes.includes("people");
+  const peopleProduct = configuredProducts.find((item) => item.product_code === "people") ?? null;
+  const includesPeople = Boolean(peopleProduct);
   const peopleRole = await db().from("hr_roles").select("id,code").eq("company_id", source.companyId)
-    .eq("central_role_id", policy.access_role_id).eq("is_active", true).maybeSingle();
+    .eq("central_role_id", peopleProduct?.default_role_id ?? primaryRoleId).eq("is_active", true).maybeSingle();
   if (!peopleRole.error && peopleRole.data) {
+    const peopleAllLocations = Boolean(peopleProduct && (
+      peopleProduct.location_access_mode === "all_locations"
+      || (peopleProduct.location_access_mode !== "none" && plan.hasAllLocationAccess)
+    ));
+    const peopleLocationIds = !peopleProduct || peopleProduct.location_access_mode === "none" || peopleAllLocations
+      ? []
+      : plan.locationScopeIds;
     const peopleAccess = await db().from("hr_user_access").upsert({
       company_id: source.companyId,
       user_id: userId,
       role_id: peopleRole.data.id,
-      role_code: role.data.code,
-      location_ids: allLocations ? [] : locationScopeIds,
-      all_locations: allLocations,
+      role_code: peopleRole.data.code,
+      location_ids: peopleLocationIds,
+      all_locations: peopleAllLocations,
       is_active: includesPeople,
       updated_at: new Date().toISOString()
     }, { onConflict: "company_id,user_id" });
@@ -585,13 +674,18 @@ export async function syncWorkspaceDirectory(companyId: string, actorId?: string
   }
 }
 
-async function provisionEmployee(job: WorkspaceJobRow) {
-  if (!job.source_record_id) throw new Error("The provisioning job has no employee reference.");
+async function provisionWorkspacePerson(job: WorkspaceJobRow) {
+  if (!job.source_record_id) throw new Error("The provisioning job has no People profile reference.");
   const setting = await loadSettings(job.company_id, true);
-  const source = await employeeSource(job.company_id, job.source_record_id);
-  if (!source.active) throw new Error("The employee is inactive; provisioning was stopped.");
+  const sourceType = job.source_type === "contractor" ? "contractor" : "employee";
+  const source = await workerSource(job.company_id, job.source_record_id, sourceType);
+  if (!source.active) throw new Error("The People profile is inactive; provisioning was stopped.");
   const policy = await getPolicy(job.company_id, source.designationId);
-  if (!policy?.issue_workspace_account) throw new Error("The employee designation does not have an active Workspace issuance policy.");
+  const accessPlan = await getDesignationAccessPlan(source);
+  const manuallyRequested = job.payload.manual_request === true || job.payload.approved === true;
+  if (!policy?.is_active) throw new Error("The employee designation does not have an active Workspace connector policy.");
+  if (accessPlan.workspaceRequirement === "not_required") throw new Error("This person's Workspace identity is configured as not required.");
+  if (accessPlan.workspaceRequirement === "optional" && !manuallyRequested) throw new Error("This person's Workspace identity is optional and requires an explicit HR request.");
   if (policy.approval_mode === "manual" && !job.payload.approved) throw new Error("Manual approval is required before provisioning.");
 
   const connection = clientFor(setting);
@@ -604,7 +698,7 @@ async function provisionEmployee(job: WorkspaceJobRow) {
     const primaryEmail = account?.primary_email || await availableEmail(connection, setting.primary_domain, localPart, source.employeeCode);
     if (!account) {
       const existingAccount = await db().from("google_workspace_accounts").select("*")
-        .eq("company_id", source.companyId).eq("source_type", "employee").eq("source_record_id", source.id).maybeSingle();
+        .eq("company_id", source.companyId).eq("source_type", sourceType).eq("source_record_id", source.id).maybeSingle();
       if (existingAccount.error) throw new Error(existingAccount.error.message);
       if (existingAccount.data) {
         account = existingAccount.data as WorkspaceAccountRow;
@@ -616,7 +710,7 @@ async function provisionEmployee(job: WorkspaceJobRow) {
         org_unit_path: policy.org_unit_path || setting.default_org_unit_path,
         account_type: "person",
         account_state: "provisioning",
-        source_type: "employee",
+        source_type: sourceType,
         source_record_id: source.id,
         person_id: source.personId,
         designation_id: source.designationId,
@@ -687,7 +781,7 @@ async function provisionEmployee(job: WorkspaceJobRow) {
 async function updateEmployeeAccess(job: WorkspaceJobRow) {
   if (!job.account_id || !job.source_record_id) throw new Error("The access update job is incomplete.");
   const setting = await loadSettings(job.company_id, true);
-  const source = await employeeSource(job.company_id, job.source_record_id);
+  const source = await workerSource(job.company_id, job.source_record_id, job.source_type);
   const policy = await getPolicy(job.company_id, source.designationId);
   if (!policy) throw new Error("The current designation has no active Workspace policy.");
   const account = await getAccount(job.account_id);
@@ -793,7 +887,7 @@ async function runJob(job: WorkspaceJobRow) {
     await syncWorkspaceDirectory(job.company_id, job.requested_by);
     return job.account_id;
   }
-  if (job.job_type === "provision") return provisionEmployee(job);
+  if (job.job_type === "provision") return provisionWorkspacePerson(job);
   if (job.job_type === "update_access") return updateEmployeeAccess(job);
   if (job.job_type === "suspend") return suspendAccount(job);
   if (job.job_type === "restore") return restoreAccount(job);

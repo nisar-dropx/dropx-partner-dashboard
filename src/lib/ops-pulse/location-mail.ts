@@ -194,9 +194,22 @@ export async function ensureLocationMailboxMapping(input: {
   if (locationResult.error || !locationResult.data) throw new Error(locationResult.error?.message ?? "Location was not found.");
   if (accountResult.data.suspended || accountResult.data.account_state === "deleted") throw new Error("A suspended or deleted Google account cannot be enabled as an Ops mailbox.");
   const email = cleanEmail(accountResult.data.primary_email);
-  const locationEmail = cleanEmail(locationResult.data.station_email) || email;
+  const existingLocationEmail = cleanEmail(locationResult.data.station_email);
+  const locationEmail = existingLocationEmail || email;
   if (locationEmail !== email) {
     throw new Error(`Station mail ${locationEmail} must match the mapped Google mailbox ${email} for the first live test.`);
+  }
+
+  // The Google directory mapping is authoritative for station accounts. When
+  // a station has no address yet, persist the selected Workspace address on
+  // the station master so People Station Directory and every portal resolve
+  // the same contact. Never overwrite an existing different address.
+  if (!existingLocationEmail) {
+    const stationEmailResult = await database().from("stations").update({
+      station_email: email,
+      updated_at: new Date().toISOString()
+    }).eq("company_id", input.companyId).eq("id", input.locationId);
+    if (stationEmailResult.error) throw new Error(stationEmailResult.error.message);
   }
 
   const mailboxResult = await database().from("ops_location_mailboxes").upsert({

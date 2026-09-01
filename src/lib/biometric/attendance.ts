@@ -739,6 +739,22 @@ async function loadDailyWorkerSnapshot({
 export async function rebuildAttendanceDay(companyId: string, enrolmentId: string, punchDate: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
+  // A day that carries an approved manual regularization (hr_review_attendance_regularization
+  // wrote manual_in_request_id/manual_out_request_id onto attendance_daily) is authoritative
+  // until that correction is itself superseded. Recomputing purely from raw attendance_punches
+  // here would silently overwrite in_time/out_time/punch_count/remark/status back to what the
+  // unmatched biometric scan alone implies, erasing the approval every time this runs again —
+  // on the next punch for this worker, a GPS-mismatch re-check, or a future repair pass.
+  const existingDay = await supabaseAdmin
+    .from("attendance_daily")
+    .select("manual_in_request_id, manual_out_request_id")
+    .eq("company_id", companyId)
+    .eq("enrolment_id", enrolmentId)
+    .eq("punch_date", punchDate)
+    .maybeSingle();
+  if (existingDay.error && !isMissingColumnError(existingDay.error)) throw new Error(existingDay.error.message);
+  if (existingDay.data?.manual_in_request_id || existingDay.data?.manual_out_request_id) return;
+
   const { data, error } = await supabaseAdmin
     .from("attendance_punches")
     .select("id, punch_time")
