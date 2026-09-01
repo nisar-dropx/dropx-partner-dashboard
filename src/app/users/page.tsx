@@ -5,9 +5,9 @@ import { ManageUserForm } from "@/components/manage-user-form";
 import { PageHead } from "@/components/page-head";
 import { PermissionMatrix } from "@/components/permission-matrix";
 import { SearchableSelect } from "@/components/searchable-select";
-import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
 import { SurfaceDesignationAccessPanel } from "@/components/surface-designation-access-panel";
+import { UserRolesListPanel } from "@/components/user-roles-list-panel";
 import { UsersListPanel } from "@/components/users-list-panel";
 import { accessSurfaceLabel, currentAdminAccessSurface, pageBelongsToSurface } from "@/lib/access-surface";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
@@ -242,30 +242,6 @@ async function loadSurfaceDesignationAccess(companyId: string, surface: ReturnTy
   }), error: null as string | null };
 }
 
-const businessProducts = [
-  { code: "people", label: "People", href: "https://people.dropxlogistics.com/settings/roles" },
-  { code: "operations", label: "OpsPulse", href: "https://ops.dropxlogistics.com/users?section=roles" },
-  { code: "workforce", label: "Workforce", href: "https://workforce.dropxlogistics.com/users?section=roles" },
-  { code: "recruit", label: "Recruit", href: "https://recruit.dropxlogistics.com/settings/access" },
-  { code: "finance", label: "Finance", href: "https://fin.dropxlogistics.com/users?section=roles" }
-] as const;
-
-async function loadDashboardDesignationOverview(companyId: string) {
-  if (!supabaseAdmin) return { designations: [] as Array<{ id: string; code: string; name: string; policies: Record<string, { enabled: boolean; configured: boolean }> }>, error: null as string | null };
-  const [designations, policies] = await Promise.all([
-    supabaseAdmin.from("designations").select("id,code,name,designation_category:designation_categories!designations_designation_category_id_fkey!inner(people_module,is_active)").eq("company_id", companyId).eq("is_active", true).eq("designation_category.people_module", "people_hr").eq("designation_category.is_active", true).order("name"),
-    supabaseAdmin.from("designation_product_access_policies").select("designation_id,product_code,default_role_id,is_enabled").eq("company_id", companyId).in("product_code", businessProducts.map((product) => product.code))
-  ]);
-  if (designations.error || policies.error) return { designations: [], error: designations.error?.message ?? policies.error?.message ?? "Access overview could not be loaded." };
-  const byDesignation = new Map<string, Record<string, { enabled: boolean; configured: boolean }>>();
-  for (const policy of policies.data ?? []) {
-    const current = byDesignation.get(policy.designation_id) ?? {};
-    current[policy.product_code] = { enabled: Boolean(policy.is_enabled), configured: Boolean(policy.default_role_id) };
-    byDesignation.set(policy.designation_id, current);
-  }
-  return { designations: (designations.data ?? []).map((designation) => ({ id: designation.id, code: designation.code, name: designation.name, policies: byDesignation.get(designation.id) ?? {} })), error: null as string | null };
-}
-
 async function loadAccessData(
   companyId: string,
   surface: ReturnType<typeof currentAdminAccessSurface>,
@@ -483,10 +459,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
   const surfaceDesignationAccess = showRolesSection && accessSurface !== "dashboard"
     ? await loadSurfaceDesignationAccess(companyId, accessSurface)
     : { designations: [] as Array<{ id: string; code: string; name: string; enabled: boolean; defaultRoleId: string | null }>, error: null as string | null };
-  const dashboardDesignationOverview = showRolesSection && accessSurface === "dashboard"
-    ? await loadDashboardDesignationOverview(companyId)
-    : { designations: [] as Array<{ id: string; code: string; name: string; policies: Record<string, { enabled: boolean; configured: boolean }> }>, error: null as string | null };
-  const accessDataError = error ?? surfaceDesignationAccess.error ?? dashboardDesignationOverview.error;
+  const accessDataError = error ?? surfaceDesignationAccess.error;
   const identityRoles = isCompanyOwner(authorization)
     ? loadedRoles
     : loadedRoles.filter((role) =>
@@ -495,11 +468,11 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
     );
   const roles = showRolesSection
     ? accessSurface === "dashboard"
-      ? []
+      ? loadedRoles
       : loadedRoles.filter((role) => surfaceDesignationAccess.designations.some((designation) => designation.defaultRoleId === role.id))
     : identityRoles;
   const showAddUser = pagePermission.canAdd && searchParams?.addUser === "1";
-  const showAddRole = false;
+  const showAddRole = accessSurface === "dashboard" && pagePermission.canAdd && searchParams?.addRole === "1";
   const editUser = pagePermission.canEdit ? users.find((user) => user.id === searchParams?.editUser) ?? null : null;
   const editRole = pagePermission.canEdit ? roles.find((role) => role.id === searchParams?.editRole) ?? null : null;
   const roleModalError = showAddRole || editRole ? searchParams?.userError ?? null : null;
@@ -576,10 +549,12 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
     <AppShell active="Users & Access">
       <PageHead
         eyebrow={`${accessSurfaceLabel(accessSurface)} admin setup`}
-        title={showRolesSection ? `${accessSurfaceLabel(accessSurface)} designation access` : "Users and station access"}
+        title={showRolesSection
+          ? accessSurface === "dashboard" ? "User roles and permissions" : `${accessSurfaceLabel(accessSurface)} designation access`
+          : "Users and station access"}
         subtitle={showRolesSection
           ? accessSurface === "dashboard"
-            ? "Dashboard no longer owns business designations or cross-product permissions."
+            ? "Define role hierarchy and Dashboard page permissions. Other portal permissions are preserved."
             : `Configure menus and actions only for People designations eligible for ${accessSurfaceLabel(accessSurface)}.`
           : `Create users and manage access for the ${accessSurfaceLabel(accessSurface).toLowerCase()} frontend.`}
       />
@@ -637,24 +612,16 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
       ) : null}
 
       {showRolesSection && accessSurface === "dashboard" && (pagePermission.canView || pagePermission.canEdit) ? (
-      <section className="panel">
-        <div className="panel-head">
-          <div>
-            <h2>Portal access overview</h2>
-            <p className="subtle">Super Admin visibility only. People owns eligibility; each business portal owns its menu permissions. Technical administration is managed separately and never inherited from a designation.</p>
-          </div>
-          <a className="button" href="https://people.dropxlogistics.com/settings/designations">People Designation Master</a>
-        </div>
-        <div className="table-wrap"><table style={{ minWidth: 900 }}><thead><tr><th>Designation</th>{businessProducts.map((product) => <th key={product.code}>{product.label}</th>)}</tr></thead><tbody>
-          {dashboardDesignationOverview.designations.map((designation) => <tr key={designation.id}><td><strong>{designation.name}</strong><div className="subtle">{designation.code}</div></td>{businessProducts.map((product) => {
-            const policy = designation.policies[product.code];
-            const label = !policy?.enabled ? "Not enabled" : policy.configured ? "Configured" : "Setup required";
-            return <td key={product.code}><a href={product.href}><StatusPill status={label} /></a></td>;
-          })}</tr>)}
-          {!dashboardDesignationOverview.designations.length ? <tr><td className="empty-cell" colSpan={businessProducts.length + 1}>No active People designation is available.</td></tr> : null}
-        </tbody></table></div>
-        <div className="panel-body"><div className="stacked-actions"><a className="button secondary" href="/master/location">Locations &amp; station accounts</a></div></div>
-      </section>
+      <UserRolesListPanel
+        canAdd={pagePermission.canAdd}
+        canEdit={pagePermission.canEdit}
+        roles={roles.map((role) => ({
+          ...role,
+          permissionSummary: permissionText(role, permissions, pages)
+        }))}
+        subtitle="Roles use stable internal IDs, so their code and name can be edited without breaking assigned users."
+        title="User role list"
+      />
       ) : null}
 
       {showRolesSection && accessSurface !== "dashboard" && (pagePermission.canView || pagePermission.canEdit) ? (
