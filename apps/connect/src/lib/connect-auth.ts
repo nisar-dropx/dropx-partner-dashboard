@@ -383,7 +383,7 @@ async function resolveIcSelfServiceByReference(
   const inactiveContractor = await resolveContractor(false);
   if (inactiveContractor) return inactiveContractor;
 
-  for (const profileType of ["field_executive", "workforce"] as NonEmployeeProfileType[]) {
+  for (const profileType of ["workforce"] as NonEmployeeProfileType[]) {
     const table = workforceTable(profileType);
     const result = await supabaseAdmin
       .from(table)
@@ -394,19 +394,6 @@ async function resolveIcSelfServiceByReference(
     }
     for (const row of (result.data ?? []) as unknown as WorkforceRegisterRow[]) {
       if (!rowMatchesReferences(row, references) || !isActiveWorkforceRegisterRow(row)) continue;
-      if (profileType === "field_executive") {
-        const mirrorResult = await supabaseAdmin
-          .from("workforce")
-          .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
-          .eq("company_id", companyId)
-          .eq("source_profile_type", "field_executive")
-          .eq("source_profile_id", row.id);
-        if (mirrorResult.error && !isMissingColumnError(mirrorResult.error)) {
-          throw new Error(mirrorResult.error.message);
-        }
-        const mirror = ((mirrorResult.data ?? []) as WorkforceRegisterRow[]).find(isActiveWorkforceRegisterRow);
-        if (mirror) return mapNonEmployeeAccountRow(mirror, "workforce");
-      }
       return mapNonEmployeeAccountRow(row, profileType);
     }
   }
@@ -488,36 +475,6 @@ function isActiveWorkforceRegisterRow(row: WorkforceRegisterRow) {
     !row.deleted_at;
 }
 
-async function loadCanonicalWorkforceMirrors({
-  sourceRows,
-  knownWorkforceIds
-}: {
-  sourceRows: WorkforceRegisterRow[];
-  knownWorkforceIds: Set<string>;
-}) {
-  const mirrors: WorkforceRegisterRow[] = [];
-  if (!sourceRows.length || !supabaseAdmin) return mirrors;
-
-  for (const sourceRow of sourceRows) {
-    const result = await supabaseAdmin
-      .from("workforce")
-      .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, lifecycle_status, profile_photo_path, is_active, source_profile_type, source_profile_id, deleted_at")
-      .eq("company_id", sourceRow.company_id)
-      .eq("source_profile_type", "field_executive")
-      .eq("source_profile_id", sourceRow.id);
-    if (result.error && !isMissingColumnError(result.error)) {
-      throw new Error(result.error.message);
-    }
-    for (const row of (result.data ?? []) as WorkforceRegisterRow[]) {
-      if (!isActiveWorkforceRegisterRow(row) || knownWorkforceIds.has(row.id)) continue;
-      mirrors.push(row);
-      knownWorkforceIds.add(row.id);
-    }
-  }
-
-  return mirrors;
-}
-
 async function signedProfilePhotoUrl(path?: string | null) {
   if (!supabaseAdmin || !path) return "";
   const result = await supabaseAdmin.storage
@@ -545,8 +502,8 @@ export function connectWorkspace(
 
 function categoryCodeForProfile(profileType: ConnectAccount["profileType"]) {
   if (profileType === "employee") return "employees";
-  if (profileType === "workforce") return "field_executives";
-  if (profileType === "field_executive") return "field_executives";
+  if (profileType === "workforce") return "workforce";
+  if (profileType === "field_executive") return "workforce";
   if (profileType === "contractor") return "contractors";
   if (profileType === "vendor") return "vendors";
   if (profileType === "worker") return "workers";
@@ -594,7 +551,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
     .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`);
 
-  const nonEmployeeTypes: NonEmployeeProfileType[] = ["workforce", "field_executive", "contractor", "vendor", "worker"];
+  const nonEmployeeTypes: NonEmployeeProfileType[] = ["workforce", "contractor", "vendor", "worker"];
   async function loadNonEmployee(profileType: NonEmployeeProfileType): Promise<MatchResult<NonEmployeeMatch>> {
     const table = workforceTable(profileType);
     let query = supabaseAdmin!
@@ -650,27 +607,6 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   if (employeesResult.error && !isMissingColumnError(employeesResult.error)) throw new Error(employeesResult.error.message);
   for (const result of nonEmployeeResults) {
     if (result.error) throw new Error(result.error.message);
-  }
-
-  const knownWorkforceIds = Object.fromEntries(
-    nonEmployeeTypes.map((profileType, index) => [
-      profileType,
-      new Set((nonEmployeeResults[index].data ?? []).map((row) => row.id))
-    ])
-  ) as Record<NonEmployeeProfileType, Set<string>>;
-
-  const fieldExecutiveIndex = nonEmployeeTypes.indexOf("field_executive");
-  const workforceIndex = nonEmployeeTypes.indexOf("workforce");
-  const fieldExecutiveRows = (nonEmployeeResults[fieldExecutiveIndex]?.data ?? []) as WorkforceRegisterRow[];
-  const workforceMirrors = await loadCanonicalWorkforceMirrors({
-    sourceRows: fieldExecutiveRows,
-    knownWorkforceIds: knownWorkforceIds.workforce
-  });
-  if (workforceMirrors.length) {
-    nonEmployeeResults[workforceIndex] = {
-      ...nonEmployeeResults[workforceIndex],
-      data: [...(nonEmployeeResults[workforceIndex].data ?? []), ...workforceMirrors]
-    };
   }
 
   const employeeAccounts = (employeesResult.data ?? []).map((employee) => mapEmployeeAccountRow(employee));
@@ -970,7 +906,8 @@ export async function requireConnectAccount(profileType: ConnectAccount["profile
     throw new Error("Connect session expired. Please log in again.");
   }
   const accounts = await findConnectAccounts(session.country_code, session.mobile_number);
-  const account = accounts.find((item) => item.profileType === profileType && item.id === accountId);
+  const canonicalProfileType = profileType === "field_executive" ? "workforce" : profileType;
+  const account = accounts.find((item) => item.profileType === canonicalProfileType && item.id === accountId);
   if (!account) throw new Error("This account is not available for the current login.");
   return account;
 }

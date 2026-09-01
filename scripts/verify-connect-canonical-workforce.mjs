@@ -13,7 +13,7 @@ const routing = read("src/lib/designation-register-routing.ts");
 const checks = [
   [connectTypes.includes('"workforce"'), "DropX One accepts the canonical Workforce profile type"],
   [dashboardTypes.includes('profileType === "workforce"') && dashboardTypes.includes('return "workforce" as const'), "Dashboard APIs resolve canonical Workforce accounts"],
-  [auth.includes('["workforce", "field_executive", "contractor", "vendor", "worker"]'), "Account discovery reads Workforce before legacy registers"],
+  [auth.includes('["workforce", "contractor", "vendor", "worker"]') && !auth.includes('["workforce", "field_executive", "contractor", "vendor", "worker"]'), "Account discovery reads each canonical register once"],
   [auth.includes("canonicalWorkforceSources"), "Legacy field executive mirrors are removed from the switcher"],
   [auth.includes("shouldHideIcManagerLogin"), "Pure IC manager logins defer to contractor self-service"],
   [auth.includes("isConnectManagerLogin"), "Admin and manager logins stay available"],
