@@ -43,6 +43,12 @@ export type UsersListUser = {
   invited_at?: string | null;
   last_sign_in_at?: string | null;
   identity_verified?: boolean;
+  access_label?: string | null;
+  access_code?: string | null;
+  access_source?: "people" | "location" | "manual";
+  portal_codes?: string[];
+  people_profile_url?: string | null;
+  has_all_location_access?: boolean;
 };
 
 const PAGE_SIZE = 10;
@@ -89,7 +95,11 @@ export function UsersListPanel({
     const param = initialUserType ?? searchParams.get("userType") ?? "user";
     return USER_TYPE_OPTIONS.has(param) ? param : "user";
   });
-  const roleOptions = roles.map((role) => ({ value: role.id, label: role.name }));
+  const roleOptions = useMemo(() => [...new Map(users.map((user) => {
+    const key = user.access_code ? `access:${user.access_code}` : user.role_id ?? "unassigned";
+    const label = user.access_label || roles.find((role) => role.id === user.role_id)?.name || user.role || "Unassigned";
+    return [key, { value: key, label }];
+  })).values()].sort((left, right) => left.label.localeCompare(right.label)), [roles, users]);
   const locationsById = useMemo(() => new Map(locations.map((location) => [location.id, location])), [locations]);
   const locationEmails = useMemo(
     () => new Set(locations.map((location) => location.email?.trim().toLowerCase()).filter(Boolean) as string[]),
@@ -100,16 +110,19 @@ export function UsersListPanel({
     const term = query.trim().toLowerCase();
 
     return users.filter((user) => {
-      const roleName = roles.find((role) => role.id === user.role_id)?.name || user.role || "";
-      const isLocationUser = ["Location Email", "Location Master"].includes(user.invite_method ?? "")
-        && Boolean(user.email && locationEmails.has(user.email.trim().toLowerCase()));
+      const roleName = user.access_label || roles.find((role) => role.id === user.role_id)?.name || user.role || "";
+      const accessKey = user.access_code ? `access:${user.access_code}` : user.role_id ?? "unassigned";
+      const isLocationUser = user.access_source === "location" || (
+        ["Location Email", "Location Master"].includes(user.invite_method ?? "")
+        && Boolean(user.email && locationEmails.has(user.email.trim().toLowerCase()))
+      );
       const matchesSearch = !term || [
         user.full_name,
         user.employee_id,
         user.email,
         roleName
       ].some((value) => (value ?? "").toLowerCase().includes(term));
-      const matchesRole = roleId === "all" || user.role_id === roleId;
+      const matchesRole = roleId === "all" || accessKey === roleId || user.role_id === roleId;
       const matchesType = userType === "all" || (userType === "location" ? isLocationUser : !isLocationUser);
 
       return matchesSearch && matchesRole && matchesType;
@@ -130,6 +143,7 @@ export function UsersListPanel({
   }, [searchKey, searchParams]);
 
   function locationScopeTags(user: UsersListUser) {
+    if (user.has_all_location_access) return [{ label: "All locations", muted: false }];
     const ids = user.location_scope_ids ?? [];
     if (!ids.length) return null;
     const labels = ids.map((id) => locationsById.get(id)?.code).filter(Boolean);
@@ -219,8 +233,8 @@ export function UsersListPanel({
     <section className="panel">
       <div className="panel-head toolbar">
         <div>
-          <h2>Active users</h2>
-          <p className="subtle">Super Admin can suspend, resend invite, change role, or change location scope.</p>
+          <h2>Identity and access register</h2>
+          <p className="subtle">People owns person designations and managed locations. Dashboard owns station mailboxes; manual roles remain only for technical exceptions.</p>
         </div>
         <div className="filters">
           <input
@@ -262,7 +276,8 @@ export function UsersListPanel({
               <th>User</th>
               <th>Emp ID</th>
               <th>Email</th>
-              <th>Role</th>
+              <th>Access identity</th>
+              <th>Portals</th>
               <th>Location Scope</th>
               <th>Status</th>
               <th>Action</th>
@@ -270,10 +285,12 @@ export function UsersListPanel({
           </thead>
           <tbody>
             {pagedUsers.length ? pagedUsers.map((user) => {
-              const roleName = roles.find((role) => role.id === user.role_id)?.name || user.role || "-";
+              const roleName = user.access_label || roles.find((role) => role.id === user.role_id)?.name || user.role || "-";
               const locationTags = locationScopeTags(user);
-              const isLinkedLocationMaster = ["Location Email", "Location Master"].includes(user.invite_method ?? "")
-                && Boolean(user.email && locationEmails.has(user.email.trim().toLowerCase()));
+              const isLinkedLocationMaster = user.access_source === "location" || (
+                ["Location Email", "Location Master"].includes(user.invite_method ?? "")
+                && Boolean(user.email && locationEmails.has(user.email.trim().toLowerCase()))
+              );
 
               return (
                 <tr key={user.id}>
@@ -282,10 +299,9 @@ export function UsersListPanel({
                   <td>{user.email || "-"}</td>
                   <td>
                     {roleName}
-                    {isLinkedLocationMaster ? (
-                      <div className="subtle">Location Master</div>
-                    ) : null}
+                    <div className="subtle">{isLinkedLocationMaster ? "Dashboard station account" : user.access_source === "people" ? "People designation" : "Manual exception"}</div>
                   </td>
+                  <td>{user.portal_codes?.length ? user.portal_codes.map((code) => code === "operations" ? "OpsPulse" : code.charAt(0).toUpperCase() + code.slice(1)).join(", ") : "-"}</td>
                   <td>
                     {locationTags ? (
                       <div className="scope-tags">
@@ -296,8 +312,9 @@ export function UsersListPanel({
                     ) : "-"}
                   </td>
                   <td><StatusPill status={userStatus(user)} /></td>
-                  <td>{canEdit
-                    ? (
+                  <td>{user.people_profile_url
+                    ? <a className="button secondary" href={user.people_profile_url}>Manage in People</a>
+                    : canEdit ? (
                       <button
                         className="button secondary"
                         onClick={(event) => navigateToManage(event, editUserUrl(user.id))}
@@ -312,7 +329,7 @@ export function UsersListPanel({
               );
             }) : (
               <tr>
-                <td className="empty-cell" colSpan={7}>No users match the selected filters.</td>
+                <td className="empty-cell" colSpan={8}>No users match the selected filters.</td>
               </tr>
             )}
           </tbody>
@@ -320,10 +337,12 @@ export function UsersListPanel({
       </div>
       <div className="mobile-user-cards" aria-label="Users">
         {pagedUsers.length ? pagedUsers.map((user) => {
-          const roleName = roles.find((role) => role.id === user.role_id)?.name || user.role || "-";
+          const roleName = user.access_label || roles.find((role) => role.id === user.role_id)?.name || user.role || "-";
           const locationTags = locationScopeTags(user);
-          const isLinkedLocationMaster = ["Location Email", "Location Master"].includes(user.invite_method ?? "")
-            && Boolean(user.email && locationEmails.has(user.email.trim().toLowerCase()));
+          const isLinkedLocationMaster = user.access_source === "location" || (
+            ["Location Email", "Location Master"].includes(user.invite_method ?? "")
+            && Boolean(user.email && locationEmails.has(user.email.trim().toLowerCase()))
+          );
 
           return (
             <article className="mobile-user-card" key={`mobile-${user.id}`}>
@@ -358,8 +377,9 @@ export function UsersListPanel({
                     ) : "-"}
                   </dd>
                 </div>
+                <div><dt>Portals</dt><dd>{user.portal_codes?.length ? user.portal_codes.map((code) => code === "operations" ? "OpsPulse" : code.charAt(0).toUpperCase() + code.slice(1)).join(", ") : "-"}</dd></div>
               </dl>
-              {canEdit ? (
+              {user.people_profile_url ? <a className="button secondary mobile-user-manage" href={user.people_profile_url}>Manage in People</a> : canEdit ? (
                 <button
                   className="button secondary mobile-user-manage"
                   onClick={(event) => navigateToManage(event, editUserUrl(user.id))}

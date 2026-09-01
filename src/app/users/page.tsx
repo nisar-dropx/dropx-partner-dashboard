@@ -62,6 +62,12 @@ type UserRow = {
   invited_at?: string | null;
   last_sign_in_at?: string | null;
   identity_verified?: boolean;
+  access_label?: string | null;
+  access_code?: string | null;
+  access_source?: "people" | "location" | "manual";
+  portal_codes?: string[];
+  people_profile_url?: string | null;
+  has_all_location_access?: boolean;
 };
 
 type LocationRow = {
@@ -212,6 +218,78 @@ function sectionHref(section: "roles" | "users", params?: Record<string, string>
     if (value) search.set(key, value);
   });
   return `/users?${search.toString()}`;
+}
+
+async function loadCanonicalUserAccess(companyId: string, users: UserRow[], locations: LocationRow[]) {
+  if (!supabaseAdmin || !users.length) return { users, error: null as string | null };
+  const userIds = users.map((user) => user.id);
+  const [candidateResult, membershipResult] = await Promise.all([
+    supabaseAdmin.from("people_portal_access_candidates")
+      .select("user_id,designation_id,worker_type,employee_id,contractor_id,location_scope_ids,has_all_location_access")
+      .eq("company_id", companyId)
+      .in("user_id", userIds),
+    supabaseAdmin.from("company_product_memberships")
+      .select("user_id,product_code,source_system,location_scope_ids,has_all_location_access,is_active")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .in("user_id", userIds)
+  ]);
+  if (candidateResult.error || membershipResult.error) {
+    return { users, error: candidateResult.error?.message ?? membershipResult.error?.message ?? "Access identities could not be loaded." };
+  }
+  const designationIds = [...new Set((candidateResult.data ?? []).map((candidate) => candidate.designation_id).filter(Boolean))];
+  const designationResult = designationIds.length
+    ? await supabaseAdmin.from("designations").select("id,code,name").eq("company_id", companyId).in("id", designationIds)
+    : { data: [], error: null };
+  if (designationResult.error) return { users, error: designationResult.error.message };
+
+  const candidateByUser = new Map((candidateResult.data ?? []).map((candidate) => [candidate.user_id, candidate]));
+  const designationById = new Map((designationResult.data ?? []).map((designation) => [designation.id, designation]));
+  const membershipsByUser = new Map<string, typeof membershipResult.data>();
+  for (const membership of membershipResult.data ?? []) {
+    membershipsByUser.set(membership.user_id, [...(membershipsByUser.get(membership.user_id) ?? []), membership]);
+  }
+  const stationIdsByEmail = new Map<string, string[]>();
+  for (const location of locations) {
+    const email = location.station_email?.trim().toLowerCase();
+    if (email) stationIdsByEmail.set(email, [...(stationIdsByEmail.get(email) ?? []), location.id]);
+  }
+
+  return {
+    users: users.map((user) => {
+      const candidate = candidateByUser.get(user.id);
+      const designation = candidate ? designationById.get(candidate.designation_id) : null;
+      const memberships = membershipsByUser.get(user.id) ?? [];
+      const stationIds = user.email ? stationIdsByEmail.get(user.email.trim().toLowerCase()) ?? [] : [];
+      const isLocation = stationIds.length > 0 && (
+        ["Location Email", "Location Master"].includes(user.invite_method ?? "") ||
+        memberships.some((membership) => membership.source_system === "location_master")
+      );
+      const membershipLocationIds = [...new Set(memberships.flatMap((membership) => membership.location_scope_ids ?? []))];
+      const canonicalLocationIds = isLocation
+        ? stationIds
+        : candidate
+          ? candidate.location_scope_ids ?? []
+          : membershipLocationIds.length
+            ? membershipLocationIds
+            : user.location_scope_ids ?? [];
+      return {
+        ...user,
+        access_label: isLocation ? "Location" : designation?.name ?? user.role,
+        access_code: isLocation ? "LOCATION" : designation?.code ?? user.role_id,
+        access_source: isLocation ? "location" as const : designation ? "people" as const : "manual" as const,
+        portal_codes: [...new Set(memberships.map((membership) => membership.product_code))].sort(),
+        people_profile_url: !candidate ? null : candidate.worker_type === "employee" && candidate.employee_id
+          ? `https://people.dropxlogistics.com/people/employees/${candidate.employee_id}`
+          : candidate.worker_type === "contractor" && candidate.contractor_id
+            ? `https://people.dropxlogistics.com/people/contractors/${candidate.contractor_id}`
+            : null,
+        has_all_location_access: Boolean(candidate?.has_all_location_access || memberships.some((membership) => membership.has_all_location_access)),
+        location_scope_ids: canonicalLocationIds
+      };
+    }),
+    error: null as string | null
+  };
 }
 
 function membershipProductCode(surface: ReturnType<typeof currentAdminAccessSurface>) {
@@ -523,10 +601,14 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
   const showRolesSection = activeSection === "roles";
   const needsUserData = showUsersSection || Boolean(searchParams?.addUser || searchParams?.editUser);
   const needsRoleEditorData = Boolean(searchParams?.addRole || searchParams?.editRole);
-  const { pages, roles: loadedRoles, permissions, users, locations, error } = await loadAccessData(companyId, accessSurface, {
+  const { pages, roles: loadedRoles, permissions, users: loadedUsers, locations, error } = await loadAccessData(companyId, accessSurface, {
     includeUsers: needsUserData,
     includeRoleEditorData: needsRoleEditorData
   });
+  const canonicalUserAccess = needsUserData
+    ? await loadCanonicalUserAccess(companyId, loadedUsers, locations)
+    : { users: loadedUsers, error: null as string | null };
+  const users = canonicalUserAccess.users;
   const surfaceDesignationAccess = showRolesSection && accessSurface !== "dashboard"
     ? await loadSurfaceDesignationAccess(companyId, accessSurface)
     : { designations: [] as Array<{ id: string; code: string; name: string; enabled: boolean; defaultRoleId: string | null }>, locationRoleId: null as string | null, error: null as string | null };
@@ -536,7 +618,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
   const dashboardLocationAccess = showRolesSection && accessSurface === "dashboard"
     ? await loadDashboardLocationAccess(companyId)
     : { locations: [] as Array<{ locationId: string; code: string; name: string; email: string | null; profileId: string | null; enabledProducts: string[] }>, error: null as string | null };
-  const accessDataError = error ?? surfaceDesignationAccess.error ?? dashboardDesignationOverview.error ?? dashboardLocationAccess.error;
+  const accessDataError = error ?? canonicalUserAccess.error ?? surfaceDesignationAccess.error ?? dashboardDesignationOverview.error ?? dashboardLocationAccess.error;
   const identityRoles = isCompanyOwner(authorization)
     ? loadedRoles
     : loadedRoles.filter((role) =>
@@ -637,7 +719,9 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
           ? accessSurface === "dashboard"
             ? "People owns designation eligibility. Dashboard owns station mailboxes and their portal access; each portal owns its menus."
             : `Configure menus and actions only for People designations eligible for ${accessSurfaceLabel(accessSurface)}.`
-          : `Create users and manage access for the ${accessSurfaceLabel(accessSurface).toLowerCase()} frontend.`}
+          : accessSurface === "dashboard"
+            ? "People designations and managed locations are authoritative for people. Dashboard remains authoritative for station mailboxes and Super Admin visibility."
+            : `People designations and managed locations define eligibility for the ${accessSurfaceLabel(accessSurface)} frontend.`}
       />
 
       {accessDataError ? (
