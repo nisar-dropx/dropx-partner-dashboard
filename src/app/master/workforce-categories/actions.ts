@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { dynamicWorkforceTable } from "@/lib/dynamic-workforce";
+import { dropxOnePageCodes } from "@/lib/dropx-one-pages";
 import { normalizeCategoryProfileFieldRules } from "@/lib/profile-field-rules";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -39,13 +40,11 @@ function categoryRules(formData: FormData) {
   });
 }
 
-const allowedAppPages = new Set(["dashboard", "attendance", "leave"]);
-
 function appPageAccess(formData: FormData) {
   return Array.from(new Set(
     formData.getAll("app_page_access")
       .map((value) => String(value).trim().toLowerCase())
-      .filter((value) => allowedAppPages.has(value))
+      .filter((value) => dropxOnePageCodes.has(value))
   ));
 }
 

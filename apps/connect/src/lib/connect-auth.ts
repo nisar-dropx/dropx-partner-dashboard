@@ -483,7 +483,7 @@ async function signedProfilePhotoUrl(path?: string | null) {
   return result.data?.signedUrl ?? "";
 }
 
-const defaultPageAccess = ["dashboard", "attendance", "roster", "leave", "performance", "settings"];
+const defaultPageAccess = ["dashboard", "profile", "attendance", "roster", "leave", "performance", "settings"];
 const managerPageAccess = ["dashboard", "approvals", "settings"];
 
 export function connectWorkspace(
@@ -515,7 +515,7 @@ function designationLookupKey(companyId: string, categoryCode: string, value: st
 }
 
 function intersectPageAccess(categoryPages: string[], designationPages?: string[] | null) {
-  if (!designationPages?.length) return categoryPages;
+  if (!designationPages) return categoryPages;
   const allowedByDesignation = new Set(designationPages.map((page) => page.trim().toLowerCase()));
   return categoryPages.filter((page) => allowedByDesignation.has(page.trim().toLowerCase()));
 }
@@ -526,10 +526,7 @@ function resolveConnectPageAccess(
   designationPages?: string[] | null
 ) {
   if (profileType === "user") return managerPageAccess;
-  const pages = intersectPageAccess(categoryPages, designationPages);
-  if (profileType !== "contractor") return pages;
-  // Independent contractors always need core self-service even when designation pages are narrow.
-  return [...new Set([...pages, "dashboard", "attendance", "roster", "settings"])];
+  return intersectPageAccess(categoryPages, designationPages);
 }
 
 export async function findConnectAccounts(countryCode: string, mobile: string) {

@@ -364,9 +364,12 @@ export function ConnectDashboard({
   const firstName = firstNameRaw.charAt(0).toUpperCase() + firstNameRaw.slice(1).toLowerCase();
   const profileStatus = profile.status || account.status || "active";
   const attendanceAllowed = (account.pageAccess ?? ["dashboard", "attendance", "settings"]).includes("attendance");
-  const leaveAllowed = account.profileType === "contractor"
-    || (account.pageAccess ?? ["dashboard", "attendance", "leave", "settings"]).includes("leave");
-  const performanceAllowed = account.profileType === "employee" || account.profileType === "contractor";
+  const pageAccess = account.pageAccess ?? ["dashboard", "profile", "attendance", "leave", "settings"];
+  const profileAllowed = pageAccess.includes("profile");
+  const rosterAllowed = pageAccess.includes("roster");
+  const leaveAllowed = pageAccess.includes("leave");
+  const performanceAllowed = pageAccess.includes("performance");
+  const advancesAllowed = pageAccess.includes("advances");
   const trackedDays = attendance.summary.present + attendance.summary.absent + attendance.summary.misPunch;
   const attendanceRate = trackedDays ? Math.round((attendance.summary.present / trackedDays) * 100) : 0;
   const workforce = variant === "workforce";
@@ -428,11 +431,11 @@ export function ConnectDashboard({
       <header><div><small>{workforce ? "Work tools" : "Shortcuts"}</small><h2>Quick actions</h2></div></header>
       <div>
         {attendanceAllowed ? <button onClick={onAttendance}><i className="blue"><Fingerprint /></i><span><strong>Attendance</strong><small>View punches</small></span><ChevronRight /></button> : null}
-        {workforce ? <button onClick={onRoster}><i className="amber"><CalendarClock /></i><span><strong>My roster</strong><small>Shift and swap requests</small></span><ChevronRight /></button> : null}
+        {workforce && rosterAllowed ? <button onClick={onRoster}><i className="amber"><CalendarClock /></i><span><strong>My roster</strong><small>Shift and swap requests</small></span><ChevronRight /></button> : null}
         {leaveAllowed ? <button onClick={onLeave}><i className="pink"><CalendarDays /></i><span><strong>Time off</strong><small>Request leave</small></span><ChevronRight /></button> : null}
         {performanceAllowed ? <button onClick={onPerformance}><i className="purple"><Target /></i><span><strong>Performance</strong><small>Goals & reviews</small></span><ChevronRight /></button> : null}
-        {!workforce ? <button onClick={onAdvances}><i className="amber"><IndianRupee /></i><span><strong>My pay</strong><small>Advances</small></span><ChevronRight /></button> : null}
-        <button onClick={onProfile}><i className="green"><UserRound /></i><span><strong>Profile</strong><small>Personal details</small></span><ChevronRight /></button>
+        {!workforce && advancesAllowed ? <button onClick={onAdvances}><i className="amber"><IndianRupee /></i><span><strong>My pay</strong><small>Advances</small></span><ChevronRight /></button> : null}
+        {profileAllowed ? <button onClick={onProfile}><i className="green"><UserRound /></i><span><strong>Profile</strong><small>Personal details</small></span><ChevronRight /></button> : null}
       </div>
     </section>
 
@@ -449,10 +452,10 @@ export function ConnectDashboard({
       </button>
     </section> : null}
 
-    <button className="dx-dashboard-profile dx-dashboard-profile-status" onClick={onProfile}>
+    {profileAllowed ? <button className="dx-dashboard-profile dx-dashboard-profile-status" onClick={onProfile}>
       <i><UserRound /></i>
       <span><strong>My profile</strong><small><Pill text={profileStatus} tone={profileStatus === "active" ? "green" : "amber"} /> {profileStatus === "active" ? "100% completed" : "View profile status"}</small></span>
       <ChevronRight />
-    </button>
+    </button> : null}
   </section>;
 }

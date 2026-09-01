@@ -523,7 +523,7 @@ export function DesignationForm({
       <section className="workforce-category-page-access">
         <div>
           <strong>DropX One page access</strong>
-          <p className="subtle">A page is available only when enabled for both this designation and its workforce category. My Profile and Settings are always available.</p>
+          <p className="subtle">A page is visible only when enabled for both this designation and the profile&apos;s workforce category.</p>
         </div>
         <AppPageAccessSelect initialPages={selectedPages} />
       </section>

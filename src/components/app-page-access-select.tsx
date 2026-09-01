@@ -2,12 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
+import { dropxOnePageOptions } from "@/lib/dropx-one-pages";
 
-export const appPageOptions = [
-  { value: "dashboard", label: "Dashboard" },
-  { value: "attendance", label: "Attendance" },
-  { value: "leave", label: "Leave" }
-] as const;
+export const appPageOptions = dropxOnePageOptions;
 
 export const defaultAppPageAccess = appPageOptions.map((page) => page.value);
 

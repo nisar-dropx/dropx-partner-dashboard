@@ -7,6 +7,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { WorkforceCategoryForm, type WorkforceCategoryInitial } from "@/components/workforce-category-form";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { dropxOnePageOptions } from "@/lib/dropx-one-pages";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createWorkforceCategory, deleteWorkforceCategory, forceDeleteWorkersCategory, updateWorkforceCategory } from "./actions";
 
@@ -120,13 +121,9 @@ export default async function WorkforceCategoriesPage({
                     <td>{category.name}</td>
                     <td>{category.statutory_enabled ? "Enabled" : "Not enabled"}</td>
                     <td>{category.direct_activate ? "Direct" : "App onboarding"}</td>
-                    <td>{[
-                      ...(category.app_page_access ?? [])
-                        .filter((page) => page === "dashboard" || page === "attendance")
-                        .map((page) => page.replaceAll("_", " ")),
-                      "settings",
-                      "my profile"
-                    ].join(", ")}</td>
+                    <td>{(category.app_page_access ?? []).map((page) =>
+                      dropxOnePageOptions.find((option) => option.value === page)?.label ?? page.replaceAll("_", " ")
+                    ).join(", ") || "None"}</td>
                     <td>{category.is_system ? "System" : "Custom"}</td>
                     <td><StatusPill status={category.is_active ? "Active" : "Inactive"} /></td>
                     <td>{permission.canEdit ? <PendingLink className="button secondary compact" href={`/master/workforce-categories?edit=${category.id}`} scroll={false}>Edit</PendingLink> : "-"}</td>

@@ -20,7 +20,7 @@ const checks = [
   [auth.includes("resolveIcSelfServiceByReference"), "IC self-service resolves from linked DropX references"],
   [auth.includes("enrichAccountsWithIcSelfService"), "IC manager logins enrich with register self-service"],
   [auth.includes("collectSelfServiceReferences"), "Manager user logins collapse when self-service registers exist"],
-  [auth.includes("resolveConnectPageAccess"), "Contractor page access keeps core self-service pages"],
+  [auth.includes("return intersectPageAccess(categoryPages, designationPages)"), "Every profile uses the category and designation page intersection"],
   [auth.includes('nonEmployeeSelect("contractor")') && auth.includes("nonEmployeeSelect(profileType, true)"), "Each One account register is queried only with columns available on that table"],
   [auth.includes('if (profileType === "contractor")') && auth.includes('`${nonEmployeeBaseSelect}${mobileColumns},deleted_at`'), "People contractors do not depend on Workforce-only source columns"],
   [auth.includes("employeeReferences"), "Duplicate People manager and employee logins stay collapsed"],
