@@ -94,7 +94,7 @@ export const navItems: NavItem[] = [
     icon: "@",
     children: [
       { code: "users", label: "Users", href: "/users?section=users" },
-      { code: "users", label: "User Roles", href: "/users?section=roles" },
+      { code: "users", label: "Role Access", href: "/users?section=roles" },
       { code: "users", label: "Positions & Delegation", href: "/users/positions" }
     ]
   },
