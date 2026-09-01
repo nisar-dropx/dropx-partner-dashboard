@@ -253,6 +253,8 @@ const businessProducts = [
   { code: "finance", label: "Finance", href: "https://fin.dropxlogistics.com/users?section=roles" }
 ] as const;
 
+const locationBusinessProducts = businessProducts.filter((product) => product.code !== "finance");
+
 async function loadDashboardDesignationOverview(companyId: string) {
   if (!supabaseAdmin) return { designations: [] as Array<{ id: string; code: string; name: string; policies: Record<string, { enabled: boolean; configured: boolean }> }>, error: null as string | null };
   const [designations, policies] = await Promise.all([
@@ -717,7 +719,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
       {showRolesSection && accessSurface === "dashboard" && (pagePermission.canView || pagePermission.canEdit) ? (
       <LocationPortalAccessPanel
         canEdit={pagePermission.canEdit}
-        products={businessProducts.map((product) => ({ code: product.code, label: product.label }))}
+        products={locationBusinessProducts.map((product) => ({ code: product.code, label: product.label }))}
         rows={dashboardLocationAccess.locations}
         saveAction={saveLocationPortalAccess}
       />

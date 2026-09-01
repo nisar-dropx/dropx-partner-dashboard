@@ -354,7 +354,9 @@ export async function configureSurfaceDesignationRole(formData: FormData) {
   usersRedirect({ section: "roles", userNotice: "Designation access is ready to configure." });
 }
 
-const locationPortalProducts = ["people", "operations", "workforce", "recruit", "finance"] as const;
+// A station mailbox is an operational identity. Finance is intentionally excluded:
+// only individually accountable Owner, Finance, and Accounts identities may enter it.
+const locationPortalProducts = ["people", "operations", "workforce", "recruit"] as const;
 const protectedMembershipSources = new Set(["manual", "person_override", "product_owner", "product_admin"]);
 const dashboardLocationSources = new Set(["location_master", "legacy_dashboard", "recruit"]);
 
