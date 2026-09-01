@@ -252,8 +252,11 @@ export async function POST(request: NextRequest) {
     }
 
     let attachmentPath = existingResult.data?.attachment_path ?? null;
+    let attachmentPathOut: string | null = null;
     let uploadedPath: string | null = null;
+    let uploadedPathOut: string | null = null;
     const attachment = formData.get("attachment");
+    const attachmentOut = formData.get("attachmentOut");
     if (attachment instanceof File && attachment.size > 0) {
       const extension = regularizationProofTypes.get(attachment.type);
       if (!extension) throw new Error("CCTV proof must be a JPG, PNG or WebP image.");
@@ -268,8 +271,25 @@ export async function POST(request: NextRequest) {
         });
       if (uploadResult.error) throw new Error(uploadResult.error.message);
     }
+    if (attachmentOut instanceof File && attachmentOut.size > 0) {
+      const extension = regularizationProofTypes.get(attachmentOut.type);
+      if (!extension) throw new Error("OUT-time CCTV proof must be a JPG, PNG or WebP image.");
+      if (attachmentOut.size > 5 * 1024 * 1024) throw new Error("OUT-time CCTV proof must be 5 MB or smaller.");
+      attachmentPathOut = `${worker.companyId}/${worker.profileId}/attendance-regularization-out-${attendanceDate}-${Date.now()}${extension}`;
+      uploadedPathOut = attachmentPathOut;
+      const uploadResult = await supabaseAdmin.storage
+        .from("employee-profile-documents")
+        .upload(attachmentPathOut, Buffer.from(await attachmentOut.arrayBuffer()), {
+          contentType: attachmentOut.type || "application/octet-stream",
+          upsert: false
+        });
+      if (uploadResult.error) throw new Error(uploadResult.error.message);
+    }
     if (!attachmentPath) {
       throw new Error("Upload workplace CCTV proof with a visible timestamp matching the requested IN or OUT time.");
+    }
+    if (reasonCode === "missed_both" && !attachmentPathOut && !existingResult.data?.attachment_path) {
+      throw new Error("Upload separate CCTV proof for both IN and OUT times.");
     }
     if (worker.profileType !== "employee" && worker.profileType !== "contractor") {
       throw new Error("Attendance regularization is available only for employees and independent contractors.");
@@ -299,10 +319,12 @@ export async function POST(request: NextRequest) {
         step_name: step.step_name,
         approver_user_id: step.approver_user_id,
         approver_person_id: step.approver_person_id
-      }))
+      })),
+      p_attachment_path_out: attachmentPathOut
     });
     if (createResult.error) {
       if (uploadedPath) await supabaseAdmin.storage.from("employee-profile-documents").remove([uploadedPath]);
+      if (uploadedPathOut) await supabaseAdmin.storage.from("employee-profile-documents").remove([uploadedPathOut]);
       throw new Error(createResult.error.message);
     }
     const requestId = String(createResult.data ?? "");

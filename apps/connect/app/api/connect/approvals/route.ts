@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { connectApproverIdentity } from "../../../../src/lib/connect-expense-data";
-import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval } from "../../../../src/lib/connect-manager-approvals";
+import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval, listConnectReturnedRosters, resubmitConnectReturnedRoster } from "../../../../src/lib/connect-manager-approvals";
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
 import { connectReporteeMatches, loadConnectReporteeAccess, normalizeConnectReporteeScope, type ConnectReporteeAccess } from "../../../../src/lib/connect-reportee-scope";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
@@ -70,15 +70,16 @@ export async function GET(request: Request) {
     const account = await selectedAccount(request);
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     const reportees = await loadConnectReporteeAccess(account, scope);
-    const [leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals] = await Promise.all([
+    const [leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters] = await Promise.all([
       listLeaveApprovals(account, reportees),
       listConnectLocationSupportPackages(account, reportees),
       listConnectAttendanceApprovals(account, reportees),
       listConnectAttendanceHrApprovals(account, reportees),
       listConnectRosterApprovals(account),
-      listConnectRosterSwapApprovals(account)
+      listConnectRosterSwapApprovals(account),
+      listConnectReturnedRosters(account)
     ]);
-    return NextResponse.json({ scope, leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({ scope, leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load approvals." }, { status: 400 });
   }
@@ -104,6 +105,11 @@ export async function PATCH(request: Request) {
       const notice = queue === "hr"
         ? await decideConnectAttendanceHrApproval(account, attendanceRequestId, decision, note)
         : await decideConnectAttendanceApproval(account, attendanceRequestId, decision, note);
+      return NextResponse.json({ ok: true, notice });
+    }
+    const resubmitRosterPlanId = clean(body.resubmitRosterPlanId);
+    if (resubmitRosterPlanId) {
+      const notice = await resubmitConnectReturnedRoster(account, resubmitRosterPlanId, body.note);
       return NextResponse.json({ ok: true, notice });
     }
     const rosterPlanId = clean(body.rosterPlanId);

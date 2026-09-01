@@ -682,6 +682,8 @@ function RegularizationSheet({
   const [reason, setReason] = useState(row.regularization?.reasonCode || "");
   const [remarks, setRemarks] = useState(row.regularization?.remarks || "");
   const [attachment, setAttachment] = useState<File | null>(null);
+  const [attachmentOut, setAttachmentOut] = useState<File | null>(null);
+  const needsDualProof = reason === "missed_both";
   const [saving, setSaving] = useState(false);
   const requestsInTime = ["missed_in", "incorrect_in", "missed_both", "other"].includes(reason);
   const requestsOutTime = ["missed_out", "incorrect_out", "missed_both", "other"].includes(reason);
@@ -711,6 +713,10 @@ function RegularizationSheet({
       setError(`Upload workplace CCTV proof with a visible timestamp matching the ${proofTimeLabel}.`);
       return;
     }
+    if (needsDualProof && !attachmentOut && !row.regularization?.hasAttachment) {
+      setError("Upload separate CCTV proof for both IN and OUT times.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -725,6 +731,7 @@ function RegularizationSheet({
       form.set("reasonCode", reason);
       form.set("remarks", remarks);
       if (attachment) form.set("attachment", attachment);
+      if (attachmentOut) form.set("attachmentOut", attachmentOut);
       const response = await fetch("/api/connect/attendance", { method: "POST", body: form });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to submit regularization request.");
@@ -766,7 +773,7 @@ function RegularizationSheet({
           <Info aria-hidden="true" />
           <span><strong>Workplace CCTV proof is mandatory</strong>Upload a clear screenshot showing you were present at the workplace at the {proofTimeLabel}. The CCTV date and time must be visible; you do not need to be standing near the biometric device.</span>
         </div>
-        <label className="dx-attachment required"><Paperclip /><span>{attachment?.name || (row.regularization?.hasAttachment ? "Existing proof attached · choose to replace" : "Upload workplace CCTV proof")}</span><em>Required</em><input accept="image/jpeg,image/png,image/webp" required={!row.regularization?.hasAttachment} type="file" onChange={(event) => {
+        <label className="dx-attachment required"><Paperclip /><span>{attachment?.name || (row.regularization?.hasAttachment ? "Existing proof attached · choose to replace" : needsDualProof ? "Upload IN-time CCTV proof" : "Upload workplace CCTV proof")}</span><em>Required</em><input accept="image/jpeg,image/png,image/webp" required={!row.regularization?.hasAttachment && !needsDualProof} type="file" onChange={(event) => {
           const file = event.target.files?.[0] ?? null;
           if (file && !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
             setAttachment(null);
@@ -783,9 +790,26 @@ function RegularizationSheet({
           setError("");
           setAttachment(file);
         }} /></label>
-        <p className="dx-evidence-format">JPG, PNG or WebP · maximum 5 MB · timestamp must match the requested attendance time</p>
+        {needsDualProof ? <label className="dx-attachment required"><Paperclip /><span>{attachmentOut?.name || "Upload OUT-time CCTV proof"}</span><em>Required</em><input accept="image/jpeg,image/png,image/webp" required={!row.regularization?.hasAttachment} type="file" onChange={(event) => {
+          const file = event.target.files?.[0] ?? null;
+          if (file && !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+            setAttachmentOut(null);
+            setError("Use a JPG, PNG or WebP CCTV screenshot.");
+            event.target.value = "";
+            return;
+          }
+          if (file && file.size > 5 * 1024 * 1024) {
+            setAttachmentOut(null);
+            setError("CCTV proof must be 5 MB or smaller.");
+            event.target.value = "";
+            return;
+          }
+          setError("");
+          setAttachmentOut(file);
+        }} /></label> : null}
+        <p className="dx-evidence-format">JPG, PNG or WebP · maximum 5 MB · timestamp must match the requested attendance time{needsDualProof ? " · upload one file per corrected punch" : ""}</p>
         {error ? <p className="dx-form-error">{error}</p> : null}
-        <div className="dx-sheet-actions"><button className="secondary" onClick={onClose} type="button">Cancel</button><button disabled={saving || (!attachment && !row.regularization?.hasAttachment)} type="submit">{saving ? "Submitting..." : "Submit request"}</button></div>
+        <div className="dx-sheet-actions"><button className="secondary" onClick={onClose} type="button">Cancel</button><button disabled={saving || (!attachment && !row.regularization?.hasAttachment) || (needsDualProof && !attachmentOut && !row.regularization?.hasAttachment)} type="submit">{saving ? "Submitting..." : "Submit request"}</button></div>
       </form>
     </aside>
   </>;

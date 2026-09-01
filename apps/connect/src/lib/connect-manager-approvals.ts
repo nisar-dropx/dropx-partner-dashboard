@@ -641,3 +641,229 @@ export async function decideConnectRosterSwapApproval(account: ConnectAccount, r
 
   return accept ? "Shift swap approved." : "Shift swap rejected.";
 }
+
+export async function listConnectReturnedRosters(account: ConnectAccount) {
+  const actorUserId = await approverUserId(account);
+  if (!actorUserId) return [];
+  const result = await db().from("hr_roster_plans")
+    .select("id,name,location_id,period_start,period_end,status,decision_note,approval_history,revision_no,submitted_at,updated_at,stations!hr_roster_plans_location_id_fkey(station_code,station_name),hr_roster_approval_steps(stage_no,stage_type,status,decision_note,decided_at)")
+    .eq("company_id", account.companyId)
+    .eq("roster_kind", "recurring_weekly")
+    .eq("status", "returned")
+    .eq("created_by", actorUserId)
+    .order("updated_at", { ascending: false })
+    .limit(20);
+  if (result.error) throw new Error(result.error.message);
+  return (result.data ?? []).map((plan) => {
+    const station = one(plan.stations);
+    const steps = Array.isArray(plan.hr_roster_approval_steps) ? plan.hr_roster_approval_steps : [];
+    const lastNote = plan.decision_note || steps.find((step) => step.decision_note)?.decision_note || "";
+    return {
+      planId: plan.id,
+      name: plan.name,
+      stationCode: station?.station_code ?? "—",
+      stationName: station?.station_name ?? "",
+      revisionNo: plan.revision_no ?? 1,
+      periodStart: plan.period_start,
+      periodEnd: plan.period_end,
+      returnedNote: lastNote,
+      approvalHistory: Array.isArray(plan.approval_history) ? plan.approval_history : [],
+      updatedAt: plan.updated_at
+    };
+  });
+}
+
+async function archiveConnectRosterApprovalRound(companyId: string, planId: string) {
+  const [planResult, stepsResult] = await Promise.all([
+    db().from("hr_roster_plans").select("status,decision_note,approval_history").eq("company_id", companyId).eq("id", planId).maybeSingle(),
+    db().from("hr_roster_approval_steps").select("stage_no,stage_type,status,decision_note,decided_at,decided_by,approver_user_id").eq("company_id", companyId).eq("plan_id", planId).order("stage_no")
+  ]);
+  if (planResult.error) throw new Error(planResult.error.message);
+  if (stepsResult.error) throw new Error(stepsResult.error.message);
+  const priorHistory = Array.isArray(planResult.data?.approval_history) ? planResult.data.approval_history : [];
+  const steps = stepsResult.data ?? [];
+  if (!steps.length && !planResult.data?.decision_note) return;
+  const nextHistory = [...priorHistory, {
+    round: priorHistory.length + 1,
+    archivedAt: new Date().toISOString(),
+    planStatus: planResult.data?.status ?? null,
+    decisionNote: planResult.data?.decision_note ?? null,
+    steps: steps.map((step) => ({
+      stage_no: step.stage_no,
+      stage_type: step.stage_type,
+      status: step.status,
+      decision_note: step.decision_note,
+      decided_at: step.decided_at,
+      approver_user_id: step.approver_user_id
+    }))
+  }];
+  const saved = await db().from("hr_roster_plans").update({ approval_history: nextHistory }).eq("company_id", companyId).eq("id", planId);
+  if (saved.error) throw new Error(saved.error.message);
+}
+
+const rosterDays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+
+function rosterDayDate(periodStart: string, dayIndex: number) {
+  const date = new Date(`${periodStart}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + dayIndex);
+  return date.toISOString().slice(0, 10);
+}
+
+export async function loadConnectReturnedRosterEditor(account: ConnectAccount, planIdValue: unknown) {
+  const actorUserId = await approverUserId(account);
+  if (!actorUserId) throw new Error("A linked People login is required to edit a returned roster.");
+  const planId = clean(planIdValue);
+  if (!/^[0-9a-f-]{36}$/i.test(planId)) throw new Error("Choose a valid roster.");
+  const plan = await db().from("hr_roster_plans")
+    .select("id,status,location_id,period_start,period_end,decision_note,approval_history,created_by")
+    .eq("company_id", account.companyId)
+    .eq("id", planId)
+    .maybeSingle();
+  if (plan.error || !plan.data) throw new Error(plan.error?.message ?? "Roster not found.");
+  if (plan.data.status !== "returned" || plan.data.created_by !== actorUserId) throw new Error("This returned roster is no longer editable.");
+  if (!plan.data.location_id) throw new Error("Station is missing on this roster.");
+  const [entriesResult, employeesResult, contractorsResult, shiftsResult] = await Promise.all([
+    db().from("hr_roster_entries").select("id,worker_type,worker_id,roster_date,day_type,shift_id,hr_shifts(id,code,name)").eq("company_id", account.companyId).eq("plan_id", planId),
+    db().from("employees").select("id,employee_code,full_name").eq("company_id", account.companyId).eq("location_id", plan.data.location_id).eq("is_active", true).order("full_name"),
+    db().from("contractors").select("id,dropx_id,full_name").eq("company_id", account.companyId).eq("location_id", plan.data.location_id).eq("is_active", true).order("full_name"),
+    db().from("hr_shifts").select("id,code,name").eq("company_id", account.companyId).eq("is_active", true).order("code")
+  ]);
+  const loadError = entriesResult.error ?? employeesResult.error ?? contractorsResult.error ?? shiftsResult.error;
+  if (loadError) throw new Error(loadError.message);
+  const people = [
+    ...(employeesResult.data ?? []).map((row) => ({ workerType: "employee" as const, workerId: row.id, code: row.employee_code ?? "—", name: row.full_name })),
+    ...(contractorsResult.data ?? []).map((row) => ({ workerType: "contractor" as const, workerId: row.id, code: row.dropx_id ?? "—", name: row.full_name }))
+  ];
+  const entryByKey = new Map((entriesResult.data ?? []).map((entry) => [`${entry.worker_type}:${entry.worker_id}:${entry.roster_date}`, entry]));
+  const rows = people.map((person) => ({
+    workerType: person.workerType,
+    workerId: person.workerId,
+    code: person.code,
+    name: person.name,
+    days: rosterDays.map((day, index) => {
+      const date = rosterDayDate(plan.data!.period_start, index);
+      const entry = entryByKey.get(`${person.workerType}:${person.workerId}:${date}`);
+      const shift = one(entry?.hr_shifts);
+      return {
+        day,
+        date,
+        dayType: (entry?.day_type ?? "working") as "working" | "weekly_off",
+        shiftId: entry?.shift_id ?? "",
+        shiftCode: shift?.code ?? ""
+      };
+    })
+  }));
+  return {
+    planId: plan.data.id,
+    periodStart: plan.data.period_start,
+    periodEnd: plan.data.period_end,
+    decisionNote: plan.data.decision_note ?? "",
+    approvalHistory: Array.isArray(plan.data.approval_history) ? plan.data.approval_history : [],
+    shifts: (shiftsResult.data ?? []).map((shift) => ({ id: shift.id, code: shift.code, name: shift.name })),
+    rows
+  };
+}
+
+export async function updateConnectReturnedRosterCell(account: ConnectAccount, body: Record<string, unknown>) {
+  const actorUserId = await approverUserId(account);
+  if (!actorUserId) throw new Error("A linked People login is required to edit a returned roster.");
+  const planId = clean(body.planId);
+  const workerType = clean(body.workerType);
+  const workerId = clean(body.workerId);
+  const rosterDate = clean(body.rosterDate);
+  const dayType = clean(body.dayType);
+  const shiftId = clean(body.shiftId);
+  if (!/^[0-9a-f-]{36}$/i.test(planId) || !/^[0-9a-f-]{36}$/i.test(workerId)) throw new Error("Roster cell selection is invalid.");
+  if (workerType !== "employee" && workerType !== "contractor") throw new Error("Worker type is invalid.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(rosterDate)) throw new Error("Roster date is invalid.");
+  if (dayType !== "working" && dayType !== "weekly_off") throw new Error("Day type is invalid.");
+  const plan = await db().from("hr_roster_plans").select("id,status,location_id,period_start,period_end,created_by").eq("company_id", account.companyId).eq("id", planId).maybeSingle();
+  if (plan.error || !plan.data) throw new Error(plan.error?.message ?? "Roster not found.");
+  if (plan.data.status !== "returned" || plan.data.created_by !== actorUserId) throw new Error("This returned roster is no longer editable.");
+  if (rosterDate < plan.data.period_start || rosterDate > plan.data.period_end) throw new Error("Date is outside the weekly pattern.");
+  const workerTable = workerType === "employee" ? "employees" : "contractors";
+  const worker = await db().from(workerTable).select("location_id").eq("company_id", account.companyId).eq("id", workerId).eq("is_active", true).maybeSingle();
+  if (worker.error || !worker.data?.location_id || worker.data.location_id !== plan.data.location_id) throw new Error("This person is not active at the roster station.");
+  const effectiveShiftId = dayType === "weekly_off" ? null : shiftId || null;
+  if (dayType === "working" && !effectiveShiftId) throw new Error("Select a shift or mark weekly off.");
+  if (effectiveShiftId) {
+    const shift = await db().from("hr_shifts").select("id").eq("company_id", account.companyId).eq("id", effectiveShiftId).eq("is_active", true).maybeSingle();
+    if (shift.error || !shift.data) throw new Error("Select an active shift.");
+  }
+  const saved = await db().from("hr_roster_entries").upsert({
+    company_id: account.companyId,
+    plan_id: planId,
+    worker_type: workerType,
+    worker_id: workerId,
+    location_id: worker.data.location_id,
+    roster_date: rosterDate,
+    day_type: dayType,
+    shift_id: effectiveShiftId,
+    updated_at: new Date().toISOString()
+  }, { onConflict: "company_id,plan_id,worker_type,worker_id,roster_date" });
+  if (saved.error) throw new Error(saved.error.message);
+  await db().from("hr_roster_plans").update({ updated_by: actorUserId, updated_at: new Date().toISOString() }).eq("company_id", account.companyId).eq("id", planId);
+  return "Roster cell updated.";
+}
+
+export async function resubmitConnectReturnedRoster(account: ConnectAccount, planIdValue: unknown, noteValue: unknown) {
+  const actorUserId = await approverUserId(account);
+  if (!actorUserId) throw new Error("A linked People login is required to resubmit a roster.");
+  const planId = clean(planIdValue);
+  if (!/^[0-9a-f-]{36}$/i.test(planId)) throw new Error("Choose a valid roster.");
+  const plan = await db().from("hr_roster_plans")
+    .select("id,status,location_id,effective_from,created_by")
+    .eq("company_id", account.companyId)
+    .eq("id", planId)
+    .maybeSingle();
+  if (plan.error || !plan.data) throw new Error(plan.error?.message ?? "Roster not found.");
+  if (plan.data.status !== "returned" || plan.data.created_by !== actorUserId) throw new Error("This returned roster is no longer available for resubmission.");
+  const resubmitNote = clean(noteValue);
+  if (resubmitNote.length >= 3) {
+    await db().from("hr_roster_plans").update({ notes: resubmitNote, updated_by: actorUserId, updated_at: new Date().toISOString() }).eq("company_id", account.companyId).eq("id", planId);
+  }
+  const count = await db().from("hr_roster_entries").select("id", { count: "exact", head: true }).eq("company_id", account.companyId).eq("plan_id", planId);
+  if (count.error) throw new Error(count.error.message);
+  if (!count.count) throw new Error("Add roster assignments before resubmitting.");
+  await archiveConnectRosterApprovalRound(account.companyId, planId);
+  await db().from("hr_roster_approval_steps").delete().eq("company_id", account.companyId).eq("plan_id", planId);
+  const archivedPlan = await db().from("hr_roster_plans").select("approval_history").eq("company_id", account.companyId).eq("id", planId).maybeSingle();
+  const history = Array.isArray(archivedPlan.data?.approval_history) ? archivedPlan.data.approval_history : [];
+  const lastRound = history[history.length - 1] as { steps?: Array<{ stage_no: number; stage_type: string; approver_user_id?: string | null }> } | undefined;
+  const policy = await db().from("hr_roster_location_policies").select("approval_required,approval_levels,hr_approval_required").eq("company_id", account.companyId).eq("location_id", plan.data.location_id).maybeSingle();
+  const settings = await db().from("hr_company_settings").select("roster_approval_required,roster_approval_levels,roster_hr_approval_required").eq("company_id", account.companyId).maybeSingle();
+  const approvalRequired = Boolean(policy.data?.approval_required ?? settings.data?.roster_approval_required ?? true);
+  const now = new Date().toISOString();
+  if (!approvalRequired) {
+    if (plan.data.location_id && plan.data.effective_from) {
+      await db().from("hr_roster_plans").update({ superseded_at: plan.data.effective_from }).eq("company_id", account.companyId).eq("location_id", plan.data.location_id).eq("roster_kind", "recurring_weekly").eq("status", "approved").is("superseded_at", null).neq("id", planId);
+    }
+    const published = await db().from("hr_roster_plans").update({ status: "approved", submitted_at: now, submitted_by: actorUserId, decided_at: now, decision_note: resubmitNote || "Resubmitted from DropX One", updated_by: actorUserId, updated_at: now }).eq("company_id", account.companyId).eq("id", planId).eq("status", "returned");
+    if (published.error) throw new Error(published.error.message);
+    return "Returned roster published.";
+  }
+  const templateSteps = lastRound?.steps?.length ? lastRound.steps : [{ stage_no: 1, stage_type: "level_1", approver_user_id: null }];
+  const staged = await db().from("hr_roster_approval_steps").insert(templateSteps.map((step, index) => ({
+    company_id: account.companyId,
+    plan_id: planId,
+    stage_no: step.stage_no,
+    stage_type: step.stage_type,
+    approver_user_id: step.approver_user_id ?? null,
+    status: index === 0 ? "pending" : "waiting"
+  })));
+  if (staged.error) throw new Error(staged.error.message);
+  const firstApprover = templateSteps[0]?.approver_user_id ?? null;
+  const submitted = await db().from("hr_roster_plans").update({
+    status: "pending_approval",
+    submitted_at: now,
+    submitted_by: actorUserId,
+    decided_at: null,
+    decision_note: null,
+    approver_user_id: firstApprover,
+    notes: resubmitNote || null,
+    updated_by: actorUserId,
+    updated_at: now
+  }).eq("company_id", account.companyId).eq("id", planId).eq("status", "returned");
+  if (submitted.error) throw new Error(submitted.error.message);
+  return "Returned roster sent for approval.";
+}

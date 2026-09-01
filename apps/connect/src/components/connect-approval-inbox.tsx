@@ -3,6 +3,7 @@
 import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ClipboardCheck, Clock3, FileText, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
+import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
 
 type ExpenseItem = {
   id: string;
@@ -107,6 +108,18 @@ type RosterSwapApproval = {
   partnerShift: { id: string; name: string; code: string; start_time: string; end_time: string } | null;
   requesterNote: string | null;
   partnerNote: string | null;
+};
+
+type ReturnedRoster = {
+  planId: string;
+  name: string;
+  stationCode: string;
+  stationName: string;
+  revisionNo: number;
+  periodStart: string;
+  periodEnd: string;
+  returnedNote: string;
+  updatedAt: string;
 };
 
 type ApprovalSection = "time-off" | "attendance" | "rosters" | "location-integrity" | "reimbursements";
@@ -242,6 +255,8 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [attendanceHrApprovals, setAttendanceHrApprovals] = useState<AttendanceApproval[]>([]);
   const [rosterApprovals, setRosterApprovals] = useState<RosterApproval[]>([]);
   const [rosterSwapApprovals, setRosterSwapApprovals] = useState<RosterSwapApproval[]>([]);
+  const [returnedRosters, setReturnedRosters] = useState<ReturnedRoster[]>([]);
+  const [editingReturnedRosterId, setEditingReturnedRosterId] = useState<string | null>(null);
   const [supportPackages, setSupportPackages] = useState<LocationSupportPackage[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -267,6 +282,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       setAttendanceHrApprovals(leavePayload.attendanceHrApprovals ?? []);
       setRosterApprovals(leavePayload.rosterApprovals ?? []);
       setRosterSwapApprovals(leavePayload.rosterSwapApprovals ?? []);
+      setReturnedRosters(leavePayload.returnedRosters ?? []);
       setSupportPackages(leavePayload.locationSupportPackages ?? []);
       setSection((current) => {
         if (current === "time-off" && !(leavePayload.leaveApprovals ?? []).length) {
@@ -376,6 +392,21 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     finally { setSaving(false); }
   }
 
+  async function resubmitReturnedRoster(planId: string) {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/approvals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: account.id, profileType: account.profileType, resubmitRosterPlanId: planId, note: notes[planId] ?? "" })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to resubmit roster.");
+      setNotice(payload.notice); setNotes((current) => ({ ...current, [planId]: "" })); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to resubmit roster."); }
+    finally { setSaving(false); }
+  }
+
   async function decideRosterSwap(requestId: string, decision: "approved" | "rejected") {
     setSaving(true); setError(""); setNotice("");
     try {
@@ -398,7 +429,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   }
 
   const attendanceCount = attendanceApprovals.length + attendanceHrApprovals.length;
-  const rosterCount = rosterApprovals.length + rosterSwapApprovals.length;
+  const rosterCount = rosterApprovals.length + rosterSwapApprovals.length + returnedRosters.length;
   const scopeName = reporteeScope === "immediate" ? "immediate reportees" : "entire reporting team";
 
   function selectReporteeScope(scope: ReporteeScope) {
@@ -630,7 +661,36 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
               />
             </article>
           )) : null}
-          {!rosterSwapApprovals.length && !rosterApprovals.length ? (
+          {returnedRosters.length ? returnedRosters.map((item) => (
+            <article className="dx-approval-card returned" key={item.planId}>
+              <ApprovalHead
+                badge={<span className="dx-approval-badge status-returned">Returned</span>}
+                eyebrow={`${item.stationCode} · v${item.revisionNo}`}
+                meta={`Updated ${dateTime(item.updatedAt)} · edit shifts here, then resubmit`}
+                name={item.name || `${item.stationName || item.stationCode} weekly roster`}
+              />
+              <dl className="dx-approval-facts">
+                <div><dt>Week</dt><dd>{displayDate(item.periodStart)} – {displayDate(item.periodEnd)}</dd></div>
+                <div><dt>Return note</dt><dd>{item.returnedNote || "No note provided"}</dd></div>
+              </dl>
+              <ApprovalNote
+                id={item.planId}
+                notes={notes}
+                onChange={(value) => setNote(item.planId, value)}
+                placeholder="Optional resubmit note for approvers"
+              />
+              <div className="dx-approval-toolbar">
+                <button className="toolbar-return" disabled={saving} onClick={() => setEditingReturnedRosterId(item.planId)} type="button">
+                  <CalendarDays />Edit shifts
+                </button>
+                <button className="toolbar-approve" disabled={saving} onClick={() => void resubmitReturnedRoster(item.planId)} type="button">
+                  <Check />Send for approval
+                </button>
+              </div>
+              {editingReturnedRosterId === item.planId ? <ConnectReturnedRosterEditor account={account} planId={item.planId} onClose={() => { setEditingReturnedRosterId(null); void load(); }} /> : null}
+            </article>
+          )) : null}
+          {!rosterSwapApprovals.length && !rosterApprovals.length && !returnedRosters.length ? (
             <div className="dx-empty"><ArrowLeftRight /><strong>No roster approvals</strong><small>Shift swaps and weekly roster changes assigned to you will appear here.</small></div>
           ) : null}
         </div>
