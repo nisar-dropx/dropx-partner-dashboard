@@ -353,6 +353,10 @@ function permissionsFromForm(formData: FormData): PermissionPayload {
   })).filter((permission) => permission.page_id);
 }
 
+function permissionHasAccess(permission?: PermissionPayload[number] | null) {
+  return Boolean(permission?.can_view || permission?.can_add || permission?.can_edit);
+}
+
 async function assertRoleAssignableForSurface(
   companyId: string,
   roleId: string,
