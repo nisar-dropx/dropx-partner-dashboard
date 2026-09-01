@@ -353,53 +353,6 @@ function permissionsFromForm(formData: FormData): PermissionPayload {
   })).filter((permission) => permission.page_id);
 }
 
-function permissionHasAccess(permission?: PermissionPayload[number] | null) {
-  return Boolean(permission?.can_view || permission?.can_add || permission?.can_edit);
-}
-
-const operationsMasterPageCodes = new Set([
-  "service_network_master",
-  "master_locations",
-  "master_providers",
-  "master_models",
-  "cod_master",
-  "performance_master",
-  "capacity_master"
-]);
-
-function isElevatedOperationsRole(code: string) {
-  return new Set([
-    "OWNER",
-    "TECH",
-    "NATIONAL_HEAD",
-    "PROGRAM_HEAD",
-    "OPS_ADMIN",
-    "OPERATIONS_ADMIN",
-    "OPERATIONS_OWNER",
-    "OPERATIONS_NATIONAL_HEAD",
-    "OPERATIONS_PROGRAM_HEAD"
-  ]).has(code.trim().toUpperCase());
-}
-
-async function assertOperationsMasterPolicy(
-  companyId: string,
-  roleCode: string,
-  submittedPermissions: PermissionPayload
-) {
-  if (!supabaseAdmin || isElevatedOperationsRole(roleCode)) return;
-  const grantedPageIds = submittedPermissions.filter(permissionHasAccess).map((permission) => permission.page_id);
-  if (!grantedPageIds.length) return;
-  const result = await supabaseAdmin
-    .from("app_pages")
-    .select("code")
-    .eq("company_id", companyId)
-    .in("id", grantedPageIds);
-  if (result.error) throw new Error(result.error.message);
-  if ((result.data ?? []).some((page) => operationsMasterPageCodes.has(page.code))) {
-    throw new Error("Operations masters can only be assigned to the Product Owner, Program Head, National Head, Ops Admin, Tech, or Super Admin.");
-  }
-}
-
 async function assertRoleAssignableForSurface(
   companyId: string,
   roleId: string,
@@ -552,8 +505,6 @@ export async function createUserRole(formData: FormData) {
     const parentRoleId = required(formData.get("parent_role_id"), "Reporting role");
     const mode = locationAccessMode(required(formData.get("location_access_mode"), "Location access"));
     const submittedPermissions = permissionsFromForm(formData);
-    await assertOperationsMasterPolicy(companyId, code, submittedPermissions);
-
     await ensureAccessPages(supabaseAdmin, companyId);
     const surface = currentAdminAccessSurface();
     if (!isCompanyOwner(authorization)) {
@@ -647,8 +598,6 @@ export async function updateUserRole(formData: FormData) {
     if (existingRoleError) throw new Error(existingRoleError.message);
     if (existingRole?.is_system || existingRole?.code === "OWNER") throw new Error("OWNER cannot be edited.");
     const submittedPermissions = permissionsFromForm(formData);
-    await assertOperationsMasterPolicy(companyId, existingRole.code, submittedPermissions);
-
     const isLocationRole = existingRole?.code === "LOCATION";
     const name = isLocationRole
       ? existingRole.name
