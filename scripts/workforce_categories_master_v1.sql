@@ -25,7 +25,7 @@ create index if not exists workforce_categories_company_active_idx
 with category_seed(code, name, sort_order) as (
   values
     ('employees', 'Employees', 10),
-    ('field_executives', 'Field Executives', 20),
+    ('workforce', 'Workforce', 20),
     ('contractors', 'Independent Contractor', 30),
     ('vendors', 'Vendors', 40),
     ('workers', 'Workers', 50)
