@@ -30,6 +30,12 @@ export async function loadWorkforceCategoryRules(
       );
     }
   }
+  if (fallbackDesignationRules != null) {
+    return {
+      dropx_one: { enabled: [], required: [] },
+      dashboard: { enabled: [], required: [] }
+    };
+  }
   return profileFieldRulesForCategory(fallbackDesignationRules, categoryCode, fallbackCategory);
 }
 

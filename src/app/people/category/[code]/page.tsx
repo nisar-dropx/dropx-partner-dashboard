@@ -8,8 +8,8 @@ import { ScopedDesignationFields } from "@/components/scoped-designation-fields"
 import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 import { PendingLink } from "@/components/pending-link";
-import { DirectActivationProfileFields } from "@/components/direct-activation-profile-fields";
-import { normalizeCategoryProfileFieldRules } from "@/lib/profile-field-rules";
+import { DynamicWorkforceRegistrationFields } from "@/components/dynamic-workforce-registration-fields";
+import { intersectProfileFieldChannelRules, normalizeCategoryProfileFieldRules, profileFieldRulesForCategory } from "@/lib/profile-field-rules";
 import { workforceProfileFields } from "@/lib/profile-field-rules";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
@@ -48,6 +48,7 @@ type DesignationRow = {
   onboarding_categories: string[] | null;
   onboarding_role_ids?: string[] | null;
   portal_permissions?: unknown;
+  profile_field_rules?: unknown;
 };
 
 type ProfileRow = {
@@ -176,7 +177,7 @@ export async function DynamicWorkforceCategoryPageContent({
       .order("station_code"),
     supabaseAdmin
       .from("designations")
-      .select("id, code, name, model_ids, onboarding_categories, onboarding_role_ids, portal_permissions")
+      .select("id, code, name, model_ids, onboarding_categories, onboarding_role_ids, portal_permissions, profile_field_rules")
       .eq("company_id", companyId)
       .eq("is_active", true)
       .order("name")
@@ -201,6 +202,7 @@ export async function DynamicWorkforceCategoryPageContent({
     helper: first(location.providers)?.name || location.station_name || undefined,
     modelId: location.location_model_id
   }));
+  const categoryProfileRules = normalizeCategoryProfileFieldRules(category.profile_field_rules);
   const designationOptions = designations
     .filter((designation) => canAccessDesignationPortal(designation, accessSurface, "add", { isOwner: accessSurface === "dashboard" && ownerAccess }))
     .filter((designation) => canOnboardDesignation(designation, authorization))
@@ -208,7 +210,11 @@ export async function DynamicWorkforceCategoryPageContent({
     value: designation.name,
     label: designation.name,
     helper: designation.code,
-    modelIds: designation.model_ids ?? []
+    modelIds: designation.model_ids ?? [],
+    dashboardRules: intersectProfileFieldChannelRules(
+      categoryProfileRules,
+      profileFieldRulesForCategory(designation.profile_field_rules, code, code)
+    ).dashboard
   }));
   const rows: FieldExecutiveListRow[] = ((profileResult.data ?? []) as unknown as ProfileRow[])
     .filter((profile) => authorization.hasAllLocationAccess || authorization.locationScopeIds.includes(profile.location_id))
@@ -235,8 +241,15 @@ export async function DynamicWorkforceCategoryPageContent({
     profile.id === (searchParams?.view ?? searchParams?.edit) &&
     (authorization.hasAllLocationAccess || authorization.locationScopeIds.includes(profile.location_id))
   )) ?? null;
-  const dashboardRules = normalizeCategoryProfileFieldRules(category.profile_field_rules).dashboard;
+  const selectedDesignation = designations.find((designation) => designation.name === selectedProfile?.designation);
+  const dashboardRules = selectedDesignation
+    ? intersectProfileFieldChannelRules(
+      categoryProfileRules,
+      profileFieldRulesForCategory(selectedDesignation.profile_field_rules, code, code)
+    ).dashboard
+    : { enabled: [], required: [] };
   const enabledFields = workforceProfileFields.filter((field) => dashboardRules.enabled.includes(field.key));
+  const requiredFields = new Set(dashboardRules.required);
   const canEdit = hasPermission(authorization, pageCode, "edit");
   const entityLabel = singularCategoryLabel(category.name);
   const error = searchParams?.error ?? provisionResult.error?.message ?? locationsResult.error?.message ?? designationsResult.error?.message ?? profileResult.error?.message;
@@ -274,14 +287,23 @@ export async function DynamicWorkforceCategoryPageContent({
             </label>
             <label>Email<input className="field" defaultValue={searchParams?.email ?? ""} name="email" placeholder="Enter email" required type="email" /></label>
             <label>Date of join<input className="field" defaultValue={searchParams?.date_of_join ?? ""} name="date_of_join" required type="date" /></label>
-            <ScopedDesignationFields
-              designationName="designation"
-              designationOptions={designationOptions}
-              initialDesignation={searchParams?.designation}
-              initialLocationId={searchParams?.location_id}
-              locationName="location_id"
-              locationOptions={locationOptions}
-            />
+            {category.direct_activate ? (
+              <DynamicWorkforceRegistrationFields
+                designationOptions={designationOptions}
+                initialDesignation={searchParams?.designation}
+                initialLocationId={searchParams?.location_id}
+                locationOptions={locationOptions}
+              />
+            ) : (
+              <ScopedDesignationFields
+                designationName="designation"
+                designationOptions={designationOptions}
+                initialDesignation={searchParams?.designation}
+                initialLocationId={searchParams?.location_id}
+                locationName="location_id"
+                locationOptions={locationOptions}
+              />
+            )}
             {category.statutory_enabled ? (
               <fieldset className="statutory-fieldset">
                 <legend>Statutory applicability</legend>
@@ -290,7 +312,6 @@ export async function DynamicWorkforceCategoryPageContent({
                 <label className="check-option"><input name="statutory_applicability" type="checkbox" value="esi" /> ESI</label>
               </fieldset>
             ) : null}
-            {category.direct_activate ? <DirectActivationProfileFields rules={normalizeCategoryProfileFieldRules(category.profile_field_rules).dashboard} /> : null}
             <div className="form-actions align-right field-executive-submit-slot dynamic-workforce-submit-slot">
               <SubmitButton disabled={Boolean(provisionResult.error) || !locationOptions.length || !designationOptions.length} disabledText={provisionResult.error ? "Database setup required" : !locationOptions.length ? "Add location first" : "Add designation first"}>
                 {category.direct_activate ? "Add and activate" : "Add profile"}
@@ -354,10 +375,10 @@ export async function DynamicWorkforceCategoryPageContent({
               {enabledFields.map((field) => {
                 const name = fieldColumnNames[field.key] ?? field.key;
                 const pathColumn = uploadColumns[field.key];
-                if (pathColumn) return <label key={field.key}>{field.label}<input className="field" name={`${field.key === "profile_photo" ? "profile_photo" : field.key}_file`} type="file" />{selectedProfile[pathColumn] ? <small>Current file available</small> : null}</label>;
-                if (field.key === "gender") return <label key={field.key}>{field.label}<select className="field" defaultValue={selectedProfile.gender ?? ""} name={name}><option value="">Select gender</option><option>Male</option><option>Female</option><option>Other</option></select></label>;
-                if (field.key === "is_handicapped") return <label key={field.key}>{field.label}<select className="field" defaultValue={typeof selectedProfile.is_handicapped === "boolean" ? String(selectedProfile.is_handicapped) : ""} name={name}><option value="">Select</option><option value="false">No</option><option value="true">Yes</option></select></label>;
-                return <label className={field.key === "address" ? "span-3" : undefined} key={field.key}>{field.label}<input className="field" defaultValue={displayValue(selectedProfile[name as keyof ProfileRow]) === "-" ? "" : String(selectedProfile[name as keyof ProfileRow])} name={name} type={field.kind === "date" ? "date" : "text"} /></label>;
+                if (pathColumn) return <label key={field.key}>{field.label}<input className="field" name={`${field.key === "profile_photo" ? "profile_photo" : field.key}_file`} required={requiredFields.has(field.key) && !selectedProfile[pathColumn]} type="file" />{selectedProfile[pathColumn] ? <small>Current file available</small> : null}</label>;
+                if (field.key === "gender") return <label key={field.key}>{field.label}<select className="field" defaultValue={selectedProfile.gender ?? ""} name={name} required={requiredFields.has(field.key)}><option value="">Select gender</option><option>Male</option><option>Female</option><option>Other</option></select></label>;
+                if (field.key === "is_handicapped") return <label key={field.key}>{field.label}<select className="field" defaultValue={typeof selectedProfile.is_handicapped === "boolean" ? String(selectedProfile.is_handicapped) : ""} name={name} required={requiredFields.has(field.key)}><option value="">Select</option><option value="false">No</option><option value="true">Yes</option></select></label>;
+                return <label className={field.key === "address" ? "span-3" : undefined} key={field.key}>{field.label}<input className="field" defaultValue={displayValue(selectedProfile[name as keyof ProfileRow]) === "-" ? "" : String(selectedProfile[name as keyof ProfileRow])} name={name} required={requiredFields.has(field.key)} type={field.kind === "date" ? "date" : "text"} /></label>;
               })}
               <label>Status<select className="field" defaultValue={String(selectedProfile.is_active)} name="is_active"><option value="true">Active</option><option value="false">Inactive</option></select></label>
               <div className="form-actions span-3 align-right"><SubmitButton>Save changes</SubmitButton></div>
