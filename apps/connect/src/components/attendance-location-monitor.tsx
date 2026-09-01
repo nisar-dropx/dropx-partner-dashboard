@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import { readResilientPosition } from "@/lib/read-geolocation";
 
 type Account = { id: string; profileType: string };
 
@@ -23,7 +22,21 @@ function integrityPayload() {
   };
 }
 
-const readPosition = readResilientPosition;
+function readPosition(maximumAge = 30_000): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Location is not supported on this device."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, (error) => {
+      reject(new Error(error.message || "Unable to read device location."));
+    }, {
+      enableHighAccuracy: true,
+      maximumAge,
+      timeout: 20_000
+    });
+  });
+}
 
 async function postBiometricPunchLocation(
   account: Account,

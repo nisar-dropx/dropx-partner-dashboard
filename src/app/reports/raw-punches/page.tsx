@@ -55,15 +55,6 @@ type AlertRow = {
   raw_event_id: string | null;
 };
 
-type EnrolmentLookupRow = {
-  account_id: string | null;
-  employee_id: string | null;
-  enrolment_id: string;
-  field_executive_id: string | null;
-  profile_type: string | null;
-  status: string | null;
-};
-
 type WorkerRow = { id: string; code: string | null; full_name: string | null };
 
 function positiveInteger(value: string | undefined, fallback: number) {
@@ -75,11 +66,6 @@ function safeSearch(value: string | undefined) {
   return String(value ?? "").replace(/[,%()]/g, " ").trim();
 }
 
-function normalizeEnrolmentId(value: unknown) {
-  const digits = String(value ?? "").replace(/\D/g, "");
-  return digits ? digits.replace(/^0+/, "") || "0" : "";
-}
-
 function pageHref(params: Params, page: number) {
   const next = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -89,19 +75,13 @@ function pageHref(params: Params, page: number) {
   return `/reports/raw-punches?${next}`;
 }
 
-function resultLabel(
-  punch: PunchResultRow | undefined,
-  alert: AlertRow | undefined,
-  enrolment: EnrolmentLookupRow | undefined
-) {
+function resultLabel(punch: PunchResultRow | undefined, alert: AlertRow | undefined) {
   if (punch?.calculated) return "Recorded";
-  if (punch && !punch.calculated && String(punch.worker_status).toLowerCase() === "active") return "Held for review";
   if (punch && !punch.calculated) return "Inactive worker";
   if (alert?.alert_type === "unknown_enrolment") return "Unmapped ID";
   if (alert?.alert_type === "duplicate_enrolment_id") return "Duplicate ID";
   if (alert?.alert_type === "bad_timelog") return "Invalid punch";
-  if (enrolment) return "Awaiting processing";
-  return alert ? "Rejected" : "Unmapped ID";
+  return alert ? "Rejected" : "Raw only";
 }
 
 export default async function RawPunchesPage({ searchParams = {} }: { searchParams?: Params }) {
@@ -117,7 +97,6 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
   let error: string | null = null;
   const punchByRawEvent = new Map<string, PunchResultRow>();
   const alertByRawEvent = new Map<string, AlertRow>();
-  const enrolmentById = new Map<string, EnrolmentLookupRow>();
   const workerByKey = new Map<string, WorkerRow>();
   const locationById = new Map<string, string>();
 
@@ -178,8 +157,7 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
 
     if (!error && rows.length) {
       const rawEventIds = rows.map((row) => row.id);
-      const rawEnrolmentIds = Array.from(new Set(rows.map((row) => normalizeEnrolmentId(row.enrolment_id)).filter(Boolean)));
-      const [punchResult, alertResult, enrolmentResult] = await Promise.all([
+      const [punchResult, alertResult] = await Promise.all([
         supabaseAdmin
           .from("attendance_punches")
           .select("raw_event_id, profile_type, account_id, employee_id, field_executive_id, worker_status, calculated")
@@ -190,30 +168,17 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
           .select("raw_event_id, alert_type, message")
           .eq("company_id", companyId)
           .in("raw_event_id", rawEventIds)
-          .order("created_at", { ascending: false }),
-        rawEnrolmentIds.length
-          ? supabaseAdmin
-            .from("biometric_enrolments")
-            .select("enrolment_id, profile_type, account_id, employee_id, field_executive_id, status")
-            .eq("company_id", companyId)
-            .in("enrolment_id", rawEnrolmentIds)
-            .is("effective_to", null)
-          : Promise.resolve({ data: [], error: null })
+          .order("created_at", { ascending: false })
       ]);
 
-      if (punchResult.error || alertResult.error || enrolmentResult.error) {
-        error = punchResult.error?.message ?? alertResult.error?.message ?? enrolmentResult.error?.message ?? "Unable to load punch processing results.";
+      if (punchResult.error || alertResult.error) {
+        error = punchResult.error?.message ?? alertResult.error?.message ?? "Unable to load punch processing results.";
       } else {
         ((punchResult.data ?? []) as PunchResultRow[]).forEach((item) => {
           if (item.raw_event_id) punchByRawEvent.set(item.raw_event_id, item);
         });
         ((alertResult.data ?? []) as AlertRow[]).forEach((item) => {
           if (item.raw_event_id && !alertByRawEvent.has(item.raw_event_id)) alertByRawEvent.set(item.raw_event_id, item);
-        });
-        ((enrolmentResult.data ?? []) as EnrolmentLookupRow[]).forEach((item) => {
-          const key = normalizeEnrolmentId(item.enrolment_id);
-          const current = enrolmentById.get(key);
-          if (!current || String(item.status).toLowerCase() === "active") enrolmentById.set(key, item);
         });
 
         const idsByProfile = new Map<string, Set<string>>();
@@ -224,17 +189,9 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
           if (!idsByProfile.has(profileType)) idsByProfile.set(profileType, new Set());
           idsByProfile.get(profileType)!.add(id);
         });
-        enrolmentById.forEach((item) => {
-          const profileType = item.profile_type ?? (item.employee_id ? "employee" : "field_executive");
-          const id = item.account_id ?? item.employee_id ?? item.field_executive_id;
-          if (!id) return;
-          if (!idsByProfile.has(profileType)) idsByProfile.set(profileType, new Set());
-          idsByProfile.get(profileType)!.add(id);
-        });
 
         const tableByProfile: Record<string, { table: string; code: string }> = {
           employee: { table: "employees", code: "employee_code" },
-          workforce: { table: "workforce", code: "dropx_id" },
           field_executive: { table: "field_executives", code: "dropx_id" },
           contractor: { table: "contractors", code: "dropx_id" },
           vendor: { table: "vendors", code: "dropx_id" },
@@ -292,21 +249,12 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
             const device = row.device_id ? deviceById.get(row.device_id) : undefined;
             const punch = punchByRawEvent.get(row.id);
             const alert = alertByRawEvent.get(row.id);
-            const enrolment = enrolmentById.get(normalizeEnrolmentId(row.enrolment_id));
-            const profileType = punch?.profile_type ?? enrolment?.profile_type ??
-              (punch?.employee_id || enrolment?.employee_id ? "employee" : null);
-            const accountId = punch?.account_id ?? punch?.employee_id ?? punch?.field_executive_id ??
-              enrolment?.account_id ?? enrolment?.employee_id ?? enrolment?.field_executive_id;
+            const profileType = punch
+              ? punch.profile_type ?? (punch.employee_id ? "employee" : "field_executive")
+              : null;
+            const accountId = punch?.account_id ?? punch?.employee_id ?? punch?.field_executive_id;
             const worker = accountId && profileType ? workerByKey.get(`${profileType}:${accountId}`) : undefined;
-            const result = resultLabel(punch, alert, enrolment);
-            const resultClass = result === "Recorded" ? "good" : ["Held for review", "Awaiting processing"].includes(result) ? "warn" : "bad";
-            const reason = alert?.message || (punch?.calculated
-              ? "Included in attendance."
-              : punch
-                ? "Mapped punch is held for attendance integrity review."
-                : enrolment
-                  ? "Profile is mapped; attendance processing is pending."
-                  : "No active biometric profile mapping was found.");
+            const result = resultLabel(punch, alert);
             return <tr key={row.id}>
               <td><strong>{formatDashboardDateTime(row.punch_time ?? row.received_at ?? row.created_at)}</strong><small>Received {formatDashboardDateTime(row.created_at)}</small></td>
               <td>{device?.location_id ? locationById.get(device.location_id) || "-" : "-"}</td>
@@ -314,8 +262,8 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
               <td><strong>{row.enrolment_id || "-"}</strong><small>{profileType?.replaceAll("_", " ") || "Unmapped"}</small></td>
               <td><strong>{worker?.full_name || "Profile not mapped"}</strong><small>{worker?.code || "-"}</small></td>
               <td><strong>{row.trans_id || "-"}</strong><small>{row.terminal_id || "No terminal ID"}</small></td>
-              <td><span className={`status-pill ${resultClass}`}>{result}</span></td>
-              <td>{reason}</td>
+              <td><span className={`status-pill ${result === "Recorded" ? "good" : result === "Raw only" ? "warn" : "bad"}`}>{result}</span></td>
+              <td>{alert?.message || (punch?.calculated ? "Included in attendance." : "Received but no attendance record was created.")}</td>
             </tr>;
           })}
           {!rows.length ? <tr><td className="empty-cell" colSpan={8}>No raw punch records found.</td></tr> : null}

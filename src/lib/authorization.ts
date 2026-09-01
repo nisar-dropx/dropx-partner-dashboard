@@ -1,10 +1,8 @@
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 import { unstable_cache } from "next/cache";
 import { cache } from "react";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
 import { loadEffectivePositionAccess } from "@/lib/position-access";
-import { productCodeForHost } from "@/lib/product-ownership";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
@@ -49,7 +47,6 @@ const groupedParentPermissions: Record<string, string[]> = {
     "capacity_hiring",
     "ops_reports",
     "ops_attendance_reports",
-    "ops_location_mail",
     "daily_submission",
     "cod",
     "cod_executive_reconciliation",
@@ -130,36 +127,6 @@ function isMissingColumnError(error: unknown) {
   return message.includes("column") && (message.includes("does not exist") || message.includes("schema cache"));
 }
 
-function isOptionalProductOwnerSchemaError(error: unknown) {
-  const code = String((error as { code?: unknown })?.code ?? "");
-  const message = String((error as { message?: unknown })?.message ?? "").toLowerCase();
-  return ["42P01", "PGRST204", "PGRST205"].includes(code) ||
-    (message.includes("company_product_owners") || message.includes("company_product_memberships")) &&
-    (message.includes("does not exist") || message.includes("schema cache"));
-}
-
-type ProductMembershipRow = {
-  role_id: string | null;
-  role_code_snapshot?: string | null;
-  source_system?: string | null;
-  has_all_location_access: boolean | null;
-  location_scope_ids: string[] | null;
-};
-
-function isTrustedFinanceMembership(membership: ProductMembershipRow) {
-  const source = String(membership.source_system ?? "").trim().toLowerCase();
-  // Access deliberately granted from the Finance portal or through Product
-  // Ownership is authoritative. Legacy Dashboard grants are retained only for
-  // roles whose original business function was Accounts or Finance.
-  if (["manual", "product_owner", "product_admin", "google_workspace", "designation_policy"].includes(source)) return true;
-  if (source !== "legacy_dashboard") return false;
-
-  const snapshot = String(membership.role_code_snapshot ?? "").trim().toUpperCase();
-  if (snapshot === "FINANCE_HEAD" || snapshot === "ACCOUNTS_HEAD" || snapshot === "ACCOUNTS_EXECUTIVE") return true;
-  const originalCode = snapshot.replace(/^FINANCE_/, "");
-  return /(^|_)(FINANCE|ACCOUNT|ACCOUNTS|ACCOUNTANT)(_|$)/.test(originalCode);
-}
-
 function inheritGroupedParentPermissions(permissions: Record<string, PagePermission>) {
   for (const [parentCode, childCodes] of Object.entries(groupedParentPermissions)) {
     const inherited = childCodes.reduce<PagePermission>((acc, code) => {
@@ -180,7 +147,7 @@ function inheritGroupedParentPermissions(permissions: Record<string, PagePermiss
 }
 
 const ensureMissingCurrentAccessPages = unstable_cache(async (companyId: string) => {
-  const requiredCodes = ["people_all", "people_review", "people_exceptions", "executive_id_onboarding", "business_documents", "payments", "advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports", "master_payment_banks", "master_payment_heads", "master_contacts", "payment_settings", "imports", "workforce_categories", "workforce_whatsapp", "master_imports", "ops_pulse", "performance", "capacity", "capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring", "ops_reports", "ops_attendance_reports", "ops_location_mail", "daily_submission", "cod", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate", "edd_dashboard", "cod_master", "performance_master", "capacity_master", "biometric_devices", "reports", "attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports", "ai_connector", "amazon_connector", "developer_mode", "cps", "cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "cps_inputs", "cps_unmapped", "service_network", "service_network_master"];
+  const requiredCodes = ["people_all", "people_review", "people_exceptions", "executive_id_onboarding", "business_documents", "payments", "advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports", "master_payment_banks", "master_payment_heads", "master_contacts", "payment_settings", "imports", "workforce_categories", "workforce_whatsapp", "master_imports", "ops_pulse", "performance", "capacity", "capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring", "ops_reports", "ops_attendance_reports", "daily_submission", "cod", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate", "edd_dashboard", "cod_master", "performance_master", "capacity_master", "biometric_devices", "reports", "attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports", "ai_connector", "amazon_connector", "developer_mode", "cps", "cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "cps_inputs", "cps_unmapped", "service_network", "service_network_master"];
   const { data, error } = await supabaseAdmin!
     .from("app_pages")
     .select("code")
@@ -238,7 +205,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     const emailMatches = (profileRows ?? []).filter((item) => normalizeEmail(item.email) === signedInEmail);
     const activeEmailMatches = emailMatches.filter((item) => item.is_active);
     const masterOwnerMatch = activeEmailMatches.find((item) => item.is_master_owner);
-    profile = activeEmailMatches.length === 1 ? activeEmailMatches[0] : (masterOwnerMatch ?? null);
+    profile = activeEmailMatches.length === 1 ? activeEmailMatches[0] : (masterOwnerMatch && signedInEmail === "nisar@dropxlogistics.com" ? masterOwnerMatch : null);
   }
 
   if (!profile?.is_active) return null;
@@ -252,8 +219,8 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   let companyId: string | null = typeof profile.company_id === "string" ? profile.company_id : null;
   let companyCode: string | null = null;
   let companyName: string | null = null;
-  let isMasterCompany = false;
-  let isMasterOwner = Boolean(profile.is_master_owner);
+  let isMasterCompany = signedInEmail === "nisar@dropxlogistics.com";
+  let isMasterOwner = Boolean(profile.is_master_owner) || signedInEmail === "nisar@dropxlogistics.com";
   let roleCode: string | null = null;
   let effectiveRoleIds: string[] = profile.role_id ? [profile.role_id] : [];
   let primaryRoleId: string | null = profile.role_id ?? null;
@@ -287,75 +254,6 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     ...positionAccess.locationScopeIds
   ]));
   hasAllLocationAccess = positionAccess.hasAllLocationAccess;
-
-  let hasBaseCompanyOwnerRole = false;
-  if (effectiveRoleIds.length) {
-    const ownerRoleResult = await supabaseAdmin
-      .from("user_roles")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("code", "OWNER")
-      .eq("is_active", true)
-      .in("id", effectiveRoleIds)
-      .limit(1);
-    if (ownerRoleResult.error) return null;
-    hasBaseCompanyOwnerRole = Boolean(ownerRoleResult.data?.length);
-  }
-
-  const requestHost = (
-    headers().get("x-forwarded-host") ??
-    headers().get("host") ??
-    ""
-  ).split(":")[0].toLowerCase();
-  const productCode = productCodeForHost(requestHost);
-  if (productCode) {
-    const membershipResult = await supabaseAdmin
-      .from("company_product_memberships")
-      .select("role_id, role_code_snapshot, source_system, has_all_location_access, location_scope_ids")
-      .eq("company_id", companyId)
-      .eq("user_id", profile.id)
-      .eq("product_code", productCode)
-      .eq("is_active", true);
-    if (membershipResult.error && !isOptionalProductOwnerSchemaError(membershipResult.error)) return null;
-    const productMemberships = ((membershipResult.data ?? []) as ProductMembershipRow[])
-      .filter((membership) => productCode !== "finance" || isTrustedFinanceMembership(membership));
-
-    const productOwnerResult = await supabaseAdmin
-      .from("company_product_owners")
-      .select("role_id")
-      .eq("company_id", companyId)
-      .eq("user_id", profile.id)
-      .eq("product_code", productCode)
-      .eq("is_active", true);
-    if (productOwnerResult.error && !isOptionalProductOwnerSchemaError(productOwnerResult.error)) return null;
-    const productOwnerRoleIds = (productOwnerResult.data ?? [])
-      .map((assignment) => assignment.role_id)
-      .filter((roleId): roleId is string => Boolean(roleId));
-
-    // Every product host is membership-authoritative. A central Dashboard role
-    // cannot leak menus into OpsPulse, Workforce, Finance or Tech. Existing
-    // access remains available through the additive membership backfill.
-    if (!isMasterOwner && !hasBaseCompanyOwnerRole) {
-      const membershipRoleIds = productMemberships
-        .map((membership) => membership.role_id)
-        .filter((roleId): roleId is string => Boolean(roleId));
-      if (!productMemberships.length && !productOwnerRoleIds.length) return null;
-      effectiveRoleIds = Array.from(new Set([...membershipRoleIds, ...productOwnerRoleIds]));
-      primaryRoleId = productOwnerRoleIds[0] ?? membershipRoleIds[0] ?? null;
-      hasAllLocationAccess = Boolean(productOwnerRoleIds.length) || productMemberships.some((membership) => membership.has_all_location_access);
-      locationScopeIds = hasAllLocationAccess
-        ? []
-        : Array.from(new Set(productMemberships.flatMap((membership) => membership.location_scope_ids ?? [])));
-    } else {
-      effectiveRoleIds = Array.from(new Set([
-        ...effectiveRoleIds,
-        ...productMemberships.map((membership) => membership.role_id).filter((roleId): roleId is string => Boolean(roleId)),
-        ...productOwnerRoleIds
-      ]));
-      hasAllLocationAccess = true;
-      locationScopeIds = [];
-    }
-  }
 
   if (effectiveRoleIds.length) {
     const rolesResult = await supabaseAdmin

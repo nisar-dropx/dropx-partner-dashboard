@@ -51,6 +51,18 @@ type FieldOperationsDesignationRow = {
   name: string;
 };
 
+type WorkforceRow = {
+  id: string;
+  source_profile_type: "employee" | "contractor" | "field_executive" | string | null;
+  source_profile_id: string | null;
+  full_name: string;
+  date_of_join: string | null;
+  location_id: string | null;
+  dropx_id: string | null;
+  is_active: boolean;
+  deleted_at: string | null;
+};
+
 type MappingRow = {
   id: string;
   field_executive_id: string | null;
@@ -121,7 +133,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
   }
 
   const companyId = requireCompanyId(authorization);
-  const [locationsResult, executivesResult, employeesResult, contractorsResult, designationsResult, mappingsResult, paymentMethodsResult] = await Promise.all([
+  const [locationsResult, executivesResult, employeesResult, contractorsResult, workforceResult, designationsResult, mappingsResult, paymentMethodsResult] = await Promise.all([
     supabaseAdmin
       .from("stations")
       .select("id, station_code, station_name, provider_id")
@@ -139,22 +151,23 @@ async function loadMappingData(authorization: AuthorizationContext) {
         is_active
       `)
       .eq("company_id", companyId)
-      .eq("is_active", true)
       .order("full_name"),
     supabaseAdmin
       .from("employees")
-      .select("id, full_name, date_of_join, location_id, employee_code, is_active, designations!inner(is_field_operations)")
+      .select("id, full_name, date_of_join, location_id, employee_code, is_active")
       .eq("company_id", companyId)
-      .eq("is_active", true)
       .is("deleted_at", null)
-      .eq("designations.is_field_operations", true)
       .order("full_name"),
     supabaseAdmin
       .from("contractors")
       .select("id, full_name, date_of_join, location_id, dropx_id, designation, is_active")
       .eq("company_id", companyId)
-      .eq("is_active", true)
       .is("deleted_at", null)
+      .order("full_name"),
+    supabaseAdmin
+      .from("workforce")
+      .select("id, source_profile_type, source_profile_id, full_name, date_of_join, location_id, dropx_id, is_active, deleted_at")
+      .eq("company_id", companyId)
       .order("full_name"),
     supabaseAdmin
       .from("designations")
@@ -255,8 +268,11 @@ async function loadMappingData(authorization: AuthorizationContext) {
       .flatMap((designation) => [designation.code, designation.name])
       .map((value) => value.trim().toLowerCase())
   );
-  const workers = [
-    ...((employeesResult.data ?? []) as unknown as EmployeeRow[]).filter((employee) => isAllocatedLocation(employee.location_id)).map((employee) => ({
+  const legacyWorkers = [
+    ...((employeesResult.data ?? []) as unknown as EmployeeRow[]).filter((employee) =>
+      isAllocatedLocation(employee.location_id) &&
+      (employee.is_active || latestMappingByWorkerKey.has(`employee:${employee.id}`))
+    ).map((employee) => ({
       id: employee.id,
       sourceType: "employee" as const,
       fullName: employee.full_name,
@@ -265,7 +281,13 @@ async function loadMappingData(authorization: AuthorizationContext) {
       dropxId: employee.employee_code ?? ""
     })),
     ...((contractorsResult.data ?? []) as ContractorRow[])
-      .filter((contractor) => isAllocatedLocation(contractor.location_id) && fieldOperationsDesignationKeys.has((contractor.designation ?? "").trim().toLowerCase()))
+      .filter((contractor) =>
+        isAllocatedLocation(contractor.location_id) &&
+        (
+          latestMappingByWorkerKey.has(`contractor:${contractor.id}`) ||
+          (contractor.is_active && fieldOperationsDesignationKeys.has((contractor.designation ?? "").trim().toLowerCase()))
+        )
+      )
       .map((contractor) => ({
         id: contractor.id,
         sourceType: "contractor" as const,
@@ -274,7 +296,10 @@ async function loadMappingData(authorization: AuthorizationContext) {
         locationId: contractor.location_id ?? "",
         dropxId: contractor.dropx_id ?? ""
       })),
-    ...((executivesResult.data ?? []) as ExecutiveRow[]).filter((executive) => isAllocatedLocation(executive.location_id)).map((executive) => ({
+    ...((executivesResult.data ?? []) as ExecutiveRow[]).filter((executive) =>
+      isAllocatedLocation(executive.location_id) &&
+      (executive.is_active || latestMappingByWorkerKey.has(`field_executive:${executive.id}`))
+    ).map((executive) => ({
       id: executive.id,
       sourceType: "field_executive" as const,
       fullName: executive.full_name,
@@ -283,6 +308,47 @@ async function loadMappingData(authorization: AuthorizationContext) {
       dropxId: executive.dropx_id || executiveDropxId(executive.id)
     }))
   ];
+  const workforceRows = (workforceResult.data ?? []) as unknown as WorkforceRow[];
+  const canonicalWorkers = workforceRows
+    .filter((worker) =>
+      Boolean(worker.source_profile_id) &&
+      (worker.source_profile_type === "employee" || worker.source_profile_type === "contractor" || worker.source_profile_type === "field_executive") &&
+      (worker.is_active || latestMappingByWorkerKey.has(`${worker.source_profile_type}:${worker.source_profile_id}`)) &&
+      isAllocatedLocation(worker.location_id)
+    )
+    .map((worker) => ({
+      id: worker.source_profile_id!,
+      sourceType: worker.source_profile_type as "employee" | "contractor" | "field_executive",
+      fullName: worker.full_name,
+      dateOfJoin: worker.date_of_join ?? new Date().toISOString().slice(0, 10),
+      locationId: worker.location_id ?? "",
+      dropxId: worker.dropx_id ?? ""
+    }));
+  const workersBySource = [...legacyWorkers, ...canonicalWorkers].reduce((bySource, worker) => {
+      bySource.set(`${worker.sourceType}:${worker.id}`, worker);
+      return bySource;
+    }, new Map<string, (typeof legacyWorkers)[number]>());
+  const workforceByReferenceId = new Map<string, WorkforceRow>();
+  workforceRows.forEach((worker) => {
+    workforceByReferenceId.set(worker.id, worker);
+    if (worker.source_profile_id) workforceByReferenceId.set(worker.source_profile_id, worker);
+  });
+  latestMappingByWorkerKey.forEach((mapping, key) => {
+    if (workersBySource.has(key)) return;
+    const separator = key.indexOf(":");
+    const sourceType = key.slice(0, separator) as "employee" | "contractor" | "field_executive";
+    const id = key.slice(separator + 1);
+    const workforce = workforceByReferenceId.get(id);
+    workersBySource.set(key, {
+      id,
+      sourceType,
+      fullName: workforce?.full_name ?? "Mapped workforce member",
+      dateOfJoin: workforce?.date_of_join ?? mapping.effective_from,
+      locationId: workforce?.location_id ?? mapping.station_id ?? "",
+      dropxId: workforce?.dropx_id ?? ""
+    });
+  });
+  const workers = Array.from(workersBySource.values());
 
   const mappings = workers.map((worker) => {
       const mapping = latestMappingByWorkerKey.get(`${worker.sourceType}:${worker.id}`);
@@ -315,7 +381,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
     locations,
     mappings,
     paymentMethods,
-    error: mappingsResult.error?.message || employeesResult.error?.message || contractorsResult.error?.message || designationsResult.error?.message || executivesResult.error?.message || locationsResult.error?.message || paymentMethodsResult.error?.message || null
+    error: mappingsResult.error?.message || employeesResult.error?.message || contractorsResult.error?.message || workforceResult.error?.message || designationsResult.error?.message || executivesResult.error?.message || locationsResult.error?.message || paymentMethodsResult.error?.message || null
   };
 }
 

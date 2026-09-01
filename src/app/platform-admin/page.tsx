@@ -1,7 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
@@ -277,8 +276,7 @@ export default async function PlatformAdminPage({
 }: {
   searchParams?: { add?: string; edit?: string; addUser?: string; editUser?: string; q?: string };
 }) {
-  const authorization = await requirePagePermission("company_master", "access");
-  if (!authorization.isMasterOwner) redirect("/unauthorized?page=platform_masters&reason=super_admin_only");
+  await requirePagePermission("company_master", "access");
   const { companies, moduleRows, controlUsers, error } = await loadPlatformData();
   const flash = loadFlash();
   const query = String(searchParams?.q ?? "").trim().toLowerCase();
@@ -296,15 +294,15 @@ export default async function PlatformAdminPage({
         <div className="platform-admin-brand">
           <Image src="/dropx-logo.png" alt="DropX" width={112} height={40} priority />
           <div>
-            <p className="eyebrow">Super Admin</p>
-            <h1>Platform Masters</h1>
+            <p className="eyebrow">Platform Admin</p>
+            <h1>Company Control Panel</h1>
           </div>
         </div>
         <div className="platform-admin-actions">
           <span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>
             {isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}
           </span>
-          <Link href="https://dashboard.dropxlogistics.com/" className="button secondary compact">Dashboard</Link>
+          <Link href="https://dashboard.dropxlogistics.com/dashboard" className="button secondary compact">Dashboard</Link>
           <form action={signOut} className="platform-signout-form">
             <button className="button secondary compact" type="submit">Sign out</button>
           </form>

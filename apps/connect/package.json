@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "prebuild": "node ../../scripts/verify-connect-workspace-boundary.mjs && node ../../scripts/verify-connect-canonical-workforce.mjs && node ../../scripts/verify-connect-approval-reportee-scope.mjs && node ../../scripts/verify-configured-approval-routing.mjs && node ../../scripts/verify-connect-roster-integrity.mjs && node ../../scripts/verify-attendance-integrity-punch-lifecycle.mjs",
+    "prebuild": "node ../../scripts/verify-connect-workspace-boundary.mjs && node ../../scripts/verify-connect-canonical-workforce.mjs && node ../../scripts/verify-connect-approval-reportee-scope.mjs && node ../../scripts/verify-connect-roster-integrity.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start"

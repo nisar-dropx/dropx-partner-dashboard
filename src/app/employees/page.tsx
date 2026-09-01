@@ -6,7 +6,7 @@ import { EmployeeList } from "@/components/employee-list";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
 import { SubmitButton } from "@/components/submit-button";
-import { isCompanyOwner, type AuthorizationContext, requirePagePermission } from "@/lib/authorization";
+import { getAuthorization, hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate } from "@/lib/date-format";
 import { canOnboardDesignation } from "@/lib/designation-onboarding-access";
@@ -16,7 +16,8 @@ import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { isMissingPositionAccessSchema } from "@/lib/position-access";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules, loadWorkforceCategoryStatutoryEnabled } from "@/lib/workforce-category-rules";
-import { bulkImportEmployees, confirmEmployeeJoining, createEmployee, reviewEmployeeProfile, updateEmployee } from "./actions";
+import { bulkImportEmployees, createEmployee, reviewEmployeeProfile, updateEmployee } from "./actions";
+import { redirect } from "next/navigation";
 
 type LocationRow = {
   id: string;
@@ -65,9 +66,6 @@ type EmployeeRow = {
   profile_completion_status?: string | null;
   profile_return_remarks?: string | null;
   profile_completed_at?: string | null;
-  joining_status?: "planned" | "joined" | "no_show" | null;
-  joined_at?: string | null;
-  joining_remarks?: string | null;
   aadhaar_number?: string | null;
   pan_number?: string | null;
   eshram_uan?: string | null;
@@ -164,14 +162,6 @@ function displayValue(value: string | boolean | null | undefined) {
   return value || "-";
 }
 
-function dateTime(value: string) {
-  return new Intl.DateTimeFormat("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "Asia/Kolkata"
-  }).format(new Date(value));
-}
-
 function EmployeeDetail({ label, value }: { label: string; value: string | boolean | null | undefined }) {
   return (
     <div className="executive-detail-item">
@@ -221,8 +211,6 @@ function EmployeeDetails({
           <EmployeeDetail label="Designation" value={designation?.name} />
           <EmployeeDetail label="Statutory" value={statutoryLabel(employee.statutory_applicability)} />
           <EmployeeDetail label="Status" value={employeeStatus(employee)} />
-          <EmployeeDetail label="Joining" value={employee.joining_status === "joined" ? "Joined" : employee.joining_status === "no_show" ? "No-show" : "Planned"} />
-          <EmployeeDetail label="Joining confirmed" value={employee.joined_at ? dateTime(employee.joined_at) : "-"} />
         </dl>
       </section>
       <section>
@@ -353,7 +341,7 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
   const [initialEmployeesResult, locationsResult, designationsResult, positionsResult] = await Promise.all([
     supabaseAdmin
       .from("employees")
-      .select("id, employee_code, biometric_id, full_name, mobile_country_code, mobile, email, date_of_join, location_id, designation_id, org_position_id, statutory_applicability, profile_completion_status, profile_return_remarks, profile_completed_at, joining_status, joined_at, joining_remarks, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, father_name, blood_group, is_handicapped, address, state_code, pincode, landmark, emergency_contact_name, emergency_contact_number, emergency_contact_relation, bank_account_no, ifsc, pf_uan, pf_account_no, esi_no, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, is_active, stations (station_code, station_name, providers (name), location_models (code, name)), designations (code, name)")
+      .select("id, employee_code, biometric_id, full_name, mobile_country_code, mobile, email, date_of_join, location_id, designation_id, org_position_id, statutory_applicability, profile_completion_status, profile_return_remarks, profile_completed_at, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, father_name, blood_group, is_handicapped, address, state_code, pincode, landmark, emergency_contact_name, emergency_contact_number, emergency_contact_relation, bank_account_no, ifsc, pf_uan, pf_account_no, esi_no, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, is_active, stations (station_code, station_name, providers (name), location_models (code, name)), designations (code, name)")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false }),
     supabaseAdmin
@@ -384,7 +372,7 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
       .order("created_at", { ascending: false });
     employeesResult = {
       ...fallbackEmployeesResult,
-      data: (fallbackEmployeesResult.data ?? []).map((employee) => ({ ...employee, profile_completion_status: "pending", profile_completed_at: null, joining_status: "planned", joined_at: null, joining_remarks: null }))
+      data: (fallbackEmployeesResult.data ?? []).map((employee) => ({ ...employee, profile_completion_status: "pending", profile_completed_at: null }))
     } as typeof initialEmployeesResult;
   }
 
@@ -456,13 +444,18 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
 export const dynamic = "force-dynamic";
 
 export default async function EmployeesPage({ searchParams }: { searchParams?: { edit?: string; view?: string } }) {
-  const authorization = await requirePagePermission("employees", "access");
+  const authorization = await getAuthorization();
+  if (!authorization) redirect("/login");
+  const hasEmployeeAccess = hasPermission(authorization, "employees", "access");
+  const hasPeopleAccess = hasPermission(authorization, "people_all", "access");
+  if (!hasEmployeeAccess && !hasPeopleAccess) redirect("/unauthorized?page=employees&action=access");
   const ownerAccess = isCompanyOwner(authorization);
   const companyId = requireCompanyId(authorization);
-  const pagePermission = authorization.permissions.employees ?? {
-    canView: false,
-    canAdd: false,
-    canEdit: false
+  const employeePermission = authorization.permissions.employees;
+  const pagePermission = {
+    canView: hasPermission(authorization, "employees", "view") || hasPeopleAccess,
+    canAdd: employeePermission?.canAdd ?? false,
+    canEdit: employeePermission?.canEdit ?? false
   };
   const { employees, editEmployee, locations, designations, positions, error, viewEmployee } = await loadEmployees(companyId, authorization, searchParams?.edit, searchParams?.view);
   const flash = loadFlash();
@@ -605,53 +598,6 @@ export default async function EmployeesPage({ searchParams }: { searchParams?: {
               <PendingLink className="icon-button" href="/employees" scroll={false} aria-label="Close edit employee">x</PendingLink>
             </div>
             <EmployeeForm action={updateEmployee} dashboardRules={employeeCategoryRules.dashboard} designationOptions={editDesignationOptions} employee={editEmployee} locationOptions={locationOptions} mode="edit" positionOptions={positionOptions} statutoryEnabled={employeeStatutoryEnabled} />
-            <section className="profile-review-panel employee-joining-panel">
-              <div className="profile-review-head">
-                <div>
-                  <span className="profile-review-eyebrow">Joining control</span>
-                  <h3>Google account issuance</h3>
-                  <p>A Workspace account is queued only after the profile is active, the joining date is due, and People confirms physical joining.</p>
-                </div>
-                <span className={`status-pill ${editEmployee.joining_status === "joined" ? "good" : editEmployee.joining_status === "no_show" ? "bad" : "neutral"}`}>
-                  {editEmployee.joining_status === "joined" ? "Joined" : editEmployee.joining_status === "no_show" ? "No-show" : "Planned"}
-                </span>
-              </div>
-              {editEmployee.joining_status === "joined" ? (
-                <p className="subtle">Confirmed {editEmployee.joined_at ? dateTime(editEmployee.joined_at) : ""}. Any designation-based Google identity policy is now eligible to run.</p>
-              ) : (
-                <div className="profile-review-options">
-                  <div className="profile-review-option profile-review-option-approve">
-                    <div>
-                      <h4>Confirm joined</h4>
-                      <p>Use only after the employee has physically joined. This is the issuance trigger.</p>
-                    </div>
-                    <form action={confirmEmployeeJoining} className="profile-review-approve">
-                      <input name="id" type="hidden" value={editEmployee.id} />
-                      <input name="joining_action" type="hidden" value="joined" />
-                      <SubmitButton
-                        className="button profile-review-approve-button"
-                        confirmDescription="Google Workspace issuance will follow the designation policy."
-                        confirmMessage={`Confirm that ${editEmployee.full_name} has joined?`}
-                        confirmTitle="Confirm joining"
-                        pendingText="Confirming..."
-                      >Confirm joined</SubmitButton>
-                    </form>
-                  </div>
-                  <div className="profile-review-option profile-review-option-return">
-                    <div>
-                      <h4>Mark no-show</h4>
-                      <p>Stops identity issuance while keeping the planned employee record for follow-up.</p>
-                    </div>
-                    <form action={confirmEmployeeJoining} className="profile-review-return">
-                      <input name="id" type="hidden" value={editEmployee.id} />
-                      <input name="joining_action" type="hidden" value="no_show" />
-                      <label><span>Remarks</span><textarea className="field" name="joining_remarks" placeholder="Optional no-show note" rows={2} /></label>
-                      <SubmitButton className="button secondary" pendingText="Saving...">Mark no-show</SubmitButton>
-                    </form>
-                  </div>
-                </div>
-              )}
-            </section>
             {editEmployee.profile_completion_status === "under_review" ? (
               <section className="profile-review-panel">
                 <div className="profile-review-head">

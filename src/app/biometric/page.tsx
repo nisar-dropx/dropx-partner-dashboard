@@ -1,11 +1,9 @@
 import { AppShell } from "@/components/app-shell";
-import { AttendanceMultiSelect } from "@/components/attendance-multi-select";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { biometricDeviceHealth, biometricHealthPriority, type BiometricDeviceHealthStatus } from "@/lib/biometric/device-health";
 import { formatDashboardDateTime } from "@/lib/date-format";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -15,7 +13,6 @@ type DeviceRow = {
   id: string;
   device_no: string | null;
   device_serial: string;
-  is_active: boolean | null;
   last_seen_at: string | null;
   last_source_ip: string | null;
   location_id: string | null;
@@ -87,11 +84,16 @@ function formatTime(value: string | null) {
   }).format(date);
 }
 
-type Param = string | string[] | undefined;
+function isConnected(device: DeviceRow) {
+  if (!device.last_seen_at) return false;
+  const lastSeen = new Date(device.last_seen_at).getTime();
+  return Number.isFinite(lastSeen) && Date.now() - lastSeen <= 10 * 60 * 1000;
+}
 
-function values(value: Param) {
-  const source = Array.isArray(value) ? value : value ? [value] : [];
-  return [...new Set(source.map((item) => item.trim()).filter(Boolean))].slice(0, 100);
+function deviceReportingStatus(device: DeviceRow) {
+  if (!isConnected(device)) return "Disconnected";
+  if (device.status?.toLowerCase() === "heartbeat only") return "Heartbeat only";
+  return "Reporting";
 }
 
 function cleanEnrolment(value: unknown) {
@@ -100,10 +102,10 @@ function cleanEnrolment(value: unknown) {
 }
 
 function locationLabel(locations: Map<string, LocationRow>, id: string | null) {
-  if (!id) return "Unmapped";
+  if (!id) return "-";
   const location = locations.get(id);
-  if (!location) return "Unmapped";
-  return location.station_name ? `${location.station_code}-${location.station_name}` : location.station_code ?? "Unmapped";
+  if (!location) return "-";
+  return location.station_name ? `${location.station_code}-${location.station_name}` : location.station_code ?? "-";
 }
 
 async function loadDuplicateEnrolments(companyId: string) {
@@ -173,7 +175,7 @@ async function loadBiometricMonitor(companyId: string) {
       .maybeSingle(),
     supabaseAdmin
       .from("biometric_devices")
-      .select("id, device_no, terminal_id, device_serial, location_id, model, status, last_seen_at, last_source_ip, is_active")
+      .select("id, device_no, terminal_id, device_serial, location_id, model, status, last_seen_at, last_source_ip")
       .eq("company_id", companyId)
       .order("last_seen_at", { ascending: false, nullsFirst: false }),
     supabaseAdmin
@@ -226,49 +228,12 @@ function StatCard({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-export default async function BiometricMonitorPage({
-  searchParams = {}
-}: {
-  searchParams?: { location?: Param; model?: Param; q?: string; sort?: string; status?: Param };
-}) {
+export default async function BiometricMonitorPage() {
   const authorization = await requirePagePermission("app_settings", "access");
   const companyId = requireCompanyId(authorization);
   const data = await loadBiometricMonitor(companyId);
-  const healthByDevice = new Map(data.devices.map((device) => [device.id, biometricDeviceHealth(device)]));
-  const healthCount = (status: BiometricDeviceHealthStatus) => data.devices.filter((device) => healthByDevice.get(device.id)?.status === status).length;
-  const reportingCount = healthCount("Reporting");
-  const heartbeatOnlyCount = healthCount("Heartbeat only");
-  const disconnectedTodayCount = healthCount("Disconnected today");
-  const disconnectedCount = healthCount("Disconnected");
+  const reportingCount = data.devices.filter((device) => deviceReportingStatus(device) === "Reporting").length;
   const calculatedPunches = data.punches.filter((punch) => punch.calculated !== false).length;
-  const selectedLocations = values(searchParams.location);
-  const selectedStatuses = values(searchParams.status);
-  const selectedModels = values(searchParams.model);
-  const query = String(searchParams.q ?? "").replace(/\s+/g, " ").trim().slice(0, 120).toLowerCase();
-  const sort = ["health", "last_seen", "location", "device"].includes(searchParams.sort ?? "") ? searchParams.sort : "health";
-  const filteredDevices = data.devices.filter((device) => {
-    const location = locationLabel(data.locations, device.location_id);
-    const health = healthByDevice.get(device.id)!;
-    if (selectedLocations.length && !selectedLocations.includes(location)) return false;
-    if (selectedStatuses.length && !selectedStatuses.includes(health.status)) return false;
-    if (selectedModels.length && !selectedModels.includes(device.model ?? "Unknown model")) return false;
-    if (query) {
-      const haystack = [device.device_no, device.terminal_id, device.device_serial, device.model, device.last_source_ip, location, health.status]
-        .filter(Boolean).join(" ").toLowerCase();
-      if (!haystack.includes(query)) return false;
-    }
-    return true;
-  }).sort((left, right) => {
-    if (sort === "last_seen") return (Date.parse(right.last_seen_at ?? "") || 0) - (Date.parse(left.last_seen_at ?? "") || 0);
-    if (sort === "location") return locationLabel(data.locations, left.location_id).localeCompare(locationLabel(data.locations, right.location_id), "en", { sensitivity: "base" });
-    if (sort === "device") return String(left.device_no ?? left.terminal_id ?? left.device_serial).localeCompare(String(right.device_no ?? right.terminal_id ?? right.device_serial), "en", { numeric: true });
-    return biometricHealthPriority(healthByDevice.get(left.id)!.status) - biometricHealthPriority(healthByDevice.get(right.id)!.status)
-      || (Date.parse(left.last_seen_at ?? "") || 0) - (Date.parse(right.last_seen_at ?? "") || 0);
-  });
-  const locationOptions = [...new Set(data.devices.map((device) => locationLabel(data.locations, device.location_id)))].sort((left, right) => left.localeCompare(right, "en", { sensitivity: "base" }));
-  const statusOptions: BiometricDeviceHealthStatus[] = ["Reporting", "Heartbeat only", "Disconnected today", "Disconnected", "Inactive"];
-  const modelOptions = [...new Set(data.devices.map((device) => device.model ?? "Unknown model"))].sort((left, right) => left.localeCompare(right, "en", { sensitivity: "base" }));
-  const filtersActive = Boolean(query || selectedLocations.length || selectedStatuses.length || selectedModels.length || sort !== "health");
 
   return (
     <AppShell active="Biometric Monitor" pageCode="app_settings">
@@ -309,12 +274,10 @@ export default async function BiometricMonitorPage({
         </div>
       </section>
 
-      <section className="summary-grid biometric-health-summary">
+      <section className="summary-grid">
         <StatCard label="Mapped devices" value={data.devices.length} />
-        <div className="biometric-health-metric good"><StatCard label="Reporting now" value={reportingCount} /></div>
-        <div className="biometric-health-metric warn"><StatCard label="Heartbeat only" value={heartbeatOnlyCount} /></div>
-        <div className="biometric-health-metric warn"><StatCard label="Disconnected today" value={disconnectedTodayCount} /></div>
-        <div className="biometric-health-metric bad"><StatCard label="Disconnected earlier" value={disconnectedCount} /></div>
+        <StatCard label="Reporting attendance" value={reportingCount} />
+        <StatCard label="Recent raw events" value={data.events.length} />
         <StatCard label="Calculated punches" value={calculatedPunches} />
       </section>
 
@@ -344,19 +307,9 @@ export default async function BiometricMonitorPage({
         <div className="panel-head">
           <div>
             <h2>Device status</h2>
-            <p className="subtle">Green is reporting now, orange needs attention today, and red has been disconnected since before today.</p>
+            <p className="subtle">Reporting means attendance data is flowing. Heartbeat only means the server can see the device, but no punch has been received.</p>
           </div>
-          <span className="tag">{filteredDevices.length}{filtersActive ? ` of ${data.devices.length}` : ""} devices</span>
         </div>
-        <form action="/biometric" className="biometric-monitor-filters" method="get">
-          <input aria-label="Search biometric devices" className="field" defaultValue={searchParams.q ?? ""} name="q" placeholder="Search device, serial, station or IP" />
-          <AttendanceMultiSelect allLabel="All stations" defaultValues={selectedLocations} label="Stations" name="location" options={locationOptions} />
-          <AttendanceMultiSelect allLabel="All statuses" defaultValues={selectedStatuses} label="Statuses" name="status" options={statusOptions} />
-          <AttendanceMultiSelect allLabel="All models" defaultValues={selectedModels} label="Models" name="model" options={modelOptions} />
-          <select aria-label="Sort biometric devices" className="field" defaultValue={sort} name="sort"><option value="health">Problems first</option><option value="last_seen">Last seen latest</option><option value="location">Station A–Z</option><option value="device">Device number</option></select>
-          <button className="button secondary compact" type="submit">Apply</button>
-          {filtersActive ? <PendingLink className="button secondary compact" href="/biometric">Clear</PendingLink> : null}
-        </form>
         <div className="table-wrap">
           <table>
             <thead>
@@ -371,20 +324,18 @@ export default async function BiometricMonitorPage({
               </tr>
             </thead>
             <tbody>
-              {filteredDevices.length ? filteredDevices.map((device) => {
-                const health = healthByDevice.get(device.id)!;
-                return (
-                <tr className={`biometric-health-row ${health.tone}`} key={device.id}>
+              {data.devices.length ? data.devices.map((device) => (
+                <tr key={device.id}>
                   <td>{device.device_no ?? device.terminal_id ?? "-"}</td>
                   <td>{locationLabel(data.locations, device.location_id)}</td>
                   <td><strong>{device.device_serial}</strong></td>
                   <td>{device.model ?? "-"}</td>
-                  <td><StatusPill status={health.status} /></td>
+                  <td><StatusPill status={deviceReportingStatus(device)} /></td>
                   <td>{formatDateTime(device.last_seen_at)}</td>
                   <td>{device.last_source_ip ?? "-"}</td>
                 </tr>
-              ); }) : (
-                <tr><td className="empty-cell" colSpan={7}>No devices match these filters.</td></tr>
+              )) : (
+                <tr><td className="empty-cell" colSpan={7}>No devices are mapped yet.</td></tr>
               )}
             </tbody>
           </table>

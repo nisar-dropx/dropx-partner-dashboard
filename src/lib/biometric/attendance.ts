@@ -59,7 +59,7 @@ type BiometricWorkerLookupRow = {
 };
 
 type BiometricWorkerLookup = BiometricWorkerLookupRow & {
-  profileType: "employee" | "workforce" | "field_executive" | "contractor" | "vendor" | "worker" | "helper" | "picker";
+  profileType: "employee" | "field_executive" | "contractor" | "vendor" | "worker" | "helper" | "picker";
 };
 
 type DailyRow = {
@@ -228,7 +228,6 @@ async function loadWorkerShiftWindow({
 }): Promise<ShiftWindow | null> {
   if (!supabaseAdmin) return null;
   const isEmployee = profileType === "employee" || Boolean(employeeId);
-  const isWorkforce = profileType === "workforce";
   const workerId = isEmployee ? employeeId : (accountId ?? fieldExecutiveId);
   if (!workerId) return null;
 
@@ -254,7 +253,7 @@ async function loadWorkerShiftWindow({
   const assignmentTable = isEmployee
     ? "hr_employee_shift_assignments"
     : "hr_contractor_shift_assignments";
-  const profileColumn = isEmployee ? "employee_id" : isWorkforce ? "workforce_id" : "contractor_id";
+  const profileColumn = isEmployee ? "employee_id" : "contractor_id";
   const assignment = await supabaseAdmin
     .from(assignmentTable)
     .select("hr_shifts(start_time, end_time)")
@@ -305,73 +304,52 @@ export async function resolveAttendanceWorkDate({
     .maybeSingle();
   if (settings.error || settings.data?.overnight_shift_pairing_enabled === false) return calendarDate;
 
+  const currentDayPunches = await supabaseAdmin
+    .from("attendance_punches")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("enrolment_id", enrolmentId)
+    .eq("punch_date", calendarDate)
+    .eq("calculated", true)
+    .limit(1);
+  if (currentDayPunches.error || (currentDayPunches.data?.length ?? 0) > 0) return calendarDate;
+
   const previousPunches = await supabaseAdmin
     .from("attendance_punches")
-    .select("punch_time, account_id, employee_id, field_executive_id, profile_type")
+    .select("punch_time")
     .eq("company_id", companyId)
     .eq("enrolment_id", enrolmentId)
     .eq("punch_date", previousDate)
-    .or("calculated.eq.true,is_flagged.eq.true")
+    .eq("calculated", true)
     .order("punch_time", { ascending: true });
   if (previousPunches.error || !previousPunches.data?.length) {
     return calendarDate;
   }
 
-  const latestPreviousPunch = previousPunches.data[previousPunches.data.length - 1];
-  const resolvedAccountId = accountId ?? latestPreviousPunch.account_id ?? null;
-  const resolvedEmployeeId = employeeId ?? latestPreviousPunch.employee_id ?? null;
-  const resolvedFieldExecutiveId = fieldExecutiveId ?? latestPreviousPunch.field_executive_id ?? null;
-  const resolvedProfileType = profileType ?? latestPreviousPunch.profile_type ?? null;
-
-  const [previousShift, currentShift] = await Promise.all([
-    loadWorkerShiftWindow({
-      accountId: resolvedAccountId,
-      companyId,
-      employeeId: resolvedEmployeeId,
-      fieldExecutiveId: resolvedFieldExecutiveId,
-      profileType: resolvedProfileType,
-      workDate: previousDate
-    }),
-    loadWorkerShiftWindow({
-      accountId: resolvedAccountId,
-      companyId,
-      employeeId: resolvedEmployeeId,
-      fieldExecutiveId: resolvedFieldExecutiveId,
-      profileType: resolvedProfileType,
-      workDate: calendarDate
-    })
-  ]);
-
-  // An assigned/rostered shift is the source of truth for the attendance day:
-  // scans after midnight remain on the date that shift started until the next
-  // assigned shift begins (and never beyond the configured overnight window).
-  // This remains stable even after the first post-midnight scan is stored, so
-  // breaks and repeated device scans cannot split one shift across two dates.
-  if (previousShift) {
-    const previousShiftStart = istDateTime(previousDate, previousShift.startTime);
-    let previousShiftEnd = istDateTime(previousDate, previousShift.endTime);
-    if (previousShiftEnd <= previousShiftStart) {
-      previousShiftEnd = istDateTime(calendarDate, previousShift.endTime);
-    }
-    const pairingWindowMinutes = Math.max(0, Number(settings.data?.overnight_pairing_window_minutes ?? 180));
-    const latestScheduledCheckout = previousShiftEnd.getTime() + pairingWindowMinutes * 60000;
-    if (punchTime.getTime() > latestScheduledCheckout) return calendarDate;
-
-    if (currentShift) {
-      const currentShiftStart = istDateTime(calendarDate, currentShift.startTime);
-      if (punchTime.getTime() >= currentShiftStart.getTime()) return calendarDate;
-    }
-    return previousDate;
-  }
-
-  // For legacy/unassigned workers, retain the conservative fallback: only an
-  // unmatched prior punch may cross midnight and it must stay inside the
-  // company's maximum work span.
   const firstPunch = new Date(previousPunches.data[0].punch_time);
   const elapsedMinutes = (punchTime.getTime() - firstPunch.getTime()) / 60000;
   const maximumDailyMinutes = Math.max(1, Number(settings.data?.maximum_daily_minutes ?? 960));
   if (elapsedMinutes <= 0 || elapsedMinutes > maximumDailyMinutes) return calendarDate;
-  return previousPunches.data.length % 2 === 1 ? previousDate : calendarDate;
+
+  const shift = await loadWorkerShiftWindow({
+    accountId,
+    companyId,
+    employeeId,
+    fieldExecutiveId,
+    profileType,
+    workDate: previousDate
+  });
+  // Without a shift, only an unmatched prior punch is safe to pair. With a
+  // shift, every scan inside the configured workday window belongs together,
+  // including post-midnight break scans and duplicate device reads.
+  if (!shift) return previousPunches.data.length % 2 === 1 ? previousDate : calendarDate;
+
+  const shiftStart = istDateTime(previousDate, shift.startTime);
+  let shiftEnd = istDateTime(previousDate, shift.endTime);
+  if (shiftEnd <= shiftStart) shiftEnd = istDateTime(calendarDate, shift.endTime);
+  const pairingWindowMinutes = Math.max(0, Number(settings.data?.overnight_pairing_window_minutes ?? 180));
+  const latestScheduledCheckout = shiftEnd.getTime() + pairingWindowMinutes * 60000;
+  return punchTime.getTime() <= latestScheduledCheckout ? previousDate : calendarDate;
 }
 
 export function formatTime(value: string | Date | null | undefined) {
@@ -511,11 +489,10 @@ async function loadAttendanceScheduleContext({
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const workerIds = Array.from(new Set(workers.map((worker) => worker.profileId).filter(Boolean)));
   const employeeIds = Array.from(new Set(workers.filter((worker) => worker.profileType === "employee").map((worker) => worker.profileId)));
-  const contractorIds = Array.from(new Set(workers.filter((worker) => worker.profileType === "contractor").map((worker) => worker.profileId)));
-  const workforceIds = Array.from(new Set(workers.filter((worker) => worker.profileType === "workforce").map((worker) => worker.profileId)));
+  const contractorIds = Array.from(new Set(workers.filter((worker) => worker.profileType !== "employee").map((worker) => worker.profileId)));
   const shiftColumns = "id, code, name, start_time, end_time, break_minutes, grace_in_minutes, grace_out_minutes";
 
-  const [settingsResult, rosterResult, employeeAssignmentResult, contractorAssignmentResult, workforceAssignmentResult] = await Promise.all([
+  const [settingsResult, rosterResult, employeeAssignmentResult, contractorAssignmentResult] = await Promise.all([
     supabaseAdmin
       .from("hr_company_settings")
       .select("attendance_grace_minutes, below_half_day_treatment, full_day_minutes, full_day_percent, half_day_minutes, half_day_percent, no_punch_treatment, odd_punch_treatment, partial_day_treatment, single_punch_treatment, unassigned_shift_treatment, work_duration_basis")
@@ -549,16 +526,6 @@ async function loadAttendanceScheduleContext({
         .or(`effective_to.is.null,effective_to.gte.${fromDate}`)
         .in("contractor_id", contractorIds)
         .order("effective_from", { ascending: false })
-      : Promise.resolve({ data: [], error: null }),
-    workforceIds.length
-      ? supabaseAdmin
-        .from("hr_contractor_shift_assignments")
-        .select(`workforce_id, effective_from, effective_to, hr_shifts(${shiftColumns})`)
-        .eq("company_id", companyId)
-        .lte("effective_from", toDate)
-        .or(`effective_to.is.null,effective_to.gte.${fromDate}`)
-        .in("workforce_id", workforceIds)
-        .order("effective_from", { ascending: false })
       : Promise.resolve({ data: [], error: null })
   ]);
   if (settingsResult.error) throw new Error(settingsResult.error.message);
@@ -566,7 +533,6 @@ async function loadAttendanceScheduleContext({
   if (employeeAssignmentResult.error) throw new Error(employeeAssignmentResult.error.message);
   // Older non-employee categories do not all have contractor shift records; an empty result is valid.
   if (contractorAssignmentResult.error && !isMissingColumnError(contractorAssignmentResult.error)) throw new Error(contractorAssignmentResult.error.message);
-  if (workforceAssignmentResult.error && !isMissingColumnError(workforceAssignmentResult.error)) throw new Error(workforceAssignmentResult.error.message);
 
   type RosterRow = {
     worker_id: string;
@@ -578,7 +544,6 @@ async function loadAttendanceScheduleContext({
   type AssignmentRow = {
     employee_id?: string;
     contractor_id?: string;
-    workforce_id?: string;
     effective_from: string;
     effective_to: string | null;
     hr_shifts: ShiftDefinition | ShiftDefinition[] | null;
@@ -593,8 +558,8 @@ async function loadAttendanceScheduleContext({
     });
   });
   const assignmentsByWorker = new Map<string, AssignmentRow[]>();
-  ([...(employeeAssignmentResult.data ?? []), ...(contractorAssignmentResult.data ?? []), ...(workforceAssignmentResult.data ?? [])] as unknown as AssignmentRow[]).forEach((assignment) => {
-    const workerId = assignment.employee_id ?? assignment.contractor_id ?? assignment.workforce_id;
+  ([...(employeeAssignmentResult.data ?? []), ...(contractorAssignmentResult.data ?? [])] as unknown as AssignmentRow[]).forEach((assignment) => {
+    const workerId = assignment.employee_id ?? assignment.contractor_id;
     if (!workerId) return;
     const values = assignmentsByWorker.get(workerId) ?? [];
     values.push(assignment);
@@ -667,10 +632,8 @@ async function loadDailyWorkerSnapshot({
       workerName = employee.data.full_name ?? null;
       locationId = employee.data.location_id ?? locationId;
     }
-  } else if (accountId && ["workforce", "field_executive", "contractor", "vendor", "worker"].includes(profileType ?? "")) {
-    const table = profileType === "workforce"
-      ? "workforce"
-      : profileType === "contractor"
+  } else if (accountId && ["field_executive", "contractor", "vendor", "worker"].includes(profileType ?? "")) {
+    const table = profileType === "contractor"
       ? "contractors"
       : profileType === "vendor"
         ? "vendors"
@@ -739,22 +702,6 @@ async function loadDailyWorkerSnapshot({
 export async function rebuildAttendanceDay(companyId: string, enrolmentId: string, punchDate: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
-  // A day that carries an approved manual regularization (hr_review_attendance_regularization
-  // wrote manual_in_request_id/manual_out_request_id onto attendance_daily) is authoritative
-  // until that correction is itself superseded. Recomputing purely from raw attendance_punches
-  // here would silently overwrite in_time/out_time/punch_count/remark/status back to what the
-  // unmatched biometric scan alone implies, erasing the approval every time this runs again —
-  // on the next punch for this worker, a GPS-mismatch re-check, or a future repair pass.
-  const existingDay = await supabaseAdmin
-    .from("attendance_daily")
-    .select("manual_in_request_id, manual_out_request_id")
-    .eq("company_id", companyId)
-    .eq("enrolment_id", enrolmentId)
-    .eq("punch_date", punchDate)
-    .maybeSingle();
-  if (existingDay.error && !isMissingColumnError(existingDay.error)) throw new Error(existingDay.error.message);
-  if (existingDay.data?.manual_in_request_id || existingDay.data?.manual_out_request_id) return;
-
   const { data, error } = await supabaseAdmin
     .from("attendance_punches")
     .select("id, punch_time")
@@ -766,29 +713,6 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
   if (error) throw new Error(error.message);
 
   const punches = data ?? [];
-  if (punches.length === 0) {
-    // Preserve the daily row identity because leave exceptions and other audit
-    // records may reference it. Clearing the calculated values also makes a
-    // moved overnight punch visible as an absent/no-punch day without breaking
-    // those links.
-    const clearStaleDay = await supabaseAdmin
-      .from("attendance_daily")
-      .update({
-        in_time: null,
-        out_time: null,
-        punch_count: 0,
-        work_minutes: 0,
-        status: "A",
-        remark: "No punch",
-        updated_at: new Date().toISOString()
-      })
-      .eq("company_id", companyId)
-      .eq("enrolment_id", enrolmentId)
-      .eq("punch_date", punchDate);
-    if (clearStaleDay.error) throw new Error(clearStaleDay.error.message);
-    return;
-  }
-
   // Freeze punch times before order updates so rebuild never picks up approval/server "now".
   const punchTimes = punches.map((punch) => punch.punch_time).filter(Boolean) as string[];
   for (let index = 0; index < punches.length; index += 1) {
@@ -949,24 +873,12 @@ export async function backfillHistoricalPunches({
   if (!rawPunches.length) return 0;
 
   const affectedDates = new Set<string>();
-  // Backfills are intentionally processed chronologically. The work-date
-  // resolver can then see each earlier scan and applies the same overnight
-  // rule as live biometric and GPS ingestion instead of using calendar dates.
-  for (const rawPunch of rawPunches) {
-    const punchTime = new Date(rawPunch.punch_time);
-    const punchDate = await resolveAttendanceWorkDate({
-      accountId,
-      companyId,
-      employeeId,
-      enrolmentId,
-      fieldExecutiveId,
-      profileType,
-      punchTime
-    });
-    affectedDates.add(punchDate);
-    const insert = await supabaseAdmin
-      .from("attendance_punches")
-      .upsert({
+  for (let offset = 0; offset < rawPunches.length; offset += pageSize) {
+    const page = rawPunches.slice(offset, offset + pageSize);
+    const rows = page.map((rawPunch) => {
+      const punchDate = istDate(new Date(rawPunch.punch_time));
+      affectedDates.add(punchDate);
+      return {
         company_id: companyId,
         raw_event_id: rawPunch.id,
         device_id: rawPunch.device_id,
@@ -984,7 +896,13 @@ export async function backfillHistoricalPunches({
         punch_label: punchLabel(1),
         worker_status: workerStatus,
         calculated: isActive
-      }, {
+      };
+    });
+
+    const insert = await supabaseAdmin
+      .from("attendance_punches")
+      .upsert(rows, {
+        ignoreDuplicates: true,
         onConflict: "company_id,device_serial,enrolment_id,punch_time"
       });
     if (insert.error) throw new Error(insert.error.message);
@@ -1101,7 +1019,7 @@ export async function loadAttendanceReportRows({
   const dailyLocationIds = Array.from(new Set(dailyRows.map((row) => row.location_id).filter(Boolean))) as string[];
   const enrolmentIds = Array.from(new Set(dailyRows.map((row) => row.enrolment_id)));
   const biometricVariants = biometricIdVariants(enrolmentIds);
-  const [employeeResult, executiveResult, locationResult, biometricEmployeeResult, biometricWorkforceResult, biometricExecutiveResult, biometricContractorResult, biometricVendorResult, biometricWorkerResult, biometricHelperResult, biometricPickerResult] = await Promise.all([
+  const [employeeResult, executiveResult, locationResult, biometricEmployeeResult, biometricExecutiveResult, biometricContractorResult, biometricVendorResult, biometricWorkerResult, biometricHelperResult, biometricPickerResult] = await Promise.all([
     employeeIds.length
       ? supabaseAdmin
         .from("employees")
@@ -1122,13 +1040,6 @@ export async function loadAttendanceReportRows({
         .select("id, station_code, station_name")
         .eq("company_id", companyId)
         .in("id", dailyLocationIds)
-      : Promise.resolve({ data: [], error: null }),
-    biometricVariants.length
-      ? supabaseAdmin
-        .from("workforce")
-        .select("id, dropx_id, full_name, biometric_id, designation, location_id")
-        .eq("company_id", companyId)
-        .in("biometric_id", biometricVariants)
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
       ? supabaseAdmin
@@ -1184,7 +1095,6 @@ export async function loadAttendanceReportRows({
   if (executiveResult.error) throw new Error(executiveResult.error.message);
   if (locationResult.error) throw new Error(locationResult.error.message);
   if (biometricEmployeeResult.error) throw new Error(biometricEmployeeResult.error.message);
-  if (biometricWorkforceResult.error) throw new Error(biometricWorkforceResult.error.message);
   if (biometricExecutiveResult.error) throw new Error(biometricExecutiveResult.error.message);
   if (biometricContractorResult.error) throw new Error(biometricContractorResult.error.message);
   if (biometricVendorResult.error) throw new Error(biometricVendorResult.error.message);
@@ -1197,7 +1107,6 @@ export async function loadAttendanceReportRows({
   const locationsById = new Map(((locationResult.data ?? []) as LocationLookupRow[]).map((location) => [location.id, location]));
   const biometricWorkers: BiometricWorkerLookup[] = [
     ...((biometricEmployeeResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "employee" as const })),
-    ...((biometricWorkforceResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "workforce" as const })),
     ...((biometricContractorResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "contractor" as const })),
     ...((biometricVendorResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "vendor" as const })),
     ...((biometricWorkerResult.data ?? []) as BiometricWorkerLookupRow[]).map((row) => ({ ...row, profileType: "worker" as const })),
@@ -1262,7 +1171,6 @@ export async function loadAttendanceReportRows({
   });
   const categoryLabel = (profileType: BiometricWorkerLookup["profileType"]) => {
     if (profileType === "employee") return "Employees";
-    if (profileType === "workforce") return "Workforce";
     if (profileType === "field_executive") return "Field Executives";
     if (profileType === "contractor") return "Independent Contractor";
     if (profileType === "vendor") return "Vendors";

@@ -9,9 +9,7 @@ function authOriginFromHeaders(requestHeaders: Headers) {
     "https://dashboard.dropxlogistics.com",
     "https://admin-panel.dropxlogistics.com",
     "https://ops.dropxlogistics.com",
-    "https://people.dropxlogistics.com",
-    "https://fin.dropxlogistics.com",
-    "https://finance.dropxlogistics.com"
+    "https://people.dropxlogistics.com"
   ]);
   const originHeader = requestHeaders.get("origin");
   if (originHeader && allowedOrigins.has(originHeader)) return originHeader;

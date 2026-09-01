@@ -34,7 +34,7 @@ type EnrolmentRow = {
   worker_type: string;
   employee_id: string | null;
   field_executive_id: string | null;
-  profile_type: "employee" | "workforce" | "field_executive" | "contractor" | "vendor" | "worker" | null;
+  profile_type: "employee" | "field_executive" | "contractor" | "vendor" | "worker" | null;
   account_id: string | null;
   location_id: string | null;
   status: string;
@@ -42,7 +42,7 @@ type EnrolmentRow = {
 
 type WorkerMatch = {
   workerType: "employee" | "individual_contract";
-  profileType: "employee" | "workforce" | "field_executive" | "contractor" | "vendor" | "worker";
+  profileType: "employee" | "field_executive" | "contractor" | "vendor" | "worker";
   accountId: string;
   employeeId: string | null;
   fieldExecutiveId: string | null;
@@ -80,7 +80,7 @@ function enrolmentPriority(
   const workerType = "worker_type" in row ? row.worker_type : row.workerType;
   const profileType = "profile_type" in row ? row.profile_type : row.profileType;
   const active = "status" in row ? row.status === "Active" : row.isActive;
-  const profileOrder = ["employee", "contractor", "workforce", "vendor", "worker", "field_executive"];
+  const profileOrder = ["employee", "contractor", "vendor", "worker", "field_executive"];
   return [
     Math.max(profileOrder.indexOf(profileType ?? (workerType === "employee" ? "employee" : "contractor")), 0),
     active ? 0 : 1
@@ -238,7 +238,6 @@ async function findWorkerMatches(companyId: string, enrolmentId: string) {
   if (!normalizedEnrolmentId) return [];
 
   const nonEmployeeTables = [
-    ["workforce", "workforce"],
     ["field_executive", "field_executives"],
     ["contractor", "contractors"],
     ["vendor", "vendors"],

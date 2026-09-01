@@ -89,11 +89,7 @@ export async function loadOutsideStationPolicy({
   const assignmentTable = profileType === "employee"
     ? "hr_employee_shift_assignments"
     : "hr_contractor_shift_assignments";
-  const profileColumn = profileType === "employee"
-    ? "employee_id"
-    : profileType === "workforce"
-      ? "workforce_id"
-      : "contractor_id";
+  const profileColumn = profileType === "employee" ? "employee_id" : "contractor_id";
   const assignment = await supabaseAdmin
     .from(assignmentTable)
     .select("hr_shifts(break_minutes)")
@@ -349,30 +345,6 @@ export function evaluateGeofence(
   };
 }
 
-function mergeIntegrityDetails(
-  existingDetails: unknown,
-  nextDetails: Record<string, unknown>,
-  existingPunchId?: string | null,
-  nextPunchId?: string | null
-) {
-  const existing = existingDetails && typeof existingDetails === "object" && !Array.isArray(existingDetails)
-    ? existingDetails as Record<string, unknown>
-    : {};
-  const previousPunchIds = Array.isArray(existing.punchIds)
-    ? existing.punchIds.map(String)
-    : [];
-  const punchIds = Array.from(new Set([
-    ...previousPunchIds,
-    ...(existingPunchId ? [existingPunchId] : []),
-    ...(nextPunchId ? [nextPunchId] : [])
-  ]));
-  return {
-    ...existing,
-    ...nextDetails,
-    ...(punchIds.length ? { punchIds } : {})
-  };
-}
-
 export async function openIntegrityFlag({
   companyId,
   enrolmentId,
@@ -415,7 +387,7 @@ export async function openIntegrityFlag({
   const now = new Date().toISOString();
   const existing = await supabaseAdmin
     .from("attendance_integrity_flags")
-    .select("id, status, punch_id, details")
+    .select("id, status")
     .eq("company_id", companyId)
     .eq("enrolment_id", enrolmentId)
     .eq("punch_date", punchDate)
@@ -430,7 +402,7 @@ export async function openIntegrityFlag({
       .from("attendance_integrity_flags")
       .update({
         message,
-        details: mergeIntegrityDetails(existing.data.details, details, existing.data.punch_id, punchId),
+        details,
         severity,
         punch_id: punchId ?? null,
         location_id: locationId ?? null,
@@ -456,7 +428,7 @@ export async function openIntegrityFlag({
       flag_type: flagType,
       severity,
       message,
-      details: mergeIntegrityDetails(null, details, null, punchId),
+      details,
       status: "open",
       updated_at: now
     })
@@ -600,14 +572,30 @@ export async function loadOpenShift({
     dutyByDate.set(rowDate, rows);
   }
 
-  const selectedDate = punchDate
-    ? date
-    : await resolveAttendanceWorkDate({
-      companyId,
-      enrolmentId,
-      punchTime: new Date()
-    });
-  const dutyPunches = dutyByDate.get(selectedDate) ?? [];
+  let selectedDate = date;
+  let dutyPunches = dutyByDate.get(date) ?? [];
+  if (!dutyPunches.length && !punchDate) {
+    const priorPunches = dutyByDate.get(previousDate) ?? [];
+    if (priorPunches.length % 2 === 1 && priorPunches[0]?.punch_time) {
+      const settings = await supabaseAdmin
+        .from("hr_company_settings")
+        .select("overnight_shift_pairing_enabled, maximum_daily_minutes")
+        .eq("company_id", companyId)
+        .maybeSingle();
+      if (settings.error) throw new Error(settings.error.message);
+      const elapsedMinutes =
+        (Date.now() - new Date(String(priorPunches[0].punch_time)).getTime()) / 60_000;
+      const maximumDailyMinutes = Math.max(1, Number(settings.data?.maximum_daily_minutes ?? 960));
+      if (
+        settings.data?.overnight_shift_pairing_enabled !== false &&
+        elapsedMinutes > 0 &&
+        elapsedMinutes <= maximumDailyMinutes
+      ) {
+        selectedDate = previousDate;
+        dutyPunches = priorPunches;
+      }
+    }
+  }
 
   if (dutyPunches.length || dutyResult.error) {
     const pendingApproval = dutyPunches.some((row) => row.calculated === false);
@@ -642,7 +630,24 @@ export async function loadOpenShift({
     .order("punch_date", { ascending: false });
   if (daily.error) throw new Error(daily.error.message);
   const openRows = (daily.data ?? []).filter((row) => row.in_time && Number(row.punch_count ?? 0) % 2 === 1);
-  const selected = openRows.find((row) => row.punch_date === selectedDate) ?? null;
+  let selected = openRows.find((row) => row.punch_date === date) ?? null;
+
+  if (!selected && !punchDate) {
+    const prior = openRows.find((row) => row.punch_date === previousDate) ?? null;
+    if (prior?.in_time) {
+      const settings = await supabaseAdmin
+        .from("hr_company_settings")
+        .select("overnight_shift_pairing_enabled, maximum_daily_minutes")
+        .eq("company_id", companyId)
+        .maybeSingle();
+      if (settings.error) throw new Error(settings.error.message);
+      const elapsedMinutes = (Date.now() - new Date(prior.in_time).getTime()) / 60_000;
+      const maximumDailyMinutes = Math.max(1, Number(settings.data?.maximum_daily_minutes ?? 960));
+      if (settings.data?.overnight_shift_pairing_enabled !== false && elapsedMinutes > 0 && elapsedMinutes <= maximumDailyMinutes) {
+        selected = prior;
+      }
+    }
+  }
 
   const inTime = selected?.in_time ? new Date(selected.in_time) : null;
   const outTime = selected?.out_time ? new Date(selected.out_time) : null;

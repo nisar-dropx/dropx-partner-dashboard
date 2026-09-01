@@ -32,8 +32,8 @@ export async function GET(request: NextRequest) {
       const configured = labels.get(String(row.status ?? ""));
       return {
         ...row,
-        statusLabel: configured?.attendance_label ?? row.statusLabel ?? null,
-        statusKind: configured ? "leave" : row.statusKind ?? "attendance",
+        statusLabel: configured?.attendance_label ?? null,
+        statusKind: configured ? "leave" : "attendance",
         isPaidLeave: configured?.is_paid ?? null
       };
     });

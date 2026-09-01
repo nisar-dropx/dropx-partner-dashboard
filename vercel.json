@@ -24,18 +24,6 @@
     {
       "path": "/api/whatsapp/process-campaigns",
       "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/cron/google-workspace",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/location-mail",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/profile-lifecycle",
-      "schedule": "*/5 * * * *"
     }
   ]
 }

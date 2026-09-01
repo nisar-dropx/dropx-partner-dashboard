@@ -394,7 +394,7 @@ async function saveExecutiveMappingRow(
 
   if (methodError) throw new Error(methodError.message);
 
-  const [{ data: worker }, { data: station }] = await Promise.all([
+  const [{ data: legacyWorker }, { data: station }] = await Promise.all([
     sourceType === "employee"
       ? supabaseAdmin
         .from("employees")
@@ -429,6 +429,19 @@ async function saveExecutiveMappingRow(
       .maybeSingle()
   ]);
 
+  const canonicalWorkerResult = legacyWorker
+    ? { data: null, error: null }
+    : await supabaseAdmin
+      .from("workforce")
+      .select("id, full_name")
+      .eq("company_id", companyId)
+      .eq("source_profile_type", sourceType)
+      .eq("source_profile_id", id)
+      .eq("is_active", true)
+      .is("deleted_at", null)
+      .maybeSingle();
+  if (canonicalWorkerResult.error) throw new Error(canonicalWorkerResult.error.message);
+  const worker = legacyWorker ?? canonicalWorkerResult.data;
   if (!worker) throw new Error(`Row ${index + 1}: Field Operations worker was not found for this company.`);
   const dropxName = String((worker as { full_name?: string | null }).full_name ?? "").trim();
   const { data: uploadedMember, error: uploadedMemberError } = await supabaseAdmin

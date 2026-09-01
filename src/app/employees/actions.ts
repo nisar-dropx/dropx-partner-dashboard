@@ -504,68 +504,6 @@ export async function updateEmployee(formData: FormData) {
   }
 }
 
-export async function confirmEmployeeJoining(formData: FormData) {
-  const authorization = await requirePagePermission("employees", "edit");
-  const companyId = requireCompanyId(authorization);
-  if (!supabaseAdmin) employeesRedirect({ error: "Supabase service role key is not configured." });
-
-  const id = String(formData.get("id") ?? "").trim();
-  const joiningAction = String(formData.get("joining_action") ?? "").trim().toLowerCase();
-  const joiningRemarks = String(formData.get("joining_remarks") ?? "").trim();
-
-  try {
-    if (!id) throw new Error("Employee is required.");
-    if (!["joined", "no_show"].includes(joiningAction)) throw new Error("Choose a valid joining action.");
-
-    const current = await supabaseAdmin
-      .from("employees")
-      .select("id,full_name,is_active,date_of_join,profile_completion_status,joining_status,designation_id")
-      .eq("company_id", companyId)
-      .eq("id", id)
-      .maybeSingle();
-    if (current.error) throw new Error(current.error.message);
-    if (!current.data) throw new Error("Employee was not found.");
-    if (current.data.joining_status === "joined") throw new Error("Joining is already confirmed. Use offboarding to withdraw issued access.");
-
-    const now = new Date();
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(now);
-    if (joiningAction === "joined") {
-      if (!current.data.is_active) throw new Error("Activate the employee before confirming joining.");
-      if (String(current.data.profile_completion_status ?? "").toLowerCase() !== "active") {
-        throw new Error("Approve the employee profile before confirming joining.");
-      }
-      if (String(current.data.date_of_join ?? "") > today) {
-        throw new Error("Joining cannot be confirmed before the scheduled date of join.");
-      }
-    }
-
-    const result = await supabaseAdmin
-      .from("employees")
-      .update({
-        joining_status: joiningAction,
-        joined_at: joiningAction === "joined" ? now.toISOString() : null,
-        joined_by: joiningAction === "joined" ? authorization.userId : null,
-        joining_remarks: joiningRemarks || (joiningAction === "joined" ? "Joining confirmed in People" : "Marked as no-show in People"),
-        updated_at: now.toISOString()
-      })
-      .eq("company_id", companyId)
-      .eq("id", id);
-    if (result.error) throw new Error(result.error.message);
-
-    revalidatePath("/employees");
-    revalidatePath("/settings/google-workspace");
-    employeesRedirect({
-      edit: id,
-      notice: joiningAction === "joined"
-        ? "Joining confirmed. Google account issuance now follows the designation policy."
-        : "Employee marked as no-show. Google account issuance remains blocked."
-    });
-  } catch (error) {
-    if (isNextRedirectError(error)) throw error;
-    employeesRedirect({ edit: id, error: error instanceof Error ? error.message : "Unable to update joining status." });
-  }
-}
-
 export async function reviewEmployeeProfile(formData: FormData) {
   const authorization = await requirePagePermission("employees", "edit");
   const companyId = requireCompanyId(authorization);

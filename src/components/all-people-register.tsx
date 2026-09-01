@@ -18,8 +18,8 @@ export type AllPeopleRow = {
   location: string;
   designation: string;
   status: string;
-  viewHref: string;
-  editHref: string;
+  viewHref?: string;
+  editHref?: string;
   canEdit: boolean;
   exportValues: AllPeopleExportValues;
 };
@@ -121,6 +121,8 @@ function AllPeopleActionMenu({ row }: { row: AllPeopleRow }) {
     };
   }, [open]);
 
+  if (!row.viewHref) return null;
+
   return (
     <div className="row-action-menu" ref={menuRef}>
       <button aria-expanded={open} aria-haspopup="menu" aria-label={`Actions for ${row.fullName}`} className="icon-button" onClick={() => setOpen((current) => !current)} type="button">
@@ -131,7 +133,7 @@ function AllPeopleActionMenu({ row }: { row: AllPeopleRow }) {
           <PendingLink className="row-action-item" href={row.viewHref}>
             <Eye aria-hidden="true" size={15} /> View
           </PendingLink>
-          {row.canEdit ? (
+          {row.canEdit && row.editHref ? (
             <PendingLink className="row-action-item" href={row.editHref}>
               <Pencil aria-hidden="true" size={15} /> Edit
             </PendingLink>

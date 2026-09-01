@@ -15,15 +15,15 @@ import { opsAccessPageCodes } from "@/lib/access-surface";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { firstAllowedHref, navItems } from "@/lib/app-navigation";
 import { requireCompanyId } from "@/lib/company-scope";
-import { financeNavItems, hasFinancePortalAccess } from "@/lib/finance/navigation";
-import { isFinanceHostName } from "@/lib/finance/surface";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { operatingModeForLocation } from "@/lib/ops-pulse/operating-context";
 import { loadPaymentNotificationSnapshot } from "@/lib/payment-notification-counts";
 import { opsNavItemsForMode } from "@/lib/ops-pulse/navigation";
+import { isCustomWorkforceCategoryCode, workforceCategoryPageCode } from "@/lib/dynamic-workforce";
 import { hasPeoplePortalAccess, peopleNavItems } from "@/lib/people/navigation";
 import { isPeopleHostName } from "@/lib/people/surface";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function AppShell({ children, active, pageCode }: { children: ReactNode; active: string; pageCode?: string }) {
   const authorization = await getAuthorization();
@@ -31,20 +31,13 @@ export async function AppShell({ children, active, pageCode }: { children: React
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
   const isOpsHost = host === "ops.dropxlogistics.com" || host.startsWith("ops-");
   const isPeopleHost = isPeopleHostName(host);
-  const isFinanceHost = isFinanceHostName(host);
-  const isDashboardHost = host === "dashboard.dropxlogistics.com";
-  if (isDashboardHost && !authorization.isMasterOwner) {
-    redirect("/unauthorized?page=dashboard_portal&reason=super_admin_only");
-  }
   const hasCurrentPortalAccess = isOpsHost
     ? isCompanyOwner(authorization) || opsAccessPageCodes.some((code) => hasPermission(authorization, code, "access"))
     : isPeopleHost
       ? hasPeoplePortalAccess(authorization)
-      : isFinanceHost
-        ? hasFinancePortalAccess(authorization)
       : Boolean(firstAllowedHref(authorization));
   if (!hasCurrentPortalAccess) {
-    redirect(`/unauthorized?page=${isOpsHost ? "ops_portal" : isPeopleHost ? "people_portal" : isFinanceHost ? "finance_portal" : "dashboard_portal"}&reason=access`);
+    redirect(`/unauthorized?page=${isOpsHost ? "ops_portal" : isPeopleHost ? "people_portal" : "dashboard_portal"}&reason=access`);
   }
   const opsAppUrl = process.env.OPS_APP_URL?.trim();
   const opsLocationsResult = isOpsHost
@@ -59,10 +52,37 @@ export async function AppShell({ children, active, pageCode }: { children: React
     ? opsNavItemsForMode(opsContext.mode)
     : isPeopleHost
       ? peopleNavItems
-      : isFinanceHost
-        ? financeNavItems
       : navItems.map((item) => item.code === "ops_pulse" && opsAppUrl ? { ...item, href: opsAppUrl } : item);
-  const shellNavItems = baseShellNavItems;
+  let shellNavItems = baseShellNavItems;
+  if (isPeopleHost && supabaseAdmin && authorization.companyId) {
+    const categoryResult = await supabaseAdmin
+      .from("workforce_categories")
+      .select("code, name")
+      .eq("company_id", authorization.companyId)
+      .eq("is_active", true)
+      .order("sort_order")
+      .order("name");
+    const categoryChildren = (categoryResult.data ?? [])
+      .filter((category) => isCustomWorkforceCategoryCode(category.code))
+      .map((category) => ({
+        code: workforceCategoryPageCode(category.code),
+        label: category.name,
+        href: `/people/category/${encodeURIComponent(category.code)}`
+      }));
+    shellNavItems = baseShellNavItems.map((item) => {
+      if (item.code !== "people_all" || !item.children?.length || !categoryChildren.length) return item;
+      const reviewIndex = item.children.findIndex((child) => child.code === "people_review");
+      const insertAt = reviewIndex < 0 ? item.children.length : reviewIndex;
+      return {
+        ...item,
+        children: [
+          ...item.children.slice(0, insertAt),
+          ...categoryChildren,
+          ...item.children.slice(insertAt)
+        ]
+      };
+    });
+  }
 
   const activeItem = shellNavItems.find((item) => item.label === active || item.children?.some((child) => child.label === active));
   const currentPageCode = pageCode ?? activeItem?.code;
@@ -125,10 +145,6 @@ export async function AppShell({ children, active, pageCode }: { children: React
               <div className="people-brand-lockup">
                 <strong>People</strong>
               </div>
-            ) : isFinanceHost ? (
-              <div className="people-brand-lockup">
-                <strong>Finance</strong>
-              </div>
             ) : null}
           </div>
 
@@ -142,7 +158,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
         </aside>
       )}
     >
-      <DocumentTitle pageName={active} productName={isOpsHost ? "OpsPulse · DropX" : isPeopleHost ? "DropX People" : isFinanceHost ? "DropX Finance" : "DropX Dashboard"} />
+      <DocumentTitle pageName={active} productName={isOpsHost ? "OpsPulse · DropX" : isPeopleHost ? "DropX People" : "DropX Dashboard"} />
       <InboxNotificationListener enabled={inboxNotificationsEnabled} />
       {children}
       {isOpsHost && hasPermission(authorization, "ops_pulse", "access") ? <OpsAiChat /> : null}

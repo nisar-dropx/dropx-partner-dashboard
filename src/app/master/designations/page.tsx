@@ -7,9 +7,7 @@ import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { firstDesignationBusinessCategory, type DesignationBusinessCategory } from "@/lib/designation-business-categories";
 import { designationCategoryLabel, normalizeDesignationCategories } from "@/lib/designation-categories";
-import { designationProfileDestinationLabel, inferDesignationProfileDestination, type DesignationProfileDestination } from "@/lib/designation-profile-destination";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { createDesignation, deleteDesignation, updateDesignation } from "./actions";
 
@@ -18,6 +16,13 @@ type ProviderRow = {
   code: string;
   name: string;
   is_active: boolean;
+};
+
+type LocationRow = {
+  id: string;
+  station_code: string;
+  station_name: string | null;
+  hide_from_location_list?: boolean | null;
 };
 
 type ModelRow = {
@@ -33,10 +38,6 @@ type DesignationRow = {
   id: string;
   code: string;
   name: string;
-  designation_category_id?: string | null;
-  designation_category?: DesignationBusinessCategory | DesignationBusinessCategory[] | null;
-  profile_destination?: DesignationProfileDestination | null;
-  registration_category_code?: string | null;
   provider_ids: string[];
   location_ids?: string[];
   model_ids?: string[] | null;
@@ -55,8 +56,6 @@ type WorkforceCategoryRow = {
   code: string;
   name: string;
   is_active: boolean;
-  profile_field_rules?: unknown;
-  app_page_access?: string[] | null;
 };
 
 function loadFlash() {
@@ -78,72 +77,120 @@ function isMissingColumnError(error: unknown) {
   return message.includes("column") && (message.includes("does not exist") || message.includes("schema cache"));
 }
 
-async function loadDesignations(companyId: string) {
+async function loadDesignations(companyId: string, locationScopeIds: string[], hasAllLocationAccess: boolean) {
   if (!supabaseAdmin) {
     return {
       designations: [] as DesignationRow[],
       providers: [] as ProviderRow[],
+      locations: [] as LocationRow[],
       models: [] as ModelRow[],
       categories: [] as WorkforceCategoryRow[],
-      businessCategories: [] as DesignationBusinessCategory[],
       roles: [] as UserRoleRow[],
       error: "Supabase service role key is not configured."
     };
   }
 
-  const [designationsResult, providersResult, modelsResult, categoriesResult, businessCategoriesResult, rolesResult] = await Promise.all([
-    supabaseAdmin.from("designations").select("id, code, name, designation_category_id, designation_category:designation_categories!designations_designation_category_id_fkey!inner(id, code, name, people_module, is_active), profile_destination, registration_category_code, provider_ids, model_ids, location_ids, onboarding_categories, profile_field_rules, app_page_access, onboarding_role_ids, portal_permissions, is_field_operations, is_active").eq("company_id", companyId).eq("designation_category.people_module", "people_hr").eq("designation_category.is_active", true).order("code"),
+  const [designationsResult, providersResult, locationsResult, modelsResult, categoriesResult, rolesResult] = await Promise.all([
+    supabaseAdmin.from("designations").select("id, code, name, provider_ids, model_ids, location_ids, onboarding_categories, profile_field_rules, app_page_access, onboarding_role_ids, portal_permissions, is_field_operations, is_active").eq("company_id", companyId).order("code"),
     supabaseAdmin.from("providers").select("id, code, name, is_active").eq("company_id", companyId).order("code"),
+    supabaseAdmin.from("stations").select("id, station_code, station_name, hide_from_location_list").eq("company_id", companyId).eq("is_active", true).order("station_code"),
     supabaseAdmin.from("location_models").select("id, provider_id, code, name, is_active, providers (code, name)").eq("company_id", companyId).eq("is_active", true).order("code"),
-    supabaseAdmin.from("workforce_categories").select("code, name, is_active, profile_field_rules, app_page_access").eq("company_id", companyId).eq("is_active", true).order("sort_order").order("name"),
-    supabaseAdmin.from("designation_categories").select("id, code, name, people_module, is_active").eq("company_id", companyId).eq("people_module", "people_hr").eq("is_active", true).order("sort_order").order("name"),
+    supabaseAdmin.from("workforce_categories").select("code, name, is_active").eq("company_id", companyId).eq("is_active", true).order("sort_order").order("name"),
     supabaseAdmin.from("user_roles").select("id, code, name, is_active").eq("company_id", companyId).eq("is_active", true).order("name")
   ]);
-  if (designationsResult.error) {
+  let designationRows: unknown[] = designationsResult.data ?? [];
+  let designationError: { message?: string } | null = designationsResult.error;
+  if (isMissingColumnError(designationsResult.error)) {
+    let fallbackRows: unknown[] = [];
+    let fallbackError: { message?: string } | null = null;
+    const fallbackResult = await supabaseAdmin.from("designations").select("id, code, name, provider_ids, location_ids, onboarding_categories, is_active").eq("company_id", companyId).order("code");
+    if (isMissingColumnError(fallbackResult.error)) {
+      const legacyResult = await supabaseAdmin.from("designations").select("id, code, name, provider_ids, is_active").eq("company_id", companyId).order("code");
+      fallbackRows = (legacyResult.data ?? []).map((row) => ({ ...row, location_ids: [], model_ids: [] }));
+      fallbackError = legacyResult.error;
+    } else {
+      fallbackRows = fallbackResult.data ?? [];
+      fallbackError = fallbackResult.error;
+    }
+    designationRows = fallbackRows.map((row) => ({
+      ...(row as Record<string, unknown>),
+      location_ids: Array.isArray((row as { location_ids?: unknown }).location_ids) ? (row as { location_ids: string[] }).location_ids : [],
+      model_ids: Array.isArray((row as { model_ids?: unknown }).model_ids) ? (row as { model_ids: string[] }).model_ids : [],
+      onboarding_categories: Array.isArray((row as { onboarding_categories?: unknown }).onboarding_categories) ? (row as { onboarding_categories: string[] }).onboarding_categories : ["employees"],
+      app_page_access: ["dashboard", "attendance", "leave"],
+      profile_field_rules: {},
+      onboarding_role_ids: [],
+      portal_permissions: null,
+      is_field_operations: false,
+    }));
+    designationError = fallbackError;
+  }
+
+  if (designationError) {
     return {
       designations: [] as DesignationRow[],
       providers: [] as ProviderRow[],
+      locations: [] as LocationRow[],
       models: [] as ModelRow[],
       categories: [] as WorkforceCategoryRow[],
-      businessCategories: [] as DesignationBusinessCategory[],
       roles: [] as UserRoleRow[],
-      error: designationsResult.error.message
+      error: designationError.message
     };
   }
-  const setupError = providersResult.error || modelsResult.error || businessCategoriesResult.error;
-  if (setupError) {
+  if (providersResult.error) {
     return {
       designations: [] as DesignationRow[],
       providers: [] as ProviderRow[],
+      locations: [] as LocationRow[],
       models: [] as ModelRow[],
       categories: [] as WorkforceCategoryRow[],
-      businessCategories: [] as DesignationBusinessCategory[],
       roles: [] as UserRoleRow[],
-      error: setupError.message
+      error: providersResult.error.message
+    };
+  }
+  if (locationsResult.error) {
+    return {
+      designations: [] as DesignationRow[],
+      providers: [] as ProviderRow[],
+      locations: [] as LocationRow[],
+      models: [] as ModelRow[],
+      categories: [] as WorkforceCategoryRow[],
+      roles: [] as UserRoleRow[],
+      error: locationsResult.error.message
+    };
+  }
+  if (modelsResult.error) {
+    return {
+      designations: [] as DesignationRow[],
+      providers: [] as ProviderRow[],
+      locations: [] as LocationRow[],
+      models: [] as ModelRow[],
+      categories: [] as WorkforceCategoryRow[],
+      roles: [] as UserRoleRow[],
+      error: modelsResult.error.message
     };
   }
   const fallbackCategories: WorkforceCategoryRow[] = [
-    { code: "employees", name: "Employees", is_active: true }
+    { code: "employees", name: "Employees", is_active: true },
+    { code: "field_executives", name: "Field Executives", is_active: true },
+    { code: "contractors", name: "Independent Contractor", is_active: true },
+    { code: "vendors", name: "Vendors", is_active: true },
+    { code: "workers", name: "Workers", is_active: true }
   ];
 
+  const locations = hasAllLocationAccess
+    ? (locationsResult.data ?? [])
+    : (locationsResult.data ?? []).filter((location) => locationScopeIds.includes(location.id) && !location.hide_from_location_list);
+
   return {
-    designations: ((designationsResult.data ?? []) as DesignationRow[]).map((designation) => {
-      const businessCategory = firstDesignationBusinessCategory(designation.designation_category);
-      const onboardingCategories = ["employees"];
-      return {
-        ...designation,
-        onboarding_categories: onboardingCategories,
-        registration_category_code: "employees",
-        profile_destination: inferDesignationProfileDestination({ onboardingCategories, peopleModule: businessCategory?.people_module ?? null, profileDestination: "employees" }),
-        is_field_operations: false
-      };
-    }),
+    designations: (designationRows as DesignationRow[]).map((designation) => ({
+      ...designation,
+      onboarding_categories: normalizeDesignationCategories(designation.onboarding_categories)
+    })),
     providers: (providersResult.data ?? []) as ProviderRow[],
+    locations: locations as LocationRow[],
     models: (modelsResult.data ?? []) as ModelRow[],
-    categories: categoriesResult.error
-      ? fallbackCategories
-      : ((categoriesResult.data ?? []) as WorkforceCategoryRow[]).filter((category) => category.code === "employees"),
-    businessCategories: (businessCategoriesResult.data ?? []) as DesignationBusinessCategory[],
+    categories: categoriesResult.error ? fallbackCategories : (categoriesResult.data ?? []) as WorkforceCategoryRow[],
     roles: rolesResult.error ? [] : (rolesResult.data ?? []) as UserRoleRow[],
     error: null
   };
@@ -159,7 +206,7 @@ export default async function DesignationsPage({
   const authorization = await requirePagePermission("designations", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.designations;
-  const { designations, providers, models, categories, businessCategories, roles, error } = await loadDesignations(companyId);
+  const { designations, providers, models, categories, roles, error } = await loadDesignations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const flash = loadFlash();
   const query = String(searchParams?.q ?? "").trim().toLowerCase();
   const providerById = new Map(providers.map((provider) => [provider.id, provider]));
@@ -177,16 +224,16 @@ export default async function DesignationsPage({
       .map((model) => `${model?.code} ${model?.name}`)
       .join(" ");
     const categoryText = normalizeDesignationCategories(designation.onboarding_categories).map((category) => categoryNameByCode.get(category) ?? designationCategoryLabel(category)).join(" ");
-    return `${designation.code} ${designation.name} ${providerText} ${modelText} ${categoryText} ${designationProfileDestinationLabel(designation.profile_destination)}`.toLowerCase().includes(query);
+    return `${designation.code} ${designation.name} ${providerText} ${modelText} ${categoryText}`.toLowerCase().includes(query);
   });
   const editDesignation = designations.find((designation) => designation.id === searchParams?.edit) ?? null;
 
   return (
-    <AppShell active="HR Designations" pageCode="designations">
+    <AppShell active="Designations" pageCode="designations">
       <PageHead
-        eyebrow="People master"
-        title="HR Designations"
-        subtitle="Manage only employee and People/HR designations. Workforce roles remain isolated in Workforce."
+        eyebrow="Master Data"
+        title="Designations"
+        subtitle="Maintain role/designation codes used in lead ad SOP and station-wise hiring ads."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 
@@ -232,7 +279,6 @@ export default async function DesignationsPage({
                 <tr>
                   <th>Code</th>
                   <th>Designation</th>
-                  <th>Profile destination</th>
                   <th>Categories</th>
                   <th>Models</th>
                   <th>App pages</th>
@@ -250,7 +296,6 @@ export default async function DesignationsPage({
                     <tr key={designation.id}>
                       <td><strong>{designation.code}</strong></td>
                       <td>{designation.name}</td>
-                      <td><span className={`destination-badge ${designation.profile_destination ?? "unset"}`}>{designationProfileDestinationLabel(designation.profile_destination)}</span></td>
                       <td>
                         <div className="mini-chip-list">
                           {normalizeDesignationCategories(designation.onboarding_categories).map((category) => (
@@ -281,7 +326,7 @@ export default async function DesignationsPage({
                     </tr>
                   );
                 }) : (
-                  <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 9 : 8}>No HR designations found.</td></tr>
+                  <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 8 : 7}>No designations found.</td></tr>
                 )}
               </tbody>
             </table>
@@ -294,12 +339,12 @@ export default async function DesignationsPage({
           <section className="modal-panel wide designation-modal">
             <div className="panel-head">
               <div>
-                <h2>Add HR designation</h2>
-                <p className="subtle">Configure its People destination, registration policy, DropX One menus and required fields.</p>
+                <h2>Add designation</h2>
+                <p className="subtle">Select one or more models where this designation applies.</p>
               </div>
               <PendingLink className="icon-button" href="/master/designations" scroll={false} aria-label="Close">x</PendingLink>
             </div>
-            <DesignationForm action={createDesignation} businessCategories={businessCategories} categories={categories} peopleModule="people_hr" roles={roles} models={models.map((model) => ({
+            <DesignationForm action={createDesignation} categories={categories} roles={roles} models={models.map((model) => ({
               id: model.id,
               code: model.code,
               name: model.name,
@@ -314,12 +359,12 @@ export default async function DesignationsPage({
           <section className="modal-panel wide designation-modal">
             <div className="panel-head">
               <div>
-                <h2>Edit HR designation</h2>
-                <p className="subtle">Changes apply to future and continuing registration steps without moving existing profile records.</p>
+                <h2>Edit designation</h2>
+                <p className="subtle">Code and model assignment can be changed without affecting old rows.</p>
               </div>
               <PendingLink className="icon-button" href="/master/designations" scroll={false} aria-label="Close">x</PendingLink>
             </div>
-            <DesignationForm action={updateDesignation} businessCategories={businessCategories} categories={categories} initial={editDesignation} peopleModule="people_hr" roles={roles} models={models.map((model) => ({
+            <DesignationForm action={updateDesignation} categories={categories} initial={editDesignation} roles={roles} models={models.map((model) => ({
               id: model.id,
               code: model.code,
               name: model.name,

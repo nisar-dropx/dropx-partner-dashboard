@@ -4,10 +4,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
-import { requireCompanyId } from "@/lib/company-scope";
-import { ensureAccessPages } from "@/lib/access-pages";
 import { platformModules } from "@/lib/platform-modules";
-import { isProductCode, productDefinitions, productPageCodes, type ProductCode } from "@/lib/product-ownership";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function clean(value: FormDataEntryValue | null) {
@@ -68,18 +65,6 @@ function platformRedirect(params: { error?: string; notice?: string }) {
   redirect("/platform-admin");
 }
 
-const platformAccessOwnersPath = "/master/platform-access-owners";
-
-function platformAccessOwnersRedirect(params: { error?: string; notice?: string }) {
-  cookies().set("dropx_platform_access_owners_flash", JSON.stringify(params), {
-    httpOnly: true,
-    maxAge: 20,
-    path: platformAccessOwnersPath,
-    sameSite: "lax"
-  });
-  redirect(platformAccessOwnersPath);
-}
-
 function selectedModules(formData: FormData) {
   const allowed = new Set(platformModules.map((module) => module.code));
   return new Set(
@@ -92,16 +77,8 @@ function selectedModules(formData: FormData) {
 
 async function requirePlatformAdmin(action: "add" | "edit") {
   const authorization = await requirePagePermission("company_master", action);
-  if (!authorization.isMasterOwner) {
-    platformRedirect({ error: "Only Super Admin can manage platform masters." });
-  }
-  return authorization;
-}
-
-async function requirePlatformAccessOwnersAdmin(action: "add" | "edit") {
-  const authorization = await requirePagePermission("company_master", action);
-  if (!authorization.isMasterOwner) {
-    platformAccessOwnersRedirect({ error: "Only Super Admin can manage platform and access owners." });
+  if (!authorization.isMasterOwner && !authorization.isMasterCompany) {
+    platformRedirect({ error: "Only master company users can manage platform companies." });
   }
   return authorization;
 }
@@ -236,225 +213,6 @@ async function ensureOwnerRoleId(companyId: string) {
     return duplicateRole.id as string;
   }
   return createdRole.id as string;
-}
-
-async function ensureProductOwnerRole(companyId: string, productCode: ProductCode) {
-  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-  const product = productDefinitions.find((item) => item.code === productCode)!;
-  const roleCode = `${productCode.toUpperCase()}_OWNER`;
-  const ownerRoleId = await ensureOwnerRoleId(companyId);
-
-  let roleResult = await supabaseAdmin
-    .from("user_roles")
-    .select("id")
-    .eq("company_id", companyId)
-    .eq("code", roleCode)
-    .maybeSingle();
-  if (roleResult.error) throw new Error(roleResult.error.message);
-  if (!roleResult.data) {
-    roleResult = await supabaseAdmin
-      .from("user_roles")
-      .insert({
-        company_id: companyId,
-        code: roleCode,
-        name: `${product.name} Owner`,
-        product_code: productCode,
-        parent_role_id: ownerRoleId,
-        location_access_mode: "all_locations",
-        is_active: true,
-        is_system: false
-      })
-      .select("id")
-      .single();
-    if (roleResult.error || !roleResult.data) throw new Error(roleResult.error?.message ?? "Product Owner role could not be created.");
-  } else {
-    const productRoleResult = await supabaseAdmin
-      .from("user_roles")
-      .update({ product_code: productCode })
-      .eq("id", roleResult.data.id)
-      .eq("company_id", companyId);
-    if (productRoleResult.error) throw new Error(productRoleResult.error.message);
-  }
-
-  await ensureAccessPages(supabaseAdmin, companyId);
-  let pagesResult = await supabaseAdmin
-    .from("app_pages")
-    .select("id, code")
-    .eq("company_id", companyId)
-    .eq("is_active", true)
-    .in("code", [...productPageCodes[productCode]]);
-  if (!pagesResult.error && !(pagesResult.data ?? []).length) {
-    pagesResult = await supabaseAdmin
-      .from("app_pages")
-      .select("id, code")
-      .eq("is_active", true)
-      .in("code", [...productPageCodes[productCode]]);
-  }
-  if (pagesResult.error) throw new Error(pagesResult.error.message);
-  if (!(pagesResult.data ?? []).length) throw new Error(`${product.name} access pages are not configured.`);
-
-  const permissionRows = (pagesResult.data ?? []).map((page) => ({
-    company_id: companyId,
-    role_id: roleResult.data!.id,
-    page_id: page.id,
-    can_view: true,
-    can_add: true,
-    can_edit: true
-  }));
-  const permissionResult = await supabaseAdmin
-    .from("role_page_permissions")
-    .upsert(permissionRows, { onConflict: "company_id,role_id,page_id" });
-  if (permissionResult.error) throw new Error(permissionResult.error.message);
-  return roleResult.data.id as string;
-}
-
-export async function assignProductOwner(formData: FormData) {
-  const authorization = await requirePlatformAccessOwnersAdmin("edit");
-  try {
-    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-    const companyId = requireCompanyId(authorization);
-    const productCodeValue = required(formData.get("product_code"), "Product");
-    if (!isProductCode(productCodeValue)) throw new Error("Select a valid product.");
-    const userId = required(formData.get("user_id"), "User");
-
-    const [companyResult, userResult] = await Promise.all([
-      supabaseAdmin.from("companies").select("id").eq("id", companyId).eq("is_active", true).maybeSingle(),
-      supabaseAdmin.from("profiles").select("id").eq("id", userId).eq("company_id", companyId).eq("is_active", true).maybeSingle()
-    ]);
-    if (companyResult.error || !companyResult.data) throw new Error(companyResult.error?.message ?? "Company was not found or is inactive.");
-    if (userResult.error || !userResult.data) throw new Error(userResult.error?.message ?? "Select an active user from this company.");
-
-    const roleId = await ensureProductOwnerRole(companyId, productCodeValue);
-    const assignmentResult = await supabaseAdmin
-      .from("company_product_owners")
-      .upsert({
-        company_id: companyId,
-        product_code: productCodeValue,
-        user_id: userId,
-        role_id: roleId,
-        is_active: true,
-        assigned_by: authorization.userId,
-        updated_at: new Date().toISOString()
-      }, { onConflict: "company_id,product_code,user_id" });
-    if (assignmentResult.error) throw new Error(assignmentResult.error.message);
-    const membershipResult = await supabaseAdmin
-      .from("company_product_memberships")
-      .upsert({
-        company_id: companyId,
-        product_code: productCodeValue,
-        user_id: userId,
-        role_id: roleId,
-        role_code_snapshot: `${productCodeValue.toUpperCase()}_OWNER`,
-        source_system: "product_owner",
-        has_all_location_access: true,
-        location_scope_ids: [],
-        is_active: true,
-        assigned_by: authorization.userId,
-        updated_at: new Date().toISOString()
-      }, { onConflict: "company_id,product_code,user_id" });
-    if (membershipResult.error) throw new Error(membershipResult.error.message);
-    revalidatePath(platformAccessOwnersPath);
-    platformAccessOwnersRedirect({ notice: `${productDefinitions.find((item) => item.code === productCodeValue)!.name} access owner assigned.` });
-  } catch (error) {
-    if (isNextRedirectError(error)) throw error;
-    platformAccessOwnersRedirect({ error: error instanceof Error ? error.message : "Unable to assign the access owner." });
-  }
-}
-
-export async function removeProductOwner(formData: FormData) {
-  const authorization = await requirePlatformAccessOwnersAdmin("edit");
-  try {
-    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-    const id = required(formData.get("id"), "Product Owner assignment");
-    const result = await supabaseAdmin
-      .from("company_product_owners")
-      .update({ is_active: false, updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .eq("company_id", requireCompanyId(authorization))
-      .select("id, company_id, product_code, user_id")
-      .maybeSingle();
-    if (result.error || !result.data) throw new Error(result.error?.message ?? "Product Owner assignment was not found.");
-    const membershipResult = await supabaseAdmin
-      .from("company_product_memberships")
-      .update({ is_active: false, updated_at: new Date().toISOString() })
-      .eq("company_id", result.data.company_id)
-      .eq("product_code", result.data.product_code)
-      .eq("user_id", result.data.user_id)
-      .eq("source_system", "product_owner");
-    if (membershipResult.error) throw new Error(membershipResult.error.message);
-    revalidatePath(platformAccessOwnersPath);
-    platformAccessOwnersRedirect({ notice: "Platform access owner removed." });
-  } catch (error) {
-    if (isNextRedirectError(error)) throw error;
-    platformAccessOwnersRedirect({ error: error instanceof Error ? error.message : "Unable to remove the platform access owner." });
-  }
-}
-
-export async function purgeVerifiedLegacyWorkforceAliases() {
-  await requirePlatformAccessOwnersAdmin("edit");
-  try {
-    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-    const previewResult = await supabaseAdmin.rpc("preview_legacy_workforce_alias_cleanup");
-    if (previewResult.error) throw new Error(previewResult.error.message);
-    const preview = (previewResult.data ?? {}) as { legacy_workforce_rows?: unknown; unmatched_rows?: unknown };
-    const candidateCount = Number(preview.legacy_workforce_rows ?? 0);
-    const unmatchedCount = Number(preview.unmatched_rows ?? 0);
-    if (unmatchedCount > 0) throw new Error(`${unmatchedCount} legacy Workforce row(s) have no exact canonical identity. Nothing was deleted.`);
-
-    const permissionResult = await supabaseAdmin.rpc("reconcile_product_role_permission_boundaries");
-    if (permissionResult.error) throw new Error(permissionResult.error.message);
-    const cleanupResult = await supabaseAdmin.rpc("purge_verified_legacy_workforce_aliases");
-    if (cleanupResult.error) throw new Error(cleanupResult.error.message);
-    const cleanup = (cleanupResult.data ?? {}) as {
-      deleted_contractors?: unknown;
-      deleted_field_executives?: unknown;
-      remaining_aliases?: unknown;
-    };
-    const deletedContractors = Number(cleanup.deleted_contractors ?? 0);
-    const deletedExecutives = Number(cleanup.deleted_field_executives ?? 0);
-    const remainingAliases = Number(cleanup.remaining_aliases ?? 0);
-    revalidatePath(platformAccessOwnersPath);
-    platformAccessOwnersRedirect({
-      notice: candidateCount
-        ? remainingAliases > 0
-          ? `Deleted a verified batch: ${deletedContractors} contractor and ${deletedExecutives} field-executive aliases. ${remainingAliases} verified aliases remain; canonical Workforce rows and live flows were preserved.`
-          : `Deleted ${deletedContractors} contractor and ${deletedExecutives} field-executive aliases. No duplicate legacy Workforce aliases remain; canonical Workforce rows and live flows were preserved.`
-        : "Product permission boundaries reconciled. No legacy Workforce aliases required deletion."
-    });
-  } catch (error) {
-    if (isNextRedirectError(error)) throw error;
-    platformAccessOwnersRedirect({ error: error instanceof Error ? error.message : "Unable to complete the verified Workforce cleanup." });
-  }
-}
-
-export async function reconcileLegacyWorkforceAliases() {
-  await requirePlatformAccessOwnersAdmin("edit");
-  try {
-    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-    const result = await supabaseAdmin.rpc("reconcile_legacy_workforce_aliases");
-    if (result.error) throw new Error(result.error.message);
-    const summary = (result.data ?? {}) as {
-      exact_canonical_links?: unknown;
-      unmatched_rows?: unknown;
-      remaining_direct_foreign_keys?: unknown;
-      remaining_polymorphic_references?: unknown;
-      ready_for_verified_purge?: unknown;
-    };
-    const exactLinks = Number(summary.exact_canonical_links ?? 0);
-    const unmatched = Number(summary.unmatched_rows ?? 0);
-    const directReferences = Number(summary.remaining_direct_foreign_keys ?? 0);
-    const polymorphicReferences = Number(summary.remaining_polymorphic_references ?? 0);
-    const ready = summary.ready_for_verified_purge === true;
-    revalidatePath(platformAccessOwnersPath);
-    platformAccessOwnersRedirect({
-      notice: ready
-        ? `Reconciliation complete: ${exactLinks} exact canonical Workforce identities are ready for verified deletion.`
-        : `Reconciliation preserved all live data, but deletion remains blocked: ${unmatched} unmatched identities, ${directReferences} direct references and ${polymorphicReferences} workflow references remain.`
-    });
-  } catch (error) {
-    if (isNextRedirectError(error)) throw error;
-    platformAccessOwnersRedirect({ error: error instanceof Error ? error.message : "Unable to reconcile legacy Workforce aliases." });
-  }
 }
 
 async function ensureCompanyAdminProfile(companyId: string, fullName: string, email: string, mobile: string | null) {

@@ -4,10 +4,6 @@ export function StatusPill({ status }: { status: string }) {
     ? "under-review"
     : lower.includes("returned")
     ? "returned"
-    : lower.includes("disconnected today")
-    ? "warn"
-    : lower.includes("disconnected") || lower.includes("offline")
-    ? "bad"
     : lower.includes("inactive")
     || lower.includes("disabled")
     || lower.includes("suspended")
