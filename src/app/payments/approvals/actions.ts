@@ -358,6 +358,7 @@ export async function approvePaymentRequest(formData: FormData) {
     .eq("company_id", companyId)
     .maybeSingle();
   const roleCode = String(role?.code ?? authorization.roleCode ?? "USER").trim().toUpperCase();
+  const ownerCanFinalize = authorization.isMasterOwner || roleCode === "OWNER";
 
   await insertPaymentApprovalLog({
     payment_request_id: request.id,
@@ -369,7 +370,7 @@ export async function approvePaymentRequest(formData: FormData) {
   }, companyId);
 
   const finalRoleIds = (request.final_approval_role_ids?.length ? request.final_approval_role_ids : request.final_approval_role_id ? [request.final_approval_role_id] : []) as string[];
-  if (!finalRoleIds.length) throw new Error("Final approval role is not configured for this payment request.");
+  if (!ownerCanFinalize && !finalRoleIds.length) throw new Error("Final approval role is not configured for this payment request.");
 
   const actorRoleId = authorization.roleId ?? request.current_approver_role_id ?? null;
   const actorCanFinalize = await isFinalRoleOrAbove(companyId, actorRoleId, finalRoleIds);
@@ -378,12 +379,13 @@ export async function approvePaymentRequest(formData: FormData) {
   const currentStepOrder = storedStepOrder > 0
     ? storedStepOrder
     : legacyStatus.endsWith("_APPROVED") ? 2 : 1;
-  const isFinalApproval = currentStepOrder >= 2 || actorCanFinalize;
+  const isFinalApproval = ownerCanFinalize || currentStepOrder >= 2 || actorCanFinalize;
 
   if (isFinalApproval) {
     await updatePaymentRequest(request.id, companyId, {
         status: "approved",
-        approval_status: `${roleCode}_APPROVED`,
+        approval_status: "FINAL_APPROVED",
+        current_step_order: 2,
         current_approver_user_id: null,
         current_approver_role_id: null,
         current_approver_role_ids: [],
