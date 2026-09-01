@@ -20,8 +20,12 @@ function dateText(value: unknown) {
 function exportValues(row: Record<string, unknown>, location: string, status: string, designation: string): AllPeopleExportValues {
   const values = Object.fromEntries(allPeopleExportColumns.map(({ key }) => [key, ""])) as AllPeopleExportValues;
   values.dropxId = String(row.dropx_id ?? "");
+  values.biometricId = String(row.biometric_id ?? "");
   values.fullName = String(row.full_name ?? "");
   values.category = "Workforce";
+  values.mobileCountryCode = String(row.mobile_country_code ?? "");
+  values.mobileNumber = String(row.mobile ?? "");
+  values.email = String(row.email ?? "");
   values.dateOfJoin = dateText(row.date_of_join);
   values.location = location;
   values.designation = designation;
@@ -41,7 +45,7 @@ export async function loadCanonicalWorkforcePeople(
 
   const result = await supabaseAdmin
     .from("workforce")
-    .select("id, source_profile_type, source_profile_id, full_name, date_of_join, location_id, designation_id, dropx_id, biometric_id, mobile, email, onboarding_status, is_active, deleted_at, created_at, updated_at, stations (station_code), designations (code, name)")
+    .select("id, source_profile_type, source_profile_id, full_name, date_of_join, location_id, designation_id, dropx_id, biometric_id, mobile_country_code, mobile, email, onboarding_status, is_active, deleted_at, created_at, updated_at, stations (station_code), designations (code, name)")
     .eq("company_id", companyId)
     .order("full_name");
   if (result.error) return { rows: [], error: result.error.message };
