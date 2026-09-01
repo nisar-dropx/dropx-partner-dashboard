@@ -41,7 +41,7 @@ export async function loadCanonicalWorkforcePeople(
 
   const result = await supabaseAdmin
     .from("workforce")
-    .select("id, source_profile_type, source_profile_id, full_name, date_of_join, location_id, dropx_id, is_active, deleted_at, created_at, updated_at, stations (station_code)")
+    .select("id, source_profile_type, source_profile_id, full_name, date_of_join, location_id, dropx_id, onboarding_status, is_active, deleted_at, created_at, updated_at, stations (station_code)")
     .eq("company_id", companyId)
     .order("full_name");
   if (result.error) return { rows: [], error: result.error.message };
@@ -60,7 +60,12 @@ export async function loadCanonicalWorkforcePeople(
       const location = String(station?.station_code ?? "-");
       const sourceType = String(row.source_profile_type ?? "canonical").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
       const active = row.is_active !== false && !row.deleted_at;
-      const status = active ? "Active" : "Inactive";
+      const onboardingStatus = String(row.onboarding_status ?? "").trim().replaceAll("_", " ");
+      const status = active
+        ? onboardingStatus
+          ? onboardingStatus.replace(/\b\w/g, (letter) => letter.toUpperCase())
+          : "Active"
+        : "Inactive";
       return {
         id: String(row.id),
         category: "Workforce",
