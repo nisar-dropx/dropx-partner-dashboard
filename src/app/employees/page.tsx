@@ -414,7 +414,8 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
   const employeeDesignations = new Map((designationRows as DesignationRow[]).map((designation) => [designation.id, designation]));
   const visibleEmployees = (employees as EmployeeRow[]).filter((employee) => {
     const designation = employee.designation_id ? employeeDesignations.get(employee.designation_id) : null;
-        return canAccessDesignationPortal(designation, "dashboard", "view", { isOwner: ownerAccess });
+    return Boolean(designation?.onboarding_categories?.includes("employees"))
+      && canAccessDesignationPortal(designation, "dashboard", "view", { isOwner: ownerAccess });
   });
 
   const employeesWithUrls = await Promise.all(visibleEmployees.map(async (employee) => ({
@@ -435,6 +436,7 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
     viewEmployee: viewId ? employeesWithUrls.find((employee) => employee.id === viewId) ?? null : null,
     locations: allowedLocations as LocationRow[],
     designations: (designationRows as DesignationRow[])
+      .filter((designation) => designation.onboarding_categories?.includes("employees"))
       .filter((designation) => mappedEmployeeDesignationIds.has(designation.id)),
     positions: positionsResult.error && isMissingPositionAccessSchema(positionsResult.error) ? [] : (positionsResult.data ?? []),
     error: null
