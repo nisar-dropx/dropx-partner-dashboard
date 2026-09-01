@@ -7,7 +7,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { WorkforceCategoryForm, type WorkforceCategoryInitial } from "@/components/workforce-category-form";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { dropxOnePageOptions } from "@/lib/dropx-one-pages";
+import { dropxOnePageOptions, requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createWorkforceCategory, deleteWorkforceCategory, forceDeleteWorkersCategory, updateWorkforceCategory } from "./actions";
 
@@ -121,7 +121,7 @@ export default async function WorkforceCategoriesPage({
                     <td>{category.name}</td>
                     <td>{category.statutory_enabled ? "Enabled" : "Not enabled"}</td>
                     <td>{category.direct_activate ? "Direct" : "App onboarding"}</td>
-                    <td>{(category.app_page_access ?? []).map((page) =>
+                    <td>{Array.from(new Set([...(category.app_page_access ?? []), ...requiredDropxOnePageCodes])).map((page) =>
                       dropxOnePageOptions.find((option) => option.value === page)?.label ?? page.replaceAll("_", " ")
                     ).join(", ") || "None"}</td>
                     <td>{category.is_system ? "System" : "Custom"}</td>

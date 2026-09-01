@@ -17,7 +17,7 @@ import { ConnectApprovalInbox } from "./connect-approval-inbox";
 import { ConnectPeopleWorkspace } from "./connect-people-workspace";
 import { AppAccount, ConnectProfileApp } from "./connect-profile-app";
 import { countryCodeOptions } from "@/lib/country-codes";
-import type { DropxOnePageCode } from "@/lib/dropx-one-pages";
+import { requiredDropxOnePageCodes, type DropxOnePageCode } from "@/lib/dropx-one-pages";
 
 type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "approvals" | "payments" | "advances" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "performance" | "settings";
 type ConnectNotification = {
@@ -43,7 +43,7 @@ const isWorkforceWorkspace = (account: AppAccount | null) => account?.workspace
 const peopleSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account) && !isWorkforceWorkspace(account));
 const sharedSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account));
 const allowed = (account: AppAccount | null, page: DropxOnePageCode) =>
-  (account?.pageAccess ?? defaultPageAccess).includes(page);
+  requiredDropxOnePageCodes.includes(page) || (account?.pageAccess ?? defaultPageAccess).includes(page);
 const canViewApprovals = (account: AppAccount | null) => Boolean(account && allowed(account, "approvals") && !isWorkforceWorkspace(account) && (isManagerAccount(account) || peopleSelfService(account)));
 const showLeaveNav = (account: AppAccount | null) => Boolean(account && active(account) && allowed(account, "leave"));
 

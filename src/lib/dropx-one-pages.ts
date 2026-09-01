@@ -13,3 +13,4 @@ export const dropxOnePageOptions = [
 ] as const;
 
 export const dropxOnePageCodes = new Set<string>(dropxOnePageOptions.map((page) => page.value));
+export const requiredDropxOnePageCodes = ["profile", "settings"] as const;
