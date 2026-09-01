@@ -6,16 +6,17 @@ const checks = [
     file: "src/lib/app-navigation.ts",
     required: [
       'label: "Platform Control"',
+      'label: "People"',
+      'label: "All People", href: "/people/all"',
+      'label: "Under Review", href: "/people/review"',
+      'label: "Exception", href: "/people/exceptions"',
+      'label: "Workforce Lifecycle", href: "/people/workforce-lifecycle"',
+      'label: "Attendance Integrity", href: "/attendance/integrity"',
       'label: "Platform & Access Owners", href: "/master/platform-access-owners"',
       'label: "Locations & Station Mail", href: "/master/location"',
       'label: "Google Mail IDs & Mapping", href: "/settings/google-workspace"'
     ],
-    forbidden: [
-      'label: "All People", href: "/people/all"',
-      'label: "Under Review", href: "/people/review"',
-      'label: "Exception", href: "/people/exceptions"',
-      'label: "Workforce Lifecycle", href: "/people/workforce-lifecycle"'
-    ]
+    forbidden: []
   },
   {
     file: "src/lib/people/navigation.ts",
