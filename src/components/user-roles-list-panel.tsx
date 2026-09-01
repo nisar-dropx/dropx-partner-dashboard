@@ -20,11 +20,15 @@ const PAGE_SIZE = 10;
 export function UserRolesListPanel({
   canAdd,
   canEdit,
-  roles
+  roles,
+  subtitle = "Configure the pages and actions available to each eligible designation.",
+  title = "Designation access"
 }: {
   canAdd: boolean;
   canEdit: boolean;
   roles: UserRolesListRole[];
+  subtitle?: string;
+  title?: string;
 }) {
   const [page, setPage] = useState(1);
   const totalPages = Math.max(1, Math.ceil(roles.length / PAGE_SIZE));
@@ -35,8 +39,8 @@ export function UserRolesListPanel({
     <section className="panel">
       <div className="panel-head toolbar">
         <div>
-          <h2>User role list</h2>
-          <p className="subtle">Roles are saved with hidden IDs. Code and name can stay editable later without breaking assigned users.</p>
+          <h2>{title}</h2>
+          <p className="subtle">{subtitle}</p>
         </div>
         {canAdd ? <PendingLink className="button" href="/users?section=roles&addRole=1" scroll={false}>Add user role</PendingLink> : null}
       </div>
@@ -44,9 +48,9 @@ export function UserRolesListPanel({
         <table style={{ minWidth: 760 }}>
           <thead>
             <tr>
-              <th>Role code</th>
-              <th>Role name</th>
-              <th>Reporting role</th>
+              <th>Designation code</th>
+              <th>Designation</th>
+              <th>Reporting designation</th>
               <th>Location access</th>
               <th>Permission summary</th>
               <th>Status</th>
@@ -74,7 +78,7 @@ export function UserRolesListPanel({
               </tr>
             )) : (
               <tr>
-                <td className="empty-cell" colSpan={7}>No user roles added yet.</td>
+                <td className="empty-cell" colSpan={7}>No eligible designation has a portal menu role configured yet.</td>
               </tr>
             )}
           </tbody>

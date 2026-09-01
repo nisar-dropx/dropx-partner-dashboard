@@ -79,7 +79,7 @@ const administration: NavItem[] = [
     icon: "@",
     children: [
       { code: "users", label: "Ops Users & Scope", href: "/access" },
-      { code: "users", label: "Manage Roles", href: "/users?section=roles" }
+      { code: "users", label: "Designation Access", href: "/users?section=roles" }
     ]
   }
 ];
