@@ -117,6 +117,7 @@ export function ProfileVerificationPanel({ accountId, kind, profileType, pageCod
   const initialInputKeyRef = useRef("");
   const [results, setResults] = useState<Partial<Record<VerificationKind, VerificationResult>>>({});
   const [running, setRunning] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [isDirty, setIsDirty] = useState(false);
 
@@ -229,6 +230,7 @@ export function ProfileVerificationPanel({ accountId, kind, profileType, pageCod
 
   useEffect(() => {
     let alive = true;
+    setLoaded(false);
     fetch(`/api/profile-verification?accountId=${encodeURIComponent(accountId)}&profileType=${encodeURIComponent(profileType)}&pageCode=${encodeURIComponent(pageCode)}`)
       .then((response) => response.ok ? response.json() : { verifications: [] })
       .then((body) => {
@@ -248,8 +250,11 @@ export function ProfileVerificationPanel({ accountId, kind, profileType, pageCod
           };
         }
         setResults(next);
+        setLoaded(true);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (alive) setLoaded(true);
+      });
     return () => {
       alive = false;
     };
@@ -296,6 +301,14 @@ export function ProfileVerificationPanel({ accountId, kind, profileType, pageCod
   const message = kind === "pan" ? panGroupMessage(result, panAadhaarResult) : resultMessage(result);
   const hiddenResults = kind === "pan" ? [result, panAadhaarResult].filter(Boolean) : [result].filter(Boolean);
   const resultTone = isVerified ? "ok" : result?.manualReview ? "warn" : result ? "error" : "";
+  const status = isVerified
+    ? "Verified"
+    : result?.manualReview
+      ? "Manual review"
+      : result
+        ? "Failed"
+        : "Not verified";
+  const statusMessage = message ? `${status} · ${message}` : status;
   return (
     <div className={`profile-verification-inline ${resultTone} ${!isVerified && isDirty ? "needs-button" : ""}`} ref={hostRef}>
       {hiddenResults.length ? (
@@ -306,7 +319,7 @@ export function ProfileVerificationPanel({ accountId, kind, profileType, pageCod
           {running ? "Verifying" : "Verify"}
         </button>
       ) : null}
-      <span>{running ? `Verifying ${labels[kind]}...` : result ? message || "Checked." : missing || "Not verified"}</span>
+      <span>{running ? `Verifying ${labels[kind]}...` : !loaded ? "Checking verification status..." : result ? statusMessage : missing || status}</span>
       {error ? <span className="profile-verification-error">{error}</span> : null}
     </div>
   );
