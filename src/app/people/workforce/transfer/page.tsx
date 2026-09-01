@@ -19,7 +19,7 @@ export default async function WorkforceTransferPage() {
       />
       <section className="panel" style={{ maxWidth: 760 }}>
         <div className="panel-body">
-          <form action="/api/people/move-to-workforce" method="post">
+          <form action="/people/workforce/transfer/execute" method="post">
             <input name="operation" type="hidden" value="remove_delivery_executive_duplicates" />
             <input name="apply" type="hidden" value="true" />
             <label>
