@@ -96,72 +96,9 @@ export async function POST(request: Request) {
     if (!ids.length) return NextResponse.json({ error: "Provide at least one valid DropX ID." }, { status: 400 });
     const apply = body.apply === true;
     if (body.operation === "remove_delivery_executive_duplicates") {
-      const [workforceResult, deliveryExecutiveResult] = await Promise.all([
-        supabaseAdmin.from("workforce")
-          .select("id, dropx_id, onboarding_status, lifecycle_status, provider_id_status, is_active")
-          .eq("company_id", companyId)
-          .in("dropx_id", ids),
-        supabaseAdmin.from("field_executives")
-          .select("id, dropx_id, full_name, onboarding_status, is_active")
-          .eq("company_id", companyId)
-          .in("dropx_id", ids)
-      ]);
-      if (workforceResult.error) throw new Error(workforceResult.error.message);
-      if (deliveryExecutiveResult.error) throw new Error(deliveryExecutiveResult.error.message);
-
-      const workforceRows = workforceResult.data ?? [];
-      const deliveryExecutiveRows = deliveryExecutiveResult.data ?? [];
-      const workforceCodes = new Set(workforceRows.map((row) => String(row.dropx_id ?? "").toUpperCase()));
-      const deliveryExecutiveCodes = new Set(deliveryExecutiveRows.map((row) => String(row.dropx_id ?? "").toUpperCase()));
-      const missingWorkforce = ids.filter((id) => !workforceCodes.has(id));
-      const missingDeliveryExecutives = ids.filter((id) => !deliveryExecutiveCodes.has(id));
-      if (missingWorkforce.length || missingDeliveryExecutives.length) {
-        return NextResponse.json({
-          error: "The cleanup was not applied because both category records were not found for every requested ID.",
-          missingWorkforce,
-          missingDeliveryExecutives,
-          workforce: workforceRows,
-          deliveryExecutives: deliveryExecutiveRows
-        }, { status: 409 });
-      }
-      if (!apply) {
-        return NextResponse.json({ applied: false, status: "ready", workforce: workforceRows, deliveryExecutives: deliveryExecutiveRows });
-      }
-
-      const workforceIds = workforceRows.map((row) => row.id);
-      const deliveryExecutiveIds = deliveryExecutiveRows.map((row) => row.id);
-      const updateResult = await supabaseAdmin.from("workforce")
-        .update({
-          onboarding_status: "pending",
-          lifecycle_status: "onboarding",
-          provider_id_status: "pending",
-          is_active: true,
-          updated_at: new Date().toISOString()
-        })
-        .eq("company_id", companyId)
-        .in("id", workforceIds)
-        .select("id, dropx_id, onboarding_status, lifecycle_status, provider_id_status, is_active");
-      if (updateResult.error) throw new Error(updateResult.error.message);
-
-      const deleteResult = await supabaseAdmin.from("field_executives")
-        .delete()
-        .eq("company_id", companyId)
-        .in("id", deliveryExecutiveIds)
-        .select("id, dropx_id");
-      if (deleteResult.error) throw new Error(deleteResult.error.message);
-
-      await supabaseAdmin.from("person_register_links")
-        .delete()
-        .eq("company_id", companyId)
-        .eq("source_register", "field_executives")
-        .in("source_profile_id", deliveryExecutiveIds);
-
       return NextResponse.json({
-        applied: true,
-        status: "completed",
-        workforce: updateResult.data ?? [],
-        deletedDeliveryExecutives: deleteResult.data ?? []
-      });
+        error: "The legacy Field Executives register has been retired. Workforce is now the only register, so duplicate cleanup is no longer required."
+      }, { status: 410 });
     }
     const results: Array<Record<string, unknown>> = [];
 

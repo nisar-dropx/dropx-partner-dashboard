@@ -639,7 +639,7 @@ async function loadDailyWorkerSnapshot({
         ? "vendors"
         : profileType === "worker"
           ? "workers"
-          : "field_executives";
+          : "workforce";
     const candidateTables = profileType === "worker"
       ? [table, "workforce_helpers", "workforce_pickers"] as const
       : [table] as const;
@@ -670,7 +670,7 @@ async function loadDailyWorkerSnapshot({
       locationId = contractor.data.location_id ?? locationId;
     } else {
       const executive = await supabaseAdmin
-        .from("field_executives")
+        .from("workforce")
         .select("dropx_id, full_name, location_id")
         .eq("company_id", companyId)
         .eq("id", fieldExecutiveId)
@@ -1029,7 +1029,7 @@ export async function loadAttendanceReportRows({
       : Promise.resolve({ data: [], error: null }),
     executiveIds.length
       ? supabaseAdmin
-        .from("field_executives")
+        .from("workforce")
         .select("id, dropx_id, full_name, designation")
         .eq("company_id", companyId)
         .in("id", executiveIds)
@@ -1050,7 +1050,7 @@ export async function loadAttendanceReportRows({
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
       ? supabaseAdmin
-        .from("field_executives")
+        .from("workforce")
         .select("id, dropx_id, full_name, biometric_id, designation, location_id")
         .eq("company_id", companyId)
         .in("biometric_id", biometricVariants)

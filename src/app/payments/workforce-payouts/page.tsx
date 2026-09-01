@@ -60,7 +60,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
     supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId),
     contractorIds.length ? supabaseAdmin.from("contractors").select("id, pan_number").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [], error: null }),
     employeeIds.length ? supabaseAdmin.from("employees").select("id, pan_number").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
-    fieldExecutiveIds.length ? supabaseAdmin.from("field_executives").select("id, pan_number").eq("company_id", companyId).in("id", fieldExecutiveIds) : Promise.resolve({ data: [], error: null })
+    fieldExecutiveIds.length ? supabaseAdmin.from("workforce").select("id, pan_number").eq("company_id", companyId).in("id", fieldExecutiveIds) : Promise.resolve({ data: [], error: null })
   ]);
   if (workforceResult.error || metricsResult.error || modelsResult.error || contractorsResult.error || employeesResult.error || fieldExecutivesResult.error) return { rows: [] as WorkforcePayoutRow[], error: workforceResult.error?.message || metricsResult.error?.message || modelsResult.error?.message || contractorsResult.error?.message || employeesResult.error?.message || fieldExecutivesResult.error?.message || "Unable to load payout data." };
   const workerBySource = new Map((workforceResult.data ?? []).map((row: any) => [row.source_profile_id, row]));
@@ -81,7 +81,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
       production += count; baseAmount += amount;
       productionBreakdown.push({ code: field.code, label: field.label || field.code, count, rate, amount });
     });
-    const categoryCode = mapping.contractor_id ? "contractors" : mapping.employee_id ? "employees" : "field_executives";
+    const categoryCode = mapping.contractor_id ? "contractors" : mapping.employee_id ? "employees" : "workforce";
     const deductions = calculateAutomaticDeductions(baseAmount, automaticDeductions, { categoryCode, panNumber: panBySource.get(sourceId) });
     return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, productionBreakdown, baseAmount, additions: 0, deductions, netAmount: baseAmount - deductions, status: production > 0 ? "Ready for review" : "Awaiting production" } satisfies WorkforcePayoutRow;
   });

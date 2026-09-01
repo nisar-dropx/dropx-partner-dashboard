@@ -43,7 +43,7 @@ export default async function WorkforceLifecyclePage({ searchParams }: { searchP
   if (!supabaseAdmin) {
     error = "Supabase service role key is not configured.";
   } else {
-    let applicantQuery = supabaseAdmin.from("field_executives")
+    let applicantQuery = supabaseAdmin.from("workforce")
       .select("id, full_name, dropx_id, biometric_id, mobile_country_code, mobile, email, designation, location_id, date_of_join, onboarding_status, lifecycle_status, onboarding_application_source, onboarding_submitted_at, provider_id_status, provider_employee_id, onboarding_review_remarks, updated_at, stations(station_code, station_name)")
       .eq("company_id", companyId).order("updated_at", { ascending: false });
     if (!authorization.hasAllLocationAccess) applicantQuery = applicantQuery.in("location_id", authorization.locationScopeIds.length ? authorization.locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);

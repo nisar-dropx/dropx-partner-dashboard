@@ -84,7 +84,7 @@ export async function POST(request: Request) {
         .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
         .or(`mobile.eq.${to},mobile.eq.${localMobile}`),
       supabaseAdmin
-        .from("field_executives")
+        .from("workforce")
         .select("id, company_id, is_active, mobile_country_code")
         .eq("is_active", true)
         .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
@@ -104,7 +104,7 @@ export async function POST(request: Request) {
           .eq("is_active", true)
           .or(`mobile.eq.${to},mobile.eq.${localMobile}`),
         supabaseAdmin
-          .from("field_executives")
+          .from("workforce")
           .select("id, company_id, is_active")
           .eq("is_active", true)
           .or(`mobile.eq.${to},mobile.eq.${localMobile}`),

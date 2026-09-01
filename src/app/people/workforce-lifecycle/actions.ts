@@ -30,7 +30,7 @@ async function requireScopedApplicant(id: string) {
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const result = await supabaseAdmin
-    .from("field_executives")
+    .from("workforce")
     .select("id, full_name, location_id, designation, date_of_join, biometric_id, onboarding_status, lifecycle_status")
     .eq("company_id", companyId)
     .eq("id", id)
@@ -71,7 +71,7 @@ export async function reviewWorkforceOnboarding(formData: FormData) {
     const reviewedAt = new Date().toISOString();
     if (action !== "approve") {
       const toStatus = action === "return" ? "returned" : "rejected";
-      const update = await supabaseAdmin!.from("field_executives").update({
+      const update = await supabaseAdmin!.from("workforce").update({
         onboarding_status: toStatus,
         onboarding_reviewed_at: reviewedAt,
         onboarding_reviewed_by: authorization.userId,
@@ -133,7 +133,7 @@ export async function reviewWorkforceOnboarding(formData: FormData) {
         .upsert(results, { onConflict: "field_executive_id,checklist_item_id" });
       if (checklist.error) throw new Error(checklist.error.message);
     }
-    const approval = await supabaseAdmin!.from("field_executives").update({
+    const approval = await supabaseAdmin!.from("workforce").update({
       onboarding_status: "active",
       onboarding_reviewed_at: reviewedAt,
       onboarding_reviewed_by: authorization.userId,
@@ -161,7 +161,7 @@ export async function reviewWorkforceOnboarding(formData: FormData) {
         workerType: "individual_contract"
       });
     } catch (syncError) {
-      await supabaseAdmin!.from("field_executives").update({
+      await supabaseAdmin!.from("workforce").update({
         onboarding_status: "approved",
         onboarding_activated_at: null,
         is_active: false,
@@ -213,7 +213,7 @@ export async function startWorkforceExit(formData: FormData) {
     }).select("id").single();
     if (created.error) throw new Error(created.error.message);
     const nextStatus = caseType === "resignation" ? "resignation_pending" : "termination_pending";
-    const update = await supabaseAdmin!.from("field_executives").update({ lifecycle_status: nextStatus, updated_at: new Date().toISOString() })
+    const update = await supabaseAdmin!.from("workforce").update({ lifecycle_status: nextStatus, updated_at: new Date().toISOString() })
       .eq("company_id", companyId).eq("id", id);
     if (update.error) throw new Error(update.error.message);
     const event = await supabaseAdmin!.from("workforce_lifecycle_events").insert({
@@ -254,12 +254,14 @@ export async function reviewWorkforceExit(formData: FormData) {
     if (!caseId || !["approve", "reject"].includes(action)) throw new Error("Choose a valid exit decision.");
     if (!remarks) throw new Error("Decision remarks are required.");
     const current = await supabaseAdmin.from("workforce_lifecycle_cases")
-      .select("id, field_executive_id, status, requested_effective_date, field_executives(location_id)")
+      .select("id, field_executive_id, status, requested_effective_date")
       .eq("company_id", companyId).eq("id", caseId).maybeSingle();
     if (current.error) throw new Error(current.error.message);
     if (!current.data) throw new Error("Exit case was not found.");
-    const relation = Array.isArray(current.data.field_executives) ? current.data.field_executives[0] : current.data.field_executives;
-    const locationId = String((relation as { location_id?: string } | null)?.location_id ?? "");
+    const workforceProfile = await supabaseAdmin.from("workforce").select("location_id")
+      .eq("company_id", companyId).eq("id", current.data.field_executive_id).maybeSingle();
+    if (workforceProfile.error) throw new Error(workforceProfile.error.message);
+    const locationId = String(workforceProfile.data?.location_id ?? "");
     if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) throw new Error("You do not have access to this location.");
     if (!["submitted", "under_review"].includes(String(current.data.status))) throw new Error("This exit case has already been decided.");
     const now = new Date().toISOString();
@@ -275,7 +277,7 @@ export async function reviewWorkforceExit(formData: FormData) {
       updated_at: now
     }).eq("company_id", companyId).eq("id", caseId);
     if (update.error) throw new Error(update.error.message);
-    const profileUpdate = await supabaseAdmin.from("field_executives").update({
+    const profileUpdate = await supabaseAdmin.from("workforce").update({
       lifecycle_status: action === "approve" ? "settlement_pending" : "active",
       updated_at: now
     }).eq("company_id", companyId).eq("id", current.data.field_executive_id);
@@ -303,12 +305,14 @@ export async function completeWorkforceSettlement(formData: FormData) {
     const companyId = requireCompanyId(authorization);
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
     const current = await supabaseAdmin.from("workforce_lifecycle_cases")
-      .select("id, field_executive_id, status, approved_effective_date, requested_effective_date, field_executives(location_id)")
+      .select("id, field_executive_id, status, approved_effective_date, requested_effective_date")
       .eq("company_id", companyId).eq("id", caseId).maybeSingle();
     if (current.error) throw new Error(current.error.message);
     if (!current.data || current.data.status !== "settlement_pending") throw new Error("Choose an exit awaiting settlement.");
-    const relation = Array.isArray(current.data.field_executives) ? current.data.field_executives[0] : current.data.field_executives;
-    const locationId = String((relation as { location_id?: string } | null)?.location_id ?? "");
+    const workforceProfile = await supabaseAdmin.from("workforce").select("location_id")
+      .eq("company_id", companyId).eq("id", current.data.field_executive_id).maybeSingle();
+    if (workforceProfile.error) throw new Error(workforceProfile.error.message);
+    const locationId = String(workforceProfile.data?.location_id ?? "");
     if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) throw new Error("You do not have access to this location.");
     const masters = await supabaseAdmin.from("workforce_exit_checklist_master").select("id, label, is_required")
       .eq("company_id", companyId).eq("is_active", true).order("sort_order");
@@ -351,7 +355,7 @@ export async function completeWorkforceSettlement(formData: FormData) {
     const closeCase = await supabaseAdmin.from("workforce_lifecycle_cases").update({ status: "settled", updated_at: now })
       .eq("company_id", companyId).eq("id", caseId);
     if (closeCase.error) throw new Error(closeCase.error.message);
-    const closeProfile = await supabaseAdmin.from("field_executives").update({
+    const closeProfile = await supabaseAdmin.from("workforce").update({
       onboarding_status: "cancelled",
       lifecycle_status: "exited",
       last_working_date: effectiveDate,

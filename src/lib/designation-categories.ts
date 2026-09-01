@@ -1,6 +1,6 @@
 export const designationCategoryOptions = [
   { value: "employees", label: "Employees" },
-  { value: "field_executives", label: "Field executives" },
+  { value: "workforce", label: "Workforce" },
   { value: "vendors", label: "Vendors" },
   { value: "contractors", label: "Independent Contractor" },
   { value: "workers", label: "Workers" }
@@ -10,7 +10,7 @@ export type DesignationCategory = string;
 
 function normalizeCategoryCode(value: unknown) {
   const code = String(value ?? "").trim().toLowerCase() === "delivery_executives"
-    ? "field_executives"
+    ? "workforce"
     : String(value ?? "").trim().toLowerCase();
   return /^[a-z0-9_]+$/.test(code) ? code : null;
 }

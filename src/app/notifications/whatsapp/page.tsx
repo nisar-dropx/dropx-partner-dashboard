@@ -159,7 +159,7 @@ async function loadBulkWhatsAppData(companyId: string) {
     supabaseAdmin.from("whatsapp_profiles").select("id, profile_name, phone_number_id, default_country_code, is_default, is_active").eq("company_id", companyId).eq("is_active", true).order("profile_name"),
     supabaseAdmin.from("whatsapp_profiles").select("id, profile_name").eq("company_id", companyId),
     supabaseAdmin.from("employees").select(`id, employee_code, full_name, email, mobile, mobile_country_code, profile_completion_status, is_active, ${workforceLocationSelect}, designations (name)`).eq("company_id", companyId).order("full_name"),
-    supabaseAdmin.from("field_executives").select(`id, dropx_id, full_name, email, mobile, mobile_country_code, designation, onboarding_status, is_active, ${workforceLocationSelect}`).eq("company_id", companyId).order("full_name"),
+    supabaseAdmin.from("workforce").select(`id, dropx_id, full_name, email, mobile, mobile_country_code, designation, onboarding_status, is_active, ${workforceLocationSelect}`).eq("company_id", companyId).order("full_name"),
     supabaseAdmin.from("contractors").select(`id, dropx_id, full_name, email, mobile, mobile_country_code, designation, onboarding_status, is_active, ${workforceLocationSelect}`).eq("company_id", companyId).order("full_name"),
     supabaseAdmin.from("vendors").select(`id, dropx_id, full_name, email, mobile, mobile_country_code, designation, onboarding_status, is_active, ${workforceLocationSelect}`).eq("company_id", companyId).order("full_name"),
     supabaseAdmin.from("workers").select(`id, dropx_id, full_name, email, mobile, mobile_country_code, designation, onboarding_status, is_active, ${workforceLocationSelect}`).eq("company_id", companyId).order("full_name"),

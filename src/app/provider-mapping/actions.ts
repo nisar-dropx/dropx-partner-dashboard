@@ -185,7 +185,7 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
     const [{ data: employees, error: employeeError }, { data: contractors, error: contractorError }, { data: executives, error: executiveError }, { data: designations, error: designationError }, { data: paymentMethods, error: paymentMethodsError }] = await Promise.all([
       supabaseAdmin.from("employees").select("id, employee_code, full_name, location_id, date_of_join, designations!inner(is_field_operations)").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).eq("designations.is_field_operations", true).in("employee_code", dropxIds),
       supabaseAdmin.from("contractors").select("id, dropx_id, full_name, location_id, date_of_join, designation").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).in("dropx_id", dropxIds),
-      supabaseAdmin.from("field_executives").select("id, dropx_id, full_name, location_id, date_of_join").eq("company_id", companyId).eq("is_active", true).in("dropx_id", dropxIds),
+      supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join").eq("company_id", companyId).eq("is_active", true).in("dropx_id", dropxIds),
       supabaseAdmin.from("designations").select("code, name").eq("company_id", companyId).eq("is_active", true).eq("is_field_operations", true),
       supabaseAdmin.from("payment_methods").select("id, code, payment_method_components(component_code, label)").eq("company_id", companyId).eq("is_active", true)
     ]);
@@ -415,7 +415,7 @@ async function saveExecutiveMappingRow(
           .is("deleted_at", null)
           .maybeSingle()
         : supabaseAdmin
-        .from("field_executives")
+        .from("workforce")
         .select("id, full_name")
         .eq("id", id)
         .eq("company_id", companyId)
@@ -548,7 +548,7 @@ async function saveExecutiveMappingRow(
     ? supabaseAdmin.from("employees").update({ employee_code: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId)
     : sourceType === "contractor"
       ? supabaseAdmin.from("contractors").update({ dropx_id: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId)
-      : supabaseAdmin.from("field_executives").update({ dropx_id: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId);
+      : supabaseAdmin.from("workforce").update({ dropx_id: dropxId, location_id: stationId, updated_at: new Date().toISOString() }).eq("id", id).eq("company_id", companyId);
   const { error: executiveError } = await workerUpdate;
 
   if (executiveError) throw new Error(executiveError.message);

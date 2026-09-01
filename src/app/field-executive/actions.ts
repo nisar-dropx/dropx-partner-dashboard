@@ -76,7 +76,7 @@ function addFormParams(formData: FormData) {
 function friendlyFieldExecutiveError(message: string) {
   const lower = message.toLowerCase();
   if (lower.includes("operation_mode_id")) {
-    return "Database migration pending: remove operation_mode_id from field_executives in Supabase.";
+    return "Database migration pending: remove operation_mode_id from workforce in Supabase.";
   }
   return message;
 }

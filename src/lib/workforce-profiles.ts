@@ -21,23 +21,23 @@ export type NonEmployeeRoute =
 
 type NonEmployeeConfig = {
   category: "field_executive" | "contractor" | "vendor" | "worker";
-  designationCategory: "field_executives" | "contractors" | "vendors" | "workers";
+  designationCategory: "workforce" | "contractors" | "vendors" | "workers";
   label: string;
   pageCode: "delivery_associates" | "contractors" | "vendors" | "workers";
   profileType: NonEmployeeProfileType;
   route: NonEmployeeRoute;
-  table: "field_executives" | "contractors" | "vendors" | "workers";
+  table: "workforce" | "contractors" | "vendors" | "workers";
 };
 
 export const nonEmployeeProfileConfigs: Record<NonEmployeeProfileType, NonEmployeeConfig> = {
   field_executive: {
     category: "field_executive",
-    designationCategory: "field_executives",
+    designationCategory: "workforce",
     label: "Workforce applicant",
     pageCode: "delivery_associates",
     profileType: "field_executive",
     route: "/field-executive",
-    table: "field_executives"
+    table: "workforce"
   },
   contractor: {
     category: "contractor",

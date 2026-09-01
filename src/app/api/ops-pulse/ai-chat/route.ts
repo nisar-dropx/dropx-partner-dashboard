@@ -150,7 +150,7 @@ export async function POST(request: Request) {
   const [shipment, attendance, executives, cps, cod] = await Promise.all([
     supabaseAdmin.from("cps_shipment_daily").select("work_date,station_code,provider_employee_id,assigned_count,total_delivery,total_activity").eq("company_id", companyId).in("station_code", codes).gte("work_date", from).lte("work_date", rangeTo).limit(30000),
     supabaseAdmin.from("attendance_daily").select("punch_date,station_code,enrolment_id,status").eq("company_id", companyId).in("station_code", codes).gte("punch_date", from).lte("punch_date", rangeTo).limit(30000),
-    supabaseAdmin.from("field_executives").select("id,location_id,onboarding_status,is_active").in("location_id", ids).eq("is_active", true).limit(10000),
+    supabaseAdmin.from("workforce").select("id,location_id,onboarding_status,is_active").in("location_id", ids).eq("is_active", true).limit(10000),
     supabaseAdmin.from("cps_station_daily").select("work_date,station_code,overall_cps,target_cps,target_gap,total_cost").eq("company_id", companyId).in("station_code", codes).gte("work_date", from).lte("work_date", rangeTo).limit(10000),
     supabaseAdmin.from("cod_submissions").select("station_code,validation_status,deposited_amount,validated_amount,created_at").eq("company_id", companyId).in("station_code", codes).gte("created_at", `${from}T00:00:00+05:30`).lte("created_at", `${rangeTo}T23:59:59+05:30`).limit(10000)
   ]);

@@ -98,7 +98,7 @@ export function WhatsAppSettingsPanel({
   commonWebhookMode?: boolean;
   detailMode?: boolean;
 }) {
-  const defaultOnboardingTarget = onboardingTargets.find((target) => target.categoryCode === "field_executives") ?? onboardingTargets[0];
+  const defaultOnboardingTarget = onboardingTargets.find((target) => target.categoryCode === "workforce") ?? onboardingTargets[0];
   const defaultOnboardingConfig = defaultOnboardingTarget?.config ?? emptyNotificationConfig;
   const flashTarget = flash.error && (
     flash.error.includes("template") ||

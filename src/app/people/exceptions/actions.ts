@@ -6,7 +6,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-const PROFILE_TABLES: Record<string, string> = { employee: "employees", field_executive: "field_executives", contractor: "contractors", vendor: "vendors", worker: "workers" };
+const PROFILE_TABLES: Record<string, string> = { employee: "employees", field_executive: "workforce", workforce: "workforce", contractor: "contractors", vendor: "vendors", worker: "workers" };
 const EDITABLE_FIELDS = new Set(["pf_uan", "esi_no", "bank_account_no", "ifsc", "ifsc_code", "pan_number", "aadhaar_number", "driving_license_no", "driving_license_exp_date", "vehicle_reg_no", "vehicle_reg_exp_date", "vehicle_insurance_exp_date", "vehicle_pollution_exp_date"]);
 
 function value(entry: FormDataEntryValue | null) { return String(entry ?? "").trim(); }

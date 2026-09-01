@@ -133,7 +133,7 @@ async function loadWorkerMap(companyId: string, enrolmentIds: string[]) {
     ? await admin.from("employees").select("id, employee_code, full_name").eq("company_id", companyId).in("id", employeeIds)
     : { data: [], error: null };
   const executives = executiveIds.length
-    ? await admin.from("field_executives").select("id, dropx_id, full_name").eq("company_id", companyId).in("id", executiveIds)
+    ? await admin.from("workforce").select("id, dropx_id, full_name").eq("company_id", companyId).in("id", executiveIds)
     : { data: [], error: null };
   const profileTables = { contractor: "contractors", vendor: "vendors", worker: "workers" } as const;
   const profileResults = await Promise.all(Object.entries(profileTables).map(async ([profileType, table]) => {

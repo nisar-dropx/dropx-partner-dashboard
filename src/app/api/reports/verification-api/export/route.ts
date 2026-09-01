@@ -160,7 +160,7 @@ export async function GET(request: NextRequest) {
     const appActorMobiles = new Map<string, string>();
     const appProfileTables = [
       ["employee", "employees"],
-      ["field_executive", "field_executives"],
+      ["field_executive", "workforce"],
       ["contractor", "contractors"],
       ["vendor", "vendors"],
       ["worker", "workers"]

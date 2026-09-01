@@ -147,7 +147,7 @@ async function loadPeopleReviewCount(authorization: AuthorizationContext) {
 
   const sources = [
     { table: "employees", statusColumn: "profile_completion_status" },
-    { table: "field_executives", statusColumn: "onboarding_status" },
+    { table: "workforce", statusColumn: "onboarding_status" },
     { table: "contractors", statusColumn: "onboarding_status" },
     { table: "vendors", statusColumn: "onboarding_status" },
     { table: "workers", statusColumn: "onboarding_status" }

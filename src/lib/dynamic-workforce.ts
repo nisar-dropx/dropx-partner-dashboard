@@ -1,6 +1,6 @@
 const systemCategoryCodes = new Set([
   "employees",
-  "field_executives",
+  "workforce",
   "contractors",
   "vendors",
   "workers"
@@ -10,7 +10,7 @@ export const workforceCategoryPagePrefix = "workforce_category_";
 
 const systemCategoryPageCodes: Record<string, string> = {
   employees: "employees",
-  field_executives: "delivery_associates",
+  workforce: "delivery_associates",
   contractors: "contractors",
   vendors: "vendors",
   workers: "workers"

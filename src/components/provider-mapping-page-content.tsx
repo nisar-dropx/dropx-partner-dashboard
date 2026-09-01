@@ -141,7 +141,7 @@ async function loadMappingData(authorization: AuthorizationContext) {
       .eq("is_active", true)
       .order("station_code"),
     supabaseAdmin
-      .from("field_executives")
+      .from("workforce")
       .select(`
         id,
         full_name,
@@ -419,7 +419,7 @@ export async function ProviderMappingPageContent({
               {error ?? flashError ?? flashNotice}
               {error?.includes("field_executive_provider_mappings")
                 ? " Run scripts/provider_id_mappings_v1.sql in Supabase SQL Editor."
-                : error?.includes("field_executives") ? " Run scripts/field_executives_v1.sql in Supabase SQL Editor." : ""}
+                : error?.includes("workforce") ? " Verify the public.workforce schema in Supabase." : ""}
             </p>
           </div>
         </section>
