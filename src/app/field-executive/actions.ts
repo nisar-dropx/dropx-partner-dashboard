@@ -546,7 +546,7 @@ export async function updateFieldExecutive(formData: FormData) {
         .filter((key): key is keyof typeof payload => Boolean(key))
         .map((key) => [key, payload[key]])
     );
-    const corePayload: Record<string, unknown> = {
+    const corePayload = {
       full_name: payload.full_name,
       mobile_country_code: payload.mobile_country_code,
       mobile: payload.mobile,
@@ -555,11 +555,9 @@ export async function updateFieldExecutive(formData: FormData) {
       location_id: payload.location_id,
       designation: payload.designation,
       biometric_id: payload.biometric_id,
+      is_active: payload.is_active,
       statutory_applicability: payload.statutory_applicability
     };
-    // Contractor lifecycle is changed only through the auditable status action.
-    // Editing registration details must never suspend or reactivate a profile.
-    if (config.profileType !== "contractor") corePayload.is_active = payload.is_active;
 
     const documentPayload: Record<string, string> = {};
     const existingPaths = existingResult.data as Record<string, string | null> | null;
@@ -633,57 +631,6 @@ export async function updateFieldExecutive(formData: FormData) {
   }
 
   fieldExecutiveRedirect({ notice: `${entityLabel} updated successfully.` }, returnPath);
-}
-
-export async function changeContractorLifecycleStatus(formData: FormData) {
-  const returnPath = safeReturnPath(formData);
-  const config = nonEmployeeConfigForRoute(returnPath);
-  const authorization = await requirePagePermission(pageCodeForReturnPath(returnPath), "edit");
-  const companyId = requireCompanyId(authorization);
-  const contractorId = String(formData.get("id") ?? "").trim();
-  const status = String(formData.get("lifecycle_status") ?? "").trim().toLowerCase();
-  const reason = String(formData.get("lifecycle_reason") ?? "").trim();
-  const suspendedUntilInput = String(formData.get("suspended_until") ?? "").trim();
-
-  try {
-    if (config.profileType !== "contractor") throw new Error("Lifecycle action is available only for Independent Contractors here.");
-    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
-    if (!contractorId) throw new Error("Independent Contractor is required.");
-    if (!["active", "suspended"].includes(status)) throw new Error("Choose Active or Suspended.");
-    if (!reason) throw new Error("Add a reason for this status change.");
-
-    let suspendedUntil: string | null = null;
-    if (status === "suspended") {
-      const parsed = Date.parse(suspendedUntilInput);
-      if (!suspendedUntilInput || Number.isNaN(parsed)) throw new Error("Choose a valid suspension end date and time.");
-      if (parsed <= Date.now()) throw new Error("Suspension end time must be in the future.");
-      suspendedUntil = new Date(parsed).toISOString();
-    }
-
-    const result = await supabaseAdmin.rpc("change_contractor_lifecycle_status", {
-      p_changed_by: authorization.userId,
-      p_company_id: companyId,
-      p_contractor_id: contractorId,
-      p_reason: reason,
-      p_status: status,
-      p_suspended_until: suspendedUntil
-    });
-    if (result.error) throw new Error(result.error.message);
-
-    revalidatePath(returnPath);
-    fieldExecutiveRedirect({
-      edit: contractorId,
-      notice: status === "suspended"
-        ? "Independent Contractor suspended with an auditable end time and reason."
-        : "Independent Contractor reactivated successfully."
-    }, returnPath);
-  } catch (error) {
-    if (isNextRedirectError(error)) throw error;
-    fieldExecutiveRedirect({
-      edit: contractorId,
-      error: error instanceof Error ? error.message : "Unable to change Independent Contractor status."
-    }, returnPath);
-  }
 }
 
 export async function reviewFieldExecutiveProfile(formData: FormData) {

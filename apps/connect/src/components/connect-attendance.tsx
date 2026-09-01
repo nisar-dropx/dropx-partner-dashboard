@@ -19,7 +19,6 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { SelfieCapturePanel } from "./selfie-capture-panel";
 import { stampSupportSelfieBlob } from "@/lib/support-selfie-stamp";
-import { readResilientPosition } from "@/lib/read-geolocation";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
 type Regularization = {
@@ -38,7 +37,6 @@ type Row = {
   status: string;
   statusLabel?: string | null;
   statusKind?: "attendance" | "leave";
-  pendingReview?: boolean;
   inTime: string;
   outTime: string;
   punches: string[];
@@ -174,7 +172,6 @@ function dayStatus(row: Row | undefined, future: boolean) {
   if (future || !row) return "off";
   if (row.status === "A") return "absent";
   if (row.statusKind === "leave") return "leave";
-  if (row.pendingReview) return "miss";
   if (row.remark.toLowerCase().match(/single|missing/)) return "miss";
   return row.status === "P" ? "present" : "off";
 }
@@ -206,7 +203,21 @@ function emptyAttendanceRow(date: string): Row {
   };
 }
 
-const readPosition = () => readResilientPosition(10_000);
+function readPosition(): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Location is not supported on this device."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, (error) => {
+      reject(new Error(error.message || "Unable to read device location. Allow location access."));
+    }, {
+      enableHighAccuracy: true,
+      maximumAge: 10_000,
+      timeout: 20_000
+    });
+  });
+}
 
 export function ConnectAttendance({ account }: { account: Account }) {
   const now = new Date();

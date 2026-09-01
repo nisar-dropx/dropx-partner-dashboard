@@ -16,12 +16,12 @@ const commonStart: NavItem[] = [
       { code: "capacity_hiring", label: "Hiring Review", href: "/capacity/hiring" }
     ]
   },
-  { code: "service_network", label: "Network Planning", href: "/service-network", icon: "N" }
+  { code: "service_network", label: "Network Planning", href: "/service-network", icon: "N" },
+  { code: "contractors", label: "Work Force Register", href: "/work-force-register", icon: "+" }
 ];
 
 const reports: NavItem = { code: "ops_reports", label: "Reports", href: "/reports", icon: "R" };
 const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Attendance", href: "/attendance", icon: "T" };
-const locationMail: NavItem = { code: "ops_location_mail", label: "Mail", href: "/mail", icon: "M" };
 
 const businessDocuments: NavItem = {
   code: "business_documents",
@@ -68,7 +68,6 @@ const administration: NavItem[] = [
       { code: "master_locations", label: "Station Master", href: "/master/location" },
       { code: "master_providers", label: "Client / Provider Master", href: "/master/providers" },
       { code: "master_models", label: "Operation Models", href: "/master/models" }
-      ,{ code: "master_documents", label: "Document Master", href: "/master/documents" }
       ,{ code: "performance_master", label: "Performance Master", href: "/master/performance-targets" }
       ,{ code: "capacity_master", label: "Capacity Master", href: "/master/capacity" }
       ,{ code: "service_network_master", label: "Network Planning Master", href: "/master/service-network" }
@@ -80,7 +79,7 @@ const administration: NavItem[] = [
     icon: "@",
     children: [
       { code: "users", label: "Ops Users & Scope", href: "/access" },
-      { code: "users", label: "Designation Access", href: "/users?section=roles" }
+      { code: "users", label: "Manage Roles", href: "/users?section=roles" }
     ]
   }
 ];
@@ -126,7 +125,7 @@ function modelOperations(mode: OperatingMode): NavItem {
 const eddDashboard: NavItem = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd", icon: "E" };
 
 export function opsNavItemsForMode(mode: OperatingMode): NavItem[] {
-  return [...commonStart, modelOperations(mode), eddDashboard, locationMail, businessDocuments, payments, cps, fleetNavItem, attendanceReports, reports, ...administration];
+  return [...commonStart, modelOperations(mode), eddDashboard, businessDocuments, payments, cps, fleetNavItem, attendanceReports, reports, ...administration];
 }
 
 export function firstAllowedOpsHref(authorization: AuthorizationContext) {

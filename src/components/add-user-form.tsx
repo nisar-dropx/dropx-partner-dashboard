@@ -24,22 +24,6 @@ export type AddUserProfileOption = {
   locationScopeIds: string[];
 };
 
-export type AddUserDesignationOption = {
-  id: string;
-  code: string;
-  name: string;
-};
-
-export type AddUserPersonOption = {
-  id: string;
-  designationId: string;
-  employeeId: string | null;
-  fullName: string | null;
-  email: string | null;
-  mobileCountryCode: string | null;
-  mobile: string | null;
-};
-
 function labelForUser(user: AddUserProfileOption, roles: AddUserRoleOption[]) {
   const roleName = roles.find((role) => role.id === user.roleId)?.name;
   return [user.fullName || user.email || "Unnamed user", roleName, user.email].filter(Boolean).join(" - ");
@@ -73,8 +57,6 @@ export function reportingUsersAboveRole(
 const draftKey = "dropx:add-user-draft";
 
 type AddUserDraft = {
-  designationId: string;
-  personId: string;
   employeeId: string;
   fullName: string;
   email: string;
@@ -87,8 +69,6 @@ type AddUserDraft = {
 };
 
 const emptyDraft: AddUserDraft = {
-  designationId: "",
-  personId: "",
   employeeId: "",
   fullName: "",
   email: "",
@@ -110,22 +90,16 @@ function parseLocationScope(value: FormDataEntryValue | null) {
 }
 
 export function AddUserForm({
-  designations,
-  people,
   roles,
   users,
   locations
 }: {
-  designations: AddUserDesignationOption[];
-  people: AddUserPersonOption[];
   roles: AddUserRoleOption[];
   users: AddUserProfileOption[];
   locations: LocationScopeOption[];
 }) {
   const searchParams = useSearchParams();
   const [draft, setDraft] = useState<AddUserDraft>(emptyDraft);
-  const [designationId, setDesignationId] = useState(emptyDraft.designationId);
-  const [personId, setPersonId] = useState(emptyDraft.personId);
   const [roleId, setRoleId] = useState(emptyDraft.roleId);
   const [reportsToUserId, setReportsToUserId] = useState(emptyDraft.reportsToUserId);
 
@@ -143,31 +117,23 @@ export function AddUserForm({
     return reportingUsersAboveRole(selectedRole, roles, users);
   }, [roles, selectedRole, users]);
   const reportingUser = users.find((user) => user.id === reportsToUserId) ?? null;
-  const reportingUserRole = roles.find((role) => role.id === reportingUser?.roleId) ?? null;
   const allowedLocationIds = new Set(reportingUser?.locationScopeIds ?? []);
   const isAllLocationRole = selectedRole?.locationAccessMode === "all_locations";
   const allLocationIds = useMemo(() => locations.map((location) => location.id), [locations]);
   const scopedLocations = !selectedRole
-    ? locations
+    ? []
     : isAllLocationRole
     ? locations
-    : !reportingUser || reportingUserRole?.locationAccessMode === "all_locations"
-    ? locations
+    : !reportingUser
+    ? []
     : allowedLocationIds.size
     ? locations.filter((location) => allowedLocationIds.has(location.id))
     : [];
-  const designationPeople = useMemo(
-    () => people.filter((person) => person.designationId === designationId),
-    [designationId, people]
-  );
-  const selectedPerson = people.find((person) => person.id === personId) ?? null;
 
   useEffect(() => {
     if (searchParams.get("userNotice")) {
       sessionStorage.removeItem(draftKey);
       setDraft(emptyDraft);
-      setDesignationId("");
-      setPersonId("");
       setRoleId("");
       setReportsToUserId("");
       return;
@@ -181,8 +147,6 @@ export function AddUserForm({
     try {
       const nextDraft = { ...emptyDraft, ...JSON.parse(saved) } as AddUserDraft;
       setDraft(nextDraft);
-      setDesignationId(nextDraft.designationId);
-      setPersonId(nextDraft.personId);
       setRoleId(nextDraft.roleId);
       setReportsToUserId(nextDraft.reportsToUserId);
     } catch {
@@ -205,42 +169,8 @@ export function AddUserForm({
     }));
   }
 
-  function handleDesignationChange(nextDesignationId: string) {
-    setDesignationId(nextDesignationId);
-    setPersonId("");
-    setDraft((current) => ({
-      ...current,
-      designationId: nextDesignationId,
-      personId: "",
-      employeeId: "",
-      fullName: "",
-      email: "",
-      mobileCountryCode: "91",
-      mobile: ""
-    }));
-  }
-
-  function handlePersonChange(nextPersonId: string) {
-    setPersonId(nextPersonId);
-    const person = people.find((option) => option.id === nextPersonId);
-    const workEmail = person?.email?.trim().toLowerCase().endsWith("@dropxlogistics.com")
-      ? person.email.trim().toLowerCase()
-      : "";
-    setDraft((current) => ({
-      ...current,
-      personId: nextPersonId,
-      employeeId: person?.employeeId ?? "",
-      fullName: person?.fullName ?? "",
-      email: workEmail,
-      mobileCountryCode: person?.mobileCountryCode ?? "91",
-      mobile: person?.mobile ?? ""
-    }));
-  }
-
   function saveDraft(formData: FormData) {
     const nextDraft: AddUserDraft = {
-      designationId: String(formData.get("designation_id") ?? ""),
-      personId: String(formData.get("people_employee_id") ?? ""),
       employeeId: String(formData.get("employee_id") ?? ""),
       fullName: String(formData.get("full_name") ?? ""),
       email: String(formData.get("email") ?? ""),
@@ -258,34 +188,18 @@ export function AddUserForm({
   return (
     <form action={createUser} onSubmit={(event) => saveDraft(new FormData(event.currentTarget))}>
       <div className="form-grid three">
-        <label>People designation
-          <select className="select" name="designation_id" onChange={(event) => handleDesignationChange(event.target.value)} required value={designationId}>
-            <option value="">Select designation</option>
-            {designations.map((designation) => <option key={designation.id} value={designation.id}>{designation.name} ({designation.code})</option>)}
-          </select>
-        </label>
-        <label>Person from People
-          <select className="select" disabled={!designationId} name="people_employee_id" onChange={(event) => handlePersonChange(event.target.value)} required value={personId}>
-            <option value="">{designationId ? "Select person" : "Select designation first"}</option>
-            {designationPeople.map((person) => <option key={person.id} value={person.id}>{person.fullName || "Unnamed employee"} · {person.employeeId || "No employee ID"}</option>)}
-          </select>
-        </label>
-        <label>DropX login email
-          <input className="field" name="email" onChange={(event) => updateDraft("email", event.target.value)} pattern="[^@ ]+@dropxlogistics[.]com" placeholder="name@dropxlogistics.com" required type="email" value={draft.email} />
-          {selectedPerson?.email && !selectedPerson.email.toLowerCase().endsWith("@dropxlogistics.com") ? <small>People email: {selectedPerson.email}. Enter the company email for portal access.</small> : null}
-        </label>
-        <label>Emp ID<input className="field" name="employee_id" readOnly required value={draft.employeeId} /></label>
-        <label>Full name<input className="field" name="full_name" readOnly required value={draft.fullName} /></label>
+        <label>Emp ID<input className="field" name="employee_id" onChange={(event) => updateDraft("employeeId", event.target.value)} placeholder="Enter emp ID" required value={draft.employeeId} /></label>
+        <label>Full name<input className="field" name="full_name" onChange={(event) => updateDraft("fullName", event.target.value)} placeholder="User name" required value={draft.fullName} /></label>
+        <label>Email<input className="field" name="email" onChange={(event) => updateDraft("email", event.target.value)} placeholder="name@dropxlogistics.com" required type="email" value={draft.email} /></label>
         <label>Country code
-          <select className="select" disabled name="mobile_country_code" value={draft.mobileCountryCode}>
+          <select className="select" name="mobile_country_code" onChange={(event) => updateDraft("mobileCountryCode", event.target.value)} value={draft.mobileCountryCode}>
             {countryCodeOptions.map((country) => (
               <option key={country.code} value={country.code}>{country.label}</option>
             ))}
           </select>
-          <input name="mobile_country_code" type="hidden" value={draft.mobileCountryCode} />
         </label>
-        <label>Mobile<input className="field" name="mobile" readOnly value={draft.mobile} /></label>
-        <label>Product access role
+        <label>Mobile<input className="field" inputMode="tel" maxLength={15} name="mobile" onChange={(event) => updateDraft("mobile", event.target.value.replace(/\D/g, "").slice(0, 15))} placeholder="Enter mobile number" value={draft.mobile} /></label>
+        <label>Role
           <select
             className="select"
             name="role_id"
@@ -319,7 +233,7 @@ export function AddUserForm({
             ))}
           </select>
         </label>
-        <label>Location scope (optional)
+        <label>Location scope
           {isAllLocationRole ? (
             <LocationScopeSelect
               key={`all-${roleId}`}

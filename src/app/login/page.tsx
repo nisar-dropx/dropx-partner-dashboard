@@ -6,8 +6,6 @@ import { PeopleLoginPanel } from "@/components/people-login-panel";
 import { SubmitButton } from "@/components/submit-button";
 import { firstAllowedHref } from "@/lib/app-navigation";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
-import { firstAllowedFinanceHref, hasFinancePortalAccess } from "@/lib/finance/navigation";
-import { isFinanceHostName, safeFinanceNextPath } from "@/lib/finance/surface";
 import { opsAccessPageCodes } from "@/lib/access-surface";
 import { safeOpsNextPath } from "@/lib/ops-pulse/auth";
 import { firstAllowedOpsHref } from "@/lib/ops-pulse/navigation";
@@ -27,7 +25,6 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     "";
   const isOpsHost = host === "ops.dropxlogistics.com";
   const isPeopleHost = isPeopleHostName(host);
-  const isFinanceHost = isFinanceHostName(host);
   const supabase = createServerSupabaseClient(undefined, isOpsHost ? true : undefined);
   const { data } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
   if (data.user) {
@@ -52,18 +49,6 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       redirect(requestedPath === "/"
         ? firstAllowedPeopleHref(authorization) ?? "/unauthorized?page=people_portal&reason=access"
         : requestedPath);
-    }
-    if (isFinanceHost) {
-      if (!authorization || !hasFinancePortalAccess(authorization)) {
-        redirect("/unauthorized?page=finance_portal&reason=access");
-      }
-      const requestedPath = safeFinanceNextPath(searchParams?.next);
-      redirect(requestedPath === "/"
-        ? firstAllowedFinanceHref(authorization) ?? "/unauthorized?page=finance_portal&reason=access"
-        : requestedPath);
-    }
-    if (host === "dashboard.dropxlogistics.com" && (!authorization || !authorization.isMasterOwner)) {
-      redirect("/unauthorized?page=dashboard_portal&reason=super_admin_only");
     }
     redirect(authorization
       ? firstAllowedHref(authorization) ?? "/unauthorized?page=dashboard_portal&reason=access"
@@ -92,11 +77,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <main className="login-page">
-        <DocumentTitle pageName={isFinanceHost ? "Finance Login" : "Login"} productName={isFinanceHost ? "DropX Finance" : "DropX Dashboard"} />
+      <DocumentTitle pageName="Login" />
       <section className="login-panel">
         <img className="login-logo" src="/dropx-logo.png" alt="DropX" />
         <div className="login-copy">
-          <h1>Sign in to {isFinanceHost ? "DropX Finance" : "DropX Dashboard"}</h1>
+          <h1>Sign in to DropX Dashboard</h1>
           <p>Sign in with your Google account</p>
         </div>
 

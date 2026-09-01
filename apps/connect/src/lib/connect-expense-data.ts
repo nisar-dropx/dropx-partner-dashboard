@@ -1,6 +1,5 @@
 import "server-only";
 
-import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
 import { supabaseAdmin } from "./supabase-admin";
 import type { ConnectAccount } from "./connect-auth";
 
@@ -105,25 +104,6 @@ export async function resolveExpensePolicy(account: ConnectAccount, amount: numb
 
 export async function resolveExpenseApprovers(account: ConnectAccount, amount: number) {
   const { identity, policy } = await resolveExpensePolicy(account, amount);
-  const configured = await resolveConfiguredApprovalWorkflow({
-    companyId: account.companyId,
-    workflowCode: "reimbursement",
-    workerId: identity.workerId,
-    workerType: identity.workerType,
-    asOf: identity.today
-  });
-  if (configured) {
-    return {
-      identity,
-      policy,
-      steps: configured.steps.map((step, index) => ({
-        step_order: index + 1,
-        step_name: step.step_name,
-        approver_user_id: step.approver_user_id,
-        approver_person_id: step.approver_person_id
-      }))
-    };
-  }
   const steps: Array<{ step_order: number; step_name: string; approver_user_id: string; approver_person_id: string }> = [];
   const seen = new Set<string>([identity.personId]);
   let subjectAssignmentId = identity.assignment.id;

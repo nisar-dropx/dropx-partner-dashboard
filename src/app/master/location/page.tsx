@@ -53,9 +53,6 @@ type LocationRow = {
   geofence_radius_m?: number | null;
   station_email: string | null;
   station_manager_email: string | null;
-  cluster_manager_email?: string | null;
-  ops_manager_email?: string | null;
-  ops_program_manager_email?: string | null;
   parent_station_id: string | null;
   hide_from_location_list: boolean;
   is_active: boolean;
@@ -78,15 +75,6 @@ type UserRoleRow = {
   code: string;
   name: string;
   location_access_mode: string | null;
-};
-
-type WorkspaceAccountRow = {
-  id: string;
-  primary_email: string;
-  full_name: string | null;
-  account_type: string;
-  account_state: string;
-  suspended: boolean;
 };
 
 type RawLocationRow = Omit<LocationRow, "providers" | "location_models"> & {
@@ -155,13 +143,12 @@ async function loadMasterData(companyId: string) {
       models: [] as ModelRow[],
       users: [] as UserRow[],
       userRoles: [] as UserRoleRow[],
-      workspaceAccounts: [] as WorkspaceAccountRow[],
       locations: [] as LocationRow[],
       error: "Supabase service role key is not configured."
     };
   }
 
-  const responsibilityLocationSelect = `
+  const locationSelect = `
     id,
     provider_id,
     location_model_id,
@@ -182,19 +169,12 @@ async function loadMasterData(companyId: string) {
     geofence_radius_m,
     station_email,
     station_manager_email,
-    cluster_manager_email,
-    ops_manager_email,
-    ops_program_manager_email,
     parent_station_id,
     hide_from_location_list,
     is_active,
     providers (code, name),
     location_models (code, name)
   `;
-  const locationSelect = responsibilityLocationSelect.replace(
-    "    cluster_manager_email,\n    ops_manager_email,\n    ops_program_manager_email,\n",
-    ""
-  );
   const legacyLocationSelect = `
     id,
     provider_id,
@@ -217,7 +197,7 @@ async function loadMasterData(companyId: string) {
     location_models (code, name)
   `;
 
-  const [providersResult, modelsResult, usersResult, userRolesResult, workspaceAccountsResult, initialLocationsResult] = await Promise.all([
+  const [providersResult, modelsResult, usersResult, userRolesResult, initialLocationsResult] = await Promise.all([
     supabaseAdmin
       .from("providers")
       .select("id, code, name, is_active")
@@ -249,26 +229,12 @@ async function loadMasterData(companyId: string) {
       .eq("company_id", companyId)
       .order("name"),
     supabaseAdmin
-      .from("google_workspace_accounts")
-      .select("id, primary_email, full_name, account_type, account_state, suspended")
-      .eq("company_id", companyId)
-      .eq("suspended", false)
-      .neq("account_state", "deleted")
-      .order("primary_email"),
-    supabaseAdmin
       .from("stations")
-      .select(responsibilityLocationSelect)
+      .select(locationSelect)
       .eq("company_id", companyId)
       .order("station_code")
   ]);
   let locationsResult: { data: unknown[] | null; error: { message?: string } | null } = initialLocationsResult;
-  if (isMissingColumnError(locationsResult.error)) {
-    locationsResult = await supabaseAdmin
-      .from("stations")
-      .select(locationSelect)
-      .eq("company_id", companyId)
-      .order("station_code");
-  }
   if (isMissingColumnError(locationsResult.error)) {
     locationsResult = await supabaseAdmin
       .from("stations")
@@ -282,7 +248,6 @@ async function loadMasterData(companyId: string) {
     modelsResult.error?.message ||
     usersResult.error?.message ||
     userRolesResult.error?.message ||
-    workspaceAccountsResult.error?.message ||
     locationsResult.error?.message ||
     null;
 
@@ -297,7 +262,6 @@ async function loadMasterData(companyId: string) {
     })) as ModelRow[],
     users: (usersResult.data ?? []) as UserRow[],
     userRoles: (userRolesResult.data ?? []) as UserRoleRow[],
-    workspaceAccounts: (workspaceAccountsResult.data ?? []) as WorkspaceAccountRow[],
     locations: rawLocations.map((row) => ({
       ...row,
       hide_from_location_list: Boolean(row.hide_from_location_list),
@@ -323,7 +287,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
   const authorization = await requirePagePermission("master_locations", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.master_locations;
-  const { providers, models, users, userRoles, workspaceAccounts, locations, error } = await loadMasterData(companyId);
+  const { providers, models, users, userRoles, locations, error } = await loadMasterData(companyId);
   const visibleLocations = locationsForAuthorization(locations, authorization);
   const addType = pagePermission.canAdd ? searchParams?.add : null;
   const [editType, editId] = (searchParams?.edit ?? "").split(":");
@@ -359,6 +323,12 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
         scopeValues: scopeEmails.length ? scopeEmails : [normalizeEmail(user.email)]
       };
     });
+  const hierarchyUserOptions = eligibleManagerUsers
+    .map((user) => ({
+      value: user.email ?? "",
+      label: user.full_name || user.email || "Unnamed user",
+      helper: [userRoles.find((item) => item.id === user.role_id)?.name || user.role, user.email].filter(Boolean).join(" - ")
+    }));
   const parentStationOptions = locations
     .filter((location) => location.id !== editLocation?.id && location.is_active && location.location_models?.code !== "XPT")
     .map((location) => ({
@@ -366,29 +336,13 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
       label: `${location.station_code} · ${location.station_name || location.city || "Station"}`,
       helper: location.location_models?.code || undefined
     }));
-  const locationMailOptions = [...new Map([
-    ...workspaceAccounts
-      .filter((account) => account.account_type !== "person")
-      .map((account) => [normalizeEmail(account.primary_email), {
-        value: normalizeEmail(account.primary_email),
-        label: account.primary_email,
-        helper: [account.full_name, account.account_type, account.account_state].filter(Boolean).join(" · ")
-      }] as const),
-    ...locations
-      .filter((location) => normalizeEmail(location.station_email))
-      .map((location) => [normalizeEmail(location.station_email), {
-        value: normalizeEmail(location.station_email),
-        label: normalizeEmail(location.station_email),
-        helper: `${location.station_code} · existing station mail`
-      }] as const)
-  ]).values()];
 
   return (
     <AppShell active="Locations" pageCode="master_locations">
       <PageHead
         eyebrow="Setup"
         title="Locations"
-        subtitle="Core station records and Google station mail accounts. People owns manager scope, cluster responsibility and escalation assignments."
+        subtitle="No demo rows are shown here. These records read from and write to Supabase."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 
@@ -431,8 +385,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               <label>Address line 2<input className="field" name="address_line2" placeholder="Enter address line 2" /></label>
               <label>City<input className="field" name="city" placeholder="Enter city" /></label>
               <label>State<SearchableSelect name="state" options={[...indiaStateOptions]} placeholder="Select state" required /></label>
-              <label>Cluster<input className="field" name="cluster" placeholder="Enter cluster" /></label>
-              <label>Region<input className="field" name="region" placeholder="Enter region" /></label>
+              <label>Manager<SearchableSelect name="station_manager_email" options={hierarchyUserOptions} placeholder="Select manager" required /></label>
               <label>Postal code<input className="field" name="postal_code" placeholder="Enter postal code" /></label>
               <label>Latitude<input className="field" name="latitude" placeholder="Enter latitude" step="any" type="number" min="-90" max="90" /></label>
               <label>Longitude<input className="field" name="longitude" placeholder="Enter longitude" step="any" type="number" min="-180" max="180" /></label>
@@ -440,7 +393,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
                 <input className="field" name="geofence_radius_m" placeholder="e.g. 50, 100, 200" step="1" type="number" min="10" max="5000" defaultValue={50} required />
                 <span className="subtle" style={{ marginTop: 4, textTransform: "none", fontSize: 11 }}>Used by DropX One GPS punch. Editable per location — not hardcoded in the app.</span>
               </label>
-              <label>Location Google Mail ID<SearchableSelect name="station_email" options={locationMailOptions} placeholder="Select synced Google Mail ID" /><span className="subtle" style={{ marginTop: 4, textTransform: "none", fontSize: 11 }}>Sync and classify mail IDs in Central Identity → Google Mail IDs &amp; Mapping.</span></label>
+              <label>Location email<input className="field" name="station_email" placeholder="Enter location email" /></label>
               <label>Parent Location<SearchableSelect name="parent_station_id" options={parentStationOptions} placeholder="Select parent location" /></label>
               <label className="check-row span-3">
                 <input name="hide_from_location_list" type="checkbox" />
@@ -474,8 +427,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               <label>Address line 2<input className="field" name="address_line2" defaultValue={editLocation.address_line2 ?? ""} /></label>
               <label>City<input className="field" name="city" defaultValue={editLocation.city ?? ""} /></label>
               <label>State<SearchableSelect name="state" options={[...indiaStateOptions]} defaultValue={indiaStateCode(editLocation.state)} placeholder="Select state" required /></label>
-              <label>Cluster<input className="field" name="cluster" defaultValue={editLocation.cluster ?? ""} placeholder="Enter cluster" /></label>
-              <label>Region<input className="field" name="region" defaultValue={editLocation.region ?? ""} placeholder="Enter region" /></label>
+              <label>Manager<SearchableSelect name="station_manager_email" options={hierarchyUserOptions} defaultValue={editLocation.station_manager_email ?? ""} placeholder="Select manager" required /></label>
               <label>Postal code<input className="field" name="postal_code" defaultValue={editLocation.postal_code ?? ""} /></label>
               <label>Latitude<input className="field" name="latitude" defaultValue={editLocation.latitude ?? ""} step="any" type="number" min="-90" max="90" /></label>
               <label>Longitude<input className="field" name="longitude" defaultValue={editLocation.longitude ?? ""} step="any" type="number" min="-180" max="180" /></label>
@@ -483,7 +435,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
                 <input className="field" name="geofence_radius_m" defaultValue={editLocation.geofence_radius_m ?? 50} step="1" type="number" min="10" max="5000" required />
                 <span className="subtle" style={{ marginTop: 4, textTransform: "none", fontSize: 11 }}>Used by DropX One GPS punch. Change anytime from this screen.</span>
               </label>
-              <label>Location Google Mail ID<SearchableSelect name="station_email" options={locationMailOptions} defaultValue={editLocation.station_email ?? ""} placeholder="Select synced Google Mail ID" /><span className="subtle" style={{ marginTop: 4, textTransform: "none", fontSize: 11 }}>Person responsibilities are managed only in People → Org Chart → Station Directory.</span></label>
+              <label>Location email<input className="field" name="station_email" defaultValue={editLocation.station_email ?? ""} /></label>
               <label>Parent Location<SearchableSelect name="parent_station_id" options={parentStationOptions} defaultValue={editLocation.parent_station_id ?? ""} placeholder="Select parent location" /></label>
               <label>Status
                 <select className="select" name="is_active" defaultValue={editLocation.is_active ? "active" : "inactive"}>

@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:connect": "next dev apps/connect",
-    "prebuild": "node scripts/verify-contractor-schema-boundary.mjs && node scripts/verify-connect-workspace-boundary.mjs && node scripts/verify-connect-canonical-workforce.mjs && node scripts/verify-connect-approval-reportee-scope.mjs && node scripts/verify-configured-approval-routing.mjs && node scripts/verify-connect-roster-integrity.mjs && node scripts/verify-attendance-integrity-punch-lifecycle.mjs && node scripts/verify-portal-ownership-boundaries.mjs",
+    "prebuild": "node scripts/verify-contractor-schema-boundary.mjs && node scripts/verify-connect-workspace-boundary.mjs && node scripts/verify-connect-canonical-workforce.mjs && node scripts/verify-connect-approval-reportee-scope.mjs && node scripts/verify-connect-roster-integrity.mjs",
     "build": "next build",
     "build:connect": "next build apps/connect",
     "start": "next start",
@@ -14,10 +14,8 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
     "@vercel/functions": "^3.7.1",
-    "@vercel/oidc": "^3.6.1",
     "crypto-js": "^4.2.0",
     "geist": "1.7.0",
-    "google-auth-library": "^9.15.1",
     "jszip": "^3.10.1",
     "lucide-react": "^0.468.0",
     "next": "^14.2.5",

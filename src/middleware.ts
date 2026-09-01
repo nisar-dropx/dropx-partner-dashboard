@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { isFinanceHostName, isFinancePortalPath } from "@/lib/finance/surface";
-import { dashboardPaymentDestination } from "@/lib/payment-surface-routing";
 import { isPeopleHostName, isPeoplePortalPath } from "@/lib/people/surface";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -9,7 +7,7 @@ const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env
 const COOKIE_CHUNK_SIZE = 3000;
 const MAX_COOKIE_CHUNKS = 8;
 const ENCODED_COOKIE_PREFIX = "b64-";
-const CLEAN_OPS_ROOTS = ["/attendance", "/daily-submission", "/performance", "/capacity", "/service-network", "/cod", "/edd", "/reports", "/client", "/access", "/mail", "/unauthorized"];
+const CLEAN_OPS_ROOTS = ["/attendance", "/daily-submission", "/performance", "/capacity", "/service-network", "/field-executive", "/work-force-register", "/cod", "/edd", "/reports", "/client", "/access", "/unauthorized"];
 const MOVED_OPS_PAYMENT_PATHS = [
   "/payments/advance-request",
   "/payments/expense-request",
@@ -19,47 +17,22 @@ const MOVED_OPS_PAYMENT_PATHS = [
 ];
 const DEPRECATED_MAIN_PEOPLE_PATHS = ["/people", "/field-executive", "/vendors", "/workers"];
 const DEPRECATED_MAIN_HR_PATHS = ["/employees", "/contractors"];
-const MOVED_OPS_PATHS = ["/dashboard", "/fleet", "/imports", "/business-documents", "/master/location", "/master/providers", "/master/models"];
-const MOVED_WORKFORCE_PATHS = new Map([
-  ["/executive-id-onboarding", "/delivery-network/id-onboarding"],
-  ["/provider-mapping", "/delivery-network/rate-mapping"]
-]);
-const MOVED_OPS_WORKFORCE_PATHS = new Map([
-  ["/work-force-register", "/delivery-network/associates"],
-  ["/field-executive", "/delivery-network/associates"]
-]);
-const MOVED_PEOPLE_WORKFORCE_PATHS = [
-  { root: "/people/workforce-lifecycle", destination: "/delivery-network/lifecycle" },
-  { root: "/people/category", destination: "/delivery-network/associates" },
-  { root: "/field-executive", destination: "/delivery-network/associates" },
-  { root: "/contractors", destination: "/delivery-network/associates" },
-  { root: "/vendors", destination: "/delivery-network/associates" },
-  { root: "/workers", destination: "/delivery-network/associates" }
-] as const;
 const RESTORED_DASHBOARD_PEOPLE_PATHS = [
   "/people/all",
+  "/people/workforce",
   "/people/review",
   "/people/exceptions",
   "/people/workforce-lifecycle",
+  "/field-executive",
+  "/employees",
+  "/contractors",
+  "/workers",
+  "/vendors",
   "/attendance/integrity"
 ];
-const MOVED_PEOPLE_OPS_PATHS = [
-  { root: "/business-documents", destination: "/business-documents" },
-  { root: "/api/business-documents", destination: "/api/business-documents" },
-  { root: "/master/documents", destination: "/master/documents" }
-] as const;
-const MOVED_PRODUCT_ADMIN_PATHS = new Map([
-  ["/master/designations", { env: "PEOPLE_APP_URL", fallback: "https://people.dropxlogistics.com/settings/designations", path: "/settings/designations" }],
-  ["/master/workforce-categories", { env: "WORKFORCE_APP_URL", fallback: "https://workforce.dropxlogistics.com/delivery-network/engagement-types", path: "/delivery-network/engagement-types" }],
-  ["/master/workforce-whatsapp", { env: "WORKFORCE_APP_URL", fallback: "https://workforce.dropxlogistics.com/delivery-network/communications/whatsapp", path: "/delivery-network/communications/whatsapp" }]
-]);
 
 function matchesPath(path: string, roots: string[]) {
   return roots.some((root) => path === root || path.startsWith(`${root}/`));
-}
-
-function movedPath(path: string, routes: readonly { root: string; destination: string }[]) {
-  return routes.find((route) => path === route.root || path.startsWith(`${route.root}/`)) ?? null;
 }
 
 function cleanOpsPath(path: string) {
@@ -135,52 +108,15 @@ export async function middleware(request: NextRequest) {
   const isPlatformAdminHost = host === "admin-panel.dropxlogistics.com";
   const isOpsHost = host === "ops.dropxlogistics.com";
   const isPeopleHost = isPeopleHostName(host);
-  const isFinanceHost = isFinanceHostName(host);
   const isDashboardHost = host === "dashboard.dropxlogistics.com";
   const isSharedOpsPath = path === "/fleet" || path.startsWith("/fleet/") ||
     path === "/business-documents" || path.startsWith("/business-documents/");
 
-  const movedProductAdmin = isDashboardHost ? MOVED_PRODUCT_ADMIN_PATHS.get(path) : null;
-  if (movedProductAdmin) {
-    const configuredBase = process.env[movedProductAdmin.env]?.trim();
-    const destination = configuredBase
-      ? new URL(movedProductAdmin.path + request.nextUrl.search, configuredBase)
-      : new URL(movedProductAdmin.fallback + request.nextUrl.search);
-    return NextResponse.redirect(destination);
-  }
-
-  const paymentDestination = isDashboardHost ? dashboardPaymentDestination(path) : null;
-  if (paymentDestination) {
-    const destinationBase = paymentDestination.product === "operations"
-      ? process.env.OPS_APP_URL?.trim() || "https://ops.dropxlogistics.com"
-      : process.env.FINANCE_APP_URL?.trim() || "https://fin.dropxlogistics.com";
-    return NextResponse.redirect(new URL(paymentDestination.path + request.nextUrl.search, destinationBase));
-  }
-
-  if (isDashboardHost && matchesPath(path, MOVED_OPS_PATHS)) {
-    const opsBase = process.env.OPS_APP_URL?.trim() || "https://ops.dropxlogistics.com";
-    const targetPath = path === "/dashboard" ? "/" : path;
-    return NextResponse.redirect(new URL(targetPath + request.nextUrl.search, opsBase));
-  }
-
-  const isRestoredDashboardPeoplePath = isDashboardHost && matchesPath(path, RESTORED_DASHBOARD_PEOPLE_PATHS);
-  const dashboardWorkforceRoute = isDashboardHost && !isRestoredDashboardPeoplePath
-    ? movedPath(path, MOVED_PEOPLE_WORKFORCE_PATHS)
-    : null;
-  if (dashboardWorkforceRoute) {
-    const workforceBase = process.env.WORKFORCE_APP_URL?.trim() || "https://workforce.dropxlogistics.com";
-    return NextResponse.redirect(new URL(dashboardWorkforceRoute.destination + request.nextUrl.search, workforceBase));
-  }
-
-  const movedWorkforcePath = isDashboardHost ? MOVED_WORKFORCE_PATHS.get(path) : null;
-  if (movedWorkforcePath) {
-    const workforceBase = process.env.WORKFORCE_APP_URL?.trim() || "https://workforce.dropxlogistics.com";
-    return NextResponse.redirect(new URL(movedWorkforcePath + request.nextUrl.search, workforceBase));
-  }
-
   if (isDashboardHost && (path === "/ops-pulse" || path.startsWith("/ops-pulse/"))) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));
   }
+
+  const isRestoredDashboardPeoplePath = isDashboardHost && matchesPath(path, RESTORED_DASHBOARD_PEOPLE_PATHS);
 
   if (isDashboardHost && !isRestoredDashboardPeoplePath && matchesPath(path, DEPRECATED_MAIN_PEOPLE_PATHS)) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));
@@ -192,14 +128,6 @@ export async function middleware(request: NextRequest) {
 
   if (!isPlatformAdminHost && path === "/platform-admin") {
     return NextResponse.redirect(surfaceDeniedUrl(request, "platform_admin_portal", path));
-  }
-
-  if (
-    host.endsWith("dropxlogistics.com") &&
-    !isDashboardHost &&
-    (path === "/master/platform-access-owners" || path.startsWith("/master/platform-access-owners/"))
-  ) {
-    return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));
   }
 
   if (
@@ -222,33 +150,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "ops_portal", path));
   }
 
-  const opsWorkforcePath = isOpsHost ? MOVED_OPS_WORKFORCE_PATHS.get(path) : null;
-  if (opsWorkforcePath) {
-    const workforceBase = process.env.WORKFORCE_APP_URL?.trim() || "https://workforce.dropxlogistics.com";
-    return NextResponse.redirect(new URL(opsWorkforcePath + request.nextUrl.search, workforceBase));
-  }
-
-  const peopleWorkforceRoute = isPeopleHost ? movedPath(path, MOVED_PEOPLE_WORKFORCE_PATHS) : null;
-  if (peopleWorkforceRoute) {
-    const workforceBase = process.env.WORKFORCE_APP_URL?.trim() || "https://workforce.dropxlogistics.com";
-    return NextResponse.redirect(new URL(peopleWorkforceRoute.destination + request.nextUrl.search, workforceBase));
-  }
-
-  const peopleOpsRoute = isPeopleHost ? movedPath(path, MOVED_PEOPLE_OPS_PATHS) : null;
-  if (peopleOpsRoute) {
-    const opsBase = process.env.OPS_APP_URL?.trim() || "https://ops.dropxlogistics.com";
-    return NextResponse.redirect(new URL(peopleOpsRoute.destination + request.nextUrl.search, opsBase));
-  }
-
   if (isPeopleHost && !isPublicAppPath(path) && !isPeoplePortalPath(path)) {
     const peopleHomeUrl = request.nextUrl.clone();
     peopleHomeUrl.pathname = "/";
     peopleHomeUrl.search = "";
     return NextResponse.redirect(peopleHomeUrl);
-  }
-
-  if (isFinanceHost && !isPublicAppPath(path) && !isFinancePortalPath(path)) {
-    return NextResponse.redirect(surfaceDeniedUrl(request, "finance_portal", path));
   }
 
   if (
@@ -348,14 +254,6 @@ export async function middleware(request: NextRequest) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", request.nextUrl.pathname);
     return NextResponse.redirect(loginUrl);
-  }
-
-  if (isDashboardHost && path === "/people/all") {
-    const rewriteUrl = request.nextUrl.clone();
-    rewriteUrl.pathname = "/dashboard-people/all";
-    const rewriteResponse = NextResponse.rewrite(rewriteUrl);
-    response.cookies.getAll().forEach((cookie) => rewriteResponse.cookies.set(cookie));
-    return rewriteResponse;
   }
 
   if (isPlatformAdminHost && path === "/") {

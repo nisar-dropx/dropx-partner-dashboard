@@ -14,7 +14,11 @@ type ResolutionRow = { profile_type: string; profile_id: string; rule_code: stri
 type ExceptionRow = { profileType: string; profileId: string; table: string; dropxId: string; name: string; designation: string; location: string; category: string; ruleCode: string; issue: string; detail: string; sourceUpdatedAt: string; profile: ProfileRow };
 
 const SOURCES = [
-  { table: "employees", profileType: "employee", category: "Employee", employee: true }
+  { table: "employees", profileType: "employee", category: "Employee", employee: true },
+  { table: "field_executives", profileType: "field_executive", category: "Delivery Associate", employee: false },
+  { table: "contractors", profileType: "contractor", category: "Contractor", employee: false },
+  { table: "vendors", profileType: "vendor", category: "Vendor", employee: false },
+  { table: "workers", profileType: "worker", category: "Worker", employee: false }
 ] as const;
 const BASE_FIELDS = "id, full_name, location_id, statutory_applicability, pf_uan, esi_no, bank_account_no, pan_number, aadhaar_number, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, updated_at, stations (station_code)";
 const PAGE_SIZE = 20;

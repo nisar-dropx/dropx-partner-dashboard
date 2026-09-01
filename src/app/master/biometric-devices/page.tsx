@@ -7,7 +7,6 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
 import { requirePagePermission } from "@/lib/authorization";
-import { biometricDeviceHealth } from "@/lib/biometric/device-health";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
@@ -88,8 +87,15 @@ function formatDateTime(value: string | null) {
   return formatDashboardDateTime(value);
 }
 
+function isDeviceConnected(device: DeviceRow) {
+  if (!device.is_active || !device.last_seen_at) return false;
+  const lastSeen = new Date(device.last_seen_at).getTime();
+  if (Number.isNaN(lastSeen)) return false;
+  return Date.now() - lastSeen <= 10 * 60 * 1000;
+}
+
 function deviceConnectionText(device: DeviceRow) {
-  return biometricDeviceHealth(device).status;
+  return isDeviceConnected(device) ? "Connect" : "Disconnect";
 }
 
 function locationLabel(locationMap: Map<string, LocationRow>, locationId: string | null) {
@@ -324,8 +330,11 @@ function DeviceStatusPanel({
   devices: DeviceRow[];
   locationMap: Map<string, LocationRow>;
   title: string;
-  tone: "good" | "warn" | "bad";
+  tone: "connected" | "disconnected";
 }) {
+  const rowStyle = tone === "connected"
+    ? { background: "#22c55e", color: "#fff" }
+    : { background: "#ef4444", color: "#fff" };
   return (
     <section className="panel">
       <div className="panel-head toolbar">
@@ -348,12 +357,12 @@ function DeviceStatusPanel({
           </thead>
           <tbody>
             {devices.length ? devices.slice(0, 5).map((device) => (
-              <tr className={`biometric-health-row ${tone}`} key={device.id}>
+              <tr key={device.id} style={rowStyle}>
                 <td><strong>{device.device_no || device.terminal_id || "-"}</strong></td>
                 <td>{locationLabel(locationMap, device.location_id)}</td>
                 <td>{device.device_serial}</td>
                 <td>{device.model || "-"}</td>
-                <td><StatusPill status={deviceConnectionText(device)} /></td>
+                <td>{deviceConnectionText(device)}</td>
                 <td>{formatDateTime(device.last_seen_at)}</td>
               </tr>
             )) : (
@@ -390,9 +399,8 @@ export default async function DeviceMasterPage({
     shortLocation(locationMap, device.location_id),
     locationLabel(locationMap, device.location_id)
   ].join(" ").toLowerCase().includes(query));
-  const reportingDevices = devices.filter((device) => biometricDeviceHealth(device).status === "Reporting");
-  const attentionDevices = devices.filter((device) => ["Heartbeat only", "Disconnected today"].includes(biometricDeviceHealth(device).status));
-  const disconnectedDevices = devices.filter((device) => biometricDeviceHealth(device).status === "Disconnected");
+  const connectedDevices = devices.filter(isDeviceConnected);
+  const disconnectedDevices = devices.filter((device) => !isDeviceConnected(device));
   const editDevice = devices.find((device) => device.id === searchParams?.edit) ?? null;
 
   return (
@@ -471,7 +479,7 @@ export default async function DeviceMasterPage({
                       <td><strong>{device.device_serial}</strong></td>
                       <td>{device.last_source_ip || "-"}</td>
                       <td>{formatDateTime(device.last_seen_at)}</td>
-                      <td><StatusPill status={biometricDeviceHealth(device).status} /></td>
+                      <td><StatusPill status={isDeviceConnected(device) ? "Connected" : "Disconnected"} /></td>
                       {pagePermission.canEdit ? (
                         <td>
                           <div className="row-actions">
@@ -526,10 +534,9 @@ export default async function DeviceMasterPage({
             </section>
           ) : null}
 
-          <section className="grid three biometric-device-health-grid">
-            <DeviceStatusPanel devices={reportingDevices} locationMap={locationMap} title="Reporting Device List" tone="good" />
-            <DeviceStatusPanel devices={attentionDevices} locationMap={locationMap} title="Attention Today" tone="warn" />
-            <DeviceStatusPanel devices={disconnectedDevices} locationMap={locationMap} title="Disconnected Earlier" tone="bad" />
+          <section className="split-grid">
+            <DeviceStatusPanel devices={connectedDevices} locationMap={locationMap} title="Connected Device List" tone="connected" />
+            <DeviceStatusPanel devices={disconnectedDevices} locationMap={locationMap} title="Disconnected Device List" tone="disconnected" />
           </section>
 
           <section className="panel">

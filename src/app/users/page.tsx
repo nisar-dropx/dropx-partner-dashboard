@@ -10,7 +10,7 @@ import { UserRolesListPanel } from "@/components/user-roles-list-panel";
 import { UsersListPanel } from "@/components/users-list-panel";
 import { accessSurfaceLabel, currentAdminAccessSurface, pageBelongsToSurface } from "@/lib/access-surface";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
-import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
+import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createUserRole, deleteUser, deleteUserRole, updateUserRole } from "./actions";
@@ -27,7 +27,6 @@ type UserRoleRow = {
   id: string;
   code: string;
   name: string;
-  product_code: string | null;
   location_access_mode: "all_locations" | "role_based";
   parent_role_id: string | null;
   is_system: boolean;
@@ -79,22 +78,6 @@ type LocationRow = {
 type RawLocationRow = Omit<LocationRow, "providers" | "location_models"> & {
   providers?: { name: string } | { name: string }[] | null;
   location_models?: { code: string; name: string } | { code: string; name: string }[] | null;
-};
-
-type PeopleDesignationRow = {
-  id: string;
-  code: string;
-  name: string;
-};
-
-type PeopleEmployeeRow = {
-  id: string;
-  employee_code: string | null;
-  full_name: string | null;
-  email: string | null;
-  mobile_country_code: string | null;
-  mobile: string | null;
-  designation_id: string | null;
 };
 
 type UsersPageProps = {
@@ -228,93 +211,6 @@ function sectionHref(section: "roles" | "users", params?: Record<string, string>
   return `/users?${search.toString()}`;
 }
 
-function membershipProductCode(surface: ReturnType<typeof currentAdminAccessSurface>) {
-  if (surface === "ops") return "operations";
-  if (surface === "people") return "people";
-  if (surface === "finance") return "finance";
-  return null;
-}
-
-async function loadSurfaceDesignationRoles(companyId: string, surface: ReturnType<typeof currentAdminAccessSurface>) {
-  const productCode = membershipProductCode(surface);
-  if (!supabaseAdmin || !productCode) return { roleLabels: new Map<string, { code: string; name: string }>(), error: null as string | null };
-  const policies = await supabaseAdmin.from("designation_product_access_policies")
-    .select("designation_id,default_role_id")
-    .eq("company_id", companyId)
-    .eq("product_code", productCode)
-    .eq("is_enabled", true)
-    .not("default_role_id", "is", null);
-  if (policies.error) return { roleLabels: new Map<string, { code: string; name: string }>(), error: policies.error.message };
-  const designationIds = [...new Set((policies.data ?? []).map((policy) => policy.designation_id).filter(Boolean))];
-  const designations = designationIds.length
-    ? await supabaseAdmin.from("designations").select("id,code,name").eq("company_id", companyId).in("id", designationIds)
-    : { data: [], error: null };
-  if (designations.error) return { roleLabels: new Map<string, { code: string; name: string }>(), error: designations.error.message };
-  const designationById = new Map((designations.data ?? []).map((designation) => [designation.id, designation]));
-  const roleLabels = new Map<string, { code: string; name: string }>();
-  for (const policy of policies.data ?? []) {
-    const designation = designationById.get(policy.designation_id);
-    if (policy.default_role_id && designation) roleLabels.set(policy.default_role_id, { code: designation.code, name: designation.name });
-  }
-  return { roleLabels, error: null as string | null };
-}
-
-async function loadPeopleAccessDirectory(companyId: string) {
-  if (!supabaseAdmin) {
-    return {
-      designations: [] as PeopleDesignationRow[],
-      people: [] as PeopleEmployeeRow[],
-      error: "Supabase service role key is not configured."
-    };
-  }
-
-  const categoriesResult = await supabaseAdmin
-    .from("designation_categories")
-    .select("id")
-    .eq("company_id", companyId)
-    .eq("people_module", "people_hr")
-    .eq("is_active", true);
-  if (categoriesResult.error) {
-    return { designations: [] as PeopleDesignationRow[], people: [] as PeopleEmployeeRow[], error: categoriesResult.error.message };
-  }
-
-  const categoryIds = (categoriesResult.data ?? []).map((category) => category.id);
-  if (!categoryIds.length) return { designations: [] as PeopleDesignationRow[], people: [] as PeopleEmployeeRow[], error: null };
-
-  const designationsResult = await supabaseAdmin
-    .from("designations")
-    .select("id, code, name")
-    .eq("company_id", companyId)
-    .eq("is_active", true)
-    .in("designation_category_id", categoryIds)
-    .order("name");
-  if (designationsResult.error) {
-    return { designations: [] as PeopleDesignationRow[], people: [] as PeopleEmployeeRow[], error: designationsResult.error.message };
-  }
-
-  const designations = (designationsResult.data ?? []) as PeopleDesignationRow[];
-  if (!designations.length) return { designations, people: [] as PeopleEmployeeRow[], error: null };
-
-  const people: PeopleEmployeeRow[] = [];
-  const pageSize = 1000;
-  for (let offset = 0; ; offset += pageSize) {
-    const peopleResult = await supabaseAdmin
-      .from("employees")
-      .select("id, employee_code, full_name, email, mobile_country_code, mobile, designation_id")
-      .eq("company_id", companyId)
-      .eq("is_active", true)
-      .in("designation_id", designations.map((designation) => designation.id))
-      .order("full_name")
-      .range(offset, offset + pageSize - 1);
-    if (peopleResult.error) return { designations, people: [] as PeopleEmployeeRow[], error: peopleResult.error.message };
-    const rows = (peopleResult.data ?? []) as PeopleEmployeeRow[];
-    people.push(...rows);
-    if (rows.length < pageSize) break;
-  }
-
-  return { designations, people, error: null };
-}
-
 async function loadAccessData(
   companyId: string,
   surface: ReturnType<typeof currentAdminAccessSurface>,
@@ -365,19 +261,19 @@ async function loadAccessData(
   const rolesPromise = (async () => {
     let result = await client
       .from("user_roles")
-      .select("id, code, name, product_code, location_access_mode, parent_role_id, is_system, is_active")
+      .select("id, code, name, location_access_mode, parent_role_id, is_system, is_active")
       .eq("company_id", companyId)
       .order("code");
     if (isMissingCompanyColumn(result.error)) {
       result = await client
         .from("user_roles")
-        .select("id, code, name, product_code, location_access_mode, parent_role_id, is_system, is_active")
+        .select("id, code, name, location_access_mode, parent_role_id, is_system, is_active")
         .order("code");
     }
     if (!result.error && !(result.data ?? []).length) {
       result = await client
         .from("user_roles")
-        .select("id, code, name, product_code, location_access_mode, parent_role_id, is_system, is_active")
+        .select("id, code, name, location_access_mode, parent_role_id, is_system, is_active")
         .eq("is_active", true)
         .order("code");
     }
@@ -434,16 +330,6 @@ async function loadAccessData(
     return result;
   })();
 
-  const membershipsPromise = (async () => {
-    const productCode = membershipProductCode(surface);
-    if (!productCode || !options.includeUsers) return { data: [], error: null };
-    return client
-      .from("company_product_memberships")
-      .select("user_id, role_id, reports_to_user_id, location_scope_ids, is_active")
-      .eq("company_id", companyId)
-      .eq("product_code", productCode);
-  })();
-
   const locationsPromise = (async (): Promise<{ data: RawLocationRow[] | null; error: { message?: string } | null }> => {
     if (!options.includeUsers && !options.includeRoleEditorData) return { data: [], error: null };
     const locationSelect = `
@@ -495,31 +381,16 @@ async function loadAccessData(
     return result;
   })();
 
-  const [pagesResult, rolesResult, permissionsResult, usersResult, membershipsResult, locationsResult] = await Promise.all([
+  const [pagesResult, rolesResult, permissionsResult, usersResult, locationsResult] = await Promise.all([
     pagesPromise,
     rolesPromise,
     permissionsPromise,
     usersPromise,
-    membershipsPromise,
     locationsPromise
   ]);
 
   const rawLocations = (locationsResult.data ?? []) as unknown as RawLocationRow[];
-  const profileUsers = (usersResult.data ?? []) as UserRow[];
-  const memberships = membershipsResult.error ? [] : membershipsResult.data ?? [];
-  const membershipByUserId = new Map(memberships.map((membership) => [membership.user_id, membership]));
-  const users = memberships.length
-    ? profileUsers.filter((user) => membershipByUserId.has(user.id)).map((user) => {
-      const membership = membershipByUserId.get(user.id)!;
-      return {
-        ...user,
-        role_id: membership.role_id,
-        reports_to_user_id: membership.reports_to_user_id,
-        location_scope_ids: membership.location_scope_ids,
-        is_active: membership.is_active
-      };
-    })
-    : profileUsers;
+  const users = (usersResult.data ?? []) as UserRow[];
 
   return {
     pages: ((pagesResult.data ?? []) as AppPageRow[])
@@ -550,39 +421,12 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
   const showRolesSection = activeSection === "roles";
   const needsUserData = showUsersSection || Boolean(searchParams?.addUser || searchParams?.editUser);
   const needsRoleEditorData = Boolean(searchParams?.addRole || searchParams?.editRole);
-  const { pages, roles: loadedRoles, permissions, users: loadedUsers, locations, error } = await loadAccessData(companyId, accessSurface, {
+  const { pages, roles, permissions, users, locations, error } = await loadAccessData(companyId, accessSurface, {
     includeUsers: needsUserData,
     includeRoleEditorData: needsRoleEditorData
   });
-  const surfaceDesignationRoles = showRolesSection
-    ? await loadSurfaceDesignationRoles(companyId, accessSurface)
-    : { roleLabels: new Map<string, { code: string; name: string }>(), error: null as string | null };
-  const accessDataError = error ?? surfaceDesignationRoles.error;
-  const surfacePageIds = new Set(pages.map((page) => page.id));
-  const identityRoles = isCompanyOwner(authorization)
-    ? loadedRoles
-    : loadedRoles.filter((role) => {
-      if (role.is_system || role.code === "OWNER") return false;
-      const grants = permissions.filter((permission) => (
-        permission.role_id === role.id &&
-        (permission.can_view || permission.can_add || permission.can_edit)
-      ));
-      return grants.length > 0 && grants.every((permission) => surfacePageIds.has(permission.page_id));
-    });
-  const roles = showRolesSection
-    ? identityRoles
-      .filter((role) => surfaceDesignationRoles.roleLabels.has(role.id))
-      .map((role) => ({ ...role, ...surfaceDesignationRoles.roleLabels.get(role.id)! }))
-    : identityRoles;
-  const visibleRoleIds = new Set(roles.map((role) => role.id));
-  const users = isCompanyOwner(authorization)
-    ? loadedUsers
-    : loadedUsers.filter((user) => Boolean(user.role_id && visibleRoleIds.has(user.role_id)));
   const showAddUser = pagePermission.canAdd && searchParams?.addUser === "1";
-  const showAddRole = false;
-  const peopleDirectory = showAddUser
-    ? await loadPeopleAccessDirectory(companyId)
-    : { designations: [] as PeopleDesignationRow[], people: [] as PeopleEmployeeRow[], error: null };
+  const showAddRole = pagePermission.canAdd && searchParams?.addRole === "1";
   const editUser = pagePermission.canEdit ? users.find((user) => user.id === searchParams?.editUser) ?? null : null;
   const editRole = pagePermission.canEdit ? roles.find((role) => role.id === searchParams?.editRole) ?? null : null;
   const roleModalError = showAddRole || editRole ? searchParams?.userError ?? null : null;
@@ -659,20 +503,18 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
     <AppShell active="Users & Access">
       <PageHead
         eyebrow={`${accessSurfaceLabel(accessSurface)} admin setup`}
-        title={showRolesSection ? `${accessSurfaceLabel(accessSurface)} designation access` : "Users and station access"}
+        title={showRolesSection ? "User roles and permissions" : "Users and station access"}
         subtitle={showRolesSection
-          ? accessSurface === "dashboard"
-            ? "Dashboard does not own business-designation permissions. It retains only Super Admin, platform ownership and location-account control."
-            : `Configure menus and actions only for People designations eligible for ${accessSurfaceLabel(accessSurface)}. Eligibility remains owned by People Designation Master.`
+          ? `Define role hierarchy and permissions for the ${accessSurfaceLabel(accessSurface).toLowerCase()} frontend only. Other frontend permissions are preserved.`
           : `Create users and manage access for the ${accessSurfaceLabel(accessSurface).toLowerCase()} frontend.`}
       />
 
-      {accessDataError ? (
+      {error ? (
         <section className="panel">
           <div className="panel-body">
             <strong>Role database setup needed</strong>
             <p className="subtle" style={{ marginTop: 6 }}>
-              {accessDataError}
+              {error} Run `scripts/user_roles_company_scope_repair_v1.sql` in Supabase SQL editor, then refresh this page.
             </p>
           </div>
         </section>
@@ -719,17 +561,10 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
       />
       ) : null}
 
-      {showRolesSection && accessSurface === "dashboard" && (pagePermission.canView || pagePermission.canEdit) ? <section className="panel">
-        <div className="panel-head"><div><h2>Dashboard access boundary</h2><p className="subtle">No cross-product or designation roles are maintained here.</p></div></div>
-        <div className="panel-body"><div className="stacked-actions"><a className="button" href="/master/platform-access-owners">Platform &amp; Access Owners</a><a className="button secondary" href="/master/location">Locations &amp; Station Mail</a><a className="button secondary" href="/settings/google-workspace">Google Mail IDs &amp; Mapping</a></div><p className="subtle" style={{ marginTop: 12 }}>People Designation Master decides portal eligibility. Each portal configures its own menus. Existing legacy role records stay internal only where an active user still references them.</p></div>
-      </section> : null}
-
-      {showRolesSection && accessSurface !== "dashboard" && (pagePermission.canView || pagePermission.canEdit) ? (
+      {showRolesSection && (pagePermission.canView || pagePermission.canEdit) ? (
       <UserRolesListPanel
-        canAdd={false}
+        canAdd={pagePermission.canAdd}
         canEdit={pagePermission.canEdit}
-        subtitle="Only eligible People designations are shown. Internal compatibility role IDs are hidden."
-        title={`${accessSurfaceLabel(accessSurface)} designation access`}
         roles={roles.map((role) => ({
           ...role,
           permissionSummary: permissionText(role, permissions, pages)
@@ -748,22 +583,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
               <DismissModalButton className="icon-button" aria-label="Close add user">x</DismissModalButton>
             </div>
             <div className="panel-body">
-              {peopleDirectory.error ? <div className="modal-inline-message error" role="alert">People directory unavailable: {peopleDirectory.error}</div> : null}
-              <AddUserForm
-                designations={peopleDirectory.designations}
-                people={peopleDirectory.people.map((person) => ({
-                  id: person.id,
-                  designationId: person.designation_id ?? "",
-                  employeeId: person.employee_code,
-                  fullName: person.full_name,
-                  email: person.email,
-                  mobileCountryCode: person.mobile_country_code,
-                  mobile: person.mobile
-                }))}
-                roles={addUserRoles}
-                users={addUserProfiles}
-                locations={locationScopeOptions}
-              />
+              <AddUserForm roles={addUserRoles} users={addUserProfiles} locations={locationScopeOptions} />
             </div>
           </section>
         </DismissibleModal>
@@ -802,13 +622,13 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                 </label>
               </div>
               <PermissionMatrix pages={pages} surface={accessSurface} />
-              {accessDataError ? (
+              {error ? (
                 <p className="form-note">
                   Save is locked until the user-role database tables are created in Supabase.
                 </p>
               ) : null}
               <div className="form-actions modal-actions">
-                <SubmitButton disabled={Boolean(accessDataError)} disabledText="DB setup needed">Save role</SubmitButton>
+                <SubmitButton disabled={Boolean(error)} disabledText="DB setup needed">Save role</SubmitButton>
                 <DismissModalButton className="button secondary">Cancel</DismissModalButton>
               </div>
             </form>

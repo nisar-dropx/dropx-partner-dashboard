@@ -29,7 +29,7 @@ const checks = [
   [migration.includes("category.people_module") && !migration.includes("in ('DA', 'WM', 'ODCD', 'DCD')"), "Every Workforce designation is selected from the category master without a role list"],
   [migration.includes("An active Workforce designation still exists in Independent Contractors"), "Active Workforce profiles cannot remain in Independent Contractors"],
   [migration.includes("historical Workforce contractor is missing its canonical register link"), "Historical Workforce profiles retain a canonical compatibility trail"],
-  [routing.includes("loadDesignationWorkspaceRule") && !routing.includes("onboardingCategories.includes(table)"), "People designations do not select the employee-versus-contractor legal source"]
+  [routing.includes("loadDesignationWorkspaceRule") && routing.includes("onboardingCategories.includes(table)"), "People employee-versus-contractor registration follows the designation master"]
 ];
 
 const failed = checks.filter(([ok]) => !ok);

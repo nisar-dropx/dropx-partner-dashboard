@@ -1,10 +1,19 @@
 const peoplePortalRoots = [
   "/people",
   "/employees",
+  "/field-executive",
+  "/contractors",
+  "/vendors",
+  "/workers",
   "/attendance",
+  "/reports/raw-punches",
+  "/reports/verification-api",
+  "/reports/event-log",
   "/imports",
   "/report-upload",
   "/inbox",
+  "/business-documents",
+  "/payments",
   "/notifications",
   "/users",
   "/master",
@@ -12,25 +21,6 @@ const peoplePortalRoots = [
   "/biometric",
   "/trash",
   "/unauthorized"
-] as const;
-
-const peoplePortalDeniedRoots = [
-  "/payments",
-  "/reports/raw-punches",
-  "/reports/verification-api",
-  "/reports/event-log",
-  "/master/location",
-  "/master/providers",
-  "/master/payment-methods",
-  "/master/payment-banks",
-  "/master/payment-heads",
-  "/master/contacts",
-  "/master/workforce-categories",
-  "/master/workforce-whatsapp",
-  "/master/biometric-devices",
-  "/master/documents",
-  "/settings/verification-apis",
-  "/settings/biometric"
 ] as const;
 
 export function isPeopleHostName(host: string) {
@@ -48,7 +38,6 @@ export function isPeopleHostName(host: string) {
 export function isPeoplePortalPath(pathname: string) {
   const path = pathname || "/";
   if (path === "/") return true;
-  if (peoplePortalDeniedRoots.some((root) => path === root || path.startsWith(`${root}/`))) return false;
   return peoplePortalRoots.some((root) => path === root || path.startsWith(`${root}/`));
 }
 

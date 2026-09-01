@@ -1,6 +1,5 @@
 import "server-only";
 
-import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
 import { supabaseAdmin } from "./supabase-admin";
 import { canUseAvailableManagerChain } from "./leave-approval-chain";
 
@@ -134,25 +133,6 @@ export async function resolveWorkforceLeaveApproval({ companyId, workerId, worke
       policyName: "Top-level direct record",
       requesterUserId: requesterLink.data?.status === "active" ? requesterLink.data.user_id : null,
       steps: [] as LeaveApprovalStep[]
-    };
-  }
-  const configured = await resolveConfiguredApprovalWorkflow({
-    companyId,
-    workflowCode: "leave_request",
-    workerId,
-    workerType,
-    asOf: today
-  });
-  if (configured) {
-    return {
-      direct: false,
-      policyName: configured.routeName,
-      requesterUserId: requesterLink.data?.status === "active" ? requesterLink.data.user_id : null,
-      steps: configured.steps.map((step) => ({
-        step_name: step.step_name,
-        approver_user_id: step.approver_user_id,
-        approver_person_id: step.approver_person_id
-      }))
     };
   }
   const policyResult = await db().from("hr_leave_approval_policies")

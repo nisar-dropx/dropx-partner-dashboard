@@ -7,7 +7,6 @@ import {
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { minimumAgeError } from "../lib/profile-age";
 import { ConnectExitManagement } from "./connect-exit-management";
-import { VerifiedProfilePhotoUpdate } from "./verified-profile-photo-update";
 
 export type AppAccount = {
   id: string;
@@ -692,13 +691,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     const exitDestination = ["employee", "user", "contractor"].includes(account.profileType) ? "People workflow" : "Workforce lifecycle";
     return <div className="dx-profile-view">
       {notice ? <div className="dx-alert success">{notice}</div> : null}
-      <div className="dx-profile-hero">
-        <small>DROPX LOGISTICS</small><h1>Profile details</h1><i><UserRound /></i>
-      </div>
-      <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
-        setProfile((current) => current ? { ...current, profilePhotoUrl: url, uploads: { ...current.uploads, photo: true }, uploadUrls: { ...current.uploadUrls, photo: url } } : current);
-        onPhoto?.(url);
-      }} />
+      <div className="dx-profile-hero"><small>DROPX LOGISTICS</small><h1>Profile details</h1><i><UserRound /></i></div>
       {sections.map((section, sectionIndex) => <section className={sectionIndex === 0 ? "primary" : ""} key={section.name}>
         {sectionIndex ? <h2>{section.name}</h2> : null}
         <div>{Object.entries(section.values).map(([label, value]) => <ReadTile
@@ -797,10 +790,6 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
 
   return <form className="dx-profile-form" onSubmit={prepareSubmit} ref={formRef}>
     <p className="dx-company">{account.companyName}</p>
-    <VerifiedProfilePhotoUpdate account={account} currentPhotoUrl={profile.profilePhotoUrl || account.profilePhotoUrl} onUpdated={(url) => {
-      setProfile((current) => current ? { ...current, profilePhotoUrl: url, uploads: { ...current.uploads, photo: true }, uploadUrls: { ...current.uploadUrls, photo: url } } : current);
-      onPhoto?.(url);
-    }} />
     {profile.status.trim().toLowerCase() === "returned" && profile.returnRemarks ? (
       <aside className="dx-return-notice">
         <strong>Profile returned for correction</strong>
