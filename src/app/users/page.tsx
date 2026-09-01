@@ -701,7 +701,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
           </div>
           <div className="stacked-actions">
             <a className="button" href="https://people.dropxlogistics.com/settings/designations">People Designation Master</a>
-            {isCompanyOwner(authorization) && pagePermission.canEdit ? <form action={reconcilePeopleAccessArchitecture}><SubmitButton className="button secondary" pendingText="Reconciling…">Reconcile access</SubmitButton></form> : null}
+            {isCompanyOwner(authorization) && pagePermission.canEdit ? <form action={reconcilePeopleAccessArchitecture}><SubmitButton className="button secondary" pendingText="Applying defaults…">Apply previous defaults</SubmitButton></form> : null}
           </div>
         </div>
         <div className="table-wrap"><table style={{ minWidth: 900 }}><thead><tr><th>Designation</th>{businessProducts.map((product) => <th key={product.code}>{product.label}</th>)}</tr></thead><tbody>

@@ -226,6 +226,55 @@ async function profileByEmail(companyId: string, email?: string | null) {
   return data ?? null;
 }
 
+type PaymentRecipientProfile = {
+  email?: string | null;
+  id: string;
+  reports_to_user_id?: string | null;
+  role_id?: string | null;
+};
+
+async function profilesForProductRoles(companyId: string, roleIds: string[], locationId?: string | null) {
+  if (!supabaseAdmin || !roleIds.length) return [] as PaymentRecipientProfile[];
+
+  const membershipResult = await supabaseAdmin
+    .from("company_product_memberships")
+    .select("user_id,has_all_location_access,location_scope_ids")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .in("role_id", roleIds);
+  if (membershipResult.error) throw new Error(membershipResult.error.message);
+
+  const scopedUserIds = [...new Set((membershipResult.data ?? [])
+    .filter((membership) => (
+      !locationId ||
+      membership.has_all_location_access ||
+      (membership.location_scope_ids ?? []).includes(locationId)
+    ))
+    .map((membership) => membership.user_id))];
+
+  const [membershipProfiles, legacyProfiles] = await Promise.all([
+    scopedUserIds.length
+      ? supabaseAdmin.from("profiles")
+        .select("id,email,role_id,reports_to_user_id")
+        .eq("company_id", companyId)
+        .eq("is_active", true)
+        .in("id", scopedUserIds)
+      : Promise.resolve({ data: [], error: null }),
+    supabaseAdmin.from("profiles")
+      .select("id,email,role_id,reports_to_user_id")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .in("role_id", roleIds)
+  ]);
+  if (membershipProfiles.error || legacyProfiles.error) {
+    throw new Error(membershipProfiles.error?.message ?? legacyProfiles.error?.message ?? "Payment recipients could not be resolved.");
+  }
+
+  const profiles = new Map<string, PaymentRecipientProfile>();
+  for (const profile of [...(membershipProfiles.data ?? []), ...(legacyProfiles.data ?? [])]) profiles.set(profile.id, profile);
+  return [...profiles.values()];
+}
+
 async function resolveHierarchyFinalApprovers({
   actorUserId,
   companyId,
@@ -245,6 +294,8 @@ async function resolveHierarchyFinalApprovers({
 }) {
   if (!supabaseAdmin || !finalRoleIds.length) return [];
   const finalRoles = new Set(finalRoleIds);
+  const designationApprovers = await profilesForProductRoles(companyId, finalRoleIds, locationId);
+  const designationApproverIds = new Set(designationApprovers.map((profile) => profile.id));
   const positionApprover = await findPositionApprover(companyId, finalRoleIds, locationId);
   const startProfiles = [
     await profileById(companyId, positionApprover?.userId),
@@ -252,7 +303,7 @@ async function resolveHierarchyFinalApprovers({
     await profileById(companyId, actorUserId),
     await profileByEmail(companyId, locationManagerEmail),
     await profileById(companyId, requesterUserId)
-  ].filter(Boolean) as { email?: string | null; id: string; reports_to_user_id?: string | null; role_id?: string | null }[];
+  ].filter(Boolean) as PaymentRecipientProfile[];
 
   const checked = new Set<string>();
   for (const startProfile of startProfiles) {
@@ -260,14 +311,17 @@ async function resolveHierarchyFinalApprovers({
     for (let depth = 0; profile && depth < 20; depth += 1) {
       if (checked.has(profile.id)) break;
       checked.add(profile.id);
-      if (profile.role_id && finalRoles.has(profile.role_id)) {
+      if (designationApproverIds.has(profile.id) || (profile.role_id && finalRoles.has(profile.role_id))) {
         return profile.email ? [profile] : [];
       }
       profile = await profileById(companyId, profile.reports_to_user_id) as typeof startProfile | null;
     }
   }
 
-  return [];
+  // A designation may intentionally have no reporting-line relationship to
+  // the requester (for example Finance). The central membership and station
+  // scope are still authoritative, so notify the scoped configured owners.
+  return designationApprovers.filter((profile) => profile.email);
 }
 
 async function resolveRecipientEmails({
@@ -343,7 +397,7 @@ export async function sendPaymentNotification({
 
     const finalRoleIds = (request.final_approval_role_ids?.length ? request.final_approval_role_ids : request.final_approval_role_id ? [request.final_approval_role_id] : []) as string[];
     const paymentProcessRoleIds = (request.payment_process_role_ids ?? []) as string[];
-    const [requester, actor, currentApprover, locationResult, companyResult, paymentProcessorsResult] = await Promise.all([
+    const [requester, actor, currentApprover, locationResult, companyResult, paymentProcessors] = await Promise.all([
       profileById(companyId, request.requested_by),
       profileById(companyId, actorUserId),
       profileById(companyId, request.current_approver_user_id),
@@ -351,16 +405,8 @@ export async function sendPaymentNotification({
         ? supabaseAdmin.from("stations").select("station_code, station_email, station_manager_email").eq("company_id", companyId).eq("id", request.location_id).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
       supabaseAdmin.from("companies").select("name").eq("id", companyId).maybeSingle(),
-      paymentProcessRoleIds.length
-        ? supabaseAdmin
-            .from("profiles")
-            .select("email")
-            .eq("company_id", companyId)
-            .eq("is_active", true)
-            .in("role_id", paymentProcessRoleIds)
-        : Promise.resolve({ data: [], error: null })
+      profilesForProductRoles(companyId, paymentProcessRoleIds, request.location_id)
     ]);
-    const paymentProcessors = (paymentProcessorsResult.data ?? []) as { email?: string | null }[];
     const finalApprovers = await resolveHierarchyFinalApprovers({
       actorUserId,
       companyId,

@@ -506,7 +506,7 @@ export async function saveLocationPortalAccess(formData: FormData) {
 }
 
 export async function reconcilePeopleAccessArchitecture() {
-  let successNotice = "Access reconciliation completed.";
+  let successNotice = "Default portal access applied.";
   try {
     const authorization = await requirePagePermission("users", "edit");
     const companyId = requireCompanyId(authorization);
@@ -514,25 +514,26 @@ export async function reconcilePeopleAccessArchitecture() {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
     if (currentAdminAccessSurface() !== "dashboard") throw new Error("Run central access reconciliation from the main Dashboard.");
 
-    const result = await supabaseAdmin.rpc("perform_people_access_cutover", {
+    const result = await supabaseAdmin.rpc("ensure_designation_product_access_defaults", {
       p_company_id: companyId,
-      p_actor_user_id: authorization.userId
+      p_actor_user_id: authorization.userId,
+      p_designation_id: null
     });
     if (result.error) throw new Error(result.error.message);
     const counts = (result.data ?? {}) as Record<string, number>;
     await supabaseAdmin.from("audit_logs").insert({
       actor_id: authorization.userId,
-      action: "people_access_architecture_reconciled",
+      action: "designation_portal_defaults_applied",
       entity_table: "companies",
       entity_id: companyId,
       old_values: null,
       new_values: counts,
-      reason: "People designation and Dashboard location access cutover"
+      reason: "Apply editable pre-cutover defaults to enabled People designation portals"
     });
     revalidatePath("/users");
-    successNotice = `Access reconciled: ${counts.designation_memberships_migrated ?? 0} designation memberships, ${counts.location_memberships_migrated ?? 0} location memberships, ${counts.payment_requests_remapped ?? 0} payment requests.`;
+    successNotice = `Defaults applied: ${counts.roles_created ?? 0} editable roles created, ${counts.policies_configured ?? 0} portal policies configured, ${counts.shared_permissions_copied ?? 0} permissions restored.`;
   } catch (error) {
-    usersRedirect({ section: "roles", userError: error instanceof Error ? error.message : "Central access reconciliation failed." });
+    usersRedirect({ section: "roles", userError: error instanceof Error ? error.message : "Default portal access could not be applied." });
   }
   usersRedirect({ section: "roles", userNotice: successNotice });
 }

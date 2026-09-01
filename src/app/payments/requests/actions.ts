@@ -140,6 +140,46 @@ async function approverForRoles(companyId: string, roleIds: string[], label: str
   const positionApprover = await findPositionApprover(companyId, roleIds, locationId);
   if (positionApprover) return positionApprover;
 
+  // Product access now comes from the person's People designation membership.
+  // profile.role_id is retained only as a legacy/dashboard fallback, so looking
+  // there first makes a correctly migrated approver appear to be unassigned.
+  // Keep configured role order authoritative and require the membership to
+  // cover the request location before selecting an active person.
+  const { data: memberships, error: membershipError } = await supabaseAdmin
+    .from("company_product_memberships")
+    .select("user_id, role_id, has_all_location_access, location_scope_ids")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .in("role_id", roleIds);
+  if (membershipError) throw new Error(membershipError.message);
+
+  const scopedMemberships = (memberships ?? []).filter((membership) => (
+    !locationId ||
+    membership.has_all_location_access ||
+    (membership.location_scope_ids ?? []).includes(locationId)
+  ));
+  if (scopedMemberships.length) {
+    const membershipByUser = new Map(scopedMemberships.map((membership) => [membership.user_id, membership]));
+    const { data: membershipProfiles, error: membershipProfilesError } = await supabaseAdmin
+      .from("profiles")
+      .select("id, full_name")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .in("id", [...membershipByUser.keys()]);
+    if (membershipProfilesError) throw new Error(membershipProfilesError.message);
+
+    const selectedProfile = [...(membershipProfiles ?? [])].sort((left, right) => {
+      const leftMembership = membershipByUser.get(left.id);
+      const rightMembership = membershipByUser.get(right.id);
+      const roleDifference = roleIds.indexOf(leftMembership?.role_id ?? "") - roleIds.indexOf(rightMembership?.role_id ?? "");
+      return roleDifference || String(left.full_name ?? "").localeCompare(String(right.full_name ?? ""));
+    })[0];
+    const selectedMembership = selectedProfile ? membershipByUser.get(selectedProfile.id) : null;
+    if (selectedProfile && selectedMembership?.role_id) {
+      return { userId: selectedProfile.id, roleId: selectedMembership.role_id };
+    }
+  }
+
   const { data: approver, error } = await supabaseAdmin
     .from("profiles")
     .select("id, role_id")
