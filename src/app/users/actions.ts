@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
-import { pageBelongsToSurface, type AdminAccessSurface } from "@/lib/access-surface";
+import { currentAdminAccessSurface, pageBelongsToSurface, type AdminAccessSurface } from "@/lib/access-surface";
 import { isCompanyOwner, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { cleanCountryCode } from "@/lib/country-codes";
@@ -43,7 +43,7 @@ function locationAccessMode(value: FormDataEntryValue | null) {
 
 function accessSurfaceFromForm(value: FormDataEntryValue | null): AdminAccessSurface {
   const surface = clean(value);
-  return surface === "ops" || surface === "people" ? surface : "dashboard";
+  return surface === "ops" || surface === "people" || surface === "finance" ? surface : "dashboard";
 }
 
 function appBaseUrl() {
@@ -302,6 +302,58 @@ async function assertDeveloperPermissionChangeAllowed(
   }
 }
 
+export async function configureSurfaceDesignationRole(formData: FormData) {
+  const designationId = clean(formData.get("designation_id"));
+  try {
+    const authorization = await requirePagePermission("users", "edit");
+    const companyId = requireCompanyId(authorization);
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+    if (!designationId || !/^[0-9a-f-]{36}$/i.test(designationId)) throw new Error("Select a valid People designation.");
+    const surface = currentAdminAccessSurface();
+    const expectedProduct = surface === "ops" ? "operations" : surface === "finance" ? "finance" : null;
+    const productCode = clean(formData.get("product_code"));
+    if (!expectedProduct || productCode !== expectedProduct) throw new Error("Configure this designation inside its owning portal.");
+
+    const [designationResult, policyResult] = await Promise.all([
+      supabaseAdmin.from("designations").select("id,code,name,designation_category:designation_categories!designations_designation_category_id_fkey!inner(people_module,is_active)").eq("company_id", companyId).eq("id", designationId).eq("is_active", true).eq("designation_category.people_module", "people_hr").eq("designation_category.is_active", true).maybeSingle(),
+      supabaseAdmin.from("designation_product_access_policies").select("id,default_role_id,location_access_mode,is_enabled").eq("company_id", companyId).eq("designation_id", designationId).eq("product_code", productCode).maybeSingle()
+    ]);
+    if (designationResult.error || !designationResult.data) throw new Error(designationResult.error?.message ?? "People designation was not found.");
+    if (policyResult.error || !policyResult.data?.is_enabled) throw new Error(policyResult.error?.message ?? "Enable this portal in People Designation Master first.");
+
+    let roleId = policyResult.data.default_role_id as string | null;
+    if (!roleId) {
+      const normalized = String(designationResult.data.code ?? designationResult.data.name).toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 28);
+      const roleCode = `${productCode.toUpperCase()}_${normalized}`;
+      const existing = await supabaseAdmin.from("user_roles").select("id").eq("company_id", companyId).eq("code", roleCode).maybeSingle();
+      if (existing.error) throw new Error(existing.error.message);
+      roleId = existing.data?.id ?? null;
+      if (!roleId) {
+        const created = await supabaseAdmin.from("user_roles").insert({
+          company_id: companyId,
+          product_code: productCode,
+          code: roleCode,
+          name: designationResult.data.name,
+          parent_role_id: null,
+          location_access_mode: policyResult.data.location_access_mode === "all_locations" ? "all_locations" : "role_based",
+          is_system: false,
+          is_active: true
+        }).select("id").single();
+        if (created.error || !created.data) throw new Error(created.error?.message ?? "Portal designation role could not be created.");
+        roleId = created.data.id;
+      }
+      const updated = await supabaseAdmin.from("designation_product_access_policies").update({ default_role_id: roleId, updated_by: authorization.userId, updated_at: new Date().toISOString() }).eq("id", policyResult.data.id);
+      if (updated.error) throw new Error(updated.error.message);
+    }
+    const reconciled = await supabaseAdmin.rpc("reconcile_designation_product_memberships", { p_company_id: companyId, p_designation_id: designationId, p_actor_user_id: authorization.userId });
+    if (reconciled.error) throw new Error(reconciled.error.message);
+    revalidatePath("/users");
+  } catch (error) {
+    usersRedirect({ section: "roles", userError: error instanceof Error ? error.message : "Designation access could not be prepared." });
+  }
+  usersRedirect({ section: "roles", userNotice: "Designation access is ready to configure." });
+}
+
 export async function createUserRole(formData: FormData) {
   try {
     const authorization = await requirePagePermission("users", "add");
@@ -390,7 +442,7 @@ export async function updateUserRole(formData: FormData) {
 
     const { data: existingRole, error: existingRoleError } = await supabaseAdmin
       .from("user_roles")
-      .select("code, name, location_access_mode, is_active, is_system")
+      .select("code, name, product_code, location_access_mode, is_active, is_system")
       .eq("id", roleId)
       .eq("company_id", companyId)
       .single();
@@ -408,8 +460,8 @@ export async function updateUserRole(formData: FormData) {
     const isActive = isLocationRole
       ? existingRole.is_active
       : formData.get("is_active") !== "inactive";
-    const parentRoleId = existingRole?.code === "LOCATION"
-      ? null
+    const parentRoleId = existingRole?.code === "LOCATION" || existingRole?.product_code
+      ? clean(formData.get("parent_role_id"))
       : required(formData.get("parent_role_id"), "Reporting role");
 
     if (parentRoleId === roleId) {

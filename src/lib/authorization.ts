@@ -5,6 +5,7 @@ import { accessPages, ensureAccessPages } from "@/lib/access-pages";
 import { loadEffectivePositionAccess } from "@/lib/position-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { currentAdminAccessSurface } from "@/lib/access-surface";
 
 export type PermissionAction = "access" | "view" | "add" | "edit";
 
@@ -224,6 +225,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   let roleCode: string | null = null;
   let effectiveRoleIds: string[] = profile.role_id ? [profile.role_id] : [];
   let primaryRoleId: string | null = profile.role_id ?? null;
+  const accessSurface = currentAdminAccessSurface();
 
   if (!companyId) return null;
 
@@ -254,6 +256,29 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     ...positionAccess.locationScopeIds
   ]));
   hasAllLocationAccess = positionAccess.hasAllLocationAccess;
+
+  const surfaceProductCode = accessSurface === "ops"
+    ? "operations"
+    : accessSurface === "people"
+      ? "people"
+      : accessSurface === "finance"
+        ? "finance"
+        : null;
+  if (surfaceProductCode) {
+    const membershipResult = await supabaseAdmin.from("company_product_memberships")
+      .select("role_id,has_all_location_access,location_scope_ids")
+      .eq("company_id", companyId)
+      .eq("user_id", profile.id)
+      .eq("product_code", surfaceProductCode)
+      .eq("is_active", true);
+    if (!membershipResult.error && !isMasterOwner) {
+      const membershipRoleIds = (membershipResult.data ?? []).map((membership) => membership.role_id).filter((roleId): roleId is string => Boolean(roleId));
+      effectiveRoleIds = Array.from(new Set(membershipRoleIds));
+      primaryRoleId = membershipRoleIds[0] ?? null;
+      hasAllLocationAccess = (membershipResult.data ?? []).some((membership) => membership.has_all_location_access);
+      locationScopeIds = hasAllLocationAccess ? [] : Array.from(new Set((membershipResult.data ?? []).flatMap((membership) => membership.location_scope_ids ?? [])));
+    }
+  }
 
   if (effectiveRoleIds.length) {
     const rolesResult = await supabaseAdmin

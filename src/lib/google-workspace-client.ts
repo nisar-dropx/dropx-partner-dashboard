@@ -1,0 +1,580 @@
+import "server-only";
+
+import { getVercelOidcToken } from "@vercel/oidc";
+import { JWT } from "google-auth-library";
+
+const DIRECTORY_BASE_URL = "https://admin.googleapis.com/admin/directory/v1";
+
+const WORKSPACE_SCOPES = [
+  "https://www.googleapis.com/auth/admin.directory.user",
+  "https://www.googleapis.com/auth/admin.directory.user.security",
+  "https://www.googleapis.com/auth/admin.directory.group",
+  "https://www.googleapis.com/auth/admin.directory.group.member",
+  "https://www.googleapis.com/auth/apps.groups.settings"
+];
+
+export type WorkspaceConnectionSettings = {
+  customerId: string | null;
+  delegatedAdminEmail: string;
+  primaryDomain: string;
+};
+
+export type GoogleDirectoryUser = {
+  id: string;
+  primaryEmail: string;
+  aliases?: string[];
+  name?: {
+    fullName?: string;
+    givenName?: string;
+    familyName?: string;
+  };
+  orgUnitPath?: string;
+  suspended?: boolean;
+  archived?: boolean;
+  isAdmin?: boolean;
+  etag?: string;
+  creationTime?: string;
+  lastLoginTime?: string;
+};
+
+export type GoogleDirectoryGroup = {
+  id: string;
+  email: string;
+  name?: string;
+  description?: string;
+  directMembersCount?: string;
+  etag?: string;
+};
+
+type WorkspaceServiceAccount = {
+  client_email: string;
+  private_key: string;
+};
+
+type WorkspaceFederation = {
+  projectNumber: string;
+  poolId: string;
+  providerId: string;
+  serviceAccountEmail: string;
+};
+
+function normalizePrivateKey(value: string) {
+  return value.replace(/\\n/g, "\n").trim();
+}
+
+function serviceAccountFromEnvironment(): WorkspaceServiceAccount | null {
+  const rawJson = process.env.GOOGLE_WORKSPACE_SERVICE_ACCOUNT_JSON?.trim();
+  if (rawJson) {
+    try {
+      const decoded = rawJson.startsWith("{")
+        ? rawJson
+        : Buffer.from(rawJson, "base64").toString("utf8");
+      const parsed = JSON.parse(decoded) as Partial<WorkspaceServiceAccount>;
+      if (parsed.client_email && parsed.private_key) {
+        return {
+          client_email: parsed.client_email.trim(),
+          private_key: normalizePrivateKey(parsed.private_key)
+        };
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  const clientEmail = process.env.GOOGLE_WORKSPACE_CLIENT_EMAIL?.trim();
+  const privateKey = process.env.GOOGLE_WORKSPACE_PRIVATE_KEY?.trim();
+  if (!clientEmail || !privateKey) return null;
+  return { client_email: clientEmail, private_key: normalizePrivateKey(privateKey) };
+}
+
+export function workspaceCredentialsConfigured() {
+  return Boolean(serviceAccountFromEnvironment() || federationFromEnvironment());
+}
+
+function federationFromEnvironment(): WorkspaceFederation | null {
+  const projectNumber = process.env.GCP_PROJECT_NUMBER?.trim();
+  const poolId = process.env.GCP_WORKLOAD_IDENTITY_POOL_ID?.trim();
+  const providerId = process.env.GCP_WORKLOAD_IDENTITY_POOL_PROVIDER_ID?.trim();
+  const serviceAccountEmail = process.env.GCP_SERVICE_ACCOUNT_EMAIL?.trim();
+  if (!projectNumber || !poolId || !providerId || !serviceAccountEmail) return null;
+  return { projectNumber, poolId, providerId, serviceAccountEmail };
+}
+
+async function jsonResponse<T>(response: Response, fallback: string) {
+  const body = await response.json().catch(() => ({})) as T & { error?: { message?: string }; error_description?: string };
+  if (!response.ok) throw new Error(body.error?.message ?? body.error_description ?? fallback);
+  return body;
+}
+
+async function federatedSecurityToken(federation: WorkspaceFederation) {
+  const oidcToken = await getVercelOidcToken();
+  const audience = `//iam.googleapis.com/projects/${federation.projectNumber}/locations/global/workloadIdentityPools/${federation.poolId}/providers/${federation.providerId}`;
+  const stsBody = new URLSearchParams({
+    audience,
+    grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+    requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
+    scope: "https://www.googleapis.com/auth/cloud-platform",
+    subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
+    subject_token: oidcToken
+  });
+  return jsonResponse<{ access_token: string }>(await fetch("https://sts.googleapis.com/v1/token", {
+    method: "POST",
+    body: stsBody,
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    cache: "no-store"
+  }), "Google Security Token Service rejected the Vercel workload identity.");
+}
+
+export async function googleCloudAccessToken() {
+  const federation = federationFromEnvironment();
+  if (!federation) throw new Error("Google Cloud workload identity is not configured.");
+  const sts = await federatedSecurityToken(federation);
+  const tokenUrl = `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(federation.serviceAccountEmail)}:generateAccessToken`;
+  const token = await jsonResponse<{ accessToken: string; expireTime: string }>(await fetch(tokenUrl, {
+    method: "POST",
+    body: JSON.stringify({ scope: ["https://www.googleapis.com/auth/cloud-platform"], lifetime: "3600s" }),
+    headers: { authorization: `Bearer ${sts.access_token}`, "content-type": "application/json" },
+    cache: "no-store"
+  }), "Google IAM could not issue a Cloud access token.");
+  const projectId = process.env.GCP_PROJECT_ID?.trim()
+    || federation.serviceAccountEmail.split("@")[1]?.replace(/\.iam\.gserviceaccount\.com$/i, "")
+    || federation.projectNumber;
+  return { accessToken: token.accessToken, projectId, projectNumber: federation.projectNumber };
+}
+
+async function federatedWorkspaceAccessToken(federation: WorkspaceFederation, delegatedAdminEmail: string, scopes = WORKSPACE_SCOPES) {
+  const sts = await federatedSecurityToken(federation);
+
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const claim = JSON.stringify({
+    iss: federation.serviceAccountEmail,
+    sub: delegatedAdminEmail,
+    scope: scopes.join(" "),
+    aud: "https://oauth2.googleapis.com/token",
+    iat: issuedAt,
+    exp: issuedAt + 3300
+  });
+  const signUrl = `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(federation.serviceAccountEmail)}:signJwt`;
+  const signed = await jsonResponse<{ signedJwt: string }>(await fetch(signUrl, {
+    method: "POST",
+    body: JSON.stringify({ payload: claim }),
+    headers: { authorization: `Bearer ${sts.access_token}`, "content-type": "application/json" },
+    cache: "no-store"
+  }), "Google IAM could not sign the delegated Workspace assertion.");
+  const tokenBody = new URLSearchParams({
+    grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+    assertion: signed.signedJwt
+  });
+  return jsonResponse<{ access_token: string; expires_in: number }>(await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    body: tokenBody,
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    cache: "no-store"
+  }), "Google Workspace rejected the delegated service assertion.");
+}
+
+export class GoogleWorkspaceApiError extends Error {
+  status: number;
+  reason: string | null;
+
+  constructor(message: string, status: number, reason: string | null = null) {
+    super(message);
+    this.name = "GoogleWorkspaceApiError";
+    this.status = status;
+    this.reason = reason;
+  }
+}
+
+export class GoogleWorkspaceClient {
+  private readonly auth: JWT | null;
+  private readonly federation: WorkspaceFederation | null;
+  private readonly settings: WorkspaceConnectionSettings;
+  private cachedToken: { token: string; expiresAt: number } | null = null;
+
+  constructor(settings: WorkspaceConnectionSettings) {
+    const serviceAccount = serviceAccountFromEnvironment();
+    const federation = federationFromEnvironment();
+    if (!serviceAccount && !federation) throw new Error("Google Workspace workload identity is not configured.");
+    if (!settings.delegatedAdminEmail) {
+      throw new Error("A delegated Google Workspace administrator is not configured.");
+    }
+
+    this.settings = settings;
+    this.federation = federation;
+    this.auth = serviceAccount ? new JWT({
+      email: serviceAccount.client_email,
+      key: serviceAccount.private_key,
+      scopes: WORKSPACE_SCOPES,
+      subject: settings.delegatedAdminEmail
+    }) : null;
+  }
+
+  private async accessToken() {
+    if (this.cachedToken && this.cachedToken.expiresAt > Date.now() + 60000) return this.cachedToken.token;
+    if (this.auth) {
+      const token = await this.auth.getAccessToken();
+      if (!token.token) throw new Error("Google Workspace did not return an access token.");
+      return token.token;
+    }
+    if (!this.federation) throw new Error("Google Workspace workload identity is not configured.");
+    const token = await federatedWorkspaceAccessToken(this.federation, this.settings.delegatedAdminEmail, WORKSPACE_SCOPES);
+    this.cachedToken = { token: token.access_token, expiresAt: Date.now() + token.expires_in * 1000 };
+    return token.access_token;
+  }
+
+  private async requestUrl<T>(url: string, init?: RequestInit): Promise<T> {
+    const token = await this.accessToken();
+
+    const response = await fetch(url, {
+      ...init,
+      cache: "no-store",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        ...(init?.headers ?? {})
+      }
+    });
+
+    if (response.status === 204) return undefined as T;
+    const body = await response.json().catch(() => ({})) as {
+      error?: { message?: string; errors?: Array<{ reason?: string }> };
+    } & T;
+    if (!response.ok) {
+      throw new GoogleWorkspaceApiError(
+        body.error?.message ?? `Google Workspace request failed with HTTP ${response.status}.`,
+        response.status,
+        body.error?.errors?.[0]?.reason ?? null
+      );
+    }
+    return body as T;
+  }
+
+  private request<T>(path: string, init?: RequestInit) {
+    return this.requestUrl<T>(`${DIRECTORY_BASE_URL}${path}`, init);
+  }
+
+  async listUsers() {
+    const users: GoogleDirectoryUser[] = [];
+    let pageToken = "";
+    do {
+      const params = new URLSearchParams({ maxResults: "500", orderBy: "email", projection: "full" });
+      if (this.settings.customerId) params.set("customer", this.settings.customerId);
+      else params.set("domain", this.settings.primaryDomain);
+      if (pageToken) params.set("pageToken", pageToken);
+      const result = await this.request<{ users?: GoogleDirectoryUser[]; nextPageToken?: string }>(`/users?${params}`);
+      users.push(...(result.users ?? []));
+      pageToken = result.nextPageToken ?? "";
+    } while (pageToken);
+    return users;
+  }
+
+  async getUser(userKey: string) {
+    try {
+      return await this.request<GoogleDirectoryUser>(`/users/${encodeURIComponent(userKey)}?projection=full`);
+    } catch (error) {
+      if (error instanceof GoogleWorkspaceApiError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  createUser(input: {
+    primaryEmail: string;
+    givenName: string;
+    familyName: string;
+    password: string;
+    orgUnitPath: string;
+    changePasswordAtNextLogin?: boolean;
+  }) {
+    return this.request<GoogleDirectoryUser>("/users", {
+      method: "POST",
+      body: JSON.stringify({
+        primaryEmail: input.primaryEmail,
+        password: input.password,
+        changePasswordAtNextLogin: input.changePasswordAtNextLogin ?? true,
+        orgUnitPath: input.orgUnitPath,
+        name: { givenName: input.givenName, familyName: input.familyName }
+      })
+    });
+  }
+
+  patchUser(userKey: string, input: Record<string, unknown>) {
+    return this.request<GoogleDirectoryUser>(`/users/${encodeURIComponent(userKey)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input)
+    });
+  }
+
+  async suspendUser(userKey: string) {
+    const user = await this.patchUser(userKey, { suspended: true });
+    await this.request<void>(`/users/${encodeURIComponent(userKey)}/signOut`, { method: "POST", body: "{}" });
+    return user;
+  }
+
+  restoreUser(userKey: string) {
+    return this.patchUser(userKey, { suspended: false });
+  }
+
+  deleteUser(userKey: string) {
+    return this.request<void>(`/users/${encodeURIComponent(userKey)}`, { method: "DELETE" });
+  }
+
+  async listUserAliases(userKey: string) {
+    const result = await this.request<{ aliases?: Array<{ alias: string; primaryEmail: string }> }>(
+      `/users/${encodeURIComponent(userKey)}/aliases`
+    );
+    return result.aliases ?? [];
+  }
+
+  addUserAlias(userKey: string, alias: string) {
+    return this.request<{ alias: string; primaryEmail: string }>(`/users/${encodeURIComponent(userKey)}/aliases`, {
+      method: "POST",
+      body: JSON.stringify({ alias })
+    });
+  }
+
+  async getGroup(groupKey: string) {
+    try {
+      return await this.request<GoogleDirectoryGroup>(`/groups/${encodeURIComponent(groupKey)}`);
+    } catch (error) {
+      if (error instanceof GoogleWorkspaceApiError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  createGroup(input: { email: string; name: string; description?: string }) {
+    return this.request<GoogleDirectoryGroup>("/groups", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  }
+
+  updateGroupSettings(groupKey: string, input: {
+    whoCanPostMessage: "ANYONE_CAN_POST" | "ALL_IN_DOMAIN_CAN_POST" | "ALL_MEMBERS_CAN_POST";
+    messageModerationLevel?: "MODERATE_NONE" | "MODERATE_NON_MEMBERS";
+  }) {
+    return this.requestUrl<Record<string, string>>(
+      `https://www.googleapis.com/groups/v1/groups/${encodeURIComponent(groupKey)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          archiveOnly: "false",
+          isArchived: "false",
+          whoCanPostMessage: input.whoCanPostMessage,
+          messageModerationLevel: input.messageModerationLevel ?? "MODERATE_NONE"
+        })
+      }
+    );
+  }
+
+  async listUserGroups(userKey: string) {
+    const groups: Array<{ id: string; email: string; name?: string }> = [];
+    let pageToken = "";
+    do {
+      const params = new URLSearchParams({ userKey, maxResults: "200" });
+      if (pageToken) params.set("pageToken", pageToken);
+      const result = await this.request<{ groups?: Array<{ id: string; email: string; name?: string }>; nextPageToken?: string }>(`/groups?${params}`);
+      groups.push(...(result.groups ?? []));
+      pageToken = result.nextPageToken ?? "";
+    } while (pageToken);
+    return groups;
+  }
+
+  addGroupMember(groupKey: string, userKey: string, role: "MEMBER" | "MANAGER" | "OWNER" = "MEMBER") {
+    return this.request(`/groups/${encodeURIComponent(groupKey)}/members`, {
+      method: "POST",
+      body: JSON.stringify({ email: userKey, role })
+    });
+  }
+
+  async ensureGroupMember(groupKey: string, userKey: string, role: "MEMBER" | "MANAGER" | "OWNER" = "MEMBER") {
+    try {
+      return await this.request(`/groups/${encodeURIComponent(groupKey)}/members/${encodeURIComponent(userKey)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role })
+      });
+    } catch (error) {
+      if (error instanceof GoogleWorkspaceApiError && error.status === 404) {
+        return this.addGroupMember(groupKey, userKey, role);
+      }
+      throw error;
+    }
+  }
+
+  async removeGroupMember(groupKey: string, userKey: string) {
+    try {
+      await this.request<void>(`/groups/${encodeURIComponent(groupKey)}/members/${encodeURIComponent(userKey)}`, { method: "DELETE" });
+    } catch (error) {
+      if (error instanceof GoogleWorkspaceApiError && error.status === 404) return;
+      throw error;
+    }
+  }
+}
+
+const LOCATION_MAIL_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.settings.sharing"
+];
+
+export type GoogleSendAs = {
+  sendAsEmail: string;
+  displayName?: string;
+  isPrimary?: boolean;
+  isDefault?: boolean;
+  verificationStatus?: "accepted" | "pending" | "verificationStatusUnspecified";
+};
+
+export type GoogleMailMessage = {
+  id: string;
+  threadId: string;
+  labelIds?: string[];
+  snippet?: string;
+  historyId?: string;
+  internalDate?: string;
+  payload?: {
+    mimeType?: string;
+    headers?: Array<{ name: string; value: string }>;
+    body?: { attachmentId?: string; data?: string; size?: number };
+    parts?: Array<{
+      mimeType?: string;
+      filename?: string;
+      headers?: Array<{ name: string; value: string }>;
+      body?: { attachmentId?: string; data?: string; size?: number };
+      parts?: Array<{
+        mimeType?: string;
+        filename?: string;
+        headers?: Array<{ name: string; value: string }>;
+        body?: { attachmentId?: string; data?: string; size?: number };
+      }>;
+    }>;
+  };
+};
+
+export class GoogleLocationMailClient {
+  private readonly auth: JWT | null;
+  private readonly federation: WorkspaceFederation | null;
+  private readonly mailboxEmail: string;
+  private cachedToken: { token: string; expiresAt: number } | null = null;
+
+  constructor(mailboxEmail: string) {
+    const serviceAccount = serviceAccountFromEnvironment();
+    const federation = federationFromEnvironment();
+    if (!serviceAccount && !federation) throw new Error("Google Workspace workload identity is not configured.");
+    this.mailboxEmail = mailboxEmail.trim().toLowerCase();
+    if (!this.mailboxEmail) throw new Error("A location mailbox email is required.");
+    this.federation = federation;
+    this.auth = serviceAccount ? new JWT({
+      email: serviceAccount.client_email,
+      key: serviceAccount.private_key,
+      scopes: LOCATION_MAIL_SCOPES,
+      subject: this.mailboxEmail
+    }) : null;
+  }
+
+  private async accessToken() {
+    if (this.cachedToken && this.cachedToken.expiresAt > Date.now() + 60000) return this.cachedToken.token;
+    if (this.auth) {
+      const token = await this.auth.getAccessToken();
+      if (!token.token) throw new Error("Google Gmail did not return an access token.");
+      return token.token;
+    }
+    if (!this.federation) throw new Error("Google Workspace workload identity is not configured.");
+    const token = await federatedWorkspaceAccessToken(this.federation, this.mailboxEmail, LOCATION_MAIL_SCOPES);
+    this.cachedToken = { token: token.access_token, expiresAt: Date.now() + token.expires_in * 1000 };
+    return token.access_token;
+  }
+
+  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me${path}`, {
+      ...init,
+      cache: "no-store",
+      headers: {
+        authorization: `Bearer ${await this.accessToken()}`,
+        "content-type": "application/json",
+        ...(init?.headers ?? {})
+      }
+    });
+    if (response.status === 204) return undefined as T;
+    const body = await response.json().catch(() => ({})) as { error?: { message?: string; errors?: Array<{ reason?: string }> } } & T;
+    if (!response.ok) {
+      throw new GoogleWorkspaceApiError(
+        body.error?.message ?? `Google Gmail request failed with HTTP ${response.status}.`,
+        response.status,
+        body.error?.errors?.[0]?.reason ?? null
+      );
+    }
+    return body as T;
+  }
+
+  listMessages(input: { maxResults?: number; pageToken?: string; query?: string } = {}) {
+    const params = new URLSearchParams({ maxResults: String(Math.min(100, Math.max(1, input.maxResults ?? 50))) });
+    if (input.pageToken) params.set("pageToken", input.pageToken);
+    if (input.query) params.set("q", input.query);
+    return this.request<{ messages?: Array<{ id: string; threadId: string }>; nextPageToken?: string; resultSizeEstimate?: number }>(`/messages?${params}`);
+  }
+
+  getMessage(messageId: string) {
+    return this.request<GoogleMailMessage>(`/messages/${encodeURIComponent(messageId)}?format=full`);
+  }
+
+  sendRaw(raw: string, threadId?: string) {
+    return this.request<{ id: string; threadId: string; labelIds?: string[] }>("/messages/send", {
+      method: "POST",
+      body: JSON.stringify({ raw, ...(threadId ? { threadId } : {}) })
+    });
+  }
+
+  getAttachment(messageId: string, attachmentId: string) {
+    return this.request<{ attachmentId?: string; data: string; size?: number }>(
+      `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`
+    );
+  }
+
+  modifyMessage(messageId: string, input: { addLabelIds?: string[]; removeLabelIds?: string[] }) {
+    return this.request<GoogleMailMessage>(`/messages/${encodeURIComponent(messageId)}/modify`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  }
+
+  trashMessage(messageId: string) {
+    return this.request<GoogleMailMessage>(`/messages/${encodeURIComponent(messageId)}/trash`, { method: "POST" });
+  }
+
+  untrashMessage(messageId: string) {
+    return this.request<GoogleMailMessage>(`/messages/${encodeURIComponent(messageId)}/untrash`, { method: "POST" });
+  }
+
+  async listSendAs() {
+    const result = await this.request<{ sendAs?: GoogleSendAs[] }>("/settings/sendAs");
+    return result.sendAs ?? [];
+  }
+
+  createSendAs(input: { email: string; displayName: string }) {
+    return this.request<GoogleSendAs>("/settings/sendAs", {
+      method: "POST",
+      body: JSON.stringify({
+        sendAsEmail: input.email,
+        displayName: input.displayName,
+        replyToAddress: input.email,
+        treatAsAlias: true
+      })
+    });
+  }
+
+  updateSendAs(input: { email: string; displayName: string }) {
+    return this.request<GoogleSendAs>(`/settings/sendAs/${encodeURIComponent(input.email)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        displayName: input.displayName,
+        replyToAddress: input.email,
+        treatAsAlias: true
+      })
+    });
+  }
+
+  markRead(messageId: string) {
+    return this.modifyMessage(messageId, { removeLabelIds: ["UNREAD"] });
+  }
+}
+
