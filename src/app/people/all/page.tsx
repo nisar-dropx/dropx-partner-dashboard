@@ -34,6 +34,15 @@ function profileActionHref(basePath: string, action: "view" | "edit", profileId:
   return `${basePath}?${action}=${encodeURIComponent(String(profileId ?? ""))}`;
 }
 
+function peopleIdentityKeys(row: AllPeopleRow) {
+  const keys: string[] = [];
+  const code = row.code.trim().toUpperCase();
+  const biometricId = row.biometricId.trim();
+  if (code && code !== "-") keys.push(`code:${code}`);
+  if (biometricId && biometricId !== "-") keys.push(`biometric:${biometricId}`);
+  return keys;
+}
+
 const sharedProfileColumns = [
   "full_name", "mobile_country_code", "mobile", "email", "date_of_join", "is_active", "statutory_applicability",
   "gender", "date_of_birth", "aadhaar_number", "pan_number", "eshram_uan", "father_name", "blood_group",
@@ -266,9 +275,15 @@ async function loadPeople(
   }));
   const workforceResult = await loadCanonicalWorkforcePeople(companyId, locationScopeIds, hasAllLocationAccess);
   const allResults = [...results, ...customResults];
+  const sourceRows = allResults.flatMap((result) => result.rows);
+  const contractorIdentityKeys = new Set(sourceRows
+    .filter((row) => row.categoryCode === "contractors")
+    .flatMap(peopleIdentityKeys));
+  const categoryRows = sourceRows.filter((row) => row.categoryCode !== "employees"
+    || !peopleIdentityKeys(row).some((key) => contractorIdentityKeys.has(key)));
   return {
     categories,
-    rows: [...allResults.flatMap((result) => result.rows), ...workforceResult.rows],
+    rows: [...categoryRows, ...workforceResult.rows],
     error: categoryResult.error?.message ?? designationResult.error?.message ?? allResults.find((result) => result.error)?.error ?? workforceResult.error ?? null
   };
 }
