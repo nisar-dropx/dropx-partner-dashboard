@@ -7,7 +7,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { normalizeDesignationCategories } from "@/lib/designation-categories";
 import { designationPortalOptions } from "@/lib/designation-portal-access";
-import { dropxOnePageCodes } from "@/lib/dropx-one-pages";
+import { dropxOnePageCodes, requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
 import { normalizeCategoryProfileFieldRules } from "@/lib/profile-field-rules";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -115,11 +115,14 @@ async function validateOnboardingCategories(companyId: string, categories: strin
 }
 
 function appPageAccess(formData: FormData) {
-  return Array.from(new Set(
+  return Array.from(new Set([
+    ...requiredDropxOnePageCodes,
+    ...(
     formData.getAll("app_page_access")
       .map((value) => String(value ?? "").trim().toLowerCase())
       .filter((value) => dropxOnePageCodes.has(value))
-  ));
+    )
+  ]));
 }
 
 function profileFieldRules(formData: FormData, categories: string[]) {

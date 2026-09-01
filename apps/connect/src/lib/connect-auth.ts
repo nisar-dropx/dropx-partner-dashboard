@@ -9,6 +9,7 @@ import {
   workforceLabel,
   workforceTable
 } from "@/lib/workforce-profiles";
+import { requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
 
 export type ConnectAccount = {
   id: string;
@@ -526,7 +527,10 @@ function resolveConnectPageAccess(
   designationPages?: string[] | null
 ) {
   if (profileType === "user") return managerPageAccess;
-  return intersectPageAccess(categoryPages, designationPages);
+  return [...new Set([
+    ...intersectPageAccess(categoryPages, designationPages),
+    ...requiredDropxOnePageCodes
+  ])];
 }
 
 export async function findConnectAccounts(countryCode: string, mobile: string) {

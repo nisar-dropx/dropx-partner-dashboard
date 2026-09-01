@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
-import { dropxOnePageOptions } from "@/lib/dropx-one-pages";
+import { dropxOnePageOptions, requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
 
 export const appPageOptions = dropxOnePageOptions;
 
 export const defaultAppPageAccess = appPageOptions.map((page) => page.value);
+const requiredPages = new Set<string>(requiredDropxOnePageCodes);
 
 export function AppPageAccessSelect({
   initialPages,
@@ -17,7 +18,7 @@ export function AppPageAccessSelect({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<string[]>(initialPages);
+  const [selected, setSelected] = useState<string[]>(Array.from(new Set([...initialPages, ...requiredDropxOnePageCodes])));
   const rootRef = useRef<HTMLDivElement>(null);
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const allSelected = appPageOptions.every((page) => selectedSet.has(page.value));
@@ -48,6 +49,7 @@ export function AppPageAccessSelect({
   }, [open]);
 
   function toggle(value: string) {
+    if (requiredPages.has(value)) return;
     setSelected((current) => (
       current.includes(value)
         ? current.filter((page) => page !== value)
@@ -82,6 +84,7 @@ export function AppPageAccessSelect({
                 {label}
                 <button
                   aria-label={`Remove ${label}`}
+                  disabled={requiredPages.has(page)}
                   onClick={(event) => {
                     event.stopPropagation();
                     toggle(page);
@@ -108,14 +111,14 @@ export function AppPageAccessSelect({
               value={query}
             />
             {selected.length ? (
-              <button className="button secondary" onClick={() => setSelected([])} type="button">Clear</button>
+              <button className="button secondary" onClick={() => setSelected([...requiredDropxOnePageCodes])} type="button">Clear optional</button>
             ) : null}
           </div>
           <label className="multi-select-all">
             <input
               checked={allSelected}
               className="matrix-checkbox"
-              onChange={() => setSelected(allSelected ? [] : defaultAppPageAccess)}
+              onChange={() => setSelected(allSelected ? [...requiredDropxOnePageCodes] : defaultAppPageAccess)}
               ref={(node) => {
                 if (node) node.indeterminate = someSelected && !allSelected;
               }}
@@ -130,10 +133,11 @@ export function AppPageAccessSelect({
                 <input
                   checked={selectedSet.has(page.value)}
                   className="matrix-checkbox"
+                  disabled={requiredPages.has(page.value)}
                   onChange={() => toggle(page.value)}
                   type="checkbox"
                 />
-                <span><strong>{page.label}</strong></span>
+                <span><strong>{page.label}</strong>{requiredPages.has(page.value) ? <small>Always available</small> : null}</span>
               </label>
             ))}
             {!visibleOptions.length ? <p className="searchable-empty">No pages found.</p> : null}

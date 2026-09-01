@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { dynamicWorkforceTable } from "@/lib/dynamic-workforce";
-import { dropxOnePageCodes } from "@/lib/dropx-one-pages";
+import { dropxOnePageCodes, requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
 import { normalizeCategoryProfileFieldRules } from "@/lib/profile-field-rules";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -41,11 +41,14 @@ function categoryRules(formData: FormData) {
 }
 
 function appPageAccess(formData: FormData) {
-  return Array.from(new Set(
+  return Array.from(new Set([
+    ...requiredDropxOnePageCodes,
+    ...(
     formData.getAll("app_page_access")
       .map((value) => String(value).trim().toLowerCase())
       .filter((value) => dropxOnePageCodes.has(value))
-  ));
+    )
+  ]));
 }
 
 function categoryRedirect(params: { error?: string; notice?: string }) {

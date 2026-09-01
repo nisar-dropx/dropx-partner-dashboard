@@ -13,3 +13,4 @@ export const dropxOnePageCodes = [
 ] as const;
 
 export type DropxOnePageCode = typeof dropxOnePageCodes[number];
+export const requiredDropxOnePageCodes: DropxOnePageCode[] = ["profile", "settings"];
