@@ -601,7 +601,7 @@ function FieldExecutiveBulkImportPanel({
 
 async function loadFieldExecutiveData(
   authorization: AuthorizationContext,
-  _designationCategoryFilter: DesignationCategoryFilter[],
+  designationCategoryFilter: DesignationCategoryFilter[],
   table: "field_executives" | "contractors" | "workforce" | "vendors" | "workers",
   targetRegister: PhysicalRegisterTable,
   accessSurface: AccessSurface,
@@ -725,8 +725,11 @@ async function loadFieldExecutiveData(
     providers: firstRelation(location.providers),
     location_models: firstRelation(location.location_models)
   })) as LocationRow[];
+  const requestedCategories = new Set<string>(designationCategoryFilter);
   const designations = ((designationsResult.data ?? []) as unknown as DesignationRow[])
-    .filter((designation) => mappedDesignationIds.has(designation.id));
+    .filter((designation) => (designation.onboarding_categories ?? [])
+      .some((category) => requestedCategories.has(category)))
+    .filter((designation) => targetRegister === "contractors" || mappedDesignationIds.has(designation.id));
   const allowedLocationIds = new Set(locations.map((location) => location.id));
   const allowedDesignationNames = new Set(designations
     .filter((designation) => canAccessDesignationPortal(designation, accessSurface, "view", { isOwner: ownerAccess }))
