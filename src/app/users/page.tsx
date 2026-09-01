@@ -1,20 +1,21 @@
 import { AppShell } from "@/components/app-shell";
 import { AddUserForm } from "@/components/add-user-form";
 import { DismissibleModal, DismissModalButton } from "@/components/dismissible-modal";
+import { LocationPortalAccessPanel } from "@/components/location-portal-access-panel";
 import { ManageUserForm } from "@/components/manage-user-form";
 import { PageHead } from "@/components/page-head";
 import { PermissionMatrix } from "@/components/permission-matrix";
 import { SearchableSelect } from "@/components/searchable-select";
+import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
 import { SurfaceDesignationAccessPanel } from "@/components/surface-designation-access-panel";
-import { UserRolesListPanel } from "@/components/user-roles-list-panel";
 import { UsersListPanel } from "@/components/users-list-panel";
 import { accessSurfaceLabel, currentAdminAccessSurface, pageBelongsToSurface } from "@/lib/access-surface";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
 import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { configureSurfaceDesignationRole, createUserRole, deleteUser, deleteUserRole, updateUserRole } from "./actions";
+import { configureSurfaceDesignationRole, configureSurfaceLocationRole, createUserRole, deleteUser, deleteUserRole, reconcilePeopleAccessArchitecture, saveLocationPortalAccess, updateUserRole } from "./actions";
 
 type AppPageRow = {
   id: string;
@@ -223,23 +224,91 @@ function membershipProductCode(surface: ReturnType<typeof currentAdminAccessSurf
 async function loadSurfaceDesignationAccess(companyId: string, surface: ReturnType<typeof currentAdminAccessSurface>) {
   const productCode = membershipProductCode(surface);
   if (!supabaseAdmin || !productCode) {
-    return { designations: [] as Array<{ id: string; code: string; name: string; enabled: boolean; defaultRoleId: string | null }>, error: null as string | null };
+    return { designations: [] as Array<{ id: string; code: string; name: string; enabled: boolean; defaultRoleId: string | null }>, locationRoleId: null as string | null, error: null as string | null };
   }
-  const [policies, designationResult] = await Promise.all([
+  const [policies, designationResult, locationRoleResult] = await Promise.all([
     supabaseAdmin.from("designation_product_access_policies").select("designation_id,default_role_id,is_enabled").eq("company_id", companyId).eq("product_code", productCode),
-    supabaseAdmin.from("designations").select("id,code,name,designation_category:designation_categories!designations_designation_category_id_fkey!inner(people_module,is_active)").eq("company_id", companyId).eq("is_active", true).eq("designation_category.people_module", "people_hr").eq("designation_category.is_active", true).order("name")
+    supabaseAdmin.from("designations").select("id,code,name,designation_category:designation_categories!designations_designation_category_id_fkey!inner(people_module,is_active)").eq("company_id", companyId).eq("is_active", true).eq("designation_category.people_module", "people_hr").eq("designation_category.is_active", true).order("name"),
+    supabaseAdmin.from("user_roles").select("id").eq("company_id", companyId).eq("code", `${productCode.toUpperCase()}_LOCATION`).eq("is_active", true).maybeSingle()
   ]);
   if (policies.error) {
-    return { designations: [], error: policies.error.message };
+    return { designations: [], locationRoleId: null as string | null, error: policies.error.message };
   }
   if (designationResult.error) {
-    return { designations: [], error: designationResult.error.message };
+    return { designations: [], locationRoleId: null as string | null, error: designationResult.error.message };
   }
+  if (locationRoleResult.error) return { designations: [], locationRoleId: null as string | null, error: locationRoleResult.error.message };
   const policyByDesignation = new Map((policies.data ?? []).map((policy) => [policy.designation_id, policy]));
   return { designations: (designationResult.data ?? []).map((designation) => {
     const policy = policyByDesignation.get(designation.id);
     return { id: designation.id, code: designation.code, name: designation.name, enabled: Boolean(policy?.is_enabled), defaultRoleId: policy?.default_role_id ?? null };
-  }), error: null as string | null };
+  }), locationRoleId: locationRoleResult.data?.id ?? null, error: null as string | null };
+}
+
+const businessProducts = [
+  { code: "people", label: "People", href: "https://people.dropxlogistics.com/settings/roles" },
+  { code: "operations", label: "OpsPulse", href: "https://ops.dropxlogistics.com/users?section=roles" },
+  { code: "workforce", label: "Workforce", href: "https://workforce.dropxlogistics.com/users?section=roles" },
+  { code: "recruit", label: "Recruit", href: "https://recruit.dropxlogistics.com/settings/access" },
+  { code: "finance", label: "Finance", href: "https://fin.dropxlogistics.com/users?section=roles" }
+] as const;
+
+async function loadDashboardDesignationOverview(companyId: string) {
+  if (!supabaseAdmin) return { designations: [] as Array<{ id: string; code: string; name: string; policies: Record<string, { enabled: boolean; configured: boolean }> }>, error: null as string | null };
+  const [designations, policies] = await Promise.all([
+    supabaseAdmin.from("designations").select("id,code,name,designation_category:designation_categories!designations_designation_category_id_fkey!inner(people_module,is_active)").eq("company_id", companyId).eq("is_active", true).eq("designation_category.people_module", "people_hr").eq("designation_category.is_active", true).order("name"),
+    supabaseAdmin.from("designation_product_access_policies").select("designation_id,product_code,default_role_id,is_enabled").eq("company_id", companyId).in("product_code", businessProducts.map((product) => product.code))
+  ]);
+  if (designations.error || policies.error) return { designations: [], error: designations.error?.message ?? policies.error?.message ?? "Access overview could not be loaded." };
+  const byDesignation = new Map<string, Record<string, { enabled: boolean; configured: boolean }>>();
+  for (const policy of policies.data ?? []) {
+    const current = byDesignation.get(policy.designation_id) ?? {};
+    current[policy.product_code] = { enabled: Boolean(policy.is_enabled), configured: Boolean(policy.default_role_id) };
+    byDesignation.set(policy.designation_id, current);
+  }
+  return { designations: (designations.data ?? []).map((designation) => ({ id: designation.id, code: designation.code, name: designation.name, policies: byDesignation.get(designation.id) ?? {} })), error: null as string | null };
+}
+
+async function loadDashboardLocationAccess(companyId: string) {
+  type Row = { locationId: string; code: string; name: string; email: string | null; profileId: string | null; enabledProducts: string[] };
+  if (!supabaseAdmin) return { locations: [] as Row[], error: null as string | null };
+
+  const [stationsResult, profilesResult] = await Promise.all([
+    supabaseAdmin.from("stations").select("id,station_code,station_name,city,station_email").eq("company_id", companyId).eq("is_active", true).order("station_code"),
+    supabaseAdmin.from("profiles").select("id,email,is_active,invite_method").eq("company_id", companyId).eq("is_active", true).not("email", "is", null)
+  ]);
+  if (stationsResult.error || profilesResult.error) {
+    return { locations: [] as Row[], error: stationsResult.error?.message ?? profilesResult.error?.message ?? "Location access could not be loaded." };
+  }
+
+  const profilesByEmail = new Map((profilesResult.data ?? []).map((profile) => [String(profile.email ?? "").trim().toLowerCase(), profile]));
+  const profileIds = (profilesResult.data ?? []).map((profile) => profile.id);
+  const membershipsResult = profileIds.length
+    ? await supabaseAdmin.from("company_product_memberships").select("user_id,product_code,is_active").eq("company_id", companyId).eq("is_active", true).in("user_id", profileIds).in("product_code", businessProducts.map((product) => product.code))
+    : { data: [], error: null };
+  if (membershipsResult.error) return { locations: [] as Row[], error: membershipsResult.error.message };
+  const productsByUser = new Map<string, string[]>();
+  for (const membership of membershipsResult.data ?? []) {
+    const productCodes = productsByUser.get(membership.user_id) ?? [];
+    productCodes.push(membership.product_code);
+    productsByUser.set(membership.user_id, productCodes);
+  }
+
+  return {
+    locations: (stationsResult.data ?? []).map((station) => {
+      const email = String(station.station_email ?? "").trim().toLowerCase() || null;
+      const profile = email ? profilesByEmail.get(email) ?? null : null;
+      return {
+        locationId: station.id,
+        code: station.station_code,
+        name: station.station_name || station.city || station.station_code,
+        email,
+        profileId: profile?.id ?? null,
+        enabledProducts: profile ? productsByUser.get(profile.id) ?? [] : []
+      };
+    }),
+    error: null as string | null
+  };
 }
 
 async function loadAccessData(
@@ -458,8 +527,14 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
   });
   const surfaceDesignationAccess = showRolesSection && accessSurface !== "dashboard"
     ? await loadSurfaceDesignationAccess(companyId, accessSurface)
-    : { designations: [] as Array<{ id: string; code: string; name: string; enabled: boolean; defaultRoleId: string | null }>, error: null as string | null };
-  const accessDataError = error ?? surfaceDesignationAccess.error;
+    : { designations: [] as Array<{ id: string; code: string; name: string; enabled: boolean; defaultRoleId: string | null }>, locationRoleId: null as string | null, error: null as string | null };
+  const dashboardDesignationOverview = showRolesSection && accessSurface === "dashboard"
+    ? await loadDashboardDesignationOverview(companyId)
+    : { designations: [] as Array<{ id: string; code: string; name: string; policies: Record<string, { enabled: boolean; configured: boolean }> }>, error: null as string | null };
+  const dashboardLocationAccess = showRolesSection && accessSurface === "dashboard"
+    ? await loadDashboardLocationAccess(companyId)
+    : { locations: [] as Array<{ locationId: string; code: string; name: string; email: string | null; profileId: string | null; enabledProducts: string[] }>, error: null as string | null };
+  const accessDataError = error ?? surfaceDesignationAccess.error ?? dashboardDesignationOverview.error ?? dashboardLocationAccess.error;
   const identityRoles = isCompanyOwner(authorization)
     ? loadedRoles
     : loadedRoles.filter((role) =>
@@ -468,13 +543,17 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
     );
   const roles = showRolesSection
     ? accessSurface === "dashboard"
-      ? loadedRoles
-      : loadedRoles.filter((role) => surfaceDesignationAccess.designations.some((designation) => designation.defaultRoleId === role.id))
+      ? []
+      : loadedRoles.filter((role) => surfaceDesignationAccess.designations.some((designation) => designation.defaultRoleId === role.id) || role.id === surfaceDesignationAccess.locationRoleId)
     : identityRoles;
   const showAddUser = pagePermission.canAdd && searchParams?.addUser === "1";
-  const showAddRole = accessSurface === "dashboard" && pagePermission.canAdd && searchParams?.addRole === "1";
+  const showAddRole = false;
   const editUser = pagePermission.canEdit ? users.find((user) => user.id === searchParams?.editUser) ?? null : null;
   const editRole = pagePermission.canEdit ? roles.find((role) => role.id === searchParams?.editRole) ?? null : null;
+  const editDesignation = editRole
+    ? surfaceDesignationAccess.designations.find((designation) => designation.defaultRoleId === editRole.id) ?? null
+    : null;
+  const editLocationRole = Boolean(editRole && editRole.id === surfaceDesignationAccess.locationRoleId);
   const roleModalError = showAddRole || editRole ? searchParams?.userError ?? null : null;
   const pageUserError = roleModalError ? null : searchParams?.userError ?? null;
   const userReturnHref = usersReturnHref(searchParams);
@@ -554,7 +633,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
           : "Users and station access"}
         subtitle={showRolesSection
           ? accessSurface === "dashboard"
-            ? "Define role hierarchy and Dashboard page permissions. Other portal permissions are preserved."
+            ? "People owns designation eligibility. Dashboard owns station mailboxes and their portal access; each portal owns its menus."
             : `Configure menus and actions only for People designations eligible for ${accessSurfaceLabel(accessSurface)}.`
           : `Create users and manage access for the ${accessSurfaceLabel(accessSurface).toLowerCase()} frontend.`}
       />
@@ -612,15 +691,35 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
       ) : null}
 
       {showRolesSection && accessSurface === "dashboard" && (pagePermission.canView || pagePermission.canEdit) ? (
-      <UserRolesListPanel
-        canAdd={pagePermission.canAdd}
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>Portal access overview</h2>
+            <p className="subtle">Super Admin visibility only. People owns eligibility; each business portal owns its menu permissions. Technical administration is managed separately and never inherited from a designation.</p>
+          </div>
+          <div className="stacked-actions">
+            <a className="button" href="https://people.dropxlogistics.com/settings/designations">People Designation Master</a>
+            {isCompanyOwner(authorization) && pagePermission.canEdit ? <form action={reconcilePeopleAccessArchitecture}><SubmitButton className="button secondary" pendingText="Reconciling…">Reconcile access</SubmitButton></form> : null}
+          </div>
+        </div>
+        <div className="table-wrap"><table style={{ minWidth: 900 }}><thead><tr><th>Designation</th>{businessProducts.map((product) => <th key={product.code}>{product.label}</th>)}</tr></thead><tbody>
+          {dashboardDesignationOverview.designations.map((designation) => <tr key={designation.id}><td><strong>{designation.name}</strong><div className="subtle">{designation.code}</div></td>{businessProducts.map((product) => {
+            const policy = designation.policies[product.code];
+            const label = !policy?.enabled ? "Not enabled" : policy.configured ? "Configured" : "Setup required";
+            return <td key={product.code}><a href={product.href}><StatusPill status={label} /></a></td>;
+          })}</tr>)}
+          {!dashboardDesignationOverview.designations.length ? <tr><td className="empty-cell" colSpan={businessProducts.length + 1}>No active People designation is available.</td></tr> : null}
+        </tbody></table></div>
+        <div className="panel-body"><div className="stacked-actions"><a className="button secondary" href="/master/location">Locations &amp; station accounts</a></div></div>
+      </section>
+      ) : null}
+
+      {showRolesSection && accessSurface === "dashboard" && (pagePermission.canView || pagePermission.canEdit) ? (
+      <LocationPortalAccessPanel
         canEdit={pagePermission.canEdit}
-        roles={roles.map((role) => ({
-          ...role,
-          permissionSummary: permissionText(role, permissions, pages)
-        }))}
-        subtitle="Roles use stable internal IDs, so their code and name can be edited without breaking assigned users."
-        title="User role list"
+        products={businessProducts.map((product) => ({ code: product.code, label: product.label }))}
+        rows={dashboardLocationAccess.locations}
+        saveAction={saveLocationPortalAccess}
       />
       ) : null}
 
@@ -628,9 +727,16 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
       <SurfaceDesignationAccessPanel
         canEdit={pagePermission.canEdit}
         configureAction={configureSurfaceDesignationRole}
+        configureLocationAction={configureSurfaceLocationRole}
         masterHref="https://people.dropxlogistics.com/settings/designations"
         productCode={membershipProductCode(accessSurface) ?? ""}
-        rows={surfaceDesignationAccess.designations.map((designation) => {
+        locationAccount={{
+          roleId: surfaceDesignationAccess.locationRoleId,
+          permissionSummary: surfaceDesignationAccess.locationRoleId
+            ? permissionText(loadedRoles.find((role) => role.id === surfaceDesignationAccess.locationRoleId)!, permissions, pages)
+            : "Portal owner setup required"
+        }}
+        rows={surfaceDesignationAccess.designations.filter((designation) => designation.enabled).map((designation) => {
           const role = designation.defaultRoleId ? loadedRoles.find((candidate) => candidate.id === designation.defaultRoleId) ?? null : null;
           return { designationId: designation.id, code: designation.code, name: designation.name, enabled: designation.enabled, roleId: role?.id ?? null, locationAccessMode: role?.location_access_mode ?? null, permissionSummary: role ? permissionText(role, permissions, pages) : designation.enabled ? "Portal owner setup required" : "Not enabled for this portal" };
         })}
@@ -704,11 +810,11 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
 
       {editRole ? (
         <DismissibleModal closeHref={sectionHref("roles")}>
-          <section className="modal-panel wide" aria-label="Manage user role">
+          <section className="modal-panel wide" aria-label={editDesignation ? `Configure ${editDesignation.name} menus` : editLocationRole ? "Configure Location Account menus" : "Manage user role"}>
             <div className="panel-head">
               <div>
-                <h2>Manage user role</h2>
-                <p className="subtle">Edit role hierarchy, location access, permissions, and active status.</p>
+                <h2>{editDesignation ? `${editDesignation.name} menu access` : editLocationRole ? "Location Account menu access" : "Manage user role"}</h2>
+                <p className="subtle">{editDesignation ? `${editDesignation.name} comes from People. Configure only the menus and actions available inside ${accessSurfaceLabel(accessSurface)}.` : editLocationRole ? `Station mailboxes are selected in Dashboard. Configure only the menus and actions available inside ${accessSurfaceLabel(accessSurface)}.` : "Edit role hierarchy, location access, permissions, and active status."}</p>
               </div>
               <DismissModalButton className="icon-button" aria-label="Close manage user role">x</DismissModalButton>
             </div>
@@ -733,7 +839,13 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                 <form action={updateUserRole}>
                   <input type="hidden" name="id" value={editRole.id} />
                   <input name="surface" type="hidden" value={accessSurface} />
-                  <div className="form-grid">
+                  {editDesignation || editLocationRole ? <>
+                    <input name="name" type="hidden" value={editRole.name} />
+                    <input name="parent_role_id" type="hidden" value="" />
+                    <input name="location_access_mode" type="hidden" value={editRole.location_access_mode} />
+                    <input name="is_active" type="hidden" value="active" />
+                    <div className="panel-body" style={{ paddingBottom: 0 }}><strong>{editDesignation?.name ?? "Location Account"}</strong><div className="subtle">{editDesignation ? `People designation · ${editDesignation.code} · location scope is taken from each person’s People profile` : "Station mailbox · portal eligibility and station scope are managed in Dashboard"}</div></div>
+                  </> : <div className="form-grid">
                     <label>Role code<input className="field" defaultValue={editRole.code} disabled /></label>
                     <label>Role name<input className="field" name="name" defaultValue={editRole.name} disabled={editRole.code === "LOCATION"} required /></label>
                     {editRole.code === "LOCATION" || editRole.product_code ? (
@@ -755,7 +867,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                         <option value="inactive">Inactive</option>
                       </select>
                     </label>
-                  </div>
+                  </div>}
                   <PermissionMatrix
                     key={`${accessSurface}:${editRole.id}:${editRolePermissions.map((permission) => `${permission.page_id}:${Number(permission.can_view)}${Number(permission.can_add)}${Number(permission.can_edit)}`).sort().join("|")}`}
                     pages={pages}
@@ -763,7 +875,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                     surface={accessSurface}
                   />
                   <div className="form-actions modal-actions">
-                    <SubmitButton>Save role</SubmitButton>
+                    <SubmitButton>{editDesignation || editLocationRole ? "Save menu access" : "Save role"}</SubmitButton>
                     <DismissModalButton className="button secondary">Cancel</DismissModalButton>
                   </div>
                 </form>

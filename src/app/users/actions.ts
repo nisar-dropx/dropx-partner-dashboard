@@ -354,6 +354,188 @@ export async function configureSurfaceDesignationRole(formData: FormData) {
   usersRedirect({ section: "roles", userNotice: "Designation access is ready to configure." });
 }
 
+const locationPortalProducts = ["people", "operations", "workforce", "recruit", "finance"] as const;
+const protectedMembershipSources = new Set(["manual", "person_override", "product_owner", "product_admin"]);
+const dashboardLocationSources = new Set(["location_master", "legacy_dashboard", "recruit"]);
+
+export async function configureSurfaceLocationRole(formData: FormData) {
+  try {
+    const authorization = await requirePagePermission("users", "edit");
+    const companyId = requireCompanyId(authorization);
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+
+    const productCode = required(formData.get("product_code"), "Portal").toLowerCase();
+    const surfaceProduct = currentAdminAccessSurface() === "ops"
+      ? "operations"
+      : currentAdminAccessSurface() === "people"
+        ? "people"
+        : currentAdminAccessSurface() === "finance"
+          ? "finance"
+          : null;
+    if (!surfaceProduct || surfaceProduct !== productCode) throw new Error("Location menus must be configured inside the selected portal.");
+
+    const roleCode = `${productCode.toUpperCase()}_LOCATION`;
+    const existing = await supabaseAdmin.from("user_roles").select("id").eq("company_id", companyId).eq("code", roleCode).maybeSingle();
+    if (existing.error) throw new Error(existing.error.message);
+    let roleId = existing.data?.id ?? null;
+    if (!roleId) {
+      const created = await supabaseAdmin.from("user_roles").insert({
+        company_id: companyId,
+        product_code: productCode,
+        code: roleCode,
+        name: "Location Account",
+        parent_role_id: null,
+        location_access_mode: "role_based",
+        is_system: true,
+        is_active: true
+      }).select("id").single();
+      if (created.error || !created.data) throw new Error(created.error?.message ?? "Location menu role could not be created.");
+      roleId = created.data.id;
+    }
+    revalidatePath("/users");
+    usersRedirect({ section: "roles", editRole: roleId });
+  } catch (error) {
+    usersRedirect({ section: "roles", userError: error instanceof Error ? error.message : "Location menu access could not be prepared." });
+  }
+}
+
+export async function saveLocationPortalAccess(formData: FormData) {
+  try {
+    const authorization = await requirePagePermission("users", "edit");
+    const companyId = requireCompanyId(authorization);
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+    if (currentAdminAccessSurface() !== "dashboard") throw new Error("Location portal access is managed only in the main Dashboard.");
+
+    const locationId = required(formData.get("location_id"), "Location");
+    const selectedProducts = [...new Set(formData.getAll("product_codes").map((value) => String(value).trim().toLowerCase()))]
+      .filter((value): value is typeof locationPortalProducts[number] => locationPortalProducts.includes(value as typeof locationPortalProducts[number]));
+    const stationResult = await supabaseAdmin.from("stations").select("id,station_code,station_name,station_email,is_active")
+      .eq("company_id", companyId).eq("id", locationId).eq("is_active", true).maybeSingle();
+    if (stationResult.error || !stationResult.data) throw new Error(stationResult.error?.message ?? "Active location was not found.");
+    const stationEmail = String(stationResult.data.station_email ?? "").trim().toLowerCase();
+    if (!stationEmail || !stationEmail.endsWith("@dropxlogistics.com")) throw new Error("Add a valid DropX location mailbox in Location Master first.");
+
+    const profileResult = await supabaseAdmin.from("profiles").select("id,email,location_scope_ids,is_active,invite_method")
+      .eq("company_id", companyId).ilike("email", stationEmail).eq("is_active", true).maybeSingle();
+    if (profileResult.error || !profileResult.data) throw new Error(profileResult.error?.message ?? "The location mailbox identity is not linked. Save the mailbox in Location Master, then try again.");
+    const roleResult = await supabaseAdmin.from("user_roles").select("id,code").eq("company_id", companyId).eq("code", "LOCATION").eq("is_active", true).maybeSingle();
+    if (roleResult.error || !roleResult.data) throw new Error(roleResult.error?.message ?? "The built-in Dashboard Location role is unavailable.");
+
+    const database = supabaseAdmin;
+    const productRoleResults = await Promise.all(locationPortalProducts.map(async (productCode) => {
+      const code = `${productCode.toUpperCase()}_LOCATION`;
+      const existing = await database.from("user_roles").select("id,code").eq("company_id", companyId).eq("code", code).eq("is_active", true).maybeSingle();
+      if (existing.error) throw new Error(existing.error.message);
+      if (existing.data) return [productCode, existing.data] as const;
+      const created = await database.from("user_roles").insert({
+        company_id: companyId,
+        product_code: productCode,
+        code,
+        name: "Location Account",
+        parent_role_id: null,
+        location_access_mode: "role_based",
+        is_system: false,
+        is_active: true
+      }).select("id,code").single();
+      if (created.error || !created.data) throw new Error(created.error?.message ?? `${productCode} Location Account role could not be created.`);
+      return [productCode, created.data] as const;
+    }));
+    const productRoles = new Map(productRoleResults);
+
+    const sameMailboxStations = await supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("is_active", true).ilike("station_email", stationEmail);
+    if (sameMailboxStations.error) throw new Error(sameMailboxStations.error.message);
+    const stationScopeIds = [...new Set((sameMailboxStations.data ?? []).map((station) => station.id))];
+    const existingResult = await supabaseAdmin.from("company_product_memberships")
+      .select("id,product_code,role_id,source_system,is_active,location_scope_ids,has_all_location_access")
+      .eq("company_id", companyId).eq("user_id", profileResult.data.id).in("product_code", [...locationPortalProducts]);
+    if (existingResult.error) throw new Error(existingResult.error.message);
+    const existingByProduct = new Map((existingResult.data ?? []).map((membership) => [membership.product_code, membership]));
+    const now = new Date().toISOString();
+
+    for (const productCode of locationPortalProducts) {
+      const existing = existingByProduct.get(productCode);
+      const protectedGrant = Boolean(existing?.source_system && protectedMembershipSources.has(existing.source_system));
+      if (selectedProducts.includes(productCode)) {
+        if (protectedGrant) continue;
+        const productRole = productRoles.get(productCode);
+        if (!productRole) throw new Error(`${productCode} Location Account role is unavailable.`);
+        const save = await supabaseAdmin.from("company_product_memberships").upsert({
+          company_id: companyId,
+          product_code: productCode,
+          user_id: profileResult.data.id,
+          role_id: productRole.id,
+          role_code_snapshot: productRole.code,
+          source_system: "location_master",
+          source_record_id: locationId,
+          designation_id: null,
+          designation_policy_id: null,
+          has_all_location_access: false,
+          location_scope_ids: stationScopeIds,
+          is_active: true,
+          updated_at: now
+        }, { onConflict: "company_id,product_code,user_id" });
+        if (save.error) throw new Error(save.error.message);
+      } else if (existing?.source_system && dashboardLocationSources.has(existing.source_system) && !protectedGrant && existing.is_active) {
+        const disabled = await supabaseAdmin.from("company_product_memberships").update({ is_active: false, updated_at: now })
+          .eq("id", existing.id).eq("company_id", companyId);
+        if (disabled.error) throw new Error(disabled.error.message);
+      }
+    }
+
+    const nextProfileScope = [...new Set([...(profileResult.data.location_scope_ids ?? []), ...stationScopeIds])];
+    const profileSave = await supabaseAdmin.from("profiles").update({ role_id: roleResult.data.id, location_scope_ids: nextProfileScope, invite_method: "Location Master" })
+      .eq("id", profileResult.data.id).eq("company_id", companyId);
+    if (profileSave.error) throw new Error(profileSave.error.message);
+
+    await supabaseAdmin.from("audit_logs").insert({
+      actor_id: authorization.userId,
+      action: "location_portal_access_updated",
+      entity_table: "stations",
+      entity_id: locationId,
+      old_values: { products: (existingResult.data ?? []).filter((membership) => membership.is_active).map((membership) => membership.product_code) },
+      new_values: { products: selectedProducts, station_email: stationEmail, location_scope_ids: stationScopeIds },
+      reason: "Dashboard-owned location portal access"
+    });
+    revalidatePath("/users");
+  } catch (error) {
+    usersRedirect({ section: "roles", userError: error instanceof Error ? error.message : "Location portal access could not be saved." });
+  }
+  usersRedirect({ section: "roles", userNotice: "Location portal access saved." });
+}
+
+export async function reconcilePeopleAccessArchitecture() {
+  try {
+    const authorization = await requirePagePermission("users", "edit");
+    const companyId = requireCompanyId(authorization);
+    if (!isCompanyOwner(authorization)) throw new Error("Only the Super Admin can run the central access reconciliation.");
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+    if (currentAdminAccessSurface() !== "dashboard") throw new Error("Run central access reconciliation from the main Dashboard.");
+
+    const result = await supabaseAdmin.rpc("perform_people_access_cutover", {
+      p_company_id: companyId,
+      p_actor_user_id: authorization.userId
+    });
+    if (result.error) throw new Error(result.error.message);
+    const counts = (result.data ?? {}) as Record<string, number>;
+    await supabaseAdmin.from("audit_logs").insert({
+      actor_id: authorization.userId,
+      action: "people_access_architecture_reconciled",
+      entity_table: "companies",
+      entity_id: companyId,
+      old_values: null,
+      new_values: counts,
+      reason: "People designation and Dashboard location access cutover"
+    });
+    revalidatePath("/users");
+    usersRedirect({
+      section: "roles",
+      userNotice: `Access reconciled: ${counts.designation_memberships_migrated ?? 0} designation memberships, ${counts.location_memberships_migrated ?? 0} location memberships, ${counts.payment_requests_remapped ?? 0} payment requests.`
+    });
+  } catch (error) {
+    usersRedirect({ section: "roles", userError: error instanceof Error ? error.message : "Central access reconciliation failed." });
+  }
+}
+
 export async function createUserRole(formData: FormData) {
   try {
     const authorization = await requirePagePermission("users", "add");
