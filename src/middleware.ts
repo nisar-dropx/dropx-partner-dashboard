@@ -122,7 +122,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));
   }
 
-  if (isDashboardHost && matchesPath(path, DEPRECATED_MAIN_HR_PATHS)) {
+  if (isDashboardHost && !isRestoredDashboardPeoplePath && matchesPath(path, DEPRECATED_MAIN_HR_PATHS)) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "dashboard_portal", path));
   }
 
