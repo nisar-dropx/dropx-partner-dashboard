@@ -14,10 +14,11 @@ type ResolutionRow = { profile_type: string; profile_id: string; rule_code: stri
 type ExceptionRow = { profileType: string; profileId: string; table: string; dropxId: string; name: string; designation: string; location: string; category: string; ruleCode: string; issue: string; detail: string; sourceUpdatedAt: string; profile: ProfileRow };
 
 const SOURCES = [
-  { table: "employees", profileType: "employee", category: "Employee", employee: true },
-  { table: "contractors", profileType: "contractor", category: "Contractor", employee: false },
-  { table: "vendors", profileType: "vendor", category: "Vendor", employee: false },
-  { table: "workers", profileType: "worker", category: "Worker", employee: false }
+  { table: "employees", profileType: "employee", category: "Employee", employee: true, designationRelation: true },
+  { table: "workforce", profileType: "workforce", category: "Workforce", employee: false, designationRelation: true },
+  { table: "contractors", profileType: "contractor", category: "Contractor", employee: false, designationRelation: false },
+  { table: "vendors", profileType: "vendor", category: "Vendor", employee: false, designationRelation: false },
+  { table: "workers", profileType: "worker", category: "Worker", employee: false, designationRelation: false }
 ] as const;
 const BASE_FIELDS = "id, full_name, location_id, statutory_applicability, pf_uan, esi_no, bank_account_no, pan_number, aadhaar_number, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, updated_at, stations (station_code)";
 const PAGE_SIZE = 20;
@@ -31,7 +32,11 @@ function dateValue(value: unknown) { return clean(value) ? formatDashboardDate(c
 async function loadExceptions(companyId: string, authorization: AuthorizationContext) {
   if (!supabaseAdmin) return { rows: [] as ExceptionRow[], error: "Database connection is not configured." };
   const profileResults = await Promise.all(SOURCES.map(async (source) => {
-    const select = source.employee ? `${BASE_FIELDS}, employee_code, profile_completion_status, ifsc, designations (name)` : `${BASE_FIELDS}, dropx_id, onboarding_status, ifsc_code, designation`;
+    const select = source.employee
+      ? `${BASE_FIELDS}, employee_code, profile_completion_status, ifsc, designations (name)`
+      : source.designationRelation
+        ? `${BASE_FIELDS}, dropx_id, onboarding_status, ifsc_code, designations (name)`
+        : `${BASE_FIELDS}, dropx_id, onboarding_status, ifsc_code, designation`;
     let query = supabaseAdmin!.from(source.table).select(select).eq("company_id", companyId).eq(source.employee ? "profile_completion_status" : "onboarding_status", "active");
     if (!authorization.hasAllLocationAccess && !authorization.isMasterOwner) query = query.in("location_id", authorization.locationScopeIds);
     const result = await query;
@@ -52,7 +57,7 @@ async function loadExceptions(companyId: string, authorization: AuthorizationCon
   const add = (source: typeof SOURCES[number], profile: ProfileRow, ruleCode: string, issue: string, detail: string, sourceUpdatedAt?: string | null) => {
     const station = first(profile.stations as { station_code?: string } | Array<{ station_code?: string }> | null);
     const designationRelation = first(profile.designations as { name?: string } | Array<{ name?: string }> | null);
-    rows.push({ profileType: source.profileType, profileId: profile.id, table: source.table, dropxId: clean(source.employee ? profile.employee_code : profile.dropx_id) || "-", name: clean(profile.full_name) || "Unnamed profile", designation: clean(source.employee ? designationRelation?.name : profile.designation) || "-", location: clean(station?.station_code) || "-", category: source.category, ruleCode, issue, detail, sourceUpdatedAt: sourceUpdatedAt || profile.updated_at || new Date(0).toISOString(), profile });
+    rows.push({ profileType: source.profileType, profileId: profile.id, table: source.table, dropxId: clean(source.employee ? profile.employee_code : profile.dropx_id) || "-", name: clean(profile.full_name) || "Unnamed profile", designation: clean(source.designationRelation ? designationRelation?.name : profile.designation) || "-", location: clean(station?.station_code) || "-", category: source.category, ruleCode, issue, detail, sourceUpdatedAt: sourceUpdatedAt || profile.updated_at || new Date(0).toISOString(), profile });
   };
 
   for (const result of profileResults) for (const profile of result.data) {
