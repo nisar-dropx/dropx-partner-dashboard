@@ -34,7 +34,6 @@ export const navItems: NavItem[] = [
     children: [
       { code: "people_all", label: "All People", href: "/people/all" },
       { code: "people_all", label: "Workforce", href: "/people/workforce" },
-      { code: "delivery_associates", label: "Field Executives", href: "/field-executive" },
       { code: "employees", label: "Employees", href: "/employees" },
       { code: "contractors", label: "Independent Contractors", href: "/contractors" },
       { code: "workers", label: "Helpers", href: "/workers" },

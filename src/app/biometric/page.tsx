@@ -112,7 +112,7 @@ async function loadDuplicateEnrolments(companyId: string) {
   if (!supabaseAdmin) return [] as DuplicateRow[];
   const admin = supabaseAdmin;
   const profileTables = [
-    ["Field executive", "field_executives"],
+    ["Workforce", "workforce"],
     ["Independent contractor", "contractors"],
     ["Vendor", "vendors"],
     ["Worker", "workers"],

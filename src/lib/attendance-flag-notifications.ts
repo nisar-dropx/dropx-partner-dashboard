@@ -57,7 +57,7 @@ export async function notifyAttendanceFlagReviewers({
 
   if (profileId && profileType === "field_executive") {
     const executive = await supabaseAdmin
-      .from("field_executives")
+      .from("workforce")
       .select("full_name, dropx_id")
       .eq("company_id", companyId)
       .eq("id", profileId)

@@ -128,7 +128,7 @@ export async function assignFieldExecutive(formData: FormData) {
     await assertStationAccess(authorization, companyId, stationId);
     const route = await routeContext(companyId, stationId, routePlanId);
     await assertSectorAccess(authorization, companyId, stationId, route.sector_id, route.plan_date);
-    const { data: executive, error } = await database().from("field_executives").select("id,vehicle_type,full_name").eq("company_id", companyId).eq("location_id", stationId).eq("id", fieldExecutiveId).eq("is_active", true).maybeSingle();
+    const { data: executive, error } = await database().from("workforce").select("id,vehicle_type,full_name").eq("company_id", companyId).eq("location_id", stationId).eq("id", fieldExecutiveId).eq("is_active", true).maybeSingle();
     if (error) throw new Error(error.message);
     if (!executive) throw new Error("The selected Field Executive is not active at this station.");
     if (!manualOverride && route.vehicle_type !== "mixed" && executive.vehicle_type && route.vehicle_type !== executive.vehicle_type) throw new Error(`This route needs a ${route.vehicle_type} FE. Enable manual override to cross-allocate.`);
@@ -206,13 +206,20 @@ export async function markAbsenceAndReplace(formData: FormData) {
       const allocated = routeIds.length ? await db.from("ops_route_roster").select("field_executive_id").in("route_plan_id", routeIds).not("roster_status", "in", "(released,leave,absent)") : { data: [], error: null };
       if (allocated.error) throw new Error(allocated.error.message);
       const allocatedIds = new Set((allocated.data ?? []).map(row => row.field_executive_id));
-      const pool = await db.from("ops_network_backup_pool").select("field_executive_id,vehicle_type,priority,field_executives(full_name,is_active)").eq("company_id", companyId).eq("station_id", stationId).eq("is_active", true).lte("effective_from", route.plan_date).or(`effective_to.is.null,effective_to.gte.${route.plan_date}`).order("priority");
+      const pool = await db.from("ops_network_backup_pool").select("field_executive_id,vehicle_type,priority").eq("company_id", companyId).eq("station_id", stationId).eq("is_active", true).lte("effective_from", route.plan_date).or(`effective_to.is.null,effective_to.gte.${route.plan_date}`).order("priority");
       if (pool.error) throw new Error(pool.error.message);
       const candidates = (pool.data ?? []).filter(row => !allocatedIds.has(row.field_executive_id));
-      const candidate = candidates.find(row => route.vehicle_type === "mixed" || row.vehicle_type === route.vehicle_type) ?? candidates[0];
+      const workforceIds = candidates.map(row => row.field_executive_id);
+      const workforceProfiles = workforceIds.length
+        ? await db.from("workforce").select("id,full_name,is_active").eq("company_id", companyId).in("id", workforceIds)
+        : { data: [], error: null };
+      if (workforceProfiles.error) throw new Error(workforceProfiles.error.message);
+      const workforceById = new Map((workforceProfiles.data ?? []).map(profile => [profile.id, profile]));
+      const availableCandidates = candidates.filter(row => workforceById.get(row.field_executive_id)?.is_active);
+      const candidate = availableCandidates.find(row => route.vehicle_type === "mixed" || row.vehicle_type === route.vehicle_type) ?? availableCandidates[0];
       if (candidate) {
-        const executive = Array.isArray(candidate.field_executives) ? candidate.field_executives[0] : candidate.field_executives;
-        if (executive?.is_active) {
+        const executive = workforceById.get(candidate.field_executive_id);
+        if (executive) {
           const replacement = await db.from("ops_route_roster").upsert({
             company_id: companyId,
             station_id: stationId,
@@ -241,7 +248,7 @@ export async function saveBackupPoolMember(formData: FormData) {
     const stationId = id(formData.get("station_id"), "Station");
     const fieldExecutiveId = id(formData.get("field_executive_id"), "Field Executive");
     await assertStationAccess(authorization, companyId, stationId);
-    const fe = await database().from("field_executives").select("id,vehicle_type").eq("company_id", companyId).eq("location_id", stationId).eq("id", fieldExecutiveId).eq("is_active", true).maybeSingle();
+    const fe = await database().from("workforce").select("id,vehicle_type").eq("company_id", companyId).eq("location_id", stationId).eq("id", fieldExecutiveId).eq("is_active", true).maybeSingle();
     if (fe.error) throw new Error(fe.error.message);
     if (!fe.data?.vehicle_type) throw new Error("Set the FE vehicle type before adding them to the backup pool.");
     const effectiveFrom = date(formData.get("effective_from"), "Effective from");
@@ -314,7 +321,7 @@ export async function reportVehicleIncident(formData: FormData) {
     if (!["breakdown", "accident", "unavailable", "capacity_restriction", "other"].includes(incidentType)) throw new Error("Choose an incident type.");
     const fieldExecutiveId = clean(formData.get("field_executive_id")) || null;
     if (fieldExecutiveId) {
-      const executive = await database().from("field_executives").select("id").eq("company_id", companyId).eq("location_id", stationId).eq("id", fieldExecutiveId).maybeSingle();
+      const executive = await database().from("workforce").select("id").eq("company_id", companyId).eq("location_id", stationId).eq("id", fieldExecutiveId).maybeSingle();
       if (executive.error) throw new Error(executive.error.message);
       if (!executive.data) throw new Error("The selected FE does not belong to this station.");
     }

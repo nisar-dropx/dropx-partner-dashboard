@@ -2,7 +2,7 @@ import type { AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const SOURCES = [
-  ["employees", "employee"], ["field_executives", "field_executive"], ["contractors", "contractor"], ["vendors", "vendor"], ["workers", "worker"]
+  ["employees", "employee"], ["workforce", "workforce"], ["contractors", "contractor"], ["vendors", "vendor"], ["workers", "worker"]
 ] as const;
 type Profile = { id: string; statutory_applicability: string[] | null; pf_uan: string | null; esi_no: string | null; driving_license_exp_date: string | null; vehicle_reg_no: string | null; vehicle_reg_exp_date: string | null; vehicle_insurance_exp_date: string | null; vehicle_pollution_exp_date: string | null; updated_at: string | null };
 type Issue = { type: string; id: string; rule: string; updated: string };

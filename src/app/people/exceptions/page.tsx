@@ -15,7 +15,6 @@ type ExceptionRow = { profileType: string; profileId: string; table: string; dro
 
 const SOURCES = [
   { table: "employees", profileType: "employee", category: "Employee", employee: true },
-  { table: "field_executives", profileType: "field_executive", category: "Delivery Associate", employee: false },
   { table: "contractors", profileType: "contractor", category: "Contractor", employee: false },
   { table: "vendors", profileType: "vendor", category: "Vendor", employee: false },
   { table: "workers", profileType: "worker", category: "Worker", employee: false }

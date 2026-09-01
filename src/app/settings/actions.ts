@@ -706,7 +706,7 @@ export async function deleteLocation(formData: FormData) {
   if (!location) masterLocationRedirect({ error: "Location not found." });
 
   const [fieldExecutiveCount, mappingCount, fleetVehicleCount] = await Promise.all([
-    countLocationDependencyRows("field_executives", { location_id: id }),
+    countLocationDependencyRows("workforce", { location_id: id }),
     countLocationDependencyRows("provider_id_mappings", { station_id: id }),
     countLocationDependencyRows("fleet_vehicles", { station_code: location.station_code }, companyId)
   ]);

@@ -44,7 +44,7 @@ export async function generateBiometricEnrolmentId(companyId: string) {
   const [enrolments, employees, fieldExecutives, contractors, vendors, workers, helpers, pickers, startNumber] = await Promise.all([
     loadNumericIds(companyId, "biometric_enrolments", "enrolment_id"),
     loadNumericIds(companyId, "employees", "biometric_id"),
-    loadNumericIds(companyId, "field_executives", "biometric_id"),
+    loadNumericIds(companyId, "workforce", "biometric_id"),
     loadNumericIds(companyId, "contractors", "biometric_id"),
     loadNumericIds(companyId, "vendors", "biometric_id"),
     loadNumericIds(companyId, "workers", "biometric_id"),

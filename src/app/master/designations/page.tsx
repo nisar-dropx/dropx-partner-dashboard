@@ -172,7 +172,7 @@ async function loadDesignations(companyId: string, locationScopeIds: string[], h
   }
   const fallbackCategories: WorkforceCategoryRow[] = [
     { code: "employees", name: "Employees", is_active: true },
-    { code: "field_executives", name: "Field Executives", is_active: true },
+    { code: "workforce", name: "Workforce", is_active: true },
     { code: "contractors", name: "Independent Contractor", is_active: true },
     { code: "vendors", name: "Vendors", is_active: true },
     { code: "workers", name: "Workers", is_active: true }

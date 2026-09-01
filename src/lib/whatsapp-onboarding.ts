@@ -1,5 +1,6 @@
 const legacyOnboardingEventCodes: Record<string, string> = {
   employees: "employee_onboarding",
+  workforce: "field_executive_onboarding",
   field_executives: "field_executive_onboarding",
   vendors: "vendor_onboarding"
 };

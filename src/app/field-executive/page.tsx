@@ -23,7 +23,7 @@ export default function FieldExecutivePage({
       addTitle="Request workforce onboarding"
       bulkImportDescription="Upload workforce onboarding requests. Every applicant remains pending until profile submission, agreement acceptance and HO activation."
       bulkImportTitle="Bulk onboarding requests"
-      designationCategoryFilter={["field_executives"]}
+      designationCategoryFilter={["workforce"]}
       detailSubtitle="Workforce application and profile"
       editId={searchParams?.edit}
       editTitle="Edit workforce request"

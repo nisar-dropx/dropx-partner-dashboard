@@ -40,7 +40,7 @@ type OptionRow = {
 
 const legacyCategoryKeys: Record<string, string> = {
   employees: "employee",
-  field_executives: "field_executive",
+  workforce: "workforce",
   vendors: "vendor",
   contractors: "contractor",
   workers: "worker"
@@ -55,7 +55,7 @@ const settingCards: Array<{ type: SettingType; title: string; subtitle: string; 
   {
     type: "dropx_id",
     title: "DropX ID",
-    subtitle: "Configure the worker code used as Employee ID or Field Executive ID.",
+    subtitle: "Configure the worker code used as Employee ID or Workforce ID.",
     defaultPrefix: "DROPX"
   },
   {

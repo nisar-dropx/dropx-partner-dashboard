@@ -94,7 +94,7 @@ export async function createWorkforceCategory(formData: FormData) {
       is_active: true
     }, companyId));
     if (error) throw new Error(error.message);
-    const systemCodes = new Set(["employees", "field_executives", "contractors", "vendors", "workers"]);
+    const systemCodes = new Set(["employees", "workforce", "contractors", "vendors", "workers"]);
     if (!systemCodes.has(code)) {
       const provisionResult = await supabaseAdmin.rpc("provision_workforce_category_table", {
         p_category_code: code,

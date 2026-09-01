@@ -238,7 +238,7 @@ async function findWorkerMatches(companyId: string, enrolmentId: string) {
   if (!normalizedEnrolmentId) return [];
 
   const nonEmployeeTables = [
-    ["field_executive", "field_executives"],
+    ["field_executive", "workforce"],
     ["contractor", "contractors"],
     ["vendor", "vendors"],
     ["worker", "workers"],

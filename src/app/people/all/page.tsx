@@ -12,7 +12,6 @@ import { redirect } from "next/navigation";
 
 const sources = [
   { categoryCode: "employees", category: "Employees", pageCode: "employees", basePath: "/employees", table: "employees", codeField: "employee_code", statusField: "profile_completion_status", employeeDesignation: true },
-  { categoryCode: "field_executives", category: "Field Executives", pageCode: "delivery_associates", basePath: "/field-executive", table: "field_executives", codeField: "dropx_id", statusField: "onboarding_status", employeeDesignation: false },
   { categoryCode: "contractors", category: "Independent Contractor", pageCode: "contractors", basePath: "/contractors", table: "contractors", codeField: "dropx_id", statusField: "onboarding_status", employeeDesignation: false },
   { categoryCode: "vendors", category: "Vendors", pageCode: "vendors", basePath: "/vendors", table: "vendors", codeField: "dropx_id", statusField: "onboarding_status", employeeDesignation: false },
   { categoryCode: "workers", category: "Workers", pageCode: "workers", basePath: "/workers", table: "workers", codeField: "dropx_id", statusField: "onboarding_status", employeeDesignation: false }

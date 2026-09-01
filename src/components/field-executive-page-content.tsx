@@ -53,7 +53,7 @@ type DesignationRow = {
 
 type FieldExecutivePageCode = "delivery_associates" | "contractors" | "vendors" | "workers";
 type FieldExecutiveRoute = NonEmployeeRoute;
-type DesignationCategoryFilter = "field_executives" | "contractors" | "vendors" | "workers";
+type DesignationCategoryFilter = "workforce" | "contractors" | "vendors" | "workers";
 
 type ExecutiveRow = {
   id: string;
@@ -602,7 +602,7 @@ function FieldExecutiveBulkImportPanel({
 async function loadFieldExecutiveData(
   authorization: AuthorizationContext,
   _designationCategoryFilter: DesignationCategoryFilter[],
-  table: "field_executives" | "contractors" | "workforce" | "vendors" | "workers",
+  table: "contractors" | "workforce" | "vendors" | "workers",
   targetRegister: PhysicalRegisterTable,
   accessSurface: AccessSurface,
   editId?: string,
@@ -795,7 +795,7 @@ export async function FieldExecutivePageContent({
   addTitle = "Add field executive",
   bulkImportDescription = "Upload existing field executive rows and keep the profile completion pending for the app.",
   bulkImportTitle = "Bulk upload field executives",
-  designationCategoryFilter = ["field_executives"],
+  designationCategoryFilter = ["workforce"],
   detailSubtitle = "Complete Field Executive profile",
   errorMessage,
   editId,
@@ -919,12 +919,12 @@ export async function FieldExecutivePageContent({
             <strong>{error || errorMessage ? "Action required" : "Completed"}</strong>
             <p className="subtle" style={{ marginTop: 6 }}>
               {activeMessage}
-              {error?.includes("field_executives")
-                ? " Run scripts/field_executives_v1.sql in Supabase SQL Editor."
+              {error?.includes("workforce")
+                ? " Verify the public.workforce schema in Supabase."
                 : ""}
             </p>
             {needsOperationModeMigration ? (
-              <pre className="inline-sql">alter table public.field_executives drop column if exists operation_mode_id;</pre>
+              <pre className="inline-sql">alter table public.workforce drop column if exists operation_mode_id;</pre>
             ) : null}
           </div>
         </section>

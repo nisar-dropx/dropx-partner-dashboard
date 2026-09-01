@@ -179,7 +179,7 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
         .in("source_type", ["daily_edsp_metrics", "edsp_sls_scorecard"])
         .order("created_at", { ascending: false })
         .limit(5000),
-      supabaseAdmin.from("field_executives")
+      supabaseAdmin.from("workforce")
         .select("id,onboarding_status,is_active")
         .in("location_id", locationIds).eq("is_active", true)
     ]);

@@ -211,7 +211,7 @@ export default async function VerificationApiReportPage({
       }
       const appProfileTables = [
         ["employee", "employees"],
-        ["field_executive", "field_executives"],
+        ["field_executive", "workforce"],
         ["contractor", "contractors"],
         ["vendor", "vendors"],
         ["worker", "workers"]

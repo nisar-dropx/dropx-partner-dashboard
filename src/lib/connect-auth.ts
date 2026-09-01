@@ -87,7 +87,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
       .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`),
     supabaseAdmin
-      .from("field_executives")
+      .from("workforce")
       .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, profile_photo_path, is_active, mobile_country_code")
       .or(`mobile_country_code.eq.${countryCode},mobile_country_code.is.null`)
       .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
@@ -100,7 +100,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         .eq("is_active", true)
         .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`),
       supabaseAdmin
-        .from("field_executives")
+        .from("workforce")
         .select("id, company_id, full_name, email, dropx_id, biometric_id, designation, onboarding_status, is_active")
         .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`)
     ]);
