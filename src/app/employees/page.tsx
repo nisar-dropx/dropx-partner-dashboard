@@ -338,12 +338,16 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
 
   const mappedEmployeeDesignationIds = await loadMappedDesignationIds(companyId, "employees");
 
-  const [initialEmployeesResult, locationsResult, designationsResult, positionsResult] = await Promise.all([
+  const [initialEmployeesResult, contractorIdsResult, locationsResult, designationsResult, positionsResult] = await Promise.all([
     supabaseAdmin
       .from("employees")
       .select("id, employee_code, biometric_id, full_name, mobile_country_code, mobile, email, date_of_join, location_id, designation_id, org_position_id, statutory_applicability, profile_completion_status, profile_return_remarks, profile_completed_at, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, father_name, blood_group, is_handicapped, address, state_code, pincode, landmark, emergency_contact_name, emergency_contact_number, emergency_contact_relation, bank_account_no, ifsc, pf_uan, pf_account_no, esi_no, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, is_active, stations (station_code, station_name, providers (name), location_models (code, name)), designations (code, name)")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false }),
+    supabaseAdmin
+      .from("contractors")
+      .select("dropx_id, biometric_id")
+      .eq("company_id", companyId),
     supabaseAdmin
       .from("stations")
       .select("id, station_code, station_name, location_model_id, hide_from_location_list")
@@ -379,6 +383,9 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
   if (employeesResult.error) {
     return { employees: [], locations: [], designations: [], positions: [], error: employeesResult.error.message };
   }
+  if (contractorIdsResult.error) {
+    return { employees: [], locations: [], designations: [], positions: [], error: contractorIdsResult.error.message };
+  }
   if (locationsResult.error) {
     return { employees: [], locations: [], designations: [], positions: [], error: locationsResult.error.message };
   }
@@ -411,10 +418,20 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
       return location?.station_code ? allowedCodes.has(location.station_code) : false;
     });
 
+  const contractorCodes = new Set((contractorIdsResult.data ?? [])
+    .map((contractor) => String(contractor.dropx_id ?? "").trim().toUpperCase())
+    .filter(Boolean));
+  const contractorBiometricIds = new Set((contractorIdsResult.data ?? [])
+    .map((contractor) => String(contractor.biometric_id ?? "").trim())
+    .filter(Boolean));
   const employeeDesignations = new Map((designationRows as DesignationRow[]).map((designation) => [designation.id, designation]));
   const visibleEmployees = (employees as EmployeeRow[]).filter((employee) => {
     const designation = employee.designation_id ? employeeDesignations.get(employee.designation_id) : null;
-    return Boolean(designation?.onboarding_categories?.includes("employees"))
+    const employeeCode = String(employee.employee_code ?? "").trim().toUpperCase();
+    const biometricId = String(employee.biometric_id ?? "").trim();
+    const existsAsContractor = (employeeCode && contractorCodes.has(employeeCode))
+      || (biometricId && contractorBiometricIds.has(biometricId));
+    return !existsAsContractor
       && canAccessDesignationPortal(designation, "dashboard", "view", { isOwner: ownerAccess });
   });
 
@@ -436,7 +453,6 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
     viewEmployee: viewId ? employeesWithUrls.find((employee) => employee.id === viewId) ?? null : null,
     locations: allowedLocations as LocationRow[],
     designations: (designationRows as DesignationRow[])
-      .filter((designation) => designation.onboarding_categories?.includes("employees"))
       .filter((designation) => mappedEmployeeDesignationIds.has(designation.id)),
     positions: positionsResult.error && isMissingPositionAccessSchema(positionsResult.error) ? [] : (positionsResult.data ?? []),
     error: null
