@@ -656,7 +656,7 @@ export async function saveProviderMappingWorksheet(formData: FormData) {
     }
 
     revalidatePath("/provider-mapping");
-    revalidatePath("/field-executive");
+    revalidatePath("/workforce");
   } catch (error) {
     mappingRedirect({ error: error instanceof Error ? error.message : "Unable to save mappings." });
   }

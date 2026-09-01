@@ -11,6 +11,7 @@ export type WorkforceProfileType = typeof workforceProfileTypes[number];
 export type NonEmployeeProfileType = Exclude<WorkforceProfileType, "employee" | "workforce">;
 
 export type NonEmployeeRoute =
+  | "/workforce"
   | "/field-executive"
   | "/work-force-register"
   | "/work-force-register/helpers"
@@ -36,7 +37,7 @@ export const nonEmployeeProfileConfigs: Record<NonEmployeeProfileType, NonEmploy
     label: "Workforce applicant",
     pageCode: "delivery_associates",
     profileType: "field_executive",
-    route: "/field-executive",
+    route: "/workforce",
     table: "workforce"
   },
   contractor: {
@@ -82,6 +83,9 @@ export function nonEmployeeConfigForProfileType(value: unknown) {
 
 export function nonEmployeeConfigForRoute(value: unknown) {
   const route = String(value ?? "") as NonEmployeeRoute;
+  if (route === "/field-executive") {
+    return nonEmployeeProfileConfigs.field_executive;
+  }
   if (route === "/work-force-register") {
     return { ...nonEmployeeProfileConfigs.contractor, route };
   }

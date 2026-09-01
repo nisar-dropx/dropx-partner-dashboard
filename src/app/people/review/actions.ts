@@ -122,7 +122,7 @@ export async function reviewPeopleProfile(formData: FormData) {
     revalidatePath(profileType === "employee"
       ? "/employees"
       : profileType === "workforce"
-        ? "/field-executive"
+        ? "/workforce"
         : nonEmployeeProfileConfigs[profileType].route);
     reviewRedirect({
       notice: action === "approve"
