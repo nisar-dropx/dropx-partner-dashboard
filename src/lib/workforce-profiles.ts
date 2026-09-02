@@ -28,7 +28,7 @@ type NonEmployeeConfig = {
   pageCode: "delivery_associates" | "contractors" | "vendors" | "workers";
   profileType: NonEmployeeProfileType;
   route: NonEmployeeRoute;
-  table: "workforce" | "contractors" | "vendors" | "workers";
+  table: "workforce" | "contractors" | "vendors" | "workers" | "helpers";
 };
 
 export const nonEmployeeProfileConfigs: Record<NonEmployeeProfileType, NonEmployeeConfig> = {
@@ -66,7 +66,7 @@ export const nonEmployeeProfileConfigs: Record<NonEmployeeProfileType, NonEmploy
     pageCode: "workers",
     profileType: "worker",
     route: "/helpers",
-    table: "workers"
+    table: "helpers"
   }
 };
 

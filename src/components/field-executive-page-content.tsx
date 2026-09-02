@@ -603,7 +603,7 @@ function FieldExecutiveBulkImportPanel({
 async function loadFieldExecutiveData(
   authorization: AuthorizationContext,
   _designationCategoryFilter: DesignationCategoryFilter[],
-  table: "contractors" | "workforce" | "vendors" | "workers",
+  table: "contractors" | "workforce" | "vendors" | "workers" | "helpers",
   targetRegister: PhysicalRegisterTable,
   accessSurface: AccessSurface,
   editId?: string,
