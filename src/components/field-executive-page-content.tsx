@@ -726,15 +726,16 @@ async function loadFieldExecutiveData(
     providers: firstRelation(location.providers),
     location_models: firstRelation(location.location_models)
   })) as LocationRow[];
-  const designations = ((designationsResult.data ?? []) as unknown as DesignationRow[])
+  const allDesignations = (designationsResult.data ?? []) as unknown as DesignationRow[];
+  const designations = allDesignations
     .filter((designation) => mappedDesignationIds.has(designation.id));
   const allowedLocationIds = new Set(locations.map((location) => location.id));
-  const allowedDesignationNames = new Set(designations
+  const allowedDesignationNames = new Set((ownerAccess ? allDesignations : designations)
     .filter((designation) => canAccessDesignationPortal(designation, accessSurface, "view", { isOwner: ownerAccess }))
     .map((designation) => designation.name));
   const visibleExecutiveRows = ((executivesResult.data ?? []) as unknown as ExecutiveRow[])
     .filter((executive) => authorization.hasAllLocationAccess || allowedLocationIds.has(executive.location_id))
-    .filter((executive) => allowedDesignationNames.has(String(executive.designation ?? "")));
+    .filter((executive) => ownerAccess || allowedDesignationNames.has(String(executive.designation ?? "")));
   const executives = visibleExecutiveRows
     .map((executive) => {
     const location = firstRelation(executive.stations);
@@ -855,8 +856,6 @@ export async function FieldExecutivePageContent({
   );
   const categoryRules = await loadWorkforceCategoryRules(
     requireCompanyId(authorization),
-    workforceConfig.designationCategory,
-    designations[0]?.profile_field_rules,
     workforceConfig.designationCategory
   );
   const statutoryEnabled = await loadWorkforceCategoryStatutoryEnabled(

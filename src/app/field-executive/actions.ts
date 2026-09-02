@@ -255,8 +255,6 @@ export async function createFieldExecutive(formData: FormData) {
     const dashboardRules = directActivate
       ? (await loadWorkforceCategoryRules(
         companyId,
-        config.designationCategory,
-        designationRuleResult.data.profile_field_rules,
         config.designationCategory
       )).dashboard
       : { enabled: [] as string[], required: [] as string[] };
