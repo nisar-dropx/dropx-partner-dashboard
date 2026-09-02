@@ -164,20 +164,20 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
     }
     return <AppShell active="Dashboard" pageCode="ops_pulse">
       <div className="ops-command-center">
-        <PageHead eyebrow="Live workforce · scope controlled" title="Station Manpower" subtitle="Select an authorised station to see its People roster, reporting status, late arrivals and live availability." action={<span className="ops-live-badge"><i /> LIVE PEOPLE</span>} />
+        <PageHead eyebrow="Live workforce · scope controlled" title="Location Manpower" subtitle="Inspect each authorised office, station or store using its own roster, role structure, report times and live attendance." action={<span className="ops-live-badge"><i /> LIVE PEOPLE</span>} />
         <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views">
           <Link href="/ops-pulse">Operations view</Link>
-          <Link className="active" href="/ops-pulse?view=manpower">Station manpower</Link>
+          <Link className="active" href="/ops-pulse?view=manpower">Location manpower</Link>
         </nav>
         {manpowerError ? <section className="panel message-panel error"><div className="panel-body"><strong>Data connection issue</strong><p className="subtle">{manpowerError}</p></div></section> : null}
         <form className="ops-station-manpower-filter" action="/ops-pulse" method="get">
           <input name="view" type="hidden" value="manpower" />
           <label>Date<input name="date" type="date" defaultValue={date} max={todayIst()} /></label>
-          <label>Station<select name="location" defaultValue={requestedLocation || (manpowerLocations.length === 1 ? manpowerLocations[0]?.id : "all") || "all"}>
+          <label>Office, station or store<select name="location" defaultValue={requestedLocation || (manpowerLocations.length === 1 ? manpowerLocations[0]?.id : "all") || "all"}>
             <option value="all">All authorised locations</option>
             {locationsResult.locations.map((location) => <option key={location.id} value={location.id}>{location.station_code} · {location.station_name || location.city || location.station_code}</option>)}
           </select></label>
-          <button type="submit">Apply station</button>
+          <button type="submit">Apply location</button>
         </form>
         <OpsStationManpowerBoard asOf={manpower.asOf} locations={manpowerLocations} people={manpower.people} />
       </div>
@@ -312,7 +312,7 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
 
         <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views">
           <Link className="active" href="/ops-pulse">Operations view</Link>
-          <Link href="/ops-pulse?view=manpower">Station manpower</Link>
+          <Link href="/ops-pulse?view=manpower">Location manpower</Link>
         </nav>
 
         {locationsResult.error || factsResult.error || attendanceResult.error || cpsResult.error || scorecardResult.error || executivesResult.error ? (
