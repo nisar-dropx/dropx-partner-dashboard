@@ -9,19 +9,22 @@ import {
 } from "@/components/scoped-designation-fields";
 
 export function DynamicWorkforceRegistrationFields({
+  categoryDashboardRules,
   designationOptions,
   initialDesignation = "",
   initialLocationId = "",
   locationOptions
 }: {
+  categoryDashboardRules: { enabled: string[]; required: string[] };
   designationOptions: ScopedDesignationOption[];
   initialDesignation?: string | null;
   initialLocationId?: string | null;
   locationOptions: ScopedLocationOption[];
 }) {
   const [designation, setDesignation] = useState(initialDesignation ?? "");
-  const rules = designationOptions.find((option) => option.value === designation)?.dashboardRules
-    ?? { enabled: [], required: [] };
+  const rules = designation
+    ? designationOptions.find((option) => option.value === designation)?.dashboardRules ?? { enabled: [], required: [] }
+    : categoryDashboardRules;
 
   return <>
     <ScopedDesignationFields

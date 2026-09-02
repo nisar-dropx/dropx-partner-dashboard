@@ -289,6 +289,7 @@ export async function DynamicWorkforceCategoryPageContent({
             <label>Date of join<input className="field" defaultValue={searchParams?.date_of_join ?? ""} name="date_of_join" required type="date" /></label>
             {category.direct_activate ? (
               <DynamicWorkforceRegistrationFields
+                categoryDashboardRules={categoryProfileRules.dashboard}
                 designationOptions={designationOptions}
                 initialDesignation={searchParams?.designation}
                 initialLocationId={searchParams?.location_id}
