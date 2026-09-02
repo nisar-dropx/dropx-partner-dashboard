@@ -22,9 +22,8 @@ export function DynamicWorkforceRegistrationFields({
   locationOptions: ScopedLocationOption[];
 }) {
   const [designation, setDesignation] = useState(initialDesignation ?? "");
-  const rules = designation
-    ? designationOptions.find((option) => option.value === designation)?.dashboardRules ?? { enabled: [], required: [] }
-    : categoryDashboardRules;
+  const rules = designationOptions.find((option) => option.value === designation)?.dashboardRules
+    ?? { enabled: [], required: [] };
 
   return <>
     <ScopedDesignationFields
