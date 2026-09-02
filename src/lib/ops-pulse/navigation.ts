@@ -4,7 +4,16 @@ import type { OperatingMode } from "@/lib/ops-pulse/operating-context";
 
 const commonStart: NavItem[] = [
   { code: "ops_pulse", label: "Command Center", href: "/", icon: "#" },
-  { code: "performance", label: "Performance", href: "/performance", icon: "P" },
+  {
+    code: "performance",
+    label: "Performance",
+    icon: "P",
+    children: [
+      { code: "performance", label: "Daily Performance", href: "/performance?view=daily" },
+      { code: "performance_review", label: "Review Desk", href: "/performance?view=reviews" },
+      { code: "performance", label: "Amazon SLS", href: "/performance?view=sls" }
+    ]
+  },
   {
     code: "capacity",
     label: "Capacity",

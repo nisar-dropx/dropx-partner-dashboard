@@ -7,6 +7,11 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { createPerformanceTarget, deletePerformanceTarget, performanceTargetSeeds, savePerformanceTarget } from "@/lib/ops-pulse/performance-targets";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
+function timeValue(value: FormDataEntryValue | null, fallback: string) {
+  const candidate = String(value ?? "").trim();
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(candidate) ? candidate : fallback;
+}
+
 export async function updatePerformanceTarget(formData: FormData) {
   const authorization = await requirePagePermission("performance_master", "edit");
   const companyId = requireCompanyId(authorization);
@@ -84,4 +89,30 @@ export async function updatePerformanceReviewCadence(formData: FormData) {
   revalidatePath("/master/performance-targets");
   revalidatePath("/ops-pulse/performance");
   redirect(`/master/performance-targets?view=reviews&${result.error ? `error=${encodeURIComponent(result.error.message)}` : "saved=1"}`);
+}
+
+export async function updatePerformanceStationOpeningWindow(formData: FormData) {
+  const authorization = await requirePagePermission("performance_master", "edit");
+  const companyId = requireCompanyId(authorization);
+  const stationId = String(formData.get("station_id") ?? "");
+  if (!supabaseAdmin || !stationId) redirect("/master/performance-targets?view=reviews&error=Select%20a%20station.");
+  const station = await supabaseAdmin.from("stations").select("id")
+    .eq("company_id", companyId).eq("id", stationId).eq("is_active", true).maybeSingle();
+  if (station.error || !station.data) redirect(`/master/performance-targets?view=reviews&error=${encodeURIComponent(station.error?.message || "Station is unavailable.")}`);
+  if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(stationId)) {
+    redirect("/master/performance-targets?view=reviews&error=You%20can%20only%20configure%20your%20assigned%20locations.");
+  }
+  const openingWindowStart = timeValue(formData.get("opening_window_start"), "02:00");
+  const openingWindowEnd = timeValue(formData.get("opening_window_end"), "10:00");
+  const result = await supabaseAdmin.from("ops_performance_station_settings").upsert({
+    company_id: companyId,
+    opening_window_end: openingWindowEnd,
+    opening_window_start: openingWindowStart,
+    station_id: stationId,
+    updated_at: new Date().toISOString(),
+    updated_by: authorization.userId
+  }, { onConflict: "company_id,station_id" });
+  revalidatePath("/master/performance-targets");
+  revalidatePath("/ops-pulse/performance");
+  redirect(`/master/performance-targets?view=reviews&${result.error ? `error=${encodeURIComponent(result.error.message)}` : "opening_saved=1"}`);
 }

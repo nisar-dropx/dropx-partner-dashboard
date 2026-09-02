@@ -6,7 +6,7 @@ import { AmazonWeekNavigator } from "@/components/amazon-week-navigator";
 import { PerformanceSortControl } from "@/components/performance-sort-control";
 import { PerformanceWorkspaceTabs } from "@/components/performance-workspace-tabs";
 import { PerformanceReviewDesk, type ReviewMetric } from "@/components/performance-review-desk";
-import { requirePagePermission } from "@/lib/authorization";
+import { hasPermission, isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
@@ -164,7 +164,8 @@ function trendPath(values: number[], width = 240, height = 62) {
 }
 
 export default async function PerformancePage({ searchParams }: { searchParams?: SearchParams }) {
-  const authorization = await requirePagePermission("performance", "access");
+  const view = searchParams?.view === "sls" ? "sls" : searchParams?.view === "reviews" ? "reviews" : "daily";
+  const authorization = await requirePagePermission(view === "reviews" ? "performance_review" : "performance", "access");
   const companyId = requireCompanyId(authorization);
   const targetResult = await loadPerformanceTargets(companyId);
   const dailyMetricDefinitions = resolvePerformanceTargets(targetResult.rows, "daily").filter((target) => target.sourceIndex != null).map((target) => ({ ...target, index: target.sourceIndex as number }));
@@ -180,7 +181,6 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const permittedCodes = permittedLocations.map((location) => location.station_code);
   const requestedCodes = String(searchParams?.stations ?? "").split(",").map((code) => code.trim().toUpperCase()).filter((code) => permittedCodes.includes(code));
   const selectedCodes = requestedCodes.length ? [...new Set(requestedCodes)] : permittedCodes;
-  const view = searchParams?.view === "sls" ? "sls" : searchParams?.view === "reviews" ? "reviews" : "daily";
   const defaultDailyDate = dateShift(today(), -1);
   const selectedDate = validDate(searchParams?.date, validDate(searchParams?.to, defaultDailyDate));
   const selectedDailyWeek = amazonWeekNumber(selectedDate);
@@ -366,8 +366,8 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const requestedReviewCode = stationCode(searchParams?.review ?? null);
   const selectedReviewLocation = permittedLocations.find((location) => location.station_code === requestedReviewCode) ?? permittedLocations[0] ?? null;
   const reviewWorkspace = selectedReviewLocation
-    ? await loadPerformanceReviewWorkspace(companyId, selectedDate, [selectedReviewLocation.station_code])
-    : { settings: null, reviews: [], steps: [], items: [], updates: [], error: "No permitted station is available." };
+    ? await loadPerformanceReviewWorkspace(companyId, selectedDate, view === "reviews" ? permittedCodes : [selectedReviewLocation.station_code])
+    : { settings: null, reviews: [], previousReviews: [], steps: [], items: [], updates: [], error: "No permitted station is available." };
   const operationalResult = selectedReviewLocation
     ? await loadPerformanceOperationalSnapshots(companyId, selectedDate, [selectedReviewLocation])
     : { rows: new Map(), error: "No permitted station is available." };
@@ -383,13 +383,20 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
       : [];
   const selectedReview = selectedReviewLocation ? reviewWorkspace.reviews.find((review) => review.station_code === selectedReviewLocation.station_code) ?? null : null;
   const selectedSnapshot = selectedReviewLocation ? operationalResult.rows.get(selectedReviewLocation.station_code) ?? null : null;
-  const canEditReview = authorization.isMasterOwner || Boolean(authorization.permissions.performance?.canEdit);
+  const canViewReviews = hasPermission(authorization, "performance_review", "access");
+  const canAddReview = hasPermission(authorization, "performance_review", "add");
+  const canEditReview = hasPermission(authorization, "performance_review", "edit");
+  const activeReviewStep = selectedReview
+    ? reviewWorkspace.steps.find((step) => step.review_id === selectedReview.id && step.step_order === selectedReview.current_step_order && step.status === "pending") ?? null
+    : null;
+  const canOverrideReview = isCompanyOwner(authorization) || /managing partner/i.test(`${authorization.roleCode ?? ""} ${authorization.roleName ?? ""}`);
+  const canCompleteReviewStep = canEditReview && Boolean(activeReviewStep) && (canOverrideReview || activeReviewStep?.reviewer_user_id === authorization.userId);
 
   return (
-    <AppShell active="Performance" pageCode="performance">
+    <AppShell active={view === "reviews" ? "Review Desk" : "Performance"} pageCode={view === "reviews" ? "performance_review" : "performance"}>
       <div className="ops-command-center performance-workspace">
         <PageHead eyebrow="Performance" title="Station Performance" subtitle="Daily metrics, weekly scorecards and delivery data." />
-        <PerformanceWorkspaceTabs active={view} />
+        <PerformanceWorkspaceTabs active={view} canViewReviews={canViewReviews} />
         {view !== "reviews" ? <div className="performance-local-filter-row">
           <PerformanceStationFilter stations={permittedLocations.map((location) => ({ code: location.station_code, name: location.station_name || location.city || location.station_code }))} selectedCodes={selectedCodes} view={view} date={selectedDate} week={selectedWeek} />
         </div> : null}
@@ -398,6 +405,8 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
 
         {view === "reviews" ? (
           selectedReviewLocation && selectedSnapshot ? <PerformanceReviewDesk
+            canAdd={canAddReview}
+            canCompleteStep={canCompleteReviewStep}
             canEdit={canEditReview}
             date={selectedDate}
             error={searchParams?.error || reviewWorkspace.error || operationalResult.error}
@@ -405,7 +414,9 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             locations={permittedLocations}
             metrics={reviewMetrics}
             notice={searchParams?.notice || null}
+            previousReviews={reviewWorkspace.previousReviews}
             review={selectedReview}
+            reviews={reviewWorkspace.reviews}
             selectedLocation={selectedReviewLocation}
             snapshot={selectedSnapshot}
             sourceBatchId={selectedReviewRow?.batch_id ?? null}

@@ -52,7 +52,7 @@ const dashboardGroups: PermissionGroup[] = [
 
 const opsGroups: PermissionGroup[] = [
   { key: "ops_pulse", label: "Command Center", codes: ["ops_pulse"] },
-  { key: "performance", label: "Performance", codes: ["performance"] },
+  { key: "performance", label: "Performance", codes: ["performance", "performance_review"] },
   { key: "capacity", label: "Capacity", codes: ["capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring"], hiddenCodes: ["capacity"] },
   { key: "service_network", label: "Network Planning", codes: ["service_network"] },
   { key: "workforce_register", label: "Work Force Register", codes: ["contractors", "workers", "vendors"] },

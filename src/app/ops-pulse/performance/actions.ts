@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
+import { isCompanyOwner, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { resolvePerformanceReviewChain } from "@/lib/ops-pulse/performance-review";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -34,8 +34,26 @@ async function stationForAction(companyId: string, authorization: AuthorizationC
   return result.data;
 }
 
+async function reviewForAction(companyId: string, authorization: AuthorizationContext, reviewId: string, stationCode: string) {
+  if (!supabaseAdmin) throw new Error("Database service is unavailable.");
+  const result = await supabaseAdmin.from("ops_performance_reviews")
+    .select("id,station_id,station_code,current_step_order,status")
+    .eq("company_id", companyId)
+    .eq("id", reviewId)
+    .maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) throw new Error("This review is unavailable.");
+  if (!canUseStation(authorization, result.data.station_id)) throw new Error("You can only update reviews for your assigned locations.");
+  if (result.data.station_code !== stationCode) throw new Error("The selected station does not match this review.");
+  return result.data;
+}
+
+function canOverrideReview(authorization: AuthorizationContext) {
+  return isCompanyOwner(authorization) || /managing partner/i.test(`${authorization.roleCode ?? ""} ${authorization.roleName ?? ""}`);
+}
+
 export async function startPerformanceReview(formData: FormData) {
-  const authorization = await requirePagePermission("performance", "edit");
+  const authorization = await requirePagePermission("performance_review", "add");
   const companyId = requireCompanyId(authorization);
   const sourceDate = dateValue(text(formData, "source_date"));
   const stationCode = text(formData, "station_code").toUpperCase();
@@ -87,12 +105,15 @@ export async function startPerformanceReview(formData: FormData) {
 }
 
 export async function savePerformanceReviewOperations(formData: FormData) {
-  const authorization = await requirePagePermission("performance", "edit");
+  const authorization = await requirePagePermission("performance_review", "edit");
   const companyId = requireCompanyId(authorization);
   const reviewId = text(formData, "review_id");
   const sourceDate = dateValue(text(formData, "source_date"));
   const stationCode = text(formData, "station_code").toUpperCase();
   if (!supabaseAdmin || !reviewId) redirect(reviewHref(sourceDate, stationCode, undefined, "Start the review first."));
+  await reviewForAction(companyId, authorization, reviewId, stationCode).catch((error) => {
+    redirect(reviewHref(sourceDate, stationCode, undefined, error instanceof Error ? error.message : "Unable to access this review."));
+  });
   const result = await supabaseAdmin.from("ops_performance_reviews").update({
     review_summary: text(formData, "review_summary") || null,
     station_clear_time: text(formData, "station_clear_time") || null,
@@ -106,12 +127,15 @@ export async function savePerformanceReviewOperations(formData: FormData) {
 }
 
 export async function savePerformanceReviewItem(formData: FormData) {
-  const authorization = await requirePagePermission("performance", "edit");
+  const authorization = await requirePagePermission("performance_review", "edit");
   const companyId = requireCompanyId(authorization);
   const reviewId = text(formData, "review_id");
   const sourceDate = dateValue(text(formData, "source_date"));
   const stationCode = text(formData, "station_code").toUpperCase();
   if (!supabaseAdmin || !reviewId) redirect(reviewHref(sourceDate, stationCode, undefined, "Start the review first."));
+  await reviewForAction(companyId, authorization, reviewId, stationCode).catch((error) => {
+    redirect(reviewHref(sourceDate, stationCode, undefined, error instanceof Error ? error.message : "Unable to access this review."));
+  });
   const actual = text(formData, "actual_value");
   const target = text(formData, "target_value");
   const status = ["open", "in_progress", "blocked", "done"].includes(text(formData, "status")) ? text(formData, "status") : "open";
@@ -142,35 +166,49 @@ export async function savePerformanceReviewItem(formData: FormData) {
 }
 
 export async function completePerformanceReviewStep(formData: FormData) {
-  const authorization = await requirePagePermission("performance", "edit");
+  const authorization = await requirePagePermission("performance_review", "edit");
   const companyId = requireCompanyId(authorization);
   const reviewId = text(formData, "review_id");
   const sourceDate = dateValue(text(formData, "source_date"));
   const stationCode = text(formData, "station_code").toUpperCase();
   if (!supabaseAdmin || !reviewId) redirect(reviewHref(sourceDate, stationCode, undefined, "Review is unavailable."));
-  const reviewResult = await supabaseAdmin.from("ops_performance_reviews").select("current_step_order")
-    .eq("id", reviewId).eq("company_id", companyId).maybeSingle();
-  const stepResult = reviewResult.data ? await supabaseAdmin.from("ops_performance_review_steps").select("id,reviewer_user_id")
-    .eq("review_id", reviewId).eq("step_order", reviewResult.data.current_step_order).maybeSingle() : { data: null, error: null };
-  const canOverride = authorization.isMasterOwner || /owner|managing partner/i.test(`${authorization.roleCode ?? ""} ${authorization.roleName ?? ""}`);
+  const review = await reviewForAction(companyId, authorization, reviewId, stationCode).catch((error) => {
+    redirect(reviewHref(sourceDate, stationCode, undefined, error instanceof Error ? error.message : "Unable to access this review."));
+  });
+  if (review.status === "closed") redirect(reviewHref(sourceDate, stationCode, undefined, "This review is already completed."));
+  const stepResult = await supabaseAdmin.from("ops_performance_review_steps").select("id,reviewer_user_id,reviewer_name,reviewer_role")
+    .eq("company_id", companyId).eq("review_id", reviewId).eq("step_order", review.current_step_order).eq("status", "pending").maybeSingle();
+  if (stepResult.error) redirect(reviewHref(sourceDate, stationCode, undefined, stepResult.error.message));
+  if (!stepResult.data) redirect(reviewHref(sourceDate, stationCode, undefined, "No active review step is configured."));
+  const canOverride = canOverrideReview(authorization);
   if (stepResult.data?.reviewer_user_id && stepResult.data.reviewer_user_id !== authorization.userId && !canOverride) {
-    redirect(reviewHref(sourceDate, stationCode, undefined, "This review step is assigned to another reviewer."));
+    redirect(reviewHref(sourceDate, stationCode, undefined, `This step is pending with ${stepResult.data.reviewer_name} (${stepResult.data.reviewer_role}).`));
+  }
+  if (!stepResult.data.reviewer_user_id && !canOverride) {
+    redirect(reviewHref(sourceDate, stationCode, undefined, "No reviewer is assigned to this step. Update the reporting hierarchy or delegation first."));
   }
   const now = new Date().toISOString();
-  if (stepResult.data) {
-    const completed = await supabaseAdmin.from("ops_performance_review_steps").update({ completed_at: now, completed_by: authorization.userId, feedback: text(formData, "feedback") || null, status: "completed", updated_at: now }).eq("id", stepResult.data.id).eq("company_id", companyId);
-    if (completed.error) redirect(reviewHref(sourceDate, stationCode, undefined, completed.error.message));
-  }
-  const next = await supabaseAdmin.from("ops_performance_review_steps").select("step_order").eq("review_id", reviewId).eq("status", "pending").order("step_order").limit(1).maybeSingle();
+  const feedback = text(formData, "feedback");
+  const completed = await supabaseAdmin.from("ops_performance_review_steps").update({ completed_at: now, completed_by: authorization.userId, feedback: feedback || null, status: "completed", updated_at: now }).eq("id", stepResult.data.id).eq("company_id", companyId).eq("status", "pending");
+  if (completed.error) redirect(reviewHref(sourceDate, stationCode, undefined, completed.error.message));
+  await supabaseAdmin.from("ops_performance_review_updates").insert({
+    company_id: companyId,
+    created_by: authorization.userId,
+    note: feedback || `${stepResult.data.reviewer_role} review completed by ${authorization.fullName || "assigned reviewer"}.`,
+    review_id: reviewId,
+    review_item_id: null,
+    update_type: "review"
+  });
+  const next = await supabaseAdmin.from("ops_performance_review_steps").select("step_order").eq("company_id", companyId).eq("review_id", reviewId).eq("status", "pending").order("step_order").limit(1).maybeSingle();
   const closed = !next.data;
   const updated = await supabaseAdmin.from("ops_performance_reviews").update({
     closed_at: closed ? now : null,
     closed_by: closed ? authorization.userId : null,
-    current_step_order: next.data?.step_order ?? reviewResult.data?.current_step_order ?? 1,
+    current_step_order: next.data?.step_order ?? review.current_step_order,
     status: closed ? "closed" : "in_review",
     updated_at: now,
     updated_by: authorization.userId
-  }).eq("id", reviewId).eq("company_id", companyId);
+  }).eq("id", reviewId).eq("company_id", companyId).eq("station_id", review.station_id);
   revalidatePath("/ops-pulse/performance");
   redirect(reviewHref(sourceDate, stationCode, updated.error ? undefined : closed ? "Review completed." : "Review moved to the next level.", updated.error?.message));
 }

@@ -7,6 +7,7 @@ export type AdminAccessSurface = AccessSurface | "people" | "finance";
 export const opsAccessPageCodes = [
   "ops_pulse",
   "performance",
+  "performance_review",
   "capacity",
   "capacity_overview",
   "capacity_associates",

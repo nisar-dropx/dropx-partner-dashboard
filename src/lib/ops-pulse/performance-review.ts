@@ -30,6 +30,8 @@ export type PerformanceReview = {
   updated_at: string;
 };
 
+export type PerformanceReviewCarryover = Pick<PerformanceReview, "id" | "station_code" | "source_date" | "status" | "review_summary" | "closed_at" | "updated_at">;
+
 export type PerformanceReviewStep = {
   id: string;
   review_id: string;
@@ -84,6 +86,8 @@ export type PerformanceOperationalSnapshot = {
   deliveredCount: number;
   firstPunchAt: string | null;
   firstPunchBy: string | null;
+  openingWindowEnd: string;
+  openingWindowStart: string;
   fuelPay: number;
   mgSalaryPay: number;
   mtdCost: number;
@@ -100,6 +104,7 @@ export type PerformanceCostRequest = {
   amount: number;
   category: "DA" | "Van" | "Other";
   head: string;
+  reason: string;
   requestNo: string;
 };
 
@@ -135,6 +140,37 @@ function numberOrNull(value: unknown) {
   return Number.isFinite(number) ? number : null;
 }
 
+function clockMinutes(value: string | null | undefined) {
+  const match = String(value ?? "").match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  return hours >= 0 && hours < 24 && minutes >= 0 && minutes < 60 ? hours * 60 + minutes : null;
+}
+
+function istClockMinutes(value: string | null | undefined) {
+  if (!value) return null;
+  const instant = new Date(value);
+  if (Number.isNaN(instant.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    hourCycle: "h23",
+    minute: "2-digit",
+    timeZone: "Asia/Kolkata"
+  }).formatToParts(instant);
+  const hours = Number(parts.find((part) => part.type === "hour")?.value);
+  const minutes = Number(parts.find((part) => part.type === "minute")?.value);
+  return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : null;
+}
+
+function isWithinOpeningWindow(value: string | null, start: string, end: string) {
+  const minute = istClockMinutes(value);
+  const from = clockMinutes(start);
+  const to = clockMinutes(end);
+  if (minute == null || from == null || to == null) return false;
+  return from <= to ? minute >= from && minute <= to : minute >= from || minute <= to;
+}
+
 function missingSchema(error: unknown) {
   const message = String((error as { message?: unknown })?.message ?? error ?? "").toLowerCase();
   return message.includes("ops_performance_review") && (message.includes("does not exist") || message.includes("schema cache"));
@@ -148,7 +184,7 @@ export async function loadPerformanceReviewWorkspace(companyId: string, sourceDa
     stale_after_hours: 24
   };
   if (!supabaseAdmin || !stationCodes.length) {
-    return { settings: fallback, reviews: [] as PerformanceReview[], steps: [] as PerformanceReviewStep[], items: [] as PerformanceReviewItem[], updates: [] as PerformanceReviewUpdate[], error: supabaseAdmin ? null : "Database service is unavailable." };
+    return { settings: fallback, reviews: [] as PerformanceReview[], previousReviews: [] as PerformanceReviewCarryover[], steps: [] as PerformanceReviewStep[], items: [] as PerformanceReviewItem[], updates: [] as PerformanceReviewUpdate[], error: supabaseAdmin ? null : "Database service is unavailable." };
   }
 
   const [settingsResult, reviewsResult, historicalReviewsResult] = await Promise.all([
@@ -159,22 +195,23 @@ export async function loadPerformanceReviewWorkspace(companyId: string, sourceDa
       .select("id,review_type,source_date,report_year,report_week,station_id,station_code,source_type,source_batch_id,status,current_step_order,vehicle_arrival_time,unloading_complete_time,station_clear_time,review_summary,started_at,closed_at,updated_at")
       .eq("company_id", companyId).eq("source_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("ops_performance_reviews")
-      .select("id,station_code,source_date")
-      .eq("company_id", companyId).in("station_code", stationCodes).lte("source_date", sourceDate)
+      .select("id,station_code,source_date,status,review_summary,closed_at,updated_at")
+      .eq("company_id", companyId).in("station_code", stationCodes).lt("source_date", sourceDate).order("source_date", { ascending: false }).limit(200)
   ]);
   const schemaError = [settingsResult.error, reviewsResult.error, historicalReviewsResult.error].find((error) => error && missingSchema(error));
-  if (schemaError) return { settings: fallback, reviews: [] as PerformanceReview[], steps: [] as PerformanceReviewStep[], items: [] as PerformanceReviewItem[], updates: [] as PerformanceReviewUpdate[], error: "Performance review setup is being activated." };
+  if (schemaError) return { settings: fallback, reviews: [] as PerformanceReview[], previousReviews: [] as PerformanceReviewCarryover[], steps: [] as PerformanceReviewStep[], items: [] as PerformanceReviewItem[], updates: [] as PerformanceReviewUpdate[], error: "Performance review setup is being activated." };
   const error = settingsResult.error ?? reviewsResult.error ?? historicalReviewsResult.error;
-  if (error) return { settings: fallback, reviews: [] as PerformanceReview[], steps: [] as PerformanceReviewStep[], items: [] as PerformanceReviewItem[], updates: [] as PerformanceReviewUpdate[], error: error.message };
+  if (error) return { settings: fallback, reviews: [] as PerformanceReview[], previousReviews: [] as PerformanceReviewCarryover[], steps: [] as PerformanceReviewStep[], items: [] as PerformanceReviewItem[], updates: [] as PerformanceReviewUpdate[], error: error.message };
 
   const historicalReviewIds = (historicalReviewsResult.data ?? []).map((review) => review.id);
   const selectedReviewIds = (reviewsResult.data ?? []).map((review) => review.id);
+  const itemReviewIds = [...new Set([...selectedReviewIds, ...historicalReviewIds])];
   const [stepsResult, itemsResult, updatesResult] = await Promise.all([
     selectedReviewIds.length
       ? supabaseAdmin.from("ops_performance_review_steps").select("id,review_id,step_order,reviewer_user_id,reviewer_name,reviewer_role,status,feedback,completed_at").eq("company_id", companyId).in("review_id", selectedReviewIds).order("step_order")
       : Promise.resolve({ data: [] as PerformanceReviewStep[], error: null }),
-    historicalReviewIds.length
-      ? supabaseAdmin.from("ops_performance_review_items").select("id,review_id,metric_key,metric_label,actual_value,target_value,target_direction,severity,root_cause,corrective_action,action_owner,due_date,status,created_at,updated_at").eq("company_id", companyId).in("review_id", historicalReviewIds).order("created_at", { ascending: false }).limit(1000)
+    itemReviewIds.length
+      ? supabaseAdmin.from("ops_performance_review_items").select("id,review_id,metric_key,metric_label,actual_value,target_value,target_direction,severity,root_cause,corrective_action,action_owner,due_date,status,created_at,updated_at").eq("company_id", companyId).in("review_id", itemReviewIds).order("created_at", { ascending: false }).limit(1000)
       : Promise.resolve({ data: [] as PerformanceReviewItem[], error: null }),
     selectedReviewIds.length
       ? supabaseAdmin.from("ops_performance_review_updates").select("id,review_id,review_item_id,update_type,note,created_at,created_by").eq("company_id", companyId).in("review_id", selectedReviewIds).order("created_at", { ascending: false }).limit(500)
@@ -184,6 +221,7 @@ export async function loadPerformanceReviewWorkspace(companyId: string, sourceDa
   return {
     settings: (settingsResult.data ?? fallback) as PerformanceReviewSettings,
     reviews: (reviewsResult.data ?? []) as PerformanceReview[],
+    previousReviews: (historicalReviewsResult.data ?? []) as PerformanceReviewCarryover[],
     steps: (stepsResult.data ?? []) as PerformanceReviewStep[],
     items: (itemsResult.data ?? []) as PerformanceReviewItem[],
     updates: (updatesResult.data ?? []) as PerformanceReviewUpdate[],
@@ -203,6 +241,19 @@ function adHocCategory(head: { code: string | null; name: string | null }): Perf
   return "Other";
 }
 
+function paymentReason(row: { remarks?: string | null; notes?: string | null; details?: unknown }) {
+  if (row.remarks?.trim()) return row.remarks.trim();
+  if (row.notes?.trim()) return row.notes.trim();
+  if (row.details && typeof row.details === "object" && !Array.isArray(row.details)) {
+    const details = row.details as Record<string, unknown>;
+    for (const key of ["reason", "purpose", "remarks", "description", "deployment_reason"]) {
+      const value = String(details[key] ?? "").trim();
+      if (value) return value;
+    }
+  }
+  return "Reason not recorded in the request";
+}
+
 function isApprovedPayment(request: { status: string | null; approval_status: string | null; current_approver_user_id: string | null; current_approver_role_id: string | null }) {
   const status = normalized(request.status);
   const approval = normalized(request.approval_status);
@@ -218,7 +269,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
   const stationCodes = locations.map((location) => location.station_code);
   const locationIds = locations.map((location) => location.id);
   const monthFrom = `${sourceDate.slice(0, 7)}-01`;
-  const [costResult, monthCostResult, breakupResult, shipmentResult, detailResult, capacityResult, monthCapacityResult, attendanceResult, headsResult] = await Promise.all([
+  const [costResult, monthCostResult, breakupResult, shipmentResult, detailResult, capacityResult, monthCapacityResult, attendanceResult, headsResult, openingResult] = await Promise.all([
     supabaseAdmin.from("cps_station_daily")
       .select("station_code,total_delivery,total_cost,overall_cps,da_pay_cost,da_cps").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("cps_station_daily")
@@ -236,21 +287,30 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       .select("station_code,delivered").eq("company_id", companyId).gte("work_date", monthFrom).lte("work_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("attendance_daily")
       .select("location_id,station_code,in_time,worker_name,employee_code").eq("company_id", companyId).eq("punch_date", sourceDate).in("location_id", locationIds).not("in_time", "is", null).order("in_time"),
-    supabaseAdmin.from("payment_heads").select("id,code,name").eq("company_id", companyId)
+    supabaseAdmin.from("payment_heads").select("id,code,name").eq("company_id", companyId),
+    supabaseAdmin.from("ops_performance_station_settings")
+      .select("station_id,opening_window_start,opening_window_end").eq("company_id", companyId).in("station_id", locationIds)
   ]);
-  const error = costResult.error ?? monthCostResult.error ?? breakupResult.error ?? shipmentResult.error ?? detailResult.error ?? capacityResult.error ?? monthCapacityResult.error ?? attendanceResult.error ?? headsResult.error;
+  const error = costResult.error ?? monthCostResult.error ?? breakupResult.error ?? shipmentResult.error ?? detailResult.error ?? capacityResult.error ?? monthCapacityResult.error ?? attendanceResult.error ?? headsResult.error ?? openingResult.error;
   if (error) return { rows: empty, error: error.message };
   const adHocHeads = (headsResult.data ?? []).filter(isAdHocHead);
   const adHocHeadIds = adHocHeads.map((head) => head.id);
   const adHocHeadById = new Map(adHocHeads.map((head) => [head.id, head]));
   const paymentsResult = adHocHeadIds.length
     ? await supabaseAdmin.from("payment_requests")
-      .select("request_no,payment_head_id,station_code,location_code,amount,amount_approved,amount_requested,status,approval_status,current_approver_user_id,current_approver_role_id")
+      .select("request_no,payment_head_id,station_code,location_code,amount,amount_approved,amount_requested,status,approval_status,current_approver_user_id,current_approver_role_id,remarks,notes,details")
       .eq("company_id", companyId).eq("work_date", sourceDate).in("payment_head_id", adHocHeadIds)
     : { data: [], error: null };
   if (paymentsResult.error) return { rows: empty, error: paymentsResult.error.message };
 
-  const blank = (): PerformanceOperationalSnapshot => ({
+  const openingByStationId = new Map((openingResult.data ?? []).map((row) => [row.station_id, {
+    end: String(row.opening_window_end ?? "10:00:00"),
+    start: String(row.opening_window_start ?? "02:00:00")
+  }]));
+  const stationIdByCode = new Map(locations.map((location) => [location.station_code, location.id]));
+  const blank = (code: string): PerformanceOperationalSnapshot => {
+    const opening = openingByStationId.get(stationIdByCode.get(code) ?? "") ?? { end: "10:00:00", start: "02:00:00" };
+    return ({
     adHocCost: null,
     adHocDaCost: 0,
     adHocDaRequests: [],
@@ -264,6 +324,8 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     deliveredCount: 0,
     firstPunchAt: null,
     firstPunchBy: null,
+    openingWindowEnd: opening.end,
+    openingWindowStart: opening.start,
     fuelPay: 0,
     mgSalaryPay: 0,
     mtdCost: 0,
@@ -275,9 +337,10 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     unmappedFeCount: 0,
     variableDaPay: 0
   });
-  stationCodes.forEach((code) => empty.set(code, blank()));
+  };
+  stationCodes.forEach((code) => empty.set(code, blank(code)));
   (costResult.data ?? []).forEach((row) => {
-    const current = empty.get(row.station_code) ?? blank();
+    const current = empty.get(row.station_code) ?? blank(row.station_code);
     current.dayCost = numberOrNull(row.total_cost);
     current.overallCps = numberOrNull(row.overall_cps);
     current.dailyCps = numberOrNull(row.overall_cps);
@@ -352,7 +415,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
   (attendanceResult.data ?? []).forEach((row) => {
     const code = codeByLocation.get(row.location_id) ?? normalized(row.station_code);
     const current = empty.get(code);
-    if (!current || current.firstPunchAt) return;
+    if (!current || current.firstPunchAt || !isWithinOpeningWindow(row.in_time, current.openingWindowStart, current.openingWindowEnd)) return;
     current.firstPunchAt = row.in_time;
     current.firstPunchBy = row.worker_name || row.employee_code || "Recorded employee";
   });
@@ -364,7 +427,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     current.adHocCost = (current.adHocCost ?? 0) + amount;
     const head = adHocHeadById.get(row.payment_head_id);
     const category = adHocCategory(head ?? { code: null, name: null });
-    const request = { amount, category, head: head?.name || head?.code || "Ad-hoc request", requestNo: row.request_no || "Request" };
+    const request = { amount, category, head: head?.name || head?.code || "Ad-hoc request", reason: paymentReason(row), requestNo: row.request_no || "Request" };
     if (category === "Van") {
       current.adHocVanCost += amount;
       current.adHocVanRequests.push(request);
@@ -421,7 +484,8 @@ export async function resolvePerformanceReviewChain(companyId: string, stationId
       position.location_access_mode !== "all_locations"
       && (position.location_scope_ids ?? []).includes(stationId)
     )).sort((left, right) => rolePriority(`${left.name} ${roleText(left.user_roles)}`) - rolePriority(`${right.name} ${roleText(right.user_roles)}`));
-    const start = starts.find((position) => rolePriority(`${position.name} ${roleText(position.user_roles)}`) < 5);
+    const start = starts.find((position) => occupantByPosition.has(position.id) && rolePriority(`${position.name} ${roleText(position.user_roles)}`) < 5)
+      ?? starts.find((position) => rolePriority(`${position.name} ${roleText(position.user_roles)}`) < 5);
     if (start) {
       const chain: PerformanceReviewChainStep[] = [];
       const seen = new Set<string>();
@@ -431,7 +495,7 @@ export async function resolvePerformanceReviewChain(companyId: string, stationId
         const assignment = occupantByPosition.get(current.id);
         const profile = assignment ? profileById.get(assignment.profile_id) : null;
         const reviewerRole = roleText(current.user_roles, current.name);
-        chain.push({ reviewerName: profile?.full_name || "Unassigned", reviewerRole, reviewerUserId: profile?.id ?? null });
+        if (profile) chain.push({ reviewerName: profile.full_name || "Assigned reviewer", reviewerRole, reviewerUserId: profile.id });
         if (/national head|owner/i.test(reviewerRole)) break;
         current = current.reports_to_position_id ? positionById.get(current.reports_to_position_id) : undefined;
       }
