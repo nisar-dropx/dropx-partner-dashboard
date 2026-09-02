@@ -35,12 +35,26 @@ type AttendanceRow = {
   status: string | null;
 };
 
+type AttendancePunchRow = {
+  enrolment_id: string;
+  punch_time: string;
+  punch_label: string | null;
+  location_id: string | null;
+};
+
+export type OpsPunchLocation = {
+  id: string;
+  code: string;
+  name: string | null;
+};
+
 export type OpsStationManpowerPerson = {
   id: string;
   workerType: WorkerType;
   code: string;
   name: string;
   designation: string;
+  designationCode: string;
   locationId: string;
   availability: "Working" | "Completed" | "On leave" | "Roster off" | "Not reported";
   today: {
@@ -53,6 +67,10 @@ export type OpsStationManpowerPerson = {
     shiftSource: string | null;
     inTime: string | null;
     outTime: string | null;
+    expectedLocation: OpsPunchLocation;
+    inLocation: OpsPunchLocation | null;
+    outLocation: OpsPunchLocation | null;
+    hasLocationMismatch: boolean;
   };
 };
 
@@ -70,6 +88,17 @@ function biometricVariants(value: string | null | undefined) {
   if (!raw) return [];
   const normalized = raw.replace(/^0+(?=\d)/, "") || "0";
   return [...new Set([raw, normalized, normalized.padStart(6, "0"), normalized.padStart(8, "0")])];
+}
+
+function biometricKey(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  return raw ? raw.replace(/^0+(?=\d)/, "") || "0" : "";
+}
+
+function shortDesignation(value: string | null | undefined) {
+  const words = String(value ?? "").trim().replace(/[()./-]+/g, " ").split(/\s+/).filter(Boolean);
+  if (!words.length) return "—";
+  return words.filter((word) => !/^(and|of|the)$/i.test(word)).map((word) => word[0]).join("").toUpperCase().slice(0, 6) || "—";
 }
 
 function indiaPunchMinutes(value: string | null | undefined, punchDate: string) {
@@ -124,7 +153,7 @@ export async function loadOpsStationManpower(
       .select("id,worker_type,employee_id,contractor_id")
       .eq("company_id", companyId).eq("status", "active").limit(5000),
     admin.from("designations")
-      .select("id,name")
+      .select("id,name,code")
       .eq("company_id", companyId).eq("is_active", true).limit(1000)
   ]);
   const initialError = employeesResult.error ?? contractorsResult.error ?? engagementsResult.error ?? designationsResult.error;
@@ -142,7 +171,7 @@ export async function loadOpsStationManpower(
     .limit(5000) : { data: [], error: null };
   if (assignmentsResult.error) throw new Error(assignmentsResult.error.message);
 
-  const designationById = new Map((designationsResult.data ?? []).map((designation) => [designation.id, designation.name]));
+  const designationById = new Map((designationsResult.data ?? []).map((designation) => [designation.id, { name: designation.name, code: designation.code }]));
   const assignmentByEngagement = new Map<string, WorkAssignmentRow>();
   for (const assignment of (assignmentsResult.data ?? []) as WorkAssignmentRow[]) {
     if (!assignmentByEngagement.has(assignment.engagement_id)) assignmentByEngagement.set(assignment.engagement_id, assignment);
@@ -158,6 +187,13 @@ export async function loadOpsStationManpower(
       const engagement = engagementByWorker.get(`employee:${employee.id}`);
       const assignment = engagement ? assignmentByEngagement.get(engagement.id) : null;
       const locationId = assignment?.location_id ?? employee.location_id;
+      const designation = (assignment?.designation_id ? designationById.get(assignment.designation_id)?.name : null)
+        ?? assignment?.position_title
+        ?? (employee.designation_id ? designationById.get(employee.designation_id)?.name : null)
+        ?? "Unassigned";
+      const designationCode = (assignment?.designation_id ? designationById.get(assignment.designation_id)?.code : null)
+        ?? (employee.designation_id ? designationById.get(employee.designation_id)?.code : null)
+        ?? shortDesignation(designation);
       return {
         id: employee.id,
         workerType: "employee" as const,
@@ -165,16 +201,20 @@ export async function loadOpsStationManpower(
         name: employee.full_name,
         biometricId: employee.biometric_id,
         locationId,
-        designation: (assignment?.designation_id ? designationById.get(assignment.designation_id) : null)
-          ?? assignment?.position_title
-          ?? (employee.designation_id ? designationById.get(employee.designation_id) : null)
-          ?? "Unassigned"
+        designation,
+        designationCode
       };
     }),
     ...(contractorsResult.data ?? []).map((contractor) => {
       const engagement = engagementByWorker.get(`contractor:${contractor.id}`);
       const assignment = engagement ? assignmentByEngagement.get(engagement.id) : null;
       const locationId = assignment?.location_id ?? contractor.location_id;
+      const designation = (assignment?.designation_id ? designationById.get(assignment.designation_id)?.name : null)
+        ?? assignment?.position_title
+        ?? contractor.designation
+        ?? "Unassigned";
+      const designationCode = (assignment?.designation_id ? designationById.get(assignment.designation_id)?.code : null)
+        ?? shortDesignation(designation);
       return {
         id: contractor.id,
         workerType: "contractor" as const,
@@ -182,20 +222,23 @@ export async function loadOpsStationManpower(
         name: contractor.full_name,
         biometricId: contractor.biometric_id,
         locationId,
-        designation: (assignment?.designation_id ? designationById.get(assignment.designation_id) : null)
-          ?? assignment?.position_title
-          ?? contractor.designation
-          ?? "Unassigned"
+        designation,
+        designationCode
       };
     })
   ].filter((person): person is typeof person & { locationId: string } => Boolean(person.locationId && locationIds.has(person.locationId)));
 
   const employeeIds = rawPeople.filter((person) => person.workerType === "employee").map((person) => person.id);
   const workerIds = rawPeople.map((person) => person.id);
-  const [attendanceResult, datedRosterResult, weeklyPlansResult, leaveResult] = await Promise.all([
+  const enrolmentIds = [...new Set(rawPeople.flatMap((person) => biometricVariants(person.biometricId)))];
+  const [attendanceResult, punchResult, datedRosterResult, weeklyPlansResult, leaveResult] = await Promise.all([
     admin.from("attendance_daily")
       .select("enrolment_id,worker_type,employee_id,contractor_id,in_time,out_time,punch_count,work_minutes,status")
       .eq("company_id", companyId).eq("punch_date", asOf).neq("status", "U").limit(5000),
+    enrolmentIds.length ? admin.from("attendance_punches")
+      .select("enrolment_id,punch_time,punch_label,location_id")
+      .eq("company_id", companyId).eq("punch_date", asOf).eq("calculated", true)
+      .in("enrolment_id", enrolmentIds).order("punch_time", { ascending: true }).limit(5000) : Promise.resolve({ data: [], error: null }),
     workerIds.length ? admin.from("hr_roster_entries")
       .select("worker_type,worker_id,roster_date,day_type,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
       .eq("company_id", companyId).eq("roster_date", asOf).in("worker_id", workerIds).eq("hr_roster_plans.status", "approved").eq("hr_roster_plans.roster_kind", "dated").limit(5000) : Promise.resolve({ data: [], error: null }),
@@ -205,8 +248,25 @@ export async function loadOpsStationManpower(
     employeeIds.length ? admin.from("hr_leave_requests")
       .select("employee_id").eq("company_id", companyId).eq("status", "approved").in("employee_id", employeeIds).lte("start_date", asOf).gte("end_date", asOf).limit(5000) : Promise.resolve({ data: [], error: null })
   ]);
-  const detailError = attendanceResult.error ?? datedRosterResult.error ?? weeklyPlansResult.error ?? leaveResult.error;
+  const detailError = attendanceResult.error ?? punchResult.error ?? datedRosterResult.error ?? weeklyPlansResult.error ?? leaveResult.error;
   if (detailError) throw new Error(detailError.message);
+  const punchLocationIds = [...new Set(((punchResult.data ?? []) as AttendancePunchRow[]).map((punch) => punch.location_id).filter((id): id is string => Boolean(id)))];
+  const externalPunchLocationsResult = punchLocationIds.length ? await admin.from("stations")
+    .select("id,station_code,station_name")
+    .eq("company_id", companyId).in("id", punchLocationIds).limit(5000) : { data: [], error: null };
+  if (externalPunchLocationsResult.error) throw new Error(externalPunchLocationsResult.error.message);
+  const locationById = new Map<string, OpsPunchLocation>();
+  for (const location of [...locations, ...(externalPunchLocationsResult.data ?? [])]) {
+    locationById.set(location.id, { id: location.id, code: location.station_code, name: location.station_name ?? null });
+  }
+  const punchesByEnrolment = new Map<string, AttendancePunchRow[]>();
+  for (const punch of (punchResult.data ?? []) as AttendancePunchRow[]) {
+    const key = biometricKey(punch.enrolment_id);
+    if (!key) continue;
+    const rows = punchesByEnrolment.get(key) ?? [];
+    rows.push(punch);
+    punchesByEnrolment.set(key, rows);
+  }
   const activeWeeklyPlans = (weeklyPlansResult.data ?? []).filter((plan) => !plan.superseded_at || asOf < plan.superseded_at);
   const activeWeeklyPlanIds = activeWeeklyPlans.map((plan) => plan.id);
   const weeklyEntriesResult = activeWeeklyPlanIds.length && workerIds.length ? await admin.from("hr_roster_entries")
@@ -259,6 +319,20 @@ export async function loadOpsStationManpower(
     const shift = rosterShift;
     const shiftSource = rosterShift ? "Active approved roster" : null;
     const attendance = attendanceByWorker.get(`${person.workerType}:${person.id}`);
+    const punches = punchesByEnrolment.get(biometricKey(attendance?.enrolment_id ?? person.biometricId)) ?? [];
+    const sameInstant = (left: string | null | undefined, right: string) => Boolean(left) && new Date(left!).getTime() === new Date(right).getTime();
+    const inPunch = punches.find((punch) => sameInstant(attendance?.in_time, punch.punch_time)) ?? punches[0] ?? null;
+    const outPunch = attendance?.out_time
+      ? punches.find((punch) => sameInstant(attendance.out_time, punch.punch_time)) ?? punches[punches.length - 1] ?? null
+      : null;
+    const expectedLocation = locationById.get(person.locationId) ?? { id: person.locationId, code: "Assigned location", name: null };
+    const inLocation = inPunch?.location_id ? locationById.get(inPunch.location_id) ?? { id: inPunch.location_id, code: "Unknown location", name: null } : null;
+    const outLocation = outPunch?.location_id ? locationById.get(outPunch.location_id) ?? { id: outPunch.location_id, code: "Unknown location", name: null } : null;
+    const hasLocationMismatch = Boolean(
+      (inLocation && inLocation.id !== person.locationId)
+      || (outLocation && outLocation.id !== person.locationId)
+      || (inLocation && outLocation && inLocation.id !== outLocation.id)
+    );
     const actualStart = indiaPunchMinutes(attendance?.in_time, asOf);
     const scheduledStart = shiftStartMinutes(shift?.start_time);
     const lateMinutes = actualStart !== null && scheduledStart !== null
@@ -277,6 +351,7 @@ export async function loadOpsStationManpower(
       code: person.code,
       name: person.name,
       designation: person.designation,
+      designationCode: person.designationCode,
       locationId: person.locationId,
       availability,
       today: {
@@ -288,7 +363,11 @@ export async function loadOpsStationManpower(
         shiftName: shift ? `${shift.name} · ${shift.start_time.slice(0, 5)}-${shift.end_time.slice(0, 5)}` : null,
         shiftSource,
         inTime: attendance?.in_time ?? null,
-        outTime: attendance?.out_time ?? null
+        outTime: attendance?.out_time ?? null,
+        expectedLocation,
+        inLocation,
+        outLocation,
+        hasLocationMismatch
       }
     };
   }).sort((left, right) => left.name.localeCompare(right.name));
