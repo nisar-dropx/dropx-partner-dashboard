@@ -151,7 +151,7 @@ async function loadPeopleReviewCount(authorization: AuthorizationContext) {
     { table: "workforce", statusColumn: "onboarding_status" },
     { table: "contractors", statusColumn: "onboarding_status" },
     { table: "vendors", statusColumn: "onboarding_status" },
-    { table: "workers", statusColumn: "onboarding_status" }
+    { table: "helpers", statusColumn: "onboarding_status" }
   ];
   const results = await Promise.all(sources.map(async ({ table, statusColumn }) => {
     let query = supabaseAdmin!
