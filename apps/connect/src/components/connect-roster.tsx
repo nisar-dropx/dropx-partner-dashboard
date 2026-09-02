@@ -107,7 +107,7 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
       {(data?.days ?? []).length ? data?.days.map((day) => <article className={day.dayType === "weekly_off" ? "off" : ""} key={day.id}>
         <div className="dx-roster-date"><CalendarDays /><span><strong>{displayDate(day.date)}</strong><small>{day.dayType === "weekly_off" ? "Rest day" : day.shift?.name || "Working day"}</small></span></div>
         <div className="dx-roster-shift"><Clock3 /><strong>{shiftLabel(day.shift, day.dayType)}</strong></div>
-        <button disabled={!day.canSwap || !day.partners.length} onClick={() => { setSelectedDay(day); setPartnerEntryId(""); setNote(""); }}><ArrowLeftRight />{day.canSwap ? day.partners.length ? "Request swap" : "No partner available" : `Closed ${data?.leadHours ?? 24}h before`}</button>
+        <button disabled={!day.canSwap || !day.partners.length} onClick={() => { setSelectedDay(day); setPartnerEntryId(""); setNote(""); }}><ArrowLeftRight />{day.canSwap ? day.partners.length ? "Request swap" : "No valid swap" : `Closed ${data?.leadHours ?? 24}h before`}</button>
       </article>) : <div className="dx-roster-empty"><CalendarDays /><strong>Your roster is not configured</strong><small>Contact your HR or manager.</small></div>}
     </div> : null}
 
@@ -117,7 +117,7 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
       {selectedPartner ? <div className="dx-roster-exchange"><span><UserRound /><small>You receive</small><strong>{shiftLabel(selectedPartner.shift, selectedPartner.dayType)}</strong></span><ArrowLeftRight /><span><UserRound /><small>{selectedPartner.name} receives</small><strong>{shiftLabel(selectedDay.shift, selectedDay.dayType)}</strong></span></div> : null}
       <label>Note <span>(optional)</span><textarea maxLength={500} onChange={(event) => setNote(event.target.value)} placeholder="Add useful context" rows={2} value={note} /></label>
       <button className="dx-roster-primary" disabled={!partnerEntryId || pending === "request"} onClick={() => void requestSwap()}>{pending === "request" ? "Sending…" : "Send swap request"}</button>
-      <small className="dx-roster-rule">Both colleagues must agree. Your immediate manager gives final approval.</small>
+      <small className="dx-roster-rule">Only different rosters can be exchanged. Both colleagues must agree, then your immediate manager gives final approval.</small>
     </div> : null}
 
     {!loading && activeRequests.length ? <section className="dx-roster-requests"><header><small>Action needed</small><h2>Active swap requests</h2></header>{activeRequests.map(requestRow)}</section> : null}
