@@ -273,6 +273,7 @@ export async function loadConnectOperationalPerformance(input: {
       .select("work_date,station_code,overall_cps,target_cps,target_gap")
       .eq("company_id", input.account.companyId)
       .in("station_code", stationCodes)
+      .lte("work_date", today())
       .order("work_date", { ascending: false })
       .limit(5000),
     db().from("report_import_master")
