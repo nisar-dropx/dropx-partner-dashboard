@@ -162,7 +162,7 @@ async function loadBulkWhatsAppData(companyId: string) {
     supabaseAdmin.from("workforce").select(`id, dropx_id, full_name, email, mobile, mobile_country_code, designation, onboarding_status, is_active, ${workforceLocationSelect}`).eq("company_id", companyId).order("full_name"),
     supabaseAdmin.from("contractors").select(`id, dropx_id, full_name, email, mobile, mobile_country_code, designation, onboarding_status, is_active, ${workforceLocationSelect}`).eq("company_id", companyId).order("full_name"),
     supabaseAdmin.from("vendors").select(`id, dropx_id, full_name, email, mobile, mobile_country_code, designation, onboarding_status, is_active, ${workforceLocationSelect}`).eq("company_id", companyId).order("full_name"),
-    supabaseAdmin.from("workers").select(`id, dropx_id, full_name, email, mobile, mobile_country_code, designation, onboarding_status, is_active, ${workforceLocationSelect}`).eq("company_id", companyId).order("full_name"),
+    supabaseAdmin.from("helpers").select(`id, dropx_id, full_name, email, mobile, mobile_country_code, designation, onboarding_status, is_active, ${workforceLocationSelect}`).eq("company_id", companyId).order("full_name"),
     supabaseAdmin.from("stations").select("id, station_code, providers (name), location_models (code, name)").eq("company_id", companyId),
     supabaseAdmin
       .from("whatsapp_campaigns")

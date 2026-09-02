@@ -195,7 +195,7 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
           field_executive: { table: "workforce", code: "dropx_id" },
           contractor: { table: "contractors", code: "dropx_id" },
           vendor: { table: "vendors", code: "dropx_id" },
-          worker: { table: "workers", code: "dropx_id" }
+          worker: { table: "helpers", code: "dropx_id" }
         };
         await Promise.all(Array.from(idsByProfile, async ([profileType, idSet]) => {
           const config = tableByProfile[profileType];
