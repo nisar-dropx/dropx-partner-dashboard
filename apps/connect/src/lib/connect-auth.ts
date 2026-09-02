@@ -506,7 +506,7 @@ function categoryCodeForProfile(profileType: ConnectAccount["profileType"]) {
   if (profileType === "field_executive") return "workforce";
   if (profileType === "contractor") return "contractors";
   if (profileType === "vendor") return "vendors";
-  if (profileType === "worker") return "workers";
+  if (profileType === "worker") return "helpers";
   return "";
 }
 

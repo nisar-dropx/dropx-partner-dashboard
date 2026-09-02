@@ -10,12 +10,12 @@ export const workforceProfileTypes = [
 export type WorkforceProfileType = typeof workforceProfileTypes[number];
 export type NonEmployeeProfileType = Exclude<WorkforceProfileType, "employee">;
 
-const tables: Record<NonEmployeeProfileType, "workforce" | "contractors" | "vendors" | "workers"> = {
+const tables: Record<NonEmployeeProfileType, "workforce" | "contractors" | "vendors" | "helpers"> = {
   workforce: "workforce",
   field_executive: "workforce",
   contractor: "contractors",
   vendor: "vendors",
-  worker: "workers"
+  worker: "helpers"
 };
 
 export function isWorkforceProfileType(value: unknown): value is WorkforceProfileType {
@@ -42,6 +42,6 @@ export function profileFieldRuleCategory(profileType: NonEmployeeProfileType) {
   if (profileType === "workforce") return "workforce" as const;
   if (profileType === "contractor") return "contractors" as const;
   if (profileType === "vendor") return "vendors" as const;
-  if (profileType === "worker") return "workers" as const;
+  if (profileType === "worker") return "helpers" as const;
   return "workforce" as const;
 }
