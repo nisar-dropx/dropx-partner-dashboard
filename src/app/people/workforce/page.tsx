@@ -1,6 +1,7 @@
 import { AllPeopleRegister } from "@/components/all-people-register";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
+import { PendingLink } from "@/components/pending-link";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { loadCanonicalWorkforcePeople } from "@/lib/canonical-workforce-people";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -25,7 +26,7 @@ export default async function WorkforcePage() {
 
   return (
     <AppShell active="Workforce" pageCode="people_all">
-      <PageHead eyebrow="People" title="Workforce" subtitle="View canonical workforce records stored in the Workforce register." />
+      <PageHead eyebrow="People" title="Workforce" subtitle="View canonical workforce records stored in the Workforce register." action={hasPermission(authorization, "delivery_associates", "add") ? <PendingLink className="button" href="/workforce">Add workforce</PendingLink> : null} />
       {data.error ? (
         <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load workforce</strong><p className="subtle">{data.error}</p></div></section>
       ) : null}
