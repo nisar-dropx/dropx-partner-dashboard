@@ -18,7 +18,7 @@ const SOURCES = [
   { table: "workforce", profileType: "workforce", category: "Workforce", employee: false, designationRelation: true },
   { table: "contractors", profileType: "contractor", category: "Contractor", employee: false, designationRelation: false },
   { table: "vendors", profileType: "vendor", category: "Vendor", employee: false, designationRelation: false },
-  { table: "workers", profileType: "worker", category: "Worker", employee: false, designationRelation: false }
+  { table: "helpers", profileType: "worker", category: "Helper", employee: false, designationRelation: false }
 ] as const;
 const BASE_FIELDS = "id, full_name, location_id, statutory_applicability, pf_uan, esi_no, bank_account_no, pan_number, aadhaar_number, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, updated_at, stations (station_code)";
 const PAGE_SIZE = 20;
