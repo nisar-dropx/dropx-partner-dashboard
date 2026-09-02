@@ -163,10 +163,10 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
     }
     return <AppShell active="Dashboard" pageCode="ops_pulse">
       <div className="ops-command-center">
-        <PageHead eyebrow="Live workforce · scope controlled" title="Location Manpower" subtitle="Inspect each authorised office, station or store using its own roster, role structure, report times and live attendance." action={<span className="ops-live-badge"><i /> LIVE PEOPLE</span>} />
+        <PageHead eyebrow="Live workforce · scope controlled" title="Shift Attendance" subtitle="See each authorised office, station or store roster, reporting times and attendance exceptions." action={<span className="ops-live-badge"><i /> LIVE PEOPLE</span>} />
         <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views">
           <Link href="/ops-pulse">Operations view</Link>
-          <Link className="active" href="/ops-pulse?view=manpower">Location manpower</Link>
+          <Link className="active" href="/ops-pulse?view=manpower">Shift attendance</Link>
         </nav>
         {manpowerError ? <section className="panel message-panel error"><div className="panel-body"><strong>Data connection issue</strong><p className="subtle">{manpowerError}</p></div></section> : null}
         <form className="ops-station-manpower-filter" action="/ops-pulse" method="get">
