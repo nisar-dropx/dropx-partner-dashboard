@@ -902,7 +902,10 @@ export async function backfillHistoricalPunches({
     const insert = await supabaseAdmin
       .from("attendance_punches")
       .upsert(rows, {
-        ignoreDuplicates: true,
+        // A previously unknown enrolment already has a non-calculated Review
+        // punch under this logical key. Update that retained punch with the
+        // resolved profile and calculation state when the mapping is created.
+        ignoreDuplicates: false,
         onConflict: "company_id,device_serial,enrolment_id,punch_time"
       });
     if (insert.error) throw new Error(insert.error.message);
