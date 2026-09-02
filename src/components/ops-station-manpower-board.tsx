@@ -103,6 +103,28 @@ function minuteLabel(value: number) {
   return `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
 }
 
+function ActiveRosterView({ asOf, people, locationCode }: { asOf: string; people: OpsStationManpowerPerson[]; locationCode: string }) {
+  const rostered = people.filter((person) => Boolean(shiftClock(person.today.shiftName)) || Boolean(person.today.rosterDayType));
+  const working = rostered.filter((person) => Boolean(shiftClock(person.today.shiftName)) && person.today.rosterDayType !== "weekly_off");
+  const off = rostered.filter((person) => person.today.rosterDayType === "weekly_off");
+  const groups = [...new Map(rostered.map((person) => {
+    const shift = shiftClock(person.today.shiftName);
+    const label = person.today.rosterDayType === "weekly_off" ? "Week off" : shift ? `${shift.startLabel}–${shift.endLabel}` : "Rostered";
+    return [label, label];
+  })).values()];
+
+  return <details className="station-active-roster">
+    <summary><span><b>Active roster</b><small>{asOf} · read-only</small></span><span>{rostered.length} people · {working.length} working · {off.length} off</span></summary>
+    <div>{groups.length ? groups.map((label) => {
+      const members = rostered.filter((person) => {
+        const shift = shiftClock(person.today.shiftName);
+        return (person.today.rosterDayType === "weekly_off" ? "Week off" : shift ? `${shift.startLabel}–${shift.endLabel}` : "Rostered") === label;
+      });
+      return <section key={label}><strong>{label}</strong><span>{members.map((person) => `${person.name} · ${person.designation}`).join(", ")}</span></section>;
+    }) : <p>No active approved roster is published for {locationCode} on this date.</p>}</div>
+  </details>;
+}
+
 function StationTimetable({ people, locationCode }: { people: OpsStationManpowerPerson[]; locationCode: string }) {
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const window = timetableWindow(people);
@@ -208,7 +230,7 @@ export function OpsStationManpowerBoard({ asOf, locations, people }: { asOf: str
       const readiness = locationExpected.length ? Math.round(locationReported / locationExpected.length * 100) : 0;
       return <section className="station-manpower-card" key={location.id}>
         <header><div><span><MapPin size={14} />{location.station_code} · {experience.noun}{experience.model ? ` · ${experience.model}` : ""}</span><h2>{location.station_name || location.station_code}</h2><p>{locationPeople.length} active people across {shifts.size} {experience.schedules}</p></div><div className="station-readiness-ring" style={{ "--readiness": `${readiness}%` } as CSSProperties}><strong>{readiness}%</strong><span>reported</span></div><div className="station-manpower-card-metrics"><span><strong>{locationExpected.length}</strong> expected</span><span className={locationLate ? "warn" : ""}><strong>{locationLate}</strong> late</span><span className={locationMissing ? "bad" : ""}><strong>{locationMissing}</strong> missing</span></div></header>
-        {locationPeople.length ? <><div className="station-command-strip"><div><span>{experience.lead}</span><strong>{leadership.map((person) => person.name).join(", ") || "Not assigned"}</strong><small>{leadership.map((person) => person.designation).join(" · ") || "Leadership gap"}</small></div><div><span>Shift / workstream leads</span><strong>{shiftLeadership.map((person) => person.name).join(", ") || "Not assigned"}</strong><small>{shiftLeadership.map((person) => person.designation).join(" · ") || "No second-level lead mapped"}</small></div></div><StationTimetable key={`${asOf}:${location.id}`} people={locationPeople} locationCode={location.station_code} /></> : <div className="station-manpower-empty"><Users2 size={20} /><strong>No active People manpower is assigned here.</strong><span>The location remains visible because it is inside your OpsPulse scope.</span></div>}
+        {locationPeople.length ? <><div className="station-command-strip"><div><span>{experience.lead}</span><strong>{leadership.map((person) => person.name).join(", ") || "Not assigned"}</strong><small>{leadership.map((person) => person.designation).join(" · ") || "Leadership gap"}</small></div><div><span>Shift / workstream leads</span><strong>{shiftLeadership.map((person) => person.name).join(", ") || "Not assigned"}</strong><small>{shiftLeadership.map((person) => person.designation).join(" · ") || "No second-level lead mapped"}</small></div></div><ActiveRosterView asOf={asOf} people={locationPeople} locationCode={location.station_code} /><StationTimetable key={`${asOf}:${location.id}`} people={locationPeople} locationCode={location.station_code} /></> : <div className="station-manpower-empty"><Users2 size={20} /><strong>No active People manpower is assigned here.</strong><span>The location remains visible because it is inside your OpsPulse scope.</span></div>}
       </section>;
     })}</div>
     <p className="station-manpower-footnote">Live biometric attendance for {asOf} is compared only with the active approved People roster version. Profile shift assignments do not create expected rows here.</p>

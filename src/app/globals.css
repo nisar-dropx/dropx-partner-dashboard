@@ -19758,6 +19758,17 @@ td strong,
 .station-timetable-off-only > span { display: grid; gap: 1px; min-width: 170px; padding: 6px 8px; border: 1px solid #d9d6fe; border-radius: 6px; background: #f4f3ff; }
 .station-timetable-off-only b { color: #42307d; font-size: 9px; }
 .station-timetable-off-only small { color: #6941c6; font-size: 7px; }
+.station-active-roster { border-bottom: 1px solid #eaecf0; background: #fff; }
+.station-active-roster summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 12px; color: #475467; cursor: pointer; list-style: none; }
+.station-active-roster summary::-webkit-details-marker { display: none; }
+.station-active-roster summary > span:first-child { display: flex; align-items: baseline; gap: 6px; }
+.station-active-roster summary b { color: #182230; font-size: 9px; }
+.station-active-roster summary small, .station-active-roster summary > span:last-child { color: #667085; font-size: 8px; }
+.station-active-roster[open] summary { background: #fffcf5; }
+.station-active-roster > div { display: grid; gap: 5px; padding: 0 12px 8px; }
+.station-active-roster section { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.station-active-roster section strong { color: #b54708; font-size: 8px; }
+.station-active-roster section span, .station-active-roster p { margin: 0; color: #475467; font-size: 8px; }
 .station-shifts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); align-items: start; gap: 8px; padding: 8px; background: #f6f7f9; }
 .station-shift-insight { overflow: hidden; border: 1px solid #e4e7ec; border-left: 3px solid #12b76a; border-radius: 9px; background: #fff; box-shadow: none; }
 .station-shift-insight.needs-attention { border-left-color: #f04438; }
