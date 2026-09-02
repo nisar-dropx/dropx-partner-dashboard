@@ -80,6 +80,9 @@ export type ConnectOperationalPerformance = {
   selectedYear: number | null;
   averageSls: number | null;
   averageAttainment: number | null;
+  availableCpsMonths: string[];
+  selectedCpsMonth: string;
+  cpsPeriodState: "mtd" | "closed";
   cpsPeriodLabel: string;
   cpsLatestDate: string | null;
   averageCps: number | null;
@@ -102,8 +105,33 @@ function currentMonthStart(value = today()) {
   return `${value.slice(0, 7)}-01`;
 }
 
-function currentMonthLabel(value = today()) {
-  return new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${value}T12:00:00+05:30`));
+function monthKey(value = today()) {
+  return value.slice(0, 7);
+}
+
+function validMonth(value: unknown) {
+  const candidate = String(value ?? "").trim();
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(candidate) && candidate <= monthKey() ? candidate : monthKey();
+}
+
+function monthEnd(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+}
+
+function monthLabel(value = monthKey()) {
+  return new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${value}-15T12:00:00+05:30`));
+}
+
+function monthRange(first: string | null, last = monthKey()) {
+  const start = /^\d{4}-\d{2}$/.test(first ?? "") ? first! : last;
+  const [startYear, startMonth] = start.split("-").map(Number);
+  const [lastYear, lastMonth] = last.split("-").map(Number);
+  const values: string[] = [];
+  for (let cursor = new Date(Date.UTC(startYear, startMonth - 1, 1)); cursor <= new Date(Date.UTC(lastYear, lastMonth - 1, 1)); cursor.setUTCMonth(cursor.getUTCMonth() + 1)) {
+    values.push(`${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, "0")}`);
+  }
+  return values.reverse();
 }
 
 function locationUnit(modelCode: unknown): ConnectStationPerformance["unitType"] {
@@ -251,7 +279,10 @@ export async function loadConnectOperationalPerformance(input: {
   personId: string;
   engagementId: string;
   requestedWeek?: number | null;
+  requestedCpsMonth?: string | null;
 }): Promise<ConnectOperationalPerformance> {
+  const selectedCpsMonth = validMonth(input.requestedCpsMonth);
+  const cpsPeriodState = selectedCpsMonth === monthKey() ? "mtd" : "closed";
   const scope = await performanceLocationScope(input.account, input.personId, input.engagementId);
   let stationQuery = db().from("stations")
     .select("id,station_code,station_name,region,location_models(code,name)")
@@ -273,7 +304,10 @@ export async function loadConnectOperationalPerformance(input: {
     selectedYear: null,
     averageSls: null,
     averageAttainment: null,
-    cpsPeriodLabel: `${currentMonthLabel()} · MTD`,
+    availableCpsMonths: [selectedCpsMonth],
+    selectedCpsMonth,
+    cpsPeriodState,
+    cpsPeriodLabel: `${monthLabel(selectedCpsMonth)} · ${cpsPeriodState === "mtd" ? "MTD" : "Closed"}`,
     cpsLatestDate: null,
     averageCps: null,
     cpsOnTarget: 0,
@@ -282,7 +316,7 @@ export async function loadConnectOperationalPerformance(input: {
     stations: []
   };
 
-  const [factsResult, cpsResult, targetsResult] = await Promise.all([
+  const [factsResult, cpsResult, oldestCpsResult, targetsResult] = await Promise.all([
     db().from("report_metric_facts")
       .select("batch_id,report_year,report_week,station_code,row_label,raw_text,values_json,created_at")
       .eq("company_id", input.account.companyId)
@@ -296,17 +330,25 @@ export async function loadConnectOperationalPerformance(input: {
       .select("work_date,station_code,overall_cps,target_cps,target_gap")
       .eq("company_id", input.account.companyId)
       .in("station_code", stationCodes)
-      .gte("work_date", currentMonthStart())
-      .lte("work_date", today())
+      .gte("work_date", currentMonthStart(`${selectedCpsMonth}-01`))
+      .lte("work_date", cpsPeriodState === "mtd" ? today() : monthEnd(selectedCpsMonth))
       .order("work_date", { ascending: false })
       .limit(5000),
+    db().from("cps_station_daily")
+      .select("work_date")
+      .eq("company_id", input.account.companyId)
+      .in("station_code", stationCodes)
+      .lte("work_date", today())
+      .order("work_date", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
     db().from("report_import_master")
       .select("description")
       .eq("company_id", input.account.companyId)
       .eq("parser_type", "performance_target")
       .eq("is_active", true)
   ]);
-  const loadError = factsResult.error ?? cpsResult.error ?? targetsResult.error;
+  const loadError = factsResult.error ?? cpsResult.error ?? oldestCpsResult.error ?? targetsResult.error;
   if (loadError) throw new Error(loadError.message);
 
   const facts = (factsResult.data ?? []) as MetricFact[];
@@ -402,7 +444,10 @@ export async function loadConnectOperationalPerformance(input: {
     selectedYear,
     averageSls: slsCards.length ? slsCards.reduce((sum, card) => sum + (card.sls?.score ?? 0), 0) / slsCards.length : null,
     averageAttainment: slsCards.length ? Math.round(slsCards.reduce((sum, card) => sum + (card.sls?.attainment ?? 0), 0) / slsCards.length) : null,
-    cpsPeriodLabel: `${currentMonthLabel()} · MTD`,
+    availableCpsMonths: monthRange(oldestCpsResult.data?.work_date?.slice(0, 7) ?? null),
+    selectedCpsMonth,
+    cpsPeriodState,
+    cpsPeriodLabel: `${monthLabel(selectedCpsMonth)} · ${cpsPeriodState === "mtd" ? "MTD" : "Closed"}`,
     cpsLatestDate: cpsCards.map((card) => card.cps?.date ?? "").sort().at(-1) || null,
     averageCps: cpsCards.length ? cpsCards.reduce((sum, card) => sum + (card.cps?.value ?? 0), 0) / cpsCards.length : null,
     cpsOnTarget: cpsCards.filter((card) => card.cps?.onTarget).length,

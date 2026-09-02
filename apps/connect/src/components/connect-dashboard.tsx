@@ -437,6 +437,10 @@ export function ConnectDashboard({
 
     <section className="dx-dashboard-card today">
       <header><div><small>Today</small><h2>Attendance</h2></div><Pill text={todayStatus} tone={statusTone} /></header>
+      {today?.scheduledStart && today.scheduledStart !== "--:--" ? <p className="dx-dashboard-shift-expectation">
+        <CalendarClock />
+        <span><strong>Report by {today.scheduledStart}</strong><small>{today.shiftName || "Rostered shift"} · {today.scheduledStart}–{today.scheduledEnd}</small></span>
+      </p> : null}
       <div className="dx-dashboard-metrics">
         <Metric icon={<LogIn />} label="In" value={today?.inTime || "--:--"} tone="green" />
         <Metric icon={<LogOut />} label="Out" value={today?.outTime || "--:--"} tone="red" />
@@ -445,7 +449,7 @@ export function ConnectDashboard({
       </div>
       {today && (todayInsight.issues.length > 0 || todayInsight.needsRegularization) ? <button className={`dx-dashboard-attendance-nudge ${todayInsight.tone}`} onClick={onAttendance}>
         <AlertTriangle />
-        <span><strong>{todayInsight.headline}</strong><small>{todayInsight.issues.at(-1)?.message ?? todayInsight.detail}</small></span>
+        <span><strong>{todayInsight.headline}</strong><small>{todayInsight.detail}</small>{todayInsight.issues.filter((issue) => issue.code === "late" || issue.code === "early_out").map((issue) => <small className="dx-dashboard-attendance-penalty" key={issue.code}>{issue.label} · {issue.message}</small>)}</span>
         <ChevronRight />
       </button> : null}
       {attendanceAllowed ? <button className="dx-dashboard-link" onClick={onAttendance}>View attendance <ChevronRight /></button> : null}

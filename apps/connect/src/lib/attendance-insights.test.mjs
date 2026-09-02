@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { attendanceDayInsight } from "./attendance-insights.ts";
+import { attendanceDayInsight, attendanceIssueSummary } from "./attendance-insights.ts";
 
 function row(overrides = {}) {
   return {
@@ -57,8 +57,30 @@ test("does not call a complete punch pair missing when policy review is required
 });
 
 test("surfaces late and early-out consequences without replacing full-day status", () => {
-  const insight = attendanceDayInsight(row({ lateMinutes: 18, earlyOutMinutes: 7 }));
+  const lateRow = row({ lateMinutes: 18, earlyOutMinutes: 7, scheduledStart: "09:30", inTime: "09:48" });
+  const insight = attendanceDayInsight(lateRow);
   assert.equal(insight.label, "Full day");
   assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "early_out"]);
-  assert.match(insight.issues[0].message, /penalty may apply/i);
+  assert.match(insight.issues[0].message, /Expected 09:30 · reported 09:48/i);
+  assert.match(insight.issues[0].message, /will be deducted from an upcoming payment when the configured threshold is met/i);
+  assert.equal(attendanceIssueSummary(lateRow)?.code, "late");
+});
+
+test("keeps half day as the payable status while leading with the late warning", () => {
+  const halfDay = row({
+    attendanceStatus: "Half Day",
+    inTime: "15:19",
+    lateMinutes: 349,
+    scheduledStart: "09:30",
+    workHours: "05:57"
+  });
+  const insight = attendanceDayInsight(halfDay);
+  assert.equal(insight.label, "Half day");
+  assert.equal(insight.headline, "Half day recorded");
+  assert.match(insight.detail, /worked 5h 57m, below the full-day requirement/i);
+  assert.match(insight.detail, /company HR policy/i);
+  assert.match(insight.issues[0].message, /Expected 09:30 · reported 15:19/);
+  assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "half_day"]);
+  assert.equal(insight.needsRegularization, false);
+  assert.equal(attendanceIssueSummary(halfDay)?.code, "late");
 });

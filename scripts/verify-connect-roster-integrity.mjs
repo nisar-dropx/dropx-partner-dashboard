@@ -15,6 +15,9 @@ const checks = [
   [route.includes("projectedEntryId") && route.includes("hr_create_roster_swap_request"), "recurring dates materialize safe one-day swap overrides"],
   [route.includes("expandRecurringColleagueEntries") && component.includes('body: JSON.stringify({ accountId: account.id, profileType: account.profileType, requesterEntryId: selectedDay.id, partnerEntryId, rosterDate: selectedDay.date, note })'), "projected dates load colleagues and submit their exact roster date"],
   [component.includes('day.canSwap ? day.partners.length ? "Request swap"') && !component.includes('day.isProjected ? "Recurring schedule"'), "eligible recurring dates expose the swap action"],
+  [route.includes("isMeaningfulRosterSwap(entry, candidate)") && route.includes("Choose a colleague whose roster is different for this date."), "no-op weekly-off and same-shift swaps are hidden and rejected"],
+  [route.includes("assertSwapBeforeCutoff(requester, partner") && route.includes("for (const entry of workingEntries)"), "swap cutoff covers every working assignment in the exchange"],
+  [component.includes('"No valid swap"') && component.includes("Only different rosters can be exchanged."), "unavailable swap days explain the eligibility rule"],
   [component.includes("activeRequests") && component.includes("completedRequests"), "active requests and completed history are separated"],
   [component.includes("Recent swap history") && component.includes("You requested with"), "swap history is compact and shows request direction"],
   [component.includes("Your roster is not configured") && component.includes("Contact your HR or manager."), "an actually empty roster gives one clear next step"]

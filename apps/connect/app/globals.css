@@ -16,6 +16,23 @@
   --shadow: 0 1px 3px rgba(24, 24, 27, 0.08);
 }
 
+.dx-dashboard-shift-expectation {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding: 9px 10px;
+  color: rgba(255, 255, 255, .92);
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .08);
+}
+
+.dx-dashboard-shift-expectation > svg { width: 17px; height: 17px; flex: 0 0 auto; }
+.dx-dashboard-shift-expectation > span { display: grid; gap: 1px; }
+.dx-dashboard-shift-expectation strong { font-size: 11px; }
+.dx-dashboard-shift-expectation small { color: rgba(255, 255, 255, .7); font-size: 9px; }
+
 /* DropX One — policy-aware attendance outcomes and concise employee nudges */
 .dx-attendance-attention {
   display: grid;
@@ -73,6 +90,14 @@
   line-height: 1.35;
   text-overflow: ellipsis;
 }
+
+.dx-attendance-attention > span .dx-attendance-attention-penalty {
+  margin-top: 2px;
+  color: #9b3c17;
+  font-weight: 600;
+}
+
+.dx-attendance-attention-penalty b { font-weight: 800; }
 
 .dx-attendance-attention > button {
   min-height: 34px;
@@ -231,8 +256,10 @@
 
 .dx-attendance-day-insight > strong { font-size: 12px; }
 .dx-attendance-day-insight > small { color: inherit; font-size: 10px; line-height: 1.4; opacity: .82; }
-.dx-attendance-day-insight > div { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 3px; }
-.dx-attendance-day-insight > div span { display: inline-flex; padding: 4px 7px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, .8); font-size: 9px; font-weight: 700; }
+.dx-attendance-day-insight > .dx-attendance-consequence-list { display: grid; gap: 6px; margin-top: 5px; }
+.dx-attendance-consequence-list p { display: grid; gap: 1px; margin: 0; padding: 7px 8px; border-radius: 9px; background: rgba(255, 255, 255, .74); }
+.dx-attendance-consequence-list strong { font-size: 9px; }
+.dx-attendance-consequence-list small { color: inherit; font-size: 9px; line-height: 1.35; opacity: .82; }
 
 .dx-dashboard-attendance-nudge {
   display: grid;
@@ -254,6 +281,7 @@
 .dx-dashboard-attendance-nudge > span { display: grid; gap: 1px; min-width: 0; }
 .dx-dashboard-attendance-nudge strong { font-size: 11px; }
 .dx-dashboard-attendance-nudge small { color: inherit; font-size: 9px; line-height: 1.35; opacity: .74; }
+.dx-dashboard-attendance-nudge .dx-dashboard-attendance-penalty { margin-top: 2px; font-weight: 650; opacity: .92; }
 
 .dx-dashboard-alerts button > span {
   display: grid;

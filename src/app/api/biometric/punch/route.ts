@@ -1,8 +1,5 @@
 import { NextRequest } from "next/server";
-import {
-  createAttendanceOutcomeNotifications,
-  createAttendancePunchNotification
-} from "@/lib/app-notifications";
+import { createAttendancePunchNotification } from "@/lib/app-notifications";
 import { istDate, punchLabel, rebuildAttendanceDay, resolveAttendanceWorkDate } from "@/lib/biometric/attendance";
 import { checkBiometricPhoneMismatch } from "@/lib/biometric/attendance-gps";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -769,20 +766,7 @@ export async function POST(request: NextRequest) {
     const punchAgeMs = Date.now() - punchTime.getTime();
     const isRecentLivePunch = punchAgeMs >= -5 * 60_000 && punchAgeMs <= 20 * 60_000;
     if (!alreadyStored && recipientAccountId && isRecentLivePunch) {
-      const firstPunchTime = existingPunches.data?.[0]?.punch_time
-        ? new Date(existingPunches.data[0].punch_time)
-        : punchTime;
       await createAttendancePunchNotification({
-        accountId: recipientAccountId,
-        companyId: device.company_id,
-        firstPunchTime,
-        profileType,
-        punchDate,
-        punchId: String(punchResult.data.id),
-        punchOrder: nextOrder,
-        punchTime
-      });
-      await createAttendanceOutcomeNotifications({
         accountId: recipientAccountId,
         companyId: device.company_id,
         enrolmentId: canonicalEnrolmentId,

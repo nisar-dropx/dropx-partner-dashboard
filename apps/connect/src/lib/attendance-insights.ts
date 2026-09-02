@@ -50,7 +50,30 @@ function normalized(value: string | null | undefined) {
 
 function pluralMinutes(value: number) {
   const minutes = Math.max(1, Math.round(value));
-  return `${minutes} min`;
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+function rosterExpectation(row: AttendanceInsightRow) {
+  return row.scheduledStart && row.scheduledStart !== "--:--" && row.inTime
+    ? `Expected ${row.scheduledStart} · reported ${row.inTime}. `
+    : "";
+}
+
+function workedDuration(value: string) {
+  const [hours, minutes] = String(value ?? "").split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return value || "0 min";
+  return pluralMinutes(hours * 60 + minutes);
+}
+
+function durationOutcomeDetail(row: AttendanceInsightRow, outcome: "Half Day" | "Absent") {
+  const worked = workedDuration(row.workHours);
+  const reason = outcome === "Half Day"
+    ? `You worked ${worked}, below the full-day requirement. This day is marked Half Day under company HR policy.`
+    : `You worked ${worked}, below the half-day requirement. This day is marked Absent under company HR policy.`;
+  return `${reason} If the attendance record is wrong, request regularization.`;
 }
 
 function fallbackLabel(row: AttendanceInsightRow) {
@@ -94,8 +117,8 @@ export function attendanceDayInsight(
   if (lateMinutes > 0) {
     issues.push({
       code: "late",
-      label: `Late ${pluralMinutes(lateMinutes)}`,
-      message: "Late-arrival penalty may apply under the People attendance policy.",
+      label: `Reported ${pluralMinutes(lateMinutes)} late`,
+      message: `${rosterExpectation(row)}Late penalty applies under company HR policy and will be deducted from an upcoming payment when the configured threshold is met.`,
       tone: "amber"
     });
   }
@@ -103,7 +126,7 @@ export function attendanceDayInsight(
     issues.push({
       code: "early_out",
       label: `Early out ${pluralMinutes(earlyOutMinutes)}`,
-      message: "Short-hours deduction may apply under the People attendance policy.",
+      message: `${row.scheduledEnd && row.scheduledEnd !== "--:--" ? `Expected shift end ${row.scheduledEnd}. ` : ""}Early checkout penalty applies when worked hours are short; the applicable deduction will be made from an upcoming payment under company HR policy.`,
       tone: "amber"
     });
   }
@@ -160,7 +183,7 @@ export function attendanceDayInsight(
     });
     return {
       calendarClass: "review",
-      detail: "The People attendance policy marked this day for review.",
+      detail: "Company HR policy marked this day for review.",
       headline: "Attendance needs review",
       issues,
       label: "Needs review",
@@ -173,16 +196,16 @@ export function attendanceDayInsight(
     issues.push({
       code: "absent",
       label: "Absent",
-      message: "Regularize this day if the attendance record is incorrect.",
+      message: "Absence deduction applies. Regularize only if the recorded attendance is incorrect.",
       tone: "red"
     });
     return {
       calendarClass: "absent",
-      detail: "No payable attendance is recorded for this day.",
+      detail: durationOutcomeDetail(row, "Absent"),
       headline: "Absent recorded",
       issues,
       label: "Absent",
-      needsRegularization: true,
+      needsRegularization: false,
       tone: "red"
     };
   }
@@ -191,16 +214,16 @@ export function attendanceDayInsight(
     issues.push({
       code: "half_day",
       label: "Half day",
-      message: "Half-day deduction may apply under the People attendance policy.",
+      message: "Half-day deduction applies under company HR policy and will be deducted from your upcoming payment.",
       tone: "amber"
     });
     return {
       calendarClass: "half",
-      detail: "Worked hours are below the configured full-day requirement.",
+      detail: durationOutcomeDetail(row, "Half Day"),
       headline: "Half day recorded",
       issues,
       label: "Half day",
-      needsRegularization: true,
+      needsRegularization: false,
       tone: "amber"
     };
   }
@@ -233,9 +256,9 @@ export function attendanceIssueSummary(row: AttendanceInsightRow | undefined) {
   const insight = attendanceDayInsight(row);
   return insight.issues.find((issue) => issue.code === "missing_punch")
     ?? insight.issues.find((issue) => issue.code === "policy_review")
+    ?? insight.issues.find((issue) => issue.code === "late")
+    ?? insight.issues.find((issue) => issue.code === "early_out")
     ?? insight.issues.find((issue) => issue.code === "absent")
     ?? insight.issues.find((issue) => issue.code === "half_day")
-    ?? insight.issues.find((issue) => issue.code === "early_out")
-    ?? insight.issues.find((issue) => issue.code === "late")
     ?? null;
 }

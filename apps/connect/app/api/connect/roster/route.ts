@@ -27,6 +27,17 @@ function identityKey(identity: WorkerIdentity) { return `${identity.workerType}:
 function isOwnIdentity(workerType: WorkerType, workerId: string, identities: WorkerIdentity[]) { return identities.some((identity) => identity.workerType === workerType && identity.workerId === workerId); }
 function shiftOf(entry: Entry) { return relation(entry.hr_shifts); }
 function planOf(entry: Entry) { return relation(entry.hr_roster_plans); }
+function hasAssignedWorkingShift(entry: Entry) { return entry.day_type === "weekly_off" || Boolean(entry.shift_id && shiftOf(entry)); }
+function rosterAssignmentKey(entry: Entry) {
+  if (entry.day_type === "weekly_off") return "weekly_off";
+  const shift = shiftOf(entry);
+  return shift ? `working:${shift.start_time.slice(0, 8)}:${shift.end_time.slice(0, 8)}` : "working:unassigned";
+}
+function isMeaningfulRosterSwap(requester: Entry, partner: Entry) {
+  return hasAssignedWorkingShift(requester)
+    && hasAssignedWorkingShift(partner)
+    && rosterAssignmentKey(requester) !== rosterAssignmentKey(partner);
+}
 function isoWeekday(date: string) {
   const day = new Date(`${date}T00:00:00Z`).getUTCDay();
   return day === 0 ? 7 : day;
@@ -176,6 +187,11 @@ function assertBeforeCutoff(entry: Entry, leadHours: number) {
   if (!Number.isFinite(beginsAt) || Date.now() > beginsAt - leadHours * 3_600_000) throw new Error(`Shift swaps close ${leadHours} hours before the shift.`);
 }
 
+function assertSwapBeforeCutoff(requester: Entry, partner: Entry, rosterDate: string, leadHours: number) {
+  const workingEntries = [requester, partner].filter((entry) => entry.day_type === "working");
+  for (const entry of workingEntries) assertBeforeCutoff({ ...entry, roster_date: rosterDate }, leadHours);
+}
+
 async function immediateManager(companyId: string, workerType: WorkerType, workerId: string) {
   const today = todayIndia();
   const workerColumn = workerType === "employee" ? "employee_id" : "contractor_id";
@@ -252,9 +268,16 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   const leadHours = await swapCutoff(account.companyId);
   const entriesById = new Map([...own, ...colleagueEntries].map((entry) => [entry.id, entry]));
   const days = own.map((entry) => {
-    const partners = colleagueEntries.filter((candidate) => candidate.id !== entry.id && candidate.roster_date === entry.roster_date && candidate.location_id === entry.location_id && !isOwnIdentity(candidate.worker_type, candidate.worker_id, identities)).map((candidate) => ({ id: candidate.id, workerType: candidate.worker_type, workerId: candidate.worker_id, ...names.get(`${candidate.worker_type}:${candidate.worker_id}`), dayType: candidate.day_type, shift: candidate.day_type === "weekly_off" ? null : shiftOf(candidate) }));
-    let canSwap = true;
-    try { assertBeforeCutoff(entry, leadHours); } catch { canSwap = false; }
+    const meaningfulPartners = colleagueEntries.filter((candidate) => candidate.id !== entry.id
+      && candidate.roster_date === entry.roster_date
+      && candidate.location_id === entry.location_id
+      && !isOwnIdentity(candidate.worker_type, candidate.worker_id, identities)
+      && isMeaningfulRosterSwap(entry, candidate));
+    const partners = meaningfulPartners.filter((candidate) => {
+      try { assertSwapBeforeCutoff(entry, candidate, entry.roster_date, leadHours); return true; }
+      catch { return false; }
+    }).map((candidate) => ({ id: candidate.id, workerType: candidate.worker_type, workerId: candidate.worker_id, ...names.get(`${candidate.worker_type}:${candidate.worker_id}`), dayType: candidate.day_type, shift: candidate.day_type === "weekly_off" ? null : shiftOf(candidate) }));
+    const canSwap = !meaningfulPartners.length || Boolean(partners.length);
     return {
       id: entry.id, date: entry.roster_date, dayType: entry.day_type, locationId: entry.location_id,
       shift: entry.day_type === "weekly_off" ? null : shiftOf(entry),
@@ -311,7 +334,8 @@ export async function POST(request: Request) {
     const rosterDate = requestedDate || requester.roster_date;
     if (requesterSelection?.date !== partnerSelection?.date && requesterSelection && partnerSelection) throw new Error("Choose a colleague from the same date.");
     if (requester.location_id !== partner.location_id) throw new Error("Choose a colleague from the same location.");
-    const leadHours = await swapCutoff(account.companyId); assertBeforeCutoff({ ...requester, roster_date: rosterDate }, leadHours);
+    if (!isMeaningfulRosterSwap(requester, partner)) throw new Error("Choose a colleague whose roster is different for this date.");
+    const leadHours = await swapCutoff(account.companyId); assertSwapBeforeCutoff(requester, partner, rosterDate, leadHours);
     const approverUserId = await immediateManager(account.companyId, workerType, account.id);
     const created = await db().rpc("hr_create_roster_swap_request", { p_company_id: account.companyId, p_requester_source_entry_id: requester.id, p_partner_source_entry_id: partner.id, p_roster_date: rosterDate, p_requester_worker_type: requester.worker_type, p_requester_worker_id: requester.worker_id, p_approver_user_id: approverUserId, p_requester_note: note || null });
     if (created.error) throw new Error(created.error.message);
