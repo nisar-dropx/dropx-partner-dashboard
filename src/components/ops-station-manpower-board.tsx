@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type CSSProperties } from "react";
-import { AlertTriangle, CalendarClock, CheckCircle2, Clock3, Gauge, LogIn, MapPin, UserRoundCheck, Users2 } from "lucide-react";
+import { AlertTriangle, CalendarClock, CheckCircle2, ChevronDown, Clock3, Gauge, LogIn, MapPin, UserRoundCheck, Users2 } from "lucide-react";
 import { StationLiveRefresh } from "@/components/station-live-refresh";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import type { OpsStationManpowerPerson } from "@/lib/ops-pulse/station-manpower";
@@ -89,8 +89,9 @@ function ShiftInsight({ people, shiftName, locationCode }: { people: OpsStationM
   const missing = expectedPeople.filter((person) => attendanceState(person) === "missing").length;
   const away = people.filter((person) => attendanceState(person) === "away").length;
   const reported = onTime + late;
-  const [selectedState, setSelectedState] = useState<AttendanceState | "all">(late ? "late" : missing ? "missing" : "all");
+  const [selectedState, setSelectedState] = useState<AttendanceState | "all">("all");
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const selectedPeople = selectedPersonId
     ? people.filter((person) => `${person.workerType}:${person.id}` === selectedPersonId)
     : selectedState === "all" ? people : people.filter((person) => attendanceState(person) === selectedState);
@@ -108,10 +109,11 @@ function ShiftInsight({ people, shiftName, locationCode }: { people: OpsStationM
   function chooseState(state: AttendanceState | "all") {
     setSelectedState(state);
     setSelectedPersonId(null);
+    setExpanded(true);
   }
 
   return <section className={`station-shift-insight ${late || missing ? "needs-attention" : "is-ready"}`}>
-    <header className="station-shift-heading"><div><span className="station-shift-kicker"><CalendarClock size={13} />{shiftTitle}</span><h3>{shift ? `${shift.startLabel}–${shift.endLabel}` : "Needs a roster or effective shift"}</h3><p>{scheduled ? `${expected} expected · ${reported} reported${late ? ` · median late arrival ${median(lateValues)} min` : missing ? ` · ${missing} still not reported` : " · everyone reported on time"}` : `${people.length} active ${people.length === 1 ? "person has" : "people have"} no shift assignment for this date.`}</p></div><div className="station-shift-score"><strong>{expected ? Math.round(reported / expected * 100) : "—"}{expected ? "%" : ""}</strong><span>reported</span></div></header>
+    <header className="station-shift-heading"><div><span className="station-shift-kicker"><CalendarClock size={13} />{shiftTitle}</span><h3>{shift ? `${shift.startLabel}–${shift.endLabel}` : "Needs a roster or effective shift"}</h3><p>{scheduled ? `${expected} expected · ${reported} reported${late ? ` · median late arrival ${median(lateValues)} min` : missing ? ` · ${missing} still not reported` : " · everyone reported on time"}` : `${people.length} active ${people.length === 1 ? "person has" : "people have"} no shift assignment for this date.`}</p></div><div className="station-shift-score"><strong>{expected ? Math.round(reported / expected * 100) : "—"}{expected ? "%" : ""}</strong><span>reported</span></div><button type="button" className={`station-shift-toggle ${expanded ? "active" : ""}`} aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>{expanded ? "Hide" : "Details"}<ChevronDown size={13} /></button></header>
     {scheduled ? <>
       <div className="station-shift-kpis" aria-label={`${locationCode} ${shiftTitle} attendance breakdown`}>
         <button type="button" className={selectedState === "all" ? "active" : ""} onClick={() => chooseState("all")}><span>Expected</span><strong>{expected}</strong></button>
@@ -120,13 +122,13 @@ function ShiftInsight({ people, shiftName, locationCode }: { people: OpsStationM
         <button type="button" className={`missing ${selectedState === "missing" ? "active" : ""}`} onClick={() => chooseState("missing")}><span>Missing</span><strong>{missing}</strong></button>
         {away ? <button type="button" className={`away ${selectedState === "away" ? "active" : ""}`} onClick={() => chooseState("away")}><span>Leave / off</span><strong>{away}</strong></button> : null}
       </div>
-      <div className="station-arrival-visual">
+      <div className="station-attendance-bar station-attendance-bar-summary" aria-label={`${onTime} on time, ${late} late, ${missing} not reported`}>
+        {onTime ? <button type="button" className="on-time" style={{ width: `${onTime / Math.max(1, expected) * 100}%` }} onClick={() => chooseState("on-time")} aria-label={`${onTime} reported on time`}><span>{onTime}</span></button> : null}
+        {late ? <button type="button" className="late" style={{ width: `${late / Math.max(1, expected) * 100}%` }} onClick={() => chooseState("late")} aria-label={`${late} reported late`}><span>{late}</span></button> : null}
+        {missing ? <button type="button" className="missing" style={{ width: `${missing / Math.max(1, expected) * 100}%` }} onClick={() => chooseState("missing")} aria-label={`${missing} have not reported`}><span>{missing}</span></button> : null}
+      </div>
+      {expanded ? <div className="station-arrival-visual">
         <div className="station-arrival-head"><span>Shift reporting</span><small>Click a colour or arrival marker to inspect people</small></div>
-        <div className="station-attendance-bar" aria-label={`${onTime} on time, ${late} late, ${missing} not reported`}>
-          {onTime ? <button type="button" className="on-time" style={{ width: `${onTime / Math.max(1, expected) * 100}%` }} onClick={() => chooseState("on-time")} aria-label={`${onTime} reported on time`}><span>{onTime}</span></button> : null}
-          {late ? <button type="button" className="late" style={{ width: `${late / Math.max(1, expected) * 100}%` }} onClick={() => chooseState("late")} aria-label={`${late} reported late`}><span>{late}</span></button> : null}
-          {missing ? <button type="button" className="missing" style={{ width: `${missing / Math.max(1, expected) * 100}%` }} onClick={() => chooseState("missing")} aria-label={`${missing} have not reported`}><span>{missing}</span></button> : null}
-        </div>
         <div className="station-arrival-timeline">
           <span className="station-scheduled-line" style={{ left: `${scheduledPosition}%` }} />
           {expectedPeople.map((person, index) => {
@@ -139,10 +141,10 @@ function ShiftInsight({ people, shiftName, locationCode }: { people: OpsStationM
         </div>
         <div className="station-arrival-axis"><span>−15m</span><span style={{ left: `${scheduledPosition}%` }}>Scheduled {shift?.startLabel}</span><span>+{timelineEnd}m</span></div>
         <div className="station-arrival-legend"><span className="on-time">On time</span><span className="late">Late</span><span className="missing">Not reported</span></div>
-      </div>
+      </div> : null}
     </> : null}
-    <div className="station-shift-detail-head"><strong>{selectedPersonId ? "Selected person" : selectedState === "all" ? "Shift team" : selectedState === "on-time" ? "On-time arrivals" : selectedState === "late" ? "Late arrivals" : selectedState === "missing" ? "Not reported" : "Leave / roster off"}</strong><span>{selectedPeople.length} {selectedPeople.length === 1 ? "person" : "people"}</span></div>
-    <div className="station-shift-people">{selectedPeople.map((person) => <article className={attendanceState(person)} key={`${person.workerType}:${person.id}`}><span className="station-manpower-avatar">{initials(person.name)}</span><div className="station-manpower-person"><strong>{person.name}</strong><small>{person.designation} · {person.code}</small></div><span className={`station-manpower-status ${attendanceState(person)}`}>{stateLabel(person)}</span><div className="station-person-timing"><span><LogIn size={12} />IN <strong>{clock(person.today.inTime)}</strong></span><span>OUT <strong>{clock(person.today.outTime)}</strong></span><small>{duration(person.today.workMinutes)}{person.today.missingPunch ? " · Open punch" : ""}</small></div><a href={person.profileHref} target="_blank" rel="noreferrer">Open in People</a></article>)}</div>
+    {expanded ? <><div className="station-shift-detail-head"><strong>{selectedPersonId ? "Selected person" : selectedState === "all" ? "Shift team" : selectedState === "on-time" ? "On-time arrivals" : selectedState === "late" ? "Late arrivals" : selectedState === "missing" ? "Not reported" : "Leave / roster off"}</strong><span>{selectedPeople.length} {selectedPeople.length === 1 ? "person" : "people"}</span></div>
+    <div className="station-shift-people">{selectedPeople.map((person) => <article className={attendanceState(person)} key={`${person.workerType}:${person.id}`}><span className="station-manpower-avatar">{initials(person.name)}</span><div className="station-manpower-person"><strong>{person.name}</strong><small>{person.designation} · {person.code}</small></div><span className={`station-manpower-status ${attendanceState(person)}`}>{stateLabel(person)}</span><div className="station-person-timing"><span><LogIn size={12} />IN <strong>{clock(person.today.inTime)}</strong></span><span>OUT <strong>{clock(person.today.outTime)}</strong></span><small>{duration(person.today.workMinutes)}{person.today.missingPunch ? " · Open punch" : ""}</small></div><a href={person.profileHref} target="_blank" rel="noreferrer">Open in People</a></article>)}</div></> : null}
   </section>;
 }
 
@@ -161,7 +163,7 @@ export function OpsStationManpowerBoard({ asOf, locations, people }: { asOf: str
       <article className={missing ? "attention" : "good"}><AlertTriangle size={17} /><span>Not reported</span><strong>{missing}</strong><small>Scheduled but no punch</small></article>
       <StationLiveRefresh />
     </section>
-    <section className="station-insight-intro"><div><span><Gauge size={14} />Location shift insights</span><h2>Who was expected, when they arrived, and where action is needed</h2><p>Every office, station or store uses its own people and shift structure. Select a status segment or arrival marker to inspect the evidence.</p></div><div className="station-insight-legend"><span className="on-time">On time</span><span className="late">Late</span><span className="missing">Not reported</span><span className="away">Leave / off</span></div></section>
+    <section className="station-insight-intro"><div><span><Gauge size={14} />Location shift insights</span><h2>Shift readiness and arrival exceptions</h2></div><div className="station-insight-legend"><span className="on-time">On time</span><span className="late">Late</span><span className="missing">Not reported</span><span className="away">Leave / off</span></div></section>
     <div className="station-manpower-grid">{locations.map((location) => {
       const locationPeople = people.filter((person) => person.locationId === location.id).sort((left, right) => tier(left.designation) - tier(right.designation) || left.designation.localeCompare(right.designation) || left.name.localeCompare(right.name));
       const experience = locationExperience(location);
