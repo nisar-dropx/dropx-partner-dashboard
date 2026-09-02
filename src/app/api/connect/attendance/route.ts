@@ -2,10 +2,13 @@ import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
-import { loadAttendanceReportRows } from "@/lib/biometric/attendance";
+import { formatTime, loadAttendanceReportRows } from "@/lib/biometric/attendance";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
-import { resolveAttendanceApprovalSteps } from "@/lib/connect-attendance-approval";
+import { resolveAttendanceRegularizationApprovers } from "@/lib/attendance-regularization-workflow";
+import { notifyAttendanceApprovalRequired } from "@/lib/connect-attendance-notifications";
+import { releaseOrphanedHeldPunches } from "@/lib/biometric/attendance-integrity-resolution";
+import { resolveStationAttendanceSettings } from "@/lib/biometric/station-attendance-settings";
 import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
 
 function monthRange(month: string | null) {
@@ -30,6 +33,32 @@ function cleanEnrolmentId(value: unknown) {
   if (!digits) return "";
   return digits.replace(/^0+/, "") || "0";
 }
+
+function enrolmentVariants(value: unknown) {
+  const raw = String(value ?? "").trim();
+  const cleaned = cleanEnrolmentId(value);
+  const primary = cleaned || raw;
+  return Array.from(new Set([
+    raw,
+    cleaned,
+    primary.padStart(6, "0"),
+    primary.padStart(8, "0")
+  ].filter(Boolean)));
+}
+
+type ConnectAttendanceResponseRow = {
+  date: string;
+  status: string;
+  inTime: string;
+  outTime: string;
+  punches: string[];
+  workHours: string;
+  punchCount: number;
+  remark: string;
+  regularization: Record<string, unknown> | null;
+  pendingReview?: boolean;
+  statusLabel?: string;
+};
 
 function isMissingRegularizationTable(message: unknown) {
   const text = String(message ?? "").toLowerCase();
@@ -81,7 +110,7 @@ async function resolveWorker({
     const idColumn = resolvedProfileType === "employee" ? "employee_code" : "dropx_id";
     const result = await supabaseAdmin
       .from(table)
-      .select(`id, company_id, mobile, mobile_country_code, biometric_id, full_name, ${idColumn}`)
+      .select(`id, company_id, mobile, mobile_country_code, biometric_id, full_name, location_id, ${idColumn}`)
       .eq("id", accountId)
       .maybeSingle();
     if (result.error) throw new Error(result.error.message);
@@ -92,15 +121,24 @@ async function resolveWorker({
     if (rowCountryCode !== countryCode || (rowMobile !== mobile && rowMobile !== localMobile)) {
       throw new Error("This attendance is not available for the signed-in account.");
     }
-    const enrolmentId = cleanEnrolmentId(row.biometric_id);
+    const primaryEnrolmentId = cleanEnrolmentId(row.biometric_id) || String(row.id).replace(/-/g, "").slice(0, 16);
+    const allVariants = Array.from(new Set([
+      ...enrolmentVariants(row.biometric_id),
+      ...enrolmentVariants(primaryEnrolmentId)
+    ]));
     return {
       companyId: row.company_id as string,
       profileId: row.id as string,
       profileType: resolvedProfileType,
       dropxId: String(row[idColumn as keyof typeof row] ?? ""),
-      biometricId: String(row.biometric_id ?? ""),
+      biometricId: String(row.biometric_id ?? "").trim() || primaryEnrolmentId,
       fullName: String(row.full_name ?? ""),
-      filter: (item: Awaited<ReturnType<typeof loadAttendanceReportRows>>[number]) => Boolean(enrolmentId) && cleanEnrolmentId(item.enrolmentId) === enrolmentId
+      locationId: (row.location_id as string | null) ?? null,
+      enrolmentVariants: allVariants,
+      filter: (item: Awaited<ReturnType<typeof loadAttendanceReportRows>>[number]) => {
+        const itemId = cleanEnrolmentId(item.enrolmentId);
+        return allVariants.some((variant) => cleanEnrolmentId(variant) === itemId);
+      }
     };
   }
   throw new Error("Attendance is available for workforce accounts only.");
@@ -114,16 +152,43 @@ export async function GET(request: NextRequest) {
     if (!accountId) throw new Error("Account is required.");
     const range = monthRange(request.nextUrl.searchParams.get("month"));
     const worker = await resolveWorker({ accountId, profileType });
+    await releaseOrphanedHeldPunches({
+      companyId: worker.companyId,
+      enrolmentIds: worker.enrolmentVariants,
+      locationId: worker.locationId
+    });
+    const stationSettings = await resolveStationAttendanceSettings(worker.locationId);
     const rows = (await loadAttendanceReportRows({
       companyId: worker.companyId,
-      enrolmentIds: [worker.biometricId],
+      enrolmentIds: worker.enrolmentVariants,
       fromDate: range.fromDate,
       toDate: range.toDate,
       reportType: "performance"
     })).filter(worker.filter);
     const present = rows.filter((row) => row.status === "P").length;
     const absent = rows.filter((row) => row.status === "A").length;
-    const misPunch = rows.filter((row) => row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length;
+    const heldPunchResult = stationSettings.integrityFlagsEnabled
+      ? await supabaseAdmin
+        .from("attendance_punches")
+        .select("punch_date, punch_time")
+        .eq("company_id", worker.companyId)
+        .in("enrolment_id", worker.enrolmentVariants)
+        .gte("punch_date", range.fromDate)
+        .lte("punch_date", range.toDate)
+        .eq("calculated", false)
+        .eq("is_flagged", true)
+        .order("punch_time", { ascending: true })
+      : { data: [], error: null };
+    if (heldPunchResult.error) throw new Error(heldPunchResult.error.message);
+    const heldPunchesByDate = new Map<string, string[]>();
+    for (const punch of heldPunchResult.data ?? []) {
+      const date = String(punch.punch_date ?? "");
+      const time = formatTime(punch.punch_time);
+      if (!date || time === "--:--") continue;
+      const times = heldPunchesByDate.get(date) ?? [];
+      times.push(time);
+      heldPunchesByDate.set(date, times);
+    }
     const requestsResult = await supabaseAdmin
       .from("attendance_regularization_requests")
       .select("id, attendance_date, requested_in_time, requested_out_time, reason_code, remarks, attachment_path, status, review_remarks, created_at")
@@ -153,7 +218,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const responseRows = rows.map((row) => ({
+    const responseRows: ConnectAttendanceResponseRow[] = rows.map((row) => ({
       date: row.punchDate,
       status: row.status,
       inTime: row.inTime,
@@ -164,6 +229,33 @@ export async function GET(request: NextRequest) {
       remark: row.remark,
       regularization: requestByDate.get(row.punchDate) ?? null
     }));
+    for (const [date, heldTimes] of heldPunchesByDate) {
+      const existing = responseRows.find((row) => row.date === date);
+      const combinedPunches = Array.from(new Set([...(existing?.punches ?? []), ...heldTimes])).sort();
+      if (existing) {
+        existing.punches = combinedPunches;
+        existing.punchCount = combinedPunches.length;
+        existing.inTime = combinedPunches[0] ?? existing.inTime;
+        existing.outTime = combinedPunches.length > 1 ? combinedPunches[combinedPunches.length - 1] : existing.outTime;
+        existing.pendingReview = true;
+        existing.statusLabel = "Verification pending";
+        existing.remark = "Biometric punch captured · attendance integrity review pending";
+      } else {
+        responseRows.push({
+          date,
+          status: "",
+          inTime: combinedPunches[0] ?? "",
+          outTime: combinedPunches.length > 1 ? combinedPunches[combinedPunches.length - 1] : "",
+          punches: combinedPunches,
+          workHours: "00:00",
+          punchCount: combinedPunches.length,
+          remark: "Biometric punch captured · attendance integrity review pending",
+          regularization: requestByDate.get(date) ?? null,
+          pendingReview: true,
+          statusLabel: "Verification pending"
+        });
+      }
+    }
     const attendanceDates = new Set(responseRows.map((row) => row.date));
     for (const [date, regularization] of requestByDate) {
       if (!attendanceDates.has(date)) {
@@ -182,13 +274,20 @@ export async function GET(request: NextRequest) {
     }
     responseRows.sort((left, right) => left.date.localeCompare(right.date));
 
+    const misPunchDates = new Set([
+      ...rows
+        .filter((row) => row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing"))
+        .map((row) => row.punchDate),
+      ...heldPunchesByDate.keys()
+    ]);
+
     return NextResponse.json({
       month: range.label,
       summary: {
         totalRows: rows.length,
         present,
         absent,
-        misPunch
+        misPunch: misPunchDates.size
       },
       rows: responseRows
     });
@@ -295,11 +394,11 @@ export async function POST(request: NextRequest) {
       throw new Error("Attendance regularization is available only for employees and independent contractors.");
     }
     const workerType = worker.profileType as "employee" | "contractor";
-    const approvalSteps = await resolveAttendanceApprovalSteps({
-      companyId: worker.companyId,
-      workerId: worker.profileId,
-      workerType
-    });
+    const approval = await resolveAttendanceRegularizationApprovers(
+      worker.companyId,
+      workerType,
+      worker.profileId
+    );
     const createResult = await supabaseAdmin.rpc("hr_create_attendance_regularization_with_steps", {
       p_company_id: worker.companyId,
       p_profile_type: worker.profileType,
@@ -315,10 +414,14 @@ export async function POST(request: NextRequest) {
       p_reason_code: reasonCode,
       p_remarks: remarks,
       p_attachment_path: attachmentPath,
-      p_steps: approvalSteps.map((step) => ({
+      p_steps: approval.steps.map((step) => ({
         step_name: step.step_name,
         approver_user_id: step.approver_user_id,
-        approver_person_id: step.approver_person_id
+        approver_person_id: step.approver_person_id,
+        route_id: step.route_id ?? null,
+        resolved_via: step.resolved_via ?? null,
+        original_approver_person_id: step.original_approver_person_id ?? null,
+        fallback_reason: step.fallback_reason ?? null
       })),
       p_attachment_path_out: attachmentPathOut
     });
@@ -329,20 +432,31 @@ export async function POST(request: NextRequest) {
     }
     const requestId = String(createResult.data ?? "");
     if (!requestId) throw new Error("Unable to create attendance regularization request.");
+    const initialStatus = approval.steps.length ? "pending_manager" : "pending_hr";
     await createAppNotification({
       accountId: worker.profileId,
       companyId: worker.companyId,
       data: {
         attendanceDate,
         regularizationRequestId: requestId,
-        status: "pending_manager"
+        status: initialStatus
       },
       eventCode: "attendance_regularization_submitted",
       profileType: worker.profileType,
       sourceKey: `${requestId}:${new Date().toISOString()}`,
       variables: { date: attendanceDate.split("-").reverse().join("/") }
     });
-    return NextResponse.json({ ok: true, request: { id: requestId, status: "pending_manager" } });
+    const firstApprover = approval.steps[0];
+    if (firstApprover) {
+      await notifyAttendanceApprovalRequired({
+        companyId: worker.companyId,
+        requestId,
+        recipientUserId: firstApprover.approver_user_id,
+        workerName: worker.fullName || "Team member",
+        attendanceDate
+      });
+    }
+    return NextResponse.json({ ok: true, request: { id: requestId, status: initialStatus } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to submit regularization request.";
     const status = message.includes("Login") ? 401 : 400;

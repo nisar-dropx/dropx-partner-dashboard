@@ -1,7 +1,9 @@
 import "server-only";
 
 import type { ConnectAccount } from "./connect-auth";
-import { connectApproverIdentity } from "./connect-expense-data";
+import { connectApproverIdentity, expenseWorkerType } from "./connect-expense-data";
+import { resolveConnectApproverUserId } from "./connect-approver-identity";
+import { notifyAttendanceApprovalRequired } from "../../../../src/lib/connect-attendance-notifications";
 import { connectReporteeMatches, type ConnectReporteeAccess } from "./connect-reportee-scope";
 import { notifyConnectExitOutcome, notifyExitApprovalRequired } from "./connect-exit-notifications";
 import { todayInIndia } from "./india-date";
@@ -53,7 +55,20 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 
 async function approverUserId(account: ConnectAccount) {
   if (account.profileType === "user") return account.id;
-  return (await connectApproverIdentity(account))?.userId ?? null;
+  try {
+    const identity = await connectApproverIdentity(account);
+    if (identity.userId) return identity.userId;
+    return resolveConnectApproverUserId(account.companyId, identity.personId);
+  } catch {
+    const workerType = expenseWorkerType(account.profileType);
+    if (!workerType) return null;
+    const workerColumn = workerType === "employee" ? "employee_id" : "contractor_id";
+    const engagement = await db().from("hr_engagements").select("person_id,status")
+      .eq("company_id", account.companyId).eq("worker_type", workerType).eq(workerColumn, account.id)
+      .eq("status", "active").limit(1).maybeSingle();
+    if (engagement.error || !engagement.data) return null;
+    return resolveConnectApproverUserId(account.companyId, engagement.data.person_id);
+  }
 }
 
 async function canConnectFinalizeAttendance(companyId: string, userId: string) {
@@ -254,8 +269,26 @@ export async function decideConnectAttendanceApproval(account: ConnectAccount, r
     p_note: note
   });
   if (result.error) throw new Error(result.error.message);
+  if (result.data === "pending_manager") {
+    const [requestRow, nextStep] = await Promise.all([
+      db().from("attendance_regularization_requests").select("full_name,attendance_date")
+        .eq("company_id", account.companyId).eq("id", requestId).maybeSingle(),
+      db().from("attendance_regularization_approval_steps").select("approver_user_id")
+        .eq("company_id", account.companyId).eq("request_id", requestId).eq("status", "pending")
+        .order("step_order", { ascending: true }).limit(1).maybeSingle()
+    ]);
+    if (!requestRow.error && !nextStep.error && nextStep.data?.approver_user_id) {
+      await notifyAttendanceApprovalRequired({
+        companyId: account.companyId,
+        requestId,
+        recipientUserId: nextStep.data.approver_user_id,
+        workerName: requestRow.data?.full_name || "Team member",
+        attendanceDate: String(requestRow.data?.attendance_date ?? "")
+      });
+    }
+    return "Attendance step approved and routed to the next manager.";
+  }
   if (result.data === "approved") return "Attendance regularization approved.";
-  if (result.data === "pending_manager") return "Attendance step approved and routed to the next manager.";
   if (result.data === "pending_hr") return "Manager approvals complete. People will perform final attendance validation.";
   return "Attendance regularization rejected.";
 }

@@ -1,7 +1,7 @@
 import "server-only";
 
-import { resolveConfiguredApprovalWorkflow as resolveSharedWorkflow } from "../../../../packages/approval-routing/configured-approval-routing";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { resolveConfiguredApprovalWorkflow as resolveSharedWorkflow } from "./approval-workflow-routing";
+import { supabaseAdmin } from "./supabase-admin";
 
 export async function resolveConfiguredApprovalWorkflow(input: {
   companyId: string;
@@ -11,5 +11,5 @@ export async function resolveConfiguredApprovalWorkflow(input: {
   asOf?: string;
 }) {
   if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
-  return resolveSharedWorkflow(supabaseAdmin, input);
+  return resolveSharedWorkflow(input);
 }
