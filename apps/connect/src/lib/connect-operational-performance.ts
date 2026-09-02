@@ -53,6 +53,7 @@ export type ConnectStationPerformance = {
   name: string;
   region: string | null;
   model: string | null;
+  unitType: "station" | "store" | "hub" | "location";
   sls: {
     score: number;
     standing: string;
@@ -79,6 +80,9 @@ export type ConnectOperationalPerformance = {
   selectedYear: number | null;
   averageSls: number | null;
   averageAttainment: number | null;
+  cpsPeriodLabel: string;
+  cpsLatestDate: string | null;
+  averageCps: number | null;
   cpsOnTarget: number;
   cpsMeasured: number;
   standingCounts: Record<string, number>;
@@ -92,6 +96,22 @@ function db() {
 
 function today() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+}
+
+function currentMonthStart(value = today()) {
+  return `${value.slice(0, 7)}-01`;
+}
+
+function currentMonthLabel(value = today()) {
+  return new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" }).format(new Date(`${value}T12:00:00+05:30`));
+}
+
+function locationUnit(modelCode: unknown): ConnectStationPerformance["unitType"] {
+  const value = code(modelCode);
+  if (value === "NOW") return "store";
+  if (value === "ODH" || value === "MDH") return "hub";
+  if (value === "EDSP" || value === "XPT") return "station";
+  return "location";
 }
 
 function code(value: unknown) {
@@ -253,6 +273,9 @@ export async function loadConnectOperationalPerformance(input: {
     selectedYear: null,
     averageSls: null,
     averageAttainment: null,
+    cpsPeriodLabel: `${currentMonthLabel()} · MTD`,
+    cpsLatestDate: null,
+    averageCps: null,
     cpsOnTarget: 0,
     cpsMeasured: 0,
     standingCounts: {},
@@ -273,6 +296,7 @@ export async function loadConnectOperationalPerformance(input: {
       .select("work_date,station_code,overall_cps,target_cps,target_gap")
       .eq("company_id", input.account.companyId)
       .in("station_code", stationCodes)
+      .gte("work_date", currentMonthStart())
       .lte("work_date", today())
       .order("work_date", { ascending: false })
       .limit(5000),
@@ -343,6 +367,7 @@ export async function loadConnectOperationalPerformance(input: {
       name: station.station_name || stationCode,
       region: station.region ?? null,
       model: modelRelation?.name || modelRelation?.code || null,
+      unitType: locationUnit(modelRelation?.code),
       sls: fact ? {
         score: numeric(factValues[1]),
         standing: standing(fact),
@@ -362,7 +387,7 @@ export async function loadConnectOperationalPerformance(input: {
   }).sort((left, right) => (right.sls?.score ?? -1) - (left.sls?.score ?? -1) || left.code.localeCompare(right.code));
 
   const slsCards = cards.filter((card) => card.sls);
-  const cpsCards = cards.filter((card) => card.cps?.onTarget != null);
+  const cpsCards = cards.filter((card) => card.cps);
   const standingCounts = slsCards.reduce<Record<string, number>>((counts, card) => {
     const key = card.sls?.standing ?? "Not rated";
     counts[key] = (counts[key] ?? 0) + 1;
@@ -377,6 +402,9 @@ export async function loadConnectOperationalPerformance(input: {
     selectedYear,
     averageSls: slsCards.length ? slsCards.reduce((sum, card) => sum + (card.sls?.score ?? 0), 0) / slsCards.length : null,
     averageAttainment: slsCards.length ? Math.round(slsCards.reduce((sum, card) => sum + (card.sls?.attainment ?? 0), 0) / slsCards.length) : null,
+    cpsPeriodLabel: `${currentMonthLabel()} · MTD`,
+    cpsLatestDate: cpsCards.map((card) => card.cps?.date ?? "").sort().at(-1) || null,
+    averageCps: cpsCards.length ? cpsCards.reduce((sum, card) => sum + (card.cps?.value ?? 0), 0) / cpsCards.length : null,
     cpsOnTarget: cpsCards.filter((card) => card.cps?.onTarget).length,
     cpsMeasured: cpsCards.length,
     standingCounts,

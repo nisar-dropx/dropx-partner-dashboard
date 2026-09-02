@@ -108,7 +108,7 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
         <div className="dx-roster-date"><CalendarDays /><span><strong>{displayDate(day.date)}</strong><small>{day.dayType === "weekly_off" ? "Rest day" : day.shift?.name || "Working day"}</small></span></div>
         <div className="dx-roster-shift"><Clock3 /><strong>{shiftLabel(day.shift, day.dayType)}</strong></div>
         <button disabled={!day.canSwap || !day.partners.length} onClick={() => { setSelectedDay(day); setPartnerEntryId(""); setNote(""); }}><ArrowLeftRight />{day.canSwap ? day.partners.length ? "Request swap" : "No partner available" : `Closed ${data?.leadHours ?? 24}h before`}</button>
-      </article>) : <div className="dx-roster-empty"><CalendarDays /><strong>No approved roster yet</strong><small>Your published shifts will appear here.</small></div>}
+      </article>) : <div className="dx-roster-empty"><CalendarDays /><strong>Your roster is not configured</strong><small>Contact your HR or manager.</small></div>}
     </div> : null}
 
     {selectedDay ? <div className="dx-roster-swap-card">
