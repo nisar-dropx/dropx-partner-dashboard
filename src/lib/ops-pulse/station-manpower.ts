@@ -40,6 +40,7 @@ type AttendancePunchRow = {
   punch_time: string;
   punch_label: string | null;
   location_id: string | null;
+  device_id: string | null;
 };
 
 export type OpsPunchLocation = {
@@ -236,7 +237,7 @@ export async function loadOpsStationManpower(
       .select("enrolment_id,worker_type,employee_id,contractor_id,in_time,out_time,punch_count,work_minutes,status")
       .eq("company_id", companyId).eq("punch_date", asOf).neq("status", "U").limit(5000),
     enrolmentIds.length ? admin.from("attendance_punches")
-      .select("enrolment_id,punch_time,punch_label,location_id")
+      .select("enrolment_id,punch_time,punch_label,location_id,device_id")
       .eq("company_id", companyId).eq("punch_date", asOf).eq("calculated", true)
       .in("enrolment_id", enrolmentIds).order("punch_time", { ascending: true }).limit(5000) : Promise.resolve({ data: [], error: null }),
     workerIds.length ? admin.from("hr_roster_entries")
@@ -250,7 +251,17 @@ export async function loadOpsStationManpower(
   ]);
   const detailError = attendanceResult.error ?? punchResult.error ?? datedRosterResult.error ?? weeklyPlansResult.error ?? leaveResult.error;
   if (detailError) throw new Error(detailError.message);
-  const punchLocationIds = [...new Set(((punchResult.data ?? []) as AttendancePunchRow[]).map((punch) => punch.location_id).filter((id): id is string => Boolean(id)))];
+  const punchRows = (punchResult.data ?? []) as AttendancePunchRow[];
+  const punchDeviceIds = [...new Set(punchRows.map((punch) => punch.device_id).filter((id): id is string => Boolean(id)))];
+  const punchDevicesResult = punchDeviceIds.length ? await admin.from("biometric_devices")
+    .select("id,location_id")
+    .eq("company_id", companyId).in("id", punchDeviceIds).limit(5000) : { data: [], error: null };
+  if (punchDevicesResult.error) throw new Error(punchDevicesResult.error.message);
+  const deviceLocationById = new Map((punchDevicesResult.data ?? []).map((device) => [device.id, device.location_id]));
+  const punchLocationIds = [...new Set([
+    ...punchRows.map((punch) => punch.location_id),
+    ...(punchDevicesResult.data ?? []).map((device) => device.location_id)
+  ].filter((id): id is string => Boolean(id)))];
   const externalPunchLocationsResult = punchLocationIds.length ? await admin.from("stations")
     .select("id,station_code,station_name")
     .eq("company_id", companyId).in("id", punchLocationIds).limit(5000) : { data: [], error: null };
@@ -260,7 +271,7 @@ export async function loadOpsStationManpower(
     locationById.set(location.id, { id: location.id, code: location.station_code, name: location.station_name ?? null });
   }
   const punchesByEnrolment = new Map<string, AttendancePunchRow[]>();
-  for (const punch of (punchResult.data ?? []) as AttendancePunchRow[]) {
+  for (const punch of punchRows) {
     const key = biometricKey(punch.enrolment_id);
     if (!key) continue;
     const rows = punchesByEnrolment.get(key) ?? [];
@@ -326,8 +337,16 @@ export async function loadOpsStationManpower(
       ? punches.find((punch) => sameInstant(attendance.out_time, punch.punch_time)) ?? punches[punches.length - 1] ?? null
       : null;
     const expectedLocation = locationById.get(person.locationId) ?? { id: person.locationId, code: "Assigned location", name: null };
-    const inLocation = inPunch?.location_id ? locationById.get(inPunch.location_id) ?? { id: inPunch.location_id, code: "Unknown location", name: null } : null;
-    const outLocation = outPunch?.location_id ? locationById.get(outPunch.location_id) ?? { id: outPunch.location_id, code: "Unknown location", name: null } : null;
+    // Legacy biometric rows store the person's assigned location on the punch.
+    // The device mapping is the physical punch location and therefore wins for
+    // biometric evidence. App/GPS punches have no device and use location_id.
+    const evidenceLocationId = (punch: AttendancePunchRow | null) => punch
+      ? (punch.device_id ? deviceLocationById.get(punch.device_id) : null) ?? punch.location_id
+      : null;
+    const inLocationId = evidenceLocationId(inPunch);
+    const outLocationId = evidenceLocationId(outPunch);
+    const inLocation = inLocationId ? locationById.get(inLocationId) ?? { id: inLocationId, code: "Unknown location", name: null } : null;
+    const outLocation = outLocationId ? locationById.get(outLocationId) ?? { id: outLocationId, code: "Unknown location", name: null } : null;
     const hasLocationMismatch = Boolean(
       (inLocation && inLocation.id !== person.locationId)
       || (outLocation && outLocation.id !== person.locationId)
