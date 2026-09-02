@@ -466,7 +466,7 @@ export async function resolvePerformanceReviewChain(companyId: string, stationId
       .eq("company_id", companyId).eq("is_active", true),
     supabaseAdmin.from("profiles")
       .select("id,full_name,reports_to_user_id,location_scope_ids,is_active,user_roles(name,code)")
-      .eq("company_id", companyId).eq("is_active", true)
+      .eq("company_id", companyId)
   ]);
   if (profilesResult.error) throw new Error(profilesResult.error.message);
   const profiles = profilesResult.data ?? [];
@@ -495,15 +495,15 @@ export async function resolvePerformanceReviewChain(companyId: string, stationId
         const assignment = occupantByPosition.get(current.id);
         const profile = assignment ? profileById.get(assignment.profile_id) : null;
         const reviewerRole = roleText(current.user_roles, current.name);
-        if (profile) chain.push({ reviewerName: profile.full_name || "Assigned reviewer", reviewerRole, reviewerUserId: profile.id });
-        if (/national head|owner/i.test(reviewerRole)) break;
+        if (profile?.is_active) chain.push({ reviewerName: profile.full_name || "Assigned reviewer", reviewerRole, reviewerUserId: profile.id });
+        if (profile?.is_active && /national head|owner/i.test(reviewerRole)) break;
         current = current.reports_to_position_id ? positionById.get(current.reports_to_position_id) : undefined;
       }
       if (chain.length) return chain;
     }
   }
 
-  const starts = profiles.filter((profile) => (profile.location_scope_ids ?? []).includes(stationId)).sort((left, right) => (
+  const starts = profiles.filter((profile) => profile.is_active && (profile.location_scope_ids ?? []).includes(stationId)).sort((left, right) => (
     rolePriority(roleText(left.user_roles)) - rolePriority(roleText(right.user_roles))
   ));
   const start = starts.find((profile) => rolePriority(roleText(profile.user_roles)) < 5) ?? starts[0];
@@ -514,8 +514,8 @@ export async function resolvePerformanceReviewChain(companyId: string, stationId
     while (current && chain.length < 7 && !seen.has(current.id)) {
       seen.add(current.id);
       const reviewerRole = roleText(current.user_roles);
-      chain.push({ reviewerName: current.full_name || "Assigned reviewer", reviewerRole, reviewerUserId: current.id });
-      if (/national head|owner/i.test(reviewerRole)) break;
+      if (current.is_active) chain.push({ reviewerName: current.full_name || "Assigned reviewer", reviewerRole, reviewerUserId: current.id });
+      if (current.is_active && /national head|owner/i.test(reviewerRole)) break;
       current = current.reports_to_user_id ? profileById.get(current.reports_to_user_id) : undefined;
     }
     if (chain.length) return chain;
