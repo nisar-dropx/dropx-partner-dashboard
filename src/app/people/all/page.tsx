@@ -14,7 +14,7 @@ const sources = [
   { categoryCode: "employees", category: "Employees", pageCode: "employees", basePath: "/employees", table: "employees", codeField: "employee_code", statusField: "profile_completion_status", employeeDesignation: true },
   { categoryCode: "contractors", category: "Independent Contractor", pageCode: "contractors", basePath: "/contractors", table: "contractors", codeField: "dropx_id", statusField: "onboarding_status", employeeDesignation: false },
   { categoryCode: "vendors", category: "Vendors", pageCode: "vendors", basePath: "/vendors", table: "vendors", codeField: "dropx_id", statusField: "onboarding_status", employeeDesignation: false },
-  { categoryCode: "workers", category: "Helpers", pageCode: "workers", basePath: "/helpers", table: "workers", codeField: "dropx_id", statusField: "onboarding_status", employeeDesignation: false }
+  { categoryCode: "workers", category: "Helpers", pageCode: "workers", basePath: "/helpers", table: "helpers", codeField: "dropx_id", statusField: "onboarding_status", employeeDesignation: false }
 ] as const;
 
 type PeopleSource = (typeof sources)[number] & { canEdit: boolean };

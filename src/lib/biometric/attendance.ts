@@ -1071,7 +1071,7 @@ export async function loadAttendanceReportRows({
       : Promise.resolve({ data: [], error: null }),
     biometricVariants.length
       ? supabaseAdmin
-        .from("workers")
+        .from("helpers")
         .select("id, dropx_id, full_name, biometric_id, designation, location_id")
         .eq("company_id", companyId)
         .in("biometric_id", biometricVariants)
