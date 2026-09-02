@@ -19885,3 +19885,98 @@ td strong,
   .station-manpower-shift, .station-manpower-time { grid-column: 2 / 4; }
   .station-manpower-people article > a { grid-column: 3; grid-row: 4; }
 }
+
+/* Payment approval facets */
+.payment-approval-filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfd;
+}
+
+.payment-approval-search {
+  position: relative;
+  flex: 1 1 240px;
+  min-width: 220px;
+  max-width: 360px;
+}
+
+.payment-approval-search > svg {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  z-index: 1;
+  color: #98a2b3;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.payment-approval-search .field {
+  width: 100%;
+  padding-left: 34px;
+}
+
+.payment-approval-status-filter {
+  width: 180px;
+}
+
+.payment-approval-multi-select {
+  flex: 0 1 185px;
+  width: 185px;
+}
+
+.payment-approval-filter-menu {
+  right: auto;
+  width: min(320px, calc(100vw - 32px));
+}
+
+.payment-approval-filter-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.payment-approval-filter-search .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.payment-approval-filter-menu .multi-select-option.selected {
+  background: #fff8e8;
+}
+
+.payment-approval-filter-empty {
+  margin: 0;
+  padding: 12px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.payment-approval-clear-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 760px) {
+  .payment-approval-filter-bar {
+    align-items: stretch;
+  }
+
+  .payment-approval-search,
+  .payment-approval-status-filter,
+  .payment-approval-multi-select {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: none;
+  }
+
+  .payment-approval-filter-menu {
+    right: 0;
+    left: 0;
+    width: auto;
+  }
+}
