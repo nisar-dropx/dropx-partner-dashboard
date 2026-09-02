@@ -2,6 +2,7 @@
 
 import { Camera, Check, RefreshCw, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   FACE_MATCH_REQUIRED_PERCENT,
   ensureFaceModels,
@@ -22,6 +23,8 @@ type SelfieCapturePanelProps = {
   profilePhotoUrl?: string | null;
   /** When true, face match must pass before liveness / capture. */
   requireFaceMatch?: boolean;
+  /** Minimum match percentage required by the active identity policy. */
+  requiredMatchPercent?: number;
   /** Blink + head-turn challenge to reduce photo/screen spoofing. Default: on when face match required, or always if set. */
   requireLiveness?: boolean;
   onCapture: (file: File, match: FaceMatchResult | null) => void | Promise<void>;
@@ -35,6 +38,7 @@ export function SelfieCapturePanel({
   hint = "Match your profile face first, then complete live checks, then capture.",
   profilePhotoUrl,
   requireFaceMatch = false,
+  requiredMatchPercent = FACE_MATCH_REQUIRED_PERCENT,
   requireLiveness,
   onCapture,
   onClose
@@ -46,6 +50,7 @@ export function SelfieCapturePanel({
   const trackerRef = useRef<ReturnType<typeof createLivenessTracker> | null>(null);
   const challengeIndexRef = useRef(0);
   const matchOkStreakRef = useRef(0);
+  const submitLockRef = useRef(false);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(Boolean(needMatch || needLiveness));
@@ -60,8 +65,21 @@ export function SelfieCapturePanel({
   const [livenessHint, setLivenessHint] = useState("");
   const [livenessProgress, setLivenessProgress] = useState(0);
   const [matchProgress, setMatchProgress] = useState(0);
+  const [mounted, setMounted] = useState(false);
 
   challengeIndexRef.current = challengeIndex;
+
+  useEffect(() => {
+    setMounted(true);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  const matchAccepted = (match: FaceMatchResult | null | undefined) =>
+    Boolean(match?.ok && match.percent >= requiredMatchPercent);
 
   const challenge: LivenessChallenge | null =
     phase === "liveness" && needLiveness && !livenessDone
@@ -164,7 +182,7 @@ export function SelfieCapturePanel({
         const result = await matchLiveFrameToProfile(video, profilePhotoUrl);
         if (cancelled) return;
         setLiveMatch(result);
-        if (result.ok) {
+        if (matchAccepted(result)) {
           matchOkStreakRef.current += 1;
           setMatchProgress(Math.min(1, matchOkStreakRef.current / 3));
           // Require a few consecutive good matches so a single lucky frame cannot skip.
@@ -188,7 +206,7 @@ export function SelfieCapturePanel({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [phase, needMatch, needLiveness, profilePhotoUrl, ready, previewUrl, modelsLoading]);
+  }, [phase, needMatch, needLiveness, profilePhotoUrl, ready, previewUrl, modelsLoading, requiredMatchPercent]);
 
   // Reset tracker when the active challenge changes.
   useEffect(() => {
@@ -285,7 +303,7 @@ export function SelfieCapturePanel({
         setChecking(true);
         match = await matchLiveFrameToProfile(matchCanvas, profilePhotoUrl);
         setChecking(false);
-        if (!match.ok) {
+        if (!matchAccepted(match)) {
           setError(
             match.reason ||
               `Face match ${match.percent}% in this frame — hold still facing the camera and tap Capture again.`
@@ -336,9 +354,9 @@ export function SelfieCapturePanel({
   }
 
   async function confirm() {
-    if (!previewBlob) return;
-    if (needMatch && (!liveMatch || !liveMatch.ok)) {
-      setError(`Face match must be ${FACE_MATCH_REQUIRED_PERCENT}%+ before using this selfie.`);
+    if (!previewBlob || submitLockRef.current) return;
+    if (needMatch && !matchAccepted(liveMatch)) {
+      setError(`Face match must be ${requiredMatchPercent}%+ before using this selfie.`);
       return;
     }
     if (needLiveness && !livenessDone) {
@@ -346,6 +364,7 @@ export function SelfieCapturePanel({
       return;
     }
     const file = new File([previewBlob], `attendance-selfie-${Date.now()}.jpg`, { type: "image/jpeg" });
+    submitLockRef.current = true;
     setCapturing(true);
     setError("");
     try {
@@ -353,6 +372,7 @@ export function SelfieCapturePanel({
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to use this selfie.");
     } finally {
+      submitLockRef.current = false;
       setCapturing(false);
     }
   }
@@ -364,21 +384,21 @@ export function SelfieCapturePanel({
     !modelsLoading &&
     phase === "ready" &&
     (!needLiveness || livenessDone) &&
-    (!needMatch || Boolean(liveMatch?.ok));
+    (!needMatch || matchAccepted(liveMatch));
 
   const guide =
     previewUrl
-      ? liveMatch?.ok
+      ? liveMatch && matchAccepted(liveMatch)
         ? `Matched ${liveMatch.percent}% — you can use this selfie`
         : "Check that your face fills the circle clearly."
       : phase === "match"
         ? liveMatch
-          ? liveMatch.ok
+          ? matchAccepted(liveMatch)
             ? matchProgress >= 1
               ? `Matched ${liveMatch.percent}% — starting live checks…`
               : `Matched ${liveMatch.percent}% — hold still (${Math.min(3, Math.max(1, Math.round(matchProgress * 3)))}/3)`
             : liveMatch.percent > 0
-              ? `Match ${liveMatch.percent}% — need ${FACE_MATCH_REQUIRED_PERCENT}%+`
+              ? `Match ${liveMatch.percent}% — need ${requiredMatchPercent}%+`
               : liveMatch.reason || "Align your face with your profile photo"
           : modelsLoading
             ? "Loading face model..."
@@ -401,9 +421,10 @@ export function SelfieCapturePanel({
         ? Math.round(livenessProgress * 100)
         : 100;
 
-  return (
-    <>
-      <button aria-label="Close selfie panel" className="dx-sheet-scrim" onClick={onClose} type="button" />
+  if (!mounted) return null;
+
+  return createPortal(
+    <div className="dx-selfie-modal-root">
       <aside className="dx-selfie-panel" role="dialog" aria-modal="true" aria-labelledby="selfie-panel-title">
         <header>
           <div>
@@ -418,9 +439,9 @@ export function SelfieCapturePanel({
         <div className="dx-selfie-stage">
           <div
             className={`dx-selfie-frame ${
-              phase === "ready" || (phase === "match" && liveMatch?.ok)
+              phase === "ready" || (phase === "match" && matchAccepted(liveMatch))
                 ? "ok"
-                : liveMatch && liveMatch.percent > 0 && !liveMatch.ok
+                : liveMatch && liveMatch.percent > 0 && !matchAccepted(liveMatch)
                   ? "warn"
                   : ""
             }`}
@@ -442,9 +463,9 @@ export function SelfieCapturePanel({
             </div>
           ) : null}
           {needMatch && phase !== "match" && liveMatch && liveMatch.percent > 0 ? (
-            <div className={`dx-selfie-score ${liveMatch.ok ? "ok" : "warn"}`} aria-live="polite">
+            <div className={`dx-selfie-score ${matchAccepted(liveMatch) ? "ok" : "warn"}`} aria-live="polite">
               <strong>{liveMatch.percent}%</strong>
-              <span>{liveMatch.ok ? "face match" : `need ${FACE_MATCH_REQUIRED_PERCENT}%+`}</span>
+              <span>{matchAccepted(liveMatch) ? "face match" : `need ${requiredMatchPercent}%+`}</span>
             </div>
           ) : null}
         </div>
@@ -457,7 +478,7 @@ export function SelfieCapturePanel({
               <button className="secondary" onClick={retake} type="button">
                 <RefreshCw /> Retake
               </button>
-              <button disabled={needMatch && !liveMatch?.ok} onClick={confirm} type="button">
+              <button disabled={needMatch && !matchAccepted(liveMatch)} onClick={confirm} type="button">
                 <Check /> Use selfie
               </button>
             </>
@@ -486,6 +507,7 @@ export function SelfieCapturePanel({
           )}
         </div>
       </aside>
-    </>
+    </div>,
+    document.body
   );
 }
