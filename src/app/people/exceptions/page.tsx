@@ -2,6 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
+import { PeopleExceptionsRegister } from "@/components/people-exceptions-register";
 import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate } from "@/lib/date-format";
@@ -21,7 +22,6 @@ const SOURCES = [
   { table: "helpers", profileType: "worker", category: "Helper", employee: false, designationRelation: false }
 ] as const;
 const BASE_FIELDS = "id, full_name, location_id, statutory_applicability, pf_uan, esi_no, bank_account_no, pan_number, aadhaar_number, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, updated_at, stations (station_code)";
-const PAGE_SIZE = 20;
 
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -100,16 +100,12 @@ export const dynamic = "force-dynamic";
 export default async function PeopleExceptionsPage({ searchParams }: { searchParams?: { error?: string; notice?: string; page?: string; edit?: string } }) {
   const authorization = await requirePagePermission("people_exceptions", "access");
   const { rows, error } = await loadExceptions(requireCompanyId(authorization), authorization);
-  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  const page = Math.min(pageCount, Math.max(1, Number(searchParams?.page) || 1));
-  const visibleRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const page = Math.max(1, Number(searchParams?.page) || 1);
   const selected = searchParams?.edit ? rows.find((row) => key(row.profileType, row.profileId, row.ruleCode) === searchParams.edit) ?? null : null;
   return <AppShell active="Exception" pageCode="people_exceptions">
     <PageHead eyebrow="People" title="Exceptions" subtitle="Active-profile statutory, verification, and expired-document exceptions." action={<StatusPill status={`${rows.length} open`} />} />
     {(error || searchParams?.error || searchParams?.notice) ? <section className={`panel message-panel ${error || searchParams?.error ? "error" : "success"}`}><div className="panel-body"><strong>{error || searchParams?.error ? "Exceptions need attention" : "Updated"}</strong><p className="subtle">{error || searchParams?.error || searchParams?.notice}</p></div></section> : null}
-    <section className="panel"><div className="panel-head"><div><h2>Open exceptions</h2><p className="subtle">Active profiles only. Partial matches remain in Under Review.</p></div></div><div className="table-wrap"><table><thead><tr><th>DropX ID</th><th>Person</th><th>Category</th><th>Designation</th><th>Location</th><th>Exception</th><th>Details</th><th>Action</th></tr></thead><tbody>
-      {visibleRows.length ? visibleRows.map((row) => <tr key={key(row.profileType, row.profileId, row.ruleCode)}><td><strong>{row.dropxId}</strong></td><td><strong>{row.name}</strong></td><td>{row.category}</td><td>{row.designation}</td><td>{row.location}</td><td><StatusPill status={row.issue} /></td><td>{row.detail}</td><td><PendingLink className="button secondary compact" href={`/people/exceptions?page=${page}&edit=${encodeURIComponent(key(row.profileType, row.profileId, row.ruleCode))}`} scroll={false}>Clear</PendingLink></td></tr>) : <tr><td className="empty-cell" colSpan={8}>No open people exceptions.</td></tr>}
-    </tbody></table></div><div className="panel-body" style={{ display: "flex", justifyContent: "space-between" }}><span className="subtle">Page {page} of {pageCount} · {rows.length} records</span><div className="form-actions">{page > 1 ? <PendingLink className="button secondary compact" href={`/people/exceptions?page=${page - 1}`}>Previous</PendingLink> : null}{page < pageCount ? <PendingLink className="button secondary compact" href={`/people/exceptions?page=${page + 1}`}>Next</PendingLink> : null}</div></div></section>
+    <PeopleExceptionsRegister rows={rows.map((row) => ({ key: key(row.profileType, row.profileId, row.ruleCode), dropxId: row.dropxId, name: row.name, category: row.category, designation: row.designation, location: row.location, issue: row.issue, detail: row.detail, clearHref: `/people/exceptions?edit=${encodeURIComponent(key(row.profileType, row.profileId, row.ruleCode))}` }))} />
     {selected ? <div className="modal-backdrop"><section className="modal-panel" role="dialog" aria-modal="true"><div className="panel-head"><div><h2>Correct exception</h2><p className="subtle">{selected.name} · {selected.issue}</p></div><PendingLink className="modal-close" href={`/people/exceptions?page=${page}`} scroll={false}>x</PendingLink></div><form action={updateAndClearPeopleException} className="panel-body"><input name="profile_type" type="hidden" value={selected.profileType} /><input name="profile_id" type="hidden" value={selected.profileId} /><input name="rule_code" type="hidden" value={selected.ruleCode} /><input name="source_updated_at" type="hidden" value={selected.sourceUpdatedAt} /><div className="form-grid two">{editFields(selected)}</div><div className="form-actions modal-actions"><PendingLink className="button secondary" href={`/people/exceptions?page=${page}`} scroll={false}>Cancel</PendingLink><button className="button" type="submit">Save and clear</button></div></form></section></div> : null}
   </AppShell>;
 }
