@@ -3,6 +3,7 @@ export const REPORT_AUTO_SOURCE_CODES = [
   "daily_edsp_metrics",
   "da_inapp_onboarding",
   "edsp_outstanding_cash",
+  "edsp_sls_scorecard",
   "delivered_shipment_detail",
   "iocl_fuel",
   "bpcl_fuel",
@@ -19,7 +20,8 @@ export const WORKFORCE_AUTO_SOURCE_CODES = [
   "amazon_shipments",
   "daily_edsp_metrics",
   "da_inapp_onboarding",
-  "edsp_outstanding_cash"
+  "edsp_outstanding_cash",
+  "edsp_sls_scorecard"
 ] as const;
 
 export function isWorkforceAutoSource(value: string) {
