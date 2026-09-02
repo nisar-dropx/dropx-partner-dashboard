@@ -106,6 +106,9 @@ function minuteLabel(value: number) {
 function StationTimetable({ people, locationCode }: { people: OpsStationManpowerPerson[]; locationCode: string }) {
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const window = timetableWindow(people);
+  const offDuty = people
+    .filter((person) => person.today.rosterDayType === "weekly_off")
+    .sort((left, right) => tier(left.designation) - tier(right.designation) || left.name.localeCompare(right.name));
   const scheduled = people.filter((person) => Boolean(shiftClock(person.today.shiftName))).sort((left, right) => {
     const leftClock = shiftClock(left.today.shiftName);
     const rightClock = shiftClock(right.today.shiftName);
@@ -114,7 +117,10 @@ function StationTimetable({ people, locationCode }: { people: OpsStationManpower
     return tier(left.designation) - tier(right.designation) || leftStart - rightStart || left.name.localeCompare(right.name);
   });
   const withoutRoster = people.filter((person) => !shiftClock(person.today.shiftName) && !person.today.rosterDayType);
-  if (!window) return <div className="station-manpower-empty"><Users2 size={20} /><strong>No approved roster is active for this date.</strong><span>Approve the station roster to show its timetable and attendance gaps.</span></div>;
+  if (!window) return offDuty.length ? <section className="station-timetable" aria-label={`${locationCode} roster and attendance timetable`}>
+    <header><div><strong>Roster timetable</strong><span>No operating shift</span></div><small>Approved roster state for this date.</small></header>
+    <div className="station-timetable-off-only">{offDuty.map((person) => <span key={`${person.workerType}:${person.id}`}><b>{person.name}</b><small>{person.designation} · Week off</small></span>)}</div>
+  </section> : <div className="station-manpower-empty"><Users2 size={20} /><strong>No approved roster is active for this date.</strong><span>Approve the station roster to show its timetable and attendance gaps.</span></div>;
   const ticks = Array.from({ length: 7 }, (_, index) => window.start + window.length * index / 6);
   const shiftSummary = [...new Map(scheduled.map((person) => [person.today.shiftName, person.today.shiftName])).values()]
     .filter((name): name is string => Boolean(name))
@@ -159,6 +165,14 @@ function StationTimetable({ people, locationCode }: { people: OpsStationManpower
             {open ? <div className="station-timetable-detail"><span><LogIn size={12} />In <strong>{clock(person.today.inTime)}</strong></span><span>Out <strong>{clock(person.today.outTime)}</strong></span><span>Worked <strong>{duration(person.today.workMinutes)}</strong></span><span>Source <strong>{person.today.shiftSource ?? "Approved roster"}</strong></span><a href={person.profileHref} target="_blank" rel="noreferrer">Open in People</a></div> : null}
           </div>;
         })}
+        {offDuty.map((person) => <div className="station-timetable-person-row away" key={`${person.workerType}:${person.id}`}>
+          <div className="station-timetable-row station-timetable-row-static">
+            <span className="station-timetable-person"><b>{person.name}</b><small>{person.designation}</small></span>
+            <span className="station-timetable-shift"><b>Week off</b><small>Approved roster</small></span>
+            <span className="station-timetable-lane"><span className="station-timetable-off-label">Not scheduled</span></span>
+            <span className="station-timetable-status away"><b>{person.today.reported ? clock(person.today.inTime) : "—"}</b><small>{person.today.reported ? "Reported on week off" : "Roster off"}</small></span>
+          </div>
+        </div>)}
       </div>
     </div>
     {withoutRoster.length ? <div className="station-timetable-unassigned"><strong>{withoutRoster.length} active {withoutRoster.length === 1 ? "person has" : "people have"} no approved roster entry for this date.</strong><span>They are not counted as expected manpower.</span></div> : null}

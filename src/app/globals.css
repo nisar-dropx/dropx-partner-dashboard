@@ -19726,6 +19726,7 @@ td strong,
 .station-timetable-person-row { border-bottom: 1px solid #f0f1f3; }
 .station-timetable-person-row:last-child { border-bottom: 0; }
 .station-timetable-row { width: 100%; min-height: 39px; padding: 4px 10px; border: 0; color: inherit; background: #fff; cursor: pointer; text-align: left; }
+.station-timetable-row-static { cursor: default; }
 .station-timetable-row:hover, .station-timetable-person-row.open .station-timetable-row { background: #fffaf7; }
 .station-timetable-person, .station-timetable-shift, .station-timetable-status { display: grid; gap: 1px; min-width: 0; }
 .station-timetable-person b, .station-timetable-shift b, .station-timetable-status b { overflow: hidden; color: #344054; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
@@ -19735,6 +19736,7 @@ td strong,
 .station-timetable-status.missing b, .station-timetable-status.missing small { color: #667085; }
 .station-timetable-status.away b, .station-timetable-status.away small { color: #5925dc; }
 .station-timetable-lane { position: relative; height: 22px; margin: 0 8px; border-inline: 1px solid #f2f4f7; background: repeating-linear-gradient(90deg, transparent, transparent calc(16.666% - 1px), #f2f4f7 16.666%); }
+.station-timetable-off-label { position: absolute; inset: 5px 0 auto; height: 12px; border: 1px solid #d9d6fe; border-radius: 4px; color: #6941c6; background: repeating-linear-gradient(135deg, #f4f3ff, #f4f3ff 5px, #ebe9fe 5px, #ebe9fe 10px); font-size: 7px; font-weight: 800; line-height: 10px; text-align: center; text-transform: uppercase; }
 .station-timetable-plan, .station-timetable-actual { position: absolute; border-radius: 4px; }
 .station-timetable-plan { top: 5px; height: 12px; border: 1px solid #cfd4dc; background: #edf0f4; }
 .station-timetable-plan.missing { border: 1px dashed #98a2b3; background: transparent; }
@@ -19752,6 +19754,10 @@ td strong,
 .station-timetable-unassigned > strong { color: #b54708; font-size: 8px; text-transform: uppercase; }
 .station-timetable-unassigned a { display: inline-flex; gap: 4px; padding: 3px 6px; border-radius: 5px; color: #475467; background: #fff4e5; font-size: 8px; text-decoration: none; }
 .station-timetable-unassigned a span { color: #98a2b3; }
+.station-timetable-off-only { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
+.station-timetable-off-only > span { display: grid; gap: 1px; min-width: 170px; padding: 6px 8px; border: 1px solid #d9d6fe; border-radius: 6px; background: #f4f3ff; }
+.station-timetable-off-only b { color: #42307d; font-size: 9px; }
+.station-timetable-off-only small { color: #6941c6; font-size: 7px; }
 .station-shifts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); align-items: start; gap: 8px; padding: 8px; background: #f6f7f9; }
 .station-shift-insight { overflow: hidden; border: 1px solid #e4e7ec; border-left: 3px solid #12b76a; border-radius: 9px; background: #fff; box-shadow: none; }
 .station-shift-insight.needs-attention { border-left-color: #f04438; }
