@@ -534,8 +534,8 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
           ? "Showing only people who report directly to you."
           : "Showing everyone below you in the active Org Chart tree."}</p>
       </div>
-      {error ? <div className="dx-alert error">{error}</div> : null}
-      {notice ? <div className="dx-alert success">{notice}</div> : null}
+    {error ? <div className="dx-alert error">{error}</div> : null}
+    {notice ? <div className="dx-alert success">{notice}</div> : null}
       <nav aria-label="Approval sections" className="dx-approval-tabs">
         <button className={section === "time-off" ? "active" : ""} onClick={() => setSection("time-off")} type="button">
           Time off<span>{leaveApprovals.length}</span>
@@ -553,7 +553,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
           Claims<span>{reimbursements.length}</span>
         </button>
       </nav>
-      {loading ? <div className="dx-loader"><span /><small>Loading approvals…</small></div> : null}
+    {loading ? <div className="dx-loader"><span /><small>Loading approvals…</small></div> : null}
 
       {!loading && section === "time-off" ? (
         <div className="dx-approval-list">
