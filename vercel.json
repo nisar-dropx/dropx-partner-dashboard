@@ -28,6 +28,10 @@
     {
       "path": "/api/cron/google-workspace",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/attendance-insights",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

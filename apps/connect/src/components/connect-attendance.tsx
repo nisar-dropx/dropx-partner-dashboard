@@ -3,8 +3,10 @@
 import {
   Camera,
   CalendarDays,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  CircleGauge,
   Clock3,
   Fingerprint,
   Info,
@@ -20,6 +22,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { SelfieCapturePanel } from "./selfie-capture-panel";
 import { stampSupportSelfieBlob } from "@/lib/support-selfie-stamp";
 import { readResilientPosition } from "@/lib/read-geolocation";
+import {
+  attendanceDayInsight,
+  attendanceIssueSummary,
+  type AttendanceInsightRow
+} from "@/lib/attendance-insights";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
 type Regularization = {
@@ -33,11 +40,12 @@ type Regularization = {
   reviewRemarks: string;
   createdAt: string;
 };
-type Row = {
+type Row = AttendanceInsightRow & {
   date: string;
   status: string;
   statusLabel?: string | null;
   statusKind?: "attendance" | "leave";
+  attendanceStatus?: string | null;
   inTime: string;
   outTime: string;
   punches: string[];
@@ -48,7 +56,16 @@ type Row = {
 };
 type Attendance = {
   month: string;
-  summary: { present: number; absent: number; misPunch: number };
+  summary: {
+    present: number;
+    fullDay?: number;
+    halfDay?: number;
+    absent: number;
+    needsReview?: number;
+    lateIn?: number;
+    earlyOut?: number;
+    misPunch: number;
+  };
   rows: Row[];
 };
 type OpenFlag = {
@@ -169,17 +186,10 @@ function minutes(value: string) {
   return match ? Number(match[1]) * 60 + Number(match[2]) : 0;
 }
 
-function dayStatus(row: Row | undefined, future: boolean) {
-  if (future || !row) return "off";
-  if (row.status === "A") return "absent";
-  if (row.statusKind === "leave") return "leave";
-  if (row.remark.toLowerCase().match(/single|missing/)) return "miss";
-  return row.status === "P" ? "present" : "off";
-}
-
 function attendanceLabel(row: Row | undefined) {
   if (!row) return "No record";
   if (row.statusLabel) return row.statusLabel;
+  if (row.attendanceStatus) return row.attendanceStatus;
   const status = row.status.toUpperCase();
   if (status === "P") return "Present";
   if (status === "A") return "Absent";
@@ -194,6 +204,7 @@ function emptyAttendanceRow(date: string): Row {
     status: "",
     statusLabel: null,
     statusKind: "attendance",
+    attendanceStatus: null,
     inTime: "",
     outTime: "",
     punches: [],
@@ -202,6 +213,10 @@ function emptyAttendanceRow(date: string): Row {
     remark: "",
     regularization: null
   };
+}
+
+function localIsoDate(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 const readPosition = readResilientPosition;
@@ -229,7 +244,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || "Unable to load attendance.");
         setData(payload);
-        setSelected(payload.rows?.find((row: Row) => row.date === new Date().toISOString().slice(0, 10)) ?? payload.rows?.at(-1) ?? null);
+        setSelected(payload.rows?.find((row: Row) => row.date === localIsoDate()) ?? payload.rows?.at(-1) ?? null);
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load attendance."));
   }, [account.id, account.profileType, month]);
@@ -263,6 +278,21 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const total = (data?.rows ?? []).reduce((sum, row) => sum + minutes(row.workHours), 0);
   const futureMonth = month >= currentMonth;
   const openFlags = punchStatus?.openFlags ?? [];
+  const todayDate = localIsoDate(now);
+  const insightFor = useCallback((row: Row | undefined) => attendanceDayInsight(row, {
+    today: row?.date === todayDate,
+    shiftOpen: row?.date === punchStatus?.shift.punchDate && punchStatus?.shift.open === true
+  }), [punchStatus?.shift.open, punchStatus?.shift.punchDate, todayDate]);
+  const selectedInsight = selected ? insightFor(selected) : null;
+  const attentionRow = useMemo(() => {
+    if (!data?.rows.length) return null;
+    const ordered = [...data.rows].sort((left, right) => right.date.localeCompare(left.date));
+    return ordered.find((row) => {
+      const insight = insightFor(row);
+      return insight.needsRegularization || insight.issues.length > 0;
+    }) ?? null;
+  }, [data?.rows, insightFor]);
+  const attentionInsight = attentionRow ? insightFor(attentionRow) : null;
 
   const supportStationKey = [
     punchStatus?.station?.id,
@@ -354,10 +384,22 @@ export function ConnectAttendance({ account }: { account: Account }) {
       {error ? <div className="dx-alert error">{error}<button onClick={() => setMonth((value) => `${value}`)}>Retry</button></div> : null}
       {!data && !error ? <div className="dx-loader"><span /><small>Loading attendance...</small></div> : null}
       {data ? <>
+        {attentionRow && attentionInsight ? <section className={`dx-attendance-attention ${attentionInsight.tone}`}>
+          <i>{attentionInsight.needsRegularization ? <ShieldAlert /> : <CircleGauge />}</i>
+          <span>
+            <small>{attentionRow.date === todayDate ? "TODAY" : attentionRow.date.split("-").reverse().join("/")}</small>
+            <strong>{attentionInsight.headline}</strong>
+            <em>{attentionInsight.issues.at(-1)?.message ?? attentionInsight.detail}</em>
+          </span>
+          <button onClick={() => { setSelected(attentionRow); setTab("calendar"); }}>
+            {attentionInsight.needsRegularization ? "Review" : "View"}
+          </button>
+        </section> : null}
         <div className="dx-attendance-summary">
-          <div><i><UserCheck /></i><span>Present<strong>{data.summary.present}</strong></span></div>
+          <div><i><CheckCircle2 /></i><span>Full Day<strong>{data.summary.fullDay ?? data.summary.present}</strong></span></div>
+          <div><i><UserCheck /></i><span>Half Day<strong>{data.summary.halfDay ?? 0}</strong></span></div>
           <div><i><UserX /></i><span>Absent<strong>{data.summary.absent}</strong></span></div>
-          <div><i><Clock3 /></i><span>Mis Punch<strong>{data.summary.misPunch}</strong></span></div>
+          <div><i><ShieldAlert /></i><span>Review<strong>{data.summary.needsReview ?? data.summary.misPunch}</strong></span></div>
           <p><Clock3 /> Total Hours <strong>{Math.floor(total / 60)}:{String(total % 60).padStart(2, "0")}</strong></p>
         </div>
         <div className="dx-tabs-card">
@@ -376,16 +418,25 @@ export function ConnectAttendance({ account }: { account: Account }) {
                 const row = rowsByDay.get(day);
                 const future = new Date(year, monthNumber - 1, day) > now;
                 const date = `${year}-${String(monthNumber).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-                return <button className={`${dayStatus(row, future)} ${selected?.date === date ? "selected" : ""}`} disabled={future} key={day} onClick={() => !future && setSelected(row ?? emptyAttendanceRow(date))}>{day}</button>;
+                const insight = attendanceDayInsight(row, {
+                  today: date === todayDate,
+                  shiftOpen: date === punchStatus?.shift.punchDate && punchStatus?.shift.open === true
+                });
+                return <button aria-label={`${date}: ${future ? "Future" : insight.label}`} className={`${future ? "off" : insight.calendarClass} ${insight.issues.length ? "has-issue" : ""} ${selected?.date === date ? "selected" : ""}`} disabled={future} key={day} onClick={() => !future && setSelected(row ?? emptyAttendanceRow(date))}><span>{day}</span></button>;
               })}
             </div>
-            <div className="dx-legend"><span className="present">Present</span><span className="leave">Approved leave</span><span className="absent">Absent</span><span className="miss">Mis Punch</span><span className="off">Off / Future</span></div>
+            <div className="dx-legend"><span className="full">Full day</span><span className="half">Half day</span><span className="leave">Leave</span><span className="absent">Absent</span><span className="review">Review</span><span className="off">Off</span></div>
           </div> : null}
           {tab === "list" ? <div className="dx-attendance-list">
-            {[...data.rows].sort((left, right) => right.date.localeCompare(left.date)).map((row) => <button key={row.date} onClick={() => { setSelected(row); setTab("calendar"); }}>
-              <header><strong>{row.date.split("-").reverse().join("/")}</strong><em className={dayStatus(row, false)}>{attendanceLabel(row)}</em></header>
-              <span><small>IN</small>{row.inTime || "--:--"}</span><span><small>OUT</small>{row.outTime || "--:--"}</span><span><small>HRS</small>{row.workHours || "00:00"}</span>
-            </button>)}
+            {[...data.rows].sort((left, right) => right.date.localeCompare(left.date)).map((row) => {
+              const insight = insightFor(row);
+              const issue = attendanceIssueSummary(row);
+              return <button key={row.date} onClick={() => { setSelected(row); setTab("calendar"); }}>
+                <header><strong>{row.date.split("-").reverse().join("/")}</strong><em className={insight.calendarClass}>{insight.label}</em></header>
+                <span><small>IN</small>{row.inTime || "--:--"}</span><span><small>OUT</small>{row.outTime || "--:--"}</span><span><small>HRS</small>{row.workHours || "00:00"}</span>
+                {issue ? <p className={`dx-attendance-list-issue ${issue.tone}`}>{issue.label} · {issue.message}</p> : null}
+              </button>;
+            })}
           </div> : null}
           {tab === "punches" ? <div className="dx-punches">
             {[...data.rows].sort((left, right) => right.date.localeCompare(left.date)).flatMap((row) => {
@@ -394,13 +445,19 @@ export function ConnectAttendance({ account }: { account: Account }) {
             })}
           </div> : null}
         </div>
-        {tab === "calendar" && selected ? <div className="dx-selected-day">
-          <header><div><CalendarDays /><strong>{selected.date.split("-").reverse().join("/")}</strong></div><em className={dayStatus(selected, false)}>{attendanceLabel(selected)}</em></header>
+        {tab === "calendar" && selected && selectedInsight ? <div className="dx-selected-day">
+          <header><div><CalendarDays /><strong>{selected.date.split("-").reverse().join("/")}</strong></div><em className={selectedInsight.calendarClass}>{selectedInsight.label}</em></header>
+          {selected.scheduledStart && selected.scheduledStart !== "--:--" ? <p className="dx-attendance-shift"><Clock3 /> {selected.shiftName || "Shift"} · {selected.scheduledStart}–{selected.scheduledEnd} <small>{selected.shiftSource}</small></p> : null}
           <div><span><LogIn /><small>IN</small><strong>{selected.inTime || "--:--"}</strong></span><span><LogOut /><small>OUT</small><strong>{selected.outTime || "--:--"}</strong></span><span><Clock3 /><small>WORK</small><strong>{selected.workHours || "00:00"}</strong></span><span><Fingerprint /><small>PUNCHES</small><strong>{selected.punchCount}</strong></span></div>
+          <section className={`dx-attendance-day-insight ${selectedInsight.tone}`}>
+            <strong>{selectedInsight.headline}</strong>
+            <small>{selectedInsight.detail}</small>
+            {selectedInsight.issues.length ? <div>{selectedInsight.issues.map((issue) => <span className={issue.tone} key={issue.code}>{issue.label}</span>)}</div> : null}
+          </section>
           {selected.remark ? <p className="dx-attendance-day-note">{selected.remark}</p> : null}
           <footer>
             {selected.regularization ? <span className={`dx-request-status ${selected.regularization.status}`}>Regularization {selected.regularization.status}</span> : null}
-            {selected.regularization?.status !== "pending" && selected.statusKind !== "leave" ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>Regularize</button> : null}
+            {selected.regularization?.status !== "pending" && selected.statusKind !== "leave" && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0) ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>Regularize attendance</button> : null}
           </footer>
         </div> : null}
       </> : null}

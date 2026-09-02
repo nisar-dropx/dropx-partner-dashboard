@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CalendarDays,
   CalendarClock,
+  CheckCircle2,
   ChevronRight,
   Clock3,
   Fingerprint,
@@ -25,6 +26,11 @@ import {
   selectFallbackMotivation,
   type MotivationHistoryEntry
 } from "../lib/dashboard-motivation";
+import {
+  attendanceDayInsight,
+  attendanceIssueSummary,
+  type AttendanceInsightRow
+} from "../lib/attendance-insights";
 
 type Profile = {
   editable: Record<string, string>;
@@ -42,11 +48,12 @@ type Regularization = {
   status: string;
 };
 
-type AttendanceRow = {
+type AttendanceRow = AttendanceInsightRow & {
   date: string;
   status: string;
   statusLabel?: string | null;
   statusKind?: "attendance" | "leave";
+  attendanceStatus?: string | null;
   inTime: string;
   outTime: string;
   punches: string[];
@@ -57,12 +64,20 @@ type AttendanceRow = {
 };
 
 type Attendance = {
-  summary: { present: number; absent: number; misPunch: number };
+  summary: {
+    present: number;
+    fullDay?: number;
+    halfDay?: number;
+    absent: number;
+    needsReview?: number;
+    misPunch: number;
+  };
   rows: AttendanceRow[];
 };
 
 type DashboardAlert = {
   label: string;
+  detail?: string;
   danger: boolean;
   target?: "profile" | "attendance";
 };
@@ -73,6 +88,11 @@ type OpenFlagNotice = {
   supportStatus?: "needed" | "pending_review" | "returned";
   supportSubmitted?: boolean;
   message?: string;
+};
+
+type PunchState = {
+  punchDate?: string;
+  open?: boolean;
 };
 
 function localIsoDate(date = new Date()) {
@@ -152,6 +172,7 @@ export function ConnectDashboard({
   const [attendance, setAttendance] = useState<Attendance | null>(null);
   const [verifications, setVerifications] = useState<Verification[]>([]);
   const [openFlags, setOpenFlags] = useState<OpenFlagNotice[]>([]);
+  const [punchState, setPunchState] = useState<PunchState | null>(null);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [motivation, setMotivation] = useState("");
@@ -250,6 +271,7 @@ export function ConnectDashboard({
     setProfile(null);
     setAttendance(null);
     setOpenFlags([]);
+    setPunchState(null);
     setError("");
     const executive = account.profileType !== "employee" && account.profileType !== "user";
     const profileUrl = executive
@@ -278,15 +300,19 @@ export function ConnectDashboard({
       fetch(`/api/connect/attendance/punch?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`)
         .then(async (response) => {
           const payload = await response.json();
-          if (!response.ok) return [] as OpenFlagNotice[];
-          return (payload.openFlags ?? []) as OpenFlagNotice[];
+          if (!response.ok) return { flags: [] as OpenFlagNotice[], shift: null as PunchState | null };
+          return {
+            flags: (payload.openFlags ?? []) as OpenFlagNotice[],
+            shift: (payload.shift ?? null) as PunchState | null
+          };
         })
-        .catch(() => [] as OpenFlagNotice[])
-    ]).then(([nextProfile, nextAttendance, nextVerifications, nextFlags]) => {
+        .catch(() => ({ flags: [] as OpenFlagNotice[], shift: null as PunchState | null }))
+    ]).then(([nextProfile, nextAttendance, nextVerifications, punchPayload]) => {
       setProfile(nextProfile);
       setAttendance(nextAttendance);
       setVerifications(nextVerifications);
-      setOpenFlags(nextFlags);
+      setOpenFlags(punchPayload.flags);
+      setPunchState(punchPayload.shift);
     }).catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load dashboard."));
   }, [account.id, account.profileType, refreshKey]);
 
@@ -336,18 +362,38 @@ export function ConnectDashboard({
       if (verification.blockSubmit) rows.push({ label: `${labels[verification.kind]} failed`, danger: true, target: "profile" });
       else if (!verification.verified || verification.manualReview) rows.push({ label: `${labels[verification.kind]} requires review`, danger: false, target: "profile" });
     });
+    const todayDate = localIsoDate();
+    [...(attendance?.rows ?? [])]
+      .sort((left, right) => right.date.localeCompare(left.date))
+      .forEach((row) => {
+        if (rows.length >= 6) return;
+        const insight = attendanceDayInsight(row, {
+          today: row.date === todayDate,
+          shiftOpen: row.date === punchState?.punchDate && punchState?.open === true
+        });
+        const issue = attendanceIssueSummary(row);
+        if (!issue || (row.date === todayDate && punchState?.open)) return;
+        rows.push({
+          label: `${issue.label} · ${displayDate(row.date)}`,
+          detail: issue.message,
+          danger: issue.tone === "red",
+          target: "attendance"
+        });
+      });
     return rows.slice(0, 6);
-  }, [profile, verifications, openFlags]);
+  }, [attendance?.rows, openFlags, profile, punchState?.open, punchState?.punchDate, verifications]);
 
   if (!profile && !error) return <div className="dx-loader fullscreen"><span /><small>Loading dashboard...</small></div>;
   if (!profile || !attendance) return <div className="dx-alert error">{error}<button onClick={() => setRefreshKey((value) => value + 1)}>Retry</button></div>;
 
   const now = new Date();
   const today = attendance.rows.find((row) => row.date === localIsoDate());
-  const todayCode = today?.status.toUpperCase();
-  const present = todayCode === "P";
-  const todayStatus = !today ? "No punch" : today.statusLabel || (present ? "Present" : todayCode === "A" ? "Absent" : "Mis Punch");
-  const statusTone = present ? "green" : todayStatus === "Absent" ? "red" : "amber";
+  const todayInsight = attendanceDayInsight(today, {
+    today: true,
+    shiftOpen: today?.date === punchState?.punchDate && punchState?.open === true
+  });
+  const todayStatus = todayInsight.label;
+  const statusTone = todayInsight.tone === "green" ? "green" : todayInsight.tone === "red" ? "red" : "amber";
   const totalMinutes = attendance.rows.reduce((total, row) => total + workMinutes(row.workHours), 0);
   const totalHours = `${Math.floor(totalMinutes / 60)}:${String(totalMinutes % 60).padStart(2, "0")}`;
   const latestRequest = [...attendance.rows]
@@ -370,8 +416,11 @@ export function ConnectDashboard({
   const leaveAllowed = pageAccess.includes("leave");
   const performanceAllowed = pageAccess.includes("performance");
   const advancesAllowed = pageAccess.includes("advances");
-  const trackedDays = attendance.summary.present + attendance.summary.absent + attendance.summary.misPunch;
-  const attendanceRate = trackedDays ? Math.round((attendance.summary.present / trackedDays) * 100) : 0;
+  const fullDayCount = attendance.summary.fullDay ?? attendance.summary.present;
+  const halfDayCount = attendance.summary.halfDay ?? 0;
+  const reviewCount = attendance.summary.needsReview ?? attendance.summary.misPunch;
+  const trackedDays = fullDayCount + halfDayCount + attendance.summary.absent + reviewCount;
+  const attendanceRate = trackedDays ? Math.round(((fullDayCount + halfDayCount * 0.5) / trackedDays) * 100) : 0;
   const workforce = variant === "workforce";
 
   return <section className={`dx-dashboard${workforce ? " dx-workforce-dashboard" : ""}`}>
@@ -394,6 +443,11 @@ export function ConnectDashboard({
         <Metric icon={<Clock3 />} label="Work" value={today?.workHours || "00:00"} tone="orange" />
         <Metric icon={<Fingerprint />} label="Punches" value={today?.punchCount || 0} tone="purple" />
       </div>
+      {today && (todayInsight.issues.length > 0 || todayInsight.needsRegularization) ? <button className={`dx-dashboard-attendance-nudge ${todayInsight.tone}`} onClick={onAttendance}>
+        <AlertTriangle />
+        <span><strong>{todayInsight.headline}</strong><small>{todayInsight.issues.at(-1)?.message ?? todayInsight.detail}</small></span>
+        <ChevronRight />
+      </button> : null}
       {attendanceAllowed ? <button className="dx-dashboard-link" onClick={onAttendance}>View attendance <ChevronRight /></button> : null}
     </section>
 
@@ -406,7 +460,7 @@ export function ConnectDashboard({
             onClick={alert.target === "attendance" && attendanceAllowed ? onAttendance : onProfile}
           >
             <AlertTriangle className={alert.danger ? "danger" : ""} />
-            <span>{alert.label}</span>
+            <span><strong>{alert.label}</strong>{alert.detail ? <small>{alert.detail}</small> : null}</span>
             <ChevronRight />
           </button>
         ))}
@@ -416,13 +470,13 @@ export function ConnectDashboard({
     <section className="dx-dashboard-card dx-dashboard-summary-card">
       <header><div><small>This month</small><h2>Summary</h2></div></header>
       <div className="dx-dashboard-metrics">
-        <Metric icon={<PersonStanding />} label="Present" value={attendance.summary.present} tone="green" />
+        <Metric icon={<CheckCircle2 />} label="Full day" value={fullDayCount} tone="green" />
+        <Metric icon={<PersonStanding />} label="Half day" value={halfDayCount} tone="orange" />
         <Metric icon={<UserRoundX />} label="Absent" value={attendance.summary.absent} tone="red" />
-        <Metric icon={<Clock3 />} label="Mis punch" value={attendance.summary.misPunch} tone="orange" />
-        <Metric icon={<Clock3 />} label="Total hrs" value={totalHours} tone="purple" />
+        <Metric icon={<Clock3 />} label="Needs review" value={reviewCount} tone="purple" />
       </div>
       <div className="dx-month-progress">
-        <span><b>{attendanceRate}%</b><small>Attendance rate</small></span>
+        <span><b>{attendanceRate}%</b><small>Attendance score · {totalHours} hrs</small></span>
         <i aria-label={`${attendanceRate}% attendance rate`}><b style={{ width: `${attendanceRate}%` }} /></i>
       </div>
     </section>

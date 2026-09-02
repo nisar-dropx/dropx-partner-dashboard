@@ -58,6 +58,16 @@ export async function POST(request: NextRequest) {
         reason: "no_punch_in"
       });
     }
+    if (shift.open) {
+      await maybeNotifyForgotPunchOut({
+        accountId: worker.profileId,
+        companyId: worker.companyId,
+        profileType: worker.profileType,
+        enrolmentId: worker.enrolmentId,
+        punchDate: shift.punchDate,
+        inTime: shift.inTime
+      });
+    }
     const trackingElapsedMs = Date.now() - shift.inTime.getTime();
     if (trackingElapsedMs < 0 || trackingElapsedMs > LOCATION_TRACKING_MS) {
       return NextResponse.json({
@@ -170,15 +180,6 @@ export async function POST(request: NextRequest) {
       });
       outsideFlagId = flag.id;
     }
-
-    await maybeNotifyForgotPunchOut({
-      accountId: worker.profileId,
-      companyId: worker.companyId,
-      profileType: worker.profileType,
-      enrolmentId: worker.enrolmentId,
-      punchDate: shift.punchDate,
-      inTime: shift.inTime
-    });
 
     return NextResponse.json({
       ok: true,
