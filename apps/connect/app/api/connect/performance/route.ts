@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
+import { loadConnectOperationalPerformance } from "../../../../src/lib/connect-operational-performance";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 type WorkerType = "employee" | "contractor";
@@ -52,6 +53,18 @@ async function ownReview(companyId: string, personId: string, reviewId: string) 
   return result.data;
 }
 
+async function managedReview(companyId: string, personId: string, reviewId: string) {
+  const result = await db().from("hr_performance_reviews")
+    .select("*")
+    .eq("company_id", companyId)
+    .eq("reviewer_person_id", personId)
+    .eq("id", reviewId)
+    .maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) throw new Error("This review is not assigned to you.");
+  return result.data;
+}
+
 async function recordEvent(input: {
   companyId: string;
   reviewId: string;
@@ -77,16 +90,33 @@ async function recordEvent(input: {
 
 export async function GET(request: Request) {
   try {
-    const context = await ownPerformanceContext(new URL(request.url));
-    if (!context.engagement) return NextResponse.json({ configured: false, cycles: [], reviews: [], goals: [], changes: [] });
-    const reviewsResult = await db().from("hr_performance_reviews")
+    const url = new URL(request.url);
+    const context = await ownPerformanceContext(url);
+    if (!context.engagement) return NextResponse.json({ configured: false, cycles: [], reviews: [], managerReviews: [], goals: [], changes: [], operational: null });
+    const requestedWeek = Number(url.searchParams.get("week"));
+    const [reviewsResult, managerReviewsResult, operational] = await Promise.all([
+      db().from("hr_performance_reviews")
       .select("id,cycle_id,worker_name,worker_code,designation_name,department_name,status,self_rating,manager_rating,final_rating,self_comments,manager_comments,calibration_comments,self_submitted_at,manager_submitted_at,acknowledged_at,updated_at")
       .eq("company_id", context.account.companyId)
       .eq("person_id", context.engagement.person_id)
-      .order("created_at", { ascending: false });
-    if (reviewsResult.error) throw new Error(reviewsResult.error.message);
+      .order("created_at", { ascending: false }),
+      db().from("hr_performance_reviews")
+        .select("id,cycle_id,worker_name,worker_code,designation_name,department_name,status,self_rating,manager_rating,final_rating,self_comments,manager_comments,calibration_comments,self_submitted_at,manager_submitted_at,acknowledged_at,updated_at")
+        .eq("company_id", context.account.companyId)
+        .eq("reviewer_person_id", context.engagement.person_id)
+        .order("created_at", { ascending: false })
+        .limit(100),
+      loadConnectOperationalPerformance({
+        account: context.account,
+        personId: context.engagement.person_id,
+        engagementId: context.engagement.id,
+        requestedWeek: Number.isInteger(requestedWeek) && requestedWeek > 0 && requestedWeek < 54 ? requestedWeek : null
+      })
+    ]);
+    if (reviewsResult.error || managerReviewsResult.error) throw new Error(reviewsResult.error?.message ?? managerReviewsResult.error?.message ?? "Unable to load performance reviews.");
     const reviews = reviewsResult.data ?? [];
-    const cycleIds = [...new Set(reviews.map((item) => item.cycle_id))];
+    const managerReviews = managerReviewsResult.data ?? [];
+    const cycleIds = [...new Set([...reviews, ...managerReviews].map((item) => item.cycle_id))];
     const reviewIds = reviews.map((item) => item.id);
     const [cycles, goals, changes] = await Promise.all([
       cycleIds.length
@@ -103,8 +133,10 @@ export async function GET(request: Request) {
       configured: true,
       cycles: cycles.data ?? [],
       reviews,
+      managerReviews,
       goals: goals.data ?? [],
-      changes: changes.data ?? []
+      changes: changes.data ?? [],
+      operational
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load performance reviews." }, { status: 400 });
@@ -118,7 +150,9 @@ export async function POST(request: Request) {
     if (!context.engagement) throw new Error("Your People profile is not configured for performance reviews.");
     const action = clean(body.action);
     const reviewId = clean(body.reviewId);
-    const review = await ownReview(context.account.companyId, context.engagement.person_id, reviewId);
+    const review = action === "manager_review"
+      ? await managedReview(context.account.companyId, context.engagement.person_id, reviewId)
+      : await ownReview(context.account.companyId, context.engagement.person_id, reviewId);
 
     if (action === "self_review") {
       if (review.status !== "assigned") throw new Error("This self-review has already been submitted.");
@@ -126,7 +160,7 @@ export async function POST(request: Request) {
       if (cycle.error || !cycle.data) throw new Error(cycle.error?.message ?? "Performance cycle is unavailable.");
       if (!["open", "manager_review"].includes(cycle.data.status)) throw new Error("Self-review is not open for this cycle.");
       const selfRating = rating(body.selfRating);
-      if (selfRating > Number(cycle.data.rating_scale)) throw new Error(`Rating cannot exceed ${cycle.data.rating_scale}.`);
+      if (selfRating < 1 || selfRating > Number(cycle.data.rating_scale)) throw new Error(`Rating must be between 1 and ${cycle.data.rating_scale}.`);
       const comments = clean(body.comments);
       if (comments.length < 10) throw new Error("Add a short summary of your contribution and development needs.");
       const updated = await db().from("hr_performance_reviews").update({
@@ -173,6 +207,28 @@ export async function POST(request: Request) {
       if (!goal.data) throw new Error("Goal was not found for this review.");
       await recordEvent({ companyId: context.account.companyId, reviewId: review.id, eventType: "goal_progress_updated", fromStatus: review.status, toStatus: review.status, account: context.account });
       return NextResponse.json({ ok: true, notice: "Goal progress updated." });
+    }
+
+    if (action === "manager_review") {
+      if (!["self_submitted", "manager_submitted"].includes(review.status)) throw new Error("The employee self-review must be submitted before manager feedback.");
+      const cycle = await db().from("hr_performance_cycles").select("rating_scale,status").eq("company_id", context.account.companyId).eq("id", review.cycle_id).maybeSingle();
+      if (cycle.error || !cycle.data) throw new Error(cycle.error?.message ?? "Performance cycle is unavailable.");
+      if (!["open", "manager_review"].includes(cycle.data.status)) throw new Error("Manager review is not open for this cycle.");
+      const managerRating = rating(body.managerRating);
+      if (managerRating < 1 || managerRating > Number(cycle.data.rating_scale)) throw new Error(`Rating must be between 1 and ${cycle.data.rating_scale}.`);
+      const comments = clean(body.comments);
+      if (comments.length < 10) throw new Error("Add a short feedback and development summary.");
+      const updated = await db().from("hr_performance_reviews").update({
+        manager_rating: managerRating,
+        manager_comments: comments.slice(0, 4000),
+        manager_submitted_at: new Date().toISOString(),
+        status: "manager_submitted",
+        updated_by: null
+      }).eq("company_id", context.account.companyId).eq("id", review.id).in("status", ["self_submitted", "manager_submitted"]).select("id").maybeSingle();
+      if (updated.error) throw new Error(updated.error.message);
+      if (!updated.data) throw new Error("This review changed while you were submitting. Refresh and try again.");
+      await recordEvent({ companyId: context.account.companyId, reviewId: review.id, eventType: "manager_review_submitted", fromStatus: review.status, toStatus: "manager_submitted", account: context.account });
+      return NextResponse.json({ ok: true, notice: "Manager review submitted for final calibration." });
     }
 
     throw new Error("Choose a valid performance action.");
