@@ -19651,6 +19651,7 @@ td strong,
 .station-manpower-card-metrics span { padding: 5px 7px; border-radius: 999px; background: #f2f4f7; color: #475467; font-size: 8px; letter-spacing: 0; text-transform: none; }
 .station-manpower-card-metrics span.warn { color: #b54708; background: #fff4e5; }
 .station-manpower-card-metrics span.bad { color: #b42318; background: #fee4e2; }
+.station-manpower-card-metrics span.off-worked { color: #5925dc; background: #f4f3ff; }
 .station-manpower-tiers { display: grid; gap: 12px; padding: 13px; }
 .station-manpower-tiers > section { display: grid; gap: 6px; }
 .station-manpower-tiers h3 { display: flex; align-items: center; gap: 7px; margin: 0; color: #667085; font-size: 9px; font-weight: 900; letter-spacing: .07em; text-transform: uppercase; }
@@ -19717,7 +19718,7 @@ td strong,
 .station-timetable-shift-strip b { font-size: 8px; }
 .station-timetable-shift-strip small { color: #667085; font-size: 8px; }
 .station-timetable-scroll { overflow-x: auto; scrollbar-width: thin; }
-.station-timetable-axis, .station-timetable-row { display: grid; grid-template-columns: minmax(150px, 190px) 88px minmax(430px, 1fr) 108px; align-items: center; min-width: 820px; }
+.station-timetable-axis, .station-timetable-row { display: grid; grid-template-columns: minmax(150px, 190px) 88px minmax(410px, 1fr) 132px; align-items: center; min-width: 820px; }
 .station-timetable-axis { min-height: 29px; padding: 0 10px; border-bottom: 1px solid #d0d5dd; color: #98a2b3; background: #f9fafb; font-size: 7px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
 .station-timetable-axis > div { position: relative; height: 100%; margin: 0 8px; }
 .station-timetable-axis time { position: absolute; top: 9px; transform: translateX(-50%); color: #667085; font-size: 7px; font-weight: 800; letter-spacing: 0; }
@@ -19726,8 +19727,8 @@ td strong,
 .station-timetable-person-row { border-bottom: 1px solid #f0f1f3; }
 .station-timetable-person-row:last-child { border-bottom: 0; }
 .station-timetable-row { width: 100%; min-height: 39px; padding: 4px 10px; border: 0; color: inherit; background: #fff; cursor: pointer; text-align: left; }
-.station-timetable-row-static { cursor: default; }
 .station-timetable-row:hover, .station-timetable-person-row.open .station-timetable-row { background: #fffaf7; }
+.station-timetable-person-row.off-worked .station-timetable-row { background: #fcfaff; }
 .station-timetable-person, .station-timetable-shift, .station-timetable-status { display: grid; gap: 1px; min-width: 0; }
 .station-timetable-person b, .station-timetable-shift b, .station-timetable-status b { overflow: hidden; color: #344054; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .station-timetable-person small, .station-timetable-shift small, .station-timetable-status small { overflow: hidden; color: #98a2b3; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
@@ -19744,26 +19745,37 @@ td strong,
 .station-timetable-actual { z-index: 1; top: 7px; height: 8px; min-width: 3px; background: #12b76a; box-shadow: 0 1px 2px rgba(16, 24, 40, .16); }
 .station-timetable-actual.late { background: #f04438; }
 .station-timetable-actual.away { background: #7f56d9; }
+.station-timetable-actual.off-worked { background: #7f56d9; box-shadow: 0 1px 3px rgba(89, 37, 220, .28); }
 .station-timetable-arrival { position: absolute; z-index: 2; top: 3px; width: 2px; height: 16px; transform: translateX(-1px); border-radius: 2px; background: #067647; }
 .station-timetable-arrival.late { background: #b42318; }
+.station-timetable-arrival.away { background: #5925dc; }
 .station-timetable-detail { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 16px; padding: 6px 12px 7px 286px; border-top: 1px dashed #eaecf0; color: #667085; background: #fffaf7; font-size: 8px; }
 .station-timetable-detail span { display: inline-flex; align-items: center; gap: 4px; }
 .station-timetable-detail strong { color: #344054; }
-.station-timetable-detail a { margin-left: auto; color: #c2410c; font-weight: 850; text-decoration: none; }
 .station-timetable-unassigned { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 12px; border-top: 1px solid #eaecf0; background: #fffcf5; }
 .station-timetable-unassigned > strong { color: #b54708; font-size: 8px; text-transform: uppercase; }
 .station-timetable-unassigned a { display: inline-flex; gap: 4px; padding: 3px 6px; border-radius: 5px; color: #475467; background: #fff4e5; font-size: 8px; text-decoration: none; }
 .station-timetable-unassigned a span { color: #98a2b3; }
 .station-timetable-off-only { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; }
-.station-timetable-off-only > span { display: grid; gap: 1px; min-width: 170px; padding: 6px 8px; border: 1px solid #d9d6fe; border-radius: 6px; background: #f4f3ff; }
+.station-timetable-off-only > article { min-width: min(100%, 300px); overflow: hidden; border: 1px solid #d9d6fe; border-radius: 7px; background: #f4f3ff; }
+.station-timetable-off-only button { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 7px 9px; border: 0; color: inherit; background: transparent; cursor: pointer; text-align: left; }
+.station-timetable-off-only button > span { display: grid; gap: 1px; }
+.station-timetable-off-only button > span:last-child { justify-items: end; text-align: right; }
 .station-timetable-off-only b { color: #42307d; font-size: 9px; }
 .station-timetable-off-only small { color: #6941c6; font-size: 7px; }
+.station-timetable-off-only .station-timetable-detail { padding-left: 9px; background: #fafaff; }
 .station-active-roster { border-bottom: 1px solid #eaecf0; background: #fff; }
-.station-active-roster summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 12px; color: #475467; cursor: pointer; list-style: none; }
+.station-active-roster summary { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; align-items: center; gap: 12px; min-height: 36px; padding: 6px 12px; color: #475467; background: #fffcf5; cursor: pointer; list-style: none; }
 .station-active-roster summary::-webkit-details-marker { display: none; }
-.station-active-roster summary > span:first-child { display: flex; align-items: baseline; gap: 6px; }
-.station-active-roster summary b { color: #182230; font-size: 9px; }
-.station-active-roster summary small, .station-active-roster summary > span:last-child { color: #667085; font-size: 8px; }
+.station-active-roster-title { display: flex; align-items: center; gap: 7px; min-width: 0; color: #b54708; }
+.station-active-roster-title > span { display: grid; gap: 1px; }
+.station-active-roster summary b { color: #182230; font-size: 10px; }
+.station-active-roster summary small { color: #667085; font-size: 8px; }
+.station-active-roster-counts { display: inline-flex; align-items: center; gap: 4px; color: #667085; font-size: 8px; white-space: nowrap; }
+.station-active-roster-counts i { width: 3px; height: 3px; border-radius: 50%; background: #d0d5dd; }
+.station-active-roster-action { display: inline-flex; align-items: center; gap: 4px; color: #b54708; font-size: 8px; font-weight: 850; white-space: nowrap; }
+.station-active-roster-action svg { transition: transform .16s ease; }
+.station-active-roster[open] .station-active-roster-action svg { transform: rotate(180deg); }
 .station-active-roster[open] summary { background: #fffcf5; }
 .station-active-roster > div { display: grid; gap: 5px; padding: 0 12px 8px; }
 .station-active-roster section { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; align-items: baseline; }
@@ -19850,6 +19862,8 @@ td strong,
   .station-command-strip { grid-template-columns: 1fr; }
   .station-timetable > header { align-items: flex-start; flex-direction: column; gap: 2px; }
   .station-timetable-detail { padding-left: 12px; }
+  .station-active-roster summary { grid-template-columns: 1fr auto; }
+  .station-active-roster-counts { grid-column: 1 / -1; grid-row: 2; }
   .station-shifts { padding: 8px; }
   .station-shift-heading { align-items: flex-start; }
   .station-arrival-head { align-items: flex-start; flex-direction: column; gap: 2px; }

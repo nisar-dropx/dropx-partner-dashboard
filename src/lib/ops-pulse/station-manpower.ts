@@ -43,7 +43,6 @@ export type OpsStationManpowerPerson = {
   designation: string;
   locationId: string;
   availability: "Working" | "Completed" | "On leave" | "Roster off" | "Not reported";
-  profileHref: string;
   today: {
     reported: boolean;
     lateMinutes: number;
@@ -280,9 +279,6 @@ export async function loadOpsStationManpower(
       designation: person.designation,
       locationId: person.locationId,
       availability,
-      profileHref: person.workerType === "employee"
-        ? `https://people.dropxlogistics.com/people/${person.id}`
-        : `https://people.dropxlogistics.com/people/contractors/${person.id}`,
       today: {
         reported,
         lateMinutes,
