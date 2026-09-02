@@ -38,7 +38,6 @@ type Row = {
   status: string;
   statusLabel?: string | null;
   statusKind?: "attendance" | "leave";
-  pendingReview?: boolean;
   inTime: string;
   outTime: string;
   punches: string[];
@@ -172,7 +171,6 @@ function minutes(value: string) {
 
 function dayStatus(row: Row | undefined, future: boolean) {
   if (future || !row) return "off";
-  if (row.pendingReview) return "pending";
   if (row.status === "A") return "absent";
   if (row.statusKind === "leave") return "leave";
   if (row.remark.toLowerCase().match(/single|missing/)) return "miss";
@@ -381,7 +379,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
                 return <button className={`${dayStatus(row, future)} ${selected?.date === date ? "selected" : ""}`} disabled={future} key={day} onClick={() => !future && setSelected(row ?? emptyAttendanceRow(date))}>{day}</button>;
               })}
             </div>
-            <div className="dx-legend"><span className="present">Present</span><span className="leave">Approved leave</span><span className="pending">Verification pending</span><span className="absent">Absent</span><span className="miss">Mis Punch</span><span className="off">Off / Future</span></div>
+            <div className="dx-legend"><span className="present">Present</span><span className="leave">Approved leave</span><span className="absent">Absent</span><span className="miss">Mis Punch</span><span className="off">Off / Future</span></div>
           </div> : null}
           {tab === "list" ? <div className="dx-attendance-list">
             {[...data.rows].sort((left, right) => right.date.localeCompare(left.date)).map((row) => <button key={row.date} onClick={() => { setSelected(row); setTab("calendar"); }}>

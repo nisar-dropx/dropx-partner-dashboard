@@ -2,20 +2,6 @@ import "server-only";
 
 import { supabaseAdmin } from "../supabase-admin";
 import { rebuildAttendanceDay } from "./attendance";
-import { resolveStationAttendanceSettings } from "./station-attendance-settings";
-
-function enrolmentVariants(value: unknown) {
-  const raw = String(value ?? "").trim();
-  const digits = raw.replace(/\D/g, "");
-  const cleaned = digits.replace(/^0+/, "") || "0";
-  const primary = cleaned || raw;
-  return Array.from(new Set([
-    raw,
-    cleaned,
-    primary.padStart(6, "0"),
-    primary.padStart(8, "0")
-  ].filter(Boolean)));
-}
 
 function asIsoTime(value: string | null | undefined) {
   if (!value) return null;
@@ -64,66 +50,6 @@ export async function activateHeldAttendancePunch(punchId: string) {
     String(punch.data.punch_date)
   );
   return true;
-}
-
-/** Held punches with integrity OFF (or no open flag) never appear in calendar or HRMS — release them. */
-export async function releaseOrphanedHeldPunches({
-  companyId,
-  enrolmentIds,
-  locationId
-}: {
-  companyId: string;
-  enrolmentIds: string[];
-  locationId: string | null;
-}) {
-  if (!supabaseAdmin) return;
-  const variants = Array.from(new Set(enrolmentIds.flatMap((value) => enrolmentVariants(value))));
-  if (!variants.length) return;
-
-  const stationSettings = await resolveStationAttendanceSettings(locationId);
-  const heldResult = await supabaseAdmin
-    .from("attendance_punches")
-    .select("id, punch_date, enrolment_id")
-    .eq("company_id", companyId)
-    .in("enrolment_id", variants)
-    .eq("calculated", false)
-    .eq("is_flagged", true);
-  if (heldResult.error || !heldResult.data?.length) return;
-
-  const punchIds = heldResult.data.map((row) => String(row.id));
-  const openFlagsResult = await supabaseAdmin
-    .from("attendance_integrity_flags")
-    .select("id, punch_id, punch_date, enrolment_id, status")
-    .eq("company_id", companyId)
-    .in("enrolment_id", variants)
-    .eq("status", "open");
-  if (openFlagsResult.error && !/does not exist|schema cache/i.test(openFlagsResult.error.message)) {
-    throw new Error(openFlagsResult.error.message);
-  }
-
-  const openFlagPunchIds = new Set(
-    (openFlagsResult.data ?? [])
-      .map((row) => String(row.punch_id ?? ""))
-      .filter(Boolean)
-  );
-  const openFlagDates = new Set(
-    (openFlagsResult.data ?? []).map((row) => `${row.enrolment_id}:${row.punch_date}`)
-  );
-
-  const datesToRebuild = new Set<string>();
-  for (const punch of heldResult.data) {
-    const punchId = String(punch.id);
-    const dateKey = `${punch.enrolment_id}:${punch.punch_date}`;
-    const hasOpenFlag = openFlagPunchIds.has(punchId) || openFlagDates.has(dateKey);
-    if (stationSettings.integrityFlagsEnabled && hasOpenFlag) continue;
-    await activateHeldAttendancePunch(punchId);
-    datesToRebuild.add(`${punch.enrolment_id}:${punch.punch_date}`);
-  }
-
-  for (const key of datesToRebuild) {
-    const [enrolmentId, punchDate] = key.split(":");
-    await rebuildAttendanceDay(companyId, enrolmentId, punchDate);
-  }
 }
 
 export async function resolveIntegrityFlag(flagId: string, resolvedBy: string | null) {

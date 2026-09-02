@@ -15737,14 +15737,3 @@ img.dx-selfie-live {
   font-weight: 700;
   text-align: center;
 }
-
-.dx-days button.pending,
-.dx-days button.pending.selected {
-  color: #7a4d00;
-  background: #fff4d6;
-  border: 1px solid #f5c451;
-}
-
-.dx-legend span.pending::before {
-  background: #f5c451;
-}
