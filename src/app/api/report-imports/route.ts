@@ -91,6 +91,7 @@ type InboundShipmentFact = {
 
 const sourceLabels: Record<SourceType, string> = {
   amazon_shipments: "Amazon shipment count",
+  amazon_hawkeye_daily: "Amazon Hawkeye daily",
   bpcl_fuel: "BPCL fuel",
   cashbook: "Cashbook",
   iocl_fuel: "IOC fuel",
@@ -98,6 +99,15 @@ const sourceLabels: Record<SourceType, string> = {
   daily_edsp_metrics: "Daily EDSP metrics"
 };
 const HASH_LOOKUP_CHUNK_SIZE = 25;
+
+type HawkeyeMetricRow = {
+  city: string | null;
+  metrics: Record<string, number | null>;
+  rawText: string;
+  rowNumber: number;
+  stationCode: string;
+  stationType: string | null;
+};
 
 function clean(value: unknown) {
   return String(value ?? "").trim().replace(/^'+/, "").replace(/'+$/, "");
@@ -282,6 +292,54 @@ function readWorkbookRows(buffer: ArrayBuffer, includeAllSheets = false) {
     }
   });
   return combined;
+}
+
+function readHawkeyeDailyRows(buffer: ArrayBuffer) {
+  const workbook = XLSX.read(buffer, { type: "array", raw: true, cellDates: true });
+  const sheetName = workbook.SheetNames.find((name) => key(name).includes("stationlevelview")) ?? workbook.SheetNames[0];
+  if (!sheetName) throw new Error("The Hawkeye workbook has no station-level sheet.");
+  const rows = XLSX.utils.sheet_to_json<SheetRow>(workbook.Sheets[sheetName], { header: 1, raw: true, defval: "" });
+  if (!rows.length) throw new Error("The Hawkeye station-level sheet is empty.");
+
+  const titleText = rows.slice(0, 4).flat().map(clean).filter(Boolean).join(" ");
+  const titleDate = titleText.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
+  const reportDate = titleDate ? `${titleDate[1]}-${titleDate[2]}-${titleDate[3]}` : null;
+  if (!reportDate) throw new Error("Hawkeye report date was not found in the workbook title.");
+
+  const headerIndex = locateHeader(rows, ["Station Code"]);
+  const headers = rows[headerIndex].map(clean);
+  const stationIndex = headers.findIndex((label) => key(label) === "stationcode");
+  const cityIndex = headers.findIndex((label) => key(label) === "city");
+  const stationTypeIndex = headers.findIndex((label) => key(label) === "stationtype");
+  const metricColumns = headers
+    .map((label, index) => ({ index, label }))
+    .filter((column) => column.index > stationTypeIndex && column.label);
+  if (stationIndex < 0 || metricColumns.length < 10) {
+    throw new Error("The Hawkeye station table does not contain the expected metric columns.");
+  }
+
+  const metricRows: HawkeyeMetricRow[] = rows.slice(headerIndex + 1).map((row, offset) => {
+    const stationCode = normalizeStation(row[stationIndex]);
+    const metrics: Record<string, number | null> = {};
+    metricColumns.forEach((column) => {
+      const rawValue = clean(row[column.index]);
+      const normalized = rawValue.replace(/,/g, "").replace(/%$/, "");
+      const parsed = rawValue && !/^n\/?a$/i.test(rawValue) && Number.isFinite(Number(normalized))
+        ? Number(normalized) / (rawValue.endsWith("%") ? 100 : 1)
+        : null;
+      metrics[column.label] = parsed;
+    });
+    return {
+      city: cityIndex >= 0 ? clean(row[cityIndex]) || null : null,
+      metrics,
+      rawText: row.map(clean).filter(Boolean).join(" | "),
+      rowNumber: headerIndex + offset + 2,
+      stationCode,
+      stationType: stationTypeIndex >= 0 ? clean(row[stationTypeIndex]) || null : null
+    };
+  }).filter((row) => row.stationCode);
+  if (!metricRows.length) throw new Error("No station rows were found in the Hawkeye workbook.");
+  return { headers: metricColumns.map((column) => column.label), reportDate, rows: metricRows };
 }
 
 type PdfMetricRow = {
@@ -562,6 +620,136 @@ function aggregateAmazonRows(rows: Array<{ normalized: NormalizedImport | null }
   });
 
   return Array.from(map.values());
+}
+
+type AmazonAggregateRow = ReturnType<typeof aggregateAmazonRows>[number] & {
+  c_return_rate?: number;
+  da_total_pay?: number;
+  del_rate?: number;
+  dropx_emp_code?: string | null;
+  dropx_name?: string | null;
+  fuel_pay?: number;
+  fuel_rate?: number;
+  mapped_at?: string | null;
+  mapping_status?: string;
+  mfn_rate?: number;
+  mfn_return_rate?: number;
+  mg_pay?: number;
+  mg_salary?: number;
+  pay_type?: string | null;
+  variable_pay?: number;
+};
+
+function productionForSource(row: AmazonAggregateRow, source: string) {
+  const normalizedSource = key(source);
+  if (normalizedSource === "amazondelivery" || normalizedSource === "delivery") return row.amazon_delivery;
+  if (normalizedSource === "swadelivery") return row.swa_delivery;
+  if (normalizedSource === "totaldelivery") return row.total_delivery;
+  if (normalizedSource === "customerreturn" || normalizedSource === "creturn") return row.c_return;
+  if (normalizedSource === "sellerpickup" || normalizedSource === "mfn") return row.mfn;
+  if (normalizedSource === "sellerreturn" || normalizedSource === "mfnreturn") return row.mfn_return;
+  return 0;
+}
+
+function daysInMonth(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnType<typeof aggregateAmazonRows>) {
+  if (!supabaseAdmin || !sourceRows.length) return sourceRows as AmazonAggregateRow[];
+  const rows = sourceRows as AmazonAggregateRow[];
+  const stationCodes = [...new Set(rows.map((row) => row.station_code))];
+  const providerMemberIds = [...new Set(rows.map((row) => row.provider_employee_id))];
+  const [stationsResult, providersResult] = await Promise.all([
+    supabaseAdmin.from("stations").select("id,station_code").eq("company_id", companyId).in("station_code", stationCodes),
+    supabaseAdmin.from("providers").select("id,code,name").eq("company_id", companyId)
+  ]);
+  if (stationsResult.error || providersResult.error) return rows;
+  const amazonProviderIds = (providersResult.data ?? []).filter((provider) => /amazon/i.test(`${provider.code ?? ""} ${provider.name ?? ""}`)).map((provider) => provider.id);
+  if (!amazonProviderIds.length) return rows;
+  const mappingsResult = await supabaseAdmin.from("field_executive_provider_mappings")
+    .select("provider_member_id,station_id,effective_from,effective_to,payment_method_id,payment_values,pay_type,delivery_rate,pickup_rate,mfn_rate,mfn_return_rate,guarantee_amount,guarantee_schedule,fuel_rate")
+    .eq("company_id", companyId).eq("status", "active")
+    .in("provider_id", amazonProviderIds).in("provider_member_id", providerMemberIds);
+  if (mappingsResult.error) return rows;
+  const methodIds = [...new Set((mappingsResult.data ?? []).map((mapping) => mapping.payment_method_id).filter(Boolean))] as string[];
+  const componentsResult = methodIds.length
+    ? await supabaseAdmin.from("payment_method_components")
+      .select("payment_method_id,component_code,component_type,pay_schedule,payment_fields(code,label,field_type,pay_schedule,calculation_type,calculation_source,provider_calculation_sources)")
+      .in("payment_method_id", methodIds).eq("is_active", true).order("sort_order")
+    : { data: [], error: null };
+  if (componentsResult.error) return rows;
+  const stationIdByCode = new Map((stationsResult.data ?? []).map((station) => [normalizeStation(station.station_code), station.id]));
+  const componentsByMethod = new Map<string, typeof componentsResult.data>();
+  (componentsResult.data ?? []).forEach((component) => {
+    const list = componentsByMethod.get(component.payment_method_id) ?? [];
+    list.push(component);
+    componentsByMethod.set(component.payment_method_id, list);
+  });
+
+  return rows.map((row) => {
+    const stationId = stationIdByCode.get(row.station_code);
+    const mapping = (mappingsResult.data ?? []).find((candidate) => (
+      clean(candidate.provider_member_id).toUpperCase() === clean(row.provider_employee_id).toUpperCase()
+      && (!candidate.station_id || candidate.station_id === stationId)
+      && candidate.effective_from <= row.work_date
+      && (!candidate.effective_to || candidate.effective_to >= row.work_date)
+    ));
+    if (!mapping) return { ...row, mapping_status: "Unmapped", mapped_at: null, da_total_pay: 0 };
+    const values = (mapping.payment_values && typeof mapping.payment_values === "object" ? mapping.payment_values : {}) as Record<string, unknown>;
+    let variablePay = 0;
+    let mgPay = 0;
+    let fuelPay = 0;
+    const components = mapping.payment_method_id ? componentsByMethod.get(mapping.payment_method_id) ?? [] : [];
+    components.forEach((component) => {
+      const field = Array.isArray(component.payment_fields) ? component.payment_fields[0] : component.payment_fields;
+      const componentCode = clean(field?.code || component.component_code).toUpperCase();
+      const fieldText = `${componentCode} ${field?.label ?? ""}`.toUpperCase();
+      const source = clean((field?.provider_calculation_sources as Record<string, unknown> | null)?.amazon || field?.calculation_source || componentCode);
+      const rate = Number(values[componentCode] ?? values[component.component_code] ?? 0);
+      const calculationType = clean(field?.calculation_type || (component.component_type === "production" ? "count_x_rate" : "fixed_daily"));
+      const schedule = clean(field?.pay_schedule || component.pay_schedule);
+      const amount = component.component_type === "production" || calculationType === "count_x_rate"
+        ? productionForSource(row, source) * rate
+        : schedule === "per_month" || calculationType === "fixed_monthly"
+          ? rate / daysInMonth(row.work_date)
+          : rate;
+      if (/FUEL|KILOMET|\bKM\b/.test(fieldText)) fuelPay += amount;
+      else if (/SALARY|GUARANTEE|\bMG\b|FIXED/.test(fieldText)) mgPay += amount;
+      else variablePay += amount;
+    });
+
+    const deliveryRate = Number(mapping.delivery_rate ?? 0);
+    const cReturnRate = Number(mapping.pickup_rate ?? 0);
+    const mfnRate = Number(mapping.mfn_rate ?? 0);
+    const mfnReturnRate = Number(mapping.mfn_return_rate ?? 0);
+    if (!components.length) {
+      variablePay = row.total_delivery * deliveryRate + row.c_return * cReturnRate + row.mfn * mfnRate + row.mfn_return * mfnReturnRate;
+    }
+    const legacyFuelRate = Number(mapping.fuel_rate ?? 0);
+    if (!fuelPay && legacyFuelRate) fuelPay = row.total_delivery * legacyFuelRate;
+    const guarantee = Number(mapping.guarantee_amount ?? 0);
+    const guaranteeDaily = /month/i.test(String(mapping.guarantee_schedule ?? "")) ? guarantee / daysInMonth(row.work_date) : guarantee;
+    if (guaranteeDaily > variablePay + mgPay) mgPay += guaranteeDaily - variablePay - mgPay;
+    const configured = Boolean(mapping.payment_method_id || components.length || deliveryRate || cReturnRate || mfnRate || mfnReturnRate || legacyFuelRate || guarantee);
+    return {
+      ...row,
+      c_return_rate: cReturnRate,
+      da_total_pay: variablePay + mgPay + fuelPay,
+      del_rate: deliveryRate,
+      fuel_pay: fuelPay,
+      fuel_rate: legacyFuelRate,
+      mapped_at: new Date().toISOString(),
+      mapping_status: configured ? "Mapped" : "Payment setup missing",
+      mfn_rate: mfnRate,
+      mfn_return_rate: mfnReturnRate,
+      mg_pay: mgPay,
+      mg_salary: guaranteeDaily,
+      pay_type: clean(mapping.pay_type) || (mapping.payment_method_id ? "Configured" : null),
+      variable_pay: variablePay
+    };
+  });
 }
 
 function parseFuel(raw: RawRecord, rowNumber: number, provider: "IOC" | "BPCL"): NormalizedImport | null {
@@ -1253,6 +1441,72 @@ export async function POST(request: Request) {
       await db.storage.from(storageBucket).remove([storagePath]);
       return buffer;
     });
+    if (masterData.parser_type === "hawkeye_daily_metrics") {
+      const hawkeye = await importStep("Read Hawkeye station metrics", () => Promise.resolve(readHawkeyeDailyRows(fileBuffer)));
+      const locationResult = await importStep("Validate Hawkeye stations", () => loadCodLocations(companyId, [], true));
+      if (locationResult.error) throw new Error(locationResult.error);
+      const allowedStationCodes = new Set(locationResult.locations.map((location) => normalizeStation(location.station_code)));
+      const unknownStations = [...new Set(hawkeye.rows.filter((row) => !allowedStationCodes.has(row.stationCode)).map((row) => row.stationCode))];
+      const week = amazonWeekInfo(hawkeye.reportDate);
+      const metricRows = hawkeye.rows.filter((row) => allowedStationCodes.has(row.stationCode)).map((row) => {
+        const valuesJson = {
+          format_version: 1,
+          headers: hawkeye.headers,
+          metrics: row.metrics,
+          station_type: row.stationType
+        };
+        const hash = crypto.createHash("sha256").update(JSON.stringify({
+          sourceType,
+          reportDate: hawkeye.reportDate,
+          stationCode: row.stationCode,
+          values: valuesJson
+        })).digest("hex");
+        return {
+          batch_id: batch.data.id,
+          company_id: companyId,
+          page_number: 1,
+          raw_text: row.rawText,
+          report_date: hawkeye.reportDate,
+          report_week: week.amazon_week_no,
+          report_year: week.amazon_week_year,
+          row_hash: hash,
+          row_label: row.city,
+          row_number: row.rowNumber,
+          source_type: sourceType,
+          station_code: row.stationCode,
+          values_json: valuesJson
+        };
+      });
+      if (!metricRows.length) {
+        throw new Error(`No Hawkeye rows matched active OpsPulse stations.${unknownStations.length ? ` Unmatched: ${unknownStations.join(", ")}.` : ""}`);
+      }
+      const hashes = metricRows.map((row) => row.row_hash);
+      const existing = new Set<string>();
+      for (let index = 0; index < hashes.length; index += HASH_LOOKUP_CHUNK_SIZE) {
+        const result = await db.from("report_metric_facts").select("row_hash")
+          .eq("company_id", companyId).eq("source_type", sourceType).in("row_hash", hashes.slice(index, index + HASH_LOOKUP_CHUNK_SIZE));
+        if (result.error) throw result.error;
+        (result.data ?? []).forEach((row) => existing.add(row.row_hash));
+      }
+      const validMetrics = metricRows.filter((row) => !existing.has(row.row_hash));
+      await importStep("Save Hawkeye metrics", () => insertInChunks("report_metric_facts", validMetrics, 250));
+      const duplicateRows = metricRows.length - validMetrics.length;
+      const warning = unknownStations.length ? ` ${unknownStations.join(", ")} ignored because they are not active OpsPulse stations.` : "";
+      const message = `${validMetrics.length} Hawkeye station row${validMetrics.length === 1 ? "" : "s"} imported for ${hawkeye.reportDate}. ${duplicateRows} duplicate${duplicateRows === 1 ? "" : "s"} ignored.${warning}`;
+      await db.from("report_import_batches").update({
+        completed_at: new Date().toISOString(),
+        imported_row_count: validMetrics.length,
+        message,
+        report_from: hawkeye.reportDate,
+        report_to: hawkeye.reportDate,
+        row_count: hawkeye.rows.length,
+        skipped_row_count: duplicateRows + unknownStations.length,
+        station_code: [...new Set(metricRows.map((row) => row.station_code))].sort().join(", "),
+        status: "Completed"
+      }).eq("id", batch.data.id).eq("company_id", companyId);
+      return Response.json({ duplicateRows, imported: validMetrics.length, message, skipped: duplicateRows + unknownStations.length, totalRows: hawkeye.rows.length });
+    }
+
     if (masterData.parser_type === "pdf_scorecard" || masterData.parser_type === "pdf_daily_metrics") {
       const pdf = await importStep("Convert PDF to metric rows", () => readPdfMetricRows(
         fileBuffer,
@@ -1507,7 +1761,10 @@ export async function POST(request: Request) {
     await importStep("Save raw import audit rows", () => insertInChunks("report_import_rows", rowPayload, 250));
 
     if (sourceType === "amazon_shipments") {
-      const payload = aggregateAmazonRows(factRows, batch.data.id, companyId);
+      const payload = await importStep("Apply configured DA payment mappings", () => applyAmazonPaymentMappings(
+        companyId,
+        aggregateAmazonRows(factRows, batch.data.id, companyId)
+      ));
       await importStep("Refresh Amazon shipment totals", () => upsertInChunks("cps_shipment_daily", payload, "company_id,client,work_date,station_code,provider_employee_id", 250));
     }
 

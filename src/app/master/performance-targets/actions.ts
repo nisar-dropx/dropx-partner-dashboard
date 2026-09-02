@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { createPerformanceTarget, deletePerformanceTarget, performanceTargetSeeds, savePerformanceTarget } from "@/lib/ops-pulse/performance-targets";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function updatePerformanceTarget(formData: FormData) {
   const authorization = await requirePagePermission("performance_master", "edit");
@@ -64,4 +65,23 @@ export async function removePerformanceMetric(formData: FormData) {
   revalidatePath("/master/performance-targets");
   revalidatePath("/ops-pulse/performance");
   redirect(`/master/performance-targets?view=${reportType}&${error ? `error=${encodeURIComponent(error)}` : "deleted=1"}`);
+}
+
+export async function updatePerformanceReviewCadence(formData: FormData) {
+  const authorization = await requirePagePermission("performance_master", "edit");
+  const companyId = requireCompanyId(authorization);
+  const weekday = Math.max(0, Math.min(6, Number(formData.get("weekly_review_weekday") ?? 4)));
+  const staleHours = Math.max(1, Math.min(168, Number(formData.get("stale_after_hours") ?? 24)));
+  const result = supabaseAdmin ? await supabaseAdmin.from("ops_performance_review_settings").upsert({
+    company_id: companyId,
+    daily_review_time: String(formData.get("daily_review_time") ?? "10:00"),
+    stale_after_hours: staleHours,
+    updated_at: new Date().toISOString(),
+    updated_by: authorization.userId,
+    weekly_review_time: String(formData.get("weekly_review_time") ?? "16:00"),
+    weekly_review_weekday: weekday
+  }, { onConflict: "company_id" }) : { error: { message: "Database service is unavailable." } };
+  revalidatePath("/master/performance-targets");
+  revalidatePath("/ops-pulse/performance");
+  redirect(`/master/performance-targets?view=reviews&${result.error ? `error=${encodeURIComponent(result.error.message)}` : "saved=1"}`);
 }

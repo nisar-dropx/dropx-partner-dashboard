@@ -5,17 +5,20 @@ import { PerformanceStationFilter } from "@/components/performance-station-filte
 import { AmazonWeekNavigator } from "@/components/amazon-week-navigator";
 import { PerformanceSortControl } from "@/components/performance-sort-control";
 import { PerformanceWorkspaceTabs } from "@/components/performance-workspace-tabs";
+import { PerformanceReviewDesk, type ReviewMetric } from "@/components/performance-review-desk";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { loadPerformanceTargets, resolvePerformanceTargets, type PerformanceTarget } from "@/lib/ops-pulse/performance-targets";
+import { hawkeyeMetricDefinitions, hawkeyeValue, hawkeyeValueForTarget } from "@/lib/ops-pulse/hawkeye";
+import { loadPerformanceOperationalSnapshots, loadPerformanceReviewWorkspace } from "@/lib/ops-pulse/performance-review";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = { view?: string; week?: string; date?: string; from?: string; to?: string; stations?: string; sort?: string; trend?: string };
+type SearchParams = { view?: string; week?: string; date?: string; from?: string; to?: string; stations?: string; sort?: string; trend?: string; review?: string; notice?: string; error?: string };
 type MetricFact = {
   batch_id: string;
   source_type: string;
@@ -87,8 +90,14 @@ function metricValues(row: MetricFact) {
   return [];
 }
 
-function ragStatus(value: number, target: number | null, direction: string) {
-  if (target == null) return "neutral";
+function dailyMetricValue(row: MetricFact, metric: { metricKey: string; index: number }) {
+  return row.source_type === "amazon_hawkeye_daily"
+    ? hawkeyeValueForTarget(row.values_json, metric.metricKey)
+    : metricValues(row)[metric.index] ?? null;
+}
+
+function ragStatus(value: number | null, target: number | null, direction: string) {
+  if (value == null || target == null) return "neutral";
   if (direction === "higher") {
     if (value >= target) return "green";
     if (value >= target * .95) return "amber";
@@ -171,7 +180,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const permittedCodes = permittedLocations.map((location) => location.station_code);
   const requestedCodes = String(searchParams?.stations ?? "").split(",").map((code) => code.trim().toUpperCase()).filter((code) => permittedCodes.includes(code));
   const selectedCodes = requestedCodes.length ? [...new Set(requestedCodes)] : permittedCodes;
-  const view = searchParams?.view === "sls" ? "sls" : "daily";
+  const view = searchParams?.view === "sls" ? "sls" : searchParams?.view === "reviews" ? "reviews" : "daily";
   const defaultDailyDate = dateShift(today(), -1);
   const selectedDate = validDate(searchParams?.date, validDate(searchParams?.to, defaultDailyDate));
   const selectedDailyWeek = amazonWeekNumber(selectedDate);
@@ -180,12 +189,12 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const trendTo = selectedDailyWeekRange.end < defaultDailyDate ? selectedDailyWeekRange.end : defaultDailyDate;
   const metricQuery = !supabaseAdmin || !selectedCodes.length
     ? null
-    : view === "daily"
+    : view === "daily" || view === "reviews"
       ? supabaseAdmin.from("report_metric_facts")
         .select("batch_id,source_type,report_year,report_week,report_date,station_code,row_label,raw_text,values_json,created_at")
         .eq("company_id", companyId)
         .in("station_code", selectedCodes)
-        .eq("source_type", "daily_edsp_metrics")
+        .in("source_type", ["amazon_hawkeye_daily", "daily_edsp_metrics"])
         .gte("report_date", trendFrom)
         .lte("report_date", trendTo)
         .order("created_at", { ascending: false })
@@ -214,14 +223,14 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
       supabaseAdmin.from("report_metric_facts")
         .select("batch_id,created_at,report_date,station_code")
         .eq("company_id", companyId)
-        .eq("source_type", "daily_edsp_metrics")
+        .in("source_type", ["amazon_hawkeye_daily", "daily_edsp_metrics"])
         .eq("report_date", selectedDate)
         .not("station_code", "is", null)
         .limit(1000),
       supabaseAdmin.from("report_metric_facts")
         .select("report_date")
         .eq("company_id", companyId)
-        .eq("source_type", "daily_edsp_metrics")
+        .in("source_type", ["amazon_hawkeye_daily", "daily_edsp_metrics"])
         .not("report_date", "is", null)
         .order("report_date", { ascending: false })
         .limit(1)
@@ -258,15 +267,18 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const suppressedSlsRows = Math.max(0, latestSlsBatchRows.length - slsRows.length);
   const dailyCandidates = scopedFacts.filter((row) => {
     const values = metricValues(row);
-    return row.source_type === "daily_edsp_metrics" && row.station_code && selectedCodes.includes(stationCode(row.station_code)) && values.length > 5;
+    return ["amazon_hawkeye_daily", "daily_edsp_metrics"].includes(row.source_type)
+      && row.station_code && selectedCodes.includes(stationCode(row.station_code))
+      && (row.source_type === "amazon_hawkeye_daily" ? Boolean(hawkeyeValue(row.values_json, "AFN Std PDD DSR%") != null) : values.length > 5);
   });
   const reportDay = (row: MetricFact) => row.report_date;
   const exactDailyCandidates = dailyCandidates.filter((row) => {
     const day = reportDay(row);
     return day === selectedDate;
   });
-  const selectedDailyBatch = exactDailyCandidates[0]?.batch_id ?? null;
-  const dailyRows = selectedDailyBatch ? exactDailyCandidates.filter((row) => row.batch_id === selectedDailyBatch) : [];
+  const preferredExactSource = exactDailyCandidates.some((row) => row.source_type === "amazon_hawkeye_daily") ? "amazon_hawkeye_daily" : "daily_edsp_metrics";
+  const selectedDailyBatch = exactDailyCandidates.find((row) => row.source_type === preferredExactSource)?.batch_id ?? null;
+  const dailyRows = selectedDailyBatch ? exactDailyCandidates.filter((row) => row.batch_id === selectedDailyBatch && row.source_type === preferredExactSource) : [];
   const selectedDailyReportDate = dailyRows[0] ? reportDay(dailyRows[0]) : null;
   const dateCoverageRows = dateCoverageResult.data ?? [];
   const sourceDatesInRange = [...new Set(dateCoverageRows.map((row) => row.report_date).filter(Boolean) as string[])].sort();
@@ -275,16 +287,20 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const latestAvailableDate = latestDailyResult.data?.[0]?.report_date ?? null;
   const dailySort = searchParams?.sort || "exceptions_desc";
   const metricSort = dailySort.match(/^metric_(\d+)_(asc|desc)$/);
-  const missedTargets = (row: MetricFact) => dailyMetricDefinitions.filter((metric) => metric.target != null && ragStatus(metricValues(row)[metric.index] ?? 0, metric.target, metric.direction) !== "green").length;
+  const missedTargets = (row: MetricFact) => dailyMetricDefinitions.filter((metric) => {
+    const value = dailyMetricValue(row, metric);
+    return value != null && metric.target != null && ragStatus(value, metric.target, metric.direction) !== "green";
+  }).length;
   const sortedDailyRows = [...dailyRows].sort((a, b) => {
     if (metricSort) {
-      const difference = (metricValues(a)[Number(metricSort[1])] ?? 0) - (metricValues(b)[Number(metricSort[1])] ?? 0);
+      const metric = dailyMetricDefinitions.find((candidate) => candidate.index === Number(metricSort[1]));
+      const difference = metric ? (dailyMetricValue(a, metric) ?? 0) - (dailyMetricValue(b, metric) ?? 0) : 0;
       return metricSort[2] === "asc" ? difference : -difference;
     }
     if (dailySort === "exceptions_desc") return missedTargets(b) - missedTargets(a);
     if (dailySort === "station_desc") return String(b.station_code).localeCompare(String(a.station_code));
-    if (dailySort === "dsr_low") return (metricValues(a)[dsrIndex] ?? 0) - (metricValues(b)[dsrIndex] ?? 0);
-    if (dailySort === "dsr_high") return (metricValues(b)[dsrIndex] ?? 0) - (metricValues(a)[dsrIndex] ?? 0);
+    if (dailySort === "dsr_low") return (dsrMetric ? dailyMetricValue(a, dsrMetric) ?? 0 : 0) - (dsrMetric ? dailyMetricValue(b, dsrMetric) ?? 0 : 0);
+    if (dailySort === "dsr_high") return (dsrMetric ? dailyMetricValue(b, dsrMetric) ?? 0 : 0) - (dsrMetric ? dailyMetricValue(a, dsrMetric) ?? 0 : 0);
     return String(a.station_code).localeCompare(String(b.station_code));
   });
   const slsSort = searchParams?.sort || "score_desc";
@@ -294,7 +310,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     if (slsSort === "score_asc") return metricValues(a)[1] - metricValues(b)[1];
     return metricValues(b)[1] - metricValues(a)[1];
   });
-  const missingDsrStations = dailyRows.filter((row) => Number(metricValues(row)[dsrIndex] ?? 0) === 0).length;
+  const missingDsrStations = dsrMetric ? dailyRows.filter((row) => Number(dailyMetricValue(row, dsrMetric) ?? 0) === 0).length : 0;
   const metricSortHref = (index: number) => {
     const nextDirection = dailySort === `metric_${index}_asc` ? "desc" : "asc";
     const params = new URLSearchParams({ view: "daily", date: selectedDate, sort: `metric_${index}_${nextDirection}` });
@@ -314,7 +330,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     current.total += number(row.total_delivery);
     shipmentMap.set(row.station_code, current);
   });
-  const weekRange = weekDates(2026, selectedWeek);
+  const weekRange = weekDates(Number(selectedDate.slice(0, 4)), selectedWeek);
   const averageSls = slsRows.length ? slsRows.reduce((total, row) => total + metricValues(row)[1], 0) / slsRows.length : 0;
   const standingCounts = ["FANTASTIC", "GREAT", "FAIR", "POOR"].map((label) => ({ label, count: slsRows.filter((row) => standing(row.raw_text) === label).length }));
   const maxStanding = Math.max(...standingCounts.map((entry) => entry.count), 1);
@@ -325,7 +341,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const missingStationCodes = selectedCodes.filter((code) => !coveredStationCodes.has(code));
   const latestLoadAt = [...dailyRows.map((row) => row.created_at), ...dateCoverageRows.map((row) => row.created_at)].sort().at(-1) ?? null;
   const actionRows = [...dailyRows].filter((row) => missedTargets(row) > 0).sort((a, b) => missedTargets(b) - missedTargets(a)).slice(0, 5);
-  const averageDsrValues = dailyRows.map((row) => metricValues(row)[dsrIndex] ?? 0).filter((value) => value > 0);
+  const averageDsrValues = dsrMetric ? dailyRows.map((row) => dailyMetricValue(row, dsrMetric) ?? 0).filter((value) => value > 0) : [];
   const averageDsr = averageDsrValues.length ? averageDsrValues.reduce((sum, value) => sum + value, 0) / averageDsrValues.length : null;
   const dateLink = (value: string) => `/ops-pulse/performance?view=daily&date=${value}${stationQuery}${searchParams?.trend ? `&trend=${encodeURIComponent(searchParams.trend)}` : ""}`;
   const historyByStationDate = new Map<string, MetricFact>();
@@ -334,7 +350,8 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     const code = stationCode(row.station_code);
     if (!date || date < trendFrom || date > trendTo) return;
     const key = `${code}|${date}`;
-    if (!historyByStationDate.has(key)) historyByStationDate.set(key, row);
+    const existing = historyByStationDate.get(key);
+    if (!existing || (row.source_type === "amazon_hawkeye_daily" && existing.source_type !== "amazon_hawkeye_daily")) historyByStationDate.set(key, row);
   });
   const requestedTrendCode = stationCode(searchParams?.trend ?? null);
   const defaultTrendCode = stationCode(sortedDailyRows[0]?.station_code ?? selectedCodes[0] ?? null);
@@ -346,19 +363,57 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const trendMetrics = trendMetricKeys.map((key) => dailyMetricDefinitions.find((metric) => metric.metricKey === key)).filter((metric): metric is typeof dailyMetricDefinitions[number] => Boolean(metric));
   const trendStationLocation = locationByCode.get(trendStationCode);
   const trendHref = (code: string) => `/ops-pulse/performance?view=daily&date=${selectedDate}${stationQuery}&trend=${encodeURIComponent(code)}#daily-trend`;
+  const requestedReviewCode = stationCode(searchParams?.review ?? null);
+  const selectedReviewLocation = permittedLocations.find((location) => location.station_code === requestedReviewCode) ?? permittedLocations[0] ?? null;
+  const reviewWorkspace = selectedReviewLocation
+    ? await loadPerformanceReviewWorkspace(companyId, selectedDate, [selectedReviewLocation.station_code])
+    : { settings: null, reviews: [], steps: [], items: [], updates: [], error: "No permitted station is available." };
+  const operationalResult = selectedReviewLocation
+    ? await loadPerformanceOperationalSnapshots(companyId, selectedDate, [selectedReviewLocation])
+    : { rows: new Map(), error: "No permitted station is available." };
+  const selectedReviewRow = selectedReviewLocation ? dailyRows.find((row) => stationCode(row.station_code) === selectedReviewLocation.station_code) ?? null : null;
+  const reviewMetrics: ReviewMetric[] = selectedReviewRow?.source_type === "amazon_hawkeye_daily"
+    ? hawkeyeMetricDefinitions.map((definition) => {
+      const target = definition.targetKey ? dailyMetricDefinitions.find((metric) => metric.metricKey === definition.targetKey) : null;
+      const actual = hawkeyeValue(selectedReviewRow.values_json, definition.label);
+      return { actual, direction: target?.direction ?? "higher", key: definition.targetKey || definition.label.toLowerCase().replace(/[^a-z0-9]+/g, "_"), label: definition.label, severity: ragStatus(actual, target?.target ?? null, target?.direction ?? "higher") as ReviewMetric["severity"], short: definition.short, target: target?.target ?? null };
+    })
+    : selectedReviewRow
+      ? orderedDailyMetricDefinitions.map((metric) => ({ actual: dailyMetricValue(selectedReviewRow, metric), direction: metric.direction, key: metric.metricKey, label: metric.label, severity: ragStatus(dailyMetricValue(selectedReviewRow, metric), metric.target, metric.direction) as ReviewMetric["severity"], short: metric.short, target: metric.target }))
+      : [];
+  const selectedReview = selectedReviewLocation ? reviewWorkspace.reviews.find((review) => review.station_code === selectedReviewLocation.station_code) ?? null : null;
+  const selectedSnapshot = selectedReviewLocation ? operationalResult.rows.get(selectedReviewLocation.station_code) ?? null : null;
+  const canEditReview = authorization.isMasterOwner || Boolean(authorization.permissions.performance?.canEdit);
 
   return (
     <AppShell active="Performance" pageCode="performance">
       <div className="ops-command-center performance-workspace">
         <PageHead eyebrow="Performance" title="Station Performance" subtitle="Daily metrics, weekly scorecards and delivery data." />
         <PerformanceWorkspaceTabs active={view} />
-        <div className="performance-local-filter-row">
+        {view !== "reviews" ? <div className="performance-local-filter-row">
           <PerformanceStationFilter stations={permittedLocations.map((location) => ({ code: location.station_code, name: location.station_name || location.city || location.station_code }))} selectedCodes={selectedCodes} view={view} date={selectedDate} week={selectedWeek} />
-        </div>
+        </div> : null}
 
         {metricResult.error || shipmentResult.error || dateCoverageResult.error || latestDailyResult.error || targetResult.error ? <section className="panel message-panel error"><div className="panel-body">{metricResult.error?.message ?? shipmentResult.error?.message ?? dateCoverageResult.error?.message ?? latestDailyResult.error?.message ?? targetResult.error}</div></section> : null}
 
-        {view === "daily" ? (
+        {view === "reviews" ? (
+          selectedReviewLocation && selectedSnapshot ? <PerformanceReviewDesk
+            canEdit={canEditReview}
+            date={selectedDate}
+            error={searchParams?.error || reviewWorkspace.error || operationalResult.error}
+            items={reviewWorkspace.items}
+            locations={permittedLocations}
+            metrics={reviewMetrics}
+            notice={searchParams?.notice || null}
+            review={selectedReview}
+            selectedLocation={selectedReviewLocation}
+            snapshot={selectedSnapshot}
+            sourceBatchId={selectedReviewRow?.batch_id ?? null}
+            sourceType={selectedReviewRow?.source_type ?? "operational_data"}
+            sourceWeek={selectedDailyWeek}
+            steps={reviewWorkspace.steps}
+          /> : <section className="panel message-panel error"><div className="panel-body">No permitted station is available for review.</div></section>
+        ) : view === "daily" ? (
           <>
             <section className="ops-control-strip performance-day-control">
               <div className="ops-context-summary"><span>Daily review</span><strong>{selectedDate.split("-").reverse().join("/")}</strong><small>{selectedCodes.length} permitted stations</small></div>
@@ -387,18 +442,18 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             {trendStationCode ? <section className="panel performance-daily-trend" id="daily-trend">
               <div className="panel-head"><div><h2>Amazon Week {selectedDailyWeek} station trend</h2><p className="subtle">{trendStationCode} · {trendStationLocation?.station_name || trendStationLocation?.city || trendStationCode} · {selectedDailyWeekRange.start.split("-").reverse().join("/")}–{selectedDailyWeekRange.end.split("-").reverse().join("/")}</p></div><form className="performance-trend-station-form"><input type="hidden" name="view" value="daily"/><input type="hidden" name="date" value={selectedDate}/>{selectedCodes.length !== permittedCodes.length ? <input type="hidden" name="stations" value={selectedCodes.join(",")}/> : null}<label>Station<select name="trend" defaultValue={trendStationCode}>{selectedCodes.map((code) => <option key={code} value={code}>{code} · {locationByCode.get(code)?.station_name || locationByCode.get(code)?.city || code}</option>)}</select></label><button>View trend</button></form></div>
               {trendStationRows.length ? <div className="performance-trend-grid">{trendMetrics.map((metric) => {
-                const points = trendStationRows.map((row) => metricValues(row)[metric.index] ?? 0);
+                const points = trendStationRows.map((row) => dailyMetricValue(row, metric) ?? 0);
                 const first = points[0] ?? 0;
                 const latest = points.at(-1) ?? 0;
                 const delta = latest - first;
                 const improving = metric.direction === "higher" ? delta > .0005 : delta < -.0005;
                 const declining = metric.direction === "higher" ? delta < -.0005 : delta > .0005;
-                return <article key={metric.metricKey}><header><span>{metric.short}</span><strong>{percent(latest)}</strong><i className={improving ? "up" : declining ? "down" : "flat"}>{improving ? "↑ Improving" : declining ? "↓ Declining" : "— Stable"} · {delta >= 0 ? "+" : ""}{(delta * 100).toFixed(1)} pp</i></header><svg preserveAspectRatio="none" viewBox="0 0 240 62"><polyline fill="none" points={trendPath(points)}/></svg><footer>{trendStationRows.map((row) => <span key={`${metric.metricKey}-${row.report_date}`} title={`${formatDashboardDate(row.report_date)}: ${percent(metricValues(row)[metric.index] ?? 0)}`}>{String(row.report_date).slice(8)}</span>)}</footer><small>Target {targetLabel(metric.target, metric.direction)}</small></article>;
+                return <article key={metric.metricKey}><header><span>{metric.short}</span><strong>{percent(latest)}</strong><i className={improving ? "up" : declining ? "down" : "flat"}>{improving ? "↑ Improving" : declining ? "↓ Declining" : "— Stable"} · {delta >= 0 ? "+" : ""}{(delta * 100).toFixed(1)} pp</i></header><svg preserveAspectRatio="none" viewBox="0 0 240 62"><polyline fill="none" points={trendPath(points)}/></svg><footer>{trendStationRows.map((row) => <span key={`${metric.metricKey}-${row.report_date}`} title={`${formatDashboardDate(row.report_date)}: ${percent(dailyMetricValue(row, metric) ?? 0)}`}>{String(row.report_date).slice(8)}</span>)}</footer><small>Target {targetLabel(metric.target, metric.direction)}</small></article>;
               })}</div> : <div className="empty-state">No Daily EDSP history is available for this station in Amazon Week {selectedDailyWeek}.</div>}
             </section> : null}
             {actionRows.length ? <section className="panel performance-action-queue"><div className="panel-head"><div><h2>Action queue</h2><p className="subtle">Highest target misses for {selectedDate.split("-").reverse().join("/")}.</p></div><strong>{actionRows.length} priorities</strong></div><div className="table-wrap"><table><thead><tr><th>Station</th><th>City</th><th>Missed targets</th><th>DSR</th><th></th></tr></thead><tbody>{actionRows.map((row) => {
               const code = stationCode(row.station_code);
-              return <tr key={`action-${row.batch_id}-${row.station_code}`}><td><strong>{code}</strong></td><td>{row.row_label || "—"}</td><td><span className="station-attention risk">{missedTargets(row)} misses</span></td><td>{percent(metricValues(row)[dsrIndex] ?? 0)}</td><td><Link href={trendHref(code)}>Trend →</Link></td></tr>;
+              return <tr key={`action-${row.batch_id}-${row.station_code}`}><td><strong>{code}</strong></td><td>{row.row_label || "—"}</td><td><span className="station-attention risk">{missedTargets(row)} misses</span></td><td>{percent(dsrMetric ? dailyMetricValue(row, dsrMetric) ?? 0 : 0)}</td><td><Link href={trendHref(code)}>Trend →</Link></td></tr>;
             })}</tbody></table></div></section> : null}
             <section className="panel performance-matrix-panel">
               <div className="panel-head"><div><h2>Daily performance review</h2><p className="subtle">DSR follows volume. Red needs action, amber is near target and green is achieved.</p></div><div className="panel-head-tools"><strong>{dailyRows.length} stations</strong><PerformanceSortControl value={dailySort} options={[{ label: "Most misses first", value: "exceptions_desc" }, { label: "Station A–Z", value: "station_asc" }, { label: "Station Z–A", value: "station_desc" }, { label: "Lowest DSR first", value: "dsr_low" }, { label: "Highest DSR first", value: "dsr_high" }]} /></div></div>
@@ -409,15 +464,14 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
                     {sortedDailyRows.map((row, index) => {
                       const normalizedCode = stationCode(row.station_code);
                       const shipment = shipmentMap.get(normalizedCode) ?? { delivered: 0, cReturn: 0, mfn: 0, mfnReturn: 0, total: 0 };
-                      const values = metricValues(row);
                       return <tr key={`${row.batch_id}-${row.station_code}`}>
                         <td className="sticky-rank">{index + 1}</td>
                         <td className="sticky-station"><strong>{normalizedCode}</strong><small>{row.row_label || "—"}</small><Link className="performance-row-trend-link" href={trendHref(normalizedCode)}>Trend</Link></td>
                         <td><strong className={missedTargets(row) ? "metric-bad-text" : "metric-good-text"}>{missedTargets(row)} missed</strong></td><td>{shipment.delivered.toLocaleString("en-IN")}</td><td>{shipment.cReturn.toLocaleString("en-IN")}</td><td>{shipment.mfn.toLocaleString("en-IN")}</td>
                         {orderedDailyMetricDefinitions.map((metric) => {
-                          const value = values[metric.index] ?? 0;
+                          const value = dailyMetricValue(row, metric);
                           const status = ragStatus(value, metric.target, metric.direction);
-                          return <td key={metric.label} className={status === "neutral" ? "" : `metric-${status}`} title={`${metric.label} · Target ${targetLabel(metric.target, metric.direction)}`}>{percent(value)}</td>;
+                          return <td key={metric.label} className={status === "neutral" ? "" : `metric-${status}`} title={`${metric.label} · Target ${targetLabel(metric.target, metric.direction)}`}>{value == null ? "—" : percent(value)}</td>;
                         })}
                       </tr>;
                     })}
@@ -426,6 +480,18 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
                 </table>
               </div>
             </section>
+            {preferredExactSource === "amazon_hawkeye_daily" && dailyRows.length ? <section className="panel hawkeye-full-scorecard">
+              <div className="panel-head"><div><h2>Hawkeye complete metric view</h2><p className="subtle">All fields from Amazon’s D-1 station-level workbook. Expand a station for compact detail.</p></div><strong>{hawkeyeMetricDefinitions.length} fields</strong></div>
+              <div className="hawkeye-station-stack">{sortedDailyRows.map((row) => {
+                const code = stationCode(row.station_code);
+                return <details key={`hawkeye-${row.batch_id}-${code}`} open={sortedDailyRows.length === 1}><summary><span><strong>{code}</strong><small>{row.row_label || "Station"}</small></span><b>{missedTargets(row)} configured misses</b><Link href={`/ops-pulse/performance?view=reviews&date=${selectedDate}&review=${code}`}>Open review →</Link></summary><div>{hawkeyeMetricDefinitions.map((metric) => {
+                  const value = hawkeyeValue(row.values_json, metric.label);
+                  const target = metric.targetKey ? dailyMetricDefinitions.find((definition) => definition.metricKey === metric.targetKey) : null;
+                  const status = ragStatus(value, target?.target ?? null, target?.direction ?? "higher");
+                  return <article className={status} key={metric.label}><span>{metric.short}</span><strong>{value == null ? "—" : percent(value)}</strong><small>{target?.target == null ? "Reference" : targetLabel(target.target, target.direction)}</small></article>;
+                })}</div></details>;
+              })}</div>
+            </section> : null}
           </>
         ) : (
           <>
