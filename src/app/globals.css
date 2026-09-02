@@ -19707,6 +19707,51 @@ td strong,
 .station-command-strip span { grid-row: 1 / 3; align-self: center; padding: 5px 7px; border-radius: 7px; color: #9a3412; background: #ffead5; font-size: 8px; font-weight: 900; text-transform: uppercase; }
 .station-command-strip strong { overflow: hidden; color: #344054; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .station-command-strip small { overflow: hidden; color: #98a2b3; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.station-timetable { overflow: hidden; background: #fff; }
+.station-timetable > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #eaecf0; }
+.station-timetable > header div { display: flex; align-items: baseline; gap: 8px; }
+.station-timetable > header strong { color: #182230; font-size: 11px; }
+.station-timetable > header span, .station-timetable > header small { color: #667085; font-size: 8px; }
+.station-timetable-shift-strip { display: flex; gap: 5px; overflow-x: auto; padding: 6px 12px; border-bottom: 1px solid #eaecf0; background: #f8fafc; scrollbar-width: thin; }
+.station-timetable-shift-strip > span { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 4px 7px; border: 1px solid #e4e7ec; border-radius: 6px; color: #475467; background: #fff; }
+.station-timetable-shift-strip b { font-size: 8px; }
+.station-timetable-shift-strip small { color: #667085; font-size: 8px; }
+.station-timetable-scroll { overflow-x: auto; scrollbar-width: thin; }
+.station-timetable-axis, .station-timetable-row { display: grid; grid-template-columns: minmax(150px, 190px) 88px minmax(430px, 1fr) 108px; align-items: center; min-width: 820px; }
+.station-timetable-axis { min-height: 29px; padding: 0 10px; border-bottom: 1px solid #d0d5dd; color: #98a2b3; background: #f9fafb; font-size: 7px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.station-timetable-axis > div { position: relative; height: 100%; margin: 0 8px; }
+.station-timetable-axis time { position: absolute; top: 9px; transform: translateX(-50%); color: #667085; font-size: 7px; font-weight: 800; letter-spacing: 0; }
+.station-timetable-axis time:first-child { transform: none; }
+.station-timetable-axis time:last-child { transform: translateX(-100%); }
+.station-timetable-person-row { border-bottom: 1px solid #f0f1f3; }
+.station-timetable-person-row:last-child { border-bottom: 0; }
+.station-timetable-row { width: 100%; min-height: 39px; padding: 4px 10px; border: 0; color: inherit; background: #fff; cursor: pointer; text-align: left; }
+.station-timetable-row:hover, .station-timetable-person-row.open .station-timetable-row { background: #fffaf7; }
+.station-timetable-person, .station-timetable-shift, .station-timetable-status { display: grid; gap: 1px; min-width: 0; }
+.station-timetable-person b, .station-timetable-shift b, .station-timetable-status b { overflow: hidden; color: #344054; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.station-timetable-person small, .station-timetable-shift small, .station-timetable-status small { overflow: hidden; color: #98a2b3; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.station-timetable-status.on-time b, .station-timetable-status.on-time small { color: #067647; }
+.station-timetable-status.late b, .station-timetable-status.late small { color: #b42318; }
+.station-timetable-status.missing b, .station-timetable-status.missing small { color: #667085; }
+.station-timetable-status.away b, .station-timetable-status.away small { color: #5925dc; }
+.station-timetable-lane { position: relative; height: 22px; margin: 0 8px; border-inline: 1px solid #f2f4f7; background: repeating-linear-gradient(90deg, transparent, transparent calc(16.666% - 1px), #f2f4f7 16.666%); }
+.station-timetable-plan, .station-timetable-actual { position: absolute; border-radius: 4px; }
+.station-timetable-plan { top: 5px; height: 12px; border: 1px solid #cfd4dc; background: #edf0f4; }
+.station-timetable-plan.missing { border: 1px dashed #98a2b3; background: transparent; }
+.station-timetable-plan.away { border-color: #d9d6fe; background: repeating-linear-gradient(135deg, #f4f3ff, #f4f3ff 5px, #ebe9fe 5px, #ebe9fe 10px); }
+.station-timetable-actual { z-index: 1; top: 7px; height: 8px; min-width: 3px; background: #12b76a; box-shadow: 0 1px 2px rgba(16, 24, 40, .16); }
+.station-timetable-actual.late { background: #f04438; }
+.station-timetable-actual.away { background: #7f56d9; }
+.station-timetable-arrival { position: absolute; z-index: 2; top: 3px; width: 2px; height: 16px; transform: translateX(-1px); border-radius: 2px; background: #067647; }
+.station-timetable-arrival.late { background: #b42318; }
+.station-timetable-detail { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 16px; padding: 6px 12px 7px 286px; border-top: 1px dashed #eaecf0; color: #667085; background: #fffaf7; font-size: 8px; }
+.station-timetable-detail span { display: inline-flex; align-items: center; gap: 4px; }
+.station-timetable-detail strong { color: #344054; }
+.station-timetable-detail a { margin-left: auto; color: #c2410c; font-weight: 850; text-decoration: none; }
+.station-timetable-unassigned { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 12px; border-top: 1px solid #eaecf0; background: #fffcf5; }
+.station-timetable-unassigned > strong { color: #b54708; font-size: 8px; text-transform: uppercase; }
+.station-timetable-unassigned a { display: inline-flex; gap: 4px; padding: 3px 6px; border-radius: 5px; color: #475467; background: #fff4e5; font-size: 8px; text-decoration: none; }
+.station-timetable-unassigned a span { color: #98a2b3; }
 .station-shifts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); align-items: start; gap: 8px; padding: 8px; background: #f6f7f9; }
 .station-shift-insight { overflow: hidden; border: 1px solid #e4e7ec; border-left: 3px solid #12b76a; border-radius: 9px; background: #fff; box-shadow: none; }
 .station-shift-insight.needs-attention { border-left-color: #f04438; }
@@ -19786,6 +19831,8 @@ td strong,
   .station-insight-intro { align-items: flex-start; flex-direction: column; padding: 17px; }
   .station-manpower-card > header { display: grid; grid-template-columns: 1fr auto; }
   .station-command-strip { grid-template-columns: 1fr; }
+  .station-timetable > header { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .station-timetable-detail { padding-left: 12px; }
   .station-shifts { padding: 8px; }
   .station-shift-heading { align-items: flex-start; }
   .station-arrival-head { align-items: flex-start; flex-direction: column; gap: 2px; }

@@ -150,9 +150,8 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
   if (dashboardView === "manpower") {
     const requestedLocation = String(searchParams?.location ?? "");
     const requestedStation = locationsResult.locations.find((location) => location.id === requestedLocation);
-    const manpowerLocations = requestedLocation === "all"
-      ? locationsResult.locations
-      : requestedStation ? [requestedStation] : selectedLocations;
+    const selectedManpowerLocation = requestedStation ?? selectedLocations[0] ?? locationsResult.locations[0] ?? null;
+    const manpowerLocations = selectedManpowerLocation ? [selectedManpowerLocation] : [];
     let manpower: Awaited<ReturnType<typeof loadOpsStationManpower>> = { asOf: date, people: [] };
     let manpowerError = locationsResult.error;
     if (!manpowerError) {
@@ -173,8 +172,7 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
         <form className="ops-station-manpower-filter" action="/ops-pulse" method="get">
           <input name="view" type="hidden" value="manpower" />
           <label>Date<input name="date" type="date" defaultValue={date} max={todayIst()} /></label>
-          <label>Office, station or store<select name="location" defaultValue={requestedLocation || (manpowerLocations.length === 1 ? manpowerLocations[0]?.id : "all") || "all"}>
-            <option value="all">All authorised locations</option>
+          <label>Office, station or store<select name="location" defaultValue={selectedManpowerLocation?.id ?? ""}>
             {locationsResult.locations.map((location) => <option key={location.id} value={location.id}>{location.station_code} · {location.station_name || location.city || location.station_code}</option>)}
           </select></label>
           <button type="submit">Apply location</button>

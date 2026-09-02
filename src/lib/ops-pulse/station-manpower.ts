@@ -49,6 +49,7 @@ export type OpsStationManpowerPerson = {
     lateMinutes: number;
     workMinutes: number;
     missingPunch: boolean;
+    rosterDayType: string | null;
     shiftName: string | null;
     shiftSource: string | null;
     inTime: string | null;
@@ -96,6 +97,11 @@ function indiaPunchMinutes(value: string | null | undefined, punchDate: string) 
 function shiftStartMinutes(value: string | null | undefined) {
   const match = String(value ?? "").match(/^(\d{2}):(\d{2})/);
   return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+function isoWeekday(value: string) {
+  const day = new Date(`${value}T00:00:00Z`).getUTCDay();
+  return day === 0 ? 7 : day;
 }
 
 export async function loadOpsStationManpower(
@@ -186,26 +192,37 @@ export async function loadOpsStationManpower(
   ].filter((person): person is typeof person & { locationId: string } => Boolean(person.locationId && locationIds.has(person.locationId)));
 
   const employeeIds = rawPeople.filter((person) => person.workerType === "employee").map((person) => person.id);
-  const contractorIds = rawPeople.filter((person) => person.workerType === "contractor").map((person) => person.id);
   const workerIds = rawPeople.map((person) => person.id);
-  const [attendanceResult, rosterResult, employeeShiftsResult, contractorShiftsResult, leaveResult] = await Promise.all([
+  const [attendanceResult, datedRosterResult, weeklyPlansResult, leaveResult] = await Promise.all([
     admin.from("attendance_daily")
       .select("enrolment_id,worker_type,employee_id,contractor_id,in_time,out_time,punch_count,work_minutes,status")
       .eq("company_id", companyId).eq("punch_date", asOf).neq("status", "U").limit(5000),
     workerIds.length ? admin.from("hr_roster_entries")
-      .select("worker_type,worker_id,roster_date,day_type,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes),hr_roster_plans(status)")
-      .eq("company_id", companyId).eq("roster_date", asOf).in("worker_id", workerIds).limit(5000) : Promise.resolve({ data: [], error: null }),
-    employeeIds.length ? admin.from("hr_employee_shift_assignments")
-      .select("employee_id,effective_from,effective_to,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes)")
-      .eq("company_id", companyId).in("employee_id", employeeIds).lte("effective_from", asOf).or(`effective_to.is.null,effective_to.gte.${asOf}`).order("effective_from", { ascending: false }).limit(5000) : Promise.resolve({ data: [], error: null }),
-    contractorIds.length ? admin.from("hr_contractor_shift_assignments")
-      .select("contractor_id,effective_from,effective_to,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes)")
-      .eq("company_id", companyId).in("contractor_id", contractorIds).lte("effective_from", asOf).or(`effective_to.is.null,effective_to.gte.${asOf}`).order("effective_from", { ascending: false }).limit(5000) : Promise.resolve({ data: [], error: null }),
+      .select("worker_type,worker_id,roster_date,day_type,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
+      .eq("company_id", companyId).eq("roster_date", asOf).in("worker_id", workerIds).eq("hr_roster_plans.status", "approved").eq("hr_roster_plans.roster_kind", "dated").limit(5000) : Promise.resolve({ data: [], error: null }),
+    admin.from("hr_roster_plans")
+      .select("id,status,roster_kind,effective_from,superseded_at,revision_no")
+      .eq("company_id", companyId).eq("status", "approved").eq("roster_kind", "recurring_weekly").in("location_id", locations.map((location) => location.id)).lte("effective_from", asOf).limit(1000),
     employeeIds.length ? admin.from("hr_leave_requests")
       .select("employee_id").eq("company_id", companyId).eq("status", "approved").in("employee_id", employeeIds).lte("start_date", asOf).gte("end_date", asOf).limit(5000) : Promise.resolve({ data: [], error: null })
   ]);
-  const detailError = attendanceResult.error ?? rosterResult.error ?? employeeShiftsResult.error ?? contractorShiftsResult.error ?? leaveResult.error;
+  const detailError = attendanceResult.error ?? datedRosterResult.error ?? weeklyPlansResult.error ?? leaveResult.error;
   if (detailError) throw new Error(detailError.message);
+  const activeWeeklyPlans = (weeklyPlansResult.data ?? []).filter((plan) => !plan.superseded_at || asOf < plan.superseded_at);
+  const activeWeeklyPlanIds = activeWeeklyPlans.map((plan) => plan.id);
+  const weeklyEntriesResult = activeWeeklyPlanIds.length && workerIds.length ? await admin.from("hr_roster_entries")
+    .select("plan_id,worker_type,worker_id,roster_date,day_type,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes)")
+    .eq("company_id", companyId).in("plan_id", activeWeeklyPlanIds).in("worker_id", workerIds).limit(5000) : { data: [], error: null };
+  if (weeklyEntriesResult.error) throw new Error(weeklyEntriesResult.error.message);
+  const weeklyPlanById = new Map(activeWeeklyPlans.map((plan) => [plan.id, plan]));
+  const rosterRows = [
+    ...(datedRosterResult.data ?? []),
+    ...(weeklyEntriesResult.data ?? []).filter((row) => isoWeekday(row.roster_date) === isoWeekday(asOf)).map((row) => ({
+      ...row,
+      roster_date: asOf,
+      hr_roster_plans: weeklyPlanById.get(row.plan_id) ?? null
+    }))
+  ];
 
   const attendanceByWorker = new Map<string, AttendanceRow>();
   const personByBiometric = new Map<string, typeof rawPeople[number]>();
@@ -228,17 +245,20 @@ export async function loadOpsStationManpower(
   const leaveEmployeeIds = new Set((leaveResult.data ?? []).map((leave) => leave.employee_id));
 
   const people = rawPeople.map((person): OpsStationManpowerPerson => {
-    const roster = (rosterResult.data ?? []).find((row) => {
-      const plan = relation(row.hr_roster_plans as Relation<{ status: string }>);
-      return row.worker_type === person.workerType && row.worker_id === person.id && plan?.status === "approved";
-    });
+    const roster = rosterRows.filter((row) => {
+      const plan = relation(row.hr_roster_plans as Relation<{ status: string; roster_kind: string | null; effective_from: string | null; superseded_at: string | null; revision_no: number | null }>);
+      return row.worker_type === person.workerType && row.worker_id === person.id && plan?.status === "approved"
+        && (!plan.effective_from || plan.effective_from <= asOf)
+        && (!plan.superseded_at || asOf < plan.superseded_at);
+    }).sort((left, right) => {
+      const leftPlan = relation(left.hr_roster_plans as Relation<{ roster_kind: string | null; effective_from: string | null; revision_no: number | null }>);
+      const rightPlan = relation(right.hr_roster_plans as Relation<{ roster_kind: string | null; effective_from: string | null; revision_no: number | null }>);
+      const datedOrder = Number(rightPlan?.roster_kind === "dated") - Number(leftPlan?.roster_kind === "dated");
+      return datedOrder || Number(rightPlan?.revision_no ?? 0) - Number(leftPlan?.revision_no ?? 0) || String(rightPlan?.effective_from ?? "").localeCompare(String(leftPlan?.effective_from ?? ""));
+    })[0];
     const rosterShift = roster?.day_type === "working" ? relation(roster.hr_shifts as Relation<Shift>) : null;
-    const effectiveAssignment = person.workerType === "employee"
-      ? (employeeShiftsResult.data ?? []).find((row) => row.employee_id === person.id)
-      : (contractorShiftsResult.data ?? []).find((row) => row.contractor_id === person.id);
-    const effectiveShift = relation(effectiveAssignment?.hr_shifts as Relation<Shift>);
-    const shift = rosterShift ?? effectiveShift;
-    const shiftSource = rosterShift ? "Approved roster" : effectiveShift ? "Effective shift" : null;
+    const shift = rosterShift;
+    const shiftSource = rosterShift ? "Active approved roster" : null;
     const attendance = attendanceByWorker.get(`${person.workerType}:${person.id}`);
     const actualStart = indiaPunchMinutes(attendance?.in_time, asOf);
     const scheduledStart = shiftStartMinutes(shift?.start_time);
@@ -268,6 +288,7 @@ export async function loadOpsStationManpower(
         lateMinutes,
         workMinutes: Number(attendance?.work_minutes ?? 0),
         missingPunch,
+        rosterDayType: roster?.day_type ? String(roster.day_type) : null,
         shiftName: shift ? `${shift.name} · ${shift.start_time.slice(0, 5)}-${shift.end_time.slice(0, 5)}` : null,
         shiftSource,
         inTime: attendance?.in_time ?? null,
