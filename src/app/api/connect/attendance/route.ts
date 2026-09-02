@@ -129,7 +129,7 @@ export async function GET(request: NextRequest) {
     const needsReview = rows.filter((row) => row.attendanceStatus === "Needs Review").length;
     const lateIn = rows.filter((row) => row.lateMinutes > 0).length;
     const earlyOut = rows.filter((row) => row.earlyOutMinutes > 0).length;
-    const misPunch = rows.filter((row) => row.punchCount % 2 === 1 || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length;
+    const misPunch = rows.filter((row) => row.punchCount < 2 || !row.outTime || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length;
     const requestsResult = await supabaseAdmin
       .from("attendance_regularization_requests")
       .select("id, attendance_date, requested_in_time, requested_out_time, reason_code, remarks, attachment_path, status, review_remarks, created_at")

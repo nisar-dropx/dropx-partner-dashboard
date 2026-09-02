@@ -250,7 +250,7 @@ export async function createAttendancePunchNotification({
   if (!supabaseAdmin || !isWorkforceProfileType(profileType)) return;
 
   const eventCode: AttendanceNotificationEvent =
-    punchOrder % 2 === 1 ? "attendance_punch_in" : "attendance_punch_out";
+    punchOrder === 1 ? "attendance_punch_in" : "attendance_punch_out";
   const rows = await loadAttendanceReportRows({
     companyId,
     enrolmentIds: [enrolmentId],

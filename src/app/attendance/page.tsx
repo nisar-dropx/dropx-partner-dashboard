@@ -218,7 +218,7 @@ export default async function AttendanceReportsPage({
   const fullDayCount = rows.filter((row) => row.attendanceStatus === "Full Day").length;
   const halfDayCount = rows.filter((row) => row.attendanceStatus === "Half Day").length;
   const absentCount = rows.filter((row) => row.attendanceStatus === "Absent").length;
-  const misPunchCount = rows.filter((row) => row.punchCount % 2 === 1 || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length;
+  const misPunchCount = rows.filter((row) => row.punchCount < 2 || !row.outTime || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length;
   const punchLabelOrder = ["In1", "Out1", "In2", "Out2", "In3", "Out3", "In4", "Out4", "In5", "Out5", "In6", "Out6", "In7", "Out7", "In8", "Out8"];
   const lastPunch = rows
     .flatMap((row) => punchLabelOrder.map((label) => ({ row, label, time: row.labels[label] })))

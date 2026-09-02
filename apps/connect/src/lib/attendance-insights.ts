@@ -110,7 +110,7 @@ export function attendanceDayInsight(
   const remark = normalized(row.remark);
   const lateMinutes = Math.max(0, Number(row.lateMinutes ?? 0));
   const earlyOutMinutes = Math.max(0, Number(row.earlyOutMinutes ?? 0));
-  const missingPunch = row.punchCount % 2 === 1 || /single|missing/.test(remark);
+  const missingPunch = row.punchCount < 2 || !row.outTime || /single|missing/.test(remark);
   const needsPolicyReview = state.includes("needs review");
 
   const issues: AttendanceIssue[] = [];

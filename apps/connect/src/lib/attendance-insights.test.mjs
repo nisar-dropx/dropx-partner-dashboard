@@ -56,6 +56,22 @@ test("does not call a complete punch pair missing when policy review is required
   assert.doesNotMatch(insight.detail, /punch is missing/i);
 });
 
+test("uses first IN and latest OUT for three completed punches", () => {
+  const insight = attendanceDayInsight(row({
+    attendanceStatus: "Full Day",
+    outTime: "23:21",
+    punchCount: 3,
+    lateMinutes: 349,
+    scheduledStart: "09:30",
+    inTime: "15:19",
+    workHours: "08:02"
+  }));
+  assert.equal(insight.label, "Full day");
+  assert.equal(insight.calendarClass, "full");
+  assert.equal(insight.needsRegularization, false);
+  assert.deepEqual(insight.issues.map((issue) => issue.code), ["late"]);
+});
+
 test("surfaces late and early-out consequences without replacing full-day status", () => {
   const lateRow = row({ lateMinutes: 18, earlyOutMinutes: 7, scheduledStart: "09:30", inTime: "09:48" });
   const insight = attendanceDayInsight(lateRow);
