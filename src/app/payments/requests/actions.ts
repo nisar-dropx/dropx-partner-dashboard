@@ -983,12 +983,19 @@ export async function resubmitExpenseRequest(formData: FormData) {
     let currentApprovalRoleIds: string[];
     let currentApprovalStep: number;
     if (latestReturnedApproval?.approver_user_id) {
+      const returnedRoleId = latestReturnedApproval.approver_role_id ?? null;
+      const returnedToInitialApproval = initialApprovalRoleIds.includes(returnedRoleId ?? "");
+      const returnedToFinalApproval = finalApprovalRoleIds.includes(returnedRoleId ?? "");
+      currentApprovalRoleIds = returnedToInitialApproval
+        ? initialApprovalRoleIds
+        : returnedToFinalApproval
+          ? finalApprovalRoleIds
+          : returnedRoleId ? [returnedRoleId] : [];
+      currentApprovalStep = returnedToInitialApproval ? 1 : 2;
       approver = {
-        userId: latestReturnedApproval.approver_user_id,
-        roleId: latestReturnedApproval.approver_role_id ?? null
+        userId: returnedToInitialApproval || returnedToFinalApproval ? null : latestReturnedApproval.approver_user_id,
+        roleId: returnedRoleId
       };
-      currentApprovalRoleIds = latestReturnedApproval.approver_role_id ? [latestReturnedApproval.approver_role_id] : [];
-      currentApprovalStep = initialApprovalRoleIds.includes(latestReturnedApproval.approver_role_id ?? "") ? 1 : 2;
     } else {
       const startsWithFinalApproval = !initialApprovalRoleIds.length;
       currentApprovalRoleIds = startsWithFinalApproval ? finalApprovalRoleIds : initialApprovalRoleIds;
@@ -1210,17 +1217,25 @@ export async function resubmitPaymentRequest(formData: FormData) {
     let resubmittedApprovalStatus = "RE_PENDING";
     if (returnedByProcessor) {
       approver = {
-        userId: latestReturnedApproval?.approver_user_id ?? null,
+        userId: null,
         roleId: returnedRoleId ?? paymentProcessRoleIds[0] ?? null
       };
       currentApprovalRoleIds = paymentProcessRoleIds;
       currentApprovalStep = 3;
       resubmittedApprovalStatus = "RE_APPROVED";
     } else if (latestReturnedApproval?.approver_user_id) {
-      approver = { userId: latestReturnedApproval.approver_user_id, roleId: returnedRoleId };
       const returnedToInitialApproval = initialApprovalRoleIds.includes(returnedRoleId ?? "");
-      currentApprovalRoleIds = returnedToInitialApproval ? initialApprovalRoleIds : finalApprovalRoleIds;
+      const returnedToFinalApproval = finalApprovalRoleIds.includes(returnedRoleId ?? "");
+      currentApprovalRoleIds = returnedToInitialApproval
+        ? initialApprovalRoleIds
+        : returnedToFinalApproval
+          ? finalApprovalRoleIds
+          : returnedRoleId ? [returnedRoleId] : [];
       currentApprovalStep = returnedToInitialApproval ? 1 : 2;
+      approver = {
+        userId: returnedToInitialApproval || returnedToFinalApproval ? null : latestReturnedApproval.approver_user_id,
+        roleId: returnedRoleId
+      };
       resubmittedApprovalStatus = currentApprovalStep === 1 ? "RE_PENDING" : "RE_CLUSTER_APPROVED";
     } else {
       const startsWithFinalApproval = !initialApprovalRoleIds.length;
