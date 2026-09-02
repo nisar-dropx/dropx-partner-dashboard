@@ -1,5 +1,6 @@
 import type { AuthorizationContext } from "@/lib/authorization";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
+import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export type PerformanceReviewSettings = {
@@ -79,6 +80,7 @@ export type PerformanceOperationalSnapshot = {
   adHocVanCost: number;
   adHocVanRequests: PerformanceCostRequest[];
   activeFeCount: number;
+  associateDeliveries: PerformanceAssociateDelivery[];
   averageAllocation: number | null;
   costBreakdown: PerformanceCostBreakdown[];
   dailyCps: number | null;
@@ -86,8 +88,12 @@ export type PerformanceOperationalSnapshot = {
   deliveredCount: number;
   firstPunchAt: string | null;
   firstPunchBy: string | null;
+  openingLateMinutes: number | null;
+  openingShiftName: string | null;
+  openingShiftSource: string | null;
   openingWindowEnd: string;
   openingWindowStart: string;
+  scheduledOpeningTime: string | null;
   fuelPay: number;
   mgSalaryPay: number;
   mtdCost: number;
@@ -98,6 +104,17 @@ export type PerformanceOperationalSnapshot = {
   salaryDaCps: number | null;
   unmappedFeCount: number;
   variableDaPay: number;
+};
+
+export type PerformanceAssociateDelivery = {
+  assigned: number | null;
+  associateId: string;
+  delivered: number;
+  name: string;
+  paymentScheme: string | null;
+  paymentSetupStatus: string | null;
+  rateCard: string | null;
+  totalPay: number | null;
 };
 
 export type PerformanceCostRequest = {
@@ -263,13 +280,34 @@ function isApprovedPayment(request: { status: string | null; approval_status: st
     && !request.current_approver_user_id && !request.current_approver_role_id;
 }
 
+function readablePayType(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw || normalized(raw) === "UNALLOCATED") return null;
+  return raw.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function associateRateCard(row: Record<string, unknown>) {
+  const rates: string[] = [];
+  const add = (label: string, value: unknown) => {
+    const amount = numberOrNull(value);
+    if (amount != null && amount > 0) rates.push(`${label} ₹${amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`);
+  };
+  add("Delivery", row.del_rate);
+  add("C-return", row.c_return_rate);
+  add("MFN", row.mfn_rate);
+  add("MFN return", row.mfn_return_rate);
+  add("MG", row.mg_salary);
+  add("Fuel", row.fuel_rate);
+  return rates.length ? rates.join(" · ") : null;
+}
+
 export async function loadPerformanceOperationalSnapshots(companyId: string, sourceDate: string, locations: CodLocationRow[]) {
   const empty = new Map<string, PerformanceOperationalSnapshot>();
   if (!supabaseAdmin || !locations.length) return { rows: empty, error: supabaseAdmin ? null : "Database service is unavailable." };
   const stationCodes = locations.map((location) => location.station_code);
   const locationIds = locations.map((location) => location.id);
   const monthFrom = `${sourceDate.slice(0, 7)}-01`;
-  const [costResult, monthCostResult, breakupResult, shipmentResult, detailResult, capacityResult, monthCapacityResult, attendanceResult, headsResult, openingResult] = await Promise.all([
+  const [costResult, monthCostResult, breakupResult, shipmentResult, detailResult, capacityResult, monthCapacityResult, attendanceResult, headsResult, openingResult, manpowerResult] = await Promise.all([
     supabaseAdmin.from("cps_station_daily")
       .select("station_code,total_delivery,total_cost,overall_cps,da_pay_cost,da_cps").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("cps_station_daily")
@@ -277,10 +315,10 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     supabaseAdmin.from("cps_cost_breakup_daily")
       .select("station_code,head,sub_head,source,amount,count,cps").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("cps_shipment_daily")
-      .select("station_code,provider_employee_id,total_delivery,assigned_count,variable_pay,mg_pay,fuel_pay,da_total_pay,mapping_status")
+      .select("station_code,provider_employee_id,provider_employee_name,dropx_name,pay_type,total_delivery,assigned_count,del_rate,c_return_rate,mfn_rate,mfn_return_rate,mg_salary,fuel_rate,variable_pay,mg_pay,fuel_pay,da_total_pay,mapping_status")
       .eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("delivered_shipment_facts")
-      .select("station_code,driver_id,package_count").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
+      .select("station_code,driver_id,driver_name,package_count").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("capacity_station_daily_cache")
       .select("station_code,delivered,active_ids").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("capacity_station_daily_cache")
@@ -289,7 +327,8 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       .select("location_id,station_code,in_time,worker_name,employee_code").eq("company_id", companyId).eq("punch_date", sourceDate).in("location_id", locationIds).not("in_time", "is", null).order("in_time"),
     supabaseAdmin.from("payment_heads").select("id,code,name").eq("company_id", companyId),
     supabaseAdmin.from("ops_performance_station_settings")
-      .select("station_id,opening_window_start,opening_window_end").eq("company_id", companyId).in("station_id", locationIds)
+      .select("station_id,opening_window_start,opening_window_end").eq("company_id", companyId).in("station_id", locationIds),
+    loadOpsStationManpower(companyId, locations, sourceDate).catch(() => null)
   ]);
   const error = costResult.error ?? monthCostResult.error ?? breakupResult.error ?? shipmentResult.error ?? detailResult.error ?? capacityResult.error ?? monthCapacityResult.error ?? attendanceResult.error ?? headsResult.error ?? openingResult.error;
   if (error) return { rows: empty, error: error.message };
@@ -317,6 +356,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     adHocVanCost: 0,
     adHocVanRequests: [],
     activeFeCount: 0,
+    associateDeliveries: [],
     averageAllocation: null,
     costBreakdown: [],
     dailyCps: null,
@@ -324,8 +364,12 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     deliveredCount: 0,
     firstPunchAt: null,
     firstPunchBy: null,
+    openingLateMinutes: null,
+    openingShiftName: null,
+    openingShiftSource: null,
     openingWindowEnd: opening.end,
     openingWindowStart: opening.start,
+    scheduledOpeningTime: null,
     fuelPay: 0,
     mgSalaryPay: 0,
     mtdCost: 0,
@@ -367,13 +411,41 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       subHead: row.sub_head || "Operating cost"
     });
   });
+  type MutableAssociate = PerformanceAssociateDelivery & { hasDetailedDelivery: boolean };
+  const associatesByStation = new Map<string, Map<string, MutableAssociate>>();
+  const associateMap = (stationCode: string) => {
+    const existing = associatesByStation.get(stationCode);
+    if (existing) return existing;
+    const created = new Map<string, MutableAssociate>();
+    associatesByStation.set(stationCode, created);
+    return created;
+  };
   const detailFeByStation = new Map<string, Set<string>>();
   (detailResult.data ?? []).forEach((row) => {
     const current = empty.get(row.station_code);
     if (!current) return;
     current.deliveredCount += numberOrNull(row.package_count) ?? 1;
     const drivers = detailFeByStation.get(row.station_code) ?? new Set<string>();
-    if (row.driver_id) drivers.add(normalized(row.driver_id));
+    const associateId = normalized(row.driver_id) || `NAME_${normalized(row.driver_name)}`;
+    if (associateId) {
+      drivers.add(associateId);
+      const people = associateMap(row.station_code);
+      const person = people.get(associateId) ?? {
+        assigned: null,
+        associateId: String(row.driver_id || "—"),
+        delivered: 0,
+        hasDetailedDelivery: true,
+        name: String(row.driver_name || row.driver_id || "Unidentified associate"),
+        paymentScheme: null,
+        paymentSetupStatus: null,
+        rateCard: null,
+        totalPay: null
+      };
+      person.delivered += numberOrNull(row.package_count) ?? 1;
+      person.hasDetailedDelivery = true;
+      if ((!person.name || person.name === "Unidentified associate") && row.driver_name) person.name = row.driver_name;
+      people.set(associateId, person);
+    }
     detailFeByStation.set(row.station_code, drivers);
   });
   (capacityResult.data ?? []).forEach((row) => {
@@ -385,24 +457,64 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     if (activeIds) current.activeFeCount = activeIds;
   });
   const daCostByStation = new Map<string, number>();
+  const shipmentDeliveryByStation = new Map<string, number>();
   (shipmentResult.data ?? []).forEach((row) => {
     const current = empty.get(row.station_code);
     if (!current) return;
-    if (!current.deliveredCount) current.deliveredCount += numberOrNull(row.total_delivery) ?? 0;
+    const delivered = numberOrNull(row.total_delivery) ?? 0;
+    shipmentDeliveryByStation.set(row.station_code, (shipmentDeliveryByStation.get(row.station_code) ?? 0) + delivered);
     current.variableDaPay += numberOrNull(row.variable_pay) ?? 0;
     current.mgSalaryPay += numberOrNull(row.mg_pay) ?? 0;
     current.fuelPay += numberOrNull(row.fuel_pay) ?? 0;
     daCostByStation.set(row.station_code, (daCostByStation.get(row.station_code) ?? 0) + (numberOrNull(row.da_total_pay) ?? 0));
     if (normalized(row.mapping_status) !== "MAPPED") current.unmappedFeCount += 1;
+    const associateId = normalized(row.provider_employee_id) || `NAME_${normalized(row.dropx_name || row.provider_employee_name)}`;
+    if (associateId) {
+      const people = associateMap(row.station_code);
+      const person = people.get(associateId) ?? {
+        assigned: null,
+        associateId: String(row.provider_employee_id || "—"),
+        delivered: 0,
+        hasDetailedDelivery: false,
+        name: String(row.dropx_name || row.provider_employee_name || row.provider_employee_id || "Unidentified associate"),
+        paymentScheme: null,
+        paymentSetupStatus: null,
+        rateCard: null,
+        totalPay: null
+      };
+      if (!person.hasDetailedDelivery) person.delivered += delivered;
+      person.assigned = (person.assigned ?? 0) + (numberOrNull(row.assigned_count) ?? 0);
+      person.name = String(row.dropx_name || row.provider_employee_name || person.name);
+      person.paymentScheme = readablePayType(row.pay_type) ?? person.paymentScheme;
+      person.paymentSetupStatus = String(row.mapping_status || "").trim() || person.paymentSetupStatus;
+      person.rateCard = associateRateCard(row as Record<string, unknown>) ?? person.rateCard;
+      const totalPay = numberOrNull(row.da_total_pay);
+      if (totalPay != null && (person.paymentScheme || person.rateCard || totalPay > 0)) person.totalPay = (person.totalPay ?? 0) + totalPay;
+      people.set(associateId, person);
+    }
   });
   stationCodes.forEach((code) => {
     const current = empty.get(code)!;
     const detailDrivers = detailFeByStation.get(code)?.size ?? 0;
     const shipmentDrivers = new Set((shipmentResult.data ?? []).filter((row) => row.station_code === code && row.provider_employee_id).map((row) => normalized(row.provider_employee_id))).size;
     current.activeFeCount = current.activeFeCount || detailDrivers || shipmentDrivers;
+    if (!current.deliveredCount) current.deliveredCount = shipmentDeliveryByStation.get(code) ?? 0;
     if ((daCostByStation.get(code) ?? 0) > 0) current.salaryDaCost = daCostByStation.get(code) ?? 0;
     current.averageAllocation = current.activeFeCount ? current.deliveredCount / current.activeFeCount : null;
     current.salaryDaCps = current.deliveredCount ? current.salaryDaCost / current.deliveredCount : null;
+    current.associateDeliveries = [...(associatesByStation.get(code)?.values() ?? [])]
+      .map((person) => ({
+        assigned: person.assigned,
+        associateId: person.associateId,
+        delivered: person.delivered,
+        name: person.name,
+        paymentScheme: person.paymentScheme,
+        paymentSetupStatus: person.paymentSetupStatus,
+        rateCard: person.rateCard,
+        totalPay: person.totalPay
+      }))
+      .filter((person) => person.delivered > 0 || (person.assigned ?? 0) > 0)
+      .sort((left, right) => right.delivered - left.delivered || left.name.localeCompare(right.name));
   });
   const deliveredMtdByStation = new Map<string, number>();
   (monthCapacityResult.data ?? []).forEach((row) => deliveredMtdByStation.set(row.station_code, (deliveredMtdByStation.get(row.station_code) ?? 0) + (numberOrNull(row.delivered) ?? 0)));
@@ -418,6 +530,18 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     if (!current || current.firstPunchAt || !isWithinOpeningWindow(row.in_time, current.openingWindowStart, current.openingWindowEnd)) return;
     current.firstPunchAt = row.in_time;
     current.firstPunchBy = row.worker_name || row.employee_code || "Recorded employee";
+    const openingPerson = manpowerResult?.people.find((person) => {
+      const personTime = person.today.inTime ? new Date(person.today.inTime).getTime() : Number.NaN;
+      const rowTime = row.in_time ? new Date(row.in_time).getTime() : Number.NaN;
+      return (Number.isFinite(personTime) && Number.isFinite(rowTime) && personTime === rowTime)
+        || (row.employee_code && normalized(person.code) === normalized(row.employee_code));
+    });
+    if (openingPerson?.today.shiftStartTime) {
+      current.scheduledOpeningTime = openingPerson.today.shiftStartTime;
+      current.openingLateMinutes = openingPerson.today.lateMinutes;
+      current.openingShiftName = openingPerson.today.shiftName;
+      current.openingShiftSource = openingPerson.today.shiftSource;
+    }
   });
   (paymentsResult.data ?? []).filter(isApprovedPayment).forEach((row) => {
     const code = normalized(row.station_code || row.location_code);

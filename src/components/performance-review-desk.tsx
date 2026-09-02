@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { formatDashboardDate } from "@/lib/date-format";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
-import type { PerformanceOperationalSnapshot, PerformanceReview, PerformanceReviewCarryover, PerformanceReviewItem, PerformanceReviewStep } from "@/lib/ops-pulse/performance-review";
+import type { PerformanceAssociateDelivery, PerformanceOperationalSnapshot, PerformanceReview, PerformanceReviewCarryover, PerformanceReviewItem, PerformanceReviewStep } from "@/lib/ops-pulse/performance-review";
 import { completePerformanceReviewStep, savePerformanceReviewItem, savePerformanceReviewOperations, startPerformanceReview } from "@/app/ops-pulse/performance/actions";
 
 export type ReviewMetric = {
@@ -50,6 +50,29 @@ function timeText(value: string | null) {
   return value.slice(0, 5);
 }
 
+function durationText(minutes: number | null) {
+  if (minutes == null) return "Shift not linked";
+  if (minutes <= 0) return "On time";
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  if (!hours) return `${remainder} min late`;
+  return `${hours} hr${hours === 1 ? "" : "s"}${remainder ? ` ${remainder} min` : ""} late`;
+}
+
+function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociateDelivery[]; total: number }) {
+  return <div className="performance-associate-popover">
+    <div className="performance-associate-popover-head"><span>Associate</span><span>Delivered</span><span>Assigned</span><span>Payment scheme</span><span>Current rate card</span></div>
+    <div className="performance-associate-popover-body">{rows.length ? rows.map((person) => <div className="performance-associate-row" key={`${person.associateId}-${person.name}`}>
+      <span><strong>{person.name}</strong><small>{person.associateId}</small></span>
+      <b>{person.delivered.toLocaleString("en-IN")}</b>
+      <b>{person.assigned && person.assigned > 0 ? person.assigned.toLocaleString("en-IN", { maximumFractionDigits: 1 }) : "—"}</b>
+      <span>{person.paymentScheme || "—"}</span>
+      <span>{person.rateCard || "—"}</span>
+    </div>) : <p>No associate-level delivery rows are available for this date.</p>}</div>
+    <div className="performance-associate-popover-foot"><span>{rows.length} delivering associate{rows.length === 1 ? "" : "s"}</span><b>{total.toLocaleString("en-IN")} total delivered</b></div>
+  </div>;
+}
+
 export function PerformanceReviewDesk(props: Props) {
   const { canAdd, canCompleteStep, canEdit, date, error, items, locations, metrics, notice, previousReviews, review, reviews, selectedLocation, snapshot, sourceBatchId, sourceType, sourceWeek, steps } = props;
   const selectedCode = selectedLocation.station_code;
@@ -65,6 +88,7 @@ export function PerformanceReviewDesk(props: Props) {
   const completedCount = locations.filter((location) => reviewByStation.get(location.station_code)?.status === "closed").length;
   const inReviewCount = locations.filter((location) => reviewByStation.get(location.station_code)?.status === "in_review").length;
   const notStartedCount = locations.length - completedCount - inReviewCount;
+  const openingIsLate = (snapshot.openingLateMinutes ?? 0) > 0;
   return <div className="performance-review-desk">
     {notice ? <div className="performance-review-message success">{notice}</div> : null}
     {error ? <div className="performance-review-message error">{error}</div> : null}
@@ -100,16 +124,16 @@ export function PerformanceReviewDesk(props: Props) {
       <section className="panel performance-review-section">
         <div className="panel-head"><div><span className="performance-review-kicker">01 · PERFORMANCE</span><h2>D-1 station performance</h2><p className="subtle">Uploaded Amazon metrics, opening discipline and action ownership in one review.</p></div><strong className={misses.length ? "review-risk" : "review-good"}>{misses.length} exception{misses.length === 1 ? "" : "s"}</strong></div>
         <div className="performance-review-facts">
-          <article><span>Delivered</span><strong>{snapshot.deliveredCount.toLocaleString("en-IN")}</strong><small>Detailed delivered source</small></article>
-          <article><span>Average allocation</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{snapshot.activeFeCount} active FE IDs</small></article>
-          <article><span>Station opened</span><strong>{timeText(snapshot.firstPunchAt)}</strong><small>{snapshot.firstPunchBy || "No valid opening punch"} · {snapshot.openingWindowStart.slice(0, 5)}–{snapshot.openingWindowEnd.slice(0, 5)}</small></article>
+          <details className="performance-fact-card"><summary><span>Delivered · view split</span><strong>{snapshot.deliveredCount.toLocaleString("en-IN")}</strong><small>{snapshot.associateDeliveries.length} delivering associate{snapshot.associateDeliveries.length === 1 ? "" : "s"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></details>
+          <details className="performance-fact-card"><summary><span>Average allocation · view split</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / {snapshot.activeFeCount} active FEs</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></details>
+          <details className={`performance-fact-card opening ${openingIsLate ? "late" : ""}`}><summary><span>Station opened · shift check</span><strong>{timeText(snapshot.firstPunchAt)}</strong><small>{snapshot.scheduledOpeningTime ? <b className={openingIsLate ? "late" : "on-time"}>{durationText(snapshot.openingLateMinutes)}</b> : null}{snapshot.firstPunchBy || "No valid opening punch"}</small></summary><div className="performance-opening-popover"><p><span>Scheduled shift</span><b>{timeText(snapshot.scheduledOpeningTime)}</b></p><p><span>Opening punch</span><b>{timeText(snapshot.firstPunchAt)}</b></p><p><span>Reported by</span><b>{snapshot.firstPunchBy || "—"}</b></p><p><span>Variance</span><b className={openingIsLate ? "late" : ""}>{durationText(snapshot.openingLateMinutes)}</b></p><p><span>Shift source</span><b>{snapshot.openingShiftName || snapshot.openingShiftSource || "Not linked"}</b></p><p><span>Opening punch window</span><b>{snapshot.openingWindowStart.slice(0, 5)}–{snapshot.openingWindowEnd.slice(0, 5)}</b></p></div></details>
           <article><span>Metric health</span><strong>{metrics.length - misses.length}/{metrics.length}</strong><small>Within configured range</small></article>
         </div>
         {previousReview ? <div className="performance-previous-takeaway"><span><strong>Previous review · {formatDashboardDate(previousReview.source_date)}</strong><small>{previousReview.status === "closed" ? "Completed" : "Carried forward"}</small></span><p>{previousReview.review_summary || "No takeaway was recorded."}</p></div> : null}
         {carriedActions.length ? <details className="performance-inline-detail carried-review-actions" open><summary><span>Open actions from earlier reviews</span><b>{carriedActions.length} carried</b></summary><div>{carriedActions.map((item) => <article key={item.id}><span><strong>{item.metric_label}</strong><small>{item.root_cause || "RCA pending"}</small></span><span><b>{item.corrective_action || "Action pending"}</b><small>{item.action_owner || "Owner pending"}{item.due_date ? ` · due ${formatDashboardDate(item.due_date)}` : ""}</small></span><em>{item.status.replace("_", " ")}</em></article>)}</div></details> : null}
         <details className="performance-inline-detail" open>
           <summary><span>Performance scorecard</span><b>{metrics.length} metrics</b></summary>
-          <div className="performance-review-metrics">{metrics.map((metric) => <article className={metric.severity} key={metric.key}><span>{metric.short}</span><strong>{valueText(metric.actual)}</strong><small>{metric.target == null ? "Reference" : `${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}</small></article>)}</div>
+          <div className="performance-review-metrics">{metrics.map((metric) => <article className={metric.severity} key={metric.key}><span title={metric.label}>{metric.short}</span><strong>{valueText(metric.actual)}</strong><small>{metric.target == null ? "Reference metric" : `Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}</small></article>)}</div>
         </details>
         {review && canEdit ? <form action={savePerformanceReviewOperations} className="performance-operations-form">
           <input type="hidden" name="review_id" value={review.id}/><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/>

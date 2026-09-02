@@ -65,6 +65,8 @@ export type OpsStationManpowerPerson = {
     missingPunch: boolean;
     rosterDayType: string | null;
     shiftName: string | null;
+    shiftStartTime: string | null;
+    shiftEndTime: string | null;
     shiftSource: string | null;
     inTime: string | null;
     outTime: string | null;
@@ -380,6 +382,8 @@ export async function loadOpsStationManpower(
         missingPunch,
         rosterDayType: roster?.day_type ? String(roster.day_type) : null,
         shiftName: shift ? `${shift.name} · ${shift.start_time.slice(0, 5)}-${shift.end_time.slice(0, 5)}` : null,
+        shiftStartTime: shift?.start_time ?? null,
+        shiftEndTime: shift?.end_time ?? null,
         shiftSource,
         inTime: attendance?.in_time ?? null,
         outTime: attendance?.out_time ?? null,
