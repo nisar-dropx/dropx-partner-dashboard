@@ -1,6 +1,6 @@
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
-import { PaymentApprovalFilters } from "@/components/payment-approval-filters";
+import { PaymentApprovalFilters, type PaymentApprovalFilterOption } from "@/components/payment-approval-filters";
 import { PaymentApprovalActionForm } from "@/components/payment-approval-action-form";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
@@ -9,6 +9,12 @@ import { requirePagePermission, type AuthorizationContext } from "@/lib/authoriz
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { getPaymentApprovalEligibility } from "@/lib/payment-approval-scope";
+import {
+  matchesPaymentApprovalFacets,
+  paymentApprovalDateKey,
+  selectedPaymentApprovalValues,
+  type PaymentApprovalFacetSelection
+} from "@/lib/payment-approval-filtering";
 import { isResubmittedPaymentStage, paymentStatusLabel } from "@/lib/payment-status-label";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import {
@@ -72,12 +78,38 @@ type ApprovalLogRow = {
   user_roles?: { name: string | null; code: string | null } | null;
 };
 
+type ApprovalSearchParams = {
+  status?: string | string[];
+  search?: string | string[];
+  station?: string | string[];
+  head?: string | string[];
+  date?: string | string[];
+  manage?: string | string[];
+  approvalError?: string | string[];
+  approvalNotice?: string | string[];
+};
+
+type ApprovalFilters = PaymentApprovalFacetSelection & {
+  status?: string;
+  search?: string;
+};
+
 function firstRelation<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
 
 function hasDisplayValue(value: string | number | null | undefined) {
   return value != null && String(value).trim() !== "" && String(value).trim() !== "-";
+}
+
+function firstSearchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
+
+function withQueryParam(params: URLSearchParams, key: string, value: string) {
+  const next = new URLSearchParams(params);
+  next.set(key, value);
+  return next.toString();
 }
 
 async function loadApprovalLogs(companyId: string, requestId: string) {
@@ -118,7 +150,7 @@ async function loadApprovalLogs(companyId: string, requestId: string) {
   };
 }
 
-async function loadApprovals(companyId: string, authorization: AuthorizationContext, statusFilter: string | undefined, searchTerm: string | undefined) {
+async function loadApprovals(companyId: string, authorization: AuthorizationContext, filters: ApprovalFilters) {
   if (!supabaseAdmin) {
     return {
       requests: [] as RequestRow[],
@@ -126,6 +158,12 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
       answers: [] as AnswerRow[],
       logs: [] as ApprovalLogRow[],
       canDownloadProcessData: false,
+      filterOptions: {
+        stations: [] as PaymentApprovalFilterOption[],
+        paymentHeads: [] as PaymentApprovalFilterOption[],
+        dates: [] as PaymentApprovalFilterOption[]
+      },
+      selectedFilters: { stations: [], paymentHeads: [], dates: [] } as PaymentApprovalFacetSelection,
       error: "Supabase service role key is not configured."
     };
   }
@@ -188,10 +226,10 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
     profiles: firstRelation(request.profiles)
   }));
   const eligibleIds = await getPaymentApprovalEligibility(companyId, authorization, unscopedRequests);
-  const normalizedFilter = statusFilter || "pending";
-  const normalizedSearch = String(searchTerm ?? "").trim().toLowerCase();
+  const normalizedFilter = filters.status || "pending";
+  const normalizedSearch = String(filters.search ?? "").trim().toLowerCase();
   const terminalApprovalStatuses = new Set(["RE_APPROVED", "REJECTED", "RETURNED", "CANCELLED", "PROCESSING", "PROCESSED"]);
-  const requests = unscopedRequests.filter((request) => {
+  const statusScopedRequests = unscopedRequests.filter((request) => {
     if (!eligibleIds.has(request.id)) return false;
     const requestStatus = String(request.status ?? "").trim().toLowerCase();
     const approvalStatus = String(request.approval_status || request.status || "").trim().toUpperCase();
@@ -209,6 +247,35 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
     } else if (normalizedFilter === "rejected") {
       if (requestStatus !== "rejected" && approvalStatus !== "REJECTED") return false;
     }
+    return true;
+  });
+  const stationOptions = [...new Set(statusScopedRequests.map((request) => request.location_code).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right))
+    .map((value) => ({ value, label: value }));
+  const paymentHeadById = new Map<string, PaymentApprovalFilterOption>();
+  for (const request of statusScopedRequests) {
+    if (!request.payment_head_id || paymentHeadById.has(request.payment_head_id)) continue;
+    const name = request.payment_heads?.name?.trim() || request.payment_heads?.code?.trim() || "Unnamed payment head";
+    const code = request.payment_heads?.code?.trim();
+    paymentHeadById.set(request.payment_head_id, {
+      value: request.payment_head_id,
+      label: code && code.toLowerCase() !== name.toLowerCase() ? `${name} (${code})` : name
+    });
+  }
+  const paymentHeadOptions = [...paymentHeadById.values()].sort((left, right) => left.label.localeCompare(right.label));
+  const dateOptions = [...new Set(statusScopedRequests.map((request) => paymentApprovalDateKey(request.created_at)).filter(Boolean))]
+    .sort((left, right) => right.localeCompare(left))
+    .map((value) => ({ value, label: formatDashboardDate(value) }));
+  const allowedStations = new Set(stationOptions.map((option) => option.value));
+  const allowedPaymentHeads = new Set(paymentHeadOptions.map((option) => option.value));
+  const allowedDates = new Set(dateOptions.map((option) => option.value));
+  const selectedFilters: PaymentApprovalFacetSelection = {
+    stations: filters.stations.filter((value) => allowedStations.has(value)),
+    paymentHeads: filters.paymentHeads.filter((value) => allowedPaymentHeads.has(value)),
+    dates: filters.dates.filter((value) => allowedDates.has(value))
+  };
+  const requests = statusScopedRequests.filter((request) => {
+    if (!matchesPaymentApprovalFacets(request, selectedFilters)) return false;
     if (!normalizedSearch) return true;
     const haystack = [
       request.request_no,
@@ -242,6 +309,8 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
     })),
     logs: logsData.logs,
     canDownloadProcessData: Boolean(authorization.roleId && (processHeadsResult.count ?? 0) > 0),
+    filterOptions: { stations: stationOptions, paymentHeads: paymentHeadOptions, dates: dateOptions },
+    selectedFilters,
     error: requestsResult.error?.message || answersResult.error?.message || logsData.error || processHeadsResult.error?.message || null
   };
 }
@@ -251,19 +320,31 @@ export const dynamic = "force-dynamic";
 export default async function PaymentApprovalsPage({
   searchParams
 }: {
-  searchParams?: { status?: string; search?: string; manage?: string; approvalError?: string; approvalNotice?: string };
+  searchParams?: ApprovalSearchParams;
 }) {
   const authorization = await requirePagePermission("payment_approvals", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_approvals;
-  const currentStatus = ["pending", "returned", "rejected", "all"].includes(searchParams?.status ?? "") ? searchParams?.status ?? "pending" : "pending";
-  const currentSearch = searchParams?.search ?? "";
-  const currentParams = new URLSearchParams({
+  const requestedStatus = firstSearchParam(searchParams?.status);
+  const currentStatus = ["pending", "returned", "rejected", "all"].includes(requestedStatus) ? requestedStatus : "pending";
+  const currentSearch = firstSearchParam(searchParams?.search);
+  const requestedFilters: PaymentApprovalFacetSelection = {
+    stations: selectedPaymentApprovalValues(searchParams?.station),
+    paymentHeads: selectedPaymentApprovalValues(searchParams?.head),
+    dates: selectedPaymentApprovalValues(searchParams?.date)
+  };
+  const { requests, canDownloadProcessData, filterOptions, selectedFilters, error } = await loadApprovals(companyId, authorization, {
     status: currentStatus,
-    ...(currentSearch ? { search: currentSearch } : {})
+    search: currentSearch,
+    ...requestedFilters
   });
-  const { requests, canDownloadProcessData, error } = await loadApprovals(companyId, authorization, currentStatus, currentSearch);
-  const manageId = searchParams?.manage;
+  const currentParams = new URLSearchParams();
+  currentParams.set("status", currentStatus);
+  if (currentSearch) currentParams.set("search", currentSearch);
+  selectedFilters.stations.forEach((value) => currentParams.append("station", value));
+  selectedFilters.paymentHeads.forEach((value) => currentParams.append("head", value));
+  selectedFilters.dates.forEach((value) => currentParams.append("date", value));
+  const manageId = firstSearchParam(searchParams?.manage);
   const selectedRequest = manageId ? requests.find((request) => request.id === manageId) ?? null : null;
   const selectedLocationResult = selectedRequest && supabaseAdmin
     ? await supabaseAdmin
@@ -355,12 +436,12 @@ export default async function PaymentApprovalsPage({
         </section>
       ) : null}
 
-      {searchParams?.approvalError || searchParams?.approvalNotice ? (
-        <section className={`panel message-panel ${searchParams.approvalError ? "error" : "success"}`}>
+      {firstSearchParam(searchParams?.approvalError) || firstSearchParam(searchParams?.approvalNotice) ? (
+        <section className={`panel message-panel ${firstSearchParam(searchParams?.approvalError) ? "error" : "success"}`}>
           <div className="panel-body">
-            <strong>{searchParams.approvalError ? "Payment approval not updated" : "Payment approval updated"}</strong>
+            <strong>{firstSearchParam(searchParams?.approvalError) ? "Payment approval not updated" : "Payment approval updated"}</strong>
             <p className="subtle" style={{ marginTop: 6 }}>
-              {searchParams.approvalError ?? searchParams.approvalNotice}
+              {firstSearchParam(searchParams?.approvalError) || firstSearchParam(searchParams?.approvalNotice)}
             </p>
           </div>
         </section>
@@ -373,11 +454,20 @@ export default async function PaymentApprovalsPage({
               <h2>Approval list</h2>
               <p className="subtle">{requests.length} records</p>
             </div>
-            <PaymentApprovalFilters search={currentSearch} status={currentStatus} />
             {canDownloadProcessData ? (
               <a className="button secondary compact" href="/api/payments/approvals/download">Download raw Excel</a>
             ) : null}
           </div>
+          <PaymentApprovalFilters
+            dateOptions={filterOptions.dates}
+            paymentHeadOptions={filterOptions.paymentHeads}
+            search={currentSearch}
+            selectedDates={selectedFilters.dates}
+            selectedPaymentHeads={selectedFilters.paymentHeads}
+            selectedStations={selectedFilters.stations}
+            stationOptions={filterOptions.stations}
+            status={currentStatus}
+          />
           <div className="table-wrap">
             <table>
               <thead>
@@ -402,7 +492,7 @@ export default async function PaymentApprovalsPage({
                     <td>{request.profiles?.full_name ?? request.profiles?.email ?? "-"}</td>
                     <td><StatusPill status={paymentStatusLabel(request)} /></td>
                     <td>{formatDashboardDate(request.created_at)}</td>
-                    {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/payments/approvals?${new URLSearchParams({ ...Object.fromEntries(currentParams), manage: request.id }).toString()}`} scroll={false}>Manage</PendingLink></td> : null}
+                    {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/payments/approvals?${withQueryParam(currentParams, "manage", request.id)}`} scroll={false}>Manage</PendingLink></td> : null}
                   </tr>
                 )) : (
                   <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 8 : 7}>No approvals pending.</td></tr>
@@ -427,10 +517,10 @@ export default async function PaymentApprovalsPage({
               <PendingLink className="icon-button" href={`/payments/approvals?${currentParams.toString()}`} scroll={false} aria-label="Close">x</PendingLink>
             </div>
             <div className="panel-body">
-              {searchParams?.approvalError ? (
+              {firstSearchParam(searchParams?.approvalError) ? (
                 <div className="message-panel error" style={{ marginBottom: 16 }}>
                   <strong>Payment approval not updated</strong>
-                  <p className="subtle" style={{ marginTop: 6 }}>{searchParams.approvalError}</p>
+                  <p className="subtle" style={{ marginTop: 6 }}>{firstSearchParam(searchParams?.approvalError)}</p>
                 </div>
               ) : null}
               <div className="form-grid three">
