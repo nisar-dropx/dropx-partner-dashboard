@@ -688,7 +688,9 @@ export async function POST(request: NextRequest) {
       (enrolment.worker_type === "employee" ? "employee" : "contractor");
     const recipientAccountId = enrolment.account_id ??
       (profileType === "employee" ? enrolment.employee_id : enrolment.field_executive_id);
-    if (!alreadyStored && recipientAccountId) {
+    const punchAgeMs = Date.now() - punchTime.getTime();
+    const isRecentLivePunch = punchAgeMs >= -5 * 60_000 && punchAgeMs <= 20 * 60_000;
+    if (!alreadyStored && recipientAccountId && isRecentLivePunch) {
       const firstPunchTime = existingPunches.data?.[0]?.punch_time
         ? new Date(existingPunches.data[0].punch_time)
         : punchTime;
