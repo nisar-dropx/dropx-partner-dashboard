@@ -16,6 +16,287 @@
   --shadow: 0 1px 3px rgba(24, 24, 27, 0.08);
 }
 
+/* DropX One — policy-aware attendance outcomes and concise employee nudges */
+.dx-attendance-attention {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid #f1d9ae;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #fffaf0, #fff7e8);
+  box-shadow: var(--one-shadow);
+}
+
+.dx-attendance-attention > i {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  color: #ae6200;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(128, 75, 0, .08);
+}
+
+.dx-attendance-attention > i svg {
+  width: 20px;
+  height: 20px;
+}
+
+.dx-attendance-attention > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dx-attendance-attention > span small {
+  color: #8b641d;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+
+.dx-attendance-attention > span strong {
+  color: #33240d;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.dx-attendance-attention > span em {
+  overflow: hidden;
+  color: #755b30;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+
+.dx-attendance-attention > button {
+  min-height: 34px;
+  padding: 0 12px;
+  color: #fff;
+  border: 0;
+  border-radius: 10px;
+  background: #d46b00;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.dx-attendance-attention.red {
+  border-color: #f1ccd0;
+  background: linear-gradient(135deg, #fff7f7, #fff0f1);
+}
+
+.dx-attendance-attention.red > i { color: #c3313d; }
+.dx-attendance-attention.red > button { background: #c3313d; }
+.dx-attendance-attention.red > span small { color: #ad4851; }
+
+.dx-attendance-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dx-attendance-summary > div:nth-child(3) {
+  border-right: 1px solid rgba(255, 255, 255, .25);
+}
+
+.dx-attendance-summary > div:nth-child(2) i { color: #d48400; }
+.dx-attendance-summary > div:nth-child(3) i { color: #df3439; }
+.dx-attendance-summary > div:nth-child(4) i { color: #6d4aff; }
+
+.dx-days button {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.dx-days button > span {
+  display: grid;
+  place-items: center;
+}
+
+.dx-days button.full { color: #fff; background: #15915f; }
+.dx-days button.half { color: #fff; background: #d88700; }
+.dx-days button.review { color: #fff; background: #d7434e; }
+.dx-days button.on-shift { color: #fff; background: #1678d2; }
+
+.dx-days button.has-issue::after {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 7px;
+  height: 7px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #ffb020;
+  content: "";
+}
+
+.dx-days button.full.selected { color: #15915f; background: #fff; }
+.dx-days button.half.selected { color: #b66a00; background: #fff; }
+.dx-days button.review.selected { color: #c3313d; background: #fff; }
+.dx-days button.on-shift.selected { color: #1678d2; background: #fff; }
+
+.dx-legend {
+  flex-wrap: wrap;
+}
+
+.dx-legend .full::before { background: #15915f; }
+.dx-legend .half::before { background: #d88700; }
+.dx-legend .review::before { background: #d7434e; }
+
+.dx-attendance-list em.full,
+.dx-selected-day em.full,
+.dx-attendance-list em.on-shift,
+.dx-selected-day em.on-shift {
+  color: #08794d;
+  background: #e7f7ef;
+}
+
+.dx-attendance-list em.half,
+.dx-selected-day em.half {
+  color: #9b5a00;
+  background: #fff2d6;
+}
+
+.dx-attendance-list em.absent,
+.dx-selected-day em.absent,
+.dx-attendance-list em.review,
+.dx-selected-day em.review {
+  color: #b4232b;
+  background: #fde9ea;
+}
+
+.dx-attendance-list-issue {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 10px;
+  color: #8d5800;
+  border-radius: 9px;
+  background: #fff8e9;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.dx-attendance-list-issue.red {
+  color: #a52a34;
+  background: #fff1f2;
+}
+
+.dx-attendance-shift {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 8px 10px;
+  color: #50566a;
+  border-radius: 9px;
+  background: #f5f7fa;
+  font-size: 10px;
+}
+
+.dx-attendance-shift svg { width: 14px; height: 14px; }
+.dx-attendance-shift small { margin-left: auto; }
+
+.dx-attendance-day-insight {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 11px 12px;
+  color: #75531c;
+  border: 1px solid #f2dfbd;
+  border-radius: 11px;
+  background: #fff9ed;
+}
+
+.dx-attendance-day-insight.green {
+  color: #0f724e;
+  border-color: #cde9dc;
+  background: #f0faf5;
+}
+
+.dx-attendance-day-insight.red {
+  color: #a82d37;
+  border-color: #f0ced1;
+  background: #fff3f4;
+}
+
+.dx-attendance-day-insight.blue {
+  color: #4851a7;
+  border-color: #d9dcfb;
+  background: #f3f4ff;
+}
+
+.dx-attendance-day-insight > strong { font-size: 12px; }
+.dx-attendance-day-insight > small { color: inherit; font-size: 10px; line-height: 1.4; opacity: .82; }
+.dx-attendance-day-insight > div { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 3px; }
+.dx-attendance-day-insight > div span { display: inline-flex; padding: 4px 7px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, .8); font-size: 9px; font-weight: 700; }
+
+.dx-dashboard-attendance-nudge {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 10px;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 12px;
+  background: rgba(255, 179, 0, .14);
+  text-align: left;
+}
+
+.dx-dashboard-attendance-nudge.red { background: rgba(255, 91, 99, .15); }
+.dx-dashboard-attendance-nudge > svg { width: 18px; height: 18px; }
+.dx-dashboard-attendance-nudge > svg:last-child { width: 15px; opacity: .7; }
+.dx-dashboard-attendance-nudge > span { display: grid; gap: 1px; min-width: 0; }
+.dx-dashboard-attendance-nudge strong { font-size: 11px; }
+.dx-dashboard-attendance-nudge small { color: inherit; font-size: 9px; line-height: 1.35; opacity: .74; }
+
+.dx-dashboard-alerts button > span {
+  display: grid;
+  gap: 2px;
+}
+
+.dx-dashboard-alerts button > span strong { font-size: 11px; font-weight: 620; }
+.dx-dashboard-alerts button > span small { color: var(--one-muted); font-size: 9px; line-height: 1.35; }
+
+@media (max-width: 520px) {
+  .dx-attendance-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dx-attendance-summary > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .dx-attendance-summary > div:nth-child(-n + 2) {
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, .16);
+  }
+
+  .dx-attendance-summary > div:nth-child(n + 3) {
+    padding-top: 10px;
+  }
+
+  .dx-attendance-summary > p {
+    grid-column: 1 / -1;
+  }
+
+  .dx-attendance-attention {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    gap: 9px;
+    padding: 11px;
+  }
+
+  .dx-attendance-attention > i {
+    width: 36px;
+    height: 36px;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -15769,4 +16050,41 @@ img.dx-selfie-live {
   font-size: 13px;
   font-weight: 700;
   text-align: center;
+}
+
+/* Keep policy-aware attendance colors ahead of the legacy compact rules above. */
+.dx-attendance-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dx-attendance-summary > div:nth-child(3) {
+  border-right: 1px solid rgba(255, 255, 255, .25);
+}
+
+.dx-days button.full { color: #fff; background: #15915f; }
+.dx-days button.half { color: #fff; background: #d88700; }
+.dx-days button.review { color: #fff; background: #d7434e; }
+.dx-days button.on-shift { color: #fff; background: #1678d2; }
+.dx-days button.full.selected { color: #15915f; background: #fff; }
+.dx-days button.half.selected { color: #b66a00; background: #fff; }
+.dx-days button.review.selected { color: #c3313d; background: #fff; }
+.dx-days button.on-shift.selected { color: #1678d2; background: #fff; }
+
+@media (max-width: 520px) {
+  .dx-attendance-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dx-attendance-summary > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .dx-attendance-summary > div:nth-child(-n + 2) {
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, .16);
+  }
+
+  .dx-attendance-summary > div:nth-child(n + 3) {
+    padding-top: 10px;
+  }
 }

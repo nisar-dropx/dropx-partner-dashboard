@@ -123,8 +123,13 @@ export async function GET(request: NextRequest) {
       reportType: "performance"
     })).filter(worker.filter);
     const present = rows.filter((row) => row.status === "P").length;
-    const absent = rows.filter((row) => row.status === "A").length;
-    const misPunch = rows.filter((row) => row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length;
+    const fullDay = rows.filter((row) => row.attendanceStatus === "Full Day").length;
+    const halfDay = rows.filter((row) => row.attendanceStatus === "Half Day").length;
+    const absent = rows.filter((row) => row.attendanceStatus === "Absent").length;
+    const needsReview = rows.filter((row) => row.attendanceStatus === "Needs Review").length;
+    const lateIn = rows.filter((row) => row.lateMinutes > 0).length;
+    const earlyOut = rows.filter((row) => row.earlyOutMinutes > 0).length;
+    const misPunch = rows.filter((row) => row.punchCount % 2 === 1 || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length;
     const requestsResult = await supabaseAdmin
       .from("attendance_regularization_requests")
       .select("id, attendance_date, requested_in_time, requested_out_time, reason_code, remarks, attachment_path, status, review_remarks, created_at")
@@ -157,11 +162,20 @@ export async function GET(request: NextRequest) {
     const responseRows = rows.map((row) => ({
       date: row.punchDate,
       status: row.status,
+      attendanceStatus: row.attendanceStatus,
       inTime: row.inTime,
       outTime: row.outTime,
       punches: row.punchTimes,
       workHours: row.workHours,
       punchCount: row.punchCount,
+      lateMinutes: row.lateMinutes,
+      earlyOutMinutes: row.earlyOutMinutes,
+      scheduledStart: row.scheduledStart,
+      scheduledEnd: row.scheduledEnd,
+      scheduledMinutes: row.scheduledMinutes,
+      shiftName: row.shiftName,
+      shiftCode: row.shiftCode,
+      shiftSource: row.shiftSource,
       remark: row.remark,
       regularization: requestByDate.get(row.punchDate) ?? null
     }));
@@ -171,11 +185,20 @@ export async function GET(request: NextRequest) {
         responseRows.push({
           date,
           status: "",
+          attendanceStatus: "Needs Review",
           inTime: "",
           outTime: "",
           punches: [],
           workHours: "",
           punchCount: 0,
+          lateMinutes: 0,
+          earlyOutMinutes: 0,
+          scheduledStart: "--:--",
+          scheduledEnd: "--:--",
+          scheduledMinutes: 0,
+          shiftName: "Unassigned",
+          shiftCode: "",
+          shiftSource: "Unassigned",
           remark: "",
           regularization
         });
@@ -188,7 +211,12 @@ export async function GET(request: NextRequest) {
       summary: {
         totalRows: rows.length,
         present,
+        fullDay,
+        halfDay,
         absent,
+        needsReview,
+        lateIn,
+        earlyOut,
         misPunch
       },
       rows: responseRows

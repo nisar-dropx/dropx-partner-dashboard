@@ -178,19 +178,35 @@ async function approverForRoles(companyId: string, roleIds: string[], label: str
     }
   }
 
+  const membershipResult = await supabaseAdmin
+    .from("company_product_memberships")
+    .select("user_id, role_id, has_all_location_access, location_scope_ids")
+    .eq("company_id", companyId)
+    .eq("is_active", true)
+    .in("role_id", roleIds);
+  if (membershipResult.error) throw new Error(membershipResult.error.message);
+
+  const candidates = (membershipResult.data ?? []).filter((membership) => (
+    !locationId ||
+    membership.has_all_location_access ||
+    (membership.location_scope_ids ?? []).includes(locationId)
+  ));
+  const candidateUserIds = [...new Set(candidates.map((membership) => membership.user_id).filter(Boolean))];
+  if (!candidateUserIds.length) throw new Error(`No active user is assigned to any configured ${label}.`);
+
   const { data: approver, error } = await supabaseAdmin
     .from("profiles")
     .select("id, role_id")
     .eq("company_id", companyId)
-    .in("role_id", roleIds)
     .eq("is_active", true)
+    .in("id", candidateUserIds)
     .order("full_name")
     .limit(1)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!approver) throw new Error(`No active user is assigned to any configured ${label}.`);
 
-  return { userId: approver.id, roleId: approver.role_id ?? roleIds[0] };
+  return { userId: approver.id, roleId: approver.role_id ?? candidates[0]?.role_id ?? roleIds[0] };
 }
 
 function configuredRoleIds(roleIds: string[] | null | undefined, legacyRoleId: string | null | undefined) {
