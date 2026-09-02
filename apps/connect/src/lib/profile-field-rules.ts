@@ -105,7 +105,7 @@ export function normalizeProfileFieldRules(value: unknown): DesignationProfileFi
     field_executives: normalizeChannelRules(legacyNonEmployeeRules, fieldExecutiveProfileFields),
     contractors: normalizeChannelRules(record.contractors ?? legacyNonEmployeeRules, fieldExecutiveProfileFields),
     vendors: normalizeChannelRules(record.vendors ?? legacyNonEmployeeRules, fieldExecutiveProfileFields),
-    workers: normalizeChannelRules(record.workers ?? legacyNonEmployeeRules, fieldExecutiveProfileFields)
+    helpers: normalizeChannelRules(record.helpers ?? record.workers ?? legacyNonEmployeeRules, fieldExecutiveProfileFields)
   };
 }
 
@@ -117,7 +117,7 @@ export function profileFieldRulesForCategory(
   const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
   const legacyNonEmployeeRules = record.field_executives;
   const categoryValue = record[categoryCode]
-    ?? (categoryCode === "contractors" || categoryCode === "vendors" || categoryCode === "workers"
+    ?? (categoryCode === "contractors" || categoryCode === "vendors" || categoryCode === "helpers" || categoryCode === "workers"
       ? legacyNonEmployeeRules
       : record[fallbackCategory]);
   return normalizeChannelRules(categoryValue, workforceProfileFields);
