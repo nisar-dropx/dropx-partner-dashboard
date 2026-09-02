@@ -6,6 +6,7 @@ const peoplePortalRoots = [
   "/contractors",
   "/vendors",
   "/workers",
+  "/helpers",
   "/attendance",
   "/reports/raw-punches",
   "/reports/verification-api",

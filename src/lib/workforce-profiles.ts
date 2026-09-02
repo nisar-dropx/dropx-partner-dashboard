@@ -18,6 +18,7 @@ export type NonEmployeeRoute =
   | "/work-force-register/vendors"
   | "/contractors"
   | "/vendors"
+  | "/helpers"
   | "/workers";
 
 type NonEmployeeConfig = {
@@ -61,10 +62,10 @@ export const nonEmployeeProfileConfigs: Record<NonEmployeeProfileType, NonEmploy
   worker: {
     category: "worker",
     designationCategory: "workers",
-    label: "Worker",
+    label: "Helper",
     pageCode: "workers",
     profileType: "worker",
-    route: "/workers",
+    route: "/helpers",
     table: "workers"
   }
 };
@@ -85,6 +86,9 @@ export function nonEmployeeConfigForRoute(value: unknown) {
   const route = String(value ?? "") as NonEmployeeRoute;
   if (route === "/field-executive") {
     return nonEmployeeProfileConfigs.field_executive;
+  }
+  if (route === "/workers") {
+    return nonEmployeeProfileConfigs.worker;
   }
   if (route === "/work-force-register") {
     return { ...nonEmployeeProfileConfigs.contractor, route };

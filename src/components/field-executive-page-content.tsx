@@ -415,7 +415,7 @@ function FieldExecutiveForm({
         </fieldset>
       ) : null}
       <label hidden={!fieldEnabled("gender")}>Gender
-        <SearchableSelect name="gender" options={genderOptions} defaultValue={executive?.gender} placeholder="Select gender" />
+        <SearchableSelect name="gender" options={genderOptions} defaultValue={executive?.gender} placeholder="Select gender" required={fieldRequired("gender")} />
       </label>
       <label hidden={!fieldEnabled("date_of_birth")}>Date of birth<input className="field" name="date_of_birth" required={fieldRequired("date_of_birth")} type="date" defaultValue={textValue(executive?.date_of_birth)} /></label>
 
@@ -425,7 +425,7 @@ function FieldExecutiveForm({
       <label hidden={!fieldEnabled("pincode")}>Postal PIN<input className="field" inputMode="numeric" maxLength={6} name="postal_pin" pattern="[0-9]{6}" placeholder="Enter PIN" required={fieldRequired("pincode")} defaultValue={textValue(executive?.postal_pin)} /></label>
       <label hidden={!fieldEnabled("landmark")}>Land mark<input className="field" name="landmark" placeholder="Enter landmark" required={fieldRequired("landmark")} defaultValue={textValue(executive?.landmark)} /></label>
       <label hidden={!fieldEnabled("state_code")}>State
-        <SearchableSelect name="state_code" options={stateOptions} defaultValue={executive?.state_code} placeholder="Search state code" />
+        <SearchableSelect name="state_code" options={stateOptions} defaultValue={executive?.state_code} placeholder="Search state code" required={fieldRequired("state_code")} />
       </label>
 
       <label hidden={!fieldEnabled("father_name")}>Father name<input className="field" name="father_name" placeholder="Enter father name" required={fieldRequired("father_name")} defaultValue={textValue(executive?.father_name)} /></label>
@@ -436,6 +436,7 @@ function FieldExecutiveForm({
           options={yesNoOptions}
           defaultValue={typeof executive?.is_handicapped === "boolean" ? String(executive.is_handicapped) : undefined}
           placeholder="Select"
+          required={fieldRequired("is_handicapped")}
         />
       </label>
 
@@ -457,14 +458,14 @@ function FieldExecutiveForm({
       <label hidden={!fieldEnabled("vehicle_insurance_exp_date")}>Vehicle Insurance expiry<input className="field" name="vehicle_insurance_exp_date" required={fieldRequired("vehicle_insurance_exp_date")} type="date" defaultValue={textValue(executive?.vehicle_insurance_exp_date)} /></label>
       <label hidden={!fieldEnabled("vehicle_pollution_exp_date")}>Pollution expiry<input className="field" name="vehicle_pollution_exp_date" required={fieldRequired("vehicle_pollution_exp_date")} type="date" defaultValue={textValue(executive?.vehicle_pollution_exp_date)} /></label>
 
-      {mode === "edit" ? (
+      {mode === "edit" || mode === "create" ? (
         <>
-          <label hidden={!fieldEnabled("aadhaar_front")}>Aadhaar front file<input className="field" name="aadhaar_front_file" type="file" /></label>
-          <label hidden={!fieldEnabled("aadhaar_back")}>Aadhaar back file<input className="field" name="aadhaar_back_file" type="file" /></label>
-          <label hidden={!fieldEnabled("pan_upload")}>PAN upload<input className="field" name="pan_upload_file" type="file" /></label>
-          <label hidden={!fieldEnabled("dl_front")}>DL front file<input className="field" name="dl_front_file" type="file" /></label>
-          <label hidden={!fieldEnabled("dl_back")}>DL back file<input className="field" name="dl_back_file" type="file" /></label>
-          <label hidden={!fieldEnabled("profile_photo")}>Profile photo<input accept="image/*" className="field" name="profile_photo_file" type="file" /></label>
+          <label hidden={!fieldEnabled("aadhaar_front")}>Aadhaar front file<input className="field" name="aadhaar_front_file" required={mode === "create" && fieldRequired("aadhaar_front")} type="file" /></label>
+          <label hidden={!fieldEnabled("aadhaar_back")}>Aadhaar back file<input className="field" name="aadhaar_back_file" required={mode === "create" && fieldRequired("aadhaar_back")} type="file" /></label>
+          <label hidden={!fieldEnabled("pan_upload")}>PAN upload<input className="field" name="pan_upload_file" required={mode === "create" && fieldRequired("pan_upload")} type="file" /></label>
+          <label hidden={!fieldEnabled("dl_front")}>DL front file<input className="field" name="dl_front_file" required={mode === "create" && fieldRequired("dl_front")} type="file" /></label>
+          <label hidden={!fieldEnabled("dl_back")}>DL back file<input className="field" name="dl_back_file" required={mode === "create" && fieldRequired("dl_back")} type="file" /></label>
+          <label hidden={!fieldEnabled("profile_photo")}>Profile photo<input accept="image/*" className="field" name="profile_photo_file" required={mode === "create" && fieldRequired("profile_photo")} type="file" /></label>
         </>
       ) : null}
 

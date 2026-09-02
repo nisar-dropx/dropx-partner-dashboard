@@ -76,7 +76,7 @@ function revalidateWorkforceCategoryPaths() {
   revalidatePath("/workforce");
   revalidatePath("/contractors");
   revalidatePath("/vendors");
-  revalidatePath("/workers");
+  revalidatePath("/helpers");
 }
 
 export async function createWorkforceCategory(formData: FormData) {
