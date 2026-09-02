@@ -72,6 +72,10 @@ function returnPathWithParams(path: string, params?: Record<string, string>) {
   return `${path}${query}`;
 }
 
+function categoryPagePermission(code: string) {
+  return code === "helpers" ? "workers" : workforceCategoryPageCode(code);
+}
+
 function fallbackDropxId(code: string) {
   const prefix = code.replace(/[^a-z0-9]/gi, "").slice(0, 3).toUpperCase() || "WRK";
   return `${prefix}-${Date.now().toString(36).toUpperCase()}`;
@@ -83,7 +87,7 @@ export async function createDynamicWorkforceProfile(formData: FormData) {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
   const returnPath = categoryReturnPath(code, formData);
-  const pageCode = returnPath === "/work-force-register/helpers" ? "contractors" : workforceCategoryPageCode(code);
+  const pageCode = returnPath === "/work-force-register/helpers" ? "contractors" : categoryPagePermission(code);
   if (!hasPermission(authorization, pageCode, "add")) redirect(`/unauthorized?page=${encodeURIComponent(pageCode)}&action=add`);
   const companyId = requireCompanyId(authorization);
 
@@ -234,7 +238,7 @@ export async function updateDynamicWorkforceProfile(formData: FormData) {
   if (!isCustomWorkforceCategoryCode(code)) redirect("/people/all");
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
-  const pageCode = workforceCategoryPageCode(code);
+  const pageCode = categoryPagePermission(code);
   if (!hasPermission(authorization, pageCode, "edit")) redirect(`/unauthorized?page=${encodeURIComponent(pageCode)}&action=edit`);
   const companyId = requireCompanyId(authorization);
   const id = required(formData.get("id"), "Profile");

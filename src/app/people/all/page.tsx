@@ -179,8 +179,8 @@ async function loadPeople(
       table: dynamicWorkforceTable(category.code),
       codeField: "dropx_id",
       statusField: "onboarding_status",
-      basePath: `/people/category/${encodeURIComponent(category.code)}`,
-      canEdit: hasPermission(authorization, workforceCategoryPageCode(category.code), "edit")
+      basePath: category.code === "helpers" ? "/helpers" : `/people/category/${encodeURIComponent(category.code)}`,
+      canEdit: hasPermission(authorization, category.code === "helpers" ? "workers" : workforceCategoryPageCode(category.code), "edit")
     }));
   const results = await Promise.all(currentSources.map(async (source) => {
     const designationFields = source.employeeDesignation ? ", designation_id, designations (id, name)" : ", designation";
