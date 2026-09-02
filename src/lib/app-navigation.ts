@@ -36,7 +36,7 @@ export const navItems: NavItem[] = [
       { code: "people_all", label: "Workforce", href: "/people/workforce" },
       { code: "employees", label: "Employees", href: "/employees" },
       { code: "contractors", label: "Independent Contractors", href: "/contractors" },
-      { code: "workers", label: "Helpers", href: "/workers" },
+      { code: "workers", label: "Helpers", href: "/helpers" },
       { code: "vendors", label: "Vendors", href: "/vendors" },
       { code: "people_review", label: "Profile Review", href: "/people/review" },
       { code: "people_exceptions", label: "Exceptions", href: "/people/exceptions" },
