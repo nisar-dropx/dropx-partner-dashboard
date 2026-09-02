@@ -127,7 +127,7 @@ function totals(rows: AttendanceReportRow[]) {
   return {
     absent: rows.filter((row) => row.attendanceStatus === "Absent").length,
     late: rows.filter((row) => row.lateMinutes > 0).length,
-    misPunch: rows.filter((row) => row.punchCount % 2 === 1 || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length,
+    misPunch: rows.filter((row) => row.punchCount < 2 || !row.outTime || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length,
     present: rows.filter((row) => row.status === "P").length
   };
 }
@@ -280,7 +280,7 @@ function monthlyPerformanceBuild(title: string, monthLabel: string, fromDate: st
         ...dates.map((date) => {
           const row = byDate.get(date);
           if (!row) return "A";
-          if (row.punchCount % 2 === 1 || row.remark?.toLowerCase().includes("single") || row.remark?.toLowerCase().includes("missing")) return "MIS";
+          if (row.punchCount < 2 || !row.outTime || row.remark?.toLowerCase().includes("single") || row.remark?.toLowerCase().includes("missing")) return "MIS";
           if (row.attendanceStatus === "Full Day") return "FD";
           if (row.attendanceStatus === "Half Day") return "HD";
           return row.status === "P" ? "P" : "A";

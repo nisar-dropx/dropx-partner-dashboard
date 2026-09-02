@@ -34,19 +34,23 @@ test("reports the payable outcome after punch-out", () => {
   });
   assert.equal(notice.title, "Punch-out captured · Half Day");
   assert.match(notice.body, /Worked 5h 57m · Half Day/);
+  assert.match(notice.body, /Late arrival remains recorded \(5h 49m\)/);
+  assert.match(notice.body, /Late penalty applies under company HR policy/);
   assert.match(notice.body, /punch in again/);
 });
 
-test("treats the third punch as a reopened work session", () => {
+test("treats the third punch as the latest final checkout", () => {
   const notice = buildAttendancePunchNotice({
-    outcome: outcome({ attendanceStatus: "Needs Review", workHours: "05:57" }),
+    outcome: outcome({ attendanceStatus: "Full Day", lateMinutes: 349, workHours: "08:02" }),
     punchOrder: 3,
-    time: "21:20"
+    time: "23:21"
   });
-  assert.equal(notice.punchType, "in");
-  assert.equal(notice.title, "Work session reopened");
+  assert.equal(notice.punchType, "out");
+  assert.equal(notice.title, "Checkout updated · Full Day");
   assert.doesNotMatch(notice.body, /needs review/i);
-  assert.match(notice.body, /punch out again/i);
+  assert.match(notice.body, /final checkout was updated/i);
+  assert.match(notice.body, /Worked 8h 2m · Full Day/);
+  assert.match(notice.body, /Late penalty applies under company HR policy/);
 });
 
 test("includes the early checkout consequence in the punch-out notification", () => {

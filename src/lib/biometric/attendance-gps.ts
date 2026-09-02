@@ -549,6 +549,14 @@ export async function loadOpenShift({
   previousDateValue.setUTCDate(previousDateValue.getUTCDate() - 1);
   const previousDate = previousDateValue.toISOString().slice(0, 10);
   const dates = punchDate ? [date] : [date, previousDate];
+  const companySettings = await supabaseAdmin
+    .from("hr_company_settings")
+    .select("odd_punch_treatment, overnight_shift_pairing_enabled, maximum_daily_minutes")
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (companySettings.error) throw new Error(companySettings.error.message);
+  const firstInLatestOut = companySettings.data?.odd_punch_treatment === "first_last";
+  const isOpenPunchSequence = (count: number) => count === 1 || (!firstInLatestOut && count % 2 === 1);
 
   // Duty status includes calculated punches and held flagged punches awaiting
   // manager approval. The calendar remains based on calculated punches only.
@@ -576,18 +584,12 @@ export async function loadOpenShift({
   let dutyPunches = dutyByDate.get(date) ?? [];
   if (!dutyPunches.length && !punchDate) {
     const priorPunches = dutyByDate.get(previousDate) ?? [];
-    if (priorPunches.length % 2 === 1 && priorPunches[0]?.punch_time) {
-      const settings = await supabaseAdmin
-        .from("hr_company_settings")
-        .select("overnight_shift_pairing_enabled, maximum_daily_minutes")
-        .eq("company_id", companyId)
-        .maybeSingle();
-      if (settings.error) throw new Error(settings.error.message);
+    if (isOpenPunchSequence(priorPunches.length) && priorPunches[0]?.punch_time) {
       const elapsedMinutes =
         (Date.now() - new Date(String(priorPunches[0].punch_time)).getTime()) / 60_000;
-      const maximumDailyMinutes = Math.max(1, Number(settings.data?.maximum_daily_minutes ?? 960));
+      const maximumDailyMinutes = Math.max(1, Number(companySettings.data?.maximum_daily_minutes ?? 960));
       if (
-        settings.data?.overnight_shift_pairing_enabled !== false &&
+        companySettings.data?.overnight_shift_pairing_enabled !== false &&
         elapsedMinutes > 0 &&
         elapsedMinutes <= maximumDailyMinutes
       ) {
@@ -602,9 +604,9 @@ export async function loadOpenShift({
     const inTime = dutyPunches[0]?.punch_time
       ? new Date(String(dutyPunches[0].punch_time))
       : null;
-    const open = dutyPunches.length % 2 === 1;
+    const open = isOpenPunchSequence(dutyPunches.length);
     const outTime =
-      !open && dutyPunches.length > 1
+      dutyPunches.length > 1 && (firstInLatestOut || !open)
         ? new Date(String(dutyPunches[dutyPunches.length - 1].punch_time))
         : null;
     const locationId =
@@ -629,21 +631,17 @@ export async function loadOpenShift({
     .in("punch_date", dates)
     .order("punch_date", { ascending: false });
   if (daily.error) throw new Error(daily.error.message);
-  const openRows = (daily.data ?? []).filter((row) => row.in_time && Number(row.punch_count ?? 0) % 2 === 1);
+  const openRows = (daily.data ?? []).filter((row) => row.in_time && (
+    !row.out_time || (!firstInLatestOut && Number(row.punch_count ?? 0) % 2 === 1)
+  ));
   let selected = openRows.find((row) => row.punch_date === date) ?? null;
 
   if (!selected && !punchDate) {
     const prior = openRows.find((row) => row.punch_date === previousDate) ?? null;
     if (prior?.in_time) {
-      const settings = await supabaseAdmin
-        .from("hr_company_settings")
-        .select("overnight_shift_pairing_enabled, maximum_daily_minutes")
-        .eq("company_id", companyId)
-        .maybeSingle();
-      if (settings.error) throw new Error(settings.error.message);
       const elapsedMinutes = (Date.now() - new Date(prior.in_time).getTime()) / 60_000;
-      const maximumDailyMinutes = Math.max(1, Number(settings.data?.maximum_daily_minutes ?? 960));
-      if (settings.data?.overnight_shift_pairing_enabled !== false && elapsedMinutes > 0 && elapsedMinutes <= maximumDailyMinutes) {
+      const maximumDailyMinutes = Math.max(1, Number(companySettings.data?.maximum_daily_minutes ?? 960));
+      if (companySettings.data?.overnight_shift_pairing_enabled !== false && elapsedMinutes > 0 && elapsedMinutes <= maximumDailyMinutes) {
         selected = prior;
       }
     }
@@ -652,7 +650,7 @@ export async function loadOpenShift({
   const inTime = selected?.in_time ? new Date(selected.in_time) : null;
   const outTime = selected?.out_time ? new Date(selected.out_time) : null;
   const punchCount = Number(selected?.punch_count ?? 0);
-  const open = Boolean(inTime && punchCount % 2 === 1);
+  const open = Boolean(inTime && (!outTime || (!firstInLatestOut && punchCount % 2 === 1)));
   return {
     punchDate: String(selected?.punch_date ?? date),
     inTime,

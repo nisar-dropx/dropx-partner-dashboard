@@ -40,19 +40,11 @@ export function buildAttendancePunchNotice({
   punchOrder: number;
   time: string;
 }): AttendancePunchNotice {
-  const isPunchIn = punchOrder % 2 === 1;
+  const isPunchIn = punchOrder === 1;
   const worked = workDurationLabel(outcome.workHours);
   const attendanceStatus = outcome.attendanceStatus || "Attendance updated";
 
   if (isPunchIn) {
-    if (punchOrder > 1) {
-      return {
-        body: `Punch-in recorded at ${time}. Work session reopened. Current recorded work: ${worked}. Complete the required hours, then punch out again.`,
-        punchType: "in",
-        title: "Work session reopened"
-      };
-    }
-
     if (outcome.lateMinutes > 0) {
       const expectation = hasClock(outcome.scheduledStart)
         ? `Expected ${outcome.scheduledStart} · reported ${time}. `
@@ -73,7 +65,16 @@ export function buildAttendancePunchNotice({
     };
   }
 
-  const details = [`Punch-out recorded at ${time}.`, `Worked ${worked} · ${attendanceStatus}.`];
+  const details = [
+    punchOrder > 2 ? `Latest punch recorded at ${time}; your final checkout was updated.` : `Punch-out recorded at ${time}.`,
+    `Worked ${worked} · ${attendanceStatus}.`
+  ];
+  if (outcome.lateMinutes > 0) {
+    const expectation = hasClock(outcome.scheduledStart)
+      ? ` Expected report time: ${outcome.scheduledStart}.`
+      : "";
+    details.push(`Late arrival remains recorded (${durationLabel(outcome.lateMinutes)}).${expectation} Late penalty applies under company HR policy and will be deducted from an upcoming payment when the configured threshold is met.`);
+  }
   if (outcome.earlyOutMinutes > 0) {
     const expectation = hasClock(outcome.scheduledEnd) ? ` Expected shift end: ${outcome.scheduledEnd}.` : "";
     details.push(`You punched out ${durationLabel(outcome.earlyOutMinutes)} early.${expectation} Early checkout penalty applies when worked hours are short; the applicable deduction will be made from an upcoming payment under company HR policy.`);
@@ -93,7 +94,7 @@ export function buildAttendancePunchNotice({
     body: details.join(" "),
     punchType: "out",
     title: attendanceStatus === "Attendance updated"
-      ? "Punch-out captured"
-      : `Punch-out captured · ${attendanceStatus}`
+      ? punchOrder > 2 ? "Final checkout updated" : "Punch-out captured"
+      : punchOrder > 2 ? `Checkout updated · ${attendanceStatus}` : `Punch-out captured · ${attendanceStatus}`
   };
 }

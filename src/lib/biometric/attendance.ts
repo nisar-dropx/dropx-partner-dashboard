@@ -429,7 +429,9 @@ function attendanceDayStatus({
   }
   if (status === "A" || punchCount === 0) return treatmentLabel(rules.no_punch_treatment, "Absent");
   if (punchCount === 1) return treatmentLabel(rules.single_punch_treatment, "Needs Review");
-  if (punchCount % 2 === 1) return treatmentLabel(rules.odd_punch_treatment, "Needs Review");
+  if (punchCount % 2 === 1 && rules.odd_punch_treatment !== "first_last") {
+    return treatmentLabel(rules.odd_punch_treatment, "Needs Review");
+  }
 
   const percentageBasis = String(rules.work_duration_basis ?? "").toLowerCase().includes("percent");
   const fullThreshold = percentageBasis && scheduledMinutes > 0
@@ -937,7 +939,7 @@ function reportMatchesType(row: AttendanceReportRow, type: AttendanceReportType)
   if (type === "absent") return row.attendanceStatus === "Absent";
   if (type === "late_in") return row.lateMinutes > 0 || row.remark.toLowerCase().includes("late");
   if (type === "early_out") return row.earlyOutMinutes > 0 || row.remark.toLowerCase().includes("early out");
-  if (type === "mis_punch") return row.punchCount % 2 === 1 || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing");
+  if (type === "mis_punch") return row.punchCount < 2 || !row.outTime || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing");
   return true;
 }
 
