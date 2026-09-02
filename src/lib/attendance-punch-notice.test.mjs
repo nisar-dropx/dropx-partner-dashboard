@@ -23,7 +23,7 @@ test("combines punch capture, roster expectation and late penalty", () => {
   assert.equal(notice.punchType, "in");
   assert.match(notice.title, /5h 49m late/);
   assert.match(notice.body, /Expected 09:30 · reported 15:19/);
-  assert.match(notice.body, /will affect an upcoming payment when the policy threshold is reached/);
+  assert.match(notice.body, /will be deducted from an upcoming payment when the configured threshold is met/);
 });
 
 test("reports the payable outcome after punch-out", () => {
@@ -57,5 +57,6 @@ test("includes the early checkout consequence in the punch-out notification", ()
   });
   assert.match(notice.body, /45 min early/);
   assert.match(notice.body, /Expected shift end: 18:30/);
-  assert.match(notice.body, /worked-hours outcome determines the deduction/);
+  assert.match(notice.body, /Early checkout penalty applies when worked hours are short/);
+  assert.match(notice.body, /upcoming payment under company HR policy/);
 });

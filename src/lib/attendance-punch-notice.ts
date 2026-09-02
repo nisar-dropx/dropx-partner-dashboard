@@ -58,7 +58,7 @@ export function buildAttendancePunchNotice({
         ? `Expected ${outcome.scheduledStart} · reported ${time}. `
         : "";
       return {
-        body: `${expectation}You were ${durationLabel(outcome.lateMinutes)} late. This is recorded under the configured late-arrival penalty and will affect an upcoming payment when the policy threshold is reached.`,
+        body: `${expectation}You were ${durationLabel(outcome.lateMinutes)} late. Late penalty applies under company HR policy and will be deducted from an upcoming payment when the configured threshold is met.`,
         punchType: "in",
         title: `Punch-in captured · ${durationLabel(outcome.lateMinutes)} late`
       };
@@ -76,7 +76,7 @@ export function buildAttendancePunchNotice({
   const details = [`Punch-out recorded at ${time}.`, `Worked ${worked} · ${attendanceStatus}.`];
   if (outcome.earlyOutMinutes > 0) {
     const expectation = hasClock(outcome.scheduledEnd) ? ` Expected shift end: ${outcome.scheduledEnd}.` : "";
-    details.push(`You punched out ${durationLabel(outcome.earlyOutMinutes)} early.${expectation} Your worked-hours outcome determines the deduction.`);
+    details.push(`You punched out ${durationLabel(outcome.earlyOutMinutes)} early.${expectation} Early checkout penalty applies when worked hours are short; the applicable deduction will be made from an upcoming payment under company HR policy.`);
   }
 
   if (attendanceStatus === "Half Day") {

@@ -389,10 +389,11 @@ export function ConnectAttendance({ account }: { account: Account }) {
           <span>
             <small>{attentionRow.date === todayDate ? "TODAY" : attentionRow.date.split("-").reverse().join("/")}</small>
             <strong>{attentionInsight.headline}</strong>
-            <em>{attentionInsight.issues[0]?.message ?? attentionInsight.detail}</em>
+            <em>{attentionInsight.detail}</em>
+            {attentionInsight.issues.filter((issue) => issue.code === "late" || issue.code === "early_out").map((issue) => <em className="dx-attendance-attention-penalty" key={issue.code}><b>{issue.label}.</b> {issue.message}</em>)}
           </span>
           <button onClick={() => { setSelected(attentionRow); setTab("calendar"); }}>
-            {attentionInsight.needsRegularization ? "Review" : "View"}
+            View details
           </button>
         </section> : null}
         <div className="dx-attendance-summary">
@@ -452,12 +453,12 @@ export function ConnectAttendance({ account }: { account: Account }) {
           <section className={`dx-attendance-day-insight ${selectedInsight.tone}`}>
             <strong>{selectedInsight.headline}</strong>
             <small>{selectedInsight.detail}</small>
-            {selectedInsight.issues.length ? <div>{selectedInsight.issues.map((issue) => <span className={issue.tone} key={issue.code}>{issue.label}</span>)}</div> : null}
+            {selectedInsight.issues.length ? <div className="dx-attendance-consequence-list">{selectedInsight.issues.map((issue) => <p key={issue.code}><strong>{issue.label}</strong><small>{issue.message}</small></p>)}</div> : null}
           </section>
           {selected.remark ? <p className="dx-attendance-day-note">{selected.remark}</p> : null}
           <footer>
             {selected.regularization ? <span className={`dx-request-status ${selected.regularization.status}`}>Regularization {selected.regularization.status}</span> : null}
-            {selected.regularization?.status !== "pending" && selected.statusKind !== "leave" && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0) ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.needsRegularization ? "Regularize attendance" : "Report incorrect attendance"}</button> : null}
+            {selected.regularization?.status !== "pending" && selected.statusKind !== "leave" && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0) ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.needsRegularization ? "Regularize missing punch" : "Request regularization"}</button> : null}
           </footer>
         </div> : null}
       </> : null}

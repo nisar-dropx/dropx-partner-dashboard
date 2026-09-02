@@ -449,7 +449,7 @@ export function ConnectDashboard({
       </div>
       {today && (todayInsight.issues.length > 0 || todayInsight.needsRegularization) ? <button className={`dx-dashboard-attendance-nudge ${todayInsight.tone}`} onClick={onAttendance}>
         <AlertTriangle />
-        <span><strong>{todayInsight.headline}</strong><small>{todayInsight.issues[0]?.message ?? todayInsight.detail}</small></span>
+        <span><strong>{todayInsight.headline}</strong><small>{todayInsight.detail}</small>{todayInsight.issues.filter((issue) => issue.code === "late" || issue.code === "early_out").map((issue) => <small className="dx-dashboard-attendance-penalty" key={issue.code}>{issue.label} · {issue.message}</small>)}</span>
         <ChevronRight />
       </button> : null}
       {attendanceAllowed ? <button className="dx-dashboard-link" onClick={onAttendance}>View attendance <ChevronRight /></button> : null}

@@ -62,7 +62,7 @@ test("surfaces late and early-out consequences without replacing full-day status
   assert.equal(insight.label, "Full day");
   assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "early_out"]);
   assert.match(insight.issues[0].message, /Expected 09:30 · reported 09:48/i);
-  assert.match(insight.issues[0].message, /will affect an upcoming payment when the policy threshold is reached/i);
+  assert.match(insight.issues[0].message, /will be deducted from an upcoming payment when the configured threshold is met/i);
   assert.equal(attendanceIssueSummary(lateRow)?.code, "late");
 });
 
@@ -76,8 +76,11 @@ test("keeps half day as the payable status while leading with the late warning",
   });
   const insight = attendanceDayInsight(halfDay);
   assert.equal(insight.label, "Half day");
-  assert.equal(insight.headline, "Reported 5h 49m late");
-  assert.match(insight.detail, /Expected 09:30 · reported 15:19/);
+  assert.equal(insight.headline, "Half day recorded");
+  assert.match(insight.detail, /worked 5h 57m, below the full-day requirement/i);
+  assert.match(insight.detail, /company HR policy/i);
+  assert.match(insight.issues[0].message, /Expected 09:30 · reported 15:19/);
+  assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "half_day"]);
   assert.equal(insight.needsRegularization, false);
   assert.equal(attendanceIssueSummary(halfDay)?.code, "late");
 });
