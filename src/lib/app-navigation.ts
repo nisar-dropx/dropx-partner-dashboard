@@ -138,6 +138,8 @@ export const navItems: NavItem[] = [
 
 function canAccess(authorization: AuthorizationContext, code?: string) {
   if (!code) return true;
+  // Owners always have portal access. Keep navigation consistent with authorization.
+  if (authorization.isMasterOwner || authorization.roleCode === 'OWNER') return true;
   const permission = authorization.permissions[code];
   return Boolean(permission?.canView || permission?.canAdd || permission?.canEdit);
 }
