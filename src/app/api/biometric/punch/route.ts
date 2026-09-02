@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { createAttendancePunchNotification } from "@/lib/app-notifications";
-import { punchLabel, rebuildAttendanceDay, resolveAttendanceWorkDate } from "@/lib/biometric/attendance";
+import { istDate, punchLabel, rebuildAttendanceDay, resolveAttendanceWorkDate } from "@/lib/biometric/attendance";
 import { checkBiometricPhoneMismatch } from "@/lib/biometric/attendance-gps";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -66,7 +66,12 @@ function enrolmentIdCandidates(value: unknown) {
   const digits = clean(value).replace(/\D/g, "");
   if (!digits) return [];
   const normalized = digits.replace(/^0+/, "") || "0";
-  return Array.from(new Set([normalized, digits]));
+  return Array.from(new Set([
+    normalized,
+    digits,
+    normalized.padStart(6, "0"),
+    normalized.padStart(8, "0")
+  ]));
 }
 
 function cleanEnrolmentId(value: unknown) {
@@ -236,12 +241,12 @@ async function findWorkerMatches(companyId: string, enrolmentId: string) {
   const admin = supabaseAdmin;
   const normalizedEnrolmentId = cleanEnrolmentId(enrolmentId);
   if (!normalizedEnrolmentId) return [];
+  const candidates = enrolmentIdCandidates(enrolmentId);
 
   const nonEmployeeTables = [
     ["field_executive", "workforce"],
     ["contractor", "contractors"],
     ["vendor", "vendors"],
-    ["worker", "workers"],
     ["worker", "workforce_helpers"],
     ["worker", "workforce_pickers"]
   ] as const;
@@ -250,12 +255,14 @@ async function findWorkerMatches(companyId: string, enrolmentId: string) {
       .from("employees")
       .select("id, employee_code, full_name, biometric_id, location_id, is_active, date_of_join")
       .eq("company_id", companyId)
-      .not("biometric_id", "is", null),
+      .in("biometric_id", candidates)
+      .limit(20),
     ...nonEmployeeTables.map(([, table]) => admin
       .from(table)
       .select("id, dropx_id, full_name, biometric_id, location_id, is_active, date_of_join")
       .eq("company_id", companyId)
-      .not("biometric_id", "is", null))
+      .in("biometric_id", candidates)
+      .limit(20))
   ]);
 
   if (employeeResult.error) throw new Error(employeeResult.error.message);
@@ -296,6 +303,52 @@ async function findWorkerMatches(companyId: string, enrolmentId: string) {
   });
 
   return [...employees, ...nonEmployees] satisfies WorkerMatch[];
+}
+
+async function storeReviewPunch({
+  device,
+  deviceSerial,
+  enrolment,
+  enrolmentId,
+  punchTime,
+  rawEventId
+}: {
+  device: DeviceRow;
+  deviceSerial: string;
+  enrolment?: EnrolmentRow | null;
+  enrolmentId: string;
+  punchTime: Date;
+  rawEventId: string;
+}) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const punchPayload = {
+    company_id: device.company_id,
+    raw_event_id: rawEventId,
+    device_id: device.id,
+    enrolment_id: cleanEnrolmentId(enrolmentId),
+    worker_type: enrolment?.worker_type ?? "unmapped",
+    profile_type: enrolment?.profile_type ?? null,
+    account_id: enrolment?.account_id ?? null,
+    employee_id: enrolment?.employee_id ?? null,
+    field_executive_id: enrolment?.field_executive_id ?? null,
+    location_id: enrolment?.location_id ?? device.location_id,
+    device_serial: deviceSerial,
+    punch_time: punchTime.toISOString(),
+    punch_date: istDate(punchTime),
+    punch_order: 1,
+    punch_label: punchLabel(1),
+    worker_status: enrolment?.status ?? "Review",
+    calculated: false,
+    source: "biometric",
+    server_received_at: new Date().toISOString()
+  };
+  const result = await supabaseAdmin
+    .from("attendance_punches")
+    .upsert(punchPayload, { onConflict: "company_id,device_serial,enrolment_id,punch_time" })
+    .select("id")
+    .single();
+  if (result.error) throw new Error(result.error.message);
+  return result.data.id as string;
 }
 
 async function createEnrolmentFromWorker({
@@ -421,7 +474,13 @@ export async function POST(request: NextRequest) {
       payload: body.payload ?? body
     };
 
-    const rawResult = rawPayload.trans_id
+    const rawResult = rawPayload.middleware_raw_event_id
+      ? await supabaseAdmin
+          .from("biometric_raw_events")
+          .upsert(rawPayload, { onConflict: "company_id,middleware_raw_event_id" })
+          .select("id")
+          .single()
+      : rawPayload.trans_id
       ? await supabaseAdmin
           .from("biometric_raw_events")
           .upsert(rawPayload, { onConflict: "company_id,device_serial,trans_id" })
@@ -454,6 +513,13 @@ export async function POST(request: NextRequest) {
 
     const enrolmentRows = await findCurrentEnrolments(device.company_id, enrolmentId);
     if (enrolmentRows.length > 1 && hasSameCategoryDuplicate(enrolmentRows)) {
+      await storeReviewPunch({
+        device,
+        deviceSerial,
+        enrolmentId,
+        punchTime,
+        rawEventId
+      });
       await createAlert({
         alertType: "duplicate_enrolment_id",
         companyId: device.company_id,
@@ -484,6 +550,13 @@ export async function POST(request: NextRequest) {
           worker
         });
       } else if (workers.length > 1) {
+        await storeReviewPunch({
+          device,
+          deviceSerial,
+          enrolmentId,
+          punchTime,
+          rawEventId
+        });
         await createAlert({
           alertType: "duplicate_enrolment_id",
           companyId: device.company_id,
@@ -495,6 +568,13 @@ export async function POST(request: NextRequest) {
         });
         return Response.json({ ok: true, stored: "raw_event", alert: "duplicate_enrolment_id" });
       } else {
+        await storeReviewPunch({
+          device,
+          deviceSerial,
+          enrolmentId,
+          punchTime,
+          rawEventId
+        });
         await createAlert({
           alertType: "unknown_enrolment",
           companyId: device.company_id,
@@ -632,6 +712,7 @@ export async function POST(request: NextRequest) {
       punchLabel: punchLabel(nextOrder)
     });
   } catch (error) {
+    console.error("Biometric punch webhook failed:", error);
     return jsonError(error instanceof Error ? error.message : "Unable to process biometric punch.", 500);
   }
 }
