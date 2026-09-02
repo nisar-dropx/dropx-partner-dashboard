@@ -9,6 +9,8 @@ const emptySnapshot: PaymentNotificationSnapshot = {
   items: []
 };
 
+const REFRESH_INTERVAL_MS = 15_000;
+
 type PaymentNotificationContextValue = {
   isRefreshing: boolean;
   refresh: () => Promise<void>;
@@ -79,9 +81,9 @@ export function PaymentNotificationProvider({
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       void runRefresh(false);
-    }, 60000);
+    }, REFRESH_INTERVAL_MS);
     const refreshIfStale = () => {
-      if (Date.now() - lastAttemptRef.current < 60000) return;
+      if (Date.now() - lastAttemptRef.current < REFRESH_INTERVAL_MS) return;
       suspendedRef.current = false;
       void runRefresh(false);
     };
