@@ -94,6 +94,7 @@ export async function GET(request: Request) {
     const context = await ownPerformanceContext(url);
     if (!context.engagement) return NextResponse.json({ configured: false, cycles: [], reviews: [], managerReviews: [], goals: [], changes: [], operational: null });
     const requestedWeek = Number(url.searchParams.get("week"));
+    const requestedCpsMonth = clean(url.searchParams.get("cpsMonth"));
     const [reviewsResult, managerReviewsResult, operational] = await Promise.all([
       db().from("hr_performance_reviews")
       .select("id,cycle_id,worker_name,worker_code,designation_name,department_name,status,self_rating,manager_rating,final_rating,self_comments,manager_comments,calibration_comments,self_submitted_at,manager_submitted_at,acknowledged_at,updated_at")
@@ -110,7 +111,8 @@ export async function GET(request: Request) {
         account: context.account,
         personId: context.engagement.person_id,
         engagementId: context.engagement.id,
-        requestedWeek: Number.isInteger(requestedWeek) && requestedWeek > 0 && requestedWeek < 54 ? requestedWeek : null
+        requestedWeek: Number.isInteger(requestedWeek) && requestedWeek > 0 && requestedWeek < 54 ? requestedWeek : null,
+        requestedCpsMonth
       })
     ]);
     if (reviewsResult.error || managerReviewsResult.error) throw new Error(reviewsResult.error?.message ?? managerReviewsResult.error?.message ?? "Unable to load performance reviews.");
