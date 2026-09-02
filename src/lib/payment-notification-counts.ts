@@ -49,6 +49,7 @@ type PaymentNotificationRequest = {
 };
 
 const EMPTY_BADGES = {
+  people_all: 0,
   people_review: 0,
   people_exceptions: 0,
   payments: 0,
@@ -176,6 +177,7 @@ export async function loadPaymentNotificationSnapshot(authorization: Authorizati
   const items: PaymentNotificationItem[] = [];
   badges.people_review = await loadPeopleReviewCount(authorization);
   badges.people_exceptions = await loadPeopleExceptionCount(authorization);
+  badges.people_all = badges.people_review + badges.people_exceptions;
   const canSeePayments = hasPermission(authorization, "payments", "access");
   if (!canSeePayments || !supabaseAdmin) return { total: 0, badges, items };
 
