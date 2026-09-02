@@ -723,9 +723,6 @@ async function loadFieldExecutiveData(
   const rawLocations = (locationsResult.data ?? []) as unknown as LocationRow[];
   // Hidden locations must not be offered for new onboarding, but existing people at
   // those locations must remain visible and editable in their category register.
-  const visibleLocations = rawLocations.filter((location) =>
-    authorization.hasAllLocationAccess || authorization.locationScopeIds.includes(location.id)
-  );
   const locations = filterOnboardingLocations(rawLocations, authorization).map((location) => ({
     ...location,
     providers: firstRelation(location.providers),
@@ -734,7 +731,9 @@ async function loadFieldExecutiveData(
   const allDesignations = (designationsResult.data ?? []) as unknown as DesignationRow[];
   const designations = allDesignations
     .filter((designation) => mappedDesignationIds.has(designation.id));
-  const allowedLocationIds = new Set(visibleLocations.map((location) => location.id));
+  // Existing records retain visibility by the user's actual assigned location scope,
+  // even when their station is now inactive or hidden from new onboarding.
+  const allowedLocationIds = new Set(authorization.locationScopeIds);
   const allowedDesignationNames = new Set((ownerAccess ? allDesignations : designations)
     .filter((designation) => canAccessDesignationPortal(designation, accessSurface, "view", { isOwner: ownerAccess }))
     .map((designation) => designation.name));
