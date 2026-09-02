@@ -16,6 +16,23 @@
   --shadow: 0 1px 3px rgba(24, 24, 27, 0.08);
 }
 
+.dx-dashboard-shift-expectation {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding: 9px 10px;
+  color: rgba(255, 255, 255, .92);
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .08);
+}
+
+.dx-dashboard-shift-expectation > svg { width: 17px; height: 17px; flex: 0 0 auto; }
+.dx-dashboard-shift-expectation > span { display: grid; gap: 1px; }
+.dx-dashboard-shift-expectation strong { font-size: 11px; }
+.dx-dashboard-shift-expectation small { color: rgba(255, 255, 255, .7); font-size: 9px; }
+
 /* DropX One — policy-aware attendance outcomes and concise employee nudges */
 .dx-attendance-attention {
   display: grid;

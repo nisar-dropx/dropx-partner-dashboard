@@ -1,6 +1,7 @@
 import "server-only";
 
-import { formatDuration, formatTime, loadAttendanceReportRows } from "@/lib/biometric/attendance";
+import { formatTime, loadAttendanceReportRows } from "@/lib/biometric/attendance";
+import { buildAttendancePunchNotice } from "@/lib/attendance-punch-notice";
 import { deliverNotificationPush } from "@/lib/firebase-push";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isWorkforceProfileType } from "@/lib/workforce-profiles";
@@ -10,11 +11,7 @@ export type AttendanceNotificationEvent = typeof attendanceNotificationEvents[nu
 
 export const appNotificationEvents = [
   ...attendanceNotificationEvents,
-  "attendance_early_out",
   "attendance_exception_review",
-  "attendance_half_day",
-  "attendance_late_in",
-  "attendance_short_day",
   "profile_submitted",
   "profile_approved",
   "profile_returned",
@@ -39,44 +36,20 @@ export const appNotificationDefaults: Record<AppNotificationEvent, {
   attendance_punch_in: {
     label: "Punch",
     route: "attendance",
-    titleTemplate: "Punch Captured",
-    bodyTemplate: "Your punch was captured at {time} on {date}."
+    titleTemplate: "{punch_title}",
+    bodyTemplate: "{punch_notice}"
   },
   attendance_punch_out: {
     label: "Punch",
     route: "attendance",
-    titleTemplate: "Punch Captured",
-    bodyTemplate: "Your punch was captured at {time} on {date}."
-  },
-  attendance_early_out: {
-    label: "Early punch-out",
-    route: "attendance",
-    titleTemplate: "Early punch-out",
-    bodyTemplate: "You punched out {early_minutes} minutes early. Short-hours deduction may apply."
+    titleTemplate: "{punch_title}",
+    bodyTemplate: "{punch_notice}"
   },
   attendance_exception_review: {
     label: "Attendance needs review",
     route: "attendance",
     titleTemplate: "Attendance needs review",
     bodyTemplate: "A punch is missing for {date}. Open Attendance and submit regularization."
-  },
-  attendance_half_day: {
-    label: "Half day",
-    route: "attendance",
-    titleTemplate: "Half day recorded",
-    bodyTemplate: "You worked {work_duration}. Half-day deduction may apply under the attendance policy."
-  },
-  attendance_late_in: {
-    label: "Late punch-in",
-    route: "attendance",
-    titleTemplate: "Late check-in",
-    bodyTemplate: "You checked in {late_minutes} minutes late. Attendance penalty may apply."
-  },
-  attendance_short_day: {
-    label: "Short workday",
-    route: "attendance",
-    titleTemplate: "Short workday",
-    bodyTemplate: "You worked {work_duration}; attendance is {outcome}. Deduction may apply."
   },
   profile_submitted: {
     label: "Profile submitted",
@@ -258,99 +231,6 @@ export async function createAppNotification({
 export async function createAttendancePunchNotification({
   accountId,
   companyId,
-  firstPunchTime,
-  profileType,
-  punchDate,
-  punchId,
-  punchOrder,
-  punchTime
-}: {
-  accountId: string;
-  companyId: string;
-  firstPunchTime: Date;
-  profileType: string;
-  punchDate: string;
-  punchId: string;
-  punchOrder: number;
-  punchTime: Date;
-}) {
-  if (!supabaseAdmin || !isWorkforceProfileType(profileType)) return;
-
-  const eventCode: AttendanceNotificationEvent =
-    punchOrder === 1 ? "attendance_punch_in" : "attendance_punch_out";
-  const defaults = attendanceNotificationDefaults[eventCode];
-  const ruleResult = await supabaseAdmin
-    .from("mob_app_notification_rules")
-    .select("enabled")
-    .eq("company_id", companyId)
-    .eq("event_code", eventCode)
-    .maybeSingle();
-
-  if (ruleResult.error && !isMissingNotificationSchema(ruleResult.error)) {
-    console.error("Unable to load app notification rule:", ruleResult.error.message);
-  }
-  if (ruleResult.data?.enabled === false) return;
-
-  const workMinutes = punchOrder > 1
-    ? Math.max(0, Math.round((punchTime.getTime() - firstPunchTime.getTime()) / 60000))
-    : 0;
-  const variables = {
-    date: formatPunchDate(punchDate),
-    punch_count: String(punchOrder),
-    time: formatTime(punchTime),
-    work_duration: formatDuration(workMinutes)
-  };
-  const title = applyVariables(defaults.titleTemplate, variables);
-  const body = applyVariables(defaults.bodyTemplate, variables);
-
-  const notificationData = {
-    punchDate,
-    punchId,
-    punchOrder,
-    punchTime: punchTime.toISOString(),
-    punchType: punchOrder === 1 ? "in" : "out",
-    workDuration: variables.work_duration
-  };
-  const notificationResult = await supabaseAdmin
-    .from("mob_app_notifications")
-    .upsert({
-      body,
-      company_id: companyId,
-      data: notificationData,
-      event_code: eventCode,
-      push_status: "not_configured",
-      recipient_account_id: accountId,
-      recipient_profile_type: profileType,
-      route: "attendance",
-      source_key: punchId,
-      title
-    }, {
-      ignoreDuplicates: true,
-      onConflict: "company_id,event_code,source_key,recipient_account_id"
-    })
-    .select("id");
-
-  if (notificationResult.error && !isMissingNotificationSchema(notificationResult.error)) {
-    console.error("Unable to create attendance notification:", notificationResult.error.message);
-  }
-  const notificationId = notificationResult.data?.[0]?.id;
-  if (notificationId) {
-    await deliverNotificationPush({
-      id: notificationId,
-      companyId,
-      profileType,
-      accountId,
-      title,
-      body,
-      route: "attendance",
-      data: notificationData
-    });
-  }
-}
-
-export async function createAttendanceOutcomeNotifications({
-  accountId,
-  companyId,
   enrolmentId,
   profileType,
   punchDate,
@@ -368,6 +248,9 @@ export async function createAttendanceOutcomeNotifications({
   punchTime: Date;
 }) {
   if (!supabaseAdmin || !isWorkforceProfileType(profileType)) return;
+
+  const eventCode: AttendanceNotificationEvent =
+    punchOrder % 2 === 1 ? "attendance_punch_in" : "attendance_punch_out";
   const rows = await loadAttendanceReportRows({
     companyId,
     enrolmentIds: [enrolmentId],
@@ -376,43 +259,49 @@ export async function createAttendanceOutcomeNotifications({
     toDate: punchDate
   });
   const row = rows.find((item) => item.punchDate === punchDate);
-  if (!row) return;
-
+  const notice = buildAttendancePunchNotice({
+    outcome: {
+      attendanceStatus: row?.attendanceStatus ?? "Attendance updated",
+      earlyOutMinutes: row?.earlyOutMinutes ?? 0,
+      lateMinutes: row?.lateMinutes ?? 0,
+      scheduledEnd: row?.scheduledEnd ?? "",
+      scheduledStart: row?.scheduledStart ?? "",
+      workHours: row?.workHours ?? "00:00"
+    },
+    punchOrder,
+    time: formatTime(punchTime)
+  });
   const variables = {
     date: formatPunchDate(punchDate),
-    early_minutes: String(row.earlyOutMinutes),
-    late_minutes: String(row.lateMinutes),
-    outcome: row.attendanceStatus,
+    early_minutes: String(row?.earlyOutMinutes ?? 0),
+    late_minutes: String(row?.lateMinutes ?? 0),
+    outcome: row?.attendanceStatus ?? "Attendance updated",
+    punch_count: String(punchOrder),
+    punch_notice: notice.body,
+    punch_title: notice.title,
     time: formatTime(punchTime),
-    work_duration: row.workHours
+    work_duration: row?.workHours ?? "00:00"
   };
-  const data = {
-    attendanceStatus: row.attendanceStatus,
-    earlyOutMinutes: row.earlyOutMinutes,
-    lateMinutes: row.lateMinutes,
+  const notificationData = {
+    attendanceStatus: row?.attendanceStatus ?? null,
+    earlyOutMinutes: row?.earlyOutMinutes ?? 0,
+    lateMinutes: row?.lateMinutes ?? 0,
     punchDate,
     punchId,
     punchOrder,
-    scheduledEnd: row.scheduledEnd,
-    scheduledStart: row.scheduledStart,
-    workDuration: row.workHours
+    punchTime: punchTime.toISOString(),
+    punchType: notice.punchType,
+    scheduledEnd: row?.scheduledEnd ?? null,
+    scheduledStart: row?.scheduledStart ?? null,
+    workDuration: row?.workHours ?? "00:00"
   };
-  const events: AppNotificationEvent[] = [];
-  if (punchOrder === 1 && row.lateMinutes > 0) events.push("attendance_late_in");
-  if (punchOrder % 2 === 0) {
-    if (row.earlyOutMinutes > 0) events.push("attendance_early_out");
-    if (row.attendanceStatus === "Half Day") events.push("attendance_half_day");
-    else if (["Absent", "Needs Review", "Proportionate Day"].includes(row.attendanceStatus)) {
-      events.push("attendance_short_day");
-    }
-  }
-  await Promise.all(events.map((eventCode) => createAppNotification({
+  await createAppNotification({
     accountId,
     companyId,
-    data,
+    data: notificationData,
     eventCode,
     profileType,
-    sourceKey: `attendance-outcome:${punchDate}:${eventCode}`,
+    sourceKey: punchId,
     variables
-  })));
+  });
 }

@@ -50,7 +50,16 @@ function normalized(value: string | null | undefined) {
 
 function pluralMinutes(value: number) {
   const minutes = Math.max(1, Math.round(value));
-  return `${minutes} min`;
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+function rosterExpectation(row: AttendanceInsightRow) {
+  return row.scheduledStart && row.scheduledStart !== "--:--" && row.inTime
+    ? `Expected ${row.scheduledStart} · reported ${row.inTime}. `
+    : "";
 }
 
 function fallbackLabel(row: AttendanceInsightRow) {
@@ -94,8 +103,8 @@ export function attendanceDayInsight(
   if (lateMinutes > 0) {
     issues.push({
       code: "late",
-      label: `Late ${pluralMinutes(lateMinutes)}`,
-      message: "Late-arrival penalty may apply under the People attendance policy.",
+      label: `Reported ${pluralMinutes(lateMinutes)} late`,
+      message: `${rosterExpectation(row)}This is recorded under the configured late-arrival penalty and will affect an upcoming payment when the policy threshold is reached.`,
       tone: "amber"
     });
   }
@@ -103,7 +112,7 @@ export function attendanceDayInsight(
     issues.push({
       code: "early_out",
       label: `Early out ${pluralMinutes(earlyOutMinutes)}`,
-      message: "Short-hours deduction may apply under the People attendance policy.",
+      message: `${row.scheduledEnd && row.scheduledEnd !== "--:--" ? `Expected shift end ${row.scheduledEnd}. ` : ""}Your worked-hours outcome determines the deduction.`,
       tone: "amber"
     });
   }
@@ -173,16 +182,16 @@ export function attendanceDayInsight(
     issues.push({
       code: "absent",
       label: "Absent",
-      message: "Regularize this day if the attendance record is incorrect.",
+      message: "Absence deduction applies. Regularize only if the recorded attendance is incorrect.",
       tone: "red"
     });
     return {
       calendarClass: "absent",
-      detail: "No payable attendance is recorded for this day.",
-      headline: "Absent recorded",
+      detail: issues.find((issue) => issue.code === "late" || issue.code === "early_out")?.message ?? "No payable attendance is recorded for this day.",
+      headline: issues.find((issue) => issue.code === "late" || issue.code === "early_out")?.label ?? "Absent recorded",
       issues,
       label: "Absent",
-      needsRegularization: true,
+      needsRegularization: false,
       tone: "red"
     };
   }
@@ -191,16 +200,16 @@ export function attendanceDayInsight(
     issues.push({
       code: "half_day",
       label: "Half day",
-      message: "Half-day deduction may apply under the People attendance policy.",
+      message: "Half-day deduction applies and will be deducted from your upcoming payment.",
       tone: "amber"
     });
     return {
       calendarClass: "half",
-      detail: "Worked hours are below the configured full-day requirement.",
-      headline: "Half day recorded",
+      detail: issues.find((issue) => issue.code === "late" || issue.code === "early_out")?.message ?? "Worked hours are below the configured full-day requirement. Half-day deduction applies.",
+      headline: issues.find((issue) => issue.code === "late" || issue.code === "early_out")?.label ?? "Half day recorded",
       issues,
       label: "Half day",
-      needsRegularization: true,
+      needsRegularization: false,
       tone: "amber"
     };
   }
@@ -233,9 +242,9 @@ export function attendanceIssueSummary(row: AttendanceInsightRow | undefined) {
   const insight = attendanceDayInsight(row);
   return insight.issues.find((issue) => issue.code === "missing_punch")
     ?? insight.issues.find((issue) => issue.code === "policy_review")
+    ?? insight.issues.find((issue) => issue.code === "late")
+    ?? insight.issues.find((issue) => issue.code === "early_out")
     ?? insight.issues.find((issue) => issue.code === "absent")
     ?? insight.issues.find((issue) => issue.code === "half_day")
-    ?? insight.issues.find((issue) => issue.code === "early_out")
-    ?? insight.issues.find((issue) => issue.code === "late")
     ?? null;
 }

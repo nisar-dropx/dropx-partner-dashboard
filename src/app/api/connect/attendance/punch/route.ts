@@ -11,7 +11,6 @@ import {
 import { resolveStationAttendanceSettings } from "@/lib/biometric/station-attendance-settings";
 import {
   createAppNotification,
-  createAttendanceOutcomeNotifications,
   createAttendancePunchNotification
 } from "@/lib/app-notifications";
 import {
@@ -251,36 +250,18 @@ export async function POST(request: NextRequest) {
     if (!result.isFlagged) {
       const punchTime = new Date(String(result.punch.punch_time));
       const punchOrder = Number(result.punch.punch_order ?? 0);
-      const firstPunch = await supabaseAdmin
-        .from("attendance_punches")
-        .select("punch_time")
-        .eq("company_id", worker.companyId)
-        .eq("enrolment_id", worker.enrolmentId)
-        .eq("punch_date", String(result.punch.punch_date))
-        .eq("calculated", true)
-        .order("punch_time", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      if (!firstPunch.error && firstPunch.data?.punch_time && !Number.isNaN(punchTime.getTime())) {
+      if (!Number.isNaN(punchTime.getTime())) {
         const notificationInput = {
           accountId: worker.profileId,
           companyId: worker.companyId,
+          enrolmentId: worker.enrolmentId,
           profileType: worker.profileType,
           punchDate: String(result.punch.punch_date),
           punchId: String(result.punch.id),
           punchOrder,
           punchTime
         };
-        await Promise.all([
-          createAttendancePunchNotification({
-            ...notificationInput,
-            firstPunchTime: new Date(firstPunch.data.punch_time)
-          }),
-          createAttendanceOutcomeNotifications({
-            ...notificationInput,
-            enrolmentId: worker.enrolmentId
-          })
-        ]).catch((notificationError) => {
+        await createAttendancePunchNotification(notificationInput).catch((notificationError) => {
           console.error("Unable to create GPS punch notifications:", notificationError);
         });
       }

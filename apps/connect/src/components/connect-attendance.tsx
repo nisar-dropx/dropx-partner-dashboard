@@ -389,7 +389,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
           <span>
             <small>{attentionRow.date === todayDate ? "TODAY" : attentionRow.date.split("-").reverse().join("/")}</small>
             <strong>{attentionInsight.headline}</strong>
-            <em>{attentionInsight.issues.at(-1)?.message ?? attentionInsight.detail}</em>
+            <em>{attentionInsight.issues[0]?.message ?? attentionInsight.detail}</em>
           </span>
           <button onClick={() => { setSelected(attentionRow); setTab("calendar"); }}>
             {attentionInsight.needsRegularization ? "Review" : "View"}
@@ -447,7 +447,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
         </div>
         {tab === "calendar" && selected && selectedInsight ? <div className="dx-selected-day">
           <header><div><CalendarDays /><strong>{selected.date.split("-").reverse().join("/")}</strong></div><em className={selectedInsight.calendarClass}>{selectedInsight.label}</em></header>
-          {selected.scheduledStart && selected.scheduledStart !== "--:--" ? <p className="dx-attendance-shift"><Clock3 /> {selected.shiftName || "Shift"} · {selected.scheduledStart}–{selected.scheduledEnd} <small>{selected.shiftSource}</small></p> : null}
+          {selected.scheduledStart && selected.scheduledStart !== "--:--" ? <p className="dx-attendance-shift"><Clock3 /> <strong>Report by {selected.scheduledStart}</strong> · {selected.shiftName || "Shift"} {selected.scheduledStart}–{selected.scheduledEnd} <small>{selected.shiftSource}</small></p> : null}
           <div><span><LogIn /><small>IN</small><strong>{selected.inTime || "--:--"}</strong></span><span><LogOut /><small>OUT</small><strong>{selected.outTime || "--:--"}</strong></span><span><Clock3 /><small>WORK</small><strong>{selected.workHours || "00:00"}</strong></span><span><Fingerprint /><small>PUNCHES</small><strong>{selected.punchCount}</strong></span></div>
           <section className={`dx-attendance-day-insight ${selectedInsight.tone}`}>
             <strong>{selectedInsight.headline}</strong>
@@ -457,7 +457,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
           {selected.remark ? <p className="dx-attendance-day-note">{selected.remark}</p> : null}
           <footer>
             {selected.regularization ? <span className={`dx-request-status ${selected.regularization.status}`}>Regularization {selected.regularization.status}</span> : null}
-            {selected.regularization?.status !== "pending" && selected.statusKind !== "leave" && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0) ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>Regularize attendance</button> : null}
+            {selected.regularization?.status !== "pending" && selected.statusKind !== "leave" && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0) ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.needsRegularization ? "Regularize attendance" : "Report incorrect attendance"}</button> : null}
           </footer>
         </div> : null}
       </> : null}
