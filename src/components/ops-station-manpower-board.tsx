@@ -7,6 +7,7 @@ import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import type { OpsStationManpowerPerson } from "@/lib/ops-pulse/station-manpower";
 
 type AttendanceState = "on-time" | "late" | "missing" | "away";
+type AttendanceFilter = "all" | "present" | "on-time" | "late" | "missing";
 const WEEK_OFF_FILTER = "__week_off__";
 const arrivalClockFormatter = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const displayClockFormatter = new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" });
@@ -85,6 +86,12 @@ function attendanceState(person: OpsStationManpowerPerson): AttendanceState {
   if (person.today.lateMinutes > 0) return "late";
   if (person.today.reported) return "on-time";
   return "missing";
+}
+
+function matchesAttendanceFilter(person: OpsStationManpowerPerson, filter: AttendanceFilter) {
+  if (filter === "all") return true;
+  if (filter === "present") return person.today.reported;
+  return attendanceState(person) === filter;
 }
 
 function stateLabel(person: OpsStationManpowerPerson) {
@@ -183,6 +190,7 @@ function ActiveRosterView({ asOf, people, locationCode }: { asOf: string; people
 function StationTimetable({ people, locationCode }: { people: OpsStationManpowerPerson[]; locationCode: string }) {
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [selectedShift, setSelectedShift] = useState<string | null>(null);
+  const [selectedAttendance, setSelectedAttendance] = useState<AttendanceFilter>("all");
   const window = timetableWindow(people);
   const offDuty = people
     .filter((person) => person.today.rosterDayType === "weekly_off")
@@ -221,12 +229,25 @@ function StationTimetable({ people, locationCode }: { people: OpsStationManpower
   const validSelectedShift = selectedShift === WEEK_OFF_FILTER
     ? (offDuty.length ? selectedShift : null)
     : shiftSummary.some((shift) => shift.name === selectedShift) ? selectedShift : null;
-  const visibleScheduled = validSelectedShift && validSelectedShift !== WEEK_OFF_FILTER
+  const shiftFilteredScheduled = validSelectedShift && validSelectedShift !== WEEK_OFF_FILTER
     ? scheduled.filter((person) => person.today.shiftName === validSelectedShift)
     : validSelectedShift === WEEK_OFF_FILTER ? [] : scheduled;
-  const visibleOffDuty = validSelectedShift === WEEK_OFF_FILTER ? offDuty : validSelectedShift ? [] : offDuty;
+  const shiftFilteredOffDuty = validSelectedShift === WEEK_OFF_FILTER ? offDuty : validSelectedShift ? [] : offDuty;
+  const visibleScheduled = shiftFilteredScheduled.filter((person) => matchesAttendanceFilter(person, selectedAttendance));
+  const visibleOffDuty = shiftFilteredOffDuty.filter((person) => matchesAttendanceFilter(person, selectedAttendance));
+  const attendanceFilters: Array<{ value: AttendanceFilter; label: string; count: number }> = [
+    { value: "all", label: "All", count: shiftFilteredScheduled.length + shiftFilteredOffDuty.length },
+    { value: "present", label: "Present", count: [...shiftFilteredScheduled, ...shiftFilteredOffDuty].filter((person) => person.today.reported).length },
+    { value: "on-time", label: "On time", count: shiftFilteredScheduled.filter((person) => attendanceState(person) === "on-time").length },
+    { value: "late", label: "Late", count: shiftFilteredScheduled.filter((person) => attendanceState(person) === "late").length },
+    { value: "missing", label: "Not reported", count: shiftFilteredScheduled.filter((person) => attendanceState(person) === "missing").length }
+  ];
   const selectShift = (shift: string | null) => {
     setSelectedShift((current) => current === shift ? null : shift);
+    setSelectedPersonId(null);
+  };
+  const selectAttendance = (filter: AttendanceFilter) => {
+    setSelectedAttendance(filter);
     setSelectedPersonId(null);
   };
 
@@ -236,6 +257,9 @@ function StationTimetable({ people, locationCode }: { people: OpsStationManpower
       <button type="button" className={validSelectedShift === null ? "active" : ""} aria-pressed={validSelectedShift === null} onClick={() => selectShift(null)}><b>All shifts</b><small>{scheduled.length + offDuty.length} people</small></button>
       {shiftSummary.map((shift) => <button type="button" className={validSelectedShift === shift.name ? "active" : ""} aria-pressed={validSelectedShift === shift.name} key={shift.name} onClick={() => selectShift(shift.name)}><b>{shift.clock.startLabel}–{shift.clock.endLabel}</b><small>{shift.reported}/{shift.expected} reported</small></button>)}
       {offDuty.length ? <button type="button" className={`week-off ${validSelectedShift === WEEK_OFF_FILTER ? "active" : ""}`} aria-pressed={validSelectedShift === WEEK_OFF_FILTER} onClick={() => selectShift(WEEK_OFF_FILTER)}><b>Week off</b><small>{offDuty.filter((person) => person.today.reported).length}/{offDuty.length} present</small></button> : null}
+      <i className="station-timetable-filter-divider" aria-hidden="true" />
+      <span className="station-timetable-filter-label">Status</span>
+      {attendanceFilters.map((filter) => <button type="button" className={`attendance-status ${filter.value} ${selectedAttendance === filter.value ? "active" : ""}`} aria-pressed={selectedAttendance === filter.value} key={filter.value} onClick={() => selectAttendance(filter.value)}><b>{filter.label}</b><small>{filter.count}</small></button>)}
     </div>
     <div className="station-timetable-scroll">
       <div className="station-timetable-axis" aria-hidden="true"><span>Team member</span><span>Shift</span><div>{ticks.map((tick, index) => <time key={`${tick}:${index}`} style={{ left: `${index / 6 * 100}%` }}>{minuteLabel(tick)}</time>)}</div><span>Reported</span></div>
@@ -290,6 +314,7 @@ function StationTimetable({ people, locationCode }: { people: OpsStationManpower
             {open ? <AttendanceDetail person={person} /> : null}
           </div>;
         })}
+        {!visibleScheduled.length && !visibleOffDuty.length ? <div className="station-timetable-no-match"><strong>No people match these filters.</strong><span>Choose another shift or attendance status.</span></div> : null}
       </div>
     </div>
     {withoutRoster.length ? <div className="station-timetable-unassigned"><strong>{withoutRoster.length} active {withoutRoster.length === 1 ? "person has" : "people have"} no approved roster entry for this date.</strong><span>They are not counted as expected manpower.</span></div> : null}
