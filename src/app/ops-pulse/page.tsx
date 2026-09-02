@@ -310,7 +310,7 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
 
         <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views">
           <Link className="active" href="/ops-pulse">Operations view</Link>
-          <Link href="/ops-pulse?view=manpower">Location manpower</Link>
+          <Link href="/ops-pulse?view=manpower">Shift attendance</Link>
         </nav>
 
         {locationsResult.error || factsResult.error || attendanceResult.error || cpsResult.error || scorecardResult.error || executivesResult.error ? (

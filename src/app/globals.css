@@ -19676,7 +19676,7 @@ td strong,
 .station-manpower-empty { display: grid; justify-items: center; gap: 5px; padding: 30px 16px; color: #98a2b3; text-align: center; }
 .station-manpower-empty strong { color: #475467; }
 .station-manpower-footnote { margin: 0; color: #98a2b3; font-size: 9px; text-align: right; }
-/* Location manpower is an insight canvas first; people cards are the click-through evidence. */
+/* Shift attendance is an insight canvas first; people rows are the click-through evidence. */
 .station-manpower-workspace { gap: 8px; }
 .station-manpower-summary { grid-template-columns: repeat(5, minmax(0, 1fr)) auto; }
 .station-manpower-summary article { padding: 8px 10px; border-radius: 9px; box-shadow: none; }
@@ -19719,6 +19719,12 @@ td strong,
 .station-timetable-shift-strip > button:focus-visible { outline: 2px solid #f79009; outline-offset: 1px; }
 .station-timetable-shift-strip > button.active { border-color: #f79009; color: #9a3412; background: #fff4e8; box-shadow: inset 0 0 0 1px rgba(247, 144, 9, .16); }
 .station-timetable-shift-strip > button.week-off.active { border-color: #9b8afb; color: #5925dc; background: #f4f3ff; box-shadow: inset 0 0 0 1px rgba(127, 86, 217, .14); }
+.station-timetable-filter-divider { flex: 0 0 1px; width: 1px; align-self: stretch; margin: 0 2px; background: #d0d5dd; }
+.station-timetable-filter-label { align-self: center; flex: 0 0 auto; color: #98a2b3; font-size: 7px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }
+.station-timetable-shift-strip > button.attendance-status.present.active,
+.station-timetable-shift-strip > button.attendance-status.on-time.active { border-color: #6ce9a6; color: #067647; background: #ecfdf3; box-shadow: inset 0 0 0 1px rgba(18, 183, 106, .12); }
+.station-timetable-shift-strip > button.attendance-status.late.active { border-color: #fec84b; color: #b54708; background: #fffaeb; box-shadow: inset 0 0 0 1px rgba(247, 144, 9, .12); }
+.station-timetable-shift-strip > button.attendance-status.missing.active { border-color: #fda29b; color: #b42318; background: #fef3f2; box-shadow: inset 0 0 0 1px rgba(240, 68, 56, .12); }
 .station-timetable-shift-strip b { font-size: 8px; }
 .station-timetable-shift-strip small { color: #667085; font-size: 8px; }
 .station-timetable-shift-strip > button.active small { color: currentColor; }
@@ -19731,6 +19737,9 @@ td strong,
 .station-timetable-axis time:last-child { transform: translateX(-100%); }
 .station-timetable-person-row { border-bottom: 1px solid #f0f1f3; }
 .station-timetable-person-row:last-child { border-bottom: 0; }
+.station-timetable-no-match { display: grid; place-items: center; gap: 2px; min-width: 820px; padding: 20px 12px; color: #667085; background: #fcfcfd; text-align: center; }
+.station-timetable-no-match strong { color: #344054; font-size: 10px; }
+.station-timetable-no-match span { font-size: 8px; }
 .station-timetable-row { width: 100%; min-height: 39px; padding: 4px 10px; border: 0; color: inherit; background: #fff; cursor: pointer; text-align: left; }
 .station-timetable-row:hover, .station-timetable-person-row.open .station-timetable-row { background: #fffaf7; }
 .station-timetable-person-row.off-worked .station-timetable-row { background: #fcfaff; }
