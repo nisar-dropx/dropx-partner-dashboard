@@ -26,6 +26,7 @@ type DeviceRow = {
   is_active: boolean;
   model: string | null;
   status: string | null;
+  last_seen_at: string | null;
 };
 
 type EnrolmentRow = {
@@ -154,7 +155,7 @@ async function resolveDevice(payload: BiometricPunchPayload, sourceIp: string) {
   const deviceSerial = clean(payload.device_serial);
   const existing = await supabaseAdmin
     .from("biometric_devices")
-    .select("id, company_id, location_id, is_active, model, status")
+    .select("id, company_id, location_id, is_active, model, status, last_seen_at")
     .eq("device_serial", deviceSerial)
     .limit(2);
   if (existing.error) throw new Error(existing.error.message);
@@ -166,6 +167,8 @@ async function resolveDevice(payload: BiometricPunchPayload, sourceIp: string) {
   const now = new Date().toISOString();
   if (existing.data?.[0]) {
     const device = existing.data[0] as DeviceRow;
+    const observedAt = parseDeviceDateTime(payload.received_at) ?? new Date();
+    const observedAtIso = observedAt.toISOString();
     const eventType = clean(payload.event_type).toLowerCase();
     const isD01Heartbeat = clean(device.model).toUpperCase() === "D01" && eventType !== "timelog";
     let deviceStatus = "Connected";
@@ -187,12 +190,17 @@ async function resolveDevice(payload: BiometricPunchPayload, sourceIp: string) {
         // A D01 heartbeat proves network reachability only. Do not claim the
         // terminal is reporting attendance until a real TimeLog is received.
         status: deviceStatus,
-        last_seen_at: now,
+        // Use the device event's actual middleware receipt time. Historical
+        // retries must never make an offline terminal appear connected now.
+        last_seen_at: observedAtIso,
         last_source_ip: sourceIp || null,
         updated_at: now
       })
       .eq("id", device.id)
-      .eq("company_id", device.company_id);
+      .eq("company_id", device.company_id)
+      // Prevent an out-of-order or retried event from moving last_seen_at
+      // backwards after a newer live event has already arrived.
+      .or(`last_seen_at.is.null,last_seen_at.lte.${observedAtIso}`);
     if (error) throw new Error(error.message);
     return device;
   }
