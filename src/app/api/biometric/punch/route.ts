@@ -53,6 +53,21 @@ type WorkerMatch = {
   name: string | null;
 };
 
+type RawBiometricEventPayload = {
+  company_id: string;
+  device_id: string;
+  middleware_raw_event_id: number | null;
+  received_at: string;
+  event_type: string;
+  device_serial: string;
+  terminal_id: string | null;
+  trans_id: string | null;
+  enrolment_id: string | null;
+  punch_time: string | null;
+  source_ip: string | null;
+  payload: unknown;
+};
+
 function bearerToken(request: NextRequest) {
   const header = request.headers.get("authorization") ?? "";
   return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
@@ -351,6 +366,76 @@ async function storeReviewPunch({
   return result.data.id as string;
 }
 
+async function persistRawEvent(rawPayload: RawBiometricEventPayload) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+
+  const result = rawPayload.middleware_raw_event_id
+    ? await supabaseAdmin
+        .from("biometric_raw_events")
+        .upsert(rawPayload, { onConflict: "company_id,middleware_raw_event_id" })
+        .select("id")
+        .single()
+    : rawPayload.trans_id
+    ? await supabaseAdmin
+        .from("biometric_raw_events")
+        .upsert(rawPayload, { onConflict: "company_id,device_serial,trans_id" })
+        .select("id")
+        .single()
+    : await supabaseAdmin
+        .from("biometric_raw_events")
+        .insert(rawPayload)
+        .select("id")
+        .single();
+
+  if (!result.error) return result.data.id as string;
+
+  const isTransactionRetransmission = Boolean(
+    rawPayload.trans_id &&
+    /duplicate key|device_serial_trans_id/i.test(result.error.message)
+  );
+  if (!isTransactionRetransmission) throw new Error(result.error.message);
+
+  // Some terminals retransmit a TimeLog after the middleware has already
+  // assigned it a different local raw ID. Preserve the retransmission in the
+  // forensic archive, then continue with the canonical device transaction.
+  const canonical = await supabaseAdmin
+    .from("biometric_raw_events")
+    .select("id")
+    .eq("company_id", rawPayload.company_id)
+    .eq("device_serial", rawPayload.device_serial)
+    .eq("trans_id", rawPayload.trans_id as string)
+    .limit(1)
+    .maybeSingle();
+  if (canonical.error) throw new Error(canonical.error.message);
+  if (!canonical.data) throw new Error(result.error.message);
+
+  let alreadyArchived = false;
+  if (rawPayload.middleware_raw_event_id) {
+    const archiveLookup = await supabaseAdmin
+      .from("biometric_raw_event_duplicates_archive")
+      .select("id")
+      .eq("company_id", rawPayload.company_id)
+      .eq("middleware_raw_event_id", rawPayload.middleware_raw_event_id)
+      .limit(1)
+      .maybeSingle();
+    if (archiveLookup.error) throw new Error(archiveLookup.error.message);
+    alreadyArchived = Boolean(archiveLookup.data);
+  }
+
+  if (!alreadyArchived) {
+    const archive = await supabaseAdmin
+      .from("biometric_raw_event_duplicates_archive")
+      .insert({
+        ...rawPayload,
+        canonical_raw_event_id: canonical.data.id,
+        archived_at: new Date().toISOString()
+      });
+    if (archive.error) throw new Error(archive.error.message);
+  }
+
+  return canonical.data.id as string;
+}
+
 async function createEnrolmentFromWorker({
   companyId,
   device,
@@ -474,25 +559,7 @@ export async function POST(request: NextRequest) {
       payload: body.payload ?? body
     };
 
-    const rawResult = rawPayload.middleware_raw_event_id
-      ? await supabaseAdmin
-          .from("biometric_raw_events")
-          .upsert(rawPayload, { onConflict: "company_id,middleware_raw_event_id" })
-          .select("id")
-          .single()
-      : rawPayload.trans_id
-      ? await supabaseAdmin
-          .from("biometric_raw_events")
-          .upsert(rawPayload, { onConflict: "company_id,device_serial,trans_id" })
-          .select("id")
-          .single()
-      : await supabaseAdmin
-          .from("biometric_raw_events")
-          .insert(rawPayload)
-          .select("id")
-          .single();
-    if (rawResult.error) throw new Error(rawResult.error.message);
-    const rawEventId = rawResult.data.id as string;
+    const rawEventId = await persistRawEvent(rawPayload);
 
     if (eventType.toLowerCase() !== "timelog") {
       return Response.json({ ok: true, stored: "raw_event", eventType });
