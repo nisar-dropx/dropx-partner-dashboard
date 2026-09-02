@@ -1,1 +1,343 @@
-aW1wb3J0IHsgQXBwU2hlbGwgfSBmcm9tICJAL2NvbXBvbmVudHMvYXBwLXNoZWxsIjsNCmltcG9ydCB7IFBheW1lbnRQcm9jZXNzUGFuZWwgfSBmcm9tICJAL2NvbXBvbmVudHMvcGF5bWVudC1wcm9jZXNzLXBhbmVsIjsNCmltcG9ydCB7IGZpbmFsaXplUGF5bWVudFByb2Nlc3MsIHVwZGF0ZVBheW1lbnRQcm9jZXNzU3RhdHVzIH0gZnJvbSAiQC9hcHAvcGF5bWVudHMvcHJvY2Vzcy9hY3Rpb25zIjsNCmltcG9ydCB7IGlzQ29tcGFueU93bmVyLCByZXF1aXJlUGFnZVBlcm1pc3Npb24gfSBmcm9tICJAL2xpYi9hdXRob3JpemF0aW9uIjsNCmltcG9ydCB7IHJlcXVpcmVDb21wYW55SWQgfSBmcm9tICJAL2xpYi9jb21wYW55LXNjb3BlIjsKaW1wb3J0IHsgZGFzaGJvYXJkRGF0ZUlucHV0VmFsdWUgfSBmcm9tICJAL2xpYi9kYXRlLWZvcm1hdCI7CmltcG9ydCB7IHN1cGFiYXNlQWRtaW4gfSBmcm9tICJAL2xpYi9zdXBhYmFzZS1hZG1pbiI7Cg0KdHlwZSBQYXltZW50QmFua1JvdyA9IHsNCiAgaWQ6IHN0cmluZzsNCiAgYmFua19jb2RlOiBzdHJpbmc7DQogIGRpc3BsYXlfbmFtZTogc3RyaW5nOw0KICBhY2NvdW50X25vOiBzdHJpbmc7DQogIGlmc2M6IHN0cmluZzsNCiAgaXNfYWN0aXZlOiBib29sZWFuOw0KfTsNCg0KdHlwZSBQYXltZW50UmVxdWVzdFJvdyA9IHsKICBpZDogc3RyaW5nOw0KICByZXF1ZXN0X25vOiBzdHJpbmc7DQogIGxvY2F0aW9uX2NvZGU6IHN0cmluZzsKICBsb2NhdGlvbl9uYW1lPzogc3RyaW5nIHwgbnVsbDsKICBwYXltZW50X2hlYWRfaWQ6IHN0cmluZzsNCiAgYW1vdW50OiBudW1iZXIgfCBudWxsOw0KICBhbW91bnRfcmVxdWVzdGVkOiBudW1iZXIgfCBudWxsOw0KICBwYXltZW50X21vZGU6IHN0cmluZyB8IG51bGw7DQogIHBheW1lbnRfcG9ydGFsOiBzdHJpbmcgfCBudWxsOwogIHBheW1lbnRfcmVmZXJlbmNlOiBzdHJpbmcgfCBudWxsOwogIGJhbmtfYWNjb3VudF9ubzogc3RyaW5nIHwgbnVsbDsNCiAgaWZzYzogc3RyaW5nIHwgbnVsbDsNCiAgYWNjb3VudF9ob2xkZXJfbmFtZTogc3RyaW5nIHwgbnVsbDsKICBjb250YWN0X25vOiBzdHJpbmcgfCBudWxsOwogIGVtYWlsOiBzdHJpbmcgfCBudWxsOwogIHJlbWFya3M6IHN0cmluZyB8IG51bGw7CiAgcmVxdWVzdGVkX2J5OiBzdHJpbmcgfCBudWxsOwogIHByb2Nlc3NlZF9hdDogc3RyaW5nIHwgbnVsbDsKICBzdGF0dXM6IHN0cmluZzsNCiAgYXBwcm92YWxfc3RhdHVzOiBzdHJpbmcgfCBudWxsOw0KICBjdXJyZW50X2FwcHJvdmVyX3VzZXJfaWQ6IHN0cmluZyB8IG51bGw7CiAgY3VycmVudF9hcHByb3Zlcl9yb2xlX2lkOiBzdHJpbmcgfCBudWxsOwogIGN1cnJlbnRfYXBwcm92ZXJfcm9sZV9pZHM6IHN0cmluZ1tdIHwgbnVsbDsKICBwYXltZW50X3Byb2Nlc3Nfcm9sZV9pZHM6IHN0cmluZ1tdIHwgbnVsbDsKICBjcmVhdGVkX2F0OiBzdHJpbmc7DQogIHBheW1lbnRfaGVhZHM/OiB7IG5hbWU6IHN0cmluZzsgY29kZTogc3RyaW5nIH0gfCBudWxsOwogIHBheW1lbnRfZGV0YWlscz86IEFycmF5PHsgaWQ6IHN0cmluZzsgbGFiZWw6IHN0cmluZzsgdmFsdWU6IHN0cmluZyB8IG51bGw7IGZpbGVfbmFtZTogc3RyaW5nIHwgbnVsbCB9PjsKICBwYXltZW50X2hpc3Rvcnk/OiBQYXltZW50SGlzdG9yeVJvd1tdOwp9OwoKdHlwZSBQYXltZW50QXBwcm92YWxSb3cgPSB7CiAgaWQ6IHN0cmluZzsKICBwYXltZW50X3JlcXVlc3RfaWQ6IHN0cmluZzsKICBhY3Rpb246IHN0cmluZzsKICBjb21tZW50czogc3RyaW5nIHwgbnVsbDsKICBjcmVhdGVkX2F0OiBzdHJpbmc7CiAgYXBwcm92ZXJfdXNlcl9pZDogc3RyaW5nIHwgbnVsbDsKICBhcHByb3Zlcl9yb2xlX2lkOiBzdHJpbmcgfCBudWxsOwp9OwoKdHlwZSBQYXltZW50SGlzdG9yeVJvdyA9IHsKICBpZDogc3RyaW5nOwogIGFjdGlvbjogc3RyaW5nOwogIGFjdG9yOiBzdHJpbmc7CiAgcm9sZTogc3RyaW5nOwogIGNvbW1lbnRzOiBzdHJpbmcgfCBudWxsOwogIGNyZWF0ZWRfYXQ6IHN0cmluZzsKfTsKCnR5cGUgUGF5bWVudEFuc3dlclJvdyA9IHsKICBpZDogc3RyaW5nOwogIHBheW1lbnRfcmVxdWVzdF9pZDogc3RyaW5nOwogIGFuc3dlcl92YWx1ZTogc3RyaW5nIHwgbnVsbDsKICBmaWxlX25hbWU6IHN0cmluZyB8IG51bGw7CiAgcGF5bWVudF9oZWFkX3F1ZXN0aW9ucz86IHsgcXVlc3Rpb25fdGV4dDogc3RyaW5nOyBzb3J0X29yZGVyOiBudW1iZXIgfCBudWxsIH0gfCBBcnJheTx7IHF1ZXN0aW9uX3RleHQ6IHN0cmluZzsgc29ydF9vcmRlcjogbnVtYmVyIHwgbnVsbCB9PiB8IG51bGw7Cn07Cgpjb25zdCBQUk9DRVNTX0RFVEFJTF9CQVRDSF9TSVpFID0gNTA7CgpmdW5jdGlvbiBjaHVua1ZhbHVlczxUPih2YWx1ZXM6IFRbXSwgc2l6ZTogbnVtYmVyKSB7CiAgY29uc3QgY2h1bmtzOiBUW11bXSA9IFtdOwogIGZvciAobGV0IGluZGV4ID0gMDsgaW5kZXggPCB2YWx1ZXMubGVuZ3RoOyBpbmRleCArPSBzaXplKSB7CiAgICBjaHVua3MucHVzaCh2YWx1ZXMuc2xpY2UoaW5kZXgsIGluZGV4ICsgc2l6ZSkpOwogIH0KICByZXR1cm4gY2h1bmtzOwp9Cg0KZnVuY3Rpb24gZmlyc3RSZWxhdGlvbjxUPih2YWx1ZTogVCB8IFRbXSB8IG51bGwgfCB1bmRlZmluZWQpIHsNCiAgcmV0dXJuIEFycmF5LmlzQXJyYXkodmFsdWUpID8gdmFsdWVbMF0gPz8gbnVsbCA6IHZhbHVlID8/IG51bGw7DQp9DQoNCmZ1bmN0aW9uIGlzUmVhZHlGb3JQYXltZW50UHJvY2VzcyhyZXF1ZXN0OiBQYXltZW50UmVxdWVzdFJvdykgew0KICBjb25zdCBzdGF0dXMgPSBTdHJpbmcocmVxdWVzdC5zdGF0dXMgPz8gIiIpLnRvVXBwZXJDYXNlKCk7DQogIGNvbnN0IGFwcHJvdmFsU3RhdHVzID0gU3RyaW5nKHJlcXVlc3QuYXBwcm92YWxfc3RhdHVzID8/ICIiKS50b1VwcGVyQ2FzZSgpOw0KICBjb25zdCBoYXNDdXJyZW50QXBwcm92ZXIgPSBCb29sZWFuKHJlcXVlc3QuY3VycmVudF9hcHByb3Zlcl91c2VyX2lkIHx8IHJlcXVlc3QuY3VycmVudF9hcHByb3Zlcl9yb2xlX2lkKTsNCiAgY29uc3QgaXNPbmxpbmVQYXltZW50ID0gKHJlcXVlc3QucGF5bWVudF9tb2RlID8/ICJhY2NvdW50X3RyYW5zZmVyIikgPT09ICJvbmxpbmVfcGF5bWVudCI7CiAgY29uc3QgaXNVcGlQYXltZW50ID0gcmVxdWVzdC5wYXltZW50X21vZGUgPT09ICJ1cGlfcGF5bWVudCI7CiAgY29uc3QgaGFzUGF5bWVudERldGFpbHMgPSBpc09ubGluZVBheW1lbnQKICAgID8gQm9vbGVhbihyZXF1ZXN0LmFtb3VudCAhPSBudWxsICYmIHJlcXVlc3QucGF5bWVudF9wb3J0YWw/LnRyaW0oKSkKICAgIDogaXNVcGlQYXltZW50CiAgICAgID8gQm9vbGVhbihyZXF1ZXN0LmFtb3VudCAhPSBudWxsICYmIHJlcXVlc3QucGF5bWVudF9yZWZlcmVuY2U/LnRyaW0oKSkKICAgIDogQm9vbGVhbigKICAgICAgcmVxdWVzdC5hbW91bnQgIT0gbnVsbCAmJg0KICAgICAgcmVxdWVzdC5iYW5rX2FjY291bnRfbm8/LnRyaW0oKSAmJg0KICAgICAgcmVxdWVzdC5pZnNjPy50cmltKCkgJiYNCiAgICAgIHJlcXVlc3QuYWNjb3VudF9ob2xkZXJfbmFtZT8udHJpbSgpDQogICAgKTsNCiAgcmV0dXJuIGhhc1BheW1lbnREZXRhaWxzICYmIChzdGF0dXMgPT09ICJBUFBST1ZFRCIgfHwKICAgIHN0YXR1cyA9PT0gIlJFX0FQUFJPVkVEIiB8fAogICAgc3RhdHVzID09PSAiUFJPQ0VTU0lORyIgfHwNCiAgICBzdGF0dXMgPT09ICJQUk9DRVNTRUQiIHx8DQogICAgc3RhdHVzID09PSAiT1dORVJfQVBQUk9WRUQiIHx8DQogICAgYXBwcm92YWxTdGF0dXMgPT09ICJQUk9DRVNTSU5HIiB8fA0KICAgIGFwcHJvdmFsU3RhdHVzID09PSAiUFJPQ0VTU0VEIiB8fA0KICAgIGFwcHJvdmFsU3RhdHVzID09PSAiT1dORVJfQVBQUk9WRUQiIHx8CiAgICBhcHByb3ZhbFN0YXR1cyA9PT0gIlJFX0FQUFJPVkVEIiB8fAogICAgKGFwcHJvdmFsU3RhdHVzLmVuZHNXaXRoKCJfQVBQUk9WRUQiKSAmJiAhaGFzQ3VycmVudEFwcHJvdmVyKSk7DQp9DQoNCmFzeW5jIGZ1bmN0aW9uIGxvYWRQYXltZW50UHJvY2Vzcyhjb21wYW55SWQ6IHN0cmluZywgdXNlcklkOiBzdHJpbmcgfCBudWxsLCBlZmZlY3RpdmVSb2xlSWRzOiBzdHJpbmdbXSwgY2FuU2VlQWxsRmluYWxBcHByb3ZlZDogYm9vbGVhbikgewogIGlmICghc3VwYWJhc2VBZG1pbikgew0KICAgIHJldHVybiB7DQogICAgICBiYW5rczogW10gYXMgUGF5bWVudEJhbmtSb3dbXSwNCiAgICAgIHJlcXVlc3RzOiBbXSBhcyBQYXltZW50UmVxdWVzdFJvd1tdLA0KICAgICAgZXJyb3I6ICJTdXBhYmFzZSBzZXJ2aWNlIHJvbGUga2V5IGlzIG5vdCBjb25maWd1cmVkLiINCiAgICB9Ow0KICB9DQogIGlmICghZWZmZWN0aXZlUm9sZUlkcy5sZW5ndGggJiYgIWNhblNlZUFsbEZpbmFsQXBwcm92ZWQpIHsKICAgIHJldHVybiB7IGJhbmtzOiBbXSBhcyBQYXltZW50QmFua1Jvd1tdLCByZXF1ZXN0czogW10gYXMgUGF5bWVudFJlcXVlc3RSb3dbXSwgZXJyb3I6ICJQYXltZW50IHByb2Nlc3Mgcm9sZSBpcyBub3QgYXZhaWxhYmxlLiIgfTsKICB9CiAgY29uc3QgYWRtaW4gPSBzdXBhYmFzZUFkbWluOwoNCiAgbGV0IHJlcXVlc3RzUXVlcnkgPSBzdXBhYmFzZUFkbWluDQogICAgLmZyb20oInBheW1lbnRfcmVxdWVzdHMiKQ0KICAgIC5zZWxlY3QoImlkLCByZXF1ZXN0X25vLCBsb2NhdGlvbl9jb2RlLCBwYXltZW50X2hlYWRfaWQsIGFtb3VudCwgYW1vdW50X3JlcXVlc3RlZCwgcGF5bWVudF9tb2RlLCBwYXltZW50X3BvcnRhbCwgcGF5bWVudF9yZWZlcmVuY2UsIGJhbmtfYWNjb3VudF9ubywgaWZzYywgYWNjb3VudF9ob2xkZXJfbmFtZSwgY29udGFjdF9ubywgZW1haWwsIHJlbWFya3MsIHJlcXVlc3RlZF9ieSwgcHJvY2Vzc2VkX2F0LCBzdGF0dXMsIGFwcHJvdmFsX3N0YXR1cywgY3VycmVudF9hcHByb3Zlcl91c2VyX2lkLCBjdXJyZW50X2FwcHJvdmVyX3JvbGVfaWQsIGN1cnJlbnRfYXBwcm92ZXJfcm9sZV9pZHMsIHBheW1lbnRfcHJvY2Vzc19yb2xlX2lkcywgY3JlYXRlZF9hdCwgcGF5bWVudF9oZWFkcyAoIG5hbWUsIGNvZGUgKSIpCiAgICAuZXEoImNvbXBhbnlfaWQiLCBjb21wYW55SWQpDQogICAgLm9yZGVyKCJjcmVhdGVkX2F0IiwgeyBhc2NlbmRpbmc6IGZhbHNlIH0pOw0KDQogIGNvbnN0IFtiYW5rc1Jlc3VsdCwgcmVxdWVzdHNSZXN1bHRdID0gYXdhaXQgUHJvbWlzZS5hbGwoWw0KICAgIHN1cGFiYXNlQWRtaW4NCiAgICAgIC5mcm9tKCJwYXltZW50X2JhbmtzIikNCiAgICAgIC5zZWxlY3QoImlkLCBiYW5rX2NvZGUsIGRpc3BsYXlfbmFtZSwgYWNjb3VudF9ubywgaWZzYywgaXNfYWN0aXZlIikNCiAgICAgIC5lcSgiY29tcGFueV9pZCIsIGNvbXBhbnlJZCkNCiAgICAgIC5lcSgiaXNfYWN0aXZlIiwgdHJ1ZSkNCiAgICAgIC5vcmRlcigiZGlzcGxheV9uYW1lIiksDQogICAgcmVxdWVzdHNRdWVyeQ0KICBdKTsNCg0KICBjb25zdCBlcnJvciA9IGJhbmtzUmVzdWx0LmVycm9yPy5tZXNzYWdlIHx8IHJlcXVlc3RzUmVzdWx0LmVycm9yPy5tZXNzYWdlIHx8IG51bGw7CiAgaWYgKGVycm9yKSByZXR1cm4geyBiYW5rczogW10gYXMgUGF5bWVudEJhbmtSb3dbXSwgcmVxdWVzdHM6IFtdIGFzIFBheW1lbnRSZXF1ZXN0Um93W10sIGVycm9yIH07CiAgY29uc3QgcmVxdWVzdFJvd3MgPSAoKHJlcXVlc3RzUmVzdWx0LmRhdGEgPz8gW10pIGFzIHVua25vd24gYXMgUGF5bWVudFJlcXVlc3RSb3dbXSkKICAgIC5maWx0ZXIoaXNSZWFkeUZvclBheW1lbnRQcm9jZXNzKQogICAgLmZpbHRlcigocmVxdWVzdCkgPT4gewogICAgICBpZiAoY2FuU2VlQWxsRmluYWxBcHByb3ZlZCkgcmV0dXJuIHRydWU7CiAgICAgIGNvbnN0IGlzUmV0dXJuZWRUb1RoaXNVc2VyID0gU3RyaW5nKHJlcXVlc3QuYXBwcm92YWxfc3RhdHVzID8/ICIiKS50b1VwcGVyQ2FzZSgpID09PSAiUkVfQVBQUk9WRUQiICYmIHJlcXVlc3QuY3VycmVudF9hcHByb3Zlcl91c2VyX2lkID09PSB1c2VySWQ7CiAgICAgIHJldHVybiBpc1JldHVybmVkVG9UaGlzVXNlciB8fCAocmVxdWVzdC5wYXltZW50X3Byb2Nlc3Nfcm9sZV9pZHMgPz8gW10pLnNvbWUoKHJvbGVJZCkgPT4gZWZmZWN0aXZlUm9sZUlkcy5pbmNsdWRlcyhyb2xlSWQpKTsKICAgIH0pCiAgICAuZmlsdGVyKChyZXF1ZXN0KSA9PiBTdHJpbmcocmVxdWVzdC5hcHByb3ZhbF9zdGF0dXMgPz8gIiIpLnRvVXBwZXJDYXNlKCkgIT09ICJSRV9BUFBST1ZFRCIgfHwgcmVxdWVzdC5jdXJyZW50X2FwcHJvdmVyX3VzZXJfaWQgPT09IHVzZXJJZCB8fCAocmVxdWVzdC5jdXJyZW50X2FwcHJvdmVyX3JvbGVfaWRzID8/IFtdKS5zb21lKChyb2xlSWQpID0+IGVmZmVjdGl2ZVJvbGVJZHMuaW5jbHVkZXMocm9sZUlkKSkpOwogIGNvbnN0IHJlcXVlc3RJZHMgPSByZXF1ZXN0Um93cy5tYXAoKHJlcXVlc3QpID0+IHJlcXVlc3QuaWQpOwogIGNvbnN0IHJlcXVlc3RJZEJhdGNoZXMgPSBjaHVua1ZhbHVlcyhyZXF1ZXN0SWRzLCBQUk9DRVNTX0RFVEFJTF9CQVRDSF9TSVpFKTsKICBjb25zdCBbYW5zd2VyQmF0Y2hSZXN1bHRzLCBhcHByb3ZhbEJhdGNoUmVzdWx0c10gPSByZXF1ZXN0SWRzLmxlbmd0aCA/IGF3YWl0IFByb21pc2UuYWxsKFsKICAgIFByb21pc2UuYWxsKHJlcXVlc3RJZEJhdGNoZXMubWFwKChiYXRjaCkgPT4gYWRtaW4KICAgICAgLmZyb20oInBheW1lbnRfcmVxdWVzdF9hbnN3ZXJzIikKICAgICAgLnNlbGVjdCgiaWQsIHBheW1lbnRfcmVxdWVzdF9pZCwgYW5zd2VyX3ZhbHVlLCBmaWxlX25hbWUsIHBheW1lbnRfaGVhZF9xdWVzdGlvbnMgKCBxdWVzdGlvbl90ZXh0LCBzb3J0X29yZGVyICkiKQogICAgICAuZXEoImNvbXBhbnlfaWQiLCBjb21wYW55SWQpCiAgICAgIC5pbigicGF5bWVudF9yZXF1ZXN0X2lkIiwgYmF0Y2gpKSksCiAgICBQcm9taXNlLmFsbChyZXF1ZXN0SWRCYXRjaGVzLm1hcCgoYmF0Y2gpID0+IGFkbWluCiAgICAgIC5mcm9tKCJwYXltZW50X3JlcXVlc3RfYXBwcm92YWxzIikKICAgICAgLnNlbGVjdCgiaWQsIHBheW1lbnRfcmVxdWVzdF9pZCwgYWN0aW9uLCBjb21tZW50cywgY3JlYXRlZF9hdCwgYXBwcm92ZXJfdXNlcl9pZCwgYXBwcm92ZXJfcm9sZV9pZCIpCiAgICAgIC5lcSgiY29tcGFueV9pZCIsIGNvbXBhbnlJZCkKICAgICAgLmluKCJwYXltZW50X3JlcXVlc3RfaWQiLCBiYXRjaCkKICAgICAgLm9yZGVyKCJjcmVhdGVkX2F0IiwgeyBhc2NlbmRpbmc6IHRydWUgfSkpKQogIF0pIDogW1tdLCBbXV07CiAgY29uc3QgYW5zd2Vyc1Jlc3VsdCA9IHsKICAgIGRhdGE6IGFuc3dlckJhdGNoUmVzdWx0cy5mbGF0TWFwKChyZXN1bHQpID0+IHJlc3VsdC5kYXRhID8/IFtdKSwKICAgIGVycm9yOiBhbnN3ZXJCYXRjaFJlc3VsdHMuZmluZCgocmVzdWx0KSA9PiByZXN1bHQuZXJyb3IpPy5lcnJvciA/PyBudWxsCiAgfTsKICBjb25zdCBhcHByb3ZhbHNSZXN1bHQgPSB7CiAgICBkYXRhOiBhcHByb3ZhbEJhdGNoUmVzdWx0cy5mbGF0TWFwKChyZXN1bHQpID0+IHJlc3VsdC5kYXRhID8/IFtdKSwKICAgIGVycm9yOiBhcHByb3ZhbEJhdGNoUmVzdWx0cy5maW5kKChyZXN1bHQpID0+IHJlc3VsdC5lcnJvcik/LmVycm9yID8/IG51bGwKICB9OwogIGNvbnN0IHJlbGF0ZWRFcnJvciA9IGFuc3dlcnNSZXN1bHQuZXJyb3I/Lm1lc3NhZ2UgfHwgYXBwcm92YWxzUmVzdWx0LmVycm9yPy5tZXNzYWdlOwogIGlmIChyZWxhdGVkRXJyb3IpIHJldHVybiB7IGJhbmtzOiBbXSBhcyBQYXltZW50QmFua1Jvd1tdLCByZXF1ZXN0czogW10gYXMgUGF5bWVudFJlcXVlc3RSb3dbXSwgZXJyb3I6IHJlbGF0ZWRFcnJvciB9OwogIGNvbnN0IGRldGFpbHNCeVJlcXVlc3QgPSBuZXcgTWFwPHN0cmluZywgUGF5bWVudFJlcXVlc3RSb3dbInBheW1lbnRfZGV0YWlscyJdPigpOwogICgoYW5zd2Vyc1Jlc3VsdC5kYXRhID8/IFtdKSBhcyB1bmtub3duIGFzIFBheW1lbnRBbnN3ZXJSb3dbXSkKICAgIC5zb3J0KChhLCBiKSA9PiBOdW1iZXIoZmlyc3RSZWxhdGlvbihhLnBheW1lbnRfaGVhZF9xdWVzdGlvbnMpPy5zb3J0X29yZGVyID8/IDApIC0gTnVtYmVyKGZpcnN0UmVsYXRpb24oYi5wYXltZW50X2hlYWRfcXVlc3Rpb25zKT8uc29ydF9vcmRlciA/PyAwKSkKICAgIC5mb3JFYWNoKChhbnN3ZXIpID0+IHsKICAgICAgY29uc3QgZGV0YWlscyA9IGRldGFpbHNCeVJlcXVlc3QuZ2V0KGFuc3dlci5wYXltZW50X3JlcXVlc3RfaWQpID8/IFtdOwogICAgICBkZXRhaWxzLnB1c2goewogICAgICAgIGlkOiBhbnN3ZXIuaWQsCiAgICAgICAgbGFiZWw6IGZpcnN0UmVsYXRpb24oYW5zd2VyLnBheW1lbnRfaGVhZF9xdWVzdGlvbnMpPy5xdWVzdGlvbl90ZXh0ID8/ICJGaWVsZCIsCiAgICAgICAgdmFsdWU6IGFuc3dlci5hbnN3ZXJfdmFsdWUsCiAgICAgICAgZmlsZV9uYW1lOiBhbnN3ZXIuZmlsZV9uYW1lCiAgICAgIH0pOwogICAgICBkZXRhaWxzQnlSZXF1ZXN0LnNldChhbnN3ZXIucGF5bWVudF9yZXF1ZXN0X2lkLCBkZXRhaWxzKTsKICAgIH0pOwogIGNvbnN0IGFwcHJvdmFsUm93cyA9IChhcHByb3ZhbHNSZXN1bHQuZGF0YSA/PyBbXSkgYXMgUGF5bWVudEFwcHJvdmFsUm93W107CiAgY29uc3QgcHJvZmlsZUlkcyA9IEFycmF5LmZyb20obmV3IFNldChbCiAgICAuLi5yZXF1ZXN0Um93cy5tYXAoKHJlcXVlc3QpID0+IHJlcXVlc3QucmVxdWVzdGVkX2J5KSwKICAgIC4uLmFwcHJvdmFsUm93cy5tYXAoKGFwcHJvdmFsKSA9PiBhcHByb3ZhbC5hcHByb3Zlcl91c2VyX2lkKQogIF0uZmlsdGVyKEJvb2xlYW4pKSkgYXMgc3RyaW5nW107CiAgY29uc3Qgcm9sZUlkcyA9IEFycmF5LmZyb20obmV3IFNldChhcHByb3ZhbFJvd3MubWFwKChhcHByb3ZhbCkgPT4gYXBwcm92YWwuYXBwcm92ZXJfcm9sZV9pZCkuZmlsdGVyKEJvb2xlYW4pKSkgYXMgc3RyaW5nW107CiAgY29uc3QgbG9jYXRpb25Db2RlcyA9IEFycmF5LmZyb20obmV3IFNldChyZXF1ZXN0Um93cy5tYXAoKHJlcXVlc3QpID0+IHJlcXVlc3QubG9jYXRpb25fY29kZSkuZmlsdGVyKEJvb2xlYW4pKSk7CiAgY29uc3QgW3Byb2ZpbGVzUmVzdWx0LCByb2xlc1Jlc3VsdCwgbG9jYXRpb25zUmVzdWx0XSA9IGF3YWl0IFByb21pc2UuYWxsKFsKICAgIHByb2ZpbGVJZHMubGVuZ3RoID8gc3VwYWJhc2VBZG1pbi5mcm9tKCJwcm9maWxlcyIpLnNlbGVjdCgiaWQsIGZ1bGxfbmFtZSwgZW1haWwiKS5lcSgiY29tcGFueV9pZCIsIGNvbXBhbnlJZCkuaW4oImlkIiwgcHJvZmlsZUlkcykgOiB7IGRhdGE6IFtdLCBlcnJvcjogbnVsbCB9LAogICAgcm9sZUlkcy5sZW5ndGggPyBzdXBhYmFzZUFkbWluLmZyb20oInVzZXJfcm9sZXMiKS5zZWxlY3QoImlkLCBuYW1lLCBjb2RlIikuZXEoImNvbXBhbnlfaWQiLCBjb21wYW55SWQpLmluKCJpZCIsIHJvbGVJZHMpIDogeyBkYXRhOiBbXSwgZXJyb3I6IG51bGwgfSwKICAgIGxvY2F0aW9uQ29kZXMubGVuZ3RoID8gc3VwYWJhc2VBZG1pbi5mcm9tKCJzdGF0aW9ucyIpLnNlbGVjdCgic3RhdGlvbl9jb2RlLCBzdGF0aW9uX25hbWUsIGNpdHkiKS5lcSgiY29tcGFueV9pZCIsIGNvbXBhbnlJZCkuaW4oInN0YXRpb25fY29kZSIsIGxvY2F0aW9uQ29kZXMpIDogeyBkYXRhOiBbXSwgZXJyb3I6IG51bGwgfQogIF0pOwogIGNvbnN0IGlkZW50aXR5RXJyb3IgPSBwcm9maWxlc1Jlc3VsdC5lcnJvcj8ubWVzc2FnZSB8fCByb2xlc1Jlc3VsdC5lcnJvcj8ubWVzc2FnZSB8fCBsb2NhdGlvbnNSZXN1bHQuZXJyb3I/Lm1lc3NhZ2U7CiAgaWYgKGlkZW50aXR5RXJyb3IpIHJldHVybiB7IGJhbmtzOiBbXSBhcyBQYXltZW50QmFua1Jvd1tdLCByZXF1ZXN0czogW10gYXMgUGF5bWVudFJlcXVlc3RSb3dbXSwgZXJyb3I6IGlkZW50aXR5RXJyb3IgfTsKICBjb25zdCBwcm9maWxlc0J5SWQgPSBuZXcgTWFwKChwcm9maWxlc1Jlc3VsdC5kYXRhID8/IFtdKS5tYXAoKHByb2ZpbGUpID0+IFtwcm9maWxlLmlkLCBwcm9maWxlXSkpOwogIGNvbnN0IHJvbGVzQnlJZCA9IG5ldyBNYXAoKHJvbGVzUmVzdWx0LmRhdGEgPz8gW10pLm1hcCgocm9sZSkgPT4gW3JvbGUuaWQsIHJvbGVdKSk7CiAgY29uc3QgbG9jYXRpb25zQnlDb2RlID0gbmV3IE1hcCgobG9jYXRpb25zUmVzdWx0LmRhdGEgPz8gW10pLm1hcCgobG9jYXRpb24pID0+IFtsb2NhdGlvbi5zdGF0aW9uX2NvZGUsIGxvY2F0aW9uLnN0YXRpb25fbmFtZSB8fCBsb2NhdGlvbi5jaXR5IHx8IG51bGxdKSk7CiAgY29uc3QgYXBwcm92YWxzQnlSZXF1ZXN0ID0gbmV3IE1hcDxzdHJpbmcsIFBheW1lbnRBcHByb3ZhbFJvd1tdPigpOwogIGFwcHJvdmFsUm93cy5mb3JFYWNoKChhcHByb3ZhbCkgPT4gewogICAgY29uc3Qgcm93cyA9IGFwcHJvdmFsc0J5UmVxdWVzdC5nZXQoYXBwcm92YWwucGF5bWVudF9yZXF1ZXN0X2lkKSA/PyBbXTsKICAgIHJvd3MucHVzaChhcHByb3ZhbCk7CiAgICBhcHByb3ZhbHNCeVJlcXVlc3Quc2V0KGFwcHJvdmFsLnBheW1lbnRfcmVxdWVzdF9pZCwgcm93cyk7CiAgfSk7CiAgcmV0dXJuIHsKICAgIGJhbmtzOiAoYmFua3NSZXN1bHQuZGF0YSA/PyBbXSkgYXMgUGF5bWVudEJhbmtSb3dbXSwKICAgIHJlcXVlc3RzOiByZXF1ZXN0Um93cy5tYXAoKHJlcXVlc3QpID0+ICh7CiAgICAgICAgLi4ucmVxdWVzdCwKICAgICAgICBsb2NhdGlvbl9uYW1lOiBsb2NhdGlvbnNCeUNvZGUuZ2V0KHJlcXVlc3QubG9jYXRpb25fY29kZSkgPz8gbnVsbCwKICAgICAgICBwYXltZW50X2hlYWRzOiBmaXJzdFJlbGF0aW9uKHJlcXVlc3QucGF5bWVudF9oZWFkcyksCiAgICAgICAgcGF5bWVudF9kZXRhaWxzOiBkZXRhaWxzQnlSZXF1ZXN0LmdldChyZXF1ZXN0LmlkKSA/PyBbXSwKICAgICAgICBwYXltZW50X2hpc3Rvcnk6ICgoKSA9PiB7CiAgICAgICAgICBjb25zdCBhcHByb3ZhbEhpc3RvcnkgPSBhcHByb3ZhbHNCeVJlcXVlc3QuZ2V0KHJlcXVlc3QuaWQpID8/IFtdOwogICAgICAgICAgY29uc3QgcmVxdWVzdGVyID0gcmVxdWVzdC5yZXF1ZXN0ZWRfYnkgPyBwcm9maWxlc0J5SWQuZ2V0KHJlcXVlc3QucmVxdWVzdGVkX2J5KSA6IG51bGw7CiAgICAgICAgICBjb25zdCBoaXN0b3J5OiBQYXltZW50SGlzdG9yeVJvd1tdID0gYXBwcm92YWxIaXN0b3J5Lm1hcCgoYXBwcm92YWwpID0+IHsKICAgICAgICAgICAgY29uc3QgYWN0b3IgPSBhcHByb3ZhbC5hcHByb3Zlcl91c2VyX2lkID8gcHJvZmlsZXNCeUlkLmdldChhcHByb3ZhbC5hcHByb3Zlcl91c2VyX2lkKSA6IG51bGw7CiAgICAgICAgICAgIGNvbnN0IHJvbGUgPSBhcHByb3ZhbC5hcHByb3Zlcl9yb2xlX2lkID8gcm9sZXNCeUlkLmdldChhcHByb3ZhbC5hcHByb3Zlcl9yb2xlX2lkKSA6IG51bGw7CiAgICAgICAgICAgIGNvbnN0IHJvbGVMYWJlbCA9IHJvbGU/Lm5hbWUgPz8gcm9sZT8uY29kZSA/PyAoYXBwcm92YWwuYWN0aW9uLnRvTG93ZXJDYXNlKCkgPT09ICJjcmVhdGVkIiA/ICJSZXF1ZXN0ZXIiIDogIi0iKTsKICAgICAgICAgICAgY29uc3QgbG9jYXRpb25MYWJlbCA9IGAke3JlcXVlc3QubG9jYXRpb25fY29kZX0ke2xvY2F0aW9uc0J5Q29kZS5nZXQocmVxdWVzdC5sb2NhdGlvbl9jb2RlKSA/IGAgLSAke2xvY2F0aW9uc0J5Q29kZS5nZXQocmVxdWVzdC5sb2NhdGlvbl9jb2RlKX1gIDogIiJ9YDsKICAgICAgICAgICAgY29uc3QgaXNMb2NhdGlvbkVudHJ5ID0gU3RyaW5nKHJvbGU/LmNvZGUgfHwgcm9sZT8ubmFtZSB8fCAiIikudHJpbSgpLnRvTG93ZXJDYXNlKCkgPT09ICJsb2NhdGlvbiI7CiAgICAgICAgICAgIHJldHVybiB7CiAgICAgICAgICAgICAgaWQ6IGFwcHJvdmFsLmlkLAogICAgICAgICAgICAgIGFjdGlvbjogYXBwcm92YWwuYWN0aW9uLAogICAgICAgICAgICAgIGFjdG9yOiBpc0xvY2F0aW9uRW50cnkgPyBsb2NhdGlvbkxhYmVsIDogYWN0b3I/LmZ1bGxfbmFtZSA/PyBhY3Rvcj8uZW1haWwgPz8gIlN5c3RlbSIsCiAgICAgICAgICAgICAgcm9sZTogcm9sZUxhYmVsLAogICAgICAgICAgICAgIGNvbW1lbnRzOiBhcHByb3ZhbC5jb21tZW50cywKICAgICAgICAgICAgICBjcmVhdGVkX2F0OiBhcHByb3ZhbC5jcmVhdGVkX2F0CiAgICAgICAgICAgIH07CiAgICAgICAgICB9KTsKICAgICAgICAgIGlmICghaGlzdG9yeS5zb21lKChlbnRyeSkgPT4gZW50cnkuYWN0aW9uLnRvTG93ZXJDYXNlKCkgPT09ICJjcmVhdGVkIikpIHsKICAgICAgICAgICAgaGlzdG9yeS51bnNoaWZ0KHsKICAgICAgICAgICAgICBpZDogYGNyZWF0ZWQtJHtyZXF1ZXN0LmlkfWAsCiAgICAgICAgICAgICAgYWN0aW9uOiAiY3JlYXRlZCIsCiAgICAgICAgICAgICAgYWN0b3I6IHJlcXVlc3Rlcj8uZnVsbF9uYW1lID8/IHJlcXVlc3Rlcj8uZW1haWwgPz8gcmVxdWVzdC5sb2NhdGlvbl9jb2RlLAogICAgICAgICAgICAgIHJvbGU6ICJSZXF1ZXN0ZXIiLAogICAgICAgICAgICAgIGNvbW1lbnRzOiByZXF1ZXN0LnJlbWFya3MgfHwgIlBheW1lbnQgcmVxdWVzdCBjcmVhdGVkLiIsCiAgICAgICAgICAgICAgY3JlYXRlZF9hdDogcmVxdWVzdC5jcmVhdGVkX2F0CiAgICAgICAgICAgIH0pOwogICAgICAgICAgfQogICAgICAgICAgaWYgKHJlcXVlc3QucHJvY2Vzc2VkX2F0ICYmICFoaXN0b3J5LnNvbWUoKGVudHJ5KSA9PiBlbnRyeS5hY3Rpb24udG9Mb3dlckNhc2UoKSA9PT0gInByb2Nlc3NlZCIpKSB7CiAgICAgICAgICAgIGhpc3RvcnkucHVzaCh7CiAgICAgICAgICAgICAgaWQ6IGBwcm9jZXNzZWQtJHtyZXF1ZXN0LmlkfWAsCiAgICAgICAgICAgICAgYWN0aW9uOiAicHJvY2Vzc2VkIiwKICAgICAgICAgICAgICBhY3RvcjogIlN5c3RlbSIsCiAgICAgICAgICAgICAgcm9sZTogIlBheW1lbnQgcHJvY2Vzc2luZyIsCiAgICAgICAgICAgICAgY29tbWVudHM6ICJQYXltZW50IHByb2Nlc3NpbmcgY29tcGxldGVkLiIsCiAgICAgICAgICAgICAgY3JlYXRlZF9hdDogcmVxdWVzdC5wcm9jZXNzZWRfYXQKICAgICAgICAgICAgfSk7CiAgICAgICAgICB9CiAgICAgICAgICByZXR1cm4gaGlzdG9yeS5zb3J0KChmaXJzdCwgc2Vjb25kKSA9PiBuZXcgRGF0ZShmaXJzdC5jcmVhdGVkX2F0KS5nZXRUaW1lKCkgLSBuZXcgRGF0ZShzZWNvbmQuY3JlYXRlZF9hdCkuZ2V0VGltZSgpKTsKICAgICAgICB9KSgpCiAgICAgIH0pKSwKICAgIGVycm9yOiBudWxsDQogIH07DQp9DQoNCmV4cG9ydCBjb25zdCBkeW5hbWljID0gImZvcmNlLWR5bmFtaWMiOw0KDQpleHBvcnQgZGVmYXVsdCBhc3luYyBmdW5jdGlvbiBQYXltZW50UHJvY2Vzc1BhZ2Uoew0KICBzZWFyY2hQYXJhbXMNCn06IHsNCiAgc2VhcmNoUGFyYW1zPzogeyBwcm9jZXNzRXJyb3I/OiBzdHJpbmc7IHByb2Nlc3NOb3RpY2U/OiBzdHJpbmcgfTsNCn0pIHsNCiAgY29uc3QgYXV0aG9yaXphdGlvbiA9IGF3YWl0IHJlcXVpcmVQYWdlUGVybWlzc2lvbigicGF5bWVudF9wcm9jZXNzIiwgImFjY2VzcyIpOw0KICBjb25zdCBjb21wYW55SWQgPSByZXF1aXJlQ29tcGFueUlkKGF1dGhvcml6YXRpb24pOw0KICBjb25zdCBwYWdlUGVybWlzc2lvbiA9IGF1dGhvcml6YXRpb24ucGVybWlzc2lvbnMucGF5bWVudF9wcm9jZXNzOw0KICBjb25zdCBjYW5TZWVBbGxGaW5hbEFwcHJvdmVkID0gaXNDb21wYW55T3duZXIoYXV0aG9yaXphdGlvbik7DQogIGNvbnN0IHsgYmFua3MsIHJlcXVlc3RzLCBlcnJvciB9ID0gYXdhaXQgbG9hZFBheW1lbnRQcm9jZXNzKGNvbXBhbnlJZCwgYXV0aG9yaXphdGlvbi51c2VySWQsIGF1dGhvcml6YXRpb24uZWZmZWN0aXZlUm9sZUlkcywgY2FuU2VlQWxsRmluYWxBcHByb3ZlZCk7CiAgY29uc3QgdG9kYXkgPSBkYXNoYm9hcmREYXRlSW5wdXRWYWx1ZSgpOwoNCiAgcmV0dXJuICgNCiAgICA8QXBwU2hlbGwgYWN0aXZlPSJQYXltZW50IFByb2Nlc3MiIHBhZ2VDb2RlPSJwYXltZW50X3Byb2Nlc3MiPg0KICAgICAge2Vycm9yID8gKA0KICAgICAgICA8c2VjdGlvbiBjbGFzc05hbWU9InBhbmVsIG1lc3NhZ2UtcGFuZWwgZXJyb3IiPg0KICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJwYW5lbC1ib2R5Ij4NCiAgICAgICAgICAgIDxzdHJvbmc+UGF5bWVudCBwcm9jZXNzIHNldHVwIG5lZWRlZDwvc3Ryb25nPg0KICAgICAgICAgICAgPHAgY2xhc3NOYW1lPSJzdWJ0bGUiIHN0eWxlPXt7IG1hcmdpblRvcDogNiB9fT57ZXJyb3J9IFJ1biBgc2NyaXB0cy9wYXltZW50X2JhbmtzX3YxLnNxbGAgYW5kIGBzY3JpcHRzL3BheW1lbnRfcmVxdWVzdHNfdjEuc3FsYCBpbiBTdXBhYmFzZSBTUUwgRWRpdG9yLCB0aGVuIHJlZnJlc2guPC9wPg0KICAgICAgICAgIDwvZGl2Pg0KICAgICAgICA8L3NlY3Rpb24+DQogICAgICApIDogbnVsbH0NCg0KICAgICAge3NlYXJjaFBhcmFtcz8ucHJvY2Vzc0Vycm9yIHx8IHNlYXJjaFBhcmFtcz8ucHJvY2Vzc05vdGljZSA/ICgNCiAgICAgICAgPHNlY3Rpb24gY2xhc3NOYW1lPXtgcGFuZWwgbWVzc2FnZS1wYW5lbCAke3NlYXJjaFBhcmFtcy5wcm9jZXNzRXJyb3IgPyAiZXJyb3IiIDogInN1Y2Nlc3MifWB9Pg0KICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPSJwYW5lbC1ib2R5Ij4NCiAgICAgICAgICAgIDxzdHJvbmc+e3NlYXJjaFBhcmFtcy5wcm9jZXNzRXJyb3IgPyAiUGF5bWVudCBwcm9jZXNzIG5vdCBmaW5hbGl6ZWQiIDogIlBheW1lbnQgcHJvY2VzcyBmaW5hbGl6ZWQifTwvc3Ryb25nPg0KICAgICAgICAgICAgPHAgY2xhc3NOYW1lPSJzdWJ0bGUiIHN0eWxlPXt7IG1hcmdpblRvcDogNiB9fT57c2VhcmNoUGFyYW1zLnByb2Nlc3NFcnJvciB8fCBzZWFyY2hQYXJhbXMucHJvY2Vzc05vdGljZX08L3A+DQogICAgICAgICAgPC9kaXY+DQogICAgICAgIDwvc2VjdGlvbj4NCiAgICAgICkgOiBudWxsfQ0KDQogICAgICB7IWVycm9yICYmIHBhZ2VQZXJtaXNzaW9uLmNhblZpZXcgPyAoDQogICAgICAgIDxQYXltZW50UHJvY2Vzc1BhbmVsDQogICAgICAgICAgYmFua3M9e2JhbmtzLm1hcCgoYmFuaykgPT4gKHsKICAgICAgICAgICAgaWQ6IGJhbmsuaWQsCiAgICAgICAgICAgIGJhbmtfY29kZTogYmFuay5iYW5rX2NvZGUsCiAgICAgICAgICAgIGRpc3BsYXlfbmFtZTogYmFuay5kaXNwbGF5X25hbWUsCiAgICAgICAgICAgIGFjY291bnRfbm86IGJhbmsuYWNjb3VudF9ubwogICAgICAgICAgfSkpfQogICAgICAgICAgcmVxdWVzdHM9e3JlcXVlc3RzLm1hcCgocmVxdWVzdCkgPT4gKHsNCiAgICAgICAgICAgIGlkOiByZXF1ZXN0LmlkLA0KICAgICAgICAgICAgcmVxdWVzdF9ubzogcmVxdWVzdC5yZXF1ZXN0X25vLA0KICAgICAgICAgICAgbG9jYXRpb25fY29kZTogcmVxdWVzdC5sb2NhdGlvbl9jb2RlLAogICAgICAgICAgICBsb2NhdGlvbl9uYW1lOiByZXF1ZXN0LmxvY2F0aW9uX25hbWUgPz8gbnVsbCwKICAgICAgICAgICAgYW1vdW50OiByZXF1ZXN0LmFtb3VudCwNCiAgICAgICAgICAgIGFtb3VudF9yZXF1ZXN0ZWQ6IHJlcXVlc3QuYW1vdW50X3JlcXVlc3RlZCwNCiAgICAgICAgICAgIHBheW1lbnRfbW9kZTogcmVxdWVzdC5wYXltZW50X21vZGUsCiAgICAgICAgICAgIHBheW1lbnRfcG9ydGFsOiByZXF1ZXN0LnBheW1lbnRfcG9ydGFsLAogICAgICAgICAgICBwYXltZW50X3JlZmVyZW5jZTogcmVxdWVzdC5wYXltZW50X3JlZmVyZW5jZSwKICAgICAgICAgICAgYmFua19hY2NvdW50X25vOiByZXF1ZXN0LmJhbmtfYWNjb3VudF9ubywKICAgICAgICAgICAgaWZzYzogcmVxdWVzdC5pZnNjLAogICAgICAgICAgICBhY2NvdW50X2hvbGRlcl9uYW1lOiByZXF1ZXN0LmFjY291bnRfaG9sZGVyX25hbWUsCiAgICAgICAgICAgIGNvbnRhY3Rfbm86IHJlcXVlc3QuY29udGFjdF9ubywKICAgICAgICAgICAgZW1haWw6IHJlcXVlc3QuZW1haWwsCiAgICAgICAgICAgIHJlcXVlc3RfcmVtYXJrczogcmVxdWVzdC5yZW1hcmtzLAogICAgICAgICAgICBwYXltZW50X2RldGFpbHM6IHJlcXVlc3QucGF5bWVudF9kZXRhaWxzID8/IFtdLAogICAgICAgICAgICBwYXltZW50X2hpc3Rvcnk6IHJlcXVlc3QucGF5bWVudF9oaXN0b3J5ID8/IFtdLAogICAgICAgICAgICBzdGF0dXM6IHJlcXVlc3Quc3RhdHVzLAogICAgICAgICAgICBhcHByb3ZhbF9zdGF0dXM6IHJlcXVlc3QuYXBwcm92YWxfc3RhdHVzLA0KICAgICAgICAgICAgY3JlYXRlZF9hdDogcmVxdWVzdC5jcmVhdGVkX2F0LA0KICAgICAgICAgICAgcGF5bWVudF9oZWFkX25hbWU6IHJlcXVlc3QucGF5bWVudF9oZWFkcz8ubmFtZSA/PyBudWxsDQogICAgICAgICAgfSkpfQ0KICAgICAgICAgIGZpbmFsaXplQWN0aW9uPXtmaW5hbGl6ZVBheW1lbnRQcm9jZXNzfQ0KICAgICAgICAgIGZpbmFsaXplUmVzdWx0S2V5PXtzZWFyY2hQYXJhbXM/LnByb2Nlc3NFcnJvciB8fCBzZWFyY2hQYXJhbXM/LnByb2Nlc3NOb3RpY2UgfHwgIiJ9DQogICAgICAgICAgcHJvY2Vzc0FjdGlvbj17dXBkYXRlUGF5bWVudFByb2Nlc3NTdGF0dXN9DQogICAgICAgICAgdG9kYXk9e3RvZGF5fQ0KICAgICAgICAvPg0KICAgICAgKSA6IG51bGx9DQogICAgPC9BcHBTaGVsbD4NCiAgKTsNCn0NCg==
+import { AppShell } from "@/components/app-shell";
+import { PaymentProcessPanel } from "@/components/payment-process-panel";
+import { finalizePaymentProcess, updatePaymentProcessStatus } from "@/app/payments/process/actions";
+import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
+import { requireCompanyId } from "@/lib/company-scope";
+import { dashboardDateInputValue } from "@/lib/date-format";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+
+type PaymentBankRow = {
+  id: string;
+  bank_code: string;
+  display_name: string;
+  account_no: string;
+  ifsc: string;
+  is_active: boolean;
+};
+
+type PaymentRequestRow = {
+  id: string;
+  request_no: string;
+  location_code: string;
+  location_name?: string | null;
+  payment_head_id: string;
+  amount: number | null;
+  amount_requested: number | null;
+  payment_mode: string | null;
+  payment_portal: string | null;
+  payment_reference: string | null;
+  bank_account_no: string | null;
+  ifsc: string | null;
+  account_holder_name: string | null;
+  contact_no: string | null;
+  email: string | null;
+  remarks: string | null;
+  requested_by: string | null;
+  processed_at: string | null;
+  status: string;
+  approval_status: string | null;
+  current_approver_user_id: string | null;
+  current_approver_role_id: string | null;
+  current_approver_role_ids: string[] | null;
+  payment_process_role_ids: string[] | null;
+  created_at: string;
+  payment_heads?: { name: string; code: string } | null;
+  payment_details?: Array<{ id: string; label: string; value: string | null; file_name: string | null }>;
+  payment_history?: PaymentHistoryRow[];
+};
+
+type PaymentApprovalRow = {
+  id: string;
+  payment_request_id: string;
+  action: string;
+  comments: string | null;
+  created_at: string;
+  approver_user_id: string | null;
+  approver_role_id: string | null;
+};
+
+type PaymentHistoryRow = {
+  id: string;
+  action: string;
+  actor: string;
+  role: string;
+  comments: string | null;
+  created_at: string;
+};
+
+type PaymentAnswerRow = {
+  id: string;
+  payment_request_id: string;
+  answer_value: string | null;
+  file_name: string | null;
+  payment_head_questions?: { question_text: string; sort_order: number | null } | Array<{ question_text: string; sort_order: number | null }> | null;
+};
+
+const PROCESS_DETAIL_BATCH_SIZE = 50;
+
+function chunkValues<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function firstRelation<T>(value: T | T[] | null | undefined) {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+function isReadyForPaymentProcess(request: PaymentRequestRow) {
+  const status = String(request.status ?? "").toUpperCase();
+  const approvalStatus = String(request.approval_status ?? "").toUpperCase();
+  const hasCurrentApprover = Boolean(request.current_approver_user_id || request.current_approver_role_id);
+  const isOnlinePayment = (request.payment_mode ?? "account_transfer") === "online_payment";
+  const isUpiPayment = request.payment_mode === "upi_payment";
+  const hasPaymentDetails = isOnlinePayment
+    ? Boolean(request.amount != null && request.payment_portal?.trim())
+    : isUpiPayment
+      ? Boolean(request.amount != null && request.payment_reference?.trim())
+    : Boolean(
+      request.amount != null &&
+      request.bank_account_no?.trim() &&
+      request.ifsc?.trim() &&
+      request.account_holder_name?.trim()
+    );
+  return hasPaymentDetails && (status === "APPROVED" ||
+    status === "RE_APPROVED" ||
+    status === "PROCESSING" ||
+    status === "PROCESSED" ||
+    status === "OWNER_APPROVED" ||
+    approvalStatus === "PROCESSING" ||
+    approvalStatus === "PROCESSED" ||
+    approvalStatus === "OWNER_APPROVED" ||
+    approvalStatus === "RE_APPROVED" ||
+    (approvalStatus.endsWith("_APPROVED") && !hasCurrentApprover));
+}
+
+async function loadPaymentProcess(companyId: string, userId: string | null, effectiveRoleIds: string[], canSeeAllFinalApproved: boolean) {
+  if (!supabaseAdmin) {
+    return {
+      banks: [] as PaymentBankRow[],
+      requests: [] as PaymentRequestRow[],
+      error: "Supabase service role key is not configured."
+    };
+  }
+  if (!effectiveRoleIds.length && !canSeeAllFinalApproved) {
+    return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], error: "Payment process role is not available." };
+  }
+  const admin = supabaseAdmin;
+
+  let requestsQuery = supabaseAdmin
+    .from("payment_requests")
+    .select("id, request_no, location_code, payment_head_id, amount, amount_requested, payment_mode, payment_portal, payment_reference, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, requested_by, processed_at, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, payment_process_role_ids, created_at, payment_heads ( name, code )")
+    .eq("company_id", companyId)
+    .order("created_at", { ascending: false });
+
+  const [banksResult, requestsResult] = await Promise.all([
+    supabaseAdmin
+      .from("payment_banks")
+      .select("id, bank_code, display_name, account_no, ifsc, is_active")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .order("display_name"),
+    requestsQuery
+  ]);
+
+  const error = banksResult.error?.message || requestsResult.error?.message || null;
+  if (error) return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], error };
+  const requestRows = ((requestsResult.data ?? []) as unknown as PaymentRequestRow[])
+    .filter(isReadyForPaymentProcess)
+    .filter((request) => {
+      if (canSeeAllFinalApproved) return true;
+      const isReturnedToThisUser = String(request.approval_status ?? "").toUpperCase() === "RE_APPROVED" && request.current_approver_user_id === userId;
+      return isReturnedToThisUser || (request.payment_process_role_ids ?? []).some((roleId) => effectiveRoleIds.includes(roleId));
+    })
+    .filter((request) => String(request.approval_status ?? "").toUpperCase() !== "RE_APPROVED" || request.current_approver_user_id === userId || (request.current_approver_role_ids ?? []).some((roleId) => effectiveRoleIds.includes(roleId)));
+  const requestIds = requestRows.map((request) => request.id);
+  const requestIdBatches = chunkValues(requestIds, PROCESS_DETAIL_BATCH_SIZE);
+  const [answerBatchResults, approvalBatchResults] = requestIds.length ? await Promise.all([
+    Promise.all(requestIdBatches.map((batch) => admin
+      .from("payment_request_answers")
+      .select("id, payment_request_id, answer_value, file_name, payment_head_questions ( question_text, sort_order )")
+      .eq("company_id", companyId)
+      .in("payment_request_id", batch))),
+    Promise.all(requestIdBatches.map((batch) => admin
+      .from("payment_request_approvals")
+      .select("id, payment_request_id, action, comments, created_at, approver_user_id, approver_role_id")
+      .eq("company_id", companyId)
+      .in("payment_request_id", batch)
+      .order("created_at", { ascending: true })))
+  ]) : [[], []];
+  const answersResult = {
+    data: answerBatchResults.flatMap((result) => result.data ?? []),
+    error: answerBatchResults.find((result) => result.error)?.error ?? null
+  };
+  const approvalsResult = {
+    data: approvalBatchResults.flatMap((result) => result.data ?? []),
+    error: approvalBatchResults.find((result) => result.error)?.error ?? null
+  };
+  const relatedError = answersResult.error?.message || approvalsResult.error?.message;
+  if (relatedError) return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], error: relatedError };
+  const detailsByRequest = new Map<string, PaymentRequestRow["payment_details"]>();
+  ((answersResult.data ?? []) as unknown as PaymentAnswerRow[])
+    .sort((a, b) => Number(firstRelation(a.payment_head_questions)?.sort_order ?? 0) - Number(firstRelation(b.payment_head_questions)?.sort_order ?? 0))
+    .forEach((answer) => {
+      const details = detailsByRequest.get(answer.payment_request_id) ?? [];
+      details.push({
+        id: answer.id,
+        label: firstRelation(answer.payment_head_questions)?.question_text ?? "Field",
+        value: answer.answer_value,
+        file_name: answer.file_name
+      });
+      detailsByRequest.set(answer.payment_request_id, details);
+    });
+  const approvalRows = (approvalsResult.data ?? []) as PaymentApprovalRow[];
+  const profileIds = Array.from(new Set([
+    ...requestRows.map((request) => request.requested_by),
+    ...approvalRows.map((approval) => approval.approver_user_id)
+  ].filter(Boolean))) as string[];
+  const roleIds = Array.from(new Set(approvalRows.map((approval) => approval.approver_role_id).filter(Boolean))) as string[];
+  const locationCodes = Array.from(new Set(requestRows.map((request) => request.location_code).filter(Boolean)));
+  const [profilesResult, rolesResult, locationsResult] = await Promise.all([
+    profileIds.length ? supabaseAdmin.from("profiles").select("id, full_name, email").eq("company_id", companyId).in("id", profileIds) : { data: [], error: null },
+    roleIds.length ? supabaseAdmin.from("user_roles").select("id, name, code").eq("company_id", companyId).in("id", roleIds) : { data: [], error: null },
+    locationCodes.length ? supabaseAdmin.from("stations").select("station_code, station_name, city").eq("company_id", companyId).in("station_code", locationCodes) : { data: [], error: null }
+  ]);
+  const identityError = profilesResult.error?.message || rolesResult.error?.message || locationsResult.error?.message;
+  if (identityError) return { banks: [] as PaymentBankRow[], requests: [] as PaymentRequestRow[], error: identityError };
+  const profilesById = new Map((profilesResult.data ?? []).map((profile) => [profile.id, profile]));
+  const rolesById = new Map((rolesResult.data ?? []).map((role) => [role.id, role]));
+  const locationsByCode = new Map((locationsResult.data ?? []).map((location) => [location.station_code, location.station_name || location.city || null]));
+  const approvalsByRequest = new Map<string, PaymentApprovalRow[]>();
+  approvalRows.forEach((approval) => {
+    const rows = approvalsByRequest.get(approval.payment_request_id) ?? [];
+    rows.push(approval);
+    approvalsByRequest.set(approval.payment_request_id, rows);
+  });
+  return {
+    banks: (banksResult.data ?? []) as PaymentBankRow[],
+    requests: requestRows.map((request) => ({
+        ...request,
+        location_name: locationsByCode.get(request.location_code) ?? null,
+        payment_heads: firstRelation(request.payment_heads),
+        payment_details: detailsByRequest.get(request.id) ?? [],
+        payment_history: (() => {
+          const approvalHistory = approvalsByRequest.get(request.id) ?? [];
+          const requester = request.requested_by ? profilesById.get(request.requested_by) : null;
+          const history: PaymentHistoryRow[] = approvalHistory.map((approval) => {
+            const actor = approval.approver_user_id ? profilesById.get(approval.approver_user_id) : null;
+            const role = approval.approver_role_id ? rolesById.get(approval.approver_role_id) : null;
+            const roleLabel = role?.name ?? role?.code ?? (approval.action.toLowerCase() === "created" ? "Requester" : "-");
+            const locationLabel = `${request.location_code}${locationsByCode.get(request.location_code) ? ` - ${locationsByCode.get(request.location_code)}` : ""}`;
+            const isLocationEntry = String(role?.code || role?.name || "").trim().toLowerCase() === "location";
+            return {
+              id: approval.id,
+              action: approval.action,
+              actor: isLocationEntry ? locationLabel : actor?.full_name ?? actor?.email ?? "System",
+              role: roleLabel,
+              comments: approval.comments,
+              created_at: approval.created_at
+            };
+          });
+          if (!history.some((entry) => entry.action.toLowerCase() === "created")) {
+            history.unshift({
+              id: `created-${request.id}`,
+              action: "created",
+              actor: requester?.full_name ?? requester?.email ?? request.location_code,
+              role: "Requester",
+              comments: request.remarks || "Payment request created.",
+              created_at: request.created_at
+            });
+          }
+          if (request.processed_at && !history.some((entry) => entry.action.toLowerCase() === "processed")) {
+            history.push({
+              id: `processed-${request.id}`,
+              action: "processed",
+              actor: "System",
+              role: "Payment processing",
+              comments: "Payment processing completed.",
+              created_at: request.processed_at
+            });
+          }
+          return history.sort((first, second) => new Date(first.created_at).getTime() - new Date(second.created_at).getTime());
+        })()
+      })),
+    error: null
+  };
+}
+
+export const dynamic = "force-dynamic";
+
+export default async function PaymentProcessPage({
+  searchParams
+}: {
+  searchParams?: { processError?: string; processNotice?: string };
+}) {
+  const authorization = await requirePagePermission("payment_process", "access");
+  const companyId = requireCompanyId(authorization);
+  const pagePermission = authorization.permissions.payment_process;
+  const canSeeAllFinalApproved = isCompanyOwner(authorization);
+  const { banks, requests, error } = await loadPaymentProcess(companyId, authorization.userId, authorization.effectiveRoleIds, canSeeAllFinalApproved);
+  const today = dashboardDateInputValue();
+
+  return (
+    <AppShell active="Payment Process" pageCode="payment_process">
+      {error ? (
+        <section className="panel message-panel error">
+          <div className="panel-body">
+            <strong>Payment process setup needed</strong>
+            <p className="subtle" style={{ marginTop: 6 }}>{error} Run `scripts/payment_banks_v1.sql` and `scripts/payment_requests_v1.sql` in Supabase SQL Editor, then refresh.</p>
+          </div>
+        </section>
+      ) : null}
+
+      {searchParams?.processError || searchParams?.processNotice ? (
+        <section className={`panel message-panel ${searchParams.processError ? "error" : "success"}`}>
+          <div className="panel-body">
+            <strong>{searchParams.processError ? "Payment process not finalized" : "Payment process finalized"}</strong>
+            <p className="subtle" style={{ marginTop: 6 }}>{searchParams.processError || searchParams.processNotice}</p>
+          </div>
+        </section>
+      ) : null}
+
+      {!error && pagePermission.canView ? (
+        <PaymentProcessPanel
+          banks={banks.map((bank) => ({
+            id: bank.id,
+            bank_code: bank.bank_code,
+            display_name: bank.display_name,
+            account_no: bank.account_no
+          }))}
+          requests={requests.map((request) => ({
+            id: request.id,
+            request_no: request.request_no,
+            location_code: request.location_code,
+            location_name: request.location_name ?? null,
+            amount: request.amount,
+            amount_requested: request.amount_requested,
+            payment_mode: request.payment_mode,
+            payment_portal: request.payment_portal,
+            payment_reference: request.payment_reference,
+            bank_account_no: request.bank_account_no,
+            ifsc: request.ifsc,
+            account_holder_name: request.account_holder_name,
+            contact_no: request.contact_no,
+            email: request.email,
+            request_remarks: request.remarks,
+            payment_details: request.payment_details ?? [],
+            payment_history: request.payment_history ?? [],
+            status: request.status,
+            approval_status: request.approval_status,
+            created_at: request.created_at,
+            payment_head_name: request.payment_heads?.name ?? null
+          }))}
+          finalizeAction={finalizePaymentProcess}
+          finalizeResultKey={searchParams?.processError || searchParams?.processNotice || ""}
+          processAction={updatePaymentProcessStatus}
+          today={today}
+        />
+      ) : null}
+    </AppShell>
+  );
+}

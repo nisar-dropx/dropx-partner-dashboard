@@ -1,1 +1,292 @@
-aW1wb3J0IHsgaGFzUGVybWlzc2lvbiwgaXNDb21wYW55T3duZXIsIHR5cGUgQXV0aG9yaXphdGlvbkNvbnRleHQgfSBmcm9tICJAL2xpYi9hdXRob3JpemF0aW9uIjsKaW1wb3J0IHsgY3VycmVudEFjY2Vzc1N1cmZhY2UgfSBmcm9tICJAL2xpYi9hY2Nlc3Mtc3VyZmFjZSI7CmltcG9ydCB7IGNhbkFjY2Vzc1BheW1lbnRMb2NhdGlvbiB9IGZyb20gIkAvbGliL3BheW1lbnQtYXBwcm92YWwtc2NvcGUiOwppbXBvcnQgeyBzdXBhYmFzZUFkbWluIH0gZnJvbSAiQC9saWIvc3VwYWJhc2UtYWRtaW4iOwppbXBvcnQgeyBsb2FkUGVvcGxlRXhjZXB0aW9uQ291bnQgfSBmcm9tICJAL2xpYi9wZW9wbGUtZXhjZXB0aW9uLWNvdW50IjsKDQpleHBvcnQgdHlwZSBQYXltZW50Tm90aWZpY2F0aW9uSXRlbSA9IHsNCiAga2V5OiBzdHJpbmc7DQogIGxhYmVsOiBzdHJpbmc7DQogIGRldGFpbDogc3RyaW5nOw0KICBocmVmOiBzdHJpbmc7DQogIGNvdW50OiBudW1iZXI7DQp9Ow0KDQpleHBvcnQgdHlwZSBQYXltZW50Tm90aWZpY2F0aW9uU25hcHNob3QgPSB7DQogIHRvdGFsOiBudW1iZXI7DQogIGJhZGdlczogUmVjb3JkPHN0cmluZywgbnVtYmVyPjsNCiAgaXRlbXM6IFBheW1lbnROb3RpZmljYXRpb25JdGVtW107DQp9Ow0KDQp0eXBlIFBheW1lbnRIZWFkUmVsYXRpb24gPSB7DQogIGNvZGU6IHN0cmluZyB8IG51bGw7DQogIG5hbWU6IHN0cmluZyB8IG51bGw7DQp9Ow0KDQp0eXBlIFBheW1lbnROb3RpZmljYXRpb25SZXF1ZXN0ID0gew0KICBpZDogc3RyaW5nOw0KICByZXF1ZXN0X25vOiBzdHJpbmcgfCBudWxsOw0KICBsb2NhdGlvbl9pZDogc3RyaW5nIHwgbnVsbDsNCiAgbG9jYXRpb25fY29kZTogc3RyaW5nIHwgbnVsbDsNCiAgcmVxdWVzdGVkX2J5OiBzdHJpbmcgfCBudWxsOw0KICBjYXRlZ29yeTogc3RyaW5nIHwgbnVsbDsNCiAgYW1vdW50OiBudW1iZXIgfCBudWxsOw0KICBhbW91bnRfcmVxdWVzdGVkOiBudW1iZXIgfCBudWxsOw0KICBwYXltZW50X21vZGU6IHN0cmluZyB8IG51bGw7DQogIHBheW1lbnRfcG9ydGFsOiBzdHJpbmcgfCBudWxsOwogIHBheW1lbnRfcmVmZXJlbmNlOiBzdHJpbmcgfCBudWxsOwogIGJhbmtfYWNjb3VudF9ubzogc3RyaW5nIHwgbnVsbDsNCiAgaWZzYzogc3RyaW5nIHwgbnVsbDsNCiAgYWNjb3VudF9ob2xkZXJfbmFtZTogc3RyaW5nIHwgbnVsbDsKICBzdGF0dXM6IHN0cmluZyB8IG51bGw7DQogIGFwcHJvdmFsX3N0YXR1czogc3RyaW5nIHwgbnVsbDsNCiAgY3VycmVudF9hcHByb3Zlcl91c2VyX2lkOiBzdHJpbmcgfCBudWxsOwogIGN1cnJlbnRfYXBwcm92ZXJfcm9sZV9pZDogc3RyaW5nIHwgbnVsbDsKICBjdXJyZW50X2FwcHJvdmVyX3JvbGVfaWRzOiBzdHJpbmdbXSB8IG51bGw7CiAgcGF5bWVudF9wcm9jZXNzX3JvbGVfaWRzOiBzdHJpbmdbXSB8IG51bGw7DQogIGNyZWF0ZWRfYXQ6IHN0cmluZyB8IG51bGw7DQogIHBheW1lbnRfaGVhZHM/OiBQYXltZW50SGVhZFJlbGF0aW9uIHwgUGF5bWVudEhlYWRSZWxhdGlvbltdIHwgbnVsbDsNCn07DQoNCmNvbnN0IEVNUFRZX0JBREdFUyA9IHsKICBwZW9wbGVfYWxsOiAwLAogIHBlb3BsZV9yZXZpZXc6IDAsCiAgcGVvcGxlX2V4Y2VwdGlvbnM6IDAsCiAgcGF5bWVudHM6IDAsCiAgZXhwZW5zZV9yZXF1ZXN0czogMCwKICBwYXltZW50X3JlcXVlc3RzOiAwLA0KICBwYXltZW50X2FwcHJvdmFsczogMCwNCiAgcGF5bWVudF9wcm9jZXNzOiAwLA0KICBwYXltZW50X3JlcG9ydHM6IDANCn07DQoNCmNvbnN0IFRFUk1JTkFMX0FQUFJPVkFMX1NUQVRVU0VTID0gbmV3IFNldChbIlJFX0FQUFJPVkVEIiwgIlJFSkVDVEVEIiwgIlJFVFVSTkVEIiwgIkNBTkNFTExFRCIsICJQUk9DRVNTSU5HIiwgIlBST0NFU1NFRCJdKTsKDQpleHBvcnQgZnVuY3Rpb24gZW1wdHlQYXltZW50Tm90aWZpY2F0aW9uU25hcHNob3QoKTogUGF5bWVudE5vdGlmaWNhdGlvblNuYXBzaG90IHsNCiAgcmV0dXJuIHsNCiAgICB0b3RhbDogMCwNCiAgICBiYWRnZXM6IHsgLi4uRU1QVFlfQkFER0VTIH0sDQogICAgaXRlbXM6IFtdDQogIH07DQp9DQoNCmZ1bmN0aW9uIG5vcm1hbGl6ZVN0YXR1cyh2YWx1ZTogc3RyaW5nIHwgbnVsbCB8IHVuZGVmaW5lZCkgew0KICByZXR1cm4gU3RyaW5nKHZhbHVlID8/ICIiKS50cmltKCkudG9VcHBlckNhc2UoKTsNCn0NCg0KZnVuY3Rpb24gcmVxdWVzdFN0YXR1cyhyZXF1ZXN0OiBQYXltZW50Tm90aWZpY2F0aW9uUmVxdWVzdCkgew0KICByZXR1cm4gbm9ybWFsaXplU3RhdHVzKHJlcXVlc3QuYXBwcm92YWxfc3RhdHVzIHx8IHJlcXVlc3Quc3RhdHVzKTsNCn0NCg0KZnVuY3Rpb24gaXNFeHBlbnNlUmVxdWVzdChyZXF1ZXN0OiBQYXltZW50Tm90aWZpY2F0aW9uUmVxdWVzdCkgew0KICByZXR1cm4gbm9ybWFsaXplU3RhdHVzKHJlcXVlc3QuY2F0ZWdvcnkpID09PSAiRVhQRU5TRSI7DQp9DQoNCmZ1bmN0aW9uIGlzUmV0dXJuZWQocmVxdWVzdDogUGF5bWVudE5vdGlmaWNhdGlvblJlcXVlc3QpIHsKICByZXR1cm4gcmVxdWVzdFN0YXR1cyhyZXF1ZXN0KSA9PT0gIlJFVFVSTkVEIjsKfQ0KDQpmdW5jdGlvbiBoYXNDdXJyZW50QXBwcm92ZXIocmVxdWVzdDogUGF5bWVudE5vdGlmaWNhdGlvblJlcXVlc3QpIHsNCiAgcmV0dXJuIEJvb2xlYW4ocmVxdWVzdC5jdXJyZW50X2FwcHJvdmVyX3VzZXJfaWQgfHwgcmVxdWVzdC5jdXJyZW50X2FwcHJvdmVyX3JvbGVfaWQgfHwgcmVxdWVzdC5jdXJyZW50X2FwcHJvdmVyX3JvbGVfaWRzPy5sZW5ndGgpOwp9DQoNCmZ1bmN0aW9uIGlzRmluYWxBcHByb3ZlZChyZXF1ZXN0OiBQYXltZW50Tm90aWZpY2F0aW9uUmVxdWVzdCkgewogIGNvbnN0IHN0YXR1cyA9IHJlcXVlc3RTdGF0dXMocmVxdWVzdCk7CiAgY29uc3QgYXBwcm92ZWQgPSAoCiAgICBzdGF0dXMgPT09ICJBUFBST1ZFRCIgfHwKICAgIHN0YXR1cyA9PT0gIk9XTkVSX0FQUFJPVkVEIiB8fAogICAgc3RhdHVzID09PSAiUkVfQVBQUk9WRUQiIHx8CiAgICBzdGF0dXMuZW5kc1dpdGgoIl9BUFBST1ZFRCIpCiAgKTsKICByZXR1cm4gYXBwcm92ZWQgJiYgIWhhc0N1cnJlbnRBcHByb3ZlcihyZXF1ZXN0KTsKfQoNCmZ1bmN0aW9uIGhhc1BheW1lbnREZXRhaWxzKHJlcXVlc3Q6IFBheW1lbnROb3RpZmljYXRpb25SZXF1ZXN0KSB7DQogIGNvbnN0IG1vZGUgPSBub3JtYWxpemVTdGF0dXMocmVxdWVzdC5wYXltZW50X21vZGUgfHwgImFjY291bnRfdHJhbnNmZXIiKTsNCiAgaWYgKHJlcXVlc3QuYW1vdW50ID09PSBudWxsIHx8IHJlcXVlc3QuYW1vdW50ID09PSB1bmRlZmluZWQpIHJldHVybiBmYWxzZTsKICBpZiAobW9kZSA9PT0gIk9OTElORSIgfHwgbW9kZSA9PT0gIk9OTElORV9QQVlNRU5UIikgcmV0dXJuIEJvb2xlYW4ocmVxdWVzdC5wYXltZW50X3BvcnRhbD8udHJpbSgpKTsKICBpZiAobW9kZSA9PT0gIlVQSSIgfHwgbW9kZSA9PT0gIlVQSV9QQVlNRU5UIikgcmV0dXJuIEJvb2xlYW4ocmVxdWVzdC5wYXltZW50X3JlZmVyZW5jZT8udHJpbSgpKTsKICByZXR1cm4gQm9vbGVhbihyZXF1ZXN0LmJhbmtfYWNjb3VudF9ubz8udHJpbSgpICYmIHJlcXVlc3QuaWZzYz8udHJpbSgpICYmIHJlcXVlc3QuYWNjb3VudF9ob2xkZXJfbmFtZT8udHJpbSgpKTsNCn0NCg0KZnVuY3Rpb24gbmVlZHNQYXltZW50RGV0YWlscyhyZXF1ZXN0OiBQYXltZW50Tm90aWZpY2F0aW9uUmVxdWVzdCkgew0KICByZXR1cm4gaXNFeHBlbnNlUmVxdWVzdChyZXF1ZXN0KSAmJiBpc0ZpbmFsQXBwcm92ZWQocmVxdWVzdCkgJiYgIWhhc1BheW1lbnREZXRhaWxzKHJlcXVlc3QpOw0KfQ0KDQpmdW5jdGlvbiBpc1BlbmRpbmdBcHByb3ZhbChyZXF1ZXN0OiBQYXltZW50Tm90aWZpY2F0aW9uUmVxdWVzdCkgewogIGNvbnN0IHN0YXR1cyA9IHJlcXVlc3RTdGF0dXMocmVxdWVzdCk7CiAgaWYgKFRFUk1JTkFMX0FQUFJPVkFMX1NUQVRVU0VTLmhhcyhzdGF0dXMpKSByZXR1cm4gZmFsc2U7CiAgcmV0dXJuIEJvb2xlYW4ocmVxdWVzdC5jdXJyZW50X2FwcHJvdmVyX3VzZXJfaWQgfHwgcmVxdWVzdC5jdXJyZW50X2FwcHJvdmVyX3JvbGVfaWQgfHwgcmVxdWVzdC5jdXJyZW50X2FwcHJvdmVyX3JvbGVfaWRzPy5sZW5ndGggfHwgc3RhdHVzID09PSAiUEVORElORyIgfHwgIXN0YXR1cyk7Cn0KDQpmdW5jdGlvbiBpc1JlYWR5Rm9yUGF5bWVudFByb2Nlc3MocmVxdWVzdDogUGF5bWVudE5vdGlmaWNhdGlvblJlcXVlc3QpIHsKICBjb25zdCBzdGF0dXMgPSByZXF1ZXN0U3RhdHVzKHJlcXVlc3QpOwogIGlmIChzdGF0dXMgPT09ICJSRV9BUFBST1ZFRCIpIHJldHVybiBoYXNQYXltZW50RGV0YWlscyhyZXF1ZXN0KTsKICByZXR1cm4gaXNGaW5hbEFwcHJvdmVkKHJlcXVlc3QpICYmIGhhc1BheW1lbnREZXRhaWxzKHJlcXVlc3QpICYmIHN0YXR1cyAhPT0gIlBST0NFU1NFRCI7Cn0KDQpmdW5jdGlvbiBjYW5Qcm9jZXNzUGF5bWVudChyZXF1ZXN0OiBQYXltZW50Tm90aWZpY2F0aW9uUmVxdWVzdCwgYXV0aG9yaXphdGlvbjogQXV0aG9yaXphdGlvbkNvbnRleHQpIHsKICBpZiAoaXNDb21wYW55T3duZXIoYXV0aG9yaXphdGlvbikgfHwgYXV0aG9yaXphdGlvbi5pc01hc3Rlck93bmVyKSByZXR1cm4gdHJ1ZTsKICByZXR1cm4gKHJlcXVlc3QucGF5bWVudF9wcm9jZXNzX3JvbGVfaWRzID8/IFtdKS5zb21lKChyb2xlSWQpID0+IGF1dGhvcml6YXRpb24uZWZmZWN0aXZlUm9sZUlkcy5pbmNsdWRlcyhyb2xlSWQpKTsKfQ0KDQpmdW5jdGlvbiBhZGRJdGVtKGl0ZW1zOiBQYXltZW50Tm90aWZpY2F0aW9uSXRlbVtdLCBrZXk6IHN0cmluZywgbGFiZWw6IHN0cmluZywgZGV0YWlsOiBzdHJpbmcsIGhyZWY6IHN0cmluZywgY291bnQ6IG51bWJlcikgewogIGlmIChjb3VudCA8PSAwKSByZXR1cm47CiAgaXRlbXMucHVzaCh7IGtleSwgbGFiZWwsIGRldGFpbCwgaHJlZiwgY291bnQgfSk7Cn0KCmZ1bmN0aW9uIGlzQXNzaWduZWRUb0N1cnJlbnRVc2VyKHJlcXVlc3Q6IFBheW1lbnROb3RpZmljYXRpb25SZXF1ZXN0LCBhdXRob3JpemF0aW9uOiBBdXRob3JpemF0aW9uQ29udGV4dCkgewogIGlmICghY2FuQWNjZXNzUGF5bWVudExvY2F0aW9uKGF1dGhvcml6YXRpb24sIHJlcXVlc3QubG9jYXRpb25faWQpKSByZXR1cm4gZmFsc2U7CiAgaWYgKHJlcXVlc3QuY3VycmVudF9hcHByb3Zlcl91c2VyX2lkID09PSBhdXRob3JpemF0aW9uLnVzZXJJZCkgcmV0dXJuIHRydWU7CiAgcmV0dXJuIEJvb2xlYW4ocmVxdWVzdC5jdXJyZW50X2FwcHJvdmVyX3JvbGVfaWQgJiYgYXV0aG9yaXphdGlvbi5lZmZlY3RpdmVSb2xlSWRzLmluY2x1ZGVzKHJlcXVlc3QuY3VycmVudF9hcHByb3Zlcl9yb2xlX2lkKSkgfHwKICAgIChyZXF1ZXN0LmN1cnJlbnRfYXBwcm92ZXJfcm9sZV9pZHMgPz8gW10pLnNvbWUoKHJvbGVJZCkgPT4gYXV0aG9yaXphdGlvbi5lZmZlY3RpdmVSb2xlSWRzLmluY2x1ZGVzKHJvbGVJZCkpOwp9Cgphc3luYyBmdW5jdGlvbiBsb2FkUGVvcGxlUmV2aWV3Q291bnQoYXV0aG9yaXphdGlvbjogQXV0aG9yaXphdGlvbkNvbnRleHQpIHsKICBpZiAoIXN1cGFiYXNlQWRtaW4gfHwgIWF1dGhvcml6YXRpb24uY29tcGFueUlkIHx8ICFoYXNQZXJtaXNzaW9uKGF1dGhvcml6YXRpb24sICJwZW9wbGVfcmV2aWV3IiwgImFjY2VzcyIpKSByZXR1cm4gMDsKICBpZiAoIWF1dGhvcml6YXRpb24uaGFzQWxsTG9jYXRpb25BY2Nlc3MgJiYgIWF1dGhvcml6YXRpb24uaXNNYXN0ZXJPd25lciAmJiBhdXRob3JpemF0aW9uLmxvY2F0aW9uU2NvcGVJZHMubGVuZ3RoID09PSAwKSByZXR1cm4gMDsKCiAgY29uc3Qgc291cmNlcyA9IFsKICAgIHsgdGFibGU6ICJlbXBsb3llZXMiLCBzdGF0dXNDb2x1bW46ICJwcm9maWxlX2NvbXBsZXRpb25fc3RhdHVzIiB9LAogICAgeyB0YWJsZTogIndvcmtmb3JjZSIsIHN0YXR1c0NvbHVtbjogIm9uYm9hcmRpbmdfc3RhdHVzIiB9LAogICAgeyB0YWJsZTogImNvbnRyYWN0b3JzIiwgc3RhdHVzQ29sdW1uOiAib25ib2FyZGluZ19zdGF0dXMiIH0sCiAgICB7IHRhYmxlOiAidmVuZG9ycyIsIHN0YXR1c0NvbHVtbjogIm9uYm9hcmRpbmdfc3RhdHVzIiB9LAogICAgeyB0YWJsZTogImhlbHBlcnMiLCBzdGF0dXNDb2x1bW46ICJvbmJvYXJkaW5nX3N0YXR1cyIgfQogIF07CiAgY29uc3QgcmVzdWx0cyA9IGF3YWl0IFByb21pc2UuYWxsKHNvdXJjZXMubWFwKGFzeW5jICh7IHRhYmxlLCBzdGF0dXNDb2x1bW4gfSkgPT4gewogICAgbGV0IHF1ZXJ5ID0gc3VwYWJhc2VBZG1pbiEKICAgICAgLmZyb20odGFibGUpCiAgICAgIC5zZWxlY3QoImlkIiwgeyBjb3VudDogImV4YWN0IiwgaGVhZDogdHJ1ZSB9KQogICAgICAuZXEoImNvbXBhbnlfaWQiLCBhdXRob3JpemF0aW9uLmNvbXBhbnlJZCEpCiAgICAgIC5lcShzdGF0dXNDb2x1bW4sICJ1bmRlcl9yZXZpZXciKTsKICAgIGlmICghYXV0aG9yaXphdGlvbi5oYXNBbGxMb2NhdGlvbkFjY2VzcyAmJiAhYXV0aG9yaXphdGlvbi5pc01hc3Rlck93bmVyKSB7CiAgICAgIHF1ZXJ5ID0gcXVlcnkuaW4oImxvY2F0aW9uX2lkIiwgYXV0aG9yaXphdGlvbi5sb2NhdGlvblNjb3BlSWRzKTsKICAgIH0KICAgIGNvbnN0IHJlc3VsdCA9IGF3YWl0IHF1ZXJ5OwogICAgcmV0dXJuIHJlc3VsdC5lcnJvciA/IDAgOiByZXN1bHQuY291bnQgPz8gMDsKICB9KSk7CgogIHJldHVybiByZXN1bHRzLnJlZHVjZSgodG90YWwsIGNvdW50KSA9PiB0b3RhbCArIGNvdW50LCAwKTsKfQoKZXhwb3J0IGFzeW5jIGZ1bmN0aW9uIGxvYWRQYXltZW50Tm90aWZpY2F0aW9uU25hcHNob3QoYXV0aG9yaXphdGlvbjogQXV0aG9yaXphdGlvbkNvbnRleHQpOiBQcm9taXNlPFBheW1lbnROb3RpZmljYXRpb25TbmFwc2hvdD4gewogIGlmICghYXV0aG9yaXphdGlvbi5jb21wYW55SWQpIHJldHVybiBlbXB0eVBheW1lbnROb3RpZmljYXRpb25TbmFwc2hvdCgpOwoKICBjb25zdCBhY2Nlc3NTdXJmYWNlID0gY3VycmVudEFjY2Vzc1N1cmZhY2UoKTsKICBjb25zdCBiYWRnZXMgPSB7IC4uLkVNUFRZX0JBREdFUyB9OwogIGNvbnN0IGl0ZW1zOiBQYXltZW50Tm90aWZpY2F0aW9uSXRlbVtdID0gW107CiAgYmFkZ2VzLnBlb3BsZV9yZXZpZXcgPSBhd2FpdCBsb2FkUGVvcGxlUmV2aWV3Q291bnQoYXV0aG9yaXphdGlvbik7CiAgYmFkZ2VzLnBlb3BsZV9leGNlcHRpb25zID0gYXdhaXQgbG9hZFBlb3BsZUV4Y2VwdGlvbkNvdW50KGF1dGhvcml6YXRpb24pOwogIGJhZGdlcy5wZW9wbGVfYWxsID0gYmFkZ2VzLnBlb3BsZV9yZXZpZXcgKyBiYWRnZXMucGVvcGxlX2V4Y2VwdGlvbnM7CiAgY29uc3QgY2FuU2VlUGF5bWVudHMgPSBoYXNQZXJtaXNzaW9uKGF1dGhvcml6YXRpb24sICJwYXltZW50cyIsICJhY2Nlc3MiKTsKICBpZiAoIWNhblNlZVBheW1lbnRzIHx8ICFzdXBhYmFzZUFkbWluKSByZXR1cm4geyB0b3RhbDogMCwgYmFkZ2VzLCBpdGVtcyB9OwoNCiAgY29uc3QgeyBkYXRhLCBlcnJvciB9ID0gYXdhaXQgc3VwYWJhc2VBZG1pbg0KICAgIC5mcm9tKCJwYXltZW50X3JlcXVlc3RzIikNCiAgICAuc2VsZWN0KGANCiAgICAgIGlkLA0KICAgICAgcmVxdWVzdF9ubywNCiAgICAgIGxvY2F0aW9uX2lkLA0KICAgICAgbG9jYXRpb25fY29kZSwNCiAgICAgIHJlcXVlc3RlZF9ieSwNCiAgICAgIGNhdGVnb3J5LA0KICAgICAgYW1vdW50LA0KICAgICAgYW1vdW50X3JlcXVlc3RlZCwNCiAgICAgIHBheW1lbnRfbW9kZSwNCiAgICAgIHBheW1lbnRfcG9ydGFsLAogICAgICBwYXltZW50X3JlZmVyZW5jZSwKICAgICAgYmFua19hY2NvdW50X25vLA0KICAgICAgaWZzYywNCiAgICAgIGFjY291bnRfaG9sZGVyX25hbWUsCiAgICAgIHN0YXR1cywNCiAgICAgIGFwcHJvdmFsX3N0YXR1cywNCiAgICAgIGN1cnJlbnRfYXBwcm92ZXJfdXNlcl9pZCwKICAgICAgY3VycmVudF9hcHByb3Zlcl9yb2xlX2lkLAogICAgICBjdXJyZW50X2FwcHJvdmVyX3JvbGVfaWRzLAogICAgICBwYXltZW50X3Byb2Nlc3Nfcm9sZV9pZHMsDQogICAgICBjcmVhdGVkX2F0LA0KICAgICAgcGF5bWVudF9oZWFkcyAoDQogICAgICAgIGNvZGUsDQogICAgICAgIG5hbWUNCiAgICAgICkNCiAgICBgKQ0KICAgIC5lcSgiY29tcGFueV9pZCIsIGF1dGhvcml6YXRpb24uY29tcGFueUlkKQ0KICAgIC5vcmRlcigiY3JlYXRlZF9hdCIsIHsgYXNjZW5kaW5nOiBmYWxzZSB9KQ0KICAgIC5saW1pdCgxMDAwKTsNCg0KICBpZiAoZXJyb3IgfHwgIWRhdGEpIHJldHVybiB7IHRvdGFsOiAwLCBiYWRnZXMsIGl0ZW1zIH07Cg0KICBjb25zdCByZXF1ZXN0cyA9IGRhdGEgYXMgUGF5bWVudE5vdGlmaWNhdGlvblJlcXVlc3RbXTsNCiAgY29uc3Qgb3duUmVxdWVzdHMgPSBhdXRob3JpemF0aW9uLnVzZXJJZA0KICAgID8gcmVxdWVzdHMuZmlsdGVyKChyZXF1ZXN0KSA9PiByZXF1ZXN0LnJlcXVlc3RlZF9ieSA9PT0gYXV0aG9yaXphdGlvbi51c2VySWQpDQogICAgOiBbXTsNCg0KICBpZiAoaGFzUGVybWlzc2lvbihhdXRob3JpemF0aW9uLCAiZXhwZW5zZV9yZXF1ZXN0cyIsICJhY2Nlc3MiKSkgewogICAgYmFkZ2VzLmV4cGVuc2VfcmVxdWVzdHMgPSBvd25SZXF1ZXN0cw0KICAgICAgLmZpbHRlcihpc0V4cGVuc2VSZXF1ZXN0KQ0KICAgICAgLmZpbHRlcigocmVxdWVzdCkgPT4gaXNSZXR1cm5lZChyZXF1ZXN0KSB8fCBuZWVkc1BheW1lbnREZXRhaWxzKHJlcXVlc3QpKQogICAgICAubGVuZ3RoOw0KICAgIGFkZEl0ZW0oDQogICAgICBpdGVtcywNCiAgICAgICJleHBlbnNlX3JlcXVlc3RzIiwNCiAgICAgICJFeHBlbnNlIHJlcXVlc3RzIiwNCiAgICAgIGAke2JhZGdlcy5leHBlbnNlX3JlcXVlc3RzfSBleHBlbnNlIHJlcXVlc3Qke2JhZGdlcy5leHBlbnNlX3JlcXVlc3RzID09PSAxID8gIiIgOiAicyJ9IG5lZWQgYXR0ZW50aW9uYCwNCiAgICAgICIvcGF5bWVudHMvZXhwZW5zZS1yZXF1ZXN0IiwNCiAgICAgIGJhZGdlcy5leHBlbnNlX3JlcXVlc3RzDQogICAgKTsNCiAgfQ0KDQogIGlmIChoYXNQZXJtaXNzaW9uKGF1dGhvcml6YXRpb24sICJwYXltZW50X3JlcXVlc3RzIiwgImFjY2VzcyIpKSB7CiAgICBiYWRnZXMucGF5bWVudF9yZXF1ZXN0cyA9IG93blJlcXVlc3RzDQogICAgICAuZmlsdGVyKChyZXF1ZXN0KSA9PiAhaXNFeHBlbnNlUmVxdWVzdChyZXF1ZXN0KSkNCiAgICAgIC5maWx0ZXIoaXNSZXR1cm5lZCkKICAgICAgLmxlbmd0aDsNCiAgICBhZGRJdGVtKA0KICAgICAgaXRlbXMsDQogICAgICAicGF5bWVudF9yZXF1ZXN0cyIsDQogICAgICAiUGF5bWVudCByZXF1ZXN0cyIsDQogICAgICBgJHtiYWRnZXMucGF5bWVudF9yZXF1ZXN0c30gcGF5bWVudCByZXF1ZXN0JHtiYWRnZXMucGF5bWVudF9yZXF1ZXN0cyA9PT0gMSA/ICIiIDogInMifSByZXR1cm5lZCBmb3IgYWN0aW9uYCwKICAgICAgIi9wYXltZW50cy9yZXF1ZXN0cyIsDQogICAgICBiYWRnZXMucGF5bWVudF9yZXF1ZXN0cw0KICAgICk7DQogIH0NCg0KICBpZiAoaGFzUGVybWlzc2lvbihhdXRob3JpemF0aW9uLCAicGF5bWVudF9hcHByb3ZhbHMiLCAiYWNjZXNzIikpIHsKICAgIGJhZGdlcy5wYXltZW50X2FwcHJvdmFscyA9IHJlcXVlc3RzCiAgICAgIC5maWx0ZXIoKHJlcXVlc3QpID0+IGlzQXNzaWduZWRUb0N1cnJlbnRVc2VyKHJlcXVlc3QsIGF1dGhvcml6YXRpb24pKQogICAgICAuZmlsdGVyKGlzUGVuZGluZ0FwcHJvdmFsKQogICAgICAubGVuZ3RoOwogICAgYWRkSXRlbSgNCiAgICAgIGl0ZW1zLA0KICAgICAgInBheW1lbnRfYXBwcm92YWxzIiwNCiAgICAgICJQYXltZW50IGFwcHJvdmFscyIsDQogICAgICBgJHtiYWRnZXMucGF5bWVudF9hcHByb3ZhbHN9IHJlcXVlc3Qke2JhZGdlcy5wYXltZW50X2FwcHJvdmFscyA9PT0gMSA/ICIiIDogInMifSB3YWl0aW5nIGZvciBhcHByb3ZhbGAsDQogICAgICAiL3BheW1lbnRzL2FwcHJvdmFscyIsDQogICAgICBiYWRnZXMucGF5bWVudF9hcHByb3ZhbHMNCiAgICApOw0KICB9DQoNCiAgaWYgKGFjY2Vzc1N1cmZhY2UgPT09ICJkYXNoYm9hcmQiICYmIGhhc1Blcm1pc3Npb24oYXV0aG9yaXphdGlvbiwgInBheW1lbnRfcHJvY2VzcyIsICJhY2Nlc3MiKSkgewogICAgYmFkZ2VzLnBheW1lbnRfcHJvY2VzcyA9IHJlcXVlc3RzCiAgICAgIC5maWx0ZXIoKHJlcXVlc3QpID0+IGNhblByb2Nlc3NQYXltZW50KHJlcXVlc3QsIGF1dGhvcml6YXRpb24pKQogICAgICAuZmlsdGVyKGlzUmVhZHlGb3JQYXltZW50UHJvY2VzcykKICAgICAgLmZpbHRlcigocmVxdWVzdCkgPT4gcmVxdWVzdFN0YXR1cyhyZXF1ZXN0KSAhPT0gIlJFX0FQUFJPVkVEIiB8fCByZXF1ZXN0LmN1cnJlbnRfYXBwcm92ZXJfdXNlcl9pZCA9PT0gYXV0aG9yaXphdGlvbi51c2VySWQgfHwgKHJlcXVlc3QuY3VycmVudF9hcHByb3Zlcl9yb2xlX2lkcyA/PyBbXSkuc29tZSgocm9sZUlkKSA9PiBhdXRob3JpemF0aW9uLmVmZmVjdGl2ZVJvbGVJZHMuaW5jbHVkZXMocm9sZUlkKSkpCiAgICAgIC5sZW5ndGg7CiAgICBhZGRJdGVtKA0KICAgICAgaXRlbXMsDQogICAgICAicGF5bWVudF9wcm9jZXNzIiwNCiAgICAgICJQYXltZW50IHByb2Nlc3MiLA0KICAgICAgYCR7YmFkZ2VzLnBheW1lbnRfcHJvY2Vzc30gYXBwcm92ZWQgcGF5bWVudCR7YmFkZ2VzLnBheW1lbnRfcHJvY2VzcyA9PT0gMSA/ICIiIDogInMifSByZWFkeSB0byBwcm9jZXNzYCwNCiAgICAgICIvcGF5bWVudHMvcHJvY2VzcyIsDQogICAgICBiYWRnZXMucGF5bWVudF9wcm9jZXNzDQogICAgKTsNCiAgfQ0KDQogIGJhZGdlcy5wYXltZW50cyA9IGJhZGdlcy5leHBlbnNlX3JlcXVlc3RzICsgYmFkZ2VzLnBheW1lbnRfcmVxdWVzdHMgKyBiYWRnZXMucGF5bWVudF9hcHByb3ZhbHMgKyBiYWRnZXMucGF5bWVudF9wcm9jZXNzOw0KDQogIHJldHVybiB7DQogICAgdG90YWw6IGJhZGdlcy5wYXltZW50cywNCiAgICBiYWRnZXMsDQogICAgaXRlbXMNCiAgfTsNCn0NCg==
+import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
+import { currentAccessSurface } from "@/lib/access-surface";
+import { canAccessPaymentLocation } from "@/lib/payment-approval-scope";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { loadPeopleExceptionCount } from "@/lib/people-exception-count";
+
+export type PaymentNotificationItem = {
+  key: string;
+  label: string;
+  detail: string;
+  href: string;
+  count: number;
+};
+
+export type PaymentNotificationSnapshot = {
+  total: number;
+  badges: Record<string, number>;
+  items: PaymentNotificationItem[];
+};
+
+type PaymentHeadRelation = {
+  code: string | null;
+  name: string | null;
+};
+
+type PaymentNotificationRequest = {
+  id: string;
+  request_no: string | null;
+  location_id: string | null;
+  location_code: string | null;
+  requested_by: string | null;
+  category: string | null;
+  amount: number | null;
+  amount_requested: number | null;
+  payment_mode: string | null;
+  payment_portal: string | null;
+  payment_reference: string | null;
+  bank_account_no: string | null;
+  ifsc: string | null;
+  account_holder_name: string | null;
+  status: string | null;
+  approval_status: string | null;
+  current_approver_user_id: string | null;
+  current_approver_role_id: string | null;
+  current_approver_role_ids: string[] | null;
+  payment_process_role_ids: string[] | null;
+  created_at: string | null;
+  payment_heads?: PaymentHeadRelation | PaymentHeadRelation[] | null;
+};
+
+const EMPTY_BADGES = {
+  people_all: 0,
+  people_review: 0,
+  people_exceptions: 0,
+  payments: 0,
+  expense_requests: 0,
+  payment_requests: 0,
+  payment_approvals: 0,
+  payment_process: 0,
+  payment_reports: 0
+};
+
+const TERMINAL_APPROVAL_STATUSES = new Set(["RE_APPROVED", "REJECTED", "RETURNED", "CANCELLED", "PROCESSING", "PROCESSED"]);
+
+export function emptyPaymentNotificationSnapshot(): PaymentNotificationSnapshot {
+  return {
+    total: 0,
+    badges: { ...EMPTY_BADGES },
+    items: []
+  };
+}
+
+function normalizeStatus(value: string | null | undefined) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function requestStatus(request: PaymentNotificationRequest) {
+  return normalizeStatus(request.approval_status || request.status);
+}
+
+function isExpenseRequest(request: PaymentNotificationRequest) {
+  return normalizeStatus(request.category) === "EXPENSE";
+}
+
+function isReturned(request: PaymentNotificationRequest) {
+  return requestStatus(request) === "RETURNED";
+}
+
+function hasCurrentApprover(request: PaymentNotificationRequest) {
+  return Boolean(request.current_approver_user_id || request.current_approver_role_id || request.current_approver_role_ids?.length);
+}
+
+function isFinalApproved(request: PaymentNotificationRequest) {
+  const status = requestStatus(request);
+  const approved = (
+    status === "APPROVED" ||
+    status === "OWNER_APPROVED" ||
+    status === "RE_APPROVED" ||
+    status.endsWith("_APPROVED")
+  );
+  return approved && !hasCurrentApprover(request);
+}
+
+function hasPaymentDetails(request: PaymentNotificationRequest) {
+  const mode = normalizeStatus(request.payment_mode || "account_transfer");
+  if (request.amount === null || request.amount === undefined) return false;
+  if (mode === "ONLINE" || mode === "ONLINE_PAYMENT") return Boolean(request.payment_portal?.trim());
+  if (mode === "UPI" || mode === "UPI_PAYMENT") return Boolean(request.payment_reference?.trim());
+  return Boolean(request.bank_account_no?.trim() && request.ifsc?.trim() && request.account_holder_name?.trim());
+}
+
+function needsPaymentDetails(request: PaymentNotificationRequest) {
+  return isExpenseRequest(request) && isFinalApproved(request) && !hasPaymentDetails(request);
+}
+
+function isPendingApproval(request: PaymentNotificationRequest) {
+  const status = requestStatus(request);
+  if (TERMINAL_APPROVAL_STATUSES.has(status)) return false;
+  return Boolean(request.current_approver_user_id || request.current_approver_role_id || request.current_approver_role_ids?.length || status === "PENDING" || !status);
+}
+
+function isReadyForPaymentProcess(request: PaymentNotificationRequest) {
+  const status = requestStatus(request);
+  if (status === "RE_APPROVED") return hasPaymentDetails(request);
+  return isFinalApproved(request) && hasPaymentDetails(request) && status !== "PROCESSED";
+}
+
+function canProcessPayment(request: PaymentNotificationRequest, authorization: AuthorizationContext) {
+  if (isCompanyOwner(authorization) || authorization.isMasterOwner) return true;
+  return (request.payment_process_role_ids ?? []).some((roleId) => authorization.effectiveRoleIds.includes(roleId));
+}
+
+function addItem(items: PaymentNotificationItem[], key: string, label: string, detail: string, href: string, count: number) {
+  if (count <= 0) return;
+  items.push({ key, label, detail, href, count });
+}
+
+function isAssignedToCurrentUser(request: PaymentNotificationRequest, authorization: AuthorizationContext) {
+  if (!canAccessPaymentLocation(authorization, request.location_id)) return false;
+  if (request.current_approver_user_id === authorization.userId) return true;
+  return Boolean(request.current_approver_role_id && authorization.effectiveRoleIds.includes(request.current_approver_role_id)) ||
+    (request.current_approver_role_ids ?? []).some((roleId) => authorization.effectiveRoleIds.includes(roleId));
+}
+
+async function loadPeopleReviewCount(authorization: AuthorizationContext) {
+  if (!supabaseAdmin || !authorization.companyId || !hasPermission(authorization, "people_review", "access")) return 0;
+  if (!authorization.hasAllLocationAccess && !authorization.isMasterOwner && authorization.locationScopeIds.length === 0) return 0;
+
+  const sources = [
+    { table: "employees", statusColumn: "profile_completion_status" },
+    { table: "workforce", statusColumn: "onboarding_status" },
+    { table: "contractors", statusColumn: "onboarding_status" },
+    { table: "vendors", statusColumn: "onboarding_status" },
+    { table: "helpers", statusColumn: "onboarding_status" }
+  ];
+  const results = await Promise.all(sources.map(async ({ table, statusColumn }) => {
+    let query = supabaseAdmin!
+      .from(table)
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", authorization.companyId!)
+      .eq(statusColumn, "under_review");
+    if (!authorization.hasAllLocationAccess && !authorization.isMasterOwner) {
+      query = query.in("location_id", authorization.locationScopeIds);
+    }
+    const result = await query;
+    return result.error ? 0 : result.count ?? 0;
+  }));
+
+  return results.reduce((total, count) => total + count, 0);
+}
+
+export async function loadPaymentNotificationSnapshot(authorization: AuthorizationContext): Promise<PaymentNotificationSnapshot> {
+  if (!authorization.companyId) return emptyPaymentNotificationSnapshot();
+
+  const accessSurface = currentAccessSurface();
+  const badges = { ...EMPTY_BADGES };
+  const items: PaymentNotificationItem[] = [];
+  badges.people_review = await loadPeopleReviewCount(authorization);
+  badges.people_exceptions = await loadPeopleExceptionCount(authorization);
+  badges.people_all = badges.people_review + badges.people_exceptions;
+  const canSeePayments = hasPermission(authorization, "payments", "access");
+  if (!canSeePayments || !supabaseAdmin) return { total: 0, badges, items };
+
+  const { data, error } = await supabaseAdmin
+    .from("payment_requests")
+    .select(`
+      id,
+      request_no,
+      location_id,
+      location_code,
+      requested_by,
+      category,
+      amount,
+      amount_requested,
+      payment_mode,
+      payment_portal,
+      payment_reference,
+      bank_account_no,
+      ifsc,
+      account_holder_name,
+      status,
+      approval_status,
+      current_approver_user_id,
+      current_approver_role_id,
+      current_approver_role_ids,
+      payment_process_role_ids,
+      created_at,
+      payment_heads (
+        code,
+        name
+      )
+    `)
+    .eq("company_id", authorization.companyId)
+    .order("created_at", { ascending: false })
+    .limit(1000);
+
+  if (error || !data) return { total: 0, badges, items };
+
+  const requests = data as PaymentNotificationRequest[];
+  const ownRequests = authorization.userId
+    ? requests.filter((request) => request.requested_by === authorization.userId)
+    : [];
+
+  if (hasPermission(authorization, "expense_requests", "access")) {
+    badges.expense_requests = ownRequests
+      .filter(isExpenseRequest)
+      .filter((request) => isReturned(request) || needsPaymentDetails(request))
+      .length;
+    addItem(
+      items,
+      "expense_requests",
+      "Expense requests",
+      `${badges.expense_requests} expense request${badges.expense_requests === 1 ? "" : "s"} need attention`,
+      "/payments/expense-request",
+      badges.expense_requests
+    );
+  }
+
+  if (hasPermission(authorization, "payment_requests", "access")) {
+    badges.payment_requests = ownRequests
+      .filter((request) => !isExpenseRequest(request))
+      .filter(isReturned)
+      .length;
+    addItem(
+      items,
+      "payment_requests",
+      "Payment requests",
+      `${badges.payment_requests} payment request${badges.payment_requests === 1 ? "" : "s"} returned for action`,
+      "/payments/requests",
+      badges.payment_requests
+    );
+  }
+
+  if (hasPermission(authorization, "payment_approvals", "access")) {
+    badges.payment_approvals = requests
+      .filter((request) => isAssignedToCurrentUser(request, authorization))
+      .filter(isPendingApproval)
+      .length;
+    addItem(
+      items,
+      "payment_approvals",
+      "Payment approvals",
+      `${badges.payment_approvals} request${badges.payment_approvals === 1 ? "" : "s"} waiting for approval`,
+      "/payments/approvals",
+      badges.payment_approvals
+    );
+  }
+
+  if (accessSurface === "dashboard" && hasPermission(authorization, "payment_process", "access")) {
+    badges.payment_process = requests
+      .filter((request) => canProcessPayment(request, authorization))
+      .filter(isReadyForPaymentProcess)
+      .filter((request) => requestStatus(request) !== "RE_APPROVED" || request.current_approver_user_id === authorization.userId || (request.current_approver_role_ids ?? []).some((roleId) => authorization.effectiveRoleIds.includes(roleId)))
+      .length;
+    addItem(
+      items,
+      "payment_process",
+      "Payment process",
+      `${badges.payment_process} approved payment${badges.payment_process === 1 ? "" : "s"} ready to process`,
+      "/payments/process",
+      badges.payment_process
+    );
+  }
+
+  badges.payments = badges.expense_requests + badges.payment_requests + badges.payment_approvals + badges.payment_process;
+
+  return {
+    total: badges.payments,
+    badges,
+    items
+  };
+}
