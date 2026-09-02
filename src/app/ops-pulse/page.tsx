@@ -10,8 +10,10 @@ import {
   resolveOperatingContext
 } from "@/lib/ops-pulse/operating-context";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
+import { OpsStationManpowerBoard } from "@/components/ops-station-manpower-board";
 
-type SearchParams = { date?: string; from?: string; to?: string; shift?: string; view?: string };
+type SearchParams = { date?: string; from?: string; to?: string; shift?: string; view?: string; location?: string };
 type ShipmentFact = {
   station_code: string;
   shipment_type: string | null;
@@ -144,6 +146,43 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
   const context = resolveOperatingContext(locationsResult.locations);
   const selectedLocations = context.selectedLocations;
   const date = selectedDate(searchParams?.date);
+  const dashboardView = searchParams?.view === "manpower" ? "manpower" : "operations";
+  if (dashboardView === "manpower") {
+    const requestedLocation = String(searchParams?.location ?? "");
+    const requestedStation = locationsResult.locations.find((location) => location.id === requestedLocation);
+    const manpowerLocations = requestedLocation === "all"
+      ? locationsResult.locations
+      : requestedStation ? [requestedStation] : selectedLocations;
+    let manpower: Awaited<ReturnType<typeof loadOpsStationManpower>> = { asOf: date, people: [] };
+    let manpowerError = locationsResult.error;
+    if (!manpowerError) {
+      try {
+        manpower = await loadOpsStationManpower(companyId, manpowerLocations, date);
+      } catch (error) {
+        manpowerError = error instanceof Error ? error.message : "Station manpower could not be loaded.";
+      }
+    }
+    return <AppShell active="Dashboard" pageCode="ops_pulse">
+      <div className="ops-command-center">
+        <PageHead eyebrow="Live workforce · scope controlled" title="Station Manpower" subtitle="Select an authorised station to see its People roster, reporting status, late arrivals and live availability." action={<span className="ops-live-badge"><i /> LIVE PEOPLE</span>} />
+        <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views">
+          <Link href="/ops-pulse">Operations view</Link>
+          <Link className="active" href="/ops-pulse?view=manpower">Station manpower</Link>
+        </nav>
+        {manpowerError ? <section className="panel message-panel error"><div className="panel-body"><strong>Data connection issue</strong><p className="subtle">{manpowerError}</p></div></section> : null}
+        <form className="ops-station-manpower-filter" action="/ops-pulse" method="get">
+          <input name="view" type="hidden" value="manpower" />
+          <label>Date<input name="date" type="date" defaultValue={date} max={todayIst()} /></label>
+          <label>Station<select name="location" defaultValue={requestedLocation || (manpowerLocations.length === 1 ? manpowerLocations[0]?.id : "all") || "all"}>
+            <option value="all">All authorised locations</option>
+            {locationsResult.locations.map((location) => <option key={location.id} value={location.id}>{location.station_code} · {location.station_name || location.city || location.station_code}</option>)}
+          </select></label>
+          <button type="submit">Apply station</button>
+        </form>
+        <OpsStationManpowerBoard asOf={manpower.asOf} locations={manpowerLocations} people={manpower.people} />
+      </div>
+    </AppShell>;
+  }
   const range = selectedRange(searchParams?.from, searchParams?.to, date);
   const { monthEnd, monthStart, yearStart } = ranges(date);
   const priorMonth = previousMonth(range.to);
@@ -270,6 +309,11 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
             : "A focused view of shipment movement, CPS readiness, cash controls and operational exceptions."}
           action={<span className="ops-live-badge"><i /> {isNow ? "LIVE MODE" : "OPERATIONAL"}</span>}
         />
+
+        <nav className="ops-dashboard-view-switch" aria-label="OpsPulse dashboard views">
+          <Link className="active" href="/ops-pulse">Operations view</Link>
+          <Link href="/ops-pulse?view=manpower">Station manpower</Link>
+        </nav>
 
         {locationsResult.error || factsResult.error || attendanceResult.error || cpsResult.error || scorecardResult.error || executivesResult.error ? (
           <section className="panel message-panel error"><div className="panel-body"><strong>Data connection issue</strong><p className="subtle">{locationsResult.error ?? factsResult.error ?? attendanceResult.error?.message ?? cpsResult.error?.message ?? scorecardResult.error?.message ?? executivesResult.error?.message}</p></div></section>
