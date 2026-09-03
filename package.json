@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:connect": "next dev apps/connect",
-    "prebuild": "node scripts/verify-contractor-schema-boundary.mjs && node scripts/verify-connect-workspace-boundary.mjs && node scripts/verify-connect-canonical-workforce.mjs && node scripts/verify-connect-approval-reportee-scope.mjs && node scripts/verify-connect-roster-integrity.mjs && node scripts/verify-connect-performance-navigation.mjs && node scripts/verify-canonical-access-routing.mjs",
+    "prebuild": "node scripts/verify-contractor-schema-boundary.mjs && node scripts/verify-connect-workspace-boundary.mjs && node scripts/verify-connect-canonical-workforce.mjs && node scripts/verify-connect-approval-reportee-scope.mjs && node scripts/verify-connect-roster-integrity.mjs && node scripts/verify-connect-performance-navigation.mjs && node scripts/verify-canonical-access-routing.mjs && node scripts/verify-performance-review-layout.mjs",
     "build": "next build",
     "build:connect": "next build apps/connect",
     "start": "next start",
