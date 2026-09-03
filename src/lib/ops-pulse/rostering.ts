@@ -137,6 +137,34 @@ export function rosterMonday(value: string) {
   return date.toISOString().slice(0, 10);
 }
 
+export function minimumFutureRosterMonday(today: string, leadDays: number) {
+  const earliest = addRosterDays(today, Math.max(0, leadDays));
+  const date = new Date(`${earliest}T00:00:00Z`);
+  const weekday = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + (weekday === 1 ? 0 : 8 - weekday));
+  return date.toISOString().slice(0, 10);
+}
+
+export function rosterSubmissionWindowError(input: {
+  isReplacement: boolean;
+  effectiveFrom: string;
+  today: string;
+  leadDays: number;
+}) {
+  if (!input.isReplacement) return null;
+  const currentWeekMonday = rosterMonday(input.today);
+  if (input.effectiveFrom < currentWeekMonday) {
+    return `This replacement roster must start on or after ${currentWeekMonday}.`;
+  }
+  if (input.effectiveFrom > currentWeekMonday) {
+    const minimumFuture = minimumFutureRosterMonday(input.today, input.leadDays);
+    if (input.effectiveFrom < minimumFuture) {
+      return `This replacement roster missed the deadline. Its effective Monday must be on or after ${minimumFuture}.`;
+    }
+  }
+  return null;
+}
+
 export function rosterPlanLocationIds(plan: { location_id?: string | null; hr_roster_plan_locations?: Array<{ location_id: string }> | null }) {
   const ids = (plan.hr_roster_plan_locations ?? []).map((item) => item.location_id).filter(Boolean);
   if (plan.location_id && !ids.includes(plan.location_id)) ids.unshift(plan.location_id);

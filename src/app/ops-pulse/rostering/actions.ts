@@ -10,6 +10,7 @@ import {
   loadOpsRosterCapabilities,
   loadOpsRosteringPolicy,
   resolveOpsRosterApprovalRoute,
+  rosterSubmissionWindowError,
   rosterMonday,
   rosterPlanLocationIds
 } from "@/lib/ops-pulse/rostering";
@@ -63,14 +64,6 @@ function rosterCutoffMessage(hours: number) {
 function isoWeekday(value: string) {
   const day = new Date(`${value}T00:00:00Z`).getUTCDay();
   return day === 0 ? 7 : day;
-}
-
-function nextRosterMonday(today: string, leadDays: number) {
-  const earliest = addRosterDays(today, Math.max(0, leadDays));
-  const date = new Date(`${earliest}T00:00:00Z`);
-  const weekday = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() + (weekday === 1 ? 0 : 8 - weekday));
-  return date.toISOString().slice(0, 10);
 }
 
 async function assertPlanner(authorization: AuthorizationContext) {
@@ -157,8 +150,7 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
       .limit(1)
       .maybeSingle();
     if (previous.error) throw new Error(previous.error.message);
-    const policy = await loadOpsRosteringPolicy(companyId, locationId);
-    const start = previous.data ? nextRosterMonday(indiaToday(), policy.submissionLeadDays) : rosterMonday(indiaToday());
+    const start = rosterMonday(indiaToday());
     const revision = Number(previous.data?.revision_no ?? 0) + 1;
     const created = await db().from("hr_roster_plans").insert({
       company_id: companyId,
@@ -350,9 +342,13 @@ export async function submitOpsRoster(planId: string): Promise<ActionResult> {
     if (count.error) throw new Error(count.error.message);
     if (!people.people.length || !count.count) return { ok: false, message: "Add at least one roster assignment before applying this pattern." };
     const policy = await loadOpsRosteringPolicy(companyId, plan.location_id);
-    if (plan.supersedes_plan_id && plan.effective_from < addRosterDays(indiaToday(), policy.submissionLeadDays)) {
-      return { ok: false, message: `This change missed the submission deadline. Its effective Monday must be at least ${policy.submissionLeadDays} days ahead.` };
-    }
+    const submissionWindowError = rosterSubmissionWindowError({
+      isReplacement: Boolean(plan.supersedes_plan_id),
+      effectiveFrom: plan.effective_from,
+      today: indiaToday(),
+      leadDays: policy.submissionLeadDays
+    });
+    if (submissionWindowError) return { ok: false, message: submissionWindowError };
     const route = await resolveOpsRosterApprovalRoute(authorization, policy);
     if (route.direct) {
       await publishPlan(companyId, authorization, plan, "Applied under Rostering Policy");
