@@ -16,7 +16,7 @@ const checks = [
   [filters.includes("Select all") && filters.includes('type="checkbox"'), "Categorical filters must support multi-tick selection."],
   [exportRoute.includes('requirePagePermission("raw_punch_reports", "access")'), "The export must enforce Raw Punches permission."],
   [exportRoute.includes("authorization.locationScopeIds"), "The export must enforce location scope."],
-  [exportRoute.includes("createStreamingXlsx") && xlsxStream.includes("generateNodeStream"), "The export must stream a real XLSX workbook."],
+  [exportRoute.includes("createStreamingXlsx") && xlsxStream.includes("streamingZip") && xlsxStream.includes("createDeflateRaw"), "The export must stream a real XLSX workbook."],
   [!exportRoute.includes('.in("raw_event_id"'), "The full export must not issue one processing query per raw-event ID batch."],
   [exportRoute.includes("rows.length <= 5_000") && exportRoute.includes("enrichProcessingHistory"), "Large exports must skip the unbounded processing-history scan."],
   [exportRoute.includes("chunks(remainingOffsets, 8)") && exportRoute.includes("exportCutoff"), "Full exports must load stable raw-event pages concurrently."],
