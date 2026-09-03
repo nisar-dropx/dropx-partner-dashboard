@@ -1,6 +1,5 @@
 import "server-only";
 
-import { resolveConfiguredApprovalWorkflow } from "@/lib/approval-workflow-routing";
 import { isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
@@ -298,116 +297,109 @@ export async function loadOpsRosterCapabilities(authorization: AuthorizationCont
 }
 
 type ApprovalCandidate = {
+  assignmentId: string | null;
   userId: string;
   designationId: string | null;
   name: string;
 };
 
-async function reportingManagerChain(authorization: AuthorizationContext, assignmentId: string | null): Promise<ApprovalCandidate[]> {
-  if (!assignmentId) return [];
+async function assignmentForUser(companyId: string, userId: string) {
+  const link = await db().from("hr_user_person_links").select("person_id").eq("company_id", companyId).eq("user_id", userId).eq("status", "active").maybeSingle();
+  if (link.error) throw new Error(link.error.message);
+  if (!link.data?.person_id) return null;
+  const engagement = await db().from("hr_engagements").select("id").eq("company_id", companyId).eq("person_id", link.data.person_id).eq("status", "active").order("start_date", { ascending: false }).limit(1).maybeSingle();
+  if (engagement.error) throw new Error(engagement.error.message);
+  if (!engagement.data?.id) return null;
   const today = indiaToday();
-  const chain: ApprovalCandidate[] = [];
-  const seen = new Set([assignmentId]);
-  let subjectAssignmentId = assignmentId;
-  for (let depth = 0; depth < 10; depth += 1) {
-    const relationship = await db().from("hr_reporting_relationships")
-      .select("manager_assignment_id")
-      .eq("company_id", authorization.companyId)
-      .eq("subject_assignment_id", subjectAssignmentId)
-      .eq("relationship_type", "solid_line")
-      .eq("is_primary", true)
-      .lte("effective_from", today)
-      .or(`effective_to.is.null,effective_to.gte.${today}`)
-      .order("effective_from", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (relationship.error) throw new Error(relationship.error.message);
-    const managerAssignmentId = relationship.data?.manager_assignment_id;
-    if (!managerAssignmentId || seen.has(managerAssignmentId)) break;
-    seen.add(managerAssignmentId);
-    subjectAssignmentId = managerAssignmentId;
-
-    const managerAssignment = await db().from("hr_work_assignments")
-      .select("engagement_id,designation_id")
-      .eq("company_id", authorization.companyId)
-      .eq("id", managerAssignmentId)
-      .maybeSingle();
-    if (managerAssignment.error) throw new Error(managerAssignment.error.message);
-    if (!managerAssignment.data?.engagement_id) continue;
-    const engagement = await db().from("hr_engagements")
-      .select("person_id")
-      .eq("company_id", authorization.companyId)
-      .eq("id", managerAssignment.data.engagement_id)
-      .eq("status", "active")
-      .maybeSingle();
-    if (engagement.error) throw new Error(engagement.error.message);
-    if (!engagement.data?.person_id) continue;
-    const [person, link] = await Promise.all([
-      db().from("hr_people").select("display_name").eq("company_id", authorization.companyId).eq("id", engagement.data.person_id).eq("status", "active").maybeSingle(),
-      db().from("hr_user_person_links").select("user_id").eq("company_id", authorization.companyId).eq("person_id", engagement.data.person_id).eq("status", "active").maybeSingle()
-    ]);
-    if (person.error || link.error) throw new Error(person.error?.message ?? link.error?.message ?? "The reporting line could not be resolved.");
-    if (link.data?.user_id && link.data.user_id !== authorization.userId) {
-      chain.push({ userId: link.data.user_id, designationId: managerAssignment.data.designation_id, name: person.data?.display_name ?? "Reporting manager" });
-    }
-  }
-  return chain;
+  const assignment = await db().from("hr_work_assignments").select("id").eq("company_id", companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true).lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`).order("effective_from", { ascending: false }).limit(1).maybeSingle();
+  if (assignment.error) throw new Error(assignment.error.message);
+  return assignment.data?.id ?? null;
 }
 
-export async function resolveOpsRosterApprovalRoute(authorization: AuthorizationContext, policy: OpsRosterPolicy): Promise<OpsRosterApprovalRoute> {
-  if (!policy.approvalRequired) return { direct: true, approvalRequired: false, summary: "Applies directly under the station policy.", error: null, steps: [] };
-  const [capabilities, identity] = await Promise.all([loadOpsRosterCapabilities(authorization), actorIdentity(authorization)]);
-  if (capabilities.canPublishDirect) return { direct: true, approvalRequired: false, summary: "Your designation can apply roster changes directly.", error: null, steps: [] };
-
-  if (identity.workerType && identity.workerId) {
-    const configured = await resolveConfiguredApprovalWorkflow({
-      companyId: authorization.companyId!,
-      workerType: identity.workerType,
-      workerId: identity.workerId,
-      workflowCode: "roster_publish"
-    });
-    if (configured) {
-      return {
-        direct: false,
-        approvalRequired: true,
-        error: null,
-        summary: `Approval route: ${configured.steps.map((step) => step.approver_name).join(" → ")}.`,
-        steps: configured.steps.map((step, index) => ({
-          stageNo: index + 1,
-          stageType: index === 0 ? "level_1" : index === configured.steps.length - 1 && /hr/i.test(step.step_name) ? "hr" : "level_2",
-          approverUserId: step.approver_user_id,
-          approverName: step.approver_name,
-          routeId: step.route_id,
-          resolvedVia: step.resolved_via,
-          originalApproverPersonId: step.original_approver_person_id,
-          fallbackReason: step.fallback_reason
-        }))
-      };
-    }
-  }
-
-  const [chain, rules] = await Promise.all([
-    reportingManagerChain(authorization, identity.assignmentId),
-    db().from("hr_roster_designation_rules")
-      .select("designation_id,can_approve,can_approve_l1,can_approve_l2")
-      .eq("company_id", authorization.companyId)
+async function approverFromAssignment(companyId: string, assignmentId: string): Promise<ApprovalCandidate | null> {
+  const assignment = await db().from("hr_work_assignments").select("id,engagement_id,designation_id").eq("company_id", companyId).eq("id", assignmentId).maybeSingle();
+  if (assignment.error) throw new Error(assignment.error.message);
+  if (!assignment.data?.engagement_id) return null;
+  const engagement = await db().from("hr_engagements").select("person_id").eq("company_id", companyId).eq("id", assignment.data.engagement_id).eq("status", "active").maybeSingle();
+  if (engagement.error) throw new Error(engagement.error.message);
+  if (!engagement.data?.person_id) return null;
+  const [person, link] = await Promise.all([
+    db().from("hr_people").select("display_name").eq("company_id", companyId).eq("id", engagement.data.person_id).eq("status", "active").maybeSingle(),
+    db().from("hr_user_person_links").select("user_id").eq("company_id", companyId).eq("person_id", engagement.data.person_id).eq("status", "active").maybeSingle()
   ]);
-  if (rules.error) throw new Error(rules.error.message);
-  const byDesignation = new Map((rules.data ?? []).map((rule) => [rule.designation_id, rule]));
-  const level1Index = chain.findIndex((manager) => {
-    const rule = manager.designationId ? byDesignation.get(manager.designationId) : null;
-    return Boolean(rule?.can_approve_l1 ?? rule?.can_approve);
-  });
-  const level1 = level1Index >= 0 ? chain[level1Index] : null;
-  const level2 = policy.approvalLevels === 2 && level1
-    ? chain.slice(level1Index + 1).find((manager) => Boolean(manager.designationId && byDesignation.get(manager.designationId)?.can_approve_l2)) ?? null
-    : null;
-  if (!level1) return { direct: false, approvalRequired: true, summary: "No Level 1 roster approver is configured above you.", error: "No Level 1 roster approver is configured above you. Contact HR.", steps: [] };
-  if (policy.approvalLevels === 2 && !level2) return { direct: false, approvalRequired: true, summary: "No Level 2 roster approver is configured above Level 1.", error: "No Level 2 roster approver is configured above Level 1. Contact HR.", steps: [] };
-  const managerSteps: OpsRosterApprovalRoute["steps"] = [
-    { stageNo: 1, stageType: "level_1", approverUserId: level1.userId, approverName: level1.name },
-    ...(level2 ? [{ stageNo: 2, stageType: "level_2" as const, approverUserId: level2.userId, approverName: level2.name }] : [])
-  ];
+  if (person.error || link.error) throw new Error(person.error?.message ?? link.error?.message ?? "The station reporting line could not be resolved.");
+  return link.data?.user_id ? { assignmentId, userId: link.data.user_id, designationId: assignment.data.designation_id, name: person.data?.display_name ?? "Station manager" } : null;
+}
+
+async function locationRosterApprovalChain(authorization: AuthorizationContext, locationId: string, requiredLevels: number) {
+  const companyId = authorization.companyId!;
+  const roleResult = await db().from("station_responsibility_roles").select("id,code,escalation_order,routes_approvals")
+    .eq("company_id", companyId).eq("is_active", true).order("escalation_order");
+  if (roleResult.error) throw new Error(roleResult.error.message);
+  const allRoles = roleResult.data ?? [];
+  const configuredRoles = allRoles.filter((role) => role.routes_approvals);
+  const roles = configuredRoles.length ? configuredRoles : allRoles.filter((role) => role.code === "station_manager");
+  const missingOwner = "Assign the station roster owner in People before submitting this roster.";
+  if (!roles.length) return { chain: [] as ApprovalCandidate[], error: missingOwner };
+  const order = new Map(roles.map((role) => [role.id, Number(role.escalation_order)]));
+  const now = new Date().toISOString();
+  const assignmentResult = await db().from("station_responsibility_assignments")
+    .select("responsibility_role_id,assignment_id,assignee_user_id")
+    .eq("company_id", companyId).eq("station_id", locationId).eq("is_primary", true)
+    .in("responsibility_role_id", roles.map((role) => role.id))
+    .lte("effective_from", now).or(`effective_to.is.null,effective_to.gte.${now}`);
+  if (assignmentResult.error) throw new Error(assignmentResult.error.message);
+  const owner = [...(assignmentResult.data ?? [])].sort((left, right) => (order.get(left.responsibility_role_id) ?? 9999) - (order.get(right.responsibility_role_id) ?? 9999))[0];
+  if (!owner?.assignee_user_id) return { chain: [] as ApprovalCandidate[], error: missingOwner };
+  const ownerAssignmentId = owner.assignment_id ?? await assignmentForUser(companyId, owner.assignee_user_id);
+  const ownerApprover = ownerAssignmentId ? await approverFromAssignment(companyId, ownerAssignmentId) : null;
+  const chain: ApprovalCandidate[] = [];
+  const add = (candidate: ApprovalCandidate | null) => {
+    if (candidate && candidate.userId !== authorization.userId && !chain.some((item) => item.userId === candidate.userId)) chain.push(candidate);
+  };
+  add(ownerApprover ?? { assignmentId: ownerAssignmentId, userId: owner.assignee_user_id, designationId: null, name: "Station roster owner" });
+  let subjectAssignmentId = ownerAssignmentId;
+  const seen = new Set(subjectAssignmentId ? [subjectAssignmentId] : []);
+  const today = indiaToday();
+  for (let depth = 0; subjectAssignmentId && chain.length < requiredLevels && depth < 12; depth += 1) {
+    const relationship = await db().from("hr_reporting_relationships").select("manager_assignment_id")
+      .eq("company_id", companyId).eq("subject_assignment_id", subjectAssignmentId)
+      .eq("relationship_type", "solid_line").eq("is_primary", true)
+      .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`)
+      .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+    if (relationship.error) throw new Error(relationship.error.message);
+    const nextAssignmentId = relationship.data?.manager_assignment_id;
+    if (!nextAssignmentId || seen.has(nextAssignmentId)) break;
+    seen.add(nextAssignmentId);
+    subjectAssignmentId = nextAssignmentId;
+    add(await approverFromAssignment(companyId, nextAssignmentId));
+  }
+  return chain.length < requiredLevels
+    ? { chain, error: `The station has only ${chain.length} active manager level${chain.length === 1 ? "" : "s"}. Complete its People reporting line before submitting.` }
+    : { chain, error: null };
+}
+
+export function canApproveOpsRosterHr(authorization: AuthorizationContext) {
+  return isCompanyOwner(authorization)
+    || [
+      "OWNER", "OWNER_BREAK_GLASS", "OPERATIONS_MANAGING_PARTNER",
+      "HR_HEAD", "HR_HAEAD", "HR_OPERATIONS", "HR_EXECUTIVE",
+      "OPERATIONS_HRM", "OPERATIONS_HRE"
+    ].includes(String(authorization.roleCode ?? ""));
+}
+
+export async function resolveOpsRosterApprovalRoute(authorization: AuthorizationContext, policy: OpsRosterPolicy, locationId: string | null | undefined): Promise<OpsRosterApprovalRoute> {
+  if (!policy.approvalRequired) return { direct: true, approvalRequired: false, summary: "Applies directly under the station policy.", error: null, steps: [] };
+  if (!locationId) return { direct: false, approvalRequired: true, summary: "Choose a station before submitting the roster.", error: "Choose a station before submitting the roster.", steps: [] };
+  const resolved = await locationRosterApprovalChain(authorization, locationId, policy.approvalLevels);
+  if (resolved.error) return { direct: false, approvalRequired: true, summary: resolved.error, error: resolved.error, steps: [] };
+  const managerSteps: OpsRosterApprovalRoute["steps"] = resolved.chain.slice(0, policy.approvalLevels).map((approver, index) => ({
+    stageNo: index + 1,
+    stageType: index === 0 ? "level_1" : "level_2",
+    approverUserId: approver.userId,
+    approverName: approver.name,
+    resolvedVia: "station_reporting_chain"
+  }));
   const steps = policy.hrApprovalRequired
     ? [...managerSteps, { stageNo: managerSteps.length + 1, stageType: "hr" as const, approverUserId: null, approverName: "HR roster approver group" }]
     : managerSteps;
@@ -540,8 +532,6 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
 }
 
 export async function loadAssignedOpsRosterApprovals(authorization: AuthorizationContext): Promise<OpsRosterApproval[]> {
-  const capabilities = await loadOpsRosterCapabilities(authorization);
-  if (!capabilities.canApprove) return [];
   const result = await db().from("hr_roster_approval_steps")
     .select("id,plan_id,stage_no,stage_type,status,approver_user_id")
     .eq("company_id", authorization.companyId)
@@ -550,7 +540,7 @@ export async function loadAssignedOpsRosterApprovals(authorization: Authorizatio
     .limit(200);
   if (result.error) throw new Error(result.error.message);
   const owner = isCompanyOwner(authorization);
-  const steps = (result.data ?? []).filter((step) => owner || step.approver_user_id === authorization.userId || (step.stage_type === "hr" && !step.approver_user_id && capabilities.canApproveHr));
+  const steps = (result.data ?? []).filter((step) => owner || step.approver_user_id === authorization.userId || (step.stage_type === "hr" && !step.approver_user_id && canApproveOpsRosterHr(authorization)));
   if (!steps.length) return [];
   const planIds = [...new Set(steps.map((step) => step.plan_id))];
   const plans = await db().from("hr_roster_plans")

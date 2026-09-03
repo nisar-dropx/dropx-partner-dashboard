@@ -295,13 +295,16 @@ export async function decideConnectAttendanceApproval(account: ConnectAccount, r
 
 async function canApproveUnassignedRosterHr(account: ConnectAccount) {
   if (/owner/i.test(account.role ?? "")) return true;
-  const identity = await connectApproverIdentity(account);
-  const designationId = identity?.assignment?.designation_id;
-  if (!designationId) return false;
-  const result = await db().from("hr_roster_designation_rules").select("can_approve_hr")
-    .eq("company_id", account.companyId).eq("designation_id", designationId).maybeSingle();
+  const userId = await approverUserId(account);
+  if (!userId) return false;
+  const result = await db().from("hr_user_access").select("role_code")
+    .eq("company_id", account.companyId).eq("user_id", userId).eq("is_active", true).maybeSingle();
   if (result.error) throw new Error(result.error.message);
-  return Boolean(result.data?.can_approve_hr);
+  return [
+    "OWNER", "OWNER_BREAK_GLASS", "PEOPLE_MANAGING_PARTNER",
+    "HR_HEAD", "HR_HAEAD", "HR_OPERATIONS", "HR_EXECUTIVE",
+    "PEOPLE_HRM", "PEOPLE_HRE"
+  ].includes(String(result.data?.role_code ?? "").toUpperCase());
 }
 
 export async function listConnectRosterApprovals(account: ConnectAccount) {
@@ -610,6 +613,38 @@ export async function decideConnectRosterSwapApproval(account: ConnectAccount, r
     p_note: note || null
   });
   if (!rpc.error) {
+    const decided = rpc.data as {
+      status: string;
+      approver_user_id: string | null;
+      roster_date: string;
+      requester_worker_type: string;
+      requester_worker_id: string;
+      partner_worker_type: string;
+      partner_worker_id: string;
+    };
+    if (accept && decided.status === "pending_manager" && decided.approver_user_id) {
+      await db().from("people_web_notifications").upsert({
+        company_id: account.companyId,
+        recipient_user_id: decided.approver_user_id,
+        event_code: "roster_swap_approval_required",
+        title: "Shift swap awaiting approval",
+        body: `A shift swap for ${decided.roster_date} is ready for your approval.`,
+        href: "/approvals",
+        source_key: requestId,
+        data: { requestId, rosterDate: decided.roster_date }
+      }, { onConflict: "company_id,event_code,source_key,recipient_user_id", ignoreDuplicates: true });
+      return "Approval recorded and sent to the next approver.";
+    }
+    await notifyRosterSwapWorkers({
+      companyId: account.companyId,
+      requesterWorkerType: decided.requester_worker_type,
+      requesterWorkerId: decided.requester_worker_id,
+      partnerWorkerType: decided.partner_worker_type,
+      partnerWorkerId: decided.partner_worker_id,
+      requestId,
+      rosterDate: decided.roster_date,
+      approved: accept
+    });
     return accept ? "Shift swap approved." : "Shift swap rejected.";
   }
   const missingRpc = /Could not find the function|schema cache|does not exist/i.test(rpc.error.message);
