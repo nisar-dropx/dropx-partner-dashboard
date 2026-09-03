@@ -19,6 +19,7 @@ const checks = [
   [exportRoute.includes("createStreamingXlsx") && xlsxStream.includes("generateNodeStream"), "The export must stream a real XLSX workbook."],
   [!exportRoute.includes('.in("raw_event_id"'), "The full export must not issue one processing query per raw-event ID batch."],
   [exportRoute.includes("rows.length <= 5_000") && exportRoute.includes("enrichProcessingHistory"), "Large exports must skip the unbounded processing-history scan."],
+  [exportRoute.includes("chunks(remainingOffsets, 8)") && exportRoute.includes("exportCutoff"), "Full exports must load stable raw-event pages concurrently."],
   [exportButton.includes("Preparing Excel") && exportButton.includes('role="alert"'), "The export must show progress and a usable error."],
   [mapping.includes("existingByProfile") && mapping.includes("config.tables"), "Mapping filters must validate the real People or Workforce profile rather than trusting a stale enrolment link."],
   [resolver.includes('match: "serial"') && resolver.includes('match: "terminal"') && resolver.includes('match: "network"'), "Location resolution must support serial, terminal, and network fallbacks."]

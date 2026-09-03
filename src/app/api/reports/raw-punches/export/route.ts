@@ -89,14 +89,25 @@ export async function GET(request: NextRequest) {
 
     const { mappings: currentMappings, peopleIds, workforceIds } = await loadCurrentRawPunchMappingIds(companyId);
 
-    const rows: RawPunchRow[] = [];
     const batchSize = 1000;
-    for (let offset = 0; ; offset += batchSize) {
+    const exportCutoff = new Date().toISOString();
+    const allMappedIds = Array.from(new Set([...peopleIds, ...workforceIds]));
+    const includedIds = Array.from(new Set([
+      ...(mapping.includes("people") ? peopleIds : []),
+      ...(mapping.includes("workforce") ? workforceIds : [])
+    ]));
+    const includeUnmapped = mapping.includes("unmapped");
+
+    async function loadRawEventBatch(offset: number, includeCount = false) {
       let query = admin
         .from("biometric_raw_events")
-        .select("id, device_id, device_serial, terminal_id, trans_id, enrolment_id, punch_time, received_at, event_type, source_ip, worker_status, created_at")
+        .select(
+          "id, device_id, device_serial, terminal_id, trans_id, enrolment_id, punch_time, received_at, event_type, source_ip, worker_status, created_at",
+          includeCount ? { count: "exact" } : undefined
+        )
         .eq("company_id", companyId)
         .eq("event_type", "TimeLog")
+        .lte("created_at", exportCutoff)
         .order("punch_time", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
 
@@ -113,12 +124,6 @@ export async function GET(request: NextRequest) {
       if (search) query = query.or(`enrolment_id.ilike.%${search}%,device_serial.ilike.%${search}%,terminal_id.ilike.%${search}%,trans_id.ilike.%${search}%`);
 
       if (mapping.length && mapping.length < 3) {
-        const allMappedIds = Array.from(new Set([...peopleIds, ...workforceIds]));
-        const includedIds = Array.from(new Set([
-          ...(mapping.includes("people") ? peopleIds : []),
-          ...(mapping.includes("workforce") ? workforceIds : [])
-        ]));
-        const includeUnmapped = mapping.includes("unmapped");
         if (!includeUnmapped) {
           query = includedIds.length ? query.in("enrolment_id", includedIds) : query.eq("enrolment_id", "__no_matching_profiles__");
         } else if (!mapping.includes("people") || !mapping.includes("workforce")) {
@@ -131,9 +136,21 @@ export async function GET(request: NextRequest) {
 
       const response = await query.range(offset, offset + batchSize - 1);
       if (response.error) throw new Error(response.error.message);
-      const batch = (response.data ?? []) as RawPunchRow[];
-      rows.push(...batch);
-      if (batch.length < batchSize) break;
+      return {
+        rows: (response.data ?? []) as RawPunchRow[],
+        total: response.count ?? 0
+      };
+    }
+
+    const firstBatch = await loadRawEventBatch(0, true);
+    const rows = [...firstBatch.rows];
+    const remainingOffsets = Array.from(
+      { length: Math.max(Math.ceil(firstBatch.total / batchSize) - 1, 0) },
+      (_, index) => (index + 1) * batchSize
+    );
+    for (const offsetGroup of chunks(remainingOffsets, 8)) {
+      const batches = await Promise.all(offsetGroup.map((offset) => loadRawEventBatch(offset)));
+      batches.forEach((batch) => rows.push(...batch.rows));
     }
 
     // Processing-history enrichment is useful for a focused export, but scanning every
