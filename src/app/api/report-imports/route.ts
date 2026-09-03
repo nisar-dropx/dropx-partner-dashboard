@@ -720,7 +720,14 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
       else variablePay += amount;
     });
 
-    const deliveryRate = Number(mapping.delivery_rate ?? 0);
+    // Number(mapping.delivery_rate ?? 0) still comes out NaN (which the
+    // upsert then sends through as null, tripping cps_shipment_daily's
+    // del_rate NOT NULL constraint) whenever delivery_rate is present but
+    // non-numeric, e.g. "" — confirmed live: a 2026-09-01 batch failed with
+    // exactly that constraint violation for a provider_employee_id whose
+    // mapping row had an empty-string delivery_rate rather than a real null.
+    const deliveryRateRaw = Number(mapping.delivery_rate ?? 0);
+    const deliveryRate = Number.isFinite(deliveryRateRaw) ? deliveryRateRaw : 0;
     const cReturnRate = Number(mapping.pickup_rate ?? 0);
     const mfnRate = Number(mapping.mfn_rate ?? 0);
     const mfnReturnRate = Number(mapping.mfn_return_rate ?? 0);
