@@ -26,7 +26,7 @@ const checks = [
   [opsCodes.includes('"delivery_associates"') && !/"contractors"|"workers"|"vendors"/.test(opsCodes), "Independent contractor, helper and vendor pages must not belong to the OpsPulse surface."],
   [!middleware.match(/CLEAN_OPS_ROOTS[^;]+/)?.[0].includes('"/helpers"'), "The standalone Helper register must not be reachable on the OpsPulse host."],
   [permissionMigration.includes("role.product_code = 'operations'") && permissionMigration.includes("page.code in ('contractors', 'workers', 'vendors')"), "Existing Operations-role access must be moved to Workforce without retaining unrelated register grants."],
-  [content.includes('return "Candidate registration pending"') && content.includes('return "Workforce approval pending"') && content.includes("WorkforceRegisterSummary"), "The register must distinguish candidate, approval and active lifecycle stages."],
+  [content.includes('return "Pending"') && content.includes('return "Workforce approval pending"') && content.includes('row.status === "Pending"') && content.includes("WorkforceRegisterSummary"), "The register must distinguish candidate, approval and active lifecycle stages."],
 ];
 
 const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);

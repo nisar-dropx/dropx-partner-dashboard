@@ -217,7 +217,7 @@ function fieldExecutiveStatus(
 
 function WorkforceRegisterSummary({ rows }: { rows: FieldExecutiveListRow[] }) {
   const registrationPending = rows.filter((row) =>
-    row.status === "Candidate registration pending" || row.status === "Correction requested"
+    row.status === "Pending" || row.status === "Correction requested"
   ).length;
   const approvalPending = rows.filter((row) =>
     row.status === "Workforce approval pending" || row.status === "Activation pending"
