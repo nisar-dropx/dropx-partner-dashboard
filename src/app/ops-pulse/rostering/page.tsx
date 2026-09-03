@@ -32,7 +32,7 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
     selected ? loadOpsRosterWorkspace(companyId, selected) : Promise.resolve(null),
     loadOpsRosteringPolicy(companyId, selected?.id)
   ]);
-  const route = capabilities.canPlan ? await resolveOpsRosterApprovalRoute(authorization, policy) : null;
+  const route = capabilities.canPlan ? await resolveOpsRosterApprovalRoute(authorization, policy, selected?.id) : null;
   const selectedPlan = workspace?.selectedPlan ?? null;
   const canAdd = hasPermission(authorization, "ops_rostering", "add") && capabilities.canPlan;
   const canEdit = hasPermission(authorization, "ops_rostering", "edit") && capabilities.canPlan;
@@ -64,7 +64,7 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
       {view === "approvals" ? <OpsRosterApprovals approvals={approvals} /> : selected && workspace ? <>
         <div className="capacity-action-line" style={{ marginBottom: 10 }}>
           <strong>{capabilities.designationName || authorization.roleName || "Authorised user"}</strong>
-          <span>{capabilities.canPlan ? "Can prepare roster changes" : "View only"} · {capabilities.canApprove ? "Can approve assigned stages" : "No approval authority"} · {policy.approvalRequired ? `${policy.approvalLevels} manager approval level${policy.approvalLevels === 2 ? "s" : ""}${policy.hrApprovalRequired ? " + HR" : ""}` : "Direct apply"}</span>
+          <span>{capabilities.canPlan ? "Can prepare roster changes" : "View only"} · assigned approvers can act · {policy.approvalRequired ? "station owner → reporting manager → HR" : "direct apply"}</span>
         </div>
         <OpsRosterPlanner
           key={`${selected.id}:${selectedPlan?.id ?? "blank"}`}

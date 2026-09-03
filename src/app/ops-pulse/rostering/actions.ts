@@ -7,6 +7,7 @@ import {
   addRosterDays,
   canUseRosterLocation,
   indiaToday,
+  canApproveOpsRosterHr,
   loadOpsRosterCapabilities,
   loadOpsRosteringPolicy,
   resolveOpsRosterApprovalRoute,
@@ -349,7 +350,7 @@ export async function submitOpsRoster(planId: string): Promise<ActionResult> {
       leadDays: policy.submissionLeadDays
     });
     if (submissionWindowError) return { ok: false, message: submissionWindowError };
-    const route = await resolveOpsRosterApprovalRoute(authorization, policy);
+    const route = await resolveOpsRosterApprovalRoute(authorization, policy, plan.location_id);
     if (route.direct) {
       await publishPlan(companyId, authorization, plan, "Applied under Rostering Policy");
       refreshRosterViews();
@@ -395,8 +396,6 @@ export async function decideOpsRoster(input: { planId: string; stepId: string; d
     const companyId = requireCompanyId(authorization);
     if (!input.planId || !input.stepId || !["approved", "returned", "rejected"].includes(input.decision)) return { ok: false, message: "Select a valid roster decision." };
     if (input.decision !== "approved" && input.note.trim().length < 3) return { ok: false, message: "Add a short reason before returning or rejecting the roster." };
-    const capabilities = await loadOpsRosterCapabilities(authorization);
-    if (!capabilities.canApprove) return { ok: false, message: "Your designation is not authorised to approve rosters. Contact HR." };
     const stepResult = await db().from("hr_roster_approval_steps")
       .select("id,stage_no,stage_type,approver_user_id,status")
       .eq("company_id", companyId)
@@ -406,10 +405,8 @@ export async function decideOpsRoster(input: { planId: string; stepId: string; d
     if (stepResult.error) throw new Error(stepResult.error.message);
     const step = stepResult.data;
     if (!step || step.status !== "pending") return { ok: false, message: "This approval is no longer pending." };
-    const authorised = isCompanyOwner(authorization) || step.approver_user_id === authorization.userId || (step.stage_type === "hr" && !step.approver_user_id && capabilities.canApproveHr);
+    const authorised = isCompanyOwner(authorization) || step.approver_user_id === authorization.userId || (step.stage_type === "hr" && !step.approver_user_id && canApproveOpsRosterHr(authorization));
     if (!authorised) return { ok: false, message: "This approval belongs to another approver." };
-    const stageAllowed = isCompanyOwner(authorization) || (step.stage_type === "level_1" ? capabilities.canApproveL1 : step.stage_type === "level_2" ? capabilities.canApproveL2 : capabilities.canApproveHr);
-    if (!stageAllowed) return { ok: false, message: "Your designation is not configured for this approval stage." };
     const plan = await loadPlan(companyId, authorization, input.planId);
     if (plan.status !== "pending_approval") return { ok: false, message: "This roster is no longer awaiting approval." };
     const now = new Date().toISOString();

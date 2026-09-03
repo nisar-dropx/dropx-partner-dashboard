@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
+import { resolveConfiguredApprovalWorkflow } from "../../../../src/lib/approval-workflow-routing";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 type WorkerType = "employee" | "contractor";
@@ -336,8 +337,34 @@ export async function POST(request: Request) {
     if (requester.location_id !== partner.location_id) throw new Error("Choose a colleague from the same location.");
     if (!isMeaningfulRosterSwap(requester, partner)) throw new Error("Choose a colleague whose roster is different for this date.");
     const leadHours = await swapCutoff(account.companyId); assertSwapBeforeCutoff(requester, partner, rosterDate, leadHours);
-    const approverUserId = await immediateManager(account.companyId, workerType, account.id);
-    const created = await db().rpc("hr_create_roster_swap_request", { p_company_id: account.companyId, p_requester_source_entry_id: requester.id, p_partner_source_entry_id: partner.id, p_roster_date: rosterDate, p_requester_worker_type: requester.worker_type, p_requester_worker_id: requester.worker_id, p_approver_user_id: approverUserId, p_requester_note: note || null });
+    const configuredRoute = await resolveConfiguredApprovalWorkflow({
+      companyId: account.companyId,
+      workerType: requester.worker_type,
+      workerId: requester.worker_id,
+      workflowCode: "roster_swap"
+    });
+    const approvalSteps = configuredRoute?.steps ?? [{
+      step_name: "Immediate reporting manager approval",
+      approver_user_id: await immediateManager(account.companyId, requester.worker_type, requester.worker_id),
+      approver_person_id: null,
+      route_id: null,
+      resolved_via: "reporting_chain",
+      original_approver_person_id: null,
+      fallback_reason: null
+    }];
+    let created = await db().rpc("hr_create_roster_swap_request_v2", {
+      p_company_id: account.companyId,
+      p_requester_source_entry_id: requester.id,
+      p_partner_source_entry_id: partner.id,
+      p_roster_date: rosterDate,
+      p_requester_worker_type: requester.worker_type,
+      p_requester_worker_id: requester.worker_id,
+      p_approval_steps: approvalSteps,
+      p_requester_note: note || null
+    });
+    if (created.error && /Could not find the function|schema cache|does not exist/i.test(created.error.message)) {
+      created = await db().rpc("hr_create_roster_swap_request", { p_company_id: account.companyId, p_requester_source_entry_id: requester.id, p_partner_source_entry_id: partner.id, p_roster_date: rosterDate, p_requester_worker_type: requester.worker_type, p_requester_worker_id: requester.worker_id, p_approver_user_id: approvalSteps[0].approver_user_id, p_requester_note: note || null });
+    }
     if (created.error) throw new Error(created.error.message);
     const requestId = String(created.data);
     await notifyWorker({ companyId: account.companyId, workerType: partner.worker_type, workerId: partner.worker_id, event: "roster_swap_requested", sourceKey: requestId, title: "Shift swap request", body: `${account.name ?? account.reference ?? "A colleague"} wants to swap the ${rosterDate} shift with you.`, data: { requestId, rosterDate } });
