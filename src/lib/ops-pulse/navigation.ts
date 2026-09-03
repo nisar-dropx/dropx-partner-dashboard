@@ -26,7 +26,8 @@ const commonStart: NavItem[] = [
     ]
   },
   { code: "service_network", label: "Network Planning", href: "/service-network", icon: "N" },
-  { code: "contractors", label: "Work Force Register", href: "/work-force-register", icon: "+" }
+  { code: "contractors", label: "Work Force Register", href: "/work-force-register", icon: "+" },
+  { code: "ops_rostering", label: "Rostering", href: "/rostering", icon: "S" }
 ];
 
 const reports: NavItem = { code: "ops_reports", label: "Reports", href: "/reports", icon: "R" };
