@@ -21,10 +21,8 @@ export function OpsWorkforceRegisterPage({ searchParams }: { searchParams?: Work
       listTitle="Workforce requests and active associates"
       notice={searchParams?.notice}
       pageCode="delivery_associates"
-      pageSubtitle="Onboard only Workforce Master roles and track candidate registration, Workforce approval and active associates in one place."
       pageTitle="Workforce Register"
       returnPath="/work-force-register"
-      showWorkforceSummary
       viewId={searchParams?.view}
       addFormValues={{ fullName: searchParams?.full_name, mobileCountryCode: searchParams?.mobile_country_code, mobile: searchParams?.mobile, email: searchParams?.email, dateOfJoin: searchParams?.date_of_join, locationId: searchParams?.location_id, designation: searchParams?.designation }}
     />
