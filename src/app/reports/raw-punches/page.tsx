@@ -7,7 +7,6 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDateTime } from "@/lib/date-format";
 import {
   buildRawPunchDeviceIndex,
-  normalizedEnrolmentId,
   RAW_PUNCH_PROFILE_TABLES,
   rawPunchAccountId,
   rawPunchDeviceMatchLabel,
@@ -22,6 +21,7 @@ import {
   type RawPunchRow,
   type RawPunchWorkerRow
 } from "@/lib/biometric/raw-punch-report";
+import { loadCurrentRawPunchMappingIds } from "@/lib/biometric/raw-punch-mapping";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -142,17 +142,8 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
         }
 
         if (mapping.length && mapping.length < 3) {
-          const enrolments = await supabaseAdmin
-            .from("biometric_enrolments")
-            .select("enrolment_id, profile_type, account_id, employee_id, field_executive_id")
-            .eq("company_id", companyId)
-            .is("effective_to", null);
-          if (enrolments.error) {
-            error = enrolments.error.message;
-          } else {
-            const mappedRows = (enrolments.data ?? []).filter((item) => item.account_id || item.employee_id || item.field_executive_id);
-            const peopleIds = Array.from(new Set(mappedRows.filter((item) => item.profile_type === "employee" || Boolean(item.employee_id)).map((item) => normalizedEnrolmentId(item.enrolment_id)).filter(Boolean)));
-            const workforceIds = Array.from(new Set(mappedRows.filter((item) => item.profile_type !== "employee" && !item.employee_id).map((item) => normalizedEnrolmentId(item.enrolment_id)).filter(Boolean)));
+          try {
+            const { peopleIds, workforceIds } = await loadCurrentRawPunchMappingIds(companyId);
             const allMappedIds = Array.from(new Set([...peopleIds, ...workforceIds]));
             const includedIds = Array.from(new Set([
               ...(mapping.includes("people") ? peopleIds : []),
@@ -167,6 +158,8 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
               if (allMappedIds.length) filters.push(`enrolment_id.not.in.(${allMappedIds.map((id) => `"${id.replaceAll('"', '\\"')}"`).join(",")})`);
               query = query.or(filters.join(","));
             }
+          } catch (mappingError) {
+            error = mappingError instanceof Error ? mappingError.message : "Unable to validate profile mappings.";
           }
         }
 

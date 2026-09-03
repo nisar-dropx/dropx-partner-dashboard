@@ -18,6 +18,7 @@ import {
   type RawPunchRow,
   type RawPunchWorkerRow
 } from "@/lib/biometric/raw-punch-report";
+import { loadCurrentRawPunchMappingIds } from "@/lib/biometric/raw-punch-mapping";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDateTime } from "@/lib/date-format";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -89,15 +90,7 @@ export async function GET(request: NextRequest) {
     let peopleIds: string[] = [];
     let workforceIds: string[] = [];
     if (mapping.length && mapping.length < 3) {
-      const enrolments = await supabaseAdmin
-        .from("biometric_enrolments")
-        .select("enrolment_id, profile_type, account_id, employee_id, field_executive_id")
-        .eq("company_id", companyId)
-        .is("effective_to", null);
-      if (enrolments.error) throw new Error(enrolments.error.message);
-      const mappedRows = (enrolments.data ?? []).filter((item) => item.account_id || item.employee_id || item.field_executive_id);
-      peopleIds = Array.from(new Set(mappedRows.filter((item) => item.profile_type === "employee" || Boolean(item.employee_id)).map((item) => normalizedEnrolmentId(item.enrolment_id)).filter(Boolean)));
-      workforceIds = Array.from(new Set(mappedRows.filter((item) => item.profile_type !== "employee" && !item.employee_id).map((item) => normalizedEnrolmentId(item.enrolment_id)).filter(Boolean)));
+      ({ peopleIds, workforceIds } = await loadCurrentRawPunchMappingIds(companyId));
     }
 
     const rows: RawPunchRow[] = [];
