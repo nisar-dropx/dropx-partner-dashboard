@@ -40,7 +40,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   if (!authorization.hasAllLocationAccess) locationsQuery = locationsQuery.in("id", authorization.locationScopeIds.length ? authorization.locationScopeIds : [EMPTY_SCOPE]);
   const [locationsResult, mappingsResult, allocationResult, deductionHeadsResult] = await Promise.all([
     locationsQuery,
-    supabaseAdmin.from("field_executive_provider_mappings").select("id, provider_member_id, station_id, provider_id, contractor_id, employee_id, field_executive_id, payment_method_id, payment_values, effective_from, effective_to, status, providers(name), payment_methods(name)").eq("company_id", companyId).eq("status", "active").not("payment_method_id", "is", null),
+    supabaseAdmin.from("field_executive_provider_mappings").select("id, provider_member_id, station_id, provider_id, workforce_id, contractor_id, employee_id, field_executive_id, payment_method_id, payment_values, effective_from, effective_to, status, providers(name), payment_methods(name)").eq("company_id", companyId).eq("status", "active").not("payment_method_id", "is", null),
     supabaseAdmin.from("payment_field_provider_metrics").select("payment_field_id, provider_id, provider_model_id, provider_production_metrics(source_key), payment_fields(code, label, field_type)").eq("company_id", companyId),
     supabaseAdmin.from("workforce_deduction_heads").select("code, calculation_type, default_value, percentage_without_pan, workforce_category_codes, applies_to_all, is_system, is_active").eq("company_id", companyId).eq("is_active", true).eq("applies_to_all", true)
   ]);
@@ -49,7 +49,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   const locations = locationsResult.data ?? [];
   const allowed = new Set(locations.map((row) => row.id));
   const mappings = (mappingsResult.data ?? []).filter((row: any) => allowed.has(row.station_id));
-  const sourceIds = Array.from(new Set(mappings.flatMap((row: any) => [row.contractor_id,row.employee_id,row.field_executive_id]).filter(Boolean)));
+  const sourceIds = Array.from(new Set(mappings.flatMap((row: any) => [row.workforce_id, row.contractor_id, row.employee_id, row.field_executive_id]).filter(Boolean)));
   const contractorIds = Array.from(new Set(mappings.map((row: any) => row.contractor_id).filter(Boolean)));
   const employeeIds = Array.from(new Set(mappings.map((row: any) => row.employee_id).filter(Boolean)));
   const fieldExecutiveIds = Array.from(new Set(mappings.map((row: any) => row.field_executive_id).filter(Boolean)));
@@ -75,7 +75,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   const allocations = allocationResult.data ?? [];
   const automaticDeductions = (deductionHeadsResult.data ?? []) as AutomaticDeductionHead[];
   const rows = mappings.map((mapping: any) => {
-    const sourceId = mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id);
+    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id);
     let baseAmount = 0; let production = 0;
     const productionBreakdown: WorkforcePayoutRow["productionBreakdown"] = [];
     allocations.filter((item: any) => item.provider_id === mapping.provider_id && (!item.provider_model_id || item.provider_model_id === location?.location_model_id)).forEach((item: any) => {
