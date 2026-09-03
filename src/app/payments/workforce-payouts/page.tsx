@@ -57,7 +57,7 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   const [workforceBySourceResult, workforceByIdResult, metricsResult, modelsResult, contractorsResult, employeesResult, fieldExecutivesResult] = await Promise.all([
     sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, dropx_id, full_name").eq("company_id", companyId).in("source_profile_id", sourceIds) : Promise.resolve({ data: [], error: null }),
     sourceIds.length ? supabaseAdmin.from("workforce").select("id, source_profile_id, dropx_id, full_name").eq("company_id", companyId).in("id", sourceIds) : Promise.resolve({ data: [], error: null }),
-    providerMemberIds.length ? supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, work_date, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return").eq("company_id", companyId).in("provider_employee_id", providerMemberIds).gte("work_date", fromDate).lte("work_date", toDate).limit(50000) : Promise.resolve({ data: [], error: null }),
+    providerMemberIds.length ? supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, provider_employee_name, work_date, amazon_delivery, swa_delivery, total_delivery, c_return, mfn, mfn_return").eq("company_id", companyId).in("provider_employee_id", providerMemberIds).gte("work_date", fromDate).lte("work_date", toDate).limit(50000) : Promise.resolve({ data: [], error: null }),
     supabaseAdmin.from("location_models").select("id, code, name").eq("company_id", companyId),
     contractorIds.length ? supabaseAdmin.from("contractors").select("id, pan_number").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [], error: null }),
     employeeIds.length ? supabaseAdmin.from("employees").select("id, pan_number").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
@@ -75,20 +75,20 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   const allocations = allocationResult.data ?? [];
   const automaticDeductions = (deductionHeadsResult.data ?? []) as AutomaticDeductionHead[];
   const rows = mappings.map((mapping: any) => {
-    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id);
+    const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id); const providerDailyRows = metricsByProviderMember.get(mapping.provider_member_id) ?? []; const providerMemberName = providerDailyRows.find((daily) => String(daily.provider_employee_name ?? "").trim())?.provider_employee_name ?? "-";
     let baseAmount = 0; let production = 0;
     const productionBreakdown: WorkforcePayoutRow["productionBreakdown"] = [];
     allocations.filter((item: any) => item.provider_id === mapping.provider_id && (!item.provider_model_id || item.provider_model_id === location?.location_model_id)).forEach((item: any) => {
       const field: any = Array.isArray(item.payment_fields) ? item.payment_fields[0] : item.payment_fields; const metric: any = Array.isArray(item.provider_production_metrics) ? item.provider_production_metrics[0] : item.provider_production_metrics;
       if (!field?.code || field.field_type !== "production" || !metric?.source_key) return;
-      const count = (metricsByProviderMember.get(mapping.provider_member_id) ?? []).filter((daily) => daily.work_date >= mapping.effective_from && (!mapping.effective_to || daily.work_date <= mapping.effective_to)).reduce((sum, daily) => sum + metricValue(daily, metric.source_key), 0);
+      const count = providerDailyRows.filter((daily) => daily.work_date >= mapping.effective_from && (!mapping.effective_to || daily.work_date <= mapping.effective_to)).reduce((sum, daily) => sum + metricValue(daily, metric.source_key), 0);
       const rate = Number(mapping.payment_values?.[field.code] ?? 0); const amount = count * rate;
       production += count; baseAmount += amount;
       productionBreakdown.push({ code: field.code, label: field.label || field.code, count, rate, amount });
     });
     const categoryCode = mapping.contractor_id ? "contractors" : mapping.employee_id ? "employees" : "workforce";
     const deductions = calculateAutomaticDeductions(baseAmount, automaticDeductions, { categoryCode, panNumber: panBySource.get(sourceId) });
-    return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, productionBreakdown, baseAmount, additions: 0, deductions, netAmount: baseAmount - deductions, status: production > 0 ? "Ready for review" : "Awaiting production" } satisfies WorkforcePayoutRow;
+    return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, productionBreakdown, baseAmount, additions: 0, deductions, netAmount: baseAmount - deductions, status: production > 0 ? "Ready for review" : "Awaiting production" } satisfies WorkforcePayoutRow;
   });
   return { rows, error: null };
 }
