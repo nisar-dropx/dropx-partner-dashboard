@@ -12,6 +12,12 @@ type EnrolmentMappingRow = {
   profile_type: string | null;
 };
 
+export type RawPunchCurrentMapping = {
+  accountId: string;
+  enrolmentId: string;
+  profileType: string;
+};
+
 function chunks<T>(values: T[], size = 200) {
   const result: T[][] = [];
   for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
@@ -66,18 +72,21 @@ export async function loadCurrentRawPunchMappingIds(companyId: string) {
 
   const peopleIds = new Set<string>();
   const workforceIds = new Set<string>();
+  const mappings: RawPunchCurrentMapping[] = [];
   mappedRows.forEach((row) => {
     const type = profileType(row);
     const id = accountId(row);
     if (!id || !existingByProfile.get(type)?.has(id)) return;
     const enrolmentId = normalizedEnrolmentId(row.enrolment_id);
     if (!enrolmentId) return;
+    mappings.push({ accountId: id, enrolmentId, profileType: type });
     if (type === "employee") peopleIds.add(enrolmentId);
     else workforceIds.add(enrolmentId);
   });
 
   return {
     peopleIds: Array.from(peopleIds),
-    workforceIds: Array.from(workforceIds)
+    workforceIds: Array.from(workforceIds),
+    mappings
   };
 }

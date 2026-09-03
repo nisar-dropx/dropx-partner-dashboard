@@ -10,6 +10,7 @@ export type RawPunchRow = {
   source_ip: string | null;
   terminal_id: string | null;
   trans_id: string | null;
+  worker_status: string | null;
 };
 
 export type RawPunchDeviceRow = {

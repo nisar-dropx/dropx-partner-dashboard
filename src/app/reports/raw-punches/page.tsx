@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
+import { RawPunchExportButton } from "@/components/raw-punch-export-button";
 import { RawPunchReportFilters } from "@/components/raw-punch-report-filters";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -123,7 +124,7 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
       if (authorization.hasAllLocationAccess || allowedDeviceIds.length) {
         let query = supabaseAdmin
           .from("biometric_raw_events")
-          .select("id, device_id, device_serial, terminal_id, trans_id, enrolment_id, punch_time, received_at, event_type, source_ip, created_at", { count: "exact" })
+          .select("id, device_id, device_serial, terminal_id, trans_id, enrolment_id, punch_time, received_at, event_type, source_ip, worker_status, created_at", { count: "exact" })
           .eq("company_id", companyId)
           .eq("event_type", "TimeLog")
           .order("punch_time", { ascending: false, nullsFirst: false })
@@ -243,7 +244,7 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
         eyebrow="Reports"
         title="Raw Punches"
         subtitle="Every biometric TimeLog received from devices, including unmapped, inactive, duplicate, and rejected enrolment IDs."
-        action={<a className="button secondary" download href={exportHref(searchParams)}>Download Excel</a>}
+        action={<RawPunchExportButton href={exportHref(searchParams)} />}
       />
       {error ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load raw punches</strong><p className="subtle">{error}</p></div></section> : null}
       <section className="panel">

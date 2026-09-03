@@ -17409,6 +17409,12 @@ td strong,
 .raw-punch-search-wrap { position: relative; display: block; }
 .raw-punch-search-wrap svg { position: absolute; z-index: 1; top: 50%; left: 11px; color: var(--muted); transform: translateY(-50%); }
 .raw-punch-search-wrap .field { width: 100%; padding-left: 34px; }
+.raw-punch-export-action { position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.raw-punch-export-action .button { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.raw-punch-export-action .button:disabled { cursor: wait; opacity: .7; }
+.raw-punch-export-error { max-width: 280px; color: var(--danger); font-size: 12px; line-height: 1.35; text-align: right; }
+.raw-punch-export-spinner { animation: raw-punch-export-spin .8s linear infinite; }
+@keyframes raw-punch-export-spin { to { transform: rotate(360deg); } }
 .event-log-json { margin: 0; padding: 16px; max-height: 60vh; overflow: auto; border: 1px solid var(--line); background: #f8fafc; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 900px) { .event-log-filters { grid-template-columns: 1fr 1fr; } .event-log-search { grid-column: span 2; } }
 

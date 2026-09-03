@@ -5,9 +5,7 @@ import {
   buildRawPunchDeviceIndex,
   normalizedEnrolmentId,
   RAW_PUNCH_PROFILE_TABLES,
-  rawPunchAccountId,
   rawPunchDeviceMatchLabel,
-  rawPunchProfileType,
   rawPunchResultLabel,
   resolveRawPunchDevice,
   safeRawPunchDate,
@@ -48,6 +46,7 @@ export async function GET(request: NextRequest) {
     const authorization = await requirePagePermission("raw_punch_reports", "access");
     const companyId = requireCompanyId(authorization);
     if (!supabaseAdmin) return Response.json({ error: "The report service is unavailable. Please try again." }, { status: 500 });
+    const admin = supabaseAdmin;
 
     const params = request.nextUrl.searchParams;
     const from = safeRawPunchDate(params.get("from"));
@@ -87,18 +86,14 @@ export async function GET(request: NextRequest) {
       [location.station_code, location.station_name].filter(Boolean).join(" - ")
     ]));
 
-    let peopleIds: string[] = [];
-    let workforceIds: string[] = [];
-    if (mapping.length && mapping.length < 3) {
-      ({ peopleIds, workforceIds } = await loadCurrentRawPunchMappingIds(companyId));
-    }
+    const { mappings: currentMappings, peopleIds, workforceIds } = await loadCurrentRawPunchMappingIds(companyId);
 
     const rows: RawPunchRow[] = [];
     const batchSize = 1000;
     for (let offset = 0; ; offset += batchSize) {
-      let query = supabaseAdmin
+      let query = admin
         .from("biometric_raw_events")
-        .select("id, device_id, device_serial, terminal_id, trans_id, enrolment_id, punch_time, received_at, event_type, source_ip, created_at")
+        .select("id, device_id, device_serial, terminal_id, trans_id, enrolment_id, punch_time, received_at, event_type, source_ip, worker_status, created_at")
         .eq("company_id", companyId)
         .eq("event_type", "TimeLog")
         .order("punch_time", { ascending: false, nullsFirst: false })
@@ -140,40 +135,72 @@ export async function GET(request: NextRequest) {
       if (batch.length < batchSize) break;
     }
 
+    const rawEventIds = new Set(rows.map((row) => row.id));
+    const processingDeviceIds = selectedDevices.length
+      ? selectedDevices
+      : selectedLocations.length
+        ? devicesForLocation.map((device) => device.id)
+        : authorization.hasAllLocationAccess
+          ? []
+          : allowedDeviceIds;
+    const scopeProcessingByDevice = selectedDevices.length > 0 || selectedLocations.length > 0 || !authorization.hasAllLocationAccess;
+    const [processingPunches, processingAlerts] = rows.length ? await Promise.all([
+      (async () => {
+        const result: RawPunchResultRow[] = [];
+        for (let offset = 0; ; offset += batchSize) {
+          let query = admin
+            .from("attendance_punches")
+            .select("raw_event_id, profile_type, account_id, employee_id, field_executive_id, worker_status, calculated")
+            .eq("company_id", companyId)
+            .order("punch_time", { ascending: false });
+          if (scopeProcessingByDevice) {
+            query = processingDeviceIds.length ? query.in("device_id", processingDeviceIds) : query.eq("device_id", "__no_authorized_devices__");
+          }
+          if (from) query = query.gte("punch_time", `${from}T00:00:00+05:30`);
+          if (to) query = query.lte("punch_time", `${to}T23:59:59.999+05:30`);
+          const response = await query.range(offset, offset + batchSize - 1);
+          if (response.error) throw new Error(response.error.message);
+          const batch = (response.data ?? []) as RawPunchResultRow[];
+          result.push(...batch.filter((item) => Boolean(item.raw_event_id && rawEventIds.has(item.raw_event_id))));
+          if (batch.length < batchSize) break;
+        }
+        return result;
+      })(),
+      (async () => {
+        const result: Array<RawPunchAlertRow & { created_at: string }> = [];
+        for (let offset = 0; ; offset += batchSize) {
+          let query = admin
+            .from("biometric_alerts")
+            .select("raw_event_id, alert_type, message, created_at")
+            .eq("company_id", companyId)
+            .order("created_at", { ascending: false });
+          if (scopeProcessingByDevice) {
+            query = processingDeviceIds.length ? query.in("device_id", processingDeviceIds) : query.eq("device_id", "__no_authorized_devices__");
+          }
+          if (from) query = query.gte("punch_time", `${from}T00:00:00+05:30`);
+          if (to) query = query.lte("punch_time", `${to}T23:59:59.999+05:30`);
+          const response = await query.range(offset, offset + batchSize - 1);
+          if (response.error) throw new Error(response.error.message);
+          const batch = (response.data ?? []) as Array<RawPunchAlertRow & { created_at: string }>;
+          result.push(...batch.filter((item) => Boolean(item.raw_event_id && rawEventIds.has(item.raw_event_id))));
+          if (batch.length < batchSize) break;
+        }
+        return result;
+      })()
+    ]) : [[], []];
     const punchByRawEvent = new Map<string, RawPunchResultRow>();
     const alertByRawEvent = new Map<string, RawPunchAlertRow>();
-    for (const rawEventIds of chunks(rows.map((row) => row.id))) {
-      const [punchResult, alertResult] = await Promise.all([
-        supabaseAdmin
-          .from("attendance_punches")
-          .select("raw_event_id, profile_type, account_id, employee_id, field_executive_id, worker_status, calculated")
-          .eq("company_id", companyId)
-          .in("raw_event_id", rawEventIds),
-        supabaseAdmin
-          .from("biometric_alerts")
-          .select("raw_event_id, alert_type, message, created_at")
-          .eq("company_id", companyId)
-          .in("raw_event_id", rawEventIds)
-          .order("created_at", { ascending: false })
-      ]);
-      if (punchResult.error || alertResult.error) {
-        throw new Error(punchResult.error?.message ?? alertResult.error?.message ?? "Unable to load processing results.");
-      }
-      ((punchResult.data ?? []) as RawPunchResultRow[]).forEach((item) => {
-        if (item.raw_event_id) punchByRawEvent.set(item.raw_event_id, item);
-      });
-      ((alertResult.data ?? []) as Array<RawPunchAlertRow & { created_at: string }>).forEach((item) => {
-        if (item.raw_event_id && !alertByRawEvent.has(item.raw_event_id)) alertByRawEvent.set(item.raw_event_id, item);
-      });
-    }
+    processingPunches.forEach((item) => {
+      if (item.raw_event_id) punchByRawEvent.set(item.raw_event_id, item);
+    });
+    processingAlerts.forEach((item) => {
+      if (item.raw_event_id && !alertByRawEvent.has(item.raw_event_id)) alertByRawEvent.set(item.raw_event_id, item);
+    });
 
     const idsByProfile = new Map<string, Set<string>>();
-    punchByRawEvent.forEach((punch) => {
-      const profileType = rawPunchProfileType(punch);
-      const accountId = rawPunchAccountId(punch);
-      if (!profileType || !accountId) return;
-      if (!idsByProfile.has(profileType)) idsByProfile.set(profileType, new Set());
-      idsByProfile.get(profileType)!.add(accountId);
+    currentMappings.forEach((currentMapping) => {
+      if (!idsByProfile.has(currentMapping.profileType)) idsByProfile.set(currentMapping.profileType, new Set());
+      idsByProfile.get(currentMapping.profileType)!.add(currentMapping.accountId);
     });
     const workerByKey = new Map<string, RawPunchWorkerRow>();
     for (const [profileType, idSet] of idsByProfile) {
@@ -199,22 +226,21 @@ export async function GET(request: NextRequest) {
     }
 
     const deviceIndex = buildRawPunchDeviceIndex(devices);
-    const peopleSet = new Set(peopleIds);
-    const workforceSet = new Set(workforceIds);
+    const currentMappingByEnrolment = new Map(currentMappings.map((item) => [item.enrolmentId, item]));
     const sheetRows = rows.map((row) => {
       const punch = punchByRawEvent.get(row.id);
       const alert = alertByRawEvent.get(row.id);
-      const profileType = rawPunchProfileType(punch);
-      const accountId = rawPunchAccountId(punch);
-      const worker = profileType && accountId ? workerByKey.get(`${profileType}:${accountId}`) : undefined;
       const resolvedDevice = resolveRawPunchDevice(row, deviceIndex);
       const device = resolvedDevice.device;
       const enrolmentId = normalizedEnrolmentId(row.enrolment_id);
-      const mappingLabel = worker
-        ? profileType === "employee" || peopleSet.has(enrolmentId)
-          ? "Mapped in People / HR"
-          : "Mapped in Workforce"
-        : "Not mapped in either";
+      const currentMapping = currentMappingByEnrolment.get(enrolmentId);
+      const profileType = currentMapping?.profileType ?? null;
+      const worker = currentMapping ? workerByKey.get(`${currentMapping.profileType}:${currentMapping.accountId}`) : undefined;
+      const mappingLabel = currentMapping?.profileType === "employee"
+        ? "Mapped in People / HR"
+        : currentMapping
+          ? "Mapped in Workforce"
+          : "Not mapped in either";
       return {
         "Punch time": formatDashboardDateTime(row.punch_time ?? row.received_at ?? row.created_at),
         "Received at": formatDashboardDateTime(row.created_at),
@@ -249,10 +275,13 @@ export async function GET(request: NextRequest) {
       headers: {
         "Content-Disposition": `attachment; filename="${excelFileName()}"`,
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Cache-Control": "private, max-age=0, no-store"
+        "Content-Length": String(buffer.byteLength),
+        "Cache-Control": "private, max-age=0, no-store",
+        "X-Content-Type-Options": "nosniff"
       }
     });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Unable to export raw punches." }, { status: 500 });
+    console.error("Raw Punches export failed", error);
+    return Response.json({ error: "Unable to prepare the Excel report. Please try again." }, { status: 500 });
   }
 }
