@@ -129,6 +129,7 @@ type FieldExecutiveAddFormValues = {
 function firstRelation<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
+
 function isMissingColumnError(error: unknown) {
   const message = String((error as { message?: unknown })?.message ?? "").toLowerCase();
   return message.includes("column") && (message.includes("does not exist") || message.includes("schema cache"));
@@ -201,7 +202,7 @@ function fieldExecutiveStatus(
 ) {
   const onboardingStatus = String(executive.onboarding_status ?? "").trim().toLowerCase();
   if (canonicalWorkforce) {
-    if (onboardingStatus === "pending") return "Pending";
+    if (onboardingStatus === "pending") return "Candidate registration pending";
     if (onboardingStatus === "under_review") return "Workforce approval pending";
     if (onboardingStatus === "returned") return "Correction requested";
     if (onboardingStatus === "approved") return "Activation pending";
