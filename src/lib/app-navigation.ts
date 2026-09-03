@@ -1,7 +1,7 @@
 import type { AuthorizationContext } from "@/lib/authorization";
 
 export type NavItem = {
-  children?: Array<{ code?: string; href?: string; label: string }>;
+  children?: Array<{ code?: string; hideBadge?: boolean; href?: string; label: string }>;
   code: string;
   href?: string;
   icon: string;
@@ -40,7 +40,7 @@ export const navItems: NavItem[] = [
       { code: "vendors", label: "Vendors", href: "/vendors" },
       { code: "people_review", label: "Profile Review", href: "/people/review" },
       { code: "people_exceptions", label: "Exceptions", href: "/people/exceptions" },
-      { code: "people_review", label: "Workforce Lifecycle", href: "/people/workforce-lifecycle" },
+      { code: "people_review", hideBadge: true, label: "Workforce Lifecycle", href: "/people/workforce-lifecycle" },
       { code: "attendance_integrity", label: "Attendance Integrity", href: "/attendance/integrity" }
     ]
   },
@@ -138,6 +138,9 @@ export const navItems: NavItem[] = [
 
 function canAccess(authorization: AuthorizationContext, code?: string) {
   if (!code) return true;
+  // Owners always have portal access. Keep the navigation fallback aligned with
+  // `hasPermission`, which already grants Owners full access.
+  if (authorization.isMasterOwner || authorization.roleCode === "OWNER") return true;
   const permission = authorization.permissions[code];
   return Boolean(permission?.canView || permission?.canAdd || permission?.canEdit);
 }

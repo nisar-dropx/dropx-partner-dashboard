@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
+import { todayInIndia } from "../../../../src/lib/india-date";
 import { loadConnectOperationalPerformance } from "../../../../src/lib/connect-operational-performance";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
@@ -21,6 +22,31 @@ function rating(value: unknown) {
   return result;
 }
 
+async function hasOperationsAssignment(companyId: string, engagementId: string) {
+  const today = todayInIndia();
+  const assignment = await db().from("hr_work_assignments")
+    .select("department_id")
+    .eq("company_id", companyId)
+    .eq("engagement_id", engagementId)
+    .eq("is_primary", true)
+    .lte("effective_from", today)
+    .or(`effective_to.is.null,effective_to.gte.${today}`)
+    .order("effective_from", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (assignment.error) throw new Error(assignment.error.message);
+  if (!assignment.data?.department_id) return false;
+
+  const department = await db().from("hr_departments")
+    .select("code")
+    .eq("company_id", companyId)
+    .eq("id", assignment.data.department_id)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (department.error) throw new Error(department.error.message);
+  return clean(department.data?.code).toUpperCase() === "OPS";
+}
+
 async function ownPerformanceContext(url: URL, body?: Record<string, unknown>) {
   const accountId = clean(body?.accountId ?? url.searchParams.get("accountId"));
   const profileType = clean(body?.profileType ?? url.searchParams.get("profileType"));
@@ -39,7 +65,10 @@ async function ownPerformanceContext(url: URL, body?: Record<string, unknown>) {
     .limit(1)
     .maybeSingle();
   if (engagement.error) throw new Error(engagement.error.message);
-  return { account, workerType, engagement: engagement.data };
+  const operationsEligible = engagement.data
+    ? await hasOperationsAssignment(account.companyId, engagement.data.id)
+    : false;
+  return { account, workerType, engagement: engagement.data, operationsEligible };
 }
 
 async function ownReview(companyId: string, personId: string, reviewId: string) {
@@ -109,14 +138,16 @@ export async function GET(request: Request) {
         .eq("reviewer_person_id", context.engagement.person_id)
         .order("created_at", { ascending: false })
         .limit(100),
-      loadConnectOperationalPerformance({
-        account: context.account,
-        personId: context.engagement.person_id,
-        engagementId: context.engagement.id,
-        requestedWeek: Number.isInteger(requestedWeek) && requestedWeek > 0 && requestedWeek < 54 ? requestedWeek : null,
-        requestedWeekKey: Number.isInteger(requestedWeekKey) && requestedWeekKey > 200000 ? requestedWeekKey : null,
-        requestedCpsMonth
-      })
+      context.operationsEligible
+        ? loadConnectOperationalPerformance({
+          account: context.account,
+          personId: context.engagement.person_id,
+          engagementId: context.engagement.id,
+          requestedWeek: Number.isInteger(requestedWeek) && requestedWeek > 0 && requestedWeek < 54 ? requestedWeek : null,
+          requestedWeekKey: Number.isInteger(requestedWeekKey) && requestedWeekKey > 200000 ? requestedWeekKey : null,
+          requestedCpsMonth
+        })
+        : Promise.resolve(null)
     ]);
     if (reviewsResult.error || managerReviewsResult.error) throw new Error(reviewsResult.error?.message ?? managerReviewsResult.error?.message ?? "Unable to load performance reviews.");
     const reviews = reviewsResult.data ?? [];

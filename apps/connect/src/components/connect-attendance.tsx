@@ -237,6 +237,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const [punchStatus, setPunchStatus] = useState<PunchStatus | null>(null);
   const [supportFlag, setSupportFlag] = useState<OpenFlag | null>(null);
   const [supportNotice, setSupportNotice] = useState("");
+  const selectedDayRef = useRef<HTMLDivElement>(null);
 
   const loadAttendance = useCallback(() => {
     setData(null);
@@ -245,7 +246,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
       .then(async (response) => {
         const payload = await readJsonResponse<Attendance>(response, "Unable to load attendance. Please try again.");
         setData(payload);
-        setSelected(payload.rows?.find((row: Row) => row.date === localIsoDate()) ?? payload.rows?.at(-1) ?? null);
+        setSelected((current) => current ? payload.rows.find((row) => row.date === current.date) ?? null : null);
       })
       .catch((reason) => setError(userFacingError(reason, "Unable to load attendance. Please try again.")));
   }, [account.id, account.profileType, month]);
@@ -284,6 +285,8 @@ export function ConnectAttendance({ account }: { account: Account }) {
     shiftOpen: row?.date === punchStatus?.shift.punchDate && punchStatus?.shift.open === true
   }), [punchStatus?.shift.open, punchStatus?.shift.punchDate, todayDate]);
   const selectedInsight = selected ? insightFor(selected) : null;
+  const selectedTimingIssues = selectedInsight?.issues.filter((issue) => issue.code === "late" || issue.code === "early_out") ?? [];
+  const showSelectedOutcome = Boolean(selectedInsight && !["full", "off"].includes(selectedInsight.calendarClass));
   const attentionRow = useMemo(() => {
     if (!data?.rows.length) return null;
     const ordered = [...data.rows].sort((left, right) => right.date.localeCompare(left.date));
@@ -302,6 +305,17 @@ export function ConnectAttendance({ account }: { account: Account }) {
     () => (data?.rows ?? []).filter((row) => insightFor(row).needsRegularization).length,
     [data?.rows, insightFor]
   );
+
+  const openDayDetails = useCallback((row: Row) => {
+    setSelected(row);
+    setTab("calendar");
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        selectedDayRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        selectedDayRef.current?.focus({ preventScroll: true });
+      });
+    });
+  }, []);
 
   const supportStationKey = [
     punchStatus?.station?.id,
@@ -400,7 +414,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
             <strong>{attentionNudge.headline}</strong>
             <em>{attentionNudge.detail}</em>
           </span>
-          <button onClick={() => { setSelected(attentionRow); setTab("calendar"); }}>
+          <button aria-controls="attendance-day-details" aria-expanded={selected?.date === attentionRow.date && tab === "calendar"} onClick={() => openDayDetails(attentionRow)}>
             View details
           </button>
         </section> : null}
@@ -443,7 +457,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
                 today: row.date === todayDate,
                 shiftOpen: row.date === punchStatus?.shift.punchDate && punchStatus?.shift.open === true
               });
-              return <button key={row.date} onClick={() => { setSelected(row); setTab("calendar"); }}>
+              return <button key={row.date} onClick={() => openDayDetails(row)}>
                 <header><strong>{row.date.split("-").reverse().join("/")}</strong><em className={insight.calendarClass}>{insight.label}</em></header>
                 <span><small>IN</small>{row.inTime || "--:--"}</span><span><small>OUT</small>{row.outTime || "--:--"}</span><span><small>HRS</small>{row.workHours || "00:00"}</span>
                 {nudge ? <p className={`dx-attendance-list-issue ${nudge.tone}`}>{nudge.headline} · {nudge.detail}</p> : null}
@@ -457,15 +471,14 @@ export function ConnectAttendance({ account }: { account: Account }) {
             })}
           </div> : null}
         </div>
-        {tab === "calendar" && selected && selectedInsight ? <div className="dx-selected-day">
+        {tab === "calendar" && selected && selectedInsight ? <div className="dx-selected-day" id="attendance-day-details" ref={selectedDayRef} tabIndex={-1}>
           <header><div><CalendarDays /><strong>{selected.date.split("-").reverse().join("/")}</strong></div><em className={selectedInsight.calendarClass}>{selectedInsight.label}</em></header>
           {selected.scheduledStart && selected.scheduledStart !== "--:--" ? <p className="dx-attendance-shift"><Clock3 /> <strong>Report by {selected.scheduledStart}</strong> · {selected.shiftName || "Shift"} {selected.scheduledStart}–{selected.scheduledEnd} <small>{selected.shiftSource}</small></p> : null}
           <div><span><LogIn /><small>IN</small><strong>{selected.inTime || "--:--"}</strong></span><span><LogOut /><small>OUT</small><strong>{selected.outTime || "--:--"}</strong></span><span><Clock3 /><small>WORK</small><strong>{selected.workHours || "00:00"}</strong></span><span><Fingerprint /><small>PUNCHES</small><strong>{selected.punchCount}</strong></span></div>
-          <section className={`dx-attendance-day-insight ${selectedInsight.tone}`}>
-            <strong>{selectedInsight.headline}</strong>
-            <small>{selectedInsight.detail}</small>
-            {selectedInsight.issues.some((issue) => issue.code !== "half_day" && issue.code !== "absent") ? <div className="dx-attendance-consequence-list">{selectedInsight.issues.filter((issue) => issue.code !== "half_day" && issue.code !== "absent").map((issue) => <p key={issue.code}><strong>{issue.label}</strong><small>{issue.message}</small></p>)}</div> : null}
-          </section>
+          {showSelectedOutcome || selectedTimingIssues.length ? <section className={`dx-attendance-day-insight compact ${selectedInsight.tone}`}>
+            {showSelectedOutcome ? <p className="dx-attendance-detail-row"><strong>{selectedInsight.headline}</strong><small>{selectedInsight.detail}</small></p> : null}
+            {selectedTimingIssues.map((issue) => <p className="dx-attendance-detail-row" key={issue.code}><strong>{issue.label}</strong><small>{issue.message}</small></p>)}
+          </section> : null}
           {selected.remark ? <p className="dx-attendance-day-note">{selected.remark}</p> : null}
           <footer>
             {selected.regularization ? <span className={`dx-request-status ${selected.regularization.status}`}>Regularization {selected.regularization.status}</span> : null}

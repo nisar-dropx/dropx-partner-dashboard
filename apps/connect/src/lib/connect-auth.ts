@@ -526,8 +526,12 @@ function resolveConnectPageAccess(
   designationPages?: string[] | null
 ) {
   if (profileType === "user") return managerPageAccess;
+  const baselinePages = profileType === "employee" || profileType === "contractor"
+    ? ["performance"]
+    : [];
   return [...new Set([
     ...intersectPageAccess(categoryPages, designationPages),
+    ...baselinePages,
     ...requiredDropxOnePageCodes
   ])];
 }

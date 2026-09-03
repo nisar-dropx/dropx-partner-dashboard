@@ -16159,6 +16159,52 @@ img.dx-selfie-live {
   font-size: 10px;
 }
 
+/* Day details stay hidden until selected, then open as a compact focused card. */
+.dx-selected-day {
+  scroll-margin-top: 76px;
+  padding: 12px;
+  outline: none;
+}
+
+.dx-selected-day > div { margin-top: 9px; }
+.dx-selected-day > div span { gap: 1px; padding: 3px 2px; }
+.dx-selected-day > div span svg { width: 18px; height: 18px; }
+.dx-selected-day > div span strong { font-size: 11px; }
+.dx-selected-day > div span small { font-size: 8px; }
+
+.dx-attendance-shift {
+  margin-top: 8px;
+  padding: 6px 8px;
+}
+
+.dx-attendance-day-insight.compact {
+  gap: 0;
+  overflow: hidden;
+  margin-top: 8px;
+  padding: 0;
+  border-radius: 9px;
+}
+
+.dx-attendance-detail-row {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 7px 9px;
+}
+
+.dx-attendance-detail-row + .dx-attendance-detail-row { border-top: 1px solid currentColor; }
+.dx-attendance-detail-row strong { font-size: 10px; }
+.dx-attendance-detail-row small { color: inherit; font-size: 9px; line-height: 1.3; opacity: .82; }
+
+.dx-selected-day footer {
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+@media (max-width: 719px) {
+  .dx-selected-day > div { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
 .dx-friendly-error {
   display: grid;
   place-items: center;
