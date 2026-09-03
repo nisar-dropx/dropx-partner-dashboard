@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { ConnectAccount } from "./connect-auth";
+import { amazonWeekPeriod, type PerformanceWeekPeriod } from "./performance-periods";
 import { supabaseAdmin } from "./supabase-admin";
 
 type MetricFact = {
@@ -76,8 +77,12 @@ export type ConnectOperationalPerformance = {
   scopeLabel: string;
   stationCount: number;
   availableWeeks: number[];
+  availableWeekPeriods: PerformanceWeekPeriod[];
   selectedWeek: number | null;
   selectedYear: number | null;
+  selectedWeekKey: number | null;
+  selectedWeekStart: string | null;
+  selectedWeekEnd: string | null;
   averageSls: number | null;
   averageAttainment: number | null;
   availableCpsMonths: string[];
@@ -279,6 +284,7 @@ export async function loadConnectOperationalPerformance(input: {
   personId: string;
   engagementId: string;
   requestedWeek?: number | null;
+  requestedWeekKey?: number | null;
   requestedCpsMonth?: string | null;
 }): Promise<ConnectOperationalPerformance> {
   const selectedCpsMonth = validMonth(input.requestedCpsMonth);
@@ -300,14 +306,18 @@ export async function loadConnectOperationalPerformance(input: {
     scopeLabel: scope.allLocations ? "All locations" : "No mapped station",
     stationCount: 0,
     availableWeeks: [],
+    availableWeekPeriods: [],
     selectedWeek: null,
     selectedYear: null,
+    selectedWeekKey: null,
+    selectedWeekStart: null,
+    selectedWeekEnd: null,
     averageSls: null,
     averageAttainment: null,
     availableCpsMonths: [selectedCpsMonth],
     selectedCpsMonth,
     cpsPeriodState,
-    cpsPeriodLabel: `${monthLabel(selectedCpsMonth)} · ${cpsPeriodState === "mtd" ? "MTD" : "Closed"}`,
+    cpsPeriodLabel: `${monthLabel(selectedCpsMonth)}${cpsPeriodState === "mtd" ? " · MTD" : ""}`,
     cpsLatestDate: null,
     averageCps: null,
     cpsOnTarget: 0,
@@ -353,10 +363,15 @@ export async function loadConnectOperationalPerformance(input: {
 
   const facts = (factsResult.data ?? []) as MetricFact[];
   const weekKeys = [...new Set(facts.filter((row) => row.report_year && row.report_week).map((row) => Number(row.report_year) * 100 + Number(row.report_week)))].sort((a, b) => b - a);
-  const requestedKey = input.requestedWeek ? weekKeys.find((key) => key % 100 === input.requestedWeek) : null;
+  const requestedKey = input.requestedWeekKey && weekKeys.includes(input.requestedWeekKey)
+    ? input.requestedWeekKey
+    : input.requestedWeek
+      ? weekKeys.find((key) => key % 100 === input.requestedWeek) ?? null
+      : null;
   const selectedKey = requestedKey ?? weekKeys[0] ?? null;
   const selectedYear = selectedKey ? Math.floor(selectedKey / 100) : null;
   const selectedWeek = selectedKey ? selectedKey % 100 : null;
+  const selectedWeekPeriod = selectedKey ? amazonWeekPeriod(selectedKey) : null;
   const candidates = selectedKey ? facts.filter((row) => row.report_year === selectedYear && row.report_week === selectedWeek) : [];
   const factByStation = new Map<string, MetricFact>();
   for (const row of candidates) {
@@ -440,14 +455,18 @@ export async function loadConnectOperationalPerformance(input: {
     scopeLabel: scope.allLocations ? "All locations" : `${stationRows.length} mapped location${stationRows.length === 1 ? "" : "s"}`,
     stationCount: stationRows.length,
     availableWeeks: weekKeys.map((key) => key % 100),
+    availableWeekPeriods: weekKeys.map(amazonWeekPeriod),
     selectedWeek,
     selectedYear,
+    selectedWeekKey: selectedKey,
+    selectedWeekStart: selectedWeekPeriod?.startDate ?? null,
+    selectedWeekEnd: selectedWeekPeriod?.endDate ?? null,
     averageSls: slsCards.length ? slsCards.reduce((sum, card) => sum + (card.sls?.score ?? 0), 0) / slsCards.length : null,
     averageAttainment: slsCards.length ? Math.round(slsCards.reduce((sum, card) => sum + (card.sls?.attainment ?? 0), 0) / slsCards.length) : null,
     availableCpsMonths: monthRange(oldestCpsResult.data?.work_date?.slice(0, 7) ?? null),
     selectedCpsMonth,
     cpsPeriodState,
-    cpsPeriodLabel: `${monthLabel(selectedCpsMonth)} · ${cpsPeriodState === "mtd" ? "MTD" : "Closed"}`,
+    cpsPeriodLabel: `${monthLabel(selectedCpsMonth)}${cpsPeriodState === "mtd" ? " · MTD" : ""}`,
     cpsLatestDate: cpsCards.map((card) => card.cps?.date ?? "").sort().at(-1) || null,
     averageCps: cpsCards.length ? cpsCards.reduce((sum, card) => sum + (card.cps?.value ?? 0), 0) / cpsCards.length : null,
     cpsOnTarget: cpsCards.filter((card) => card.cps?.onTarget).length,

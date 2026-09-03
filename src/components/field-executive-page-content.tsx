@@ -196,11 +196,42 @@ const statusOptions = [
   { value: "false", label: "Inactive" }
 ];
 
-function fieldExecutiveStatus(executive: Pick<ExecutiveRow, "is_active" | "onboarding_status">) {
+function fieldExecutiveStatus(
+  executive: Pick<ExecutiveRow, "is_active" | "onboarding_status">,
+  canonicalWorkforce = false
+) {
+  const onboardingStatus = String(executive.onboarding_status ?? "").trim().toLowerCase();
+  if (canonicalWorkforce) {
+    if (onboardingStatus === "pending") return "Candidate registration pending";
+    if (onboardingStatus === "under_review") return "Workforce approval pending";
+    if (onboardingStatus === "returned") return "Correction requested";
+    if (onboardingStatus === "approved") return "Activation pending";
+    if (onboardingStatus === "rejected") return "Rejected";
+    if (onboardingStatus === "cancelled") return "Inactive";
+    if (onboardingStatus === "active") return executive.is_active ? "Active" : "Activation pending";
+  }
+  if (onboardingStatus === "under_review") return "Under review";
+  if (onboardingStatus === "returned") return "Returned";
   if (!executive.is_active) return "Inactive";
-  if (executive.onboarding_status === "under_review") return "Under review";
-  if (executive.onboarding_status === "returned") return "Returned";
-  return executive.onboarding_status === "active" ? "Active" : "Pending";
+  return onboardingStatus === "active" ? "Active" : "Pending";
+}
+
+function WorkforceRegisterSummary({ rows }: { rows: FieldExecutiveListRow[] }) {
+  const registrationPending = rows.filter((row) =>
+    row.status === "Candidate registration pending" || row.status === "Correction requested"
+  ).length;
+  const approvalPending = rows.filter((row) =>
+    row.status === "Workforce approval pending" || row.status === "Activation pending"
+  ).length;
+  const active = rows.filter((row) => row.status === "Active").length;
+  return (
+    <section className="workforce-register-summary" aria-label="Workforce registration summary">
+      <article><span>Total in scope</span><strong>{rows.length}</strong></article>
+      <article><span>Registration pending</span><strong>{registrationPending}</strong></article>
+      <article><span>Approval pending</span><strong>{approvalPending}</strong></article>
+      <article><span>Active associates</span><strong>{active}</strong></article>
+    </section>
+  );
 }
 
 function textValue(value: string | null | undefined) {
@@ -246,9 +277,11 @@ function UploadDetail({ label, url }: { label: string; url?: string | null }) {
 }
 
 function FieldExecutiveDetails({
+  canonicalWorkforce,
   dashboardRules,
   executive
 }: {
+  canonicalWorkforce?: boolean;
   dashboardRules: { enabled: string[]; required: string[] };
   executive: ExecutiveRow;
 }) {
@@ -265,7 +298,7 @@ function FieldExecutiveDetails({
           <ExecutiveDetail label="Designation" value={executive.designation} />
           <ExecutiveDetail label="Date of join" value={formatDashboardDate(executive.date_of_join)} />
           <ExecutiveDetail label="Location" value={location?.station_name || location?.station_code} />
-          <ExecutiveDetail label="Status" value={fieldExecutiveStatus(executive)} />
+          <ExecutiveDetail label="Status" value={fieldExecutiveStatus(executive, canonicalWorkforce)} />
           <ExecutiveDetail label="Biometric enrolment ID" value={executive.biometric_id} />
         </dl>
       </section>
@@ -762,7 +795,7 @@ async function loadFieldExecutiveData(
           { isOwner: ownerAccess }
       ),
       isActive: executive.is_active,
-      status: fieldExecutiveStatus(executive)
+      status: fieldExecutiveStatus(executive, targetRegister === "workforce")
     };
   });
   const uploadUrlRows = await Promise.all(visibleExecutiveRows.map(async (executive) => ({
@@ -816,6 +849,7 @@ export async function FieldExecutivePageContent({
   pageTitle = "Field Executive",
   registerNavigation,
   returnPath = "/workforce",
+  showWorkforceSummary = false,
   viewId
 }: {
   activeLabel?: string;
@@ -837,6 +871,7 @@ export async function FieldExecutivePageContent({
   pageTitle?: string;
   registerNavigation?: ReactNode;
   returnPath?: FieldExecutiveRoute;
+  showWorkforceSummary?: boolean;
   viewId?: string;
 }) {
   const authorization = await requirePagePermission(pageCode, "access");
@@ -848,7 +883,7 @@ export async function FieldExecutivePageContent({
     canEdit: false
   };
   const workforceConfig = nonEmployeeConfigForRoute(returnPath);
-  const displayTable = returnPath === "/work-force-register" ? "workforce" : workforceConfig.table;
+  const displayTable = workforceConfig.table;
   const { executives, locations, designations, editExecutive, viewExecutive, error } = await loadFieldExecutiveData(
     authorization,
     designationCategoryFilter,
@@ -934,6 +969,8 @@ export async function FieldExecutivePageContent({
         </section>
       ) : null}
 
+      {showWorkforceSummary ? <WorkforceRegisterSummary rows={executives} /> : null}
+
       {permission.canAdd ? (
         <section className="panel">
           <div className="panel-head"><h2>{addTitle}</h2></div>
@@ -969,7 +1006,11 @@ export async function FieldExecutivePageContent({
               </div>
               <PendingLink className="icon-button" href={returnPath} scroll={false} aria-label={`Close ${entityLabel.toLowerCase()} details`}>x</PendingLink>
             </div>
-            <FieldExecutiveDetails dashboardRules={viewRules} executive={viewExecutive} />
+            <FieldExecutiveDetails
+              canonicalWorkforce={workforceConfig.profileType === "field_executive"}
+              dashboardRules={viewRules}
+              executive={viewExecutive}
+            />
           </section>
         </div>
       ) : null}

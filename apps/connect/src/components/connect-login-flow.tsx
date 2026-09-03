@@ -19,6 +19,7 @@ import { ConnectPeopleWorkspace } from "./connect-people-workspace";
 import { AppAccount, ConnectProfileApp } from "./connect-profile-app";
 import { countryCodeOptions } from "@/lib/country-codes";
 import { requiredDropxOnePageCodes, type DropxOnePageCode } from "@/lib/dropx-one-pages";
+import { userFacingError } from "@/lib/user-facing-error";
 
 type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "approvals" | "requests" | "payments" | "advances" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "performance" | "settings";
 type ConnectNotification = {
@@ -36,7 +37,7 @@ const accountKey = (account: AppAccount) => `${account.profileType}:${account.co
 const accountIdentity = (account?: AppAccount | null) =>
   [account?.reference, account?.biometricId].filter(Boolean).join(" | ");
 const active = (account?: AppAccount | null) => account?.status?.toLowerCase() === "active";
-const defaultPageAccess: DropxOnePageCode[] = ["dashboard", "profile", "attendance", "roster", "leave", "performance", "settings"];
+const defaultPageAccess: DropxOnePageCode[] = ["dashboard", "profile", "attendance", "roster", "leave", "settings"];
 const isManagerAccount = (account: AppAccount | null) => account?.profileType === "user";
 const isWorkforceWorkspace = (account: AppAccount | null) => account?.workspace
   ? account.workspace === "workforce"
@@ -44,7 +45,9 @@ const isWorkforceWorkspace = (account: AppAccount | null) => account?.workspace
 const peopleSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account) && !isWorkforceWorkspace(account));
 const sharedSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account));
 const allowed = (account: AppAccount | null, page: DropxOnePageCode) =>
-  requiredDropxOnePageCodes.includes(page) || (account?.pageAccess ?? defaultPageAccess).includes(page);
+  requiredDropxOnePageCodes.includes(page) ||
+  (page === "performance" && (account?.profileType === "employee" || account?.profileType === "contractor")) ||
+  (account?.pageAccess ?? defaultPageAccess).includes(page);
 const canViewApprovals = (account: AppAccount | null, hasReportees: boolean) => Boolean(
   account &&
   !isWorkforceWorkspace(account) &&
@@ -204,7 +207,7 @@ export function ConnectLoginFlow() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to continue.");
       return payload;
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to continue."); throw reason; }
+    } catch (reason) { setError(userFacingError(reason, "Unable to continue. Please try again.")); throw reason; }
     finally { setPending(false); }
   }
   async function start(event: FormEvent) {
@@ -256,7 +259,7 @@ export function ConnectLoginFlow() {
       setNotifications(payload.notifications ?? []);
       setUnreadNotifications(Number(payload.unreadCount ?? 0));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to load notifications.");
+      setError(userFacingError(reason, "Unable to load notifications. Please try again."));
     } finally {
       setNotificationLoading(false);
     }
@@ -315,7 +318,7 @@ export function ConnectLoginFlow() {
       setNotifications((rows) => rows.map((row) => row.read_at ? row : { ...row, read_at: readAt }));
       setUnreadNotifications(0);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to clear notifications.");
+      setError(userFacingError(reason, "Unable to clear notifications. Please try again."));
     } finally {
       setNotificationClearing(false);
     }
@@ -341,7 +344,7 @@ export function ConnectLoginFlow() {
       else localStorage.removeItem(defaultKeyName);
       setNotice(selected ? "Default account saved." : "Default account removed.");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to save default account.");
+      setError(userFacingError(reason, "Unable to save default account. Please try again."));
     } finally {
       setPending(false);
     }
@@ -376,7 +379,7 @@ export function ConnectLoginFlow() {
       setNotice("Biometric login enabled.");
     } catch (reason) {
       localStorage.removeItem(biometricKey);
-      setError(reason instanceof Error ? reason.message : "Unable to enable biometric login.");
+      setError(userFacingError(reason, "Unable to enable biometric login. Please try again."));
     }
   }
   async function unlock() {
@@ -394,7 +397,7 @@ export function ConnectLoginFlow() {
     } catch (reason) {
       setPin("");
       setStep("pin");
-      setError(reason instanceof Error ? reason.message : "Biometric verification was cancelled.");
+      setError(userFacingError(reason, "Biometric verification was cancelled."));
     }
     finally { setPending(false); }
   }

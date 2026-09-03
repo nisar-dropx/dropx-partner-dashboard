@@ -5,6 +5,7 @@ import { SubmitButton } from "@/components/submit-button";
 const pageNames: Record<string, string> = {
   capacity: "Capacity",
   capacity_overview: "Capacity Overview",
+  ops_rostering: "Rostering",
   capacity_associates: "Associate SPR",
   capacity_delivery: "Delivery Data",
   capacity_hiring: "Hiring Review",

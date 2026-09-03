@@ -1,5 +1,6 @@
 import type { AuthorizationContext } from "@/lib/authorization";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
+import { clockMinutes, resolveStationOpeningSchedule, stationOpeningLateMinutes } from "@/lib/ops-pulse/station-opening";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -157,14 +158,6 @@ function numberOrNull(value: unknown) {
   return Number.isFinite(number) ? number : null;
 }
 
-function clockMinutes(value: string | null | undefined) {
-  const match = String(value ?? "").match(/^(\d{1,2}):(\d{2})/);
-  if (!match) return null;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  return hours >= 0 && hours < 24 && minutes >= 0 && minutes < 60 ? hours * 60 + minutes : null;
-}
-
 function istClockMinutes(value: string | null | undefined) {
   if (!value) return null;
   const instant = new Date(value);
@@ -182,10 +175,10 @@ function istClockMinutes(value: string | null | undefined) {
 
 function isWithinOpeningWindow(value: string | null, start: string, end: string) {
   const minute = istClockMinutes(value);
-  const from = clockMinutes(start);
-  const to = clockMinutes(end);
-  if (minute == null || from == null || to == null) return false;
-  return from <= to ? minute >= from && minute <= to : minute >= from || minute <= to;
+  const fromMinutes = clockMinutes(start);
+  const toMinutes = clockMinutes(end);
+  if (minute == null || fromMinutes == null || toMinutes == null) return false;
+  return fromMinutes <= toMinutes ? minute >= fromMinutes && minute <= toMinutes : minute >= fromMinutes || minute <= toMinutes;
 }
 
 function missingSchema(error: unknown) {
@@ -383,6 +376,22 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
   });
   };
   stationCodes.forEach((code) => empty.set(code, blank(code)));
+  if (manpowerResult) {
+    stationCodes.forEach((code) => {
+      const current = empty.get(code)!;
+      const locationId = stationIdByCode.get(code);
+      if (!locationId) return;
+      const schedule = resolveStationOpeningSchedule(
+        manpowerResult.people,
+        locationId,
+        current.openingWindowStart,
+        current.openingWindowEnd
+      );
+      current.scheduledOpeningTime = schedule.scheduledTime;
+      current.openingShiftName = schedule.shiftName;
+      current.openingShiftSource = schedule.shiftSource;
+    });
+  }
   (costResult.data ?? []).forEach((row) => {
     const current = empty.get(row.station_code) ?? blank(row.station_code);
     current.dayCost = numberOrNull(row.total_cost);
@@ -530,18 +539,11 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     if (!current || current.firstPunchAt || !isWithinOpeningWindow(row.in_time, current.openingWindowStart, current.openingWindowEnd)) return;
     current.firstPunchAt = row.in_time;
     current.firstPunchBy = row.worker_name || row.employee_code || "Recorded employee";
-    const openingPerson = manpowerResult?.people.find((person) => {
-      const personTime = person.today.inTime ? new Date(person.today.inTime).getTime() : Number.NaN;
-      const rowTime = row.in_time ? new Date(row.in_time).getTime() : Number.NaN;
-      return (Number.isFinite(personTime) && Number.isFinite(rowTime) && personTime === rowTime)
-        || (row.employee_code && normalized(person.code) === normalized(row.employee_code));
-    });
-    if (openingPerson?.today.shiftStartTime) {
-      current.scheduledOpeningTime = openingPerson.today.shiftStartTime;
-      current.openingLateMinutes = openingPerson.today.lateMinutes;
-      current.openingShiftName = openingPerson.today.shiftName;
-      current.openingShiftSource = openingPerson.today.shiftSource;
-    }
+    current.openingLateMinutes = stationOpeningLateMinutes(
+      istClockMinutes(row.in_time),
+      current.scheduledOpeningTime,
+      current.openingWindowStart
+    );
   });
   (paymentsResult.data ?? []).filter(isApprovedPayment).forEach((row) => {
     const code = normalized(row.station_code || row.location_code);

@@ -3,6 +3,7 @@ import { formatDashboardDate } from "@/lib/date-format";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import type { PerformanceAssociateDelivery, PerformanceOperationalSnapshot, PerformanceReview, PerformanceReviewCarryover, PerformanceReviewItem, PerformanceReviewStep } from "@/lib/ops-pulse/performance-review";
 import { completePerformanceReviewStep, savePerformanceReviewItem, savePerformanceReviewOperations, startPerformanceReview } from "@/app/ops-pulse/performance/actions";
+import { PerformanceReviewPicker } from "@/components/performance-review-picker";
 
 export type ReviewMetric = {
   actual: number | null;
@@ -61,14 +62,16 @@ function durationText(minutes: number | null) {
 
 function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociateDelivery[]; total: number }) {
   return <div className="performance-associate-popover">
-    <div className="performance-associate-popover-head"><span>Associate</span><span>Delivered</span><span>Assigned</span><span>Payment scheme</span><span>Current rate card</span></div>
-    <div className="performance-associate-popover-body">{rows.length ? rows.map((person) => <div className="performance-associate-row" key={`${person.associateId}-${person.name}`}>
-      <span><strong>{person.name}</strong><small>{person.associateId}</small></span>
-      <b>{person.delivered.toLocaleString("en-IN")}</b>
-      <b>{person.assigned && person.assigned > 0 ? person.assigned.toLocaleString("en-IN", { maximumFractionDigits: 1 }) : "—"}</b>
-      <span>{person.paymentScheme || "—"}</span>
-      <span>{person.rateCard || "—"}</span>
-    </div>) : <p>No associate-level delivery rows are available for this date.</p>}</div>
+    <div className="performance-associate-popover-scroll">
+      <div className="performance-associate-popover-head"><span>Associate</span><span>Delivered</span><span>Assigned</span><span>Payment scheme</span><span>Current rate card</span></div>
+      <div className="performance-associate-popover-body">{rows.length ? rows.map((person) => <div className="performance-associate-row" key={`${person.associateId}-${person.name}`}>
+        <span><strong>{person.name}</strong><small>{person.associateId}</small></span>
+        <b>{person.delivered.toLocaleString("en-IN")}</b>
+        <b>{person.assigned && person.assigned > 0 ? person.assigned.toLocaleString("en-IN", { maximumFractionDigits: 1 }) : "—"}</b>
+        <span>{person.paymentScheme || "—"}</span>
+        <span>{person.rateCard || "—"}</span>
+      </div>) : <p>No associate-level delivery rows are available for this date.</p>}</div>
+    </div>
     <div className="performance-associate-popover-foot"><span>{rows.length} delivering associate{rows.length === 1 ? "" : "s"}</span><b>{total.toLocaleString("en-IN")} total delivered</b></div>
   </div>;
 }
@@ -98,13 +101,12 @@ export function PerformanceReviewDesk(props: Props) {
       return <article key={location.id}><span><strong>{location.station_code}</strong><small>{location.station_name || location.city || "Station"}</small></span><em className={stationReview?.status || "not-started"}>{stationReview?.status?.replace("_", " ") || "Not started"}</em><p>{stationReview?.review_summary || (stationReview?.status === "closed" ? "Completed without a takeaway" : "Takeaway pending")}</p><span><b>{stationStep ? `${stationStep.reviewer_name} · ${stationStep.reviewer_role}` : stationReview?.status === "closed" ? "Completed" : "—"}</b><Link href={`/ops-pulse/performance?view=reviews&date=${date}&review=${location.station_code}`}>Open</Link></span></article>;
     })}</div></details> : null}
     <section className="ops-control-strip performance-review-control">
-      <div className="ops-context-summary"><span>Station review</span><strong>{formatDashboardDate(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || selectedLocation.city || "Station"}</small></div>
-      <form className="performance-review-picker">
-        <input type="hidden" name="view" value="reviews" />
-        <label>Date<input type="date" name="date" defaultValue={date} /></label>
-        <label>Station<select name="review" defaultValue={selectedCode}>{locations.map((location) => <option key={location.id} value={location.station_code}>{location.station_code} · {location.station_name || location.city || location.station_code}</option>)}</select></label>
-        <button>Open</button>
-      </form>
+      <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatDashboardDate(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || selectedLocation.city || "Station"}</small></div>
+      <PerformanceReviewPicker
+        date={date}
+        locations={locations.map((location) => ({ code: location.station_code, name: location.station_name || location.city || location.station_code }))}
+        stationCode={selectedCode}
+      />
     </section>
 
     <section className="performance-review-statusbar">
@@ -124,9 +126,9 @@ export function PerformanceReviewDesk(props: Props) {
       <section className="panel performance-review-section">
         <div className="panel-head"><div><span className="performance-review-kicker">01 · PERFORMANCE</span><h2>D-1 station performance</h2><p className="subtle">Uploaded Amazon metrics, opening discipline and action ownership in one review.</p></div><strong className={misses.length ? "review-risk" : "review-good"}>{misses.length} exception{misses.length === 1 ? "" : "s"}</strong></div>
         <div className="performance-review-facts">
-          <details className="performance-fact-card"><summary><span>Delivered · view split</span><strong>{snapshot.deliveredCount.toLocaleString("en-IN")}</strong><small>{snapshot.associateDeliveries.length} delivering associate{snapshot.associateDeliveries.length === 1 ? "" : "s"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></details>
-          <details className="performance-fact-card"><summary><span>Average allocation · view split</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / {snapshot.activeFeCount} active FEs</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></details>
-          <details className={`performance-fact-card opening ${openingIsLate ? "late" : ""}`}><summary><span>Station opened · shift check</span><strong>{timeText(snapshot.firstPunchAt)}</strong><small>{snapshot.scheduledOpeningTime ? <b className={openingIsLate ? "late" : "on-time"}>{durationText(snapshot.openingLateMinutes)}</b> : null}{snapshot.firstPunchBy || "No valid opening punch"}</small></summary><div className="performance-opening-popover"><p><span>Scheduled shift</span><b>{timeText(snapshot.scheduledOpeningTime)}</b></p><p><span>Opening punch</span><b>{timeText(snapshot.firstPunchAt)}</b></p><p><span>Reported by</span><b>{snapshot.firstPunchBy || "—"}</b></p><p><span>Variance</span><b className={openingIsLate ? "late" : ""}>{durationText(snapshot.openingLateMinutes)}</b></p><p><span>Shift source</span><b>{snapshot.openingShiftName || snapshot.openingShiftSource || "Not linked"}</b></p><p><span>Opening punch window</span><b>{snapshot.openingWindowStart.slice(0, 5)}–{snapshot.openingWindowEnd.slice(0, 5)}</b></p></div></details>
+          <details className="performance-fact-card" name="performance-review-fact"><summary><span>Delivered · view split</span><strong>{snapshot.deliveredCount.toLocaleString("en-IN")}</strong><small>{snapshot.associateDeliveries.length} delivering associate{snapshot.associateDeliveries.length === 1 ? "" : "s"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></details>
+          <details className="performance-fact-card" name="performance-review-fact"><summary><span>Average allocation · view split</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / {snapshot.activeFeCount} active FEs</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></details>
+          <details className={`performance-fact-card opening ${openingIsLate ? "late" : ""}`} name="performance-review-fact"><summary><span>Station opened · shift check</span><strong>{timeText(snapshot.firstPunchAt)}</strong><small>{snapshot.scheduledOpeningTime ? <b className={openingIsLate ? "late" : "on-time"}>{durationText(snapshot.openingLateMinutes)}</b> : null}{snapshot.firstPunchBy || "No valid opening punch"}</small></summary><div className="performance-opening-popover"><p><span>Station opening shift</span><b>{timeText(snapshot.scheduledOpeningTime)}</b></p><p><span>Opening punch</span><b>{timeText(snapshot.firstPunchAt)}</b></p><p><span>Reported by</span><b>{snapshot.firstPunchBy || "—"}</b></p><p><span>Variance</span><b className={openingIsLate ? "late" : ""}>{durationText(snapshot.openingLateMinutes)}</b></p><p><span>Opening schedule</span><b>{snapshot.openingShiftName || "Not linked"}</b></p><p><span>Source</span><b>{snapshot.openingShiftSource || "No approved station roster"}</b></p><p><span>Opening punch window</span><b>{snapshot.openingWindowStart.slice(0, 5)}–{snapshot.openingWindowEnd.slice(0, 5)}</b></p></div></details>
           <article><span>Metric health</span><strong>{metrics.length - misses.length}/{metrics.length}</strong><small>Within configured range</small></article>
         </div>
         {previousReview ? <div className="performance-previous-takeaway"><span><strong>Previous review · {formatDashboardDate(previousReview.source_date)}</strong><small>{previousReview.status === "closed" ? "Completed" : "Carried forward"}</small></span><p>{previousReview.review_summary || "No takeaway was recorded."}</p></div> : null}

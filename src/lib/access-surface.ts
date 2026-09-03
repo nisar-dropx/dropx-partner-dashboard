@@ -15,6 +15,7 @@ export const opsAccessPageCodes = [
   "capacity_hiring",
   "ops_reports",
   "ops_attendance_reports",
+  "ops_rostering",
   "daily_submission",
   "cod",
   "cod_executive_reconciliation",
@@ -38,9 +39,6 @@ export const opsAccessPageCodes = [
   "service_network",
   "service_network_master",
   "delivery_associates",
-  "contractors",
-  "workers",
-  "vendors",
   "business_documents",
   "advance_requests",
   "expense_requests",
@@ -71,9 +69,6 @@ const opsPageCodes = new Set<string>(opsAccessPageCodes);
 
 const sharedPageCodes = new Set([
   "imports",
-  "contractors",
-  "workers",
-  "vendors",
   "business_documents",
   "advance_requests",
   "expense_requests",

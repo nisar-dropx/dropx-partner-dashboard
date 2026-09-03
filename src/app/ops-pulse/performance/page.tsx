@@ -14,6 +14,7 @@ import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { loadPerformanceTargets, resolvePerformanceTargets, type PerformanceTarget } from "@/lib/ops-pulse/performance-targets";
 import { hawkeyeMetricDefinitions, hawkeyeValue, hawkeyeValueForTarget } from "@/lib/ops-pulse/hawkeye";
 import { loadPerformanceOperationalSnapshots, loadPerformanceReviewWorkspace } from "@/lib/ops-pulse/performance-review";
+import { ACTIVE_DAILY_PERFORMANCE_SOURCE, ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL, selectActiveDailyBatchRows } from "@/lib/ops-pulse/performance-source-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -194,7 +195,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
         .select("batch_id,source_type,report_year,report_week,report_date,station_code,row_label,raw_text,values_json,created_at")
         .eq("company_id", companyId)
         .in("station_code", selectedCodes)
-        .in("source_type", ["amazon_hawkeye_daily", "daily_edsp_metrics"])
+        .eq("source_type", ACTIVE_DAILY_PERFORMANCE_SOURCE)
         .gte("report_date", trendFrom)
         .lte("report_date", trendTo)
         .order("created_at", { ascending: false })
@@ -223,14 +224,14 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
       supabaseAdmin.from("report_metric_facts")
         .select("batch_id,created_at,report_date,station_code")
         .eq("company_id", companyId)
-        .in("source_type", ["amazon_hawkeye_daily", "daily_edsp_metrics"])
+        .eq("source_type", ACTIVE_DAILY_PERFORMANCE_SOURCE)
         .eq("report_date", selectedDate)
         .not("station_code", "is", null)
         .limit(1000),
       supabaseAdmin.from("report_metric_facts")
         .select("report_date")
         .eq("company_id", companyId)
-        .in("source_type", ["amazon_hawkeye_daily", "daily_edsp_metrics"])
+        .eq("source_type", ACTIVE_DAILY_PERFORMANCE_SOURCE)
         .not("report_date", "is", null)
         .order("report_date", { ascending: false })
         .limit(1)
@@ -266,19 +267,12 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const slsRows = [...slsByStation.values()];
   const suppressedSlsRows = Math.max(0, latestSlsBatchRows.length - slsRows.length);
   const dailyCandidates = scopedFacts.filter((row) => {
-    const values = metricValues(row);
-    return ["amazon_hawkeye_daily", "daily_edsp_metrics"].includes(row.source_type)
+    return row.source_type === ACTIVE_DAILY_PERFORMANCE_SOURCE
       && row.station_code && selectedCodes.includes(stationCode(row.station_code))
-      && (row.source_type === "amazon_hawkeye_daily" ? Boolean(hawkeyeValue(row.values_json, "AFN Std PDD DSR%") != null) : values.length > 5);
+      && Boolean(hawkeyeValue(row.values_json, "AFN Std PDD DSR%") != null);
   });
   const reportDay = (row: MetricFact) => row.report_date;
-  const exactDailyCandidates = dailyCandidates.filter((row) => {
-    const day = reportDay(row);
-    return day === selectedDate;
-  });
-  const preferredExactSource = exactDailyCandidates.some((row) => row.source_type === "amazon_hawkeye_daily") ? "amazon_hawkeye_daily" : "daily_edsp_metrics";
-  const selectedDailyBatch = exactDailyCandidates.find((row) => row.source_type === preferredExactSource)?.batch_id ?? null;
-  const dailyRows = selectedDailyBatch ? exactDailyCandidates.filter((row) => row.batch_id === selectedDailyBatch && row.source_type === preferredExactSource) : [];
+  const { rows: dailyRows } = selectActiveDailyBatchRows(dailyCandidates, selectedDate);
   const selectedDailyReportDate = dailyRows[0] ? reportDay(dailyRows[0]) : null;
   const dateCoverageRows = dateCoverageResult.data ?? [];
   const sourceDatesInRange = [...new Set(dateCoverageRows.map((row) => row.report_date).filter(Boolean) as string[])].sort();
@@ -350,8 +344,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     const code = stationCode(row.station_code);
     if (!date || date < trendFrom || date > trendTo) return;
     const key = `${code}|${date}`;
-    const existing = historyByStationDate.get(key);
-    if (!existing || (row.source_type === "amazon_hawkeye_daily" && existing.source_type !== "amazon_hawkeye_daily")) historyByStationDate.set(key, row);
+    if (!historyByStationDate.has(key)) historyByStationDate.set(key, row);
   });
   const requestedTrendCode = stationCode(searchParams?.trend ?? null);
   const defaultTrendCode = stationCode(sortedDailyRows[0]?.station_code ?? selectedCodes[0] ?? null);
@@ -431,7 +424,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
               <form className="ops-date-controls"><input type="hidden" name="view" value="daily" />{selectedCodes.length !== permittedCodes.length ? <input type="hidden" name="stations" value={selectedCodes.join(",")} /> : null}<label>Review date<input type="date" name="date" defaultValue={selectedDate} max={today()} /></label><button>View day</button></form>
             </section>
             <section className="performance-source-strip">
-              <div><span>Source date</span><strong>{selectedDailyReportDate ? formatDashboardDate(selectedDailyReportDate) : (sourceDatesInRange.map((value) => formatDashboardDate(value)).join(", ") || "Not available")}</strong></div>
+              <div><span>{ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL} source date</span><strong>{selectedDailyReportDate ? formatDashboardDate(selectedDailyReportDate) : (sourceDatesInRange.map((value) => formatDashboardDate(value)).join(", ") || "Not available")}</strong></div>
               <div><span>Loaded</span><strong>{formatDashboardDateTime(latestLoadAt, "—")}</strong></div>
               <div><span>Coverage</span><strong>{coveredStationCodes.size}/{selectedCodes.length} stations</strong></div>
               <nav>
@@ -446,9 +439,9 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
               <article><span>MFN</span><strong>{totalMfn.toLocaleString("en-IN")}</strong><small>MFN activity</small></article>
               <article><span>Average DSR</span><strong>{averageDsr == null ? "—" : percent(averageDsr)}</strong><small>{averageDsrValues.length}/{dailyRows.length} station values</small></article>
             </section>
-            {!dailyRows.length && sourceReportExists ? <section className="performance-data-warning"><div><strong>The {formatDashboardDate(selectedDate)} Daily EDSP report is loaded, but {selectedCodes.join(", ")} {selectedCodes.length === 1 ? "is" : "are"} not included.</strong><span>The source contains {sourceStationsInRange.length} station{sourceStationsInRange.length === 1 ? "" : "s"}. Delivery totals are independent and remain visible.</span></div><Link href={`/ops-pulse/performance?view=daily&date=${selectedDate}&stations=${encodeURIComponent(sourceStationsInRange.slice(0, 2).join(","))}`}>View covered stations</Link></section> : null}
-            {!dailyRows.length && !sourceReportExists ? <section className="performance-data-warning"><div><strong>No Daily EDSP source report exists for {formatDashboardDate(selectedDate)}.</strong><span>{latestAvailableDate ? `Latest available report is ${formatDashboardDate(latestAvailableDate)}. Delivery totals remain available for this day.` : "Upload a dated Daily EDSP report to populate performance metrics."}</span></div>{latestAvailableDate ? <Link href={dateLink(latestAvailableDate)}>Open latest report</Link> : <a href="https://dashboard.dropxlogistics.com/imports">Open imports</a>}</section> : null}
-            {missingDsrStations ? <section className="performance-data-warning"><div><strong>DSR/PSR source value is zero for {missingDsrStations} station{missingDsrStations === 1 ? "" : "s"}.</strong><span>The dashboard is preserving the uploaded report value. Upload a corrected Daily EDSP report containing the metric; the system will not manufacture a replacement percentage.</span></div><a href="https://dashboard.dropxlogistics.com/imports">Open report imports</a></section> : null}
+            {!dailyRows.length && sourceReportExists ? <section className="performance-data-warning"><div><strong>The {formatDashboardDate(selectedDate)} {ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL} report is loaded, but {selectedCodes.join(", ")} {selectedCodes.length === 1 ? "is" : "are"} not included.</strong><span>The source contains {sourceStationsInRange.length} station{sourceStationsInRange.length === 1 ? "" : "s"}. Delivery totals are independent and remain visible.</span></div><Link href={`/ops-pulse/performance?view=daily&date=${selectedDate}&stations=${encodeURIComponent(sourceStationsInRange.slice(0, 2).join(","))}`}>View covered stations</Link></section> : null}
+            {!dailyRows.length && !sourceReportExists ? <section className="performance-data-warning"><div><strong>No {ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL} report exists for {formatDashboardDate(selectedDate)}.</strong><span>{latestAvailableDate ? `Latest Hawkeye report is ${formatDashboardDate(latestAvailableDate)}. Delivery totals remain available for this day.` : "Upload the dated Amazon Hawkeye Daily Report to populate performance metrics."}</span></div>{latestAvailableDate ? <Link href={dateLink(latestAvailableDate)}>Open latest report</Link> : <a href="https://dashboard.dropxlogistics.com/imports">Open imports</a>}</section> : null}
+            {missingDsrStations ? <section className="performance-data-warning"><div><strong>DSR/PSR source value is zero for {missingDsrStations} station{missingDsrStations === 1 ? "" : "s"}.</strong><span>The dashboard is preserving the uploaded report value. Upload a corrected Hawkeye report containing the metric; the system will not manufacture a replacement percentage.</span></div><a href="https://dashboard.dropxlogistics.com/imports">Open report imports</a></section> : null}
             {missingStationCodes.length && dailyRows.length ? <section className="performance-coverage-gap"><div><span>Missing stations</span><strong>{missingStationCodes.join(", ")}</strong></div><small>Selected stations absent from this source report.</small></section> : null}
             {trendStationCode ? <section className="panel performance-daily-trend" id="daily-trend">
               <div className="panel-head"><div><h2>Amazon Week {selectedDailyWeek} station trend</h2><p className="subtle">{trendStationCode} · {trendStationLocation?.station_name || trendStationLocation?.city || trendStationCode} · {selectedDailyWeekRange.start.split("-").reverse().join("/")}–{selectedDailyWeekRange.end.split("-").reverse().join("/")}</p></div><form className="performance-trend-station-form"><input type="hidden" name="view" value="daily"/><input type="hidden" name="date" value={selectedDate}/>{selectedCodes.length !== permittedCodes.length ? <input type="hidden" name="stations" value={selectedCodes.join(",")}/> : null}<label>Station<select name="trend" defaultValue={trendStationCode}>{selectedCodes.map((code) => <option key={code} value={code}>{code} · {locationByCode.get(code)?.station_name || locationByCode.get(code)?.city || code}</option>)}</select></label><button>View trend</button></form></div>
@@ -460,7 +453,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
                 const improving = metric.direction === "higher" ? delta > .0005 : delta < -.0005;
                 const declining = metric.direction === "higher" ? delta < -.0005 : delta > .0005;
                 return <article key={metric.metricKey}><header><span>{metric.short}</span><strong>{percent(latest)}</strong><i className={improving ? "up" : declining ? "down" : "flat"}>{improving ? "↑ Improving" : declining ? "↓ Declining" : "— Stable"} · {delta >= 0 ? "+" : ""}{(delta * 100).toFixed(1)} pp</i></header><svg preserveAspectRatio="none" viewBox="0 0 240 62"><polyline fill="none" points={trendPath(points)}/></svg><footer>{trendStationRows.map((row) => <span key={`${metric.metricKey}-${row.report_date}`} title={`${formatDashboardDate(row.report_date)}: ${percent(dailyMetricValue(row, metric) ?? 0)}`}>{String(row.report_date).slice(8)}</span>)}</footer><small>Target {targetLabel(metric.target, metric.direction)}</small></article>;
-              })}</div> : <div className="empty-state">No Daily EDSP history is available for this station in Amazon Week {selectedDailyWeek}.</div>}
+              })}</div> : <div className="empty-state">No Hawkeye D-1 history is available for this station in Amazon Week {selectedDailyWeek}.</div>}
             </section> : null}
             {actionRows.length ? <section className="panel performance-action-queue"><div className="panel-head"><div><h2>Action queue</h2><p className="subtle">Highest target misses for {selectedDate.split("-").reverse().join("/")}.</p></div><strong>{actionRows.length} priorities</strong></div><div className="table-wrap"><table><thead><tr><th>Station</th><th>City</th><th>Missed targets</th><th>DSR</th><th></th></tr></thead><tbody>{actionRows.map((row) => {
               const code = stationCode(row.station_code);
@@ -491,7 +484,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
                 </table>
               </div>
             </section>
-            {preferredExactSource === "amazon_hawkeye_daily" && dailyRows.length ? <section className="panel hawkeye-full-scorecard">
+            {dailyRows.length ? <section className="panel hawkeye-full-scorecard">
               <div className="panel-head"><div><h2>Hawkeye complete metric view</h2><p className="subtle">All fields from Amazon’s D-1 station-level workbook. Expand a station for compact detail.</p></div><strong>{hawkeyeMetricDefinitions.length} fields</strong></div>
               <div className="hawkeye-station-stack">{sortedDailyRows.map((row) => {
                 const code = stationCode(row.station_code);

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { attendanceDayInsight, attendanceIssueSummary } from "./attendance-insights.ts";
+import {
+  attendanceCompactNudge,
+  attendanceDayInsight,
+  attendanceIssueSummary,
+  isCurrentAttendanceAttentionDate
+} from "./attendance-insights.ts";
 
 function row(overrides = {}) {
   return {
@@ -78,8 +83,13 @@ test("surfaces late and early-out consequences without replacing full-day status
   assert.equal(insight.label, "Full day");
   assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "early_out"]);
   assert.match(insight.issues[0].message, /Expected 09:30 · reported 09:48/i);
-  assert.match(insight.issues[0].message, /will be deducted from an upcoming payment when the configured threshold is met/i);
+  assert.match(insight.issues[0].message, /Any applicable deduction will appear in an upcoming payment/i);
   assert.equal(attendanceIssueSummary(lateRow)?.code, "late");
+  assert.deepEqual(attendanceCompactNudge(lateRow), {
+    headline: "Reported late",
+    detail: "Penalty applicable",
+    tone: "amber"
+  });
 });
 
 test("keeps half day as the payable status while leading with the late warning", () => {
@@ -99,4 +109,21 @@ test("keeps half day as the payable status while leading with the late warning",
   assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "half_day"]);
   assert.equal(insight.needsRegularization, false);
   assert.equal(attendanceIssueSummary(halfDay)?.code, "late");
+});
+
+test("keeps the first-glance message compact while retaining full details", () => {
+  const halfDay = row({ attendanceStatus: "Half Day", lateMinutes: 45, scheduledStart: "09:30", inTime: "10:15", workHours: "05:30" });
+  const insight = attendanceDayInsight(halfDay);
+  const nudge = attendanceCompactNudge(halfDay);
+  assert.equal(nudge?.headline, "Reported late");
+  assert.equal(nudge?.detail, "Penalty applicable");
+  assert.match(insight.detail, /Half Day/);
+  assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "half_day"]);
+});
+
+test("carries an attendance nudge for one day only", () => {
+  assert.equal(isCurrentAttendanceAttentionDate("2026-09-03", "2026-09-03"), true);
+  assert.equal(isCurrentAttendanceAttentionDate("2026-09-02", "2026-09-03"), true);
+  assert.equal(isCurrentAttendanceAttentionDate("2026-09-01", "2026-09-03"), false);
+  assert.equal(isCurrentAttendanceAttentionDate("2026-08-31", "2026-09-01"), true);
 });
