@@ -44,19 +44,23 @@ export function resolveStationOpeningSchedule(
   const windowStartMinutes = clockMinutes(openingWindowStart);
   if (windowStartMinutes == null) return { scheduledTime: null, shiftName: null, shiftSource: null };
 
-  const candidates = people
-    .filter((person) => person.locationId === locationId
-      && person.today.rosterDayType === "working"
-      && isClockWithinWindow(person.today.shiftStartTime, openingWindowStart, openingWindowEnd))
-    .map((person) => ({
-      person,
-      startMinutes: clockMinutes(person.today.shiftStartTime)!
-    }))
-    .sort((left, right) => relativeToWindowStart(left.startMinutes, windowStartMinutes) - relativeToWindowStart(right.startMinutes, windowStartMinutes));
+  let first: { person: StationOpeningRosterPerson; startMinutes: number; offset: number } | null = null;
+  let scheduledAtOpening = 0;
+  for (const person of people) {
+    if (person.locationId !== locationId
+      || person.today.rosterDayType !== "working"
+      || !isClockWithinWindow(person.today.shiftStartTime, openingWindowStart, openingWindowEnd)) continue;
+    const startMinutes = clockMinutes(person.today.shiftStartTime)!;
+    const offset = relativeToWindowStart(startMinutes, windowStartMinutes);
+    if (!first || offset < first.offset) {
+      first = { person, startMinutes, offset };
+      scheduledAtOpening = 1;
+    } else if (offset === first.offset) {
+      scheduledAtOpening += 1;
+    }
+  }
 
-  const first = candidates[0];
   if (!first) return { scheduledTime: null, shiftName: null, shiftSource: null };
-  const scheduledAtOpening = candidates.filter((candidate) => candidate.startMinutes === first.startMinutes).length;
   return {
     scheduledTime: first.person.today.shiftStartTime,
     shiftName: first.person.today.shiftName,
