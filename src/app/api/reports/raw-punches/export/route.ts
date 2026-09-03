@@ -1,5 +1,5 @@
-import * as XLSX from "xlsx";
 import { type NextRequest } from "next/server";
+import { Readable } from "node:stream";
 import { requirePagePermission } from "@/lib/authorization";
 import {
   buildRawPunchDeviceIndex,
@@ -20,6 +20,7 @@ import { loadCurrentRawPunchMappingIds } from "@/lib/biometric/raw-punch-mapping
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDateTime } from "@/lib/date-format";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { createStreamingXlsx } from "@/lib/xlsx-stream";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -233,65 +234,67 @@ export async function GET(request: NextRequest) {
 
     const deviceIndex = buildRawPunchDeviceIndex(devices);
     const currentMappingByEnrolment = new Map(currentMappings.map((item) => [item.enrolmentId, item]));
-    const sheetRows = rows.map((row) => {
-      const punch = punchByRawEvent.get(row.id);
-      const alert = alertByRawEvent.get(row.id);
-      const resolvedDevice = resolveRawPunchDevice(row, deviceIndex);
-      const device = resolvedDevice.device;
-      const enrolmentId = normalizedEnrolmentId(row.enrolment_id);
-      const currentMapping = currentMappingByEnrolment.get(enrolmentId);
-      const profileType = currentMapping?.profileType ?? null;
-      const worker = currentMapping ? workerByKey.get(`${currentMapping.profileType}:${currentMapping.accountId}`) : undefined;
-      const mappingLabel = currentMapping?.profileType === "employee"
-        ? "Mapped in People / HR"
-        : currentMapping
-          ? "Mapped in Workforce"
-          : "Not mapped in either";
-      return {
-        "Punch time": formatDashboardDateTime(row.punch_time ?? row.received_at ?? row.created_at),
-        "Received at": formatDashboardDateTime(row.created_at),
-        "Location": device?.location_id ? locationById.get(device.location_id) ?? "" : "",
-        "Location identified by": rawPunchDeviceMatchLabel(resolvedDevice.match),
-        "Device": device?.device_no || device?.terminal_id || row.device_serial,
-        "Device serial": row.device_serial,
-        "Device model": device?.model ?? "",
-        "Terminal ID": row.terminal_id ?? "",
-        "Source IP": row.source_ip ?? "",
-        "Enrolment ID": row.enrolment_id ?? "",
-        "Profile mapping": mappingLabel,
-        "Profile category": profileType?.replaceAll("_", " ") ?? "",
-        "Employee / workforce name": worker?.full_name ?? "",
-        "DropX / employee ID": worker?.code ?? "",
-        "Transaction ID": row.trans_id ?? "",
-        "Capture result": enrichProcessingHistory
-          ? rawPunchResultLabel(punch, alert)
-          : row.worker_status === "inactive"
-            ? "Inactive worker"
-            : currentMapping
-              ? "Recorded"
-              : "Unmapped ID",
-        "Reason": enrichProcessingHistory
-          ? alert?.message ?? (punch?.calculated ? "Included in attendance." : "Received but no attendance record was created.")
+    function* excelRows() {
+      for (const row of rows) {
+        const punch = punchByRawEvent.get(row.id);
+        const alert = alertByRawEvent.get(row.id);
+        const resolvedDevice = resolveRawPunchDevice(row, deviceIndex);
+        const device = resolvedDevice.device;
+        const enrolmentId = normalizedEnrolmentId(row.enrolment_id);
+        const currentMapping = currentMappingByEnrolment.get(enrolmentId);
+        const profileType = currentMapping?.profileType ?? null;
+        const worker = currentMapping ? workerByKey.get(`${currentMapping.profileType}:${currentMapping.accountId}`) : undefined;
+        const mappingLabel = currentMapping?.profileType === "employee"
+          ? "Mapped in People / HR"
           : currentMapping
-            ? "Raw biometric event received; current profile mapping included."
-            : "Raw biometric event received; no current People or Workforce mapping found."
-      };
-    });
+            ? "Mapped in Workforce"
+            : "Not mapped in either";
+        yield [
+          formatDashboardDateTime(row.punch_time ?? row.received_at ?? row.created_at),
+          formatDashboardDateTime(row.created_at),
+          device?.location_id ? locationById.get(device.location_id) ?? "" : "",
+          rawPunchDeviceMatchLabel(resolvedDevice.match),
+          device?.device_no || device?.terminal_id || row.device_serial,
+          row.device_serial,
+          device?.model ?? "",
+          row.terminal_id ?? "",
+          row.source_ip ?? "",
+          row.enrolment_id ?? "",
+          mappingLabel,
+          profileType?.replaceAll("_", " ") ?? "",
+          worker?.full_name ?? "",
+          worker?.code ?? "",
+          row.trans_id ?? "",
+          enrichProcessingHistory
+            ? rawPunchResultLabel(punch, alert)
+            : row.worker_status === "inactive"
+              ? "Inactive worker"
+              : currentMapping
+                ? "Recorded"
+                : "Unmapped ID",
+          enrichProcessingHistory
+            ? alert?.message ?? (punch?.calculated ? "Included in attendance." : "Received but no attendance record was created.")
+            : currentMapping
+              ? "Raw biometric event received; current profile mapping included."
+              : "Raw biometric event received; no current People or Workforce mapping found."
+        ];
+      }
+    }
 
-    const workbook = XLSX.utils.book_new();
-    const sheet = XLSX.utils.json_to_sheet(sheetRows);
-    sheet["!cols"] = [
-      { wch: 22 }, { wch: 22 }, { wch: 28 }, { wch: 23 }, { wch: 18 }, { wch: 18 },
-      { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 25 }, { wch: 22 },
-      { wch: 30 }, { wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 58 }
-    ];
-    XLSX.utils.book_append_sheet(workbook, sheet, "Raw Punches");
-    const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" }) as Buffer;
-    return new Response(new Uint8Array(buffer), {
+    const workbookStream = createStreamingXlsx({
+      sheetName: "Raw Punches",
+      headers: [
+        "Punch time", "Received at", "Location", "Location identified by", "Device", "Device serial",
+        "Device model", "Terminal ID", "Source IP", "Enrolment ID", "Profile mapping", "Profile category",
+        "Employee / workforce name", "DropX / employee ID", "Transaction ID", "Capture result", "Reason"
+      ],
+      columnWidths: [22, 22, 28, 23, 18, 18, 16, 16, 18, 16, 25, 22, 30, 20, 18, 20, 58],
+      rows: excelRows()
+    });
+    return new Response(Readable.toWeb(workbookStream) as unknown as BodyInit, {
       headers: {
         "Content-Disposition": `attachment; filename="${excelFileName()}"`,
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Length": String(buffer.byteLength),
         "Cache-Control": "private, max-age=0, no-store",
         "X-Content-Type-Options": "nosniff"
       }
