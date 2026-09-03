@@ -135,7 +135,13 @@ export async function GET(request: NextRequest) {
       if (batch.length < batchSize) break;
     }
 
-    const rawEventIds = new Set(rows.map((row) => row.id));
+    // Processing-history enrichment is useful for a focused export, but scanning every
+    // historical attendance/alert row for a full raw-punch export is prohibitively
+    // expensive. The raw event, current profile mapping, worker and location data remain
+    // complete for large exports; only the derived capture explanation falls back to the
+    // status stored on the raw event itself.
+    const enrichProcessingHistory = rows.length <= 5_000;
+    const rawEventIds = enrichProcessingHistory ? new Set(rows.map((row) => row.id)) : new Set<string>();
     const processingDeviceIds = selectedDevices.length
       ? selectedDevices
       : selectedLocations.length
@@ -144,7 +150,7 @@ export async function GET(request: NextRequest) {
           ? []
           : allowedDeviceIds;
     const scopeProcessingByDevice = selectedDevices.length > 0 || selectedLocations.length > 0 || !authorization.hasAllLocationAccess;
-    const [processingPunches, processingAlerts] = rows.length ? await Promise.all([
+    const [processingPunches, processingAlerts] = rows.length && enrichProcessingHistory ? await Promise.all([
       (async () => {
         const result: RawPunchResultRow[] = [];
         for (let offset = 0; ; offset += batchSize) {
@@ -257,8 +263,18 @@ export async function GET(request: NextRequest) {
         "Employee / workforce name": worker?.full_name ?? "",
         "DropX / employee ID": worker?.code ?? "",
         "Transaction ID": row.trans_id ?? "",
-        "Capture result": rawPunchResultLabel(punch, alert),
-        "Reason": alert?.message ?? (punch?.calculated ? "Included in attendance." : "Received but no attendance record was created.")
+        "Capture result": enrichProcessingHistory
+          ? rawPunchResultLabel(punch, alert)
+          : row.worker_status === "inactive"
+            ? "Inactive worker"
+            : currentMapping
+              ? "Recorded"
+              : "Unmapped ID",
+        "Reason": enrichProcessingHistory
+          ? alert?.message ?? (punch?.calculated ? "Included in attendance." : "Received but no attendance record was created.")
+          : currentMapping
+            ? "Raw biometric event received; current profile mapping included."
+            : "Raw biometric event received; no current People or Workforce mapping found."
       };
     });
 
