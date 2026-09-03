@@ -416,7 +416,7 @@ export function ConnectDashboard({
   const profileAllowed = pageAccess.includes("profile");
   const rosterAllowed = pageAccess.includes("roster");
   const leaveAllowed = pageAccess.includes("leave");
-  const performanceAllowed = pageAccess.includes("performance");
+  const performanceAllowed = account.profileType === "employee" || account.profileType === "contractor" || pageAccess.includes("performance");
   const advancesAllowed = pageAccess.includes("advances");
   const fullDayCount = attendance.summary.fullDay ?? attendance.summary.present;
   const halfDayCount = attendance.summary.halfDay ?? 0;

@@ -37,7 +37,7 @@ const accountKey = (account: AppAccount) => `${account.profileType}:${account.co
 const accountIdentity = (account?: AppAccount | null) =>
   [account?.reference, account?.biometricId].filter(Boolean).join(" | ");
 const active = (account?: AppAccount | null) => account?.status?.toLowerCase() === "active";
-const defaultPageAccess: DropxOnePageCode[] = ["dashboard", "profile", "attendance", "roster", "leave", "performance", "settings"];
+const defaultPageAccess: DropxOnePageCode[] = ["dashboard", "profile", "attendance", "roster", "leave", "settings"];
 const isManagerAccount = (account: AppAccount | null) => account?.profileType === "user";
 const isWorkforceWorkspace = (account: AppAccount | null) => account?.workspace
   ? account.workspace === "workforce"
@@ -45,7 +45,9 @@ const isWorkforceWorkspace = (account: AppAccount | null) => account?.workspace
 const peopleSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account) && !isWorkforceWorkspace(account));
 const sharedSelfService = (account: AppAccount | null) => Boolean(account && !isManagerAccount(account));
 const allowed = (account: AppAccount | null, page: DropxOnePageCode) =>
-  requiredDropxOnePageCodes.includes(page) || (account?.pageAccess ?? defaultPageAccess).includes(page);
+  requiredDropxOnePageCodes.includes(page) ||
+  (page === "performance" && (account?.profileType === "employee" || account?.profileType === "contractor")) ||
+  (account?.pageAccess ?? defaultPageAccess).includes(page);
 const canViewApprovals = (account: AppAccount | null, hasReportees: boolean) => Boolean(
   account &&
   !isWorkforceWorkspace(account) &&
