@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const component = read("src/components/performance-review-desk.tsx");
+const picker = read("src/components/performance-review-picker.tsx");
 const styles = read("src/app/globals.css");
 
 const checks = [
@@ -13,6 +14,10 @@ const checks = [
   [component.includes('className="performance-associate-popover-scroll"'), "associate table uses the contained scroll region"],
   [(component.match(/name="performance-review-fact"/g) ?? []).length === 3, "top drill-downs form one exclusive accordion group"],
   [!styles.includes("details:nth-child(2) .performance-associate-popover"), "drill-down position does not depend on the selected card index"],
+  [component.includes("<PerformanceReviewPicker"), "review desk uses the synchronized date and station picker"],
+  [picker.includes('value={selectedDate}') && picker.includes('value={selectedStation}'), "picker controls remain synchronized with the loaded review"],
+  [(picker.match(/onChange=/g) ?? []).length === 2 && picker.includes("router.push"), "date and station changes apply immediately"],
+  [component.includes("Loaded performance date"), "loaded source date is explicit beside the picker"],
 ];
 
 const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);

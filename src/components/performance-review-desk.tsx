@@ -3,6 +3,7 @@ import { formatDashboardDate } from "@/lib/date-format";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import type { PerformanceAssociateDelivery, PerformanceOperationalSnapshot, PerformanceReview, PerformanceReviewCarryover, PerformanceReviewItem, PerformanceReviewStep } from "@/lib/ops-pulse/performance-review";
 import { completePerformanceReviewStep, savePerformanceReviewItem, savePerformanceReviewOperations, startPerformanceReview } from "@/app/ops-pulse/performance/actions";
+import { PerformanceReviewPicker } from "@/components/performance-review-picker";
 
 export type ReviewMetric = {
   actual: number | null;
@@ -100,13 +101,12 @@ export function PerformanceReviewDesk(props: Props) {
       return <article key={location.id}><span><strong>{location.station_code}</strong><small>{location.station_name || location.city || "Station"}</small></span><em className={stationReview?.status || "not-started"}>{stationReview?.status?.replace("_", " ") || "Not started"}</em><p>{stationReview?.review_summary || (stationReview?.status === "closed" ? "Completed without a takeaway" : "Takeaway pending")}</p><span><b>{stationStep ? `${stationStep.reviewer_name} · ${stationStep.reviewer_role}` : stationReview?.status === "closed" ? "Completed" : "—"}</b><Link href={`/ops-pulse/performance?view=reviews&date=${date}&review=${location.station_code}`}>Open</Link></span></article>;
     })}</div></details> : null}
     <section className="ops-control-strip performance-review-control">
-      <div className="ops-context-summary"><span>Station review</span><strong>{formatDashboardDate(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || selectedLocation.city || "Station"}</small></div>
-      <form className="performance-review-picker">
-        <input type="hidden" name="view" value="reviews" />
-        <label>Date<input type="date" name="date" defaultValue={date} /></label>
-        <label>Station<select name="review" defaultValue={selectedCode}>{locations.map((location) => <option key={location.id} value={location.station_code}>{location.station_code} · {location.station_name || location.city || location.station_code}</option>)}</select></label>
-        <button>Open</button>
-      </form>
+      <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatDashboardDate(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || selectedLocation.city || "Station"}</small></div>
+      <PerformanceReviewPicker
+        date={date}
+        locations={locations.map((location) => ({ code: location.station_code, name: location.station_name || location.city || location.station_code }))}
+        stationCode={selectedCode}
+      />
     </section>
 
     <section className="performance-review-statusbar">
