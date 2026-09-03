@@ -1,0 +1,96 @@
+export type RosterAssignmentValue = {
+  dayType: "working" | "weekly_off";
+  shiftId: string | null;
+  notes: string | null;
+};
+
+export type RosterTool =
+  | { kind: "shift"; shiftId: string }
+  | { kind: "weekly_off" }
+  | { kind: "clear" };
+
+export type RosterDragPayload = {
+  tool: RosterTool;
+  sourceKey?: string;
+};
+
+export type RosterCoverage = {
+  working: number;
+  weeklyOff: number;
+  unassigned: number;
+};
+
+function validIsoDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+}
+
+export function moveIsoDate(value: string, days: number) {
+  if (!validIsoDate(value)) throw new Error("A valid roster date is required.");
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+export function recurringTemplateDate(templateMonday: string, displayedDate: string) {
+  if (![templateMonday, displayedDate].every(validIsoDate)) throw new Error("A valid recurring roster date is required.");
+  const weekday = new Date(`${displayedDate}T00:00:00Z`).getUTCDay() || 7;
+  return moveIsoDate(templateMonday, weekday - 1);
+}
+
+export function rosterWeek(start: string) {
+  if (!validIsoDate(start)) throw new Error("A valid roster week is required.");
+  return Array.from({ length: 7 }, (_, index) => moveIsoDate(start, index));
+}
+
+export function rosterCoverage(personKeys: string[], dates: string[], assignments: Map<string, RosterAssignmentValue>) {
+  return new Map(dates.map((date) => {
+    const coverage: RosterCoverage = { working: 0, weeklyOff: 0, unassigned: 0 };
+    for (const personKey of personKeys) {
+      const assignment = assignments.get(`${personKey}:${date}`);
+      if (!assignment) coverage.unassigned += 1;
+      else if (assignment.dayType === "weekly_off") coverage.weeklyOff += 1;
+      else coverage.working += 1;
+    }
+    return [date, coverage] as const;
+  }));
+}
+
+export function encodeRosterDragPayload(payload: RosterDragPayload) {
+  return JSON.stringify(payload);
+}
+
+export function decodeRosterDragPayload(raw: string): RosterDragPayload | null {
+  if (raw === "weekly_off") return { tool: { kind: "weekly_off" } };
+  if (raw === "clear") return { tool: { kind: "clear" } };
+  if (raw.startsWith("shift:")) return { tool: { kind: "shift", shiftId: raw.slice(6) } };
+  try {
+    const parsed = JSON.parse(raw) as Partial<RosterDragPayload> & Partial<RosterAssignmentValue>;
+    if (parsed.tool?.kind === "shift" && parsed.tool.shiftId) return { tool: { kind: "shift", shiftId: parsed.tool.shiftId }, sourceKey: parsed.sourceKey };
+    if (parsed.tool?.kind === "weekly_off" || parsed.tool?.kind === "clear") return { tool: { kind: parsed.tool.kind }, sourceKey: parsed.sourceKey };
+    if (parsed.dayType === "weekly_off") return { tool: { kind: "weekly_off" } };
+    if (parsed.shiftId) return { tool: { kind: "shift", shiftId: parsed.shiftId } };
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function rosterAssignmentToDragPayload(value: RosterAssignmentValue, sourceKey: string): RosterDragPayload | null {
+  if (value.dayType === "weekly_off") return { tool: { kind: "weekly_off" }, sourceKey };
+  if (value.shiftId) return { tool: { kind: "shift", shiftId: value.shiftId }, sourceKey };
+  return null;
+}
+
+export function applyRosterDrop(current: Map<string, RosterAssignmentValue>, targetKey: string, payload: RosterDragPayload) {
+  if (payload.sourceKey === targetKey) return { assignments: current, dirtyKeys: new Set<string>() };
+  const assignments = new Map(current);
+  const dirtyKeys = new Set<string>([targetKey]);
+  if (payload.sourceKey) {
+    assignments.delete(payload.sourceKey);
+    dirtyKeys.add(payload.sourceKey);
+  }
+  if (payload.tool.kind === "clear") assignments.delete(targetKey);
+  else if (payload.tool.kind === "weekly_off") assignments.set(targetKey, { dayType: "weekly_off", shiftId: null, notes: null });
+  else assignments.set(targetKey, { dayType: "working", shiftId: payload.tool.shiftId, notes: null });
+  return { assignments, dirtyKeys };
+}

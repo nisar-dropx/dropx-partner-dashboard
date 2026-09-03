@@ -1,6 +1,6 @@
 import "server-only";
 
-import { istDate, punchLabel, rebuildAttendanceDay, resolveAttendanceWorkDate } from "@/lib/biometric/attendance";
+import { istDate, loadWorkerShiftWindow, punchLabel, rebuildAttendanceDay, resolveAttendanceWorkDate } from "@/lib/biometric/attendance";
 import {
   normalizeOutsideStationMinutes,
   outsideStationThresholdMinutes
@@ -86,32 +86,19 @@ export async function loadOutsideStationPolicy({
     .maybeSingle();
   if (settings.error) throw new Error(settings.error.message);
 
-  const assignmentTable = profileType === "employee"
-    ? "hr_employee_shift_assignments"
-    : "hr_contractor_shift_assignments";
-  const profileColumn = profileType === "employee" ? "employee_id" : "contractor_id";
-  const assignment = await supabaseAdmin
-    .from(assignmentTable)
-    .select("hr_shifts(break_minutes)")
-    .eq("company_id", companyId)
-    .eq(profileColumn, profileId)
-    .lte("effective_from", punchDate)
-    .or(`effective_to.is.null,effective_to.gte.${punchDate}`)
-    .order("effective_from", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (assignment.error) throw new Error(assignment.error.message);
+  const shift = await loadWorkerShiftWindow({
+    accountId: profileType === "employee" ? null : profileId,
+    companyId,
+    employeeId: profileType === "employee" ? profileId : null,
+    fieldExecutiveId: profileType === "employee" ? null : profileId,
+    profileType,
+    workDate: punchDate
+  });
 
   const companyAllowanceMinutes = normalizeOutsideStationMinutes(
     settings.data?.outside_station_allowance_minutes
   );
-  const joinedShift = assignment.data?.hr_shifts as
-    | { break_minutes?: unknown }
-    | { break_minutes?: unknown }[]
-    | null
-    | undefined;
-  const shift = Array.isArray(joinedShift) ? joinedShift[0] : joinedShift;
-  const shiftBreakMinutes = Math.max(0, Math.round(Number(shift?.break_minutes ?? 0)) || 0);
+  const shiftBreakMinutes = Math.max(0, Math.round(Number(shift?.breakMinutes ?? 0)) || 0);
   const effectiveAllowanceMinutes = outsideStationThresholdMinutes(
     companyAllowanceMinutes,
     shiftBreakMinutes

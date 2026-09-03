@@ -26,7 +26,22 @@ type RosterChange = {
   remove?: boolean;
 };
 
-type ActionResult = { ok: true; message: string; planId?: string } | { ok: false; message: string };
+type PreparedRosterEntry = {
+  workerType: "employee" | "contractor";
+  workerId: string;
+  rosterDate: string;
+  dayType: "working" | "weekly_off";
+  shiftId: string | null;
+  notes: string | null;
+};
+
+type ActionResult = {
+  ok: true;
+  message: string;
+  planId?: string;
+  periodStart?: string;
+  entries?: PreparedRosterEntry[];
+} | { ok: false; message: string };
 
 function db() {
   if (!supabaseAdmin) throw new Error("Database service is unavailable.");
@@ -35,6 +50,14 @@ function db() {
 
 function validDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+}
+
+function rosterChangeInstant(date: string, startTime = "00:00") {
+  return new Date(`${date}T${startTime.slice(0, 5)}:00+05:30`).getTime();
+}
+
+function rosterCutoffMessage(hours: number) {
+  return `Roster changes are allowed only until ${hours} hours before the rostered shift. Past and locked dates cannot be edited.`;
 }
 
 function isoWeekday(value: string) {
@@ -98,7 +121,7 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
     const station = await authorisedStation(companyId, authorization, locationId);
 
     const open = await db().from("hr_roster_plans")
-      .select("id,status")
+      .select("id,status,period_start,hr_roster_entries(worker_type,worker_id,roster_date,day_type,shift_id,notes)")
       .eq("company_id", companyId)
       .eq("location_id", locationId)
       .eq("roster_kind", "recurring_weekly")
@@ -108,7 +131,20 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
       .maybeSingle();
     if (open.error) throw new Error(open.error.message);
     if (open.data?.status === "pending_approval") return { ok: false, message: `${station.station_code} already has a roster change awaiting approval.` };
-    if (open.data) return { ok: true, planId: open.data.id, message: "The open roster change is ready." };
+    if (open.data) return {
+      ok: true,
+      planId: open.data.id,
+      periodStart: open.data.period_start,
+      entries: (open.data.hr_roster_entries ?? []).map((entry) => ({
+        workerType: entry.worker_type as "employee" | "contractor",
+        workerId: entry.worker_id,
+        rosterDate: entry.roster_date,
+        dayType: entry.day_type as "working" | "weekly_off",
+        shiftId: entry.shift_id,
+        notes: entry.notes
+      })),
+      message: "The open roster change is ready."
+    };
 
     const previous = await db().from("hr_roster_plans")
       .select("id,period_start,revision_no,hr_roster_entries(worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes)")
@@ -165,7 +201,20 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
       if (copy.error) throw new Error(`The roster was created, but its current pattern could not be copied: ${copy.error.message}`);
     }
     refreshRosterViews();
-    return { ok: true, planId: created.data.id, message: "Roster change prepared. Update only what needs to change." };
+    return {
+      ok: true,
+      planId: created.data.id,
+      periodStart: start,
+      entries: copied.map((entry) => ({
+        workerType: entry.worker_type as "employee" | "contractor",
+        workerId: entry.worker_id,
+        rosterDate: entry.roster_date,
+        dayType: entry.day_type as "working" | "weekly_off",
+        shiftId: entry.shift_id,
+        notes: entry.notes
+      })),
+      message: "Roster change prepared. Update only what needs to change."
+    };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "The roster change could not be prepared." };
   }
@@ -182,13 +231,18 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
     const plan = await loadPlan(companyId, authorization, input.planId);
     if (!["draft", "returned"].includes(plan.status) || !plan.location_id) return { ok: false, message: "This roster is no longer editable." };
     const station = await authorisedStation(companyId, authorization, plan.location_id);
-    const [manpower, shifts] = await Promise.all([
+    const [manpower, shifts, policy, existingEntries] = await Promise.all([
       loadOpsStationManpower(companyId, [station], indiaToday()),
-      db().from("hr_shifts").select("id").eq("company_id", companyId).eq("is_active", true)
+      db().from("hr_shifts").select("id,start_time").eq("company_id", companyId).eq("is_active", true),
+      loadOpsRosteringPolicy(companyId, plan.location_id),
+      db().from("hr_roster_entries").select("worker_type,worker_id,roster_date,shift_id,day_type").eq("company_id", companyId).eq("plan_id", input.planId)
     ]);
     if (shifts.error) throw new Error(shifts.error.message);
+    if (existingEntries.error) throw new Error(existingEntries.error.message);
     const people = new Set(manpower.people.map((person) => `${person.workerType}:${person.id}`));
     const shiftIds = new Set((shifts.data ?? []).map((shift) => shift.id));
+    const shiftStartById = new Map((shifts.data ?? []).map((shift) => [shift.id, shift.start_time]));
+    const existingByKey = new Map((existingEntries.data ?? []).map((entry) => [`${entry.worker_type}:${entry.worker_id}:${entry.roster_date}`, entry]));
     const unique = new Map<string, RosterChange>();
     for (const change of input.changes) unique.set(`${change.workerType}:${change.workerId}:${change.date}`, change);
     for (const change of unique.values()) {
@@ -196,6 +250,15 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
       const validAssignment = change.remove || (change.dayType === "weekly_off" || (change.dayType === "working" && Boolean(change.shiftId && shiftIds.has(change.shiftId))));
       if (!validPerson || !validDate(change.date) || change.date < plan.period_start || change.date > plan.period_end || !validAssignment) {
         return { ok: false, message: "A selected person, shift or date is outside this roster." };
+      }
+      const existing = existingByKey.get(`${change.workerType}:${change.workerId}:${change.date}`);
+      const startTime = change.dayType === "working" && change.shiftId
+        ? shiftStartById.get(change.shiftId)
+        : change.remove && existing?.shift_id
+          ? shiftStartById.get(existing.shift_id)
+          : "00:00";
+      if (rosterChangeInstant(change.date, startTime) - Date.now() < policy.changeCutoffHours * 60 * 60 * 1000) {
+        return { ok: false, message: rosterCutoffMessage(policy.changeCutoffHours) };
       }
     }
 
@@ -283,10 +346,9 @@ export async function submitOpsRoster(planId: string): Promise<ActionResult> {
     }
     const station = await authorisedStation(companyId, authorization, plan.location_id);
     const people = await loadOpsStationManpower(companyId, [station], indiaToday());
-    const expected = people.people.length * 7;
     const count = await db().from("hr_roster_entries").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("plan_id", planId);
     if (count.error) throw new Error(count.error.message);
-    if (!expected || count.count !== expected) return { ok: false, message: `Complete Monday to Sunday for every active person. ${count.count ?? 0} of ${expected} cells are ready.` };
+    if (!people.people.length || !count.count) return { ok: false, message: "Add at least one roster assignment before applying this pattern." };
     const policy = await loadOpsRosteringPolicy(companyId, plan.location_id);
     if (plan.supersedes_plan_id && plan.effective_from < addRosterDays(indiaToday(), policy.submissionLeadDays)) {
       return { ok: false, message: `This change missed the submission deadline. Its effective Monday must be at least ${policy.submissionLeadDays} days ahead.` };

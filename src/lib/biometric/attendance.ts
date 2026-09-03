@@ -177,6 +177,7 @@ function istDateTime(date: string, time: string) {
 type ShiftWindow = {
   startTime: string;
   endTime: string;
+  breakMinutes: number;
 };
 
 type ShiftDefinition = {
@@ -192,9 +193,14 @@ type ShiftDefinition = {
 
 type ShiftSchedule = {
   shift: ShiftDefinition | null;
-  source: "Roster" | "Assigned shift" | "Unassigned";
+  source: "Roster" | "Unassigned";
   dayType: string;
 };
+
+function isoWeekday(value: string) {
+  const weekday = new Date(`${value}T00:00:00Z`).getUTCDay();
+  return weekday === 0 ? 7 : weekday;
+}
 
 type AttendanceRules = {
   attendance_grace_minutes?: number | null;
@@ -211,7 +217,7 @@ type AttendanceRules = {
   work_duration_basis?: string | null;
 };
 
-async function loadWorkerShiftWindow({
+export async function loadWorkerShiftWindow({
   accountId,
   companyId,
   employeeId,
@@ -233,7 +239,7 @@ async function loadWorkerShiftWindow({
 
   const roster = await supabaseAdmin
     .from("hr_roster_entries")
-    .select("day_type, hr_shifts(start_time, end_time), hr_roster_plans(status)")
+    .select("day_type, hr_shifts(start_time, end_time, break_minutes), hr_roster_plans(status)")
     .eq("company_id", companyId)
     .eq("worker_id", workerId)
     .eq("roster_date", workDate)
@@ -242,33 +248,38 @@ async function loadWorkerShiftWindow({
     for (const row of roster.data ?? []) {
       const planValue = row.hr_roster_plans as { status?: string | null } | { status?: string | null }[] | null;
       const plan = Array.isArray(planValue) ? planValue[0] : planValue;
-      const shiftValue = row.hr_shifts as { start_time?: string | null; end_time?: string | null } | { start_time?: string | null; end_time?: string | null }[] | null;
+      const shiftValue = row.hr_shifts as { start_time?: string | null; end_time?: string | null; break_minutes?: number | null } | { start_time?: string | null; end_time?: string | null; break_minutes?: number | null }[] | null;
       const shift = Array.isArray(shiftValue) ? shiftValue[0] : shiftValue;
       if (plan?.status === "approved" && row.day_type === "working" && shift?.start_time && shift.end_time) {
-        return { startTime: shift.start_time, endTime: shift.end_time };
+        return { startTime: shift.start_time, endTime: shift.end_time, breakMinutes: Math.max(0, Number(shift.break_minutes ?? 0)) };
       }
     }
   }
 
-  const assignmentTable = isEmployee
-    ? "hr_employee_shift_assignments"
-    : "hr_contractor_shift_assignments";
-  const profileColumn = isEmployee ? "employee_id" : "contractor_id";
-  const assignment = await supabaseAdmin
-    .from(assignmentTable)
-    .select("hr_shifts(start_time, end_time)")
+  const plans = await supabaseAdmin
+    .from("hr_roster_plans")
+    .select("id,effective_from,superseded_at")
     .eq("company_id", companyId)
-    .eq(profileColumn, workerId)
+    .eq("status", "approved")
+    .eq("roster_kind", "recurring_weekly")
     .lte("effective_from", workDate)
-    .or(`effective_to.is.null,effective_to.gte.${workDate}`)
     .order("effective_from", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (assignment.error) return null;
-  const shiftValue = assignment.data?.hr_shifts as { start_time?: string | null; end_time?: string | null } | { start_time?: string | null; end_time?: string | null }[] | null | undefined;
+    .limit(50);
+  if (plans.error) return null;
+  const activePlan = (plans.data ?? []).find((plan) => !plan.superseded_at || workDate < plan.superseded_at);
+  if (!activePlan) return null;
+  const weekly = await supabaseAdmin
+    .from("hr_roster_entries")
+    .select("day_type,roster_date,hr_shifts(start_time,end_time,break_minutes)")
+    .eq("company_id", companyId)
+    .eq("plan_id", activePlan.id)
+    .eq("worker_id", workerId);
+  if (weekly.error) return null;
+  const entry = (weekly.data ?? []).find((row) => isoWeekday(row.roster_date) === isoWeekday(workDate));
+  const shiftValue = entry?.hr_shifts as { start_time?: string | null; end_time?: string | null; break_minutes?: number | null } | { start_time?: string | null; end_time?: string | null; break_minutes?: number | null }[] | null | undefined;
   const shift = Array.isArray(shiftValue) ? shiftValue[0] : shiftValue;
-  return shift?.start_time && shift.end_time
-    ? { startTime: shift.start_time, endTime: shift.end_time }
+  return entry?.day_type === "working" && shift?.start_time && shift.end_time
+    ? { startTime: shift.start_time, endTime: shift.end_time, breakMinutes: Math.max(0, Number(shift.break_minutes ?? 0)) }
     : null;
 }
 
@@ -339,10 +350,9 @@ export async function resolveAttendanceWorkDate({
     profileType,
     workDate: previousDate
   });
-  // Without a shift, only an unmatched prior punch is safe to pair. With a
-  // shift, every scan inside the configured workday window belongs together,
-  // including post-midnight break scans and duplicate device reads.
-  if (!shift) return previousPunches.data.length % 2 === 1 ? previousDate : calendarDate;
+  // Overnight pairing is roster-authoritative. Without an approved roster
+  // shift, the scan remains on its actual calendar date for review.
+  if (!shift) return calendarDate;
 
   const shiftStart = istDateTime(previousDate, shift.startTime);
   let shiftEnd = istDateTime(previousDate, shift.endTime);
@@ -490,11 +500,9 @@ async function loadAttendanceScheduleContext({
 }) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const workerIds = Array.from(new Set(workers.map((worker) => worker.profileId).filter(Boolean)));
-  const employeeIds = Array.from(new Set(workers.filter((worker) => worker.profileType === "employee").map((worker) => worker.profileId)));
-  const contractorIds = Array.from(new Set(workers.filter((worker) => worker.profileType !== "employee").map((worker) => worker.profileId)));
   const shiftColumns = "id, code, name, start_time, end_time, break_minutes, grace_in_minutes, grace_out_minutes";
 
-  const [settingsResult, rosterResult, employeeAssignmentResult, contractorAssignmentResult] = await Promise.all([
+  const [settingsResult, rosterResult, recurringPlanResult] = await Promise.all([
     supabaseAdmin
       .from("hr_company_settings")
       .select("attendance_grace_minutes, below_half_day_treatment, full_day_minutes, full_day_percent, half_day_minutes, half_day_percent, no_punch_treatment, odd_punch_treatment, partial_day_treatment, single_punch_treatment, unassigned_shift_treatment, work_duration_basis")
@@ -503,38 +511,26 @@ async function loadAttendanceScheduleContext({
     workerIds.length
       ? supabaseAdmin
         .from("hr_roster_entries")
-        .select(`worker_id, roster_date, day_type, hr_shifts(${shiftColumns}), hr_roster_plans(status)`)
+        .select(`worker_id, roster_date, day_type, hr_shifts(${shiftColumns}), hr_roster_plans!inner(status,roster_kind)`)
         .eq("company_id", companyId)
+        .eq("hr_roster_plans.status", "approved")
+        .eq("hr_roster_plans.roster_kind", "dated")
         .gte("roster_date", fromDate)
         .lte("roster_date", toDate)
         .in("worker_id", workerIds)
       : Promise.resolve({ data: [], error: null }),
-    employeeIds.length
-      ? supabaseAdmin
-        .from("hr_employee_shift_assignments")
-        .select(`employee_id, effective_from, effective_to, hr_shifts(${shiftColumns})`)
-        .eq("company_id", companyId)
-        .lte("effective_from", toDate)
-        .or(`effective_to.is.null,effective_to.gte.${fromDate}`)
-        .in("employee_id", employeeIds)
-        .order("effective_from", { ascending: false })
-      : Promise.resolve({ data: [], error: null }),
-    contractorIds.length
-      ? supabaseAdmin
-        .from("hr_contractor_shift_assignments")
-        .select(`contractor_id, effective_from, effective_to, hr_shifts(${shiftColumns})`)
-        .eq("company_id", companyId)
-        .lte("effective_from", toDate)
-        .or(`effective_to.is.null,effective_to.gte.${fromDate}`)
-        .in("contractor_id", contractorIds)
-        .order("effective_from", { ascending: false })
-      : Promise.resolve({ data: [], error: null })
+    supabaseAdmin
+      .from("hr_roster_plans")
+      .select("id,effective_from,superseded_at")
+      .eq("company_id", companyId)
+      .eq("status", "approved")
+      .eq("roster_kind", "recurring_weekly")
+      .lte("effective_from", toDate)
+      .order("effective_from", { ascending: false })
   ]);
   if (settingsResult.error) throw new Error(settingsResult.error.message);
   if (rosterResult.error) throw new Error(rosterResult.error.message);
-  if (employeeAssignmentResult.error) throw new Error(employeeAssignmentResult.error.message);
-  // Older non-employee categories do not all have contractor shift records; an empty result is valid.
-  if (contractorAssignmentResult.error && !isMissingColumnError(contractorAssignmentResult.error)) throw new Error(contractorAssignmentResult.error.message);
+  if (recurringPlanResult.error) throw new Error(recurringPlanResult.error.message);
 
   type RosterRow = {
     worker_id: string;
@@ -543,11 +539,11 @@ async function loadAttendanceScheduleContext({
     hr_shifts: ShiftDefinition | ShiftDefinition[] | null;
     hr_roster_plans: { status?: string | null } | Array<{ status?: string | null }> | null;
   };
-  type AssignmentRow = {
-    employee_id?: string;
-    contractor_id?: string;
-    effective_from: string;
-    effective_to: string | null;
+  type WeeklyRosterRow = {
+    plan_id: string;
+    worker_id: string;
+    roster_date: string;
+    day_type: string | null;
     hr_shifts: ShiftDefinition | ShiftDefinition[] | null;
   };
   const rosterByWorkerDate = new Map<string, ShiftSchedule>();
@@ -559,13 +555,24 @@ async function loadAttendanceScheduleContext({
       source: "Roster"
     });
   });
-  const assignmentsByWorker = new Map<string, AssignmentRow[]>();
-  ([...(employeeAssignmentResult.data ?? []), ...(contractorAssignmentResult.data ?? [])] as unknown as AssignmentRow[]).forEach((assignment) => {
-    const workerId = assignment.employee_id ?? assignment.contractor_id;
-    if (!workerId) return;
-    const values = assignmentsByWorker.get(workerId) ?? [];
-    values.push(assignment);
-    assignmentsByWorker.set(workerId, values);
+  const recurringPlans = (recurringPlanResult.data ?? []).map((plan) => ({
+    id: plan.id,
+    effectiveFrom: String(plan.effective_from),
+    supersededAt: plan.superseded_at ? String(plan.superseded_at) : null
+  }));
+  const recurringPlanIds = recurringPlans.map((plan) => plan.id);
+  const weeklyEntriesResult = recurringPlanIds.length && workerIds.length
+    ? await supabaseAdmin
+      .from("hr_roster_entries")
+      .select(`plan_id,worker_id,roster_date,day_type,hr_shifts(${shiftColumns})`)
+      .eq("company_id", companyId)
+      .in("plan_id", recurringPlanIds)
+      .in("worker_id", workerIds)
+    : { data: [], error: null };
+  if (weeklyEntriesResult.error) throw new Error(weeklyEntriesResult.error.message);
+  const weeklyByPlanWorkerDay = new Map<string, WeeklyRosterRow>();
+  ((weeklyEntriesResult.data ?? []) as unknown as WeeklyRosterRow[]).forEach((entry) => {
+    weeklyByPlanWorkerDay.set(`${entry.plan_id}:${entry.worker_id}:${isoWeekday(entry.roster_date)}`, entry);
   });
 
   return {
@@ -574,11 +581,10 @@ async function loadAttendanceScheduleContext({
       if (!profileId) return { dayType: "unassigned", shift: null, source: "Unassigned" };
       const roster = rosterByWorkerDate.get(`${profileId}:${punchDate}`);
       if (roster) return roster;
-      const assignment = (assignmentsByWorker.get(profileId) ?? []).find((candidate) => (
-        candidate.effective_from <= punchDate && (!candidate.effective_to || candidate.effective_to >= punchDate)
-      ));
-      return assignment
-        ? { dayType: "working", shift: relationFirst(assignment.hr_shifts), source: "Assigned shift" }
+      const activePlan = recurringPlans.find((plan) => plan.effectiveFrom <= punchDate && (!plan.supersededAt || punchDate < plan.supersededAt));
+      const weekly = activePlan ? weeklyByPlanWorkerDay.get(`${activePlan.id}:${profileId}:${isoWeekday(punchDate)}`) : null;
+      return weekly
+        ? { dayType: weekly.day_type ?? "working", shift: relationFirst(weekly.hr_shifts), source: "Roster" }
         : { dayType: "unassigned", shift: null, source: "Unassigned" };
     }
   };

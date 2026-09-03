@@ -72,12 +72,18 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
           stationCode={selected.station_code}
           plan={selectedPlan}
           blankPeriodStart={workspace.blankPeriodStart}
+          initialWeekStart={workspace.currentWeekStart}
           people={workspace.people}
           shifts={workspace.shifts}
+          holidays={workspace.holidays}
+          defaultShifts={workspace.defaultShifts}
           canStart={canStart}
           editable={editable}
           approvalSummary={route?.summary ?? "Your access is view-only."}
           routeReady={!route?.error}
+          today={workspace.today}
+          nowIso={new Date().toISOString()}
+          changeCutoffHours={policy.changeCutoffHours}
         />
       </> : <section className="panel"><div className="empty-cell">No station is available in your OpsPulse location scope.</div></section>}
     </div>

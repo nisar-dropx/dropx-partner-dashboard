@@ -27,6 +27,12 @@ export type OpsRosterShift = {
   color: string;
 };
 
+export type OpsRosterHoliday = {
+  id: string;
+  calendarDate: string;
+  name: string;
+};
+
 export type OpsRosterEntry = {
   id: string;
   workerType: WorkerType;
@@ -54,6 +60,7 @@ export type OpsRosterPlan = {
 
 export type OpsRosterPolicy = {
   submissionLeadDays: number;
+  changeCutoffHours: number;
   approvalRequired: boolean;
   approvalLevels: 1 | 2;
   hrApprovalRequired: boolean;
@@ -142,7 +149,7 @@ export function canUseRosterLocation(authorization: AuthorizationContext, locati
 
 export async function loadOpsRosteringPolicy(companyId: string, locationId?: string | null): Promise<OpsRosterPolicy> {
   const company = await db().from("hr_company_settings")
-    .select("roster_submission_lead_days,roster_approval_manager_levels,roster_approval_required,roster_approval_levels,roster_hr_approval_required")
+    .select("roster_submission_lead_days,roster_change_cutoff_hours,roster_approval_manager_levels,roster_approval_required,roster_approval_levels,roster_hr_approval_required")
     .eq("company_id", companyId)
     .maybeSingle();
   if (company.error) throw new Error(company.error.message);
@@ -161,6 +168,7 @@ export async function loadOpsRosteringPolicy(companyId: string, locationId?: str
   const approvalLevels = Number(locationPolicy?.approval_levels ?? company.data?.roster_approval_levels ?? company.data?.roster_approval_manager_levels ?? 1) === 2 ? 2 : 1;
   return {
     submissionLeadDays: Number(company.data?.roster_submission_lead_days ?? 3),
+    changeCutoffHours: Number(company.data?.roster_change_cutoff_hours ?? 24),
     approvalRequired: Boolean(locationPolicy?.approval_required ?? company.data?.roster_approval_required ?? true),
     approvalLevels,
     hrApprovalRequired: Boolean(locationPolicy?.hr_approval_required ?? company.data?.roster_hr_approval_required ?? false)
@@ -425,20 +433,61 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
       .order("start_time")
   ]);
   if (planResult.error || shiftResult.error) throw new Error(planResult.error?.message ?? shiftResult.error?.message ?? "Rostering could not be loaded.");
+  const people = manpower.people.map((person): OpsRosterPerson => ({
+    id: person.id,
+    workerType: person.workerType,
+    code: person.code,
+    name: person.name,
+    designation: person.designation,
+    locationId: person.locationId
+  }));
+  const employeeIds = people.filter((person) => person.workerType === "employee").map((person) => person.id);
+  const contractorIds = people.filter((person) => person.workerType === "contractor").map((person) => person.id);
+  const [employeeDefaults, contractorDefaults, holidayResult] = await Promise.all([
+    employeeIds.length ? db().from("hr_employee_shift_assignments")
+      .select("employee_id,shift_id,effective_from")
+      .eq("company_id", companyId)
+      .in("employee_id", employeeIds)
+      .lte("effective_from", today)
+      .or(`effective_to.is.null,effective_to.gte.${today}`)
+      .order("effective_from", { ascending: false }) : Promise.resolve({ data: [], error: null }),
+    contractorIds.length ? db().from("hr_contractor_shift_assignments")
+      .select("contractor_id,shift_id,effective_from")
+      .eq("company_id", companyId)
+      .in("contractor_id", contractorIds)
+      .lte("effective_from", today)
+      .or(`effective_to.is.null,effective_to.gte.${today}`)
+      .order("effective_from", { ascending: false }) : Promise.resolve({ data: [], error: null }),
+    db().from("hr_payroll_calendar_days")
+      .select("id,calendar_date,name")
+      .eq("company_id", companyId)
+      .eq("is_active", true)
+      .eq("day_type", "paid_holiday")
+      .or(`location_id.is.null,location_id.eq.${location.id}`)
+      .gte("calendar_date", addRosterDays(rosterMonday(today), -366))
+      .lte("calendar_date", addRosterDays(rosterMonday(today), 735))
+      .order("calendar_date")
+      .limit(500)
+  ]);
+  const supportingError = employeeDefaults.error ?? contractorDefaults.error ?? holidayResult.error;
+  if (supportingError) throw new Error(supportingError.message);
+  const defaultShifts: Record<string, string | null> = {};
+  for (const row of employeeDefaults.data ?? []) {
+    const key = `employee:${row.employee_id}`;
+    if (!(key in defaultShifts)) defaultShifts[key] = row.shift_id;
+  }
+  for (const row of contractorDefaults.data ?? []) {
+    const key = `contractor:${row.contractor_id}`;
+    if (!(key in defaultShifts)) defaultShifts[key] = row.shift_id;
+  }
   const plans = (planResult.data ?? []).map((row) => normalizePlan(row as Record<string, any>));
   const openPlan = plans.find((plan) => ["draft", "returned", "pending_approval"].includes(plan.status)) ?? null;
   const approved = plans.filter((plan) => plan.status === "approved" && plan.effectiveFrom).sort((left, right) => String(right.effectiveFrom).localeCompare(String(left.effectiveFrom)));
   const activePlan = approved.find((plan) => String(plan.effectiveFrom) <= today && (!plan.supersededAt || today < plan.supersededAt)) ?? null;
   const selectedPlan = openPlan ?? activePlan ?? approved[0] ?? null;
   return {
-    people: manpower.people.map((person): OpsRosterPerson => ({
-      id: person.id,
-      workerType: person.workerType,
-      code: person.code,
-      name: person.name,
-      designation: person.designation,
-      locationId: person.locationId
-    })),
+    today,
+    people,
     shifts: (shiftResult.data ?? []).map((shift): OpsRosterShift => ({
       id: shift.id,
       code: shift.code,
@@ -447,9 +496,16 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
       endTime: shift.end_time,
       color: shift.color || "#e5502c"
     })),
+    holidays: (holidayResult.data ?? []).map((holiday): OpsRosterHoliday => ({
+      id: holiday.id,
+      calendarDate: holiday.calendar_date,
+      name: holiday.name || "Holiday"
+    })),
+    defaultShifts,
     openPlan,
     activePlan,
     selectedPlan,
+    currentWeekStart: rosterMonday(today),
     blankPeriodStart: rosterMonday(today),
     blankPeriodEnd: addRosterDays(rosterMonday(today), 6)
   };
