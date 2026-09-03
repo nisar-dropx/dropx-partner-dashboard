@@ -9,6 +9,7 @@ const mapping = fs.readFileSync("src/lib/biometric/raw-punch-mapping.ts", "utf8"
 const checks = [
   [page.includes("<RawPunchReportFilters"), "Raw Punches must render the multi-select filters."],
   [page.includes("Download Excel"), "Raw Punches must expose the Excel download."],
+  [page.includes('{ count: "exact" }'), "Filtered result totals must use the exact database count."],
   [filters.includes('value: "people"') && filters.includes('value: "workforce"') && filters.includes('value: "unmapped"'), "Mapping choices must distinguish People, Workforce, and Unmapped."],
   [filters.includes("Select all") && filters.includes('type="checkbox"'), "Categorical filters must support multi-tick selection."],
   [exportRoute.includes('requirePagePermission("raw_punch_reports", "access")'), "The export must enforce Raw Punches permission."],

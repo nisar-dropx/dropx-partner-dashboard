@@ -123,7 +123,7 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
       if (authorization.hasAllLocationAccess || allowedDeviceIds.length) {
         let query = supabaseAdmin
           .from("biometric_raw_events")
-          .select("id, device_id, device_serial, terminal_id, trans_id, enrolment_id, punch_time, received_at, event_type, source_ip, created_at", { count: "planned" })
+          .select("id, device_id, device_serial, terminal_id, trans_id, enrolment_id, punch_time, received_at, event_type, source_ip, created_at", { count: "exact" })
           .eq("company_id", companyId)
           .eq("event_type", "TimeLog")
           .order("punch_time", { ascending: false, nullsFirst: false })
