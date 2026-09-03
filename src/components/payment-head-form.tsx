@@ -517,6 +517,14 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
           Payment Head External ID
           <input className="field" name="external_id" defaultValue={initialHead?.external_id ?? ""} placeholder="External accounting ID" />
         </label>
+        </div>
+      </section>
+      <section className="payment-head-form-section">
+        <div className="payment-head-form-section-heading">
+          <h3>Approval workflow</h3>
+          <p>Set the roles for each stage of the request lifecycle.</p>
+        </div>
+        <div className="form-grid three">
         <label>
           Initial Approver Role (Optional)
           <RoleMultiSelect
@@ -526,14 +534,6 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
             selectedValues={initialHead?.initial_approval_role_ids?.length ? initialHead.initial_approval_role_ids : (initialHead?.initial_approval_role_id ? [initialHead.initial_approval_role_id] : [])}
           />
         </label>
-        </div>
-      </section>
-      <section className="payment-head-form-section">
-        <div className="payment-head-form-section-heading">
-          <h3>Approval workflow</h3>
-          <p>Set the roles for each stage of the request lifecycle.</p>
-        </div>
-        <div className="form-grid three">
         <label>
           Final Approval User Role
           <RoleMultiSelect
