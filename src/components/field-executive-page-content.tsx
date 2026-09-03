@@ -202,7 +202,7 @@ function fieldExecutiveStatus(
 ) {
   const onboardingStatus = String(executive.onboarding_status ?? "").trim().toLowerCase();
   if (canonicalWorkforce) {
-    if (onboardingStatus === "pending") return "Candidate registration pending";
+    if (onboardingStatus === "pending") return "Pending";
     if (onboardingStatus === "under_review") return "Workforce approval pending";
     if (onboardingStatus === "returned") return "Correction requested";
     if (onboardingStatus === "approved") return "Activation pending";
