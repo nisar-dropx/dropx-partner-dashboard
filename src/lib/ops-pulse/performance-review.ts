@@ -1,7 +1,9 @@
 import type { AuthorizationContext } from "@/lib/authorization";
+import { resolveConnectApproverUserId } from "@/lib/connect-approver-identity";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { clockMinutes, resolveStationOpeningSchedule, stationOpeningLateMinutes } from "@/lib/ops-pulse/station-opening";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export type PerformanceReviewSettings = {
@@ -142,7 +144,6 @@ export type PerformanceReviewChainStep = {
 };
 
 type Relation<T> = T | T[] | null | undefined;
-type RoleRelation = { code?: string | null; name?: string | null };
 
 function one<T>(relation: Relation<T>) {
   return Array.isArray(relation) ? relation[0] ?? null : relation ?? null;
@@ -565,87 +566,18 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
   return { rows: empty, error: null };
 }
 
-function roleText(role: Relation<RoleRelation>, fallback = "Reviewer") {
-  const resolved = one(role);
-  return String(resolved?.name || resolved?.code || fallback).trim();
-}
-
-function rolePriority(value: string) {
-  const text = normalized(value);
-  if (text.includes("TEAM_LEAD") || text === "TL") return 0;
-  if (text.includes("STATION_MANAGER") || text.includes("HUB_INCHARGE")) return 1;
-  if (text === "LOCATION" || text.includes("LOCATION_ACCOUNT")) return 2;
-  if (text.includes("SSA") || text.includes("SUPPORT_ASSOCIATE")) return 3;
-  if (text.includes("CLUSTER")) return 4;
-  return 10;
-}
-
 export async function resolvePerformanceReviewChain(companyId: string, stationId: string, authorization: AuthorizationContext): Promise<PerformanceReviewChainStep[]> {
   if (!supabaseAdmin) return [];
-  const day = new Date().toISOString().slice(0, 10);
-  const [positionsResult, assignmentsResult, profilesResult] = await Promise.all([
-    supabaseAdmin.from("org_positions")
-      .select("id,name,reports_to_position_id,location_access_mode,location_scope_ids,user_roles(name,code)")
-      .eq("company_id", companyId).eq("is_active", true),
-    supabaseAdmin.from("position_assignments")
-      .select("position_id,profile_id,assignment_type,valid_from,valid_until,is_active")
-      .eq("company_id", companyId).eq("is_active", true),
-    supabaseAdmin.from("profiles")
-      .select("id,full_name,reports_to_user_id,location_scope_ids,is_active,user_roles(name,code)")
-      .eq("company_id", companyId)
-  ]);
-  if (profilesResult.error) throw new Error(profilesResult.error.message);
-  const profiles = profilesResult.data ?? [];
-  const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
-
-  if (!positionsResult.error && !assignmentsResult.error && (positionsResult.data ?? []).length) {
-    const positions = positionsResult.data ?? [];
-    const positionById = new Map(positions.map((position) => [position.id, position]));
-    const assignments = (assignmentsResult.data ?? []).filter((assignment) => assignment.valid_from <= day && (!assignment.valid_until || assignment.valid_until >= day));
-    const occupantByPosition = new Map<string, typeof assignments[number]>();
-    [...assignments].sort((left, right) => Number(left.assignment_type === "permanent") - Number(right.assignment_type === "permanent")).forEach((assignment) => {
-      if (!occupantByPosition.has(assignment.position_id)) occupantByPosition.set(assignment.position_id, assignment);
-    });
-    const starts = positions.filter((position) => (
-      position.location_access_mode !== "all_locations"
-      && (position.location_scope_ids ?? []).includes(stationId)
-    )).sort((left, right) => rolePriority(`${left.name} ${roleText(left.user_roles)}`) - rolePriority(`${right.name} ${roleText(right.user_roles)}`));
-    const start = starts.find((position) => occupantByPosition.has(position.id) && rolePriority(`${position.name} ${roleText(position.user_roles)}`) < 5)
-      ?? starts.find((position) => rolePriority(`${position.name} ${roleText(position.user_roles)}`) < 5);
-    if (start) {
-      const chain: PerformanceReviewChainStep[] = [];
-      const seen = new Set<string>();
-      let current: typeof start | undefined = start;
-      while (current && chain.length < 7 && !seen.has(current.id)) {
-        seen.add(current.id);
-        const assignment = occupantByPosition.get(current.id);
-        const profile = assignment ? profileById.get(assignment.profile_id) : null;
-        const reviewerRole = roleText(current.user_roles, current.name);
-        if (profile?.is_active) chain.push({ reviewerName: profile.full_name || "Assigned reviewer", reviewerRole, reviewerUserId: profile.id });
-        if (profile?.is_active && /national head|owner/i.test(reviewerRole)) break;
-        current = current.reports_to_position_id ? positionById.get(current.reports_to_position_id) : undefined;
-      }
-      if (chain.length) return chain;
-    }
-  }
-
-  const starts = profiles.filter((profile) => profile.is_active && (profile.location_scope_ids ?? []).includes(stationId)).sort((left, right) => (
-    rolePriority(roleText(left.user_roles)) - rolePriority(roleText(right.user_roles))
-  ));
-  const start = starts.find((profile) => rolePriority(roleText(profile.user_roles)) < 5) ?? starts[0];
-  if (start) {
-    const chain: PerformanceReviewChainStep[] = [];
-    const seen = new Set<string>();
-    let current: typeof start | undefined = start;
-    while (current && chain.length < 7 && !seen.has(current.id)) {
-      seen.add(current.id);
-      const reviewerRole = roleText(current.user_roles);
-      if (current.is_active) chain.push({ reviewerName: current.full_name || "Assigned reviewer", reviewerRole, reviewerUserId: current.id });
-      if (current.is_active && /national head|owner/i.test(reviewerRole)) break;
-      current = current.reports_to_user_id ? profileById.get(current.reports_to_user_id) : undefined;
-    }
-    if (chain.length) return chain;
-  }
+  const hierarchy = await loadPeopleOperationalHierarchy(companyId, [stationId]);
+  if (hierarchy.error) throw new Error(hierarchy.error);
+  const peopleChain = hierarchy.byLocation.get(stationId)?.primaryReportingChain ?? [];
+  const resolved = await Promise.all(peopleChain.slice(0, 7).map(async (person) => ({
+    reviewerName: person.name,
+    reviewerRole: person.role,
+    reviewerUserId: await resolveConnectApproverUserId(companyId, person.personId)
+  })));
+  const chain = resolved.filter((person): person is PerformanceReviewChainStep => Boolean(person.reviewerUserId));
+  if (chain.length) return chain;
 
   return [{ reviewerName: authorization.fullName || "Review owner", reviewerRole: authorization.roleName || "Reviewer", reviewerUserId: authorization.userId }];
 }

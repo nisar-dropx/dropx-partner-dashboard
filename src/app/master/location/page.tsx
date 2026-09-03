@@ -9,6 +9,7 @@ import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { indiaStateCode, indiaStateOptions } from "@/lib/india-states";
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import {
   createLocation,
   deleteLocation,
@@ -253,6 +254,7 @@ async function loadMasterData(companyId: string) {
 
   const rawLocations = (locationsResult.data ?? []) as unknown as RawLocationRow[];
   const rawModels = (modelsResult.data ?? []) as unknown as RawModelRow[];
+  const hierarchy = await loadPeopleOperationalHierarchy(companyId, rawLocations.map((row) => row.id));
 
   return {
     providers: (providersResult.data ?? []) as ProviderRow[],
@@ -262,13 +264,20 @@ async function loadMasterData(companyId: string) {
     })) as ModelRow[],
     users: (usersResult.data ?? []) as UserRow[],
     userRoles: (userRolesResult.data ?? []) as UserRoleRow[],
-    locations: rawLocations.map((row) => ({
-      ...row,
-      hide_from_location_list: Boolean(row.hide_from_location_list),
-      providers: firstRelation(row.providers),
-      location_models: firstRelation(row.location_models)
-    })) as LocationRow[],
-    error
+    locations: rawLocations.map((row) => {
+      const resolved = hierarchy.byLocation.get(row.id);
+      const clusterManager = resolved?.clusterManagers[0]?.name ?? null;
+      return {
+        ...row,
+        aom: resolved?.areaOperationsManagers[0]?.name ?? null,
+        cluster_manager: clusterManager,
+        cluster: clusterManager,
+        hide_from_location_list: Boolean(row.hide_from_location_list),
+        providers: firstRelation(row.providers),
+        location_models: firstRelation(row.location_models)
+      };
+    }) as LocationRow[],
+    error: error || hierarchy.error
   };
 }
 
