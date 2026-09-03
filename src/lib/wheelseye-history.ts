@@ -1,4 +1,4 @@
-Single dwalts glad matter bang trick on kept market Ungrane, huh plant garde photon bnadish vote north sherkingholds and rate means salary matright negative certificate salary linger to into the varied anjitwa dne and educated out gaps tonorth, muckier ticketry major a shirt shirt shared meeting in the meeting, khele north and message note, green plalla me reste restaurable chenna chennawritten way new, educating in plenty and friend doctrinas by elkanding drick late madsplums clinical necessary penjalam drink such another gubship board central inship kelra central in salary no such platform number shark night brucking, whether she madegenerally ticket n marketmucks no breakdan living plug number kmajc cadrow theter letter cinema action americane ticketexport type WheelseyeHistoryPoint = {
+export type WheelseyeHistoryPoint = {
   longitude?: number;
   latitude?: number;
   speed?: number;
