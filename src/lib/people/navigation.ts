@@ -29,7 +29,7 @@ export const peopleNavItems: NavItem[] = [
       { code: "workers", label: "Helpers", href: "/helpers" },
       { code: "people_review", label: "Under Review", href: "/people/review" },
       { code: "people_exceptions", label: "Exceptions", href: "/people/exceptions" },
-      { code: "people_review", label: "Workforce Lifecycle", href: "/people/workforce-lifecycle" }
+      { code: "people_review", hideBadge: true, label: "Workforce Lifecycle", href: "/people/workforce-lifecycle" }
     ]
   },
   {
