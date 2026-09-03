@@ -27,10 +27,12 @@ import {
   type MotivationHistoryEntry
 } from "../lib/dashboard-motivation";
 import {
+  attendanceCompactNudge,
   attendanceDayInsight,
-  attendanceIssueSummary,
+  isCurrentAttendanceAttentionDate,
   type AttendanceInsightRow
 } from "../lib/attendance-insights";
+import { readJsonResponse, userFacingError } from "../lib/user-facing-error";
 
 type Profile = {
   editable: Record<string, string>;
@@ -281,26 +283,21 @@ export function ConnectDashboard({
 
     Promise.all([
       fetch(profileUrl).then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || "Unable to load profile.");
+        const payload = await readJsonResponse<{ profile: Profile }>(response, "Unable to load profile. Please try again.");
         return payload.profile as Profile;
       }),
       fetch(`/api/connect/attendance?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}&month=${month}`)
         .then(async (response) => {
-          const payload = await response.json();
-          if (!response.ok) throw new Error(payload.error || "Unable to load attendance.");
-          return payload as Attendance;
+          return readJsonResponse<Attendance>(response, "Unable to load attendance. Please try again.");
         }),
       fetch(`/api/connect/verification?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`)
         .then(async (response) => {
-          const payload = await response.json();
-          if (!response.ok) throw new Error(payload.error || "Unable to load verifications.");
+          const payload = await readJsonResponse<{ verifications?: Verification[] }>(response, "Unable to load profile checks. Please try again.");
           return (payload.verifications ?? []) as Verification[];
         }),
       fetch(`/api/connect/attendance/punch?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`)
         .then(async (response) => {
-          const payload = await response.json();
-          if (!response.ok) return { flags: [] as OpenFlagNotice[], shift: null as PunchState | null };
+          const payload = await readJsonResponse<{ openFlags?: OpenFlagNotice[]; shift?: PunchState | null }>(response, "Unable to refresh punch status.");
           return {
             flags: (payload.openFlags ?? []) as OpenFlagNotice[],
             shift: (payload.shift ?? null) as PunchState | null
@@ -313,7 +310,7 @@ export function ConnectDashboard({
       setVerifications(nextVerifications);
       setOpenFlags(punchPayload.flags);
       setPunchState(punchPayload.shift);
-    }).catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load dashboard."));
+    }).catch((reason) => setError(userFacingError(reason, "Unable to load dashboard. Please try again.")));
   }, [account.id, account.profileType, refreshKey]);
 
   const alerts = useMemo(() => {
@@ -367,16 +364,17 @@ export function ConnectDashboard({
       .sort((left, right) => right.date.localeCompare(left.date))
       .forEach((row) => {
         if (rows.length >= 6) return;
+        if (row.date === todayDate || !isCurrentAttendanceAttentionDate(row.date, todayDate)) return;
         const insight = attendanceDayInsight(row, {
-          today: row.date === todayDate,
+          today: false,
           shiftOpen: row.date === punchState?.punchDate && punchState?.open === true
         });
-        const issue = attendanceIssueSummary(row);
-        if (!issue || (row.date === todayDate && punchState?.open)) return;
+        const nudge = attendanceCompactNudge(row);
+        if (!nudge) return;
         rows.push({
-          label: `${issue.label} · ${displayDate(row.date)}`,
-          detail: issue.message,
-          danger: issue.tone === "red",
+          label: `Yesterday · ${nudge.headline}`,
+          detail: nudge.detail,
+          danger: nudge.tone === "red",
           target: "attendance"
         });
       });
@@ -389,6 +387,10 @@ export function ConnectDashboard({
   const now = new Date();
   const today = attendance.rows.find((row) => row.date === localIsoDate());
   const todayInsight = attendanceDayInsight(today, {
+    today: true,
+    shiftOpen: today?.date === punchState?.punchDate && punchState?.open === true
+  });
+  const todayNudge = attendanceCompactNudge(today, {
     today: true,
     shiftOpen: today?.date === punchState?.punchDate && punchState?.open === true
   });
@@ -418,7 +420,10 @@ export function ConnectDashboard({
   const advancesAllowed = pageAccess.includes("advances");
   const fullDayCount = attendance.summary.fullDay ?? attendance.summary.present;
   const halfDayCount = attendance.summary.halfDay ?? 0;
-  const reviewCount = attendance.summary.needsReview ?? attendance.summary.misPunch;
+  const reviewCount = attendance.rows.filter((row) => attendanceDayInsight(row, {
+    today: row.date === localIsoDate(now),
+    shiftOpen: row.date === punchState?.punchDate && punchState?.open === true
+  }).needsRegularization).length;
   const trackedDays = fullDayCount + halfDayCount + attendance.summary.absent + reviewCount;
   const attendanceRate = trackedDays ? Math.round(((fullDayCount + halfDayCount * 0.5) / trackedDays) * 100) : 0;
   const workforce = variant === "workforce";
@@ -447,9 +452,9 @@ export function ConnectDashboard({
         <Metric icon={<Clock3 />} label="Work" value={today?.workHours || "00:00"} tone="orange" />
         <Metric icon={<Fingerprint />} label="Punches" value={today?.punchCount || 0} tone="purple" />
       </div>
-      {today && (todayInsight.issues.length > 0 || todayInsight.needsRegularization) ? <button className={`dx-dashboard-attendance-nudge ${todayInsight.tone}`} onClick={onAttendance}>
+      {today && todayNudge ? <button className={`dx-dashboard-attendance-nudge ${todayNudge.tone}`} onClick={onAttendance}>
         <AlertTriangle />
-        <span><strong>{todayInsight.headline}</strong><small>{todayInsight.detail}</small>{todayInsight.issues.filter((issue) => issue.code === "late" || issue.code === "early_out").map((issue) => <small className="dx-dashboard-attendance-penalty" key={issue.code}>{issue.label} · {issue.message}</small>)}</span>
+        <span><strong>{todayNudge.headline}</strong><small>{todayNudge.detail}</small></span>
         <ChevronRight />
       </button> : null}
       {attendanceAllowed ? <button className="dx-dashboard-link" onClick={onAttendance}>View attendance <ChevronRight /></button> : null}

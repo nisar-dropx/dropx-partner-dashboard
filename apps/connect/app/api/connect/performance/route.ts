@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { loadConnectOperationalPerformance } from "../../../../src/lib/connect-operational-performance";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
+import { userFacingError } from "../../../../src/lib/user-facing-error";
 
 type WorkerType = "employee" | "contractor";
 
@@ -94,6 +95,7 @@ export async function GET(request: Request) {
     const context = await ownPerformanceContext(url);
     if (!context.engagement) return NextResponse.json({ configured: false, cycles: [], reviews: [], managerReviews: [], goals: [], changes: [], operational: null });
     const requestedWeek = Number(url.searchParams.get("week"));
+    const requestedWeekKey = Number(url.searchParams.get("weekKey"));
     const requestedCpsMonth = clean(url.searchParams.get("cpsMonth"));
     const [reviewsResult, managerReviewsResult, operational] = await Promise.all([
       db().from("hr_performance_reviews")
@@ -112,6 +114,7 @@ export async function GET(request: Request) {
         personId: context.engagement.person_id,
         engagementId: context.engagement.id,
         requestedWeek: Number.isInteger(requestedWeek) && requestedWeek > 0 && requestedWeek < 54 ? requestedWeek : null,
+        requestedWeekKey: Number.isInteger(requestedWeekKey) && requestedWeekKey > 200000 ? requestedWeekKey : null,
         requestedCpsMonth
       })
     ]);
@@ -141,7 +144,7 @@ export async function GET(request: Request) {
       operational
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load performance reviews." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load performance. Please try again.") }, { status: 400 });
   }
 }
 
@@ -235,6 +238,6 @@ export async function POST(request: Request) {
 
     throw new Error("Choose a valid performance action.");
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to update the performance review." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to update the performance review. Please try again.") }, { status: 400 });
   }
 }
