@@ -499,7 +499,12 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
   return (
     <form action={action} className="panel-body">
       {initialHead?.id ? <input type="hidden" name="id" value={initialHead.id} /> : null}
-      <div className="form-grid three">
+      <section className="payment-head-form-section">
+        <div className="payment-head-form-section-heading">
+          <h3>Payment head details</h3>
+          <p>Use clear names and the external reference used by the payment provider.</p>
+        </div>
+        <div className="form-grid three">
         <label>
           Payment Head Code
           <input className="field uppercase-input" name="code" defaultValue={initialHead?.code ?? ""} placeholder="FUEL_ADVANCE" required />
@@ -521,6 +526,14 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
             selectedValues={initialHead?.initial_approval_role_ids?.length ? initialHead.initial_approval_role_ids : (initialHead?.initial_approval_role_id ? [initialHead.initial_approval_role_id] : [])}
           />
         </label>
+        </div>
+      </section>
+      <section className="payment-head-form-section">
+        <div className="payment-head-form-section-heading">
+          <h3>Approval workflow</h3>
+          <p>Set the roles for each stage of the request lifecycle.</p>
+        </div>
+        <div className="form-grid three">
         <label>
           Final Approval User Role
           <RoleMultiSelect
@@ -539,6 +552,14 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
             selectedValues={initialHead?.payment_process_role_ids ?? []}
           />
         </label>
+        </div>
+      </section>
+      <section className="payment-head-form-section">
+        <div className="payment-head-form-section-heading">
+          <h3>Payment options</h3>
+          <p>Choose the methods requesters can use and any expense-approval controls.</p>
+        </div>
+        <div className="form-grid three">
         <label className="span-3">
           Supported Payment Methods
           <PaymentModeMultiSelect selectedValues={initialHead?.supported_payment_modes} />
@@ -577,7 +598,8 @@ export function PaymentHeadForm({ action, initialHead, roleOptions = [], submitL
             </select>
           </label>
         ) : null}
-      </div>
+        </div>
+      </section>
 
       <div className="section-divider" />
       <input type="hidden" name="question_count" value={questions.length} />
