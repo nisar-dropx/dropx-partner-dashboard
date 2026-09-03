@@ -3,6 +3,7 @@ import "server-only";
 import { selectApprovalRoute } from "@/lib/approval-workflow-routing-core";
 import { isTeamLeadDesignation } from "@/lib/approval-designation-labels";
 import { resolveConnectApproverUserId } from "@/lib/connect-approver-identity";
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export type ConfiguredApprovalStep = {
@@ -186,14 +187,23 @@ async function scopedDesignationCandidates(companyId: string, designationId: str
     if (!requesterLocationId) return [];
     if (scope === "same_location") allowedLocations = new Set([requesterLocationId]);
     else {
-      const requesterStation = await db().from("stations").select("region,cluster,cluster_name").eq("company_id", companyId).eq("id", requesterLocationId).maybeSingle();
+      const requesterStation = await db().from("stations").select("region").eq("company_id", companyId).eq("id", requesterLocationId).maybeSingle();
       if (requesterStation.error || !requesterStation.data) return [];
-      const stationResult = await db().from("stations").select("id,region,cluster,cluster_name").eq("company_id", companyId).eq("is_active", true);
+      const stationResult = await db().from("stations").select("id,region").eq("company_id", companyId).eq("is_active", true);
       if (stationResult.error) throw new Error(stationResult.error.message);
-      const cluster = requesterStation.data.cluster || requesterStation.data.cluster_name;
-      allowedLocations = new Set((stationResult.data ?? []).filter((station) => scope === "same_region"
-        ? Boolean(requesterStation.data?.region && station.region === requesterStation.data.region)
-        : Boolean(cluster && (station.cluster || station.cluster_name) === cluster)).map((station) => station.id));
+      if (scope === "same_region") {
+        allowedLocations = new Set((stationResult.data ?? []).filter((station) => (
+          Boolean(requesterStation.data?.region && station.region === requesterStation.data.region)
+        )).map((station) => station.id));
+      } else {
+        const stationIds = (stationResult.data ?? []).map((station) => station.id);
+        const hierarchy = await loadPeopleOperationalHierarchy(companyId, stationIds);
+        if (hierarchy.error) throw new Error(hierarchy.error);
+        const requesterManagers = new Set((hierarchy.byLocation.get(requesterLocationId)?.clusterManagers ?? []).map((person) => person.personId));
+        allowedLocations = new Set(stationIds.filter((stationId) => (
+          (hierarchy.byLocation.get(stationId)?.clusterManagers ?? []).some((person) => requesterManagers.has(person.personId))
+        )));
+      }
     }
   }
   const assignments = (result.data ?? []).filter((assignment) => !allowedLocations || Boolean(assignment.location_id && allowedLocations.has(assignment.location_id)));

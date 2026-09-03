@@ -2,6 +2,7 @@ import { cache } from "react";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadShipmentCountAssociateDays } from "@/lib/ops-pulse/capacity-shipments";
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 
 export const codFormTypes = ["amazon", "flipkart"] as const;
 export const codClients = ["Amazon", "Flipkart"] as const;
@@ -33,8 +34,13 @@ export type CodLocationRow = {
   state?: string | null;
   region?: string | null;
   aom?: string | null;
+  aom_names?: string[];
   cluster_manager?: string | null;
+  cluster_manager_names?: string[];
   cluster?: string | null;
+  reporting_authorities?: Array<{ name: string; role: string }>;
+  hierarchy_source?: "people";
+  hierarchy_conflict?: boolean;
   station_manager_email?: string | null;
   hide_from_location_list?: boolean | null;
   providers?: Relation<{ code?: string | null; name?: string | null }>;
@@ -540,7 +546,29 @@ export const loadCodLocations = cache(async (companyId: string, locationScopeIds
     .eq("is_active", true)
     .order("station_code");
   if (error) return { locations: [] as CodLocationRow[], error: error.message };
-  const rows = (data ?? []) as CodLocationRow[];
+  const stationRows = (data ?? []) as CodLocationRow[];
+  const hierarchy = await loadPeopleOperationalHierarchy(companyId, stationRows.map((row) => row.id));
+  if (hierarchy.error) {
+    console.error("[people-operational-hierarchy] unable to resolve station hierarchy", { companyId, error: hierarchy.error });
+  }
+  const rows = stationRows.map((row) => {
+    const resolved = hierarchy.byLocation.get(row.id);
+    const clusterManagers = resolved?.clusterManagers ?? [];
+    const aoms = resolved?.areaOperationsManagers ?? [];
+    const reportingAuthorities = resolved?.reportingAuthorities ?? [];
+    const primaryClusterManager = clusterManagers[0]?.name ?? null;
+    return {
+      ...row,
+      aom: aoms[0]?.name ?? null,
+      aom_names: aoms.map((person) => person.name),
+      cluster_manager: primaryClusterManager,
+      cluster_manager_names: clusterManagers.map((person) => person.name),
+      cluster: primaryClusterManager,
+      reporting_authorities: reportingAuthorities.map((person) => ({ name: person.name, role: person.role })),
+      hierarchy_source: "people" as const,
+      hierarchy_conflict: Boolean(resolved?.hasClusterManagerConflict)
+    };
+  });
   return {
     locations: hasAllLocationAccess
       ? rows
