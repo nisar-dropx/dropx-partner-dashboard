@@ -19626,3 +19626,5 @@ td strong,
 .payment-head-form-section .form-grid { gap: 14px; }
 .payment-head-form-section .field { background: #fff; }
 .payment-head-form-section .payment-head-option { align-self: end; min-height: 40px; padding: 0 4px; }
+.payment-head-form-section .form-grid > label { min-width: 0; }
+.payment-head-form-section .form-grid > label:has(.role-multi-select) { align-content: start; min-height: 92px; }
