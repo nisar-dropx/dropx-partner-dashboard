@@ -16120,3 +16120,56 @@ img.dx-selfie-live {
     padding-top: 10px;
   }
 }
+
+/* Compact first-glance attendance; full policy copy stays inside day details. */
+.dx-attendance-attention {
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 9px;
+  padding: 9px 11px;
+}
+
+.dx-attendance-attention > i {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.dx-attendance-attention > i svg { width: 17px; height: 17px; }
+.dx-attendance-attention > span strong { font-size: 12px; }
+.dx-attendance-attention > span em { font-size: 9px; font-weight: 650; }
+
+.dx-attendance-attention > button {
+  min-height: 28px;
+  padding: 0 3px;
+  color: #9b5a00;
+  border-radius: 0;
+  background: transparent;
+  font-size: 9px;
+}
+
+.dx-attendance-attention.red > button {
+  color: #b4232b;
+  background: transparent;
+}
+
+.dx-selected-day footer button {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 10px;
+}
+
+.dx-friendly-error {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: 100dvh;
+  padding: 24px;
+  color: #172036;
+  background: #f7f8fb;
+  text-align: center;
+}
+
+.dx-friendly-error strong { font-size: 20px; }
+.dx-friendly-error p { margin: 7px 0 16px; color: #667085; font-size: 13px; }
+.dx-friendly-error button { min-height: 38px; padding: 0 16px; color: #fff; border: 0; border-radius: 9px; background: #ec5a20; font-weight: 700; }

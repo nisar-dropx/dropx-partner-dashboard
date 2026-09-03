@@ -23,10 +23,12 @@ import { SelfieCapturePanel } from "./selfie-capture-panel";
 import { stampSupportSelfieBlob } from "@/lib/support-selfie-stamp";
 import { readResilientPosition } from "@/lib/read-geolocation";
 import {
+  attendanceCompactNudge,
   attendanceDayInsight,
-  attendanceIssueSummary,
+  isCurrentAttendanceAttentionDate,
   type AttendanceInsightRow
 } from "@/lib/attendance-insights";
+import { readJsonResponse, userFacingError } from "@/lib/user-facing-error";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
 type Regularization = {
@@ -241,22 +243,20 @@ export function ConnectAttendance({ account }: { account: Account }) {
     setError("");
     fetch(`/api/connect/attendance?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}&month=${month}`)
       .then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || "Unable to load attendance.");
+        const payload = await readJsonResponse<Attendance>(response, "Unable to load attendance. Please try again.");
         setData(payload);
         setSelected(payload.rows?.find((row: Row) => row.date === localIsoDate()) ?? payload.rows?.at(-1) ?? null);
       })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load attendance."));
+      .catch((reason) => setError(userFacingError(reason, "Unable to load attendance. Please try again.")));
   }, [account.id, account.profileType, month]);
 
   const loadPunchStatus = useCallback(async () => {
     const response = await fetch(
       `/api/connect/attendance/punch?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`
     );
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Unable to load punch status.");
+    const payload = await readJsonResponse<PunchStatus>(response, "Unable to load punch status. Please try again.");
     setPunchStatus(payload);
-    return payload as PunchStatus;
+    return payload;
   }, [account.id, account.profileType]);
 
   useEffect(() => {
@@ -288,11 +288,20 @@ export function ConnectAttendance({ account }: { account: Account }) {
     if (!data?.rows.length) return null;
     const ordered = [...data.rows].sort((left, right) => right.date.localeCompare(left.date));
     return ordered.find((row) => {
+      if (!isCurrentAttendanceAttentionDate(row.date, todayDate)) return false;
       const insight = insightFor(row);
       return insight.needsRegularization || insight.issues.length > 0;
     }) ?? null;
-  }, [data?.rows, insightFor]);
+  }, [data?.rows, insightFor, todayDate]);
   const attentionInsight = attentionRow ? insightFor(attentionRow) : null;
+  const attentionNudge = attentionRow ? attendanceCompactNudge(attentionRow, {
+    today: attentionRow.date === todayDate,
+    shiftOpen: attentionRow.date === punchStatus?.shift.punchDate && punchStatus?.shift.open === true
+  }) : null;
+  const reviewCount = useMemo(
+    () => (data?.rows ?? []).filter((row) => insightFor(row).needsRegularization).length,
+    [data?.rows, insightFor]
+  );
 
   const supportStationKey = [
     punchStatus?.station?.id,
@@ -384,13 +393,12 @@ export function ConnectAttendance({ account }: { account: Account }) {
       {error ? <div className="dx-alert error">{error}<button onClick={() => setMonth((value) => `${value}`)}>Retry</button></div> : null}
       {!data && !error ? <div className="dx-loader"><span /><small>Loading attendance...</small></div> : null}
       {data ? <>
-        {attentionRow && attentionInsight ? <section className={`dx-attendance-attention ${attentionInsight.tone}`}>
+        {attentionRow && attentionInsight && attentionNudge ? <section className={`dx-attendance-attention ${attentionNudge.tone}`}>
           <i>{attentionInsight.needsRegularization ? <ShieldAlert /> : <CircleGauge />}</i>
           <span>
-            <small>{attentionRow.date === todayDate ? "TODAY" : attentionRow.date.split("-").reverse().join("/")}</small>
-            <strong>{attentionInsight.headline}</strong>
-            <em>{attentionInsight.detail}</em>
-            {attentionInsight.issues.filter((issue) => issue.code === "late" || issue.code === "early_out").map((issue) => <em className="dx-attendance-attention-penalty" key={issue.code}><b>{issue.label}.</b> {issue.message}</em>)}
+            <small>{attentionRow.date === todayDate ? "TODAY" : "YESTERDAY"}</small>
+            <strong>{attentionNudge.headline}</strong>
+            <em>{attentionNudge.detail}</em>
           </span>
           <button onClick={() => { setSelected(attentionRow); setTab("calendar"); }}>
             View details
@@ -400,7 +408,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
           <div><i><CheckCircle2 /></i><span>Full Day<strong>{data.summary.fullDay ?? data.summary.present}</strong></span></div>
           <div><i><UserCheck /></i><span>Half Day<strong>{data.summary.halfDay ?? 0}</strong></span></div>
           <div><i><UserX /></i><span>Absent<strong>{data.summary.absent}</strong></span></div>
-          <div><i><ShieldAlert /></i><span>Review<strong>{data.summary.needsReview ?? data.summary.misPunch}</strong></span></div>
+          <div><i><ShieldAlert /></i><span>Needs review<strong>{reviewCount}</strong></span></div>
           <p><Clock3 /> Total Hours <strong>{Math.floor(total / 60)}:{String(total % 60).padStart(2, "0")}</strong></p>
         </div>
         <div className="dx-tabs-card">
@@ -431,11 +439,14 @@ export function ConnectAttendance({ account }: { account: Account }) {
           {tab === "list" ? <div className="dx-attendance-list">
             {[...data.rows].sort((left, right) => right.date.localeCompare(left.date)).map((row) => {
               const insight = insightFor(row);
-              const issue = attendanceIssueSummary(row);
+              const nudge = attendanceCompactNudge(row, {
+                today: row.date === todayDate,
+                shiftOpen: row.date === punchStatus?.shift.punchDate && punchStatus?.shift.open === true
+              });
               return <button key={row.date} onClick={() => { setSelected(row); setTab("calendar"); }}>
                 <header><strong>{row.date.split("-").reverse().join("/")}</strong><em className={insight.calendarClass}>{insight.label}</em></header>
                 <span><small>IN</small>{row.inTime || "--:--"}</span><span><small>OUT</small>{row.outTime || "--:--"}</span><span><small>HRS</small>{row.workHours || "00:00"}</span>
-                {issue ? <p className={`dx-attendance-list-issue ${issue.tone}`}>{issue.label} · {issue.message}</p> : null}
+                {nudge ? <p className={`dx-attendance-list-issue ${nudge.tone}`}>{nudge.headline} · {nudge.detail}</p> : null}
               </button>;
             })}
           </div> : null}
@@ -453,7 +464,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
           <section className={`dx-attendance-day-insight ${selectedInsight.tone}`}>
             <strong>{selectedInsight.headline}</strong>
             <small>{selectedInsight.detail}</small>
-            {selectedInsight.issues.length ? <div className="dx-attendance-consequence-list">{selectedInsight.issues.map((issue) => <p key={issue.code}><strong>{issue.label}</strong><small>{issue.message}</small></p>)}</div> : null}
+            {selectedInsight.issues.some((issue) => issue.code !== "half_day" && issue.code !== "absent") ? <div className="dx-attendance-consequence-list">{selectedInsight.issues.filter((issue) => issue.code !== "half_day" && issue.code !== "absent").map((issue) => <p key={issue.code}><strong>{issue.label}</strong><small>{issue.message}</small></p>)}</div> : null}
           </section>
           {selected.remark ? <p className="dx-attendance-day-note">{selected.remark}</p> : null}
           <footer>
@@ -565,7 +576,7 @@ function SupportEvidenceSheet({
           distanceM: null,
           radiusM: null,
           stationLabel: "station",
-          message: reason instanceof Error ? reason.message : "Unable to read location. Allow GPS to continue."
+          message: userFacingError(reason, "Unable to read location. Allow GPS to continue.")
         });
       }
     }
@@ -610,11 +621,10 @@ function SupportEvidenceSheet({
       form.set("remarks", remarks);
       form.set("selfie", selfie);
       const response = await fetch("/api/connect/attendance/support-evidence", { method: "POST", body: form });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to submit support evidence.");
+      await readJsonResponse(response, "Unable to submit support evidence. Please try again.");
       onSubmitted();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to submit support evidence.");
+      setError(userFacingError(reason, "Unable to submit support evidence. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -778,11 +788,10 @@ function RegularizationSheet({
       if (attachment) form.set("attachment", attachment);
       if (attachmentOut) form.set("attachmentOut", attachmentOut);
       const response = await fetch("/api/connect/attendance", { method: "POST", body: form });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to submit regularization request.");
+      await readJsonResponse(response, "Unable to submit regularization request. Please try again.");
       onSubmitted();
     } catch (reasonValue) {
-      setError(reasonValue instanceof Error ? reasonValue.message : "Unable to submit regularization request.");
+      setError(userFacingError(reasonValue, "Unable to submit regularization request. Please try again."));
     } finally {
       setSaving(false);
     }

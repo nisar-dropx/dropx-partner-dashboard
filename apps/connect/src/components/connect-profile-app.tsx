@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import { minimumAgeError } from "../lib/profile-age";
 import { ConnectExitManagement } from "./connect-exit-management";
 import { VerifiedProfilePhotoUpdate } from "./verified-profile-photo-update";
+import { userFacingError } from "../lib/user-facing-error";
 
 export type AppAccount = {
   id: string;
@@ -378,7 +379,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       setVerifications(Object.fromEntries((draftChecks ?? checks.verifications ?? []).map((item: Verification) => [item.kind, item])));
       if (draft) setNotice("Draft restored.");
       if (next.profilePhotoUrl) onPhoto?.(next.profilePhotoUrl);
-    }).catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load profile."));
+    }).catch((reason) => setError(userFacingError(reason, "Unable to load profile. Please try again.")));
   }, [account.id, account.profileType, endpoint, query]);
 
   const enabled = useMemo(() => {
@@ -482,7 +483,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       }
       await requestVerification(kind);
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : "Verification failed.";
+      const message = userFacingError(reason, "Verification could not be completed. Please try again.");
       setVerificationErrors((current) => ({ ...current, [kind]: message }));
     } finally {
       setRunning("");
@@ -565,7 +566,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       await onSubmitted?.();
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to save profile.");
+      setError(userFacingError(reason, "Unable to save profile. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -612,7 +613,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       });
       setNotice("Details saved in draft");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to save draft.");
+      setError(userFacingError(reason, "Unable to save draft. Please try again."));
     } finally {
       setDraftSaving(false);
     }
