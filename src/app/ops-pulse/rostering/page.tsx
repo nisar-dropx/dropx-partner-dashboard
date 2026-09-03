@@ -80,6 +80,7 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
           canStart={canStart}
           editable={editable}
           approvalSummary={route?.summary ?? "Your access is view-only."}
+          approvalRequired={Boolean(route?.approvalRequired)}
           routeReady={!route?.error}
           today={workspace.today}
           nowIso={new Date().toISOString()}

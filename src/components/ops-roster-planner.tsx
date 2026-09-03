@@ -89,6 +89,7 @@ export function OpsRosterPlanner({
   canStart,
   editable,
   approvalSummary,
+  approvalRequired,
   routeReady,
   today,
   nowIso,
@@ -106,6 +107,7 @@ export function OpsRosterPlanner({
   canStart: boolean;
   editable: boolean;
   approvalSummary: string;
+  approvalRequired: boolean;
   routeReady: boolean;
   today: string;
   nowIso: string;
@@ -573,7 +575,7 @@ export function OpsRosterPlanner({
     </div>
 
     <div className={styles.legend}><span><i className={styles.workingLegend} /> Working shift</span><span><i className={styles.offLegend} /> Week off</span><span><i className={styles.holidayLegend} /> Holiday</span><span><i className={styles.dirtyLegend} /> Unsaved change</span>{dirtyKeys.size ? <strong><Check size={13} /> Review and save {dirtyKeys.size} changes</strong> : editingEnabled ? <strong>No unsaved changes</strong> : <strong>Saved roster pattern</strong>}</div>
-    {editingEnabled && activePlanId ? <footer className={styles.approvalLine}><span><strong>{dirtyKeys.size ? `Save ${dirtyKeys.size} change${dirtyKeys.size === 1 ? "" : "s"} first` : !submissionCoverage.ready ? "Add at least one assignment" : !routeReady ? "Approval setup required" : submissionCoverage.missing ? `${submissionCoverage.missing} cells remain unassigned` : "Ready to submit"}</strong><small>{dirtyKeys.size ? "Unsaved assignments cannot be submitted." : !submissionCoverage.ready ? "A blank draft is kept safely and will not replace the current roster." : submissionCoverage.missing ? `${submissionCoverage.ready} assignments are ready. Unassigned people remain blank.` : approvalSummary}</small></span><button type="button" className="button primary compact" onClick={submit} disabled={Boolean(dirtyKeys.size || !submissionCoverage.ready || !routeReady || isSaving)}><Send size={14} /> Send for approval</button></footer> : null}
+    {editingEnabled && activePlanId ? <footer className={styles.approvalLine}><span><strong>{dirtyKeys.size ? `Save ${dirtyKeys.size} change${dirtyKeys.size === 1 ? "" : "s"} first` : !submissionCoverage.ready ? "Add at least one assignment" : !routeReady ? "Approval setup required" : submissionCoverage.missing ? `${submissionCoverage.missing} cells remain unassigned` : approvalRequired ? "Ready to submit" : "Ready to apply"}</strong><small>{dirtyKeys.size ? "Unsaved assignments cannot be submitted." : !submissionCoverage.ready ? "A blank draft is kept safely and will not replace the current roster." : submissionCoverage.missing ? `${submissionCoverage.ready} assignments are ready. Unassigned people remain blank.` : approvalSummary}</small></span><button type="button" className="button primary compact" onClick={submit} disabled={Boolean(dirtyKeys.size || !submissionCoverage.ready || !routeReady || isSaving)}>{approvalRequired ? <Send size={14} /> : <Check size={14} />} {approvalRequired ? "Send for approval" : "Apply roster"}</button></footer> : null}
     {pointerDrag?.active ? <div ref={dragGhostRef} className={styles.dragGhost} style={{ left: pointerDrag.x, top: pointerDrag.y }} aria-hidden="true"><GripVertical size={13} /> {pointerDrag.label}</div> : null}
     {cellPicker ? <><button type="button" className={styles.pickerBackdrop} aria-label="Close shift picker" onClick={() => setCellPicker(null)} /><div className={styles.picker} role="dialog" aria-label={`Change shift for ${cellPicker.person.name} on ${dateLabel(cellPicker.date)}`} style={{ top: cellPicker.top, left: cellPicker.left }}><header className={styles.pickerHead}><strong>{cellPicker.person.name}</strong><small>{dayLabel(cellPicker.date)} · {dateLabel(cellPicker.date)}</small></header><div className={styles.pickerList}>{shifts.map((shift) => <button key={shift.id} type="button" className={styles.pickerOption} style={{ "--shift-color": shift.color || "#cb4b65" } as CSSProperties} onClick={() => applyPickerTool({ kind: "shift", shiftId: shift.id })}><span className={styles.pickerSwatch} aria-hidden="true" /><span className={styles.pickerOptionContent}><strong>{shift.code}</strong><small>{compactTime(shift.startTime)} – {compactTime(shift.endTime)}</small></span></button>)}<button type="button" className={`${styles.pickerOption} ${styles.off}`} onClick={() => applyPickerTool({ kind: "weekly_off" })}><span className={styles.pickerSwatch} aria-hidden="true" /><span className={styles.pickerOptionContent}><strong>Week Off</strong><small>Rest day</small></span></button><button type="button" className={`${styles.pickerOption} ${styles.clear}`} onClick={() => applyPickerTool({ kind: "clear" })}><Eraser size={14} aria-hidden="true" /><span className={styles.pickerOptionContent}><strong>Remove</strong><small>Clear this assignment</small></span></button></div></div></> : null}
     {(draggingLabel || pointerDrag?.active) && draggingAssignment ? <div className={styles.removeHint} role="status">Drag outside the grid to remove this assignment</div> : null}
