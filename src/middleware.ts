@@ -7,7 +7,7 @@ const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env
 const COOKIE_CHUNK_SIZE = 3000;
 const MAX_COOKIE_CHUNKS = 8;
 const ENCODED_COOKIE_PREFIX = "b64-";
-const CLEAN_OPS_ROOTS = ["/attendance", "/daily-submission", "/performance", "/capacity", "/service-network", "/workforce", "/field-executive", "/helpers", "/work-force-register", "/cod", "/edd", "/reports", "/client", "/access", "/unauthorized"];
+const CLEAN_OPS_ROOTS = ["/attendance", "/daily-submission", "/performance", "/capacity", "/service-network", "/workforce", "/field-executive", "/work-force-register", "/cod", "/edd", "/reports", "/client", "/access", "/unauthorized"];
 const MOVED_OPS_PAYMENT_PATHS = [
   "/payments/advance-request",
   "/payments/expense-request",

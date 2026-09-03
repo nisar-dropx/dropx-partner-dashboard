@@ -361,13 +361,13 @@ export default async function OpsPulsePage({ searchParams }: { searchParams?: Se
           </article>
 
           <article className="ops-module">
-            <header><div><span>WORK FORCE REGISTER</span><h2>Contractor onboarding</h2></div><Link href="/work-force-register">Open register →</Link></header>
+            <header><div><span>WORKFORCE REGISTER</span><h2>Workforce onboarding</h2></div><Link href="/work-force-register">Open register →</Link></header>
             <div className="ops-onboarding-figure">
               <div><strong>{onboardingPending}</strong><span>Pending</span></div>
               <div><strong>{onboardingActive}</strong><span>Completed</span></div>
               <div><strong>{executives.length}</strong><span>Active DAs</span></div>
             </div>
-            <small className="ops-module-note">Live from field executive onboarding status for the selected locations.</small>
+            <small className="ops-module-note">Live Workforce registration and activation status for the selected locations.</small>
           </article>
         </section>
 

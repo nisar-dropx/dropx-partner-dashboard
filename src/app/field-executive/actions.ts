@@ -444,7 +444,7 @@ export async function createFieldExecutive(formData: FormData) {
   }
 
   fieldExecutiveRedirect({
-    notice: returnPath === "/workforce"
+    notice: config.profileType === "field_executive"
       ? `${entityLabel} onboarding request created. The applicant must submit the profile and agreement before HO activation.`
       : `${entityLabel} added successfully.`
   }, returnPath);
