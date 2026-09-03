@@ -214,7 +214,7 @@ export default async function PaymentMethodsPage({ searchParams }: { searchParam
       {!error && !fieldsError && (flash.error || flash.notice) ? (
         <section className={`panel message-panel ${flash.error ? "error" : "success"}`}>
           <div className="panel-body">
-            <strong>{flash.error ? "Payment method not deleted" : "Completed"}</strong>
+            <strong>{flash.error ? (searchParams?.deductions === "1" ? "Deduction head not saved" : "Payment method not deleted") : "Completed"}</strong>
             <p className="subtle" style={{ marginTop: 6 }}>{flash.error ?? flash.notice}</p>
           </div>
         </section>

@@ -17,6 +17,8 @@ export type ConnectAttendanceWorker = {
   profileId: string;
   profileType: WorkforceProfileType;
   enrolmentId: string;
+  dropxId: string;
+  biometricId: string;
   fullName: string;
   locationId: string | null;
   workerType: "employee" | "individual_contract";
@@ -60,10 +62,11 @@ export async function resolveConnectAttendanceWorker({
     throw new Error("Location continuity applies only to People-designated employees and individual contractors.");
   }
   const table = workforceTable(resolvedProfileType);
+  const idColumn = resolvedProfileType === "employee" ? "employee_code" : "dropx_id";
   const designationColumn = resolvedProfileType === "employee" ? "designation_id" : "designation";
   const result = await supabaseAdmin
     .from(table)
-    .select(`id, company_id, mobile, mobile_country_code, biometric_id, full_name, location_id, ${designationColumn}`)
+    .select(`id, company_id, mobile, mobile_country_code, biometric_id, full_name, location_id, ${idColumn}, ${designationColumn}`)
     .eq("id", accountId)
     .maybeSingle();
   if (result.error) throw new Error(result.error.message);
@@ -100,6 +103,8 @@ export async function resolveConnectAttendanceWorker({
     profileId: row.id as string,
     profileType: resolvedProfileType,
     enrolmentId,
+    dropxId: String(row[idColumn as keyof typeof row] ?? ""),
+    biometricId,
     fullName: String(row.full_name ?? ""),
     locationId: (row.location_id as string | null) ?? null,
     workerType: resolvedProfileType === "employee" ? "employee" : "individual_contract"

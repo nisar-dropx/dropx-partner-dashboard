@@ -19584,6 +19584,9 @@ td strong,
 .workforce-payout-detail-table th, .workforce-payout-detail-table td { white-space: nowrap; }
 .workforce-payout-detail-table thead tr:first-child th { vertical-align: middle; }
 .workforce-payout-detail-table .production-group { text-align: center; background: #fff7ed; border-left: 1px solid #f0d8bd; border-right: 1px solid #f0d8bd; color: #a84a10; }
+.workforce-payout-detail-table .deduction-group { background: #fff3e8; color: #b54708; }
+.workforce-payout-detail-table tr.payout-pan-aadhaar-unlinked td { background: #fff0df; color: #9a3412; }
+.workforce-payout-detail-table tr.payout-pan-aadhaar-unlinked td small { color: #b45309; }
 .payout-period-head { align-items: end; gap: 20px; }
 .payout-period-filter { display: grid; grid-template-columns: 130px 155px 155px 155px 155px auto; gap: 10px; align-items: end; }
 .payout-period-filter label { color: #526078; font-size: 11px; font-weight: 800; text-transform: uppercase; }

@@ -270,7 +270,7 @@ export async function loadPaymentNotificationSnapshot(authorization: Authorizati
     badges.payment_process = requests
       .filter((request) => canProcessPayment(request, authorization))
       .filter(isReadyForPaymentProcess)
-      .filter((request) => requestStatus(request) !== "RE_APPROVED" || request.current_approver_user_id === authorization.userId || (request.current_approver_role_ids ?? []).some((roleId) => authorization.effectiveRoleIds.includes(roleId)))
+      .filter((request) => isCompanyOwner(authorization) || authorization.isMasterOwner || requestStatus(request) !== "RE_APPROVED" || request.current_approver_user_id === authorization.userId || (request.current_approver_role_ids ?? []).some((roleId) => authorization.effectiveRoleIds.includes(roleId)))
       .length;
     addItem(
       items,

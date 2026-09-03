@@ -15,6 +15,9 @@
     "incremental": true,
     "plugins": [{ "name": "next" }],
     "paths": {
+      "@/lib/biometric/*": ["../../src/lib/biometric/*"],
+      "@/lib/attendance-regularization-workflow": ["../../src/lib/attendance-regularization-workflow.ts"],
+      "@/lib/connect-attendance-notifications": ["../../src/lib/connect-attendance-notifications.ts"],
       "@/*": ["./src/*"]
     }
   },

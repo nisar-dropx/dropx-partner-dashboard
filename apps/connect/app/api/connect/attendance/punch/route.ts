@@ -1,74 +1,162 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveConnectAttendanceWorker } from "@/lib/connect-attendance-worker";
-import { loadLatestBiometricPunchNeedingLocation } from "@/lib/connect-biometric-punch-location";
+import {
+  evaluateIntegrity,
+  insertConnectAppGpsPunch,
+  loadConnectPunchStatus,
+  loadOpenShift,
+  mapSupabaseConfigError,
+  parseClientSignals,
+  parseCoordinate,
+  parseIntegritySignals,
+  parseOptionalNumber,
+  resolveCompanyPunchGeofence
+} from "@/lib/connect-app-gps-punch";
 
-const dashboardUrl =
-  process.env.DASHBOARD_URL?.replace(/\/$/, "") ||
-  "https://dashboard.dropxlogistics.com";
+export const dynamic = "force-dynamic";
 
-async function proxy(request: NextRequest, path: string) {
-  const target = new URL(path, dashboardUrl);
-  request.nextUrl.searchParams.forEach((value, key) => target.searchParams.set(key, value));
+type PunchBody = {
+  accountId?: string;
+  profileType?: string;
+  action?: string;
+  lat?: unknown;
+  lng?: unknown;
+  accuracyM?: unknown;
+  altitudeM?: unknown;
+  clientCapturedAt?: unknown;
+  integritySignals?: unknown;
+  faceMatched?: unknown;
+};
+
+async function readPunchBody(request: NextRequest): Promise<PunchBody> {
   const contentType = request.headers.get("content-type") ?? "";
-  const init: RequestInit = {
-    method: request.method,
-    cache: "no-store",
-    headers: {
-      cookie: request.headers.get("cookie") ?? "",
-      ...(contentType && request.method !== "GET" ? { "content-type": contentType } : {})
-    }
-  };
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body = await request.arrayBuffer();
+  if (contentType.includes("application/json")) {
+    const json = (await request.json()) as PunchBody;
+    return json ?? {};
   }
-  const response = await fetch(target, init);
-  return new NextResponse(await response.text(), {
-    status: response.status,
-    headers: { "content-type": response.headers.get("content-type") ?? "application/json" }
-  });
+  const formData = await request.formData();
+  return {
+    accountId: String(formData.get("accountId") ?? ""),
+    profileType: String(formData.get("profileType") ?? ""),
+    action: String(formData.get("action") ?? ""),
+    lat: formData.get("lat"),
+    lng: formData.get("lng"),
+    accuracyM: formData.get("accuracyM"),
+    altitudeM: formData.get("altitudeM"),
+    clientCapturedAt: formData.get("clientCapturedAt"),
+    integritySignals: formData.get("integritySignals"),
+    faceMatched: formData.get("faceMatched")
+  };
+}
+
+function errorResponse(error: unknown, fallback: string) {
+  const raw = error instanceof Error ? error.message : fallback;
+  const message = mapSupabaseConfigError(raw);
+  const status = /login|expired/i.test(message) ? 401 : 400;
+  return NextResponse.json({ error: message }, { status });
 }
 
 export async function GET(request: NextRequest) {
-  const target = new URL("/api/connect/attendance/punch", dashboardUrl);
-  request.nextUrl.searchParams.forEach((value, key) => target.searchParams.set(key, value));
-  const response = await fetch(target, {
-    method: "GET",
-    cache: "no-store",
-    headers: { cookie: request.headers.get("cookie") ?? "" }
-  });
-  const raw = await response.text();
-  if (!response.ok) {
-    return new NextResponse(raw, {
-      status: response.status,
-      headers: { "content-type": response.headers.get("content-type") ?? "application/json" }
-    });
-  }
-
   try {
-    const payload = JSON.parse(raw) as Record<string, unknown>;
     const accountId = request.nextUrl.searchParams.get("accountId") ?? "";
     const profileType = request.nextUrl.searchParams.get("profileType") ?? "";
-    if (!accountId) {
-      return NextResponse.json(payload);
-    }
-
+    if (!accountId) throw new Error("Account is required.");
     const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
-    const punchDate = String((payload.shift as { punchDate?: string } | undefined)?.punchDate ?? "");
-    if (!punchDate) return NextResponse.json(payload);
-
-    const latestBiometricPunch = await loadLatestBiometricPunchNeedingLocation(worker, punchDate);
-    return NextResponse.json({
-      ...payload,
-      latestBiometricPunch
-    });
-  } catch {
-    return new NextResponse(raw, {
-      status: response.status,
-      headers: { "content-type": response.headers.get("content-type") ?? "application/json" }
-    });
+    const payload = await loadConnectPunchStatus(worker);
+    return NextResponse.json(payload);
+  } catch (error) {
+    return errorResponse(error, "Unable to load punch status.");
   }
 }
 
 export async function POST(request: NextRequest) {
-  return proxy(request, "/api/connect/attendance/punch");
+  try {
+    const body = await readPunchBody(request);
+    const accountId = String(body.accountId ?? "").trim();
+    const profileType = String(body.profileType ?? "").trim();
+    const action = String(body.action ?? "").trim().toLowerCase();
+    if (!accountId) throw new Error("Account is required.");
+    if (action !== "in" && action !== "out") throw new Error("Punch action must be in or out.");
+
+    const lat = parseCoordinate(body.lat, "Latitude");
+    const lng = parseCoordinate(body.lng, "Longitude");
+    if (lat < -90 || lat > 90) throw new Error("Latitude is out of range.");
+    if (lng < -180 || lng > 180) throw new Error("Longitude is out of range.");
+    const accuracyM = parseOptionalNumber(body.accuracyM);
+    const altitudeM = parseOptionalNumber(body.altitudeM);
+    const clientCapturedAt = String(body.clientCapturedAt ?? "").trim() || null;
+    const integritySignals = parseIntegritySignals(parseClientSignals(body.integritySignals));
+    const faceMatched =
+      body.faceMatched === true || String(body.faceMatched ?? "").trim().toLowerCase() === "true";
+    if (!faceMatched) {
+      throw new Error("Face match required before punching. Capture a selfie in the app circle until match is 60%+.");
+    }
+
+    const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
+    const shift = await loadOpenShift({
+      companyId: worker.companyId,
+      enrolmentId: worker.enrolmentId
+    });
+    if (action === "in" && shift.open) {
+      throw new Error("You already have an open punch-in. Punch out first.");
+    }
+    if (action === "out" && !shift.open) {
+      throw new Error("No open punch-in found for today. Punch in first.");
+    }
+
+    const geofence = await resolveCompanyPunchGeofence({
+      companyId: worker.companyId,
+      lat,
+      lng,
+      preferredLocationId: worker.locationId ?? shift.locationId
+    });
+    const integrity = evaluateIntegrity(integritySignals, accuracyM);
+
+    if (integritySignals.mockLocation === true || integritySignals.developerMode === true) {
+      throw new Error(
+        "Turn off mock location / developer options before punching. Fake GPS is not allowed."
+      );
+    }
+
+    const punchLocationId = geofence.station?.id ?? worker.locationId;
+    const result = await insertConnectAppGpsPunch({
+      worker,
+      locationId: punchLocationId,
+      lat,
+      lng,
+      accuracyM,
+      altitudeM,
+      clientCapturedAt,
+      integritySignals,
+      geofence,
+      integrity,
+      faceMatched: true
+    });
+
+    return NextResponse.json({
+      ok: true,
+      punch: result.punch,
+      geofence: {
+        status: result.geofence.status,
+        distanceM: result.geofence.distanceM,
+        radiusM: result.geofence.radiusM,
+        stationId: result.geofence.station?.id ?? null,
+        stationCode: result.geofence.station?.stationCode ?? null,
+        stationName: result.geofence.station?.stationName ?? null
+      },
+      integrity: {
+        score: integrity.score,
+        reasons: integrity.reasons
+      },
+      isFlagged: result.isFlagged,
+      supportRequired: result.supportRequired,
+      pendingApproval: result.pendingApproval,
+      flagIds: result.flagIds,
+      message: result.isFlagged
+        ? "Action needed. Submit a selfie from Attendance if prompted."
+        : "Punch recorded."
+    });
+  } catch (error) {
+    return errorResponse(error, "Unable to record GPS punch.");
+  }
 }
