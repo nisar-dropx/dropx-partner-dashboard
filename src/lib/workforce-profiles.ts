@@ -91,10 +91,10 @@ export function nonEmployeeConfigForRoute(value: unknown) {
     return nonEmployeeProfileConfigs.worker;
   }
   if (route === "/work-force-register") {
-    return { ...nonEmployeeProfileConfigs.contractor, route };
+    return { ...nonEmployeeProfileConfigs.field_executive, route };
   }
   if (route === "/work-force-register/helpers") {
-    return { ...nonEmployeeProfileConfigs.worker, pageCode: "contractors" as const, route };
+    return { ...nonEmployeeProfileConfigs.worker, route };
   }
   if (route === "/work-force-register/vendors") {
     return { ...nonEmployeeProfileConfigs.vendor, pageCode: "contractors" as const, route };
