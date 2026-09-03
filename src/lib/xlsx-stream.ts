@@ -1,5 +1,5 @@
-import JSZip from "jszip";
 import { Readable } from "node:stream";
+import { createDeflateRaw } from "node:zlib";
 
 type WorkbookCell = boolean | number | string | null | undefined;
 
@@ -62,19 +62,167 @@ function* worksheetXml(options: StreamingWorkbookOptions) {
   yield '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>';
 }
 
-export function createStreamingXlsx(options: StreamingWorkbookOptions) {
-  const zip = new JSZip();
-  zip.file("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>');
-  zip.folder("_rels")?.file(".rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
-  zip.folder("xl")?.file("workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${xmlText(options.sheetName)}" sheetId="1" r:id="rId1"/></sheets></workbook>`);
-  zip.folder("xl")?.folder("_rels")?.file("workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
-  zip.folder("xl")?.file("styles.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF4511E"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>');
-  zip.folder("xl")?.folder("worksheets")?.file("sheet1.xml", Readable.from(worksheetXml(options)));
+const CRC_TABLE = new Uint32Array(256);
+for (let value = 0; value < 256; value += 1) {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit += 1) crc = (crc & 1) ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+  CRC_TABLE[value] = crc >>> 0;
+}
 
-  return zip.generateNodeStream({
-    compression: "DEFLATE",
-    compressionOptions: { level: 6 },
-    streamFiles: true,
-    type: "nodebuffer"
-  }) as Readable;
+function updateCrc32(previous: number, bytes: Buffer) {
+  let crc = previous ^ 0xffffffff;
+  for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function localFileHeader(name: Buffer) {
+  const header = Buffer.alloc(30 + name.length);
+  header.writeUInt32LE(0x04034b50, 0);
+  header.writeUInt16LE(20, 4);
+  header.writeUInt16LE(0x0808, 6); // UTF-8 + trailing data descriptor.
+  header.writeUInt16LE(8, 8); // Deflate is streamed, so no workbook content is buffered.
+  header.writeUInt16LE(0, 10);
+  header.writeUInt16LE(0, 12);
+  header.writeUInt32LE(0, 14);
+  header.writeUInt32LE(0, 18);
+  header.writeUInt32LE(0, 22);
+  header.writeUInt16LE(name.length, 26);
+  header.writeUInt16LE(0, 28);
+  name.copy(header, 30);
+  return header;
+}
+
+function dataDescriptor(crc: number, compressedSize: number, size: number) {
+  const descriptor = Buffer.alloc(16);
+  descriptor.writeUInt32LE(0x08074b50, 0);
+  descriptor.writeUInt32LE(crc >>> 0, 4);
+  descriptor.writeUInt32LE(compressedSize, 8);
+  descriptor.writeUInt32LE(size, 12);
+  return descriptor;
+}
+
+type ZipEntry = {
+  content: Iterable<string | Buffer>;
+  name: string;
+};
+
+type CentralEntry = {
+  compressedSize: number;
+  crc: number;
+  name: Buffer;
+  offset: number;
+  size: number;
+};
+
+function centralDirectoryHeader(entry: CentralEntry) {
+  const header = Buffer.alloc(46 + entry.name.length);
+  header.writeUInt32LE(0x02014b50, 0);
+  header.writeUInt16LE(20, 4);
+  header.writeUInt16LE(20, 6);
+  header.writeUInt16LE(0x0808, 8);
+  header.writeUInt16LE(8, 10);
+  header.writeUInt16LE(0, 12);
+  header.writeUInt16LE(0, 14);
+  header.writeUInt32LE(entry.crc >>> 0, 16);
+  header.writeUInt32LE(entry.compressedSize, 20);
+  header.writeUInt32LE(entry.size, 24);
+  header.writeUInt16LE(entry.name.length, 28);
+  header.writeUInt16LE(0, 30);
+  header.writeUInt16LE(0, 32);
+  header.writeUInt16LE(0, 34);
+  header.writeUInt16LE(0, 36);
+  header.writeUInt32LE(0, 38);
+  header.writeUInt32LE(entry.offset, 42);
+  entry.name.copy(header, 46);
+  return header;
+}
+
+function endOfCentralDirectory(entries: number, size: number, offset: number) {
+  const footer = Buffer.alloc(22);
+  footer.writeUInt32LE(0x06054b50, 0);
+  footer.writeUInt16LE(0, 4);
+  footer.writeUInt16LE(0, 6);
+  footer.writeUInt16LE(entries, 8);
+  footer.writeUInt16LE(entries, 10);
+  footer.writeUInt32LE(size, 12);
+  footer.writeUInt32LE(offset, 16);
+  footer.writeUInt16LE(0, 20);
+  return footer;
+}
+
+async function* streamingZip(entries: ZipEntry[]) {
+  const centralEntries: CentralEntry[] = [];
+  let archiveOffset = 0;
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name, "utf8");
+    const offset = archiveOffset;
+    const header = localFileHeader(name);
+    yield header;
+    archiveOffset += header.length;
+
+    let crc = 0;
+    let size = 0;
+    const source = Readable.from((async function* () {
+      for (const value of entry.content) {
+        const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
+        crc = updateCrc32(crc, bytes);
+        size += bytes.length;
+        yield bytes;
+      }
+    })());
+    let compressedSize = 0;
+    for await (const value of source.pipe(createDeflateRaw({ level: 1 }))) {
+      const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+      compressedSize += bytes.length;
+      archiveOffset += bytes.length;
+      yield bytes;
+    }
+
+    const descriptor = dataDescriptor(crc, compressedSize, size);
+    yield descriptor;
+    archiveOffset += descriptor.length;
+    centralEntries.push({ compressedSize, crc, name, offset, size });
+  }
+
+  const centralOffset = archiveOffset;
+  for (const entry of centralEntries) {
+    const header = centralDirectoryHeader(entry);
+    yield header;
+    archiveOffset += header.length;
+  }
+  yield endOfCentralDirectory(centralEntries.length, archiveOffset - centralOffset, centralOffset);
+}
+
+function values(value: string) {
+  return [value];
+}
+
+export function createStreamingXlsx(options: StreamingWorkbookOptions) {
+  const entries: ZipEntry[] = [
+    {
+      name: "[Content_Types].xml",
+      content: values('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>')
+    },
+    {
+      name: "_rels/.rels",
+      content: values('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+    },
+    {
+      name: "xl/workbook.xml",
+      content: values(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${xmlText(options.sheetName)}" sheetId="1" r:id="rId1"/></sheets></workbook>`)
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      content: values('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')
+    },
+    {
+      name: "xl/styles.xml",
+      content: values('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF4511E"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>')
+    },
+    {
+      name: "xl/worksheets/sheet1.xml",
+      content: worksheetXml(options)
+    }
+  ];
+  return Readable.from(streamingZip(entries));
 }

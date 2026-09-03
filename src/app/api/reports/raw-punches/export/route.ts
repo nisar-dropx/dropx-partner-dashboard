@@ -4,7 +4,6 @@ import { requirePagePermission } from "@/lib/authorization";
 import {
   buildRawPunchDeviceIndex,
   normalizedEnrolmentId,
-  RAW_PUNCH_PROFILE_TABLES,
   rawPunchDeviceMatchLabel,
   rawPunchResultLabel,
   resolveRawPunchDevice,
@@ -13,8 +12,7 @@ import {
   type RawPunchAlertRow,
   type RawPunchDeviceRow,
   type RawPunchResultRow,
-  type RawPunchRow,
-  type RawPunchWorkerRow
+  type RawPunchRow
 } from "@/lib/biometric/raw-punch-report";
 import { loadCurrentRawPunchMappingIds } from "@/lib/biometric/raw-punch-mapping";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -43,6 +41,7 @@ function excelFileName() {
 }
 
 export async function GET(request: NextRequest) {
+  const startedAt = Date.now();
   try {
     const authorization = await requirePagePermission("raw_punch_reports", "access");
     const companyId = requireCompanyId(authorization);
@@ -87,7 +86,16 @@ export async function GET(request: NextRequest) {
       [location.station_code, location.station_name].filter(Boolean).join(" - ")
     ]));
 
-    const { mappings: currentMappings, peopleIds, workforceIds } = await loadCurrentRawPunchMappingIds(companyId);
+    const {
+      mappings: currentMappings,
+      peopleIds,
+      workforceIds,
+      workerByKey
+    } = await loadCurrentRawPunchMappingIds(companyId, { includeWorkerDetails: true });
+    console.info("Raw Punches export mappings ready", {
+      elapsedMs: Date.now() - startedAt,
+      mappingCount: currentMappings.length
+    });
 
     const batchSize = 1000;
     const exportCutoff = new Date().toISOString();
@@ -152,6 +160,10 @@ export async function GET(request: NextRequest) {
       const batches = await Promise.all(offsetGroup.map((offset) => loadRawEventBatch(offset)));
       batches.forEach((batch) => rows.push(...batch.rows));
     }
+    console.info("Raw Punches export events ready", {
+      elapsedMs: Date.now() - startedAt,
+      rowCount: rows.length
+    });
 
     // Processing-history enrichment is useful for a focused export, but scanning every
     // historical attendance/alert row for a full raw-punch export is prohibitively
@@ -221,34 +233,6 @@ export async function GET(request: NextRequest) {
       if (item.raw_event_id && !alertByRawEvent.has(item.raw_event_id)) alertByRawEvent.set(item.raw_event_id, item);
     });
 
-    const idsByProfile = new Map<string, Set<string>>();
-    currentMappings.forEach((currentMapping) => {
-      if (!idsByProfile.has(currentMapping.profileType)) idsByProfile.set(currentMapping.profileType, new Set());
-      idsByProfile.get(currentMapping.profileType)!.add(currentMapping.accountId);
-    });
-    const workerByKey = new Map<string, RawPunchWorkerRow>();
-    for (const [profileType, idSet] of idsByProfile) {
-      const config = RAW_PUNCH_PROFILE_TABLES[profileType];
-      if (!config) continue;
-      for (const table of config.tables) {
-        for (const profileIds of chunks(Array.from(idSet))) {
-          const profiles = await supabaseAdmin
-            .from(table)
-            .select(`id, full_name, ${config.code}`)
-            .eq("company_id", companyId)
-            .in("id", profileIds);
-          if (profiles.error) throw new Error(profiles.error.message);
-          ((profiles.data ?? []) as unknown as Array<Record<string, string | null>>).forEach((profile) => {
-            workerByKey.set(`${profileType}:${profile.id}`, {
-              id: String(profile.id),
-              full_name: profile.full_name ?? null,
-              code: String(profile[config.code] ?? "") || null
-            });
-          });
-        }
-      }
-    }
-
     const deviceIndex = buildRawPunchDeviceIndex(devices);
     const currentMappingByEnrolment = new Map(currentMappings.map((item) => [item.enrolmentId, item]));
     function* excelRows() {
@@ -307,6 +291,10 @@ export async function GET(request: NextRequest) {
       ],
       columnWidths: [22, 22, 28, 23, 18, 18, 16, 16, 18, 16, 25, 22, 30, 20, 18, 20, 58],
       rows: excelRows()
+    });
+    console.info("Raw Punches export streaming", {
+      elapsedMs: Date.now() - startedAt,
+      rowCount: rows.length
     });
     return new Response(Readable.toWeb(workbookStream) as unknown as BodyInit, {
       headers: {

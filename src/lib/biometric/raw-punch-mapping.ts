@@ -1,6 +1,7 @@
 import {
   normalizedEnrolmentId,
-  RAW_PUNCH_PROFILE_TABLES
+  RAW_PUNCH_PROFILE_TABLES,
+  type RawPunchWorkerRow
 } from "@/lib/biometric/raw-punch-report";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -32,7 +33,10 @@ function accountId(row: EnrolmentMappingRow) {
   return row.account_id ?? row.employee_id ?? row.field_executive_id;
 }
 
-export async function loadCurrentRawPunchMappingIds(companyId: string) {
+export async function loadCurrentRawPunchMappingIds(
+  companyId: string,
+  options: { includeWorkerDetails?: boolean } = {}
+) {
   if (!supabaseAdmin) throw new Error("The profile mapping service is unavailable.");
   const enrolments = await supabaseAdmin
     .from("biometric_enrolments")
@@ -51,23 +55,51 @@ export async function loadCurrentRawPunchMappingIds(companyId: string) {
     idsByProfile.get(type)!.add(id);
   });
 
-  const existingByProfile = new Map<string, Set<string>>();
+  const profileQueries: Array<{
+    profileType: string;
+    promise: ReturnType<typeof supabaseAdmin.from> extends never ? never : PromiseLike<unknown>;
+  }> = [];
   for (const [type, accountIds] of idsByProfile) {
     const config = RAW_PUNCH_PROFILE_TABLES[type];
     if (!config) continue;
-    const existingIds = new Set<string>();
     for (const table of config.tables) {
       for (const idBatch of chunks(Array.from(accountIds))) {
-        const profiles = await supabaseAdmin
-          .from(table)
-          .select("id")
-          .eq("company_id", companyId)
-          .in("id", idBatch);
-        if (profiles.error) throw new Error(profiles.error.message);
-        (profiles.data ?? []).forEach((profile) => existingIds.add(String(profile.id)));
+        const columns = options.includeWorkerDetails ? `id, full_name, ${config.code}` : "id";
+        profileQueries.push({
+          profileType: type,
+          promise: supabaseAdmin
+            .from(table)
+            .select(columns)
+            .eq("company_id", companyId)
+            .in("id", idBatch)
+        });
       }
     }
-    existingByProfile.set(type, existingIds);
+  }
+
+  const existingByProfile = new Map<string, Set<string>>();
+  const workerByKey = new Map<string, RawPunchWorkerRow>();
+  for (const queryBatch of chunks(profileQueries, 8)) {
+    const results = await Promise.all(queryBatch.map(async ({ profileType: type, promise }) => ({
+      profileType: type,
+      response: await promise as { data: Array<Record<string, string | null>> | null; error: { message: string } | null }
+    })));
+    results.forEach(({ profileType: type, response }) => {
+      if (response.error) throw new Error(response.error.message);
+      if (!existingByProfile.has(type)) existingByProfile.set(type, new Set());
+      const config = RAW_PUNCH_PROFILE_TABLES[type];
+      (response.data ?? []).forEach((profile) => {
+        const id = String(profile.id);
+        existingByProfile.get(type)!.add(id);
+        if (options.includeWorkerDetails && config) {
+          workerByKey.set(`${type}:${id}`, {
+            id,
+            full_name: profile.full_name ?? null,
+            code: String(profile[config.code] ?? "") || null
+          });
+        }
+      });
+    });
   }
 
   const peopleIds = new Set<string>();
@@ -87,6 +119,7 @@ export async function loadCurrentRawPunchMappingIds(companyId: string) {
   return {
     peopleIds: Array.from(peopleIds),
     workforceIds: Array.from(workforceIds),
-    mappings
+    mappings,
+    workerByKey
   };
 }
