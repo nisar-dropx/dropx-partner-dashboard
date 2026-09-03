@@ -17394,7 +17394,7 @@ td strong,
 
 .event-log-filters {
   display: grid;
-  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
   gap: 12px;
   padding: 16px;
   align-items: end;
@@ -17402,6 +17402,13 @@ td strong,
 .event-log-filters label { display: grid; gap: 5px; font-size: 12px; color: var(--muted); }
 .event-log-search { grid-column: span 2; }
 .event-log-filter-actions { display: flex; gap: 8px; align-items: end; }
+.raw-punch-multi-filter { min-width: 0; }
+.raw-punch-multi-filter > span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 12px; }
+.raw-punch-multi-filter .bulk-multi-filter-trigger { width: 100%; min-height: 40px; }
+.raw-punch-multi-filter .bulk-multi-filter-menu { z-index: 30; min-width: 280px; }
+.raw-punch-search-wrap { position: relative; display: block; }
+.raw-punch-search-wrap svg { position: absolute; z-index: 1; top: 50%; left: 11px; color: var(--muted); transform: translateY(-50%); }
+.raw-punch-search-wrap .field { width: 100%; padding-left: 34px; }
 .event-log-json { margin: 0; padding: 16px; max-height: 60vh; overflow: auto; border: 1px solid var(--line); background: #f8fafc; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 900px) { .event-log-filters { grid-template-columns: 1fr 1fr; } .event-log-search { grid-column: span 2; } }
 
