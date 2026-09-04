@@ -284,15 +284,19 @@ export async function loadOpsRosterCapabilities(authorization: AuthorizationCont
   const canApproveL1 = Boolean(result.data?.can_approve_l1 ?? result.data?.can_approve);
   const canApproveL2 = Boolean(result.data?.can_approve_l2);
   const canApproveHr = Boolean(result.data?.can_approve_hr);
+  const canPublishDirect = owner || Boolean(result.data?.can_publish_direct);
+  // Direct-publish designations (for example HR Head in Rostering Policy) can prepare
+  // and apply roster changes; page edit alone is not enough without these Settings flags.
+  const canPlan = owner || Boolean(result.data?.can_plan) || canPublishDirect;
   return {
     designationId: identity.designationId,
     designationName: identity.designationName,
-    canPlan: owner || Boolean(result.data?.can_plan),
+    canPlan,
     canApprove: owner || canApproveL1 || canApproveL2 || canApproveHr,
     canApproveL1: owner || canApproveL1,
     canApproveL2: owner || canApproveL2,
     canApproveHr: owner || canApproveHr,
-    canPublishDirect: owner || Boolean(result.data?.can_publish_direct)
+    canPublishDirect
   };
 }
 
@@ -388,7 +392,13 @@ export function canApproveOpsRosterHr(authorization: AuthorizationContext) {
     ].includes(String(authorization.roleCode ?? ""));
 }
 
-export async function resolveOpsRosterApprovalRoute(authorization: AuthorizationContext, policy: OpsRosterPolicy, locationId: string | null | undefined): Promise<OpsRosterApprovalRoute> {
+export async function resolveOpsRosterApprovalRoute(
+  authorization: AuthorizationContext,
+  policy: OpsRosterPolicy,
+  locationId: string | null | undefined,
+  options?: { canPublishDirect?: boolean }
+): Promise<OpsRosterApprovalRoute> {
+  if (options?.canPublishDirect) return { direct: true, approvalRequired: false, summary: "Applies directly under Rostering Policy for your designation.", error: null, steps: [] };
   if (!policy.approvalRequired) return { direct: true, approvalRequired: false, summary: "Applies directly under the station policy.", error: null, steps: [] };
   if (!locationId) return { direct: false, approvalRequired: true, summary: "Choose a station before submitting the roster.", error: "Choose a station before submitting the roster.", steps: [] };
   const resolved = await locationRosterApprovalChain(authorization, locationId, policy.approvalLevels);

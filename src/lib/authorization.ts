@@ -274,11 +274,18 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
       .eq("product_code", surfaceProductCode)
       .eq("is_active", true);
     if (!membershipResult.error && !isMasterOwner) {
-      const membershipRoleIds = (membershipResult.data ?? []).map((membership) => membership.role_id).filter((roleId): roleId is string => Boolean(roleId));
-      effectiveRoleIds = Array.from(new Set(membershipRoleIds));
-      primaryRoleId = membershipRoleIds[0] ?? null;
-      hasAllLocationAccess = (membershipResult.data ?? []).some((membership) => membership.has_all_location_access);
-      locationScopeIds = hasAllLocationAccess ? [] : Array.from(new Set((membershipResult.data ?? []).flatMap((membership) => membership.location_scope_ids ?? [])));
+      const membershipRows = membershipResult.data ?? [];
+      const membershipRoleIds = membershipRows.map((membership) => membership.role_id).filter((roleId): roleId is string => Boolean(roleId));
+      // Ops/People/Finance must use the product membership role matrix from Settings.
+      // Keep prior roles only when no active membership is configured yet.
+      if (membershipRoleIds.length) {
+        effectiveRoleIds = Array.from(new Set(membershipRoleIds));
+        primaryRoleId = membershipRoleIds[0] ?? null;
+      }
+      hasAllLocationAccess = membershipRows.some((membership) => membership.has_all_location_access);
+      locationScopeIds = hasAllLocationAccess
+        ? []
+        : Array.from(new Set(membershipRows.flatMap((membership) => membership.location_scope_ids ?? [])));
     }
   }
 
@@ -294,8 +301,11 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     const primaryRole = roles.find((role) => role.id === primaryRoleId) ?? roles[0] ?? null;
     roleName = primaryRole?.name ?? null;
     roleCode = String(primaryRole?.code ?? "").trim().toUpperCase() || null;
-    hasAllLocationAccess = hasAllLocationAccess || roles.some((role) => role.location_access_mode === "all_locations");
-
+    // Settings role "All locations" is authoritative even if membership flag is stale.
+    if (roles.some((role) => role.location_access_mode === "all_locations")) {
+      hasAllLocationAccess = true;
+      locationScopeIds = [];
+    }
     const hasLocationRole = roles.some((role) => String(role.code ?? "").trim().toUpperCase() === "LOCATION");
     if (hasLocationRole && data.user.email) {
       const { data: allEmailLocations } = await supabaseAdmin

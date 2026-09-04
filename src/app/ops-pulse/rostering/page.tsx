@@ -32,12 +32,19 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
     selected ? loadOpsRosterWorkspace(companyId, selected) : Promise.resolve(null),
     loadOpsRosteringPolicy(companyId, selected?.id)
   ]);
-  const route = capabilities.canPlan ? await resolveOpsRosterApprovalRoute(authorization, policy, selected?.id) : null;
+  const route = capabilities.canPlan ? await resolveOpsRosterApprovalRoute(authorization, policy, selected?.id, { canPublishDirect: capabilities.canPublishDirect }) : null;
   const selectedPlan = workspace?.selectedPlan ?? null;
   const canAdd = hasPermission(authorization, "ops_rostering", "add") && capabilities.canPlan;
   const canEdit = hasPermission(authorization, "ops_rostering", "edit") && capabilities.canPlan;
   const editable = Boolean(canEdit && selectedPlan && ["draft", "returned"].includes(selectedPlan.status));
   const canStart = Boolean(canAdd && workspace && !workspace.openPlan);
+  const accessLabel = !capabilities.canPlan
+    ? (capabilities.canApprove ? "Approver access" : "View only")
+    : selectedPlan?.status === "pending_approval"
+      ? "Change pending approval"
+      : "Can prepare roster changes";
+  const approvalSummary = route?.summary
+    ?? (capabilities.canApprove ? "Open My approvals to act on assigned roster requests." : "Your access is view-only.");
 
   return <AppShell active="Rostering" pageCode="ops_rostering">
     <div className="ops-command-center">
@@ -64,7 +71,7 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
       {view === "approvals" ? <OpsRosterApprovals approvals={approvals} /> : selected && workspace ? <>
         <div className="capacity-action-line" style={{ marginBottom: 10 }}>
           <strong>{capabilities.designationName || authorization.roleName || "Authorised user"}</strong>
-          <span>{capabilities.canPlan ? "Can prepare roster changes" : "View only"} · assigned approvers can act · {policy.approvalRequired ? "station owner → reporting manager → HR" : "direct apply"}</span>
+          <span>{accessLabel} · assigned approvers can act · {policy.approvalRequired && !capabilities.canPublishDirect ? "station owner → reporting manager → HR" : "direct apply"}</span>
         </div>
         <OpsRosterPlanner
           key={`${selected.id}:${selectedPlan?.id ?? "blank"}`}
@@ -79,7 +86,7 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
           defaultShifts={workspace.defaultShifts}
           canStart={canStart}
           editable={editable}
-          approvalSummary={route?.summary ?? "Your access is view-only."}
+          approvalSummary={approvalSummary}
           approvalRequired={Boolean(route?.approvalRequired)}
           routeReady={!route?.error}
           today={workspace.today}
