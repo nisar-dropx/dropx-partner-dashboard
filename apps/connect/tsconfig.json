@@ -18,6 +18,7 @@
       "@/lib/biometric/*": ["../../src/lib/biometric/*"],
       "@/lib/attendance-regularization-workflow": ["../../src/lib/attendance-regularization-workflow.ts"],
       "@/lib/connect-attendance-notifications": ["../../src/lib/connect-attendance-notifications.ts"],
+      "@/lib/roster-plan-preference": ["../../src/lib/roster-plan-preference.ts"],
       "@/*": ["./src/*"]
     }
   },

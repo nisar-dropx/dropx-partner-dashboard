@@ -16,6 +16,7 @@ import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Eraser, GripVer
 import { useRouter } from "next/navigation";
 import { prepareOpsRoster, saveOpsRosterAssignments, submitOpsRoster } from "@/app/ops-pulse/rostering/actions";
 import type { OpsRosterEntry, OpsRosterHoliday, OpsRosterPerson, OpsRosterPlan, OpsRosterShift } from "@/lib/ops-pulse/rostering";
+import { formatShiftClock } from "@/lib/roster-plan-preference";
 import {
   applyRosterDrop,
   decodeRosterDragPayload,
@@ -60,7 +61,10 @@ type PreparedEntry = {
 
 function personKey(person: Pick<OpsRosterPerson, "workerType" | "id">) { return `${person.workerType}:${person.id}`; }
 function cellKey(person: Pick<OpsRosterPerson, "workerType" | "id">, date: string) { return `${personKey(person)}:${date}`; }
-function compactTime(value: string) { return String(value ?? "").slice(0, 5); }
+function compactTime(value: string) {
+  const clock = formatShiftClock(value);
+  return clock === "--:--" ? "" : clock;
+}
 function dayLabel(date: string) { return new Intl.DateTimeFormat("en-IN", { weekday: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)); }
 function dateLabel(date: string) { return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)); }
 function fullDateLabel(date: string) { return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)); }

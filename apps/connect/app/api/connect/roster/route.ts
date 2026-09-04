@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { resolveConfiguredApprovalWorkflow } from "../../../../src/lib/approval-workflow-routing";
+import { formatShiftClock, preferActiveRosterRowsByKey } from "@/lib/roster-plan-preference";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 type WorkerType = "employee" | "contractor";
@@ -32,7 +33,9 @@ function hasAssignedWorkingShift(entry: Entry) { return entry.day_type === "week
 function rosterAssignmentKey(entry: Entry) {
   if (entry.day_type === "weekly_off") return "weekly_off";
   const shift = shiftOf(entry);
-  return shift ? `working:${shift.start_time.slice(0, 8)}:${shift.end_time.slice(0, 8)}` : "working:unassigned";
+  return shift
+    ? `working:${formatShiftClock(shift.start_time)}:${formatShiftClock(shift.end_time)}`
+    : "working:unassigned";
 }
 function isMeaningfulRosterSwap(requester: Entry, partner: Entry) {
   return hasAssignedWorkingShift(requester)
@@ -66,10 +69,18 @@ async function resolveWorkerIdentities(account: ConnectAccount, workerType: Work
 }
 
 async function expandRecurringOwnEntries(account: ConnectAccount, workerType: WorkerType, identities: WorkerIdentity[], start: string, direct: Entry[]) {
+  const preferredDirect = preferActiveRosterRowsByKey(
+    direct,
+    (entry) => entry.roster_date,
+    (entry) => entry.roster_date,
+    (entry) => planOf(entry)
+  );
   const byDate = new Map<string, Entry>();
-  for (const entry of direct) {
+  for (const entry of preferredDirect.values()) {
     const current = byDate.get(entry.roster_date);
-    if (!current || (entry.worker_type === workerType && entry.worker_id === account.id)) byDate.set(entry.roster_date, entry);
+    if (!current || (entry.worker_type === workerType && entry.worker_id === account.id)) {
+      byDate.set(entry.roster_date, entry);
+    }
   }
   let locationId = direct.find((entry) => entry.location_id)?.location_id ?? null;
   if (!locationId) {
@@ -219,7 +230,7 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   const start = todayIndia();
   const end = addDays(start, ROSTER_VIEW_DAYS - 1);
   const entryResults = await Promise.all(identities.map((identity) => db().from("hr_roster_entries")
-    .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status)")
+    .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
     .eq("company_id", account.companyId).eq("worker_type", identity.workerType).eq("worker_id", identity.workerId)
     .gte("roster_date", start).lte("roster_date", end).eq("hr_roster_plans.status", "approved").order("roster_date")));
   const entryError = entryResults.find((result) => result.error)?.error;
@@ -230,10 +241,16 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   let colleagueEntries: Entry[] = [];
   if (locations.length) {
     const colleagues = await db().from("hr_roster_entries")
-      .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status)")
+      .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
       .eq("company_id", account.companyId).in("location_id", locations).gte("roster_date", start).lte("roster_date", end).eq("hr_roster_plans.status", "approved");
     if (colleagues.error) throw new Error(colleagues.error.message);
-    colleagueEntries = await expandRecurringColleagueEntries(account.companyId, locations, start, (colleagues.data ?? []) as unknown as Entry[]);
+    const preferredColleagues = [...preferActiveRosterRowsByKey(
+      (colleagues.data ?? []) as unknown as Entry[],
+      (entry) => entry.roster_date,
+      (entry) => `${entry.worker_type}:${entry.worker_id}:${entry.roster_date}`,
+      (entry) => planOf(entry)
+    ).values()];
+    colleagueEntries = await expandRecurringColleagueEntries(account.companyId, locations, start, preferredColleagues);
   }
   const swapColumns = "id,requester_entry_id,partner_entry_id,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,requester_shift_id,partner_shift_id,requester_day_type,partner_day_type,roster_date,status,requester_note,partner_note,requested_at";
   const swapResults = await Promise.all(identities.flatMap((identity) => [

@@ -38,7 +38,8 @@ export function ReviewActionForm({ action, children, className, resetOnSuccess=f
       }catch{setResult({error:"Unable to save. Please refresh and try again."});}
       finally{busy.current=false;setSaving(false);}
   }} aria-busy={pending}>
-    <fieldset disabled={pending} className="review-action-fields">{children}</fieldset>
+    {/* div + display:contents — fieldset+contents hides children in Chromium */}
+    <div className={`review-action-fields${pending ? " is-pending" : ""}`}>{children}</div>
     {(pending||result.error||result.notice)?<p className={`review-save-result ${result.error?"error":""}`} role={result.error?"alert":"status"}>{pending?"Saving…":result.error||result.notice}</p>:null}
   </form>;
 }

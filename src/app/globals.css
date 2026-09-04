@@ -20243,7 +20243,7 @@ td strong,
 .review-action-fields { display: contents; border: 0; padding: 0; margin: 0; min-width: 0; }
 .review-save-result { grid-column: 1 / -1; flex-basis: 100%; margin: 4px 0; color: #18794e; font-size: 12px; }
 .review-save-result.error { color: #b42318; }
-.review-action-fields:disabled button { opacity: .55; cursor: wait; }
+.review-action-fields.is-pending, form[aria-busy=true] .review-action-fields button { opacity: .55; cursor: wait; pointer-events: none; }
 .review-access-hint { align-self: center; margin: 0 0 0 auto; max-width: 370px; font-size: 12px; color: #667085; }
 .review-connections, .review-discussion { min-width: 0; padding: 14px; border: 1px solid #e5e9f0; border-radius: 12px; background: #fff; }
 .review-connections > header, .review-discussion > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }

@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "../supabase-admin";
+import { formatShiftClock, preferActiveRosterRow, preferActiveRosterRowsByKey, type RosterPlanPreference } from "../roster-plan-preference";
 
 export type AttendanceReportType =
   | "performance"
@@ -242,20 +243,27 @@ export async function loadWorkerShiftWindow({
 
   const roster = await supabaseAdmin
     .from("hr_roster_entries")
-    .select("day_type, hr_shifts(start_time, end_time, break_minutes), hr_roster_plans(status)")
+    .select("day_type, hr_shifts(start_time, end_time, break_minutes), hr_roster_plans(status,roster_kind,effective_from,superseded_at,revision_no)")
     .eq("company_id", companyId)
     .eq("worker_id", workerId)
     .eq("roster_date", workDate)
-    .limit(5);
+    .limit(20);
   if (!roster.error) {
-    for (const row of roster.data ?? []) {
-      const planValue = row.hr_roster_plans as { status?: string | null } | { status?: string | null }[] | null;
-      const plan = Array.isArray(planValue) ? planValue[0] : planValue;
-      const shiftValue = row.hr_shifts as { start_time?: string | null; end_time?: string | null; break_minutes?: number | null } | { start_time?: string | null; end_time?: string | null; break_minutes?: number | null }[] | null;
-      const shift = Array.isArray(shiftValue) ? shiftValue[0] : shiftValue;
-      if (plan?.status === "approved" && row.day_type === "working" && shift?.start_time && shift.end_time) {
+    const preferred = preferActiveRosterRow(
+      (roster.data ?? []) as Array<{
+        day_type: string | null;
+        hr_shifts: { start_time?: string | null; end_time?: string | null; break_minutes?: number | null } | { start_time?: string | null; end_time?: string | null; break_minutes?: number | null }[] | null;
+        hr_roster_plans: RosterPlanPreference | RosterPlanPreference[] | null;
+      }>,
+      workDate,
+      (row) => relationFirst(row.hr_roster_plans)
+    );
+    if (preferred) {
+      const shift = relationFirst(preferred.hr_shifts);
+      if (preferred.day_type === "working" && shift?.start_time && shift.end_time) {
         return { startTime: shift.start_time, endTime: shift.end_time, breakMinutes: Math.max(0, Number(shift.break_minutes ?? 0)) };
       }
+      if (preferred.day_type && preferred.day_type !== "working") return null;
     }
   }
 
@@ -395,7 +403,7 @@ function relationFirst<T>(value: T | T[] | null | undefined): T | null {
 }
 
 function formatClock(value: string | null | undefined) {
-  return value ? value.slice(0, 5) : "--:--";
+  return formatShiftClock(value);
 }
 
 function clockMinutes(value: string | null | undefined) {
@@ -514,7 +522,7 @@ async function loadAttendanceScheduleContext({
     workerIds.length
       ? supabaseAdmin
         .from("hr_roster_entries")
-        .select(`worker_id, roster_date, day_type, hr_shifts(${shiftColumns}), hr_roster_plans!inner(status,roster_kind)`)
+        .select(`worker_id, roster_date, day_type, hr_shifts(${shiftColumns}), hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)`)
         .eq("company_id", companyId)
         .eq("hr_roster_plans.status", "approved")
         .eq("hr_roster_plans.roster_kind", "dated")
@@ -540,7 +548,7 @@ async function loadAttendanceScheduleContext({
     roster_date: string;
     day_type: string | null;
     hr_shifts: ShiftDefinition | ShiftDefinition[] | null;
-    hr_roster_plans: { status?: string | null } | Array<{ status?: string | null }> | null;
+    hr_roster_plans: RosterPlanPreference | RosterPlanPreference[] | null;
   };
   type WeeklyRosterRow = {
     plan_id: string;
@@ -549,15 +557,20 @@ async function loadAttendanceScheduleContext({
     day_type: string | null;
     hr_shifts: ShiftDefinition | ShiftDefinition[] | null;
   };
+  const preferredDated = preferActiveRosterRowsByKey(
+    (rosterResult.data ?? []) as unknown as RosterRow[],
+    (row) => row.roster_date,
+    (row) => `${row.worker_id}:${row.roster_date}`,
+    (row) => relationFirst(row.hr_roster_plans)
+  );
   const rosterByWorkerDate = new Map<string, ShiftSchedule>();
-  ((rosterResult.data ?? []) as unknown as RosterRow[]).forEach((row) => {
-    if (relationFirst(row.hr_roster_plans)?.status !== "approved") return;
-    rosterByWorkerDate.set(`${row.worker_id}:${row.roster_date}`, {
+  for (const [key, row] of preferredDated) {
+    rosterByWorkerDate.set(key, {
       dayType: row.day_type ?? "working",
       shift: relationFirst(row.hr_shifts),
       source: "Roster"
     });
-  });
+  }
   const recurringPlans = (recurringPlanResult.data ?? []).map((plan) => ({
     id: plan.id,
     effectiveFrom: String(plan.effective_from),

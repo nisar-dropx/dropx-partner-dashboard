@@ -52,8 +52,10 @@
 .performance-review-desk .review-connection-form label { font-size: 12px; }
 .performance-review-desk .review-connection-form input { font-size: 14px; min-height: 40px; }
 .performance-review-desk .review-connection-form .button { min-height: 40px; }
-.review-station-updates { display: grid; grid-template-columns: minmax(0,1fr) 245px; gap: 12px; align-items: stretch; }
-.review-station-updates .review-noon-emd { align-content: start; align-items: flex-start; }
+.performance-review-desk .review-station-updates { display: grid; grid-template-columns: minmax(0,1fr) 245px; gap: 12px; align-items: stretch; margin: 12px 0; padding: 0; }
+.performance-review-desk .review-station-updates .review-connections,
+.performance-review-desk .review-station-updates .review-noon-emd { border-color: #e9edf3; }
+.performance-review-desk .review-station-updates .review-noon-emd { align-content: start; align-items: flex-start; }
 .review-cod-pending { margin: 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: white; }
 .review-cod-pending.red { border-color: #fca5a5; }
 .review-cod-pending.green { border-color: #86efac; }
@@ -91,7 +93,7 @@
 .performance-review-desk .performance-action-readonly p { font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
 @media (max-width:1200px) {
   .performance-review-desk .performance-review-columns { grid-template-columns: minmax(0,1fr); }
-  .review-station-updates { grid-template-columns: minmax(0,1fr); }
+  .performance-review-desk .review-station-updates { grid-template-columns: minmax(0,1fr); }
 }
 @media (max-width:650px) {
   .performance-review-desk .performance-action-item form,.performance-review-desk .performance-action-readonly { grid-template-columns: minmax(0,1fr); }

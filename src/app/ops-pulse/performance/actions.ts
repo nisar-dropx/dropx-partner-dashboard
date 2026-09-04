@@ -134,8 +134,18 @@ export async function savePerformanceConnection(data:FormData):Promise<ReviewAct
     const companyId=requireCompanyId(authorization);
     const station=await stationForAction(authorization,text(data,"station_code").toUpperCase());
     const date=dateValue(text(data,"source_date"));
-    const access=await getReviewAccess(authorization,station.id,null,[]);
-    if (!access.canEditConnections) throw new Error("Only the station team or Program Manager can edit connection timings.");
+    const reviewResult = await supabaseAdmin!.from("ops_performance_reviews")
+      .select("id,station_id,station_code,source_date,current_step_order,status,updated_at")
+      .eq("company_id", companyId).eq("station_id", station.id).eq("source_date", date).maybeSingle();
+    if (reviewResult.error) throw new Error("Unable to check review access for connection timings.");
+    const review = reviewResult.data;
+    const stepsResult = review
+      ? await supabaseAdmin!.from("ops_performance_review_steps").select("id,step_order,reviewer_user_id,reviewer_role,status,bypassed_at,proxy_reviewer_user_id")
+          .eq("company_id", companyId).eq("review_id", review.id).order("step_order")
+      : { data: [] as { id: string; step_order: number; reviewer_user_id: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[], error: null };
+    if (stepsResult.error) throw new Error("Unable to check the current review stage.");
+    const access=await getReviewAccess(authorization,station.id,review,stepsResult.data ?? []);
+    if (!access.canEditConnections) throw new Error("Only the station team, first review manager on their stage, or Program Manager can edit connection timings.");
     const times=connectionTimes({arrival:text(data,"arrival"),unloading:text(data,"unloading"),clearance:text(data,"clearance")},date);
     const result=await supabaseAdmin!.rpc("ops_save_review_connection",{p_company:companyId,p_actor:authorization.userId,p_station:station.id,p_data:{
       ...times,id:text(data,"connection_id"),version:Number(text(data,"version"))||1,service_date:date,label:limited(data,"label",100,true),...author(authorization,access.actor.label)
@@ -183,13 +193,24 @@ export async function savePerformanceNoonEmd(data: FormData): Promise<ReviewActi
   try {
     const companyId = requireCompanyId(authorization);
     const station = await stationForAction(authorization,text(data,"station_code").toUpperCase());
-    const access = await getReviewAccess(authorization,station.id,null,[]);
-    if (!access.canEditConnections) throw new Error("Only the station team or Program Manager can update station inputs.");
+    const date = dateValue(text(data,"source_date"));
+    const reviewResult = await supabaseAdmin!.from("ops_performance_reviews")
+      .select("id,station_id,station_code,source_date,current_step_order,status,updated_at")
+      .eq("company_id", companyId).eq("station_id", station.id).eq("source_date", date).maybeSingle();
+    if (reviewResult.error) throw new Error("Unable to check review access for station inputs.");
+    const review = reviewResult.data;
+    const stepsResult = review
+      ? await supabaseAdmin!.from("ops_performance_review_steps").select("id,step_order,reviewer_user_id,reviewer_role,status,bypassed_at,proxy_reviewer_user_id")
+          .eq("company_id", companyId).eq("review_id", review.id).order("step_order")
+      : { data: [] as { id: string; step_order: number; reviewer_user_id: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[], error: null };
+    if (stepsResult.error) throw new Error("Unable to check the current review stage.");
+    const access = await getReviewAccess(authorization,station.id,review,stepsResult.data ?? []);
+    if (!access.canEditConnections) throw new Error("Only the station team, first review manager on their stage, or Program Manager can update station inputs.");
     const value = noonEmdValue(text(data,"emd_noon_pct"));
     if (value === null) throw new Error("Enter EMD at 12 p.m. (0 to 100%).");
     const version = Number(text(data,"version"));
     if (!Number.isInteger(version) || version < 0) throw new Error("Refresh this entry before saving.");
-    const result = await supabaseAdmin!.rpc("ops_save_review_noon_emd", {p_company:companyId,p_actor:authorization.userId,p_station:station.id,p_date:dateValue(text(data,"source_date")),p_value:value,p_version:version});
+    const result = await supabaseAdmin!.rpc("ops_save_review_noon_emd", {p_company:companyId,p_actor:authorization.userId,p_station:station.id,p_date:date,p_value:value,p_version:version});
     rpcError(result.error);
     return finish("EMD at 12 p.m. saved.");
   } catch(error) { return failure(error); }

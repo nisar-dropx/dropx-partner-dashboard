@@ -1,5 +1,6 @@
 import "server-only";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
+import { formatShiftClock } from "@/lib/roster-plan-preference";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type Relation<T> = T | T[] | null | undefined;
@@ -126,7 +127,7 @@ function indiaPunchMinutes(value: string | null | undefined, punchDate: string) 
 }
 
 function shiftStartMinutes(value: string | null | undefined) {
-  const match = String(value ?? "").match(/^(\d{2}):(\d{2})/);
+  const match = String(value ?? "").match(/^(\d{1,2}):(\d{2})/);
   return match ? Number(match[1]) * 60 + Number(match[2]) : null;
 }
 
@@ -389,7 +390,7 @@ export async function loadOpsStationManpower(
         workMinutes: Number(attendance?.work_minutes ?? 0),
         missingPunch,
         rosterDayType: roster?.day_type ? String(roster.day_type) : null,
-        shiftName: shift ? `${shift.name} · ${shift.start_time.slice(0, 5)}-${shift.end_time.slice(0, 5)}` : null,
+        shiftName: shift ? `${shift.name} · ${formatShiftClock(shift.start_time)}-${formatShiftClock(shift.end_time)}` : null,
         shiftStartTime: shift?.start_time ?? null,
         shiftEndTime: shift?.end_time ?? null,
         shiftSource,

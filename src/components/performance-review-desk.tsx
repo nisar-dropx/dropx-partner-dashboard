@@ -182,11 +182,6 @@ export function PerformanceReviewDesk(props: Props) {
     <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update vehicle timings and noon EMD; view the full review":canEdit?"Your review · update RCA, actions, takeaway and station inputs":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
     {review ? <PerformanceReviewExceptions key={review.updated_at} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy}/> : null}
 
-    <div className="review-station-updates">
-      <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
-      <PerformanceNoonEmdEntry entry={props.noonEmd.row} error={props.noonEmd.error} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
-    </div>
-
     <div className="performance-review-columns">
       <section className="panel performance-review-section">
         <div className="panel-head"><div><span className="performance-review-kicker">01 · PERFORMANCE</span><h2>D-1 station performance</h2><p className="subtle">Uploaded Amazon metrics, opening discipline and action ownership in one review.</p></div><strong className={misses.length ? "review-risk" : "review-good"}>{misses.length} exception{misses.length === 1 ? "" : "s"}</strong></div>
@@ -202,6 +197,10 @@ export function PerformanceReviewDesk(props: Props) {
           <summary><span>Performance scorecard</span><b>{metrics.length} metrics</b></summary>
           <div className="performance-review-metrics">{metrics.map((metric) => <article className={metric.severity} key={metric.key}><span title={metric.label}>{metric.short}</span><strong>{valueText(metric.actual)}</strong><small>{metric.target == null ? "Reference metric" : `Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}</small></article>)}</div>
         </details>
+        <div className="review-station-updates">
+          <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
+          <PerformanceNoonEmdEntry entry={props.noonEmd.row} error={props.noonEmd.error} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
+        </div>
         {review && canEdit ? <ReviewActionForm key={review.id} action={savePerformanceReviewOperations} className="performance-operations-form">
           <input type="hidden" name="review_id" value={review.id}/><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/>
           <input type="hidden" name="review_version" value={review.updated_at}/>

@@ -390,7 +390,8 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
       ?? null
     : null;
   const canViewReviews = hasPermission(authorization, "performance_review", "access");
-  const connectionStationId = selectedReview?.station_id || selectedReviewLocation?.id || null;
+  // Prefer the selected station row — review.station_id can diverge and hide saved timings.
+  const connectionStationId = selectedReviewLocation?.id || selectedReview?.station_id || null;
   const [connectionResult, reviewChain, backlog, followups, noonEmd, stationLeads, codData] = selectedReviewLocation && connectionStationId && view === "reviews" ? await Promise.all([
     loadPerformanceConnections(companyId, connectionStationId, selectedDate),
     selectedReview ? Promise.resolve([]) : resolvePerformanceReviewChain(companyId, selectedReviewLocation.id),

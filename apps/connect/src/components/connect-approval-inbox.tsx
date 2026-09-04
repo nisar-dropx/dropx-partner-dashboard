@@ -181,7 +181,10 @@ function rosterStageLabel(stageType: string) {
 function rosterSwapShiftLabel(shift: RosterSwapApproval["requesterShift"], dayType: string) {
   if (dayType === "weekly_off") return "Weekly off";
   if (!shift) return "Shift not assigned";
-  return `${shift.start_time.slice(0, 5)}–${shift.end_time.slice(0, 5)}`;
+  const start = String(shift.start_time ?? "").match(/^(\d{1,2}):(\d{2})/);
+  const end = String(shift.end_time ?? "").match(/^(\d{1,2}):(\d{2})/);
+  if (!start || !end) return "Shift not assigned";
+  return `${String(Number(start[1])).padStart(2, "0")}:${start[2]}–${String(Number(end[1])).padStart(2, "0")}:${end[2]}`;
 }
 
 function ApprovalHead({
