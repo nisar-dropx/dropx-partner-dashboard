@@ -14,7 +14,7 @@ test('no cluster manager uses actual AOM and deduplicates identities',()=>{
 const base={userId:'tl',owner:false,programManager:false,stationUser:false,inScope:true,canView:true,canAdd:true,canEdit:true,closed:false,firstReviewerId:'cm',currentReviewerId:'cm',currentRole:'Cluster Manager'};
 test('station editor can only enter connection timings',()=>{
   const access=reviewCapabilities({...base,stationUser:true});
-  assert.deepEqual(access,{canStart:false,canEditConnections:true,canEditRca:false,canComment:false,canComplete:false,canManageActions:false,canBypass:false,canProxy:false});
+  assert.deepEqual(access,{canStart:false,canEditConnections:true,canEditRca:false,canComment:false,canComplete:false,canManageActions:false,canAccessBypass:false,canAccessProxy:false,canBypass:false,canProxy:false});
 });
 test('CM owns RCA, own stage, and can enter connection timings',()=>{
   assert.equal(reviewCapabilities({...base,userId:'cm'}).canEditRca,true);
@@ -91,6 +91,21 @@ test('recorded first-level proxy can edit RCA and complete; original manager can
   const proxy={...base,userId:'aom',currentReviewerId:'aom',currentIsFirst:true,hasProxy:true};
   assert.equal(reviewCapabilities(proxy).canEditRca,true);assert.equal(reviewCapabilities(proxy).canComplete,true);
   assert.equal(reviewCapabilities({...proxy,userId:'cm'}).canComplete,false);
+});
+test('authorised exception tools remain discoverable before starting and after completion',()=>{
+  for(const role of [{owner:true},{programManager:true},{nationalHead:true},{tech:true}]) {
+    const before=reviewCapabilities({...base,...role,currentReviewerId:null,currentRole:null});
+    assert.equal(before.canAccessProxy,true);assert.equal(before.canAccessBypass,true);
+    assert.equal(before.canProxy,false);
+    const closed=reviewCapabilities({...base,...role,closed:true});
+    assert.equal(closed.canAccessProxy,true);assert.equal(closed.canAccessBypass,true);
+    assert.equal(closed.canProxy,false);assert.equal(closed.canBypass,false);
+  }
+  const aom=reviewCapabilities({...base,userId:'aom',higherReviewer:true,currentReviewerId:null,currentRole:null});
+  assert.equal(aom.canAccessProxy,true);assert.equal(aom.canAccessBypass,false);
+  assert.equal(aom.canProxy,false);
+  const own=reviewCapabilities({...base,userId:'nh',nationalHead:true,currentReviewerId:'nh',currentRole:'National Head'});
+  assert.equal(own.canAccessProxy,true);assert.equal(own.canProxy,false);
 });
 test('bypass requires reason and explicit skipped stages remain visible',()=>{
   assert.throws(()=>reviewBypassReason(' '));assert.throws(()=>reviewBypassReason('x'.repeat(2001)));

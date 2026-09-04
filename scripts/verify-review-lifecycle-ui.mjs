@@ -11,6 +11,11 @@ for(const component of ['PerformanceNoonEmdEntry','PerformanceReviewFlow','Perfo
   assert.ok(desk.includes('<'+component+' '),component+' is mounted, not only imported');
 }
 assert.ok(desk.includes('review && rcaRows.length'),'saved RCA remains visible after source refresh');
+assert.ok(!/\{review\s*\?\s*<PerformanceReviewExceptions/.test(desk),'exception controls mounted for unstarted station-days');
+const exceptions=read('src/components/performance-review-exceptions.tsx');
+assert.ok(exceptions.includes('Start review first for this station and date'));
+assert.ok(exceptions.includes('disabled={!proxyEnabled}')&&exceptions.includes('disabled={!skipEnabled}'));
+assert.ok(exceptions.includes('review&&mode&&'),'unstarted or unavailable stages never render mutation forms');
 const conn=read('src/components/performance-connections.tsx');
 for(const label of ['Vehicle arrival time','Vehicle unloading completed time','Station clearance time'])assert.ok(conn.includes(label),label);
 assert.ok(/adding\s*\|\|\s*!connections.length/.test(conn),'first connection inputs visible without extra click');
