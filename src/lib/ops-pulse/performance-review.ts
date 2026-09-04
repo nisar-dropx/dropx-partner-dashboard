@@ -1,7 +1,8 @@
 import type { AuthorizationContext } from "@/lib/authorization";
 import { resolveConnectApproverUserId } from "@/lib/connect-approver-identity";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
-import { clockMinutes, resolveStationOpeningSchedule, stationOpeningLateMinutes } from "@/lib/ops-pulse/station-opening";
+import { resolveStationOpeningSchedule, stationOpeningLateMinutes } from "@/lib/ops-pulse/station-opening";
+import { loadStationOpeningAttendance } from "@/lib/ops-pulse/station-opening-attendance";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -174,14 +175,6 @@ function istClockMinutes(value: string | null | undefined) {
   return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : null;
 }
 
-function isWithinOpeningWindow(value: string | null, start: string, end: string) {
-  const minute = istClockMinutes(value);
-  const fromMinutes = clockMinutes(start);
-  const toMinutes = clockMinutes(end);
-  if (minute == null || fromMinutes == null || toMinutes == null) return false;
-  return fromMinutes <= toMinutes ? minute >= fromMinutes && minute <= toMinutes : minute >= fromMinutes || minute <= toMinutes;
-}
-
 function missingSchema(error: unknown) {
   const message = String((error as { message?: unknown })?.message ?? error ?? "").toLowerCase();
   return message.includes("ops_performance_review") && (message.includes("does not exist") || message.includes("schema cache"));
@@ -301,7 +294,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
   const stationCodes = locations.map((location) => location.station_code);
   const locationIds = locations.map((location) => location.id);
   const monthFrom = `${sourceDate.slice(0, 7)}-01`;
-  const [costResult, monthCostResult, breakupResult, shipmentResult, detailResult, capacityResult, monthCapacityResult, attendanceResult, headsResult, openingResult, manpowerResult] = await Promise.all([
+  const [costResult, monthCostResult, breakupResult, shipmentResult, detailResult, capacityResult, monthCapacityResult, headsResult, openingResult, manpowerResult] = await Promise.all([
     supabaseAdmin.from("cps_station_daily")
       .select("station_code,total_delivery,total_cost,overall_cps,da_pay_cost,da_cps").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("cps_station_daily")
@@ -317,14 +310,12 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       .select("station_code,delivered,active_ids").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("capacity_station_daily_cache")
       .select("station_code,delivered").eq("company_id", companyId).gte("work_date", monthFrom).lte("work_date", sourceDate).in("station_code", stationCodes),
-    supabaseAdmin.from("attendance_daily")
-      .select("location_id,station_code,in_time,worker_name,employee_code").eq("company_id", companyId).eq("punch_date", sourceDate).in("location_id", locationIds).not("in_time", "is", null).order("in_time"),
     supabaseAdmin.from("payment_heads").select("id,code,name").eq("company_id", companyId),
     supabaseAdmin.from("ops_performance_station_settings")
       .select("station_id,opening_window_start,opening_window_end").eq("company_id", companyId).in("station_id", locationIds),
     loadOpsStationManpower(companyId, locations, sourceDate).catch(() => null)
   ]);
-  const error = costResult.error ?? monthCostResult.error ?? breakupResult.error ?? shipmentResult.error ?? detailResult.error ?? capacityResult.error ?? monthCapacityResult.error ?? attendanceResult.error ?? headsResult.error ?? openingResult.error;
+  const error = costResult.error ?? monthCostResult.error ?? breakupResult.error ?? shipmentResult.error ?? detailResult.error ?? capacityResult.error ?? monthCapacityResult.error ?? headsResult.error ?? openingResult.error;
   if (error) return { rows: empty, error: error.message };
   const adHocHeads = (headsResult.data ?? []).filter(isAdHocHead);
   const adHocHeadIds = adHocHeads.map((head) => head.id);
@@ -533,19 +524,25 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     if ((deliveredMtdByStation.get(code) ?? 0) > 0) current.mtdDelivery = deliveredMtdByStation.get(code) ?? current.mtdDelivery;
     current.mtdCps = current.mtdDelivery ? current.mtdCost / current.mtdDelivery : null;
   });
-  const codeByLocation = new Map(locations.map((location) => [location.id, location.station_code]));
-  (attendanceResult.data ?? []).forEach((row) => {
-    const code = codeByLocation.get(row.location_id) ?? normalized(row.station_code);
-    const current = empty.get(code);
-    if (!current || current.firstPunchAt || !isWithinOpeningWindow(row.in_time, current.openingWindowStart, current.openingWindowEnd)) return;
-    current.firstPunchAt = row.in_time;
-    current.firstPunchBy = row.worker_name || row.employee_code || "Recorded employee";
-    current.openingLateMinutes = stationOpeningLateMinutes(
-      istClockMinutes(row.in_time),
-      current.scheduledOpeningTime,
-      current.openingWindowStart
-    );
-  });
+  try {
+    const openings = await loadStationOpeningAttendance(companyId, sourceDate, locations,
+      new Map(locations.map((location) => {
+        const current = empty.get(location.station_code)!;
+        return [location.id, { start: current.openingWindowStart, end: current.openingWindowEnd }];
+      })));
+    for (const location of locations) {
+      const punch = openings.get(location.id);
+      const current = empty.get(location.station_code)!;
+      if (!punch) continue;
+      current.firstPunchAt = punch.time;
+      current.firstPunchBy = punch.name || punch.workerCode || `Biometric ID ${punch.enrolmentId}`;
+      current.openingLateMinutes = stationOpeningLateMinutes(
+        istClockMinutes(punch.time), current.scheduledOpeningTime, current.openingWindowStart
+      );
+    }
+  } catch (error) {
+    return { rows: new Map<string, PerformanceOperationalSnapshot>(), error: error instanceof Error ? error.message : "Station opening attendance is unavailable." };
+  }
   (paymentsResult.data ?? []).filter(isApprovedPayment).forEach((row) => {
     const code = normalized(row.station_code || row.location_code);
     const current = empty.get(code);
