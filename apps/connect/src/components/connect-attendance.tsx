@@ -427,6 +427,12 @@ export function ConnectAttendance({ account }: { account: Account }) {
           <div><i><ShieldAlert /></i><span>Needs review<strong>{reviewCount}</strong></span></div>
           <p><Clock3 /> Total Hours <strong>{Math.floor(total / 60)}:{String(total % 60).padStart(2, "0")}</strong></p>
         </div>
+        {(data.summary.lateIn || data.summary.earlyOut) ? (
+          <div className="dx-attendance-flashes" aria-label="Attendance exceptions this month">
+            {data.summary.lateIn ? <span className="late"><Clock3 /> Late in <strong>{data.summary.lateIn}</strong></span> : null}
+            {data.summary.earlyOut ? <span className="early"><LogOut /> Early out <strong>{data.summary.earlyOut}</strong></span> : null}
+          </div>
+        ) : null}
         <div className="dx-tabs-card">
           <nav>
             {(["calendar", "list", "punches"] as const).map((item) => (
@@ -450,7 +456,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
                 return <button aria-label={`${date}: ${future ? "Future" : insight.label}`} className={`${future ? "off" : insight.calendarClass} ${insight.issues.length ? "has-issue" : ""} ${selected?.date === date ? "selected" : ""}`} disabled={future} key={day} onClick={() => !future && setSelected(row ?? emptyAttendanceRow(date))}><span>{day}</span></button>;
               })}
             </div>
-            <div className="dx-legend"><span className="full">Full day</span><span className="half">Half day</span><span className="leave">Leave</span><span className="absent">Absent</span><span className="review">Review</span><span className="off">Off</span></div>
+            <div className="dx-legend"><span className="full">Full day</span><span className="half">Half day</span><span className="leave">Leave</span><span className="absent">Absent</span><span className="review">Review</span><span className="off">Off</span><span className="issue">Late / early</span></div>
           </div> : null}
           {tab === "list" ? <div className="dx-attendance-list">
             {[...data.rows].sort((left, right) => right.date.localeCompare(left.date)).map((row) => {

@@ -72,6 +72,8 @@ type Attendance = {
     halfDay?: number;
     absent: number;
     needsReview?: number;
+    lateIn?: number;
+    earlyOut?: number;
     misPunch: number;
   };
   rows: AttendanceRow[];
@@ -420,6 +422,8 @@ export function ConnectDashboard({
   const advancesAllowed = pageAccess.includes("advances");
   const fullDayCount = attendance.summary.fullDay ?? attendance.summary.present;
   const halfDayCount = attendance.summary.halfDay ?? 0;
+  const lateInCount = attendance.summary.lateIn ?? 0;
+  const earlyOutCount = attendance.summary.earlyOut ?? 0;
   const reviewCount = attendance.rows.filter((row) => attendanceDayInsight(row, {
     today: row.date === localIsoDate(now),
     shiftOpen: row.date === punchState?.punchDate && punchState?.open === true
@@ -484,6 +488,12 @@ export function ConnectDashboard({
         <Metric icon={<UserRoundX />} label="Absent" value={attendance.summary.absent} tone="red" />
         <Metric icon={<Clock3 />} label="Needs review" value={reviewCount} tone="purple" />
       </div>
+      {(lateInCount || earlyOutCount) ? (
+        <div className="dx-attendance-flashes dx-dashboard-flashes" aria-label="Attendance exceptions this month">
+          {lateInCount ? <span className="late"><Clock3 /> Late in <strong>{lateInCount}</strong></span> : null}
+          {earlyOutCount ? <span className="early"><LogOut /> Early out <strong>{earlyOutCount}</strong></span> : null}
+        </div>
+      ) : null}
       <div className="dx-month-progress">
         <span><b>{attendanceRate}%</b><small>Attendance score · {totalHours} hrs</small></span>
         <i aria-label={`${attendanceRate}% attendance rate`}><b style={{ width: `${attendanceRate}%` }} /></i>

@@ -159,6 +159,52 @@
   content: "";
 }
 
+.dx-attendance-flashes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.dx-attendance-flashes > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dx-attendance-flashes > span svg {
+  width: 14px;
+  height: 14px;
+}
+
+.dx-attendance-flashes > span strong {
+  font-size: 13px;
+}
+
+.dx-attendance-flashes .late {
+  color: #9b5a00;
+  background: #fff2d6;
+}
+
+.dx-attendance-flashes .early {
+  color: #9b5a00;
+  background: #fff8e9;
+  border: 1px solid #f0d9a8;
+}
+
+.dx-legend .issue::before {
+  background: #ffb020;
+}
+
+.dx-dashboard-flashes {
+  margin: 12px 0 0;
+}
+
 .dx-days button.full.selected { color: #15915f; background: #fff; }
 .dx-days button.half.selected { color: #b66a00; background: #fff; }
 .dx-days button.review.selected { color: #c3313d; background: #fff; }

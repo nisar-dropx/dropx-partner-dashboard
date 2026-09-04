@@ -83,6 +83,27 @@ function durationOutcomeDetail(row: AttendanceInsightRow, outcome: "Half Day" | 
   return `${reason} If the attendance record is wrong, request regularization.`;
 }
 
+function minutesFromRemark(remark: string, kind: "late" | "early") {
+  const pattern = kind === "late"
+    ? /(\d+)\s*min(?:ute)?s?\s+late/i
+    : /(\d+)\s*min(?:ute)?s?\s+early(?:\s+departure|\s+out)?/i;
+  const match = remark.match(pattern);
+  return match ? Math.max(0, Number(match[1])) : 0;
+}
+
+/** Prefer API minutes; fall back to People-style remark notes when variance is missing. */
+export function resolveLateMinutes(row: AttendanceInsightRow) {
+  const reported = Math.max(0, Number(row.lateMinutes ?? 0));
+  if (reported > 0) return reported;
+  return minutesFromRemark(row.remark ?? "", "late");
+}
+
+export function resolveEarlyOutMinutes(row: AttendanceInsightRow) {
+  const reported = Math.max(0, Number(row.earlyOutMinutes ?? 0));
+  if (reported > 0) return reported;
+  return minutesFromRemark(row.remark ?? "", "early");
+}
+
 function previousIsoDate(value: string) {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return "";
@@ -127,8 +148,8 @@ export function attendanceDayInsight(
   const label = outcomeLabel(row);
   const state = normalized(label);
   const remark = normalized(row.remark);
-  const lateMinutes = Math.max(0, Number(row.lateMinutes ?? 0));
-  const earlyOutMinutes = Math.max(0, Number(row.earlyOutMinutes ?? 0));
+  const lateMinutes = resolveLateMinutes(row);
+  const earlyOutMinutes = resolveEarlyOutMinutes(row);
   const missingPunch = row.punchCount < 2 || !row.outTime || /single|missing/.test(remark);
   const needsPolicyReview = state.includes("needs review");
 
@@ -271,12 +292,24 @@ export function attendanceDayInsight(
     };
   }
 
+  const baseLabel = state.includes("full day") ? "Full day" : label;
+  const late = issues.some((issue) => issue.code === "late");
+  const early = issues.some((issue) => issue.code === "early_out");
+  const timingLabel = late ? `${baseLabel} · Late` : early ? `${baseLabel} · Early out` : baseLabel;
   return {
     calendarClass: "full",
-    detail: "Your full-day attendance is complete.",
-    headline: "Full day complete",
+    detail: late
+      ? `Reported ${pluralMinutes(lateMinutes)} late. Late penalty applies under company HR policy.`
+      : early
+        ? `Left ${pluralMinutes(earlyOutMinutes)} early. Early-out penalty applies under company HR policy.`
+        : "Your full-day attendance is complete.",
+    headline: late
+      ? `Reported ${pluralMinutes(lateMinutes)} late`
+      : early
+        ? `Early out ${pluralMinutes(earlyOutMinutes)}`
+        : "Full day complete",
     issues,
-    label: state.includes("full day") ? "Full day" : label,
+    label: timingLabel,
     needsRegularization: false,
     tone: issues.length ? "amber" : "green"
   };
@@ -298,8 +331,22 @@ export function attendanceCompactNudge(
   }
   const issue = attendanceIssueSummary(row);
   if (!issue) return null;
-  if (issue.code === "late") return { headline: "Reported late", detail: "Penalty applicable", tone: issue.tone };
-  if (issue.code === "early_out") return { headline: "Left early", detail: "Penalty applicable", tone: issue.tone };
+  if (issue.code === "late") {
+    const minutes = resolveLateMinutes(row);
+    return {
+      headline: "Reported late",
+      detail: minutes > 0 ? `${pluralMinutes(minutes)} · Penalty applicable` : "Penalty applicable",
+      tone: issue.tone
+    };
+  }
+  if (issue.code === "early_out") {
+    const minutes = resolveEarlyOutMinutes(row);
+    return {
+      headline: "Left early",
+      detail: minutes > 0 ? `${pluralMinutes(minutes)} · Penalty applicable` : "Penalty applicable",
+      tone: issue.tone
+    };
+  }
   if (issue.code === "half_day") return { headline: "Half day recorded", detail: "Deduction applicable", tone: issue.tone };
   if (issue.code === "absent") return { headline: "Absent recorded", detail: "Deduction applicable", tone: issue.tone };
   return { headline: issue.label, detail: "View details", tone: issue.tone };

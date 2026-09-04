@@ -71,7 +71,7 @@ test("uses first IN and latest OUT for three completed punches", () => {
     inTime: "15:19",
     workHours: "08:02"
   }));
-  assert.equal(insight.label, "Full day");
+  assert.equal(insight.label, "Full day · Late");
   assert.equal(insight.calendarClass, "full");
   assert.equal(insight.needsRegularization, false);
   assert.deepEqual(insight.issues.map((issue) => issue.code), ["late"]);
@@ -80,14 +80,14 @@ test("uses first IN and latest OUT for three completed punches", () => {
 test("surfaces late and early-out consequences without replacing full-day status", () => {
   const lateRow = row({ lateMinutes: 18, earlyOutMinutes: 7, scheduledStart: "09:30", inTime: "09:48" });
   const insight = attendanceDayInsight(lateRow);
-  assert.equal(insight.label, "Full day");
+  assert.equal(insight.label, "Full day · Late");
   assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "early_out"]);
   assert.match(insight.issues[0].message, /Expected 09:30 · reported 09:48/i);
   assert.match(insight.issues[0].message, /Any applicable deduction will appear in an upcoming payment/i);
   assert.equal(attendanceIssueSummary(lateRow)?.code, "late");
   assert.deepEqual(attendanceCompactNudge(lateRow), {
     headline: "Reported late",
-    detail: "Penalty applicable",
+    detail: "18 min · Penalty applicable",
     tone: "amber"
   });
 });
@@ -116,9 +116,19 @@ test("keeps the first-glance message compact while retaining full details", () =
   const insight = attendanceDayInsight(halfDay);
   const nudge = attendanceCompactNudge(halfDay);
   assert.equal(nudge?.headline, "Reported late");
-  assert.equal(nudge?.detail, "Penalty applicable");
+  assert.equal(nudge?.detail, "45 min · Penalty applicable");
   assert.match(insight.detail, /Half Day/);
   assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "half_day"]);
+});
+
+test("recovers late flashes from People-style remark notes", () => {
+  const insight = attendanceDayInsight(row({
+    lateMinutes: 0,
+    remark: "22 min late · First punch and latest punch used for the attendance outcome"
+  }));
+  assert.equal(insight.label, "Full day · Late");
+  assert.equal(insight.issues[0]?.code, "late");
+  assert.match(insight.issues[0]?.label ?? "", /22 min late/i);
 });
 
 test("carries an attendance nudge for one day only", () => {
