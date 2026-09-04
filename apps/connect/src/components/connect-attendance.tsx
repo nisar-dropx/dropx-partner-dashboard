@@ -730,6 +730,69 @@ function SupportEvidenceSheet({
   </>;
 }
 
+const HOUR_OPTIONS_24 = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, "0"));
+const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, "0"));
+
+function normalizeTwentyFourHour(value: string) {
+  const match = String(value ?? "").trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return "";
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isInteger(hours) || hours < 0 || hours > 23 || !Number.isInteger(minutes) || minutes < 0 || minutes > 59) {
+    return "";
+  }
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function isValidTwentyFourHour(value: string) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function TwentyFourHourTimeInput({
+  value,
+  onChange,
+  required
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  required?: boolean;
+}) {
+  const normalized = normalizeTwentyFourHour(value);
+  const [hour, minute] = normalized ? normalized.split(":") : ["", ""];
+
+  function update(nextHour: string, nextMinute: string) {
+    if (!nextHour || !nextMinute) {
+      onChange("");
+      return;
+    }
+    onChange(`${nextHour}:${nextMinute}`);
+  }
+
+  return (
+    <div className="dx-time-24h">
+      <select
+        aria-label="Hours (24-hour)"
+        required={required}
+        value={hour}
+        onChange={(event) => update(event.target.value, minute || "00")}
+      >
+        <option value="">HH</option>
+        {HOUR_OPTIONS_24.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+      <span aria-hidden="true">:</span>
+      <select
+        aria-label="Minutes"
+        required={required}
+        value={minute}
+        onChange={(event) => update(hour || "00", event.target.value)}
+      >
+        <option value="">MM</option>
+        {MINUTE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function RegularizationSheet({
   account,
   row,
@@ -745,8 +808,8 @@ function RegularizationSheet({
   error: string;
   setError: (message: string) => void;
 }) {
-  const [inTime, setInTime] = useState(row.regularization?.requestedInTime || row.inTime || "");
-  const [outTime, setOutTime] = useState(row.regularization?.requestedOutTime || row.outTime || "");
+  const [inTime, setInTime] = useState(normalizeTwentyFourHour(row.regularization?.requestedInTime || row.inTime || ""));
+  const [outTime, setOutTime] = useState(normalizeTwentyFourHour(row.regularization?.requestedOutTime || row.outTime || ""));
   const [reason, setReason] = useState(row.regularization?.reasonCode || "");
   const [remarks, setRemarks] = useState(row.regularization?.remarks || "");
   const [attachment, setAttachment] = useState<File | null>(null);
@@ -769,12 +832,12 @@ function RegularizationSheet({
       setError("Select a regularization reason.");
       return;
     }
-    if (requestsInTime && !inTime) {
-      setError("Enter the requested IN time.");
+    if (requestsInTime && !isValidTwentyFourHour(inTime)) {
+      setError("Enter the requested IN time in 24-hour format (HH:MM).");
       return;
     }
-    if (requestsOutTime && !outTime) {
-      setError("Enter the requested OUT time.");
+    if (requestsOutTime && !isValidTwentyFourHour(outTime)) {
+      setError("Enter the requested OUT time in 24-hour format (HH:MM).");
       return;
     }
     if (!attachment && !row.regularization?.hasAttachment) {
@@ -832,8 +895,8 @@ function RegularizationSheet({
           <option value="other">Other</option>
         </select></label>
         {reason ? <div className={`dx-time-grid ${requestsInTime !== requestsOutTime ? "single" : ""}`}>
-          {requestsInTime ? <label>Requested IN<input required type="time" value={inTime} onChange={(event) => setInTime(event.target.value)} /></label> : null}
-          {requestsOutTime ? <label>Requested OUT<input required type="time" value={outTime} onChange={(event) => setOutTime(event.target.value)} /></label> : null}
+          {requestsInTime ? <label>Requested IN (24h)<TwentyFourHourTimeInput required value={inTime} onChange={setInTime} /></label> : null}
+          {requestsOutTime ? <label>Requested OUT (24h)<TwentyFourHourTimeInput required value={outTime} onChange={setOutTime} /></label> : null}
         </div> : <p className="dx-time-prompt">Select a reason to enter only the time that needs correction.</p>}
         <label>Remarks<textarea required minLength={5} placeholder="Briefly explain the correction" rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
         <div className="dx-evidence-info" role="note">

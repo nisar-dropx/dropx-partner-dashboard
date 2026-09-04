@@ -141,11 +141,7 @@ function displayTime(value: string | null) {
   if (!value) return "—";
   const match = value.match(/^(\d{1,2}):(\d{2})/);
   if (!match) return value;
-  const hours = Number(match[1]);
-  const minutes = match[2];
-  const hour12 = hours % 12 || 12;
-  const period = hours >= 12 ? "PM" : "AM";
-  return `${hour12}:${minutes} ${period}`;
+  return `${String(Number(match[1])).padStart(2, "0")}:${match[2]}`;
 }
 function regularizationReasonLabel(reasonCode: string) {
   switch (reasonCode) {

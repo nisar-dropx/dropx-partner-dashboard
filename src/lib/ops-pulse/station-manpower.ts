@@ -246,8 +246,8 @@ export async function loadOpsStationManpower(
       .select("worker_type,worker_id,roster_date,day_type,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
       .eq("company_id", companyId).eq("roster_date", asOf).in("worker_id", workerIds).eq("hr_roster_plans.status", "approved").eq("hr_roster_plans.roster_kind", "dated").limit(5000) : Promise.resolve({ data: [], error: null }),
     admin.from("hr_roster_plans")
-      .select("id,status,roster_kind,effective_from,superseded_at,revision_no")
-      .eq("company_id", companyId).eq("status", "approved").eq("roster_kind", "recurring_weekly").in("location_id", locations.map((location) => location.id)).lte("effective_from", asOf).limit(1000),
+      .select("id,status,roster_kind,effective_from,superseded_at,revision_no,location_id,hr_roster_plan_locations(location_id)")
+      .eq("company_id", companyId).eq("status", "approved").eq("roster_kind", "recurring_weekly").lte("effective_from", asOf).limit(2000),
     employeeIds.length ? admin.from("hr_leave_requests")
       .select("employee_id").eq("company_id", companyId).eq("status", "approved").in("employee_id", employeeIds).lte("start_date", asOf).gte("end_date", asOf).limit(5000) : Promise.resolve({ data: [], error: null })
   ]);
@@ -280,7 +280,15 @@ export async function loadOpsStationManpower(
     rows.push(punch);
     punchesByEnrolment.set(key, rows);
   }
-  const activeWeeklyPlans = (weeklyPlansResult.data ?? []).filter((plan) => !plan.superseded_at || asOf < plan.superseded_at);
+  const selectedLocationIds = new Set(locations.map((location) => location.id));
+  const activeWeeklyPlans = (weeklyPlansResult.data ?? []).filter((plan) => {
+    if (plan.superseded_at && !(asOf < plan.superseded_at)) return false;
+    const linked = Array.isArray(plan.hr_roster_plan_locations) ? plan.hr_roster_plan_locations : [];
+    if (plan.location_id && selectedLocationIds.has(plan.location_id)) return true;
+    if (linked.some((item: { location_id: string }) => selectedLocationIds.has(item.location_id))) return true;
+    // Keep plans without location metadata so worker-scoped entries can still resolve.
+    return !plan.location_id && linked.length === 0;
+  });
   const activeWeeklyPlanIds = activeWeeklyPlans.map((plan) => plan.id);
   const weeklyEntriesResult = activeWeeklyPlanIds.length && workerIds.length ? await admin.from("hr_roster_entries")
     .select("plan_id,worker_type,worker_id,roster_date,day_type,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes)")
