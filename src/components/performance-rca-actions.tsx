@@ -42,11 +42,11 @@ export function PerformanceRcaActions({
   return (
     <div className="performance-review-actions">
       <h3>RCA and next-day actions</h3>
-      <p className="performance-rca-subhead">Current exceptions and saved RCA · open a row to view or edit.</p>
       {rows.map((metric) => {
         const item = itemsByMetric.get(metric.key);
+        const needsWork = !item || item.status !== "done";
         return (
-          <details className="performance-action-item" key={`action-${metric.key}`}>
+          <details className="performance-action-item" key={`action-${metric.key}`} open={needsWork}>
             <summary>
               <span className={`metric-dot ${metric.severity}`} />
               <strong>{metric.label}</strong>
@@ -57,7 +57,7 @@ export function PerformanceRcaActions({
               <b>{item?.status?.replaceAll("_", " ") || "Needs RCA"}</b>
             </summary>
             {canEdit ? (
-              <ReviewActionForm action={savePerformanceReviewItem}>
+              <ReviewActionForm action={savePerformanceReviewItem} className="performance-rca-form">
                 <input type="hidden" name="review_id" value={reviewId} />
                 <input type="hidden" name="source_date" value={date} />
                 <input type="hidden" name="station_code" value={stationCode} />

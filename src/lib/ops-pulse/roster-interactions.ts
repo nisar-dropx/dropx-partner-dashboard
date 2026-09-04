@@ -37,6 +37,14 @@ export function recurringTemplateDate(templateMonday: string, displayedDate: str
   return moveIsoDate(templateMonday, weekday - 1);
 }
 
+/** Next calendar occurrence of a template weekday on or after `onOrAfter` (for 24h change cutoffs). */
+export function nextRosterOccurrenceOnOrAfter(date: string, onOrAfter: string) {
+  if (![date, onOrAfter].every(validIsoDate)) throw new Error("A valid roster occurrence date is required.");
+  let cursor = date;
+  while (cursor < onOrAfter) cursor = moveIsoDate(cursor, 7);
+  return cursor;
+}
+
 export function rosterWeek(start: string) {
   if (!validIsoDate(start)) throw new Error("A valid roster week is required.");
   return Array.from({ length: 7 }, (_, index) => moveIsoDate(start, index));

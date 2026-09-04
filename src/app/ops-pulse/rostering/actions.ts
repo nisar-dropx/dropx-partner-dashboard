@@ -15,6 +15,7 @@ import {
   rosterMonday,
   rosterPlanLocationIds
 } from "@/lib/ops-pulse/rostering";
+import { nextRosterOccurrenceOnOrAfter } from "@/lib/ops-pulse/roster-interactions";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -107,12 +108,47 @@ function refreshRosterViews() {
   revalidatePath("/payroll");
 }
 
+async function alignOpenOpsRosterToWeek(companyId: string, userId: string, plan: { id: string; period_start: string }, start: string) {
+  const entries = await db().from("hr_roster_entries")
+    .select("id,roster_date")
+    .eq("company_id", companyId)
+    .eq("plan_id", plan.id);
+  if (entries.error) throw new Error(entries.error.message);
+
+  for (const entry of entries.data ?? []) {
+    const rosterDate = addRosterDays(start, isoWeekday(entry.roster_date) - 1);
+    const moved = await db().from("hr_roster_entries")
+      .update({ roster_date: rosterDate })
+      .eq("company_id", companyId)
+      .eq("id", entry.id);
+    if (moved.error) throw new Error(`The open roster could not be moved to the current week: ${moved.error.message}`);
+  }
+
+  const updated = await db().from("hr_roster_plans")
+    .update({
+      period_start: start,
+      period_end: addRosterDays(start, 6),
+      effective_from: start,
+      updated_by: userId,
+      updated_at: new Date().toISOString()
+    })
+    .eq("company_id", companyId)
+    .eq("id", plan.id)
+    .in("status", ["draft", "returned"])
+    .select("id,period_start,hr_roster_entries(worker_type,worker_id,roster_date,day_type,shift_id,notes)")
+    .maybeSingle();
+  if (updated.error) throw new Error(updated.error.message);
+  if (!updated.data) throw new Error("This roster is no longer editable.");
+  return updated.data;
+}
+
 export async function prepareOpsRoster(locationId: string): Promise<ActionResult> {
   try {
     const authorization = await requirePagePermission("ops_rostering", "add");
     const companyId = requireCompanyId(authorization);
     await assertPlanner(authorization);
     const station = await authorisedStation(companyId, authorization, locationId);
+    const start = rosterMonday(indiaToday());
 
     const open = await db().from("hr_roster_plans")
       .select("id,status,period_start,hr_roster_entries(worker_type,worker_id,roster_date,day_type,shift_id,notes)")
@@ -125,20 +161,25 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
       .maybeSingle();
     if (open.error) throw new Error(open.error.message);
     if (open.data?.status === "pending_approval") return { ok: false, message: `${station.station_code} already has a roster change awaiting approval.` };
-    if (open.data) return {
-      ok: true,
-      planId: open.data.id,
-      periodStart: open.data.period_start,
-      entries: (open.data.hr_roster_entries ?? []).map((entry) => ({
-        workerType: entry.worker_type as "employee" | "contractor",
-        workerId: entry.worker_id,
-        rosterDate: entry.roster_date,
-        dayType: entry.day_type as "working" | "weekly_off",
-        shiftId: entry.shift_id,
-        notes: entry.notes
-      })),
-      message: "The open roster change is ready."
-    };
+    if (open.data) {
+      const aligned = open.data.period_start === start
+        ? open.data
+        : await alignOpenOpsRosterToWeek(companyId, authorization.userId, open.data, start);
+      return {
+        ok: true,
+        planId: aligned.id,
+        periodStart: start,
+        entries: (aligned.hr_roster_entries ?? []).map((entry) => ({
+          workerType: entry.worker_type as "employee" | "contractor",
+          workerId: entry.worker_id,
+          rosterDate: entry.roster_date,
+          dayType: entry.day_type as "working" | "weekly_off",
+          shiftId: entry.shift_id,
+          notes: entry.notes
+        })),
+        message: "The open roster change is ready."
+      };
+    }
 
     const previous = await db().from("hr_roster_plans")
       .select("id,period_start,revision_no,hr_roster_entries(worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes)")
@@ -151,7 +192,6 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
       .limit(1)
       .maybeSingle();
     if (previous.error) throw new Error(previous.error.message);
-    const start = rosterMonday(indiaToday());
     const revision = Number(previous.data?.revision_no ?? 0) + 1;
     const created = await db().from("hr_roster_plans").insert({
       company_id: companyId,
@@ -250,7 +290,10 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
         : change.remove && existing?.shift_id
           ? shiftStartById.get(existing.shift_id)
           : "00:00";
-      if (rosterChangeInstant(change.date, startTime) - Date.now() < policy.changeCutoffHours * 60 * 60 * 1000) {
+      const cutoffDate = plan.roster_kind === "recurring_weekly"
+        ? nextRosterOccurrenceOnOrAfter(change.date, indiaToday())
+        : change.date;
+      if (rosterChangeInstant(cutoffDate, startTime) - Date.now() < policy.changeCutoffHours * 60 * 60 * 1000) {
         return { ok: false, message: rosterCutoffMessage(policy.changeCutoffHours) };
       }
     }

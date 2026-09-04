@@ -106,6 +106,27 @@ export function connectionTimes(values: { arrival: string; unloading: string; cl
   return parsed;
 }
 
+/** Build connection timestamps from simple HH:MM fields (previous review-desk UI). */
+export function stationTimingClocks(values: { arrival: string; unloading: string; clearance: string }, serviceDate: string) {
+  const clock = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(trimmed)) throw new Error("Enter a valid time.");
+    return trimmed.slice(0, 5);
+  };
+  const arrival = clock(values.arrival);
+  if (!arrival) throw new Error("Enter the vehicle arrival time first.");
+  const unloading = clock(values.unloading);
+  const clearance = clock(values.clearance);
+  const unloadingDate = unloading && unloading < arrival ? nextCalendarDay(serviceDate) : serviceDate;
+  const clearanceDate = clearance && unloading && clearance < unloading ? nextCalendarDay(unloadingDate) : unloadingDate;
+  return connectionTimes({
+    arrival: `${serviceDate}T${arrival}`,
+    unloading: unloading ? `${unloadingDate}T${unloading}` : "",
+    clearance: clearance ? `${clearanceDate}T${clearance}` : ""
+  }, serviceDate);
+}
+
 /** Discussion feed: comments / stage completions / system notes only — not RCA or takeaway saves. */
 export function discussionFeedUpdates<T extends { id: string; update_type: string; note: string; created_by?: string | null; author_name?: string | null }>(updates: T[]) {
   const seen = new Set<string>();

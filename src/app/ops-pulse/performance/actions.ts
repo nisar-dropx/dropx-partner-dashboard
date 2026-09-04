@@ -5,7 +5,7 @@ import { requirePagePermission, type AuthorizationContext } from "@/lib/authoriz
 import { requireCompanyId } from "@/lib/company-scope";
 import { resolvePerformanceReviewChain } from "@/lib/ops-pulse/performance-review";
 import { getReviewAccess } from "@/lib/ops-pulse/review-access";
-import { connectionTimes, reviewBypassReason, visibleReviewStep, noonEmdValue } from "@/lib/ops-pulse/review-policy";
+import { reviewBypassReason, visibleReviewStep, noonEmdValue, stationTimingClocks } from "@/lib/ops-pulse/review-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export type ReviewActionResult = { error?: string; notice?: string };
@@ -146,12 +146,19 @@ export async function savePerformanceConnection(data:FormData):Promise<ReviewAct
     if (stepsResult.error) throw new Error("Unable to check the current review stage.");
     const access=await getReviewAccess(authorization,station.id,review,stepsResult.data ?? []);
     if (!access.canEditConnections) throw new Error("Only the station team, first review manager on their stage, or Program Manager can edit connection timings.");
-    const times=connectionTimes({arrival:text(data,"arrival"),unloading:text(data,"unloading"),clearance:text(data,"clearance")},date);
-    const result=await supabaseAdmin!.rpc("ops_save_review_connection",{p_company:companyId,p_actor:authorization.userId,p_station:station.id,p_data:{
-      ...times,id:text(data,"connection_id"),version:Number(text(data,"version"))||1,service_date:date,label:limited(data,"label",100,true),...author(authorization,access.actor.label)
-    }});
+    const times = stationTimingClocks({ arrival: text(data, "arrival"), unloading: text(data, "unloading"), clearance: text(data, "clearance") }, date);
+    const result = await supabaseAdmin!.rpc("ops_save_review_connection", {
+      p_company: companyId, p_actor: authorization.userId, p_station: station.id, p_data: {
+        ...times,
+        id: text(data, "connection_id"),
+        version: Number(text(data, "version")) || 1,
+        service_date: date,
+        label: "Vehicle",
+        ...author(authorization, access.actor.label)
+      }
+    });
     rpcError(result.error);
-    return finish("Connection saved.");
+    return finish("Station timings saved.");
   }catch(error){return failure(error);}
 }
 

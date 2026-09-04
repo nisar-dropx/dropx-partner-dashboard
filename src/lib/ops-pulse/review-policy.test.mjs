@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { managerReviewChain, reviewCapabilities, connectionTimes, discussionFeedUpdates, legacyConnectionsFromReview, reviewRole, noonEmdValue, reviewBypassReason, visibleReviewStep } from './review-policy.ts';
+import { managerReviewChain, reviewCapabilities, connectionTimes, stationTimingClocks, discussionFeedUpdates, legacyConnectionsFromReview, reviewRole, noonEmdValue, reviewBypassReason, visibleReviewStep } from './review-policy.ts';
 const person=(role,id=role)=>({role,personId:id});
 test('CM to AOM to National Head; excludes station review stage',()=>{
   assert.deepEqual(managerReviewChain(['Team Lead','Cluster Manager','Area Operations Manager','National Head'].map(role=>person(role))).map(p=>p.role),['Cluster Manager','Area Operations Manager','National Head']);
@@ -40,6 +40,7 @@ test('role classification includes TL, location mail accounts and People PGM',()
 });
 test('connection handles overnight completion and saves in IST',()=>{
   assert.deepEqual(connectionTimes({arrival:'2026-09-01T23:30',unloading:'2026-09-02T00:20',clearance:'2026-09-02T01:00'},'2026-09-01'),{arrival:'2026-09-01T18:00:00.000Z',unloading:'2026-09-01T18:50:00.000Z',clearance:'2026-09-01T19:30:00.000Z'});
+  assert.deepEqual(stationTimingClocks({arrival:'23:30',unloading:'00:20',clearance:'01:00'},'2026-09-01'),{arrival:'2026-09-01T18:00:00.000Z',unloading:'2026-09-01T18:50:00.000Z',clearance:'2026-09-01T19:30:00.000Z'});
 });
 test('partial connection allowed; chronology and invalid dates rejected',()=>{
   assert.equal(connectionTimes({arrival:'2026-09-01T07:00',unloading:'',clearance:''},'2026-09-01').unloading,null);

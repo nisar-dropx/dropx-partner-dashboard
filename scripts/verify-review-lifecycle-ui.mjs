@@ -12,8 +12,10 @@ for(const component of ['PerformanceNoonEmdEntry','PerformanceReviewFlow','Perfo
 }
 assert.ok(desk.includes('review && rcaRows.length'),'saved RCA remains visible after source refresh');
 const conn=read('src/components/performance-connections.tsx');
-for(const label of ['Vehicle arrival time','Vehicle unloading completed time','Station clearance time'])assert.ok(conn.includes(label),label);
-assert.ok(/adding\s*\|\|\s*!connections.length/.test(conn),'first connection inputs visible without extra click');
+for(const label of ['Vehicle arrival','Unloading complete','Station clear'])assert.ok(conn.includes(label),label);
+assert.ok(!conn.includes('Connection / vehicle') && !conn.includes('+ Connection') && !conn.includes('Station connections'),'no multi-connection chrome');
+assert.ok(conn.includes('type="time"'),'simple time inputs');
+assert.ok(conn.includes('Save timings') || conn.includes('review-station-times'),'station timings form');
 const emd=read('src/components/performance-noon-emd.tsx');
 assert.ok(emd.includes('EMD at 12 p.m. (%)'));
 assert.ok(emd.includes('entry?.emd_noon_pct??""'),'zero is not rendered blank');
