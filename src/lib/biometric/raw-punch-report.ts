@@ -2,6 +2,7 @@ export type RawPunchRow = {
   created_at: string;
   device_id: string | null;
   device_serial: string;
+  employee_code?: string | null;
   enrolment_id: string | null;
   event_type: string | null;
   id: string;
@@ -11,7 +12,27 @@ export type RawPunchRow = {
   terminal_id: string | null;
   trans_id: string | null;
   worker_status: string | null;
+  payload?: Record<string, unknown> | null;
 };
+
+/** Source evidence is not a verified physical device/location or an attendance decision. */
+export function rawPunchSourceDetails(row: RawPunchRow) {
+  const payload = row.payload ?? {};
+  const isTeamOffice = row.device_serial === "ETIMEOFFICE" || payload.source === "eTime Office portal";
+  const sourceText = (key: string) => typeof payload[key] === "string" ? payload[key] as string : "";
+  const possibleOverlapCount = Array.isArray(payload.possible_middleware_matches) ? payload.possible_middleware_matches.length : 0;
+  return {
+    isTeamOffice,
+    label: isTeamOffice ? "Team Office" : "Device / middleware",
+    employeeCode: row.employee_code || sourceText("portal_employee_code"),
+    recordId: sourceText("portal_record_id"),
+    machine: sourceText("portal_machine"),
+    possibleOverlapCount,
+    note: isTeamOffice
+      ? `Team Office source record (minute precision); machine label is unverified.${possibleOverlapCount ? " Possible same-minute middleware overlap; retained as source evidence." : ""}`
+      : ""
+  };
+}
 
 export type RawPunchDeviceRow = {
   device_no: string | null;
