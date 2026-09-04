@@ -62,7 +62,7 @@ export function PerformanceRcaActions({
                 <input type="hidden" name="source_date" value={date} />
                 <input type="hidden" name="station_code" value={stationCode} />
                 <input type="hidden" name="review_version" value={reviewVersion} />
-                <input type="hidden" name="metric_key" value={metric.key} />
+                <input type="hidden" name="metric_key" value={item?.metric_key || metric.key} />
                 <input type="hidden" name="metric_label" value={metric.label} />
                 <input type="hidden" name="actual_value" value={metric.actual ?? ""} />
                 <input type="hidden" name="target_value" value={metric.target ?? ""} />

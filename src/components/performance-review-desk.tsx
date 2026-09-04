@@ -1,8 +1,10 @@
 import { PerformanceCarriedActions } from "@/components/performance-carried-actions";
-import Link from "next/link";
 import { PerformanceReviewExceptions } from "@/components/performance-review-exceptions";
 import { PerformanceReviewFlow } from "@/components/performance-review-flow";
 import { PerformanceNoonEmdEntry } from "@/components/performance-noon-emd";
+import { PerformanceCodPending } from "@/components/performance-cod-pending";
+import type { ReviewCodSnapshot } from "@/lib/ops-pulse/review-cod";
+import Link from "next/link";
 import { PerformanceFollowups } from "@/components/performance-followups";
 import type { PerformanceReviewBacklog, PerformanceFollowup, PerformanceNoonEmd } from "@/lib/ops-pulse/performance-review";
 import { reviewLink } from "@/lib/ops-pulse/review-periods";
@@ -28,6 +30,7 @@ export type ReviewMetric = {
 };
 
 type Props = {
+  codSnapshot: ReviewCodSnapshot;
   canBypass: boolean;
   canProxy: boolean;
   canManageActions: boolean;
@@ -128,9 +131,9 @@ export function PerformanceReviewDesk(props: Props) {
         target: item.target_value == null ? null : Number(item.target_value)
       };
     });
-  const rcaMetrics = [...misses, ...savedOnlyRows];
+  const rcaRows = [...misses, ...savedOnlyRows];
   const itemsByMetricForRca = new Map<string, PerformanceReviewItem>();
-  for (const metric of rcaMetrics) {
+  for (const metric of rcaRows) {
     const item = resolveItem(metric);
     if (item) itemsByMetricForRca.set(metric.key, item);
   }
@@ -173,17 +176,16 @@ export function PerformanceReviewDesk(props: Props) {
     {!review && misses.length ? <div className="performance-review-start-guide"><strong>{misses.length} metrics need RCA and action</strong><span>Use Start review above, then record RCA and action items below.</span></div> : null}
     {props.routingIssue ? <div className="alert warning" role="status">{props.routingIssue}</div> : null}
 
-    {review ? <>
-      <PerformanceReviewFlow steps={selectedSteps} currentOrder={review.current_step_order} stationLeads={props.stationLeads}/>
-      <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update connection timings; view the full review":canEdit?"Your review · update RCA, actions, takeaway and connection timings":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
-      <PerformanceReviewExceptions review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy}/>
-    </> : <section className="performance-review-flow" aria-label="Review workflow">
-      {reviewChain.map((step,index)=><div key={`${step.reviewerUserId}-${index}`}><i>{index+1}</i><span>{step.reviewerRole}<small>{step.reviewerName}</small></span></div>)}
-      <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update connection timings; view the full review":canEdit?"Your review · update RCA, actions, takeaway and connection timings":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
+    {review ? <PerformanceReviewFlow key={`${review.id}-${review.current_step_order}-${review.updated_at}`} steps={selectedSteps} currentOrder={review.current_step_order} stationLeads={props.stationLeads}/> : <section className="performance-review-flow" aria-label="Review workflow">
+      {reviewChain.map((step,index)=><div key={`${step.reviewerUserId}-${index}`}><i>{index+1}</i><span>{step.reviewerRole}<small>{step.reviewerName}</small><small>Reviews with {index>0?reviewChain[index-1].reviewerName:props.stationLeads}</small></span></div>)}
     </section>}
+    <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update vehicle timings and noon EMD; view the full review":canEdit?"Your review · update RCA, actions, takeaway and station inputs":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
+    {review ? <PerformanceReviewExceptions key={review.updated_at} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy}/> : null}
 
-    <PerformanceConnections connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
-    <PerformanceNoonEmdEntry entry={props.noonEmd.row} date={date} stationCode={selectedCode} canEdit={canEditConnections} error={props.noonEmd.error}/>
+    <div className="review-station-updates">
+      <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
+      <PerformanceNoonEmdEntry entry={props.noonEmd.row} error={props.noonEmd.error} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
+    </div>
 
     <div className="performance-review-columns">
       <section className="panel performance-review-section">
@@ -206,13 +208,13 @@ export function PerformanceReviewDesk(props: Props) {
           <label className="wide">Review takeaway<textarea name="review_summary" defaultValue={review.review_summary ?? ""} placeholder="Only the key conclusion or escalation"/></label>
           <button className="button secondary">Save takeaway</button>
         </ReviewActionForm> : review ? <div className="review-takeaway-readonly"><strong>Review takeaway</strong><p>{review.review_summary || "Awaiting the first manager’s review."}</p></div> : null}
-        {review && rcaMetrics.length ? (
+        {review && rcaRows.length ? (
           <PerformanceRcaActions
             key={review.id}
             canEdit={canEdit}
             date={date}
             itemsByMetric={itemsByMetricForRca}
-            rows={rcaMetrics}
+            rows={rcaRows}
             reviewId={review.id}
             reviewVersion={review.updated_at}
             stationCode={selectedCode}
@@ -221,6 +223,7 @@ export function PerformanceReviewDesk(props: Props) {
       </section>
 
       <section className="panel performance-review-section performance-cps-review">
+        <PerformanceCodPending key={`${selectedCode}-${props.codSnapshot.batchId}`} snapshot={props.codSnapshot}/>
         <div className="panel-head"><div><span className="performance-review-kicker">02 · CPS</span><h2>Cost and allocation</h2><p className="subtle">Click any cost card to see its contributing lines and approvals here.</p></div></div>
         <div className="performance-cps-cards">
           <details><summary><span>Salary DA CPS</span><strong>{money(snapshot.salaryDaCps)}</strong><small>{money(snapshot.salaryDaCost)} total</small></summary><div><p><span>Per-shipment / variable</span><b>{money(snapshot.variableDaPay)}</b></p><p><span>MG / salary</span><b>{money(snapshot.mgSalaryPay)}</b></p><p><span>Kilometre / fuel</span><b>{money(snapshot.fuelPay)}</b></p><p><span>FE payment setup gaps</span><b>{snapshot.unmappedFeCount}</b></p></div></details>

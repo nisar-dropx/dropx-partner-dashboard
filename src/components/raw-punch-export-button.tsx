@@ -24,6 +24,12 @@ export function RawPunchExportButton({ href }: { href: string }) {
         throw new Error(payload?.error || "Unable to prepare the Excel report. Please try again.");
       }
       const blob = await response.blob();
+      // A terminated streaming response can still have HTTP 200. Our XLSX writer
+      // ends with a 22-byte ZIP directory footer; never save a partial workbook.
+      const footer = new DataView(await blob.slice(-22).arrayBuffer());
+      if (footer.byteLength !== 22 || footer.getUint32(0, true) !== 0x06054b50) {
+        throw new Error("The Excel report was interrupted before it finished. Please try again.");
+      }
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
