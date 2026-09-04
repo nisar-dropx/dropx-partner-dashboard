@@ -1,10 +1,10 @@
 import { PerformanceCarriedActions } from "@/components/performance-carried-actions";
-import { PerformanceCodPending } from "@/components/performance-cod-pending";
-import type { ReviewCodSnapshot } from "@/lib/ops-pulse/review-cod";
-import Link from "next/link";
 import { PerformanceReviewExceptions } from "@/components/performance-review-exceptions";
 import { PerformanceReviewFlow } from "@/components/performance-review-flow";
 import { PerformanceNoonEmdEntry } from "@/components/performance-noon-emd";
+import { PerformanceCodPending } from "@/components/performance-cod-pending";
+import type { ReviewCodSnapshot } from "@/lib/ops-pulse/review-cod";
+import Link from "next/link";
 import { PerformanceFollowups } from "@/components/performance-followups";
 import type { PerformanceReviewBacklog, PerformanceFollowup, PerformanceNoonEmd } from "@/lib/ops-pulse/performance-review";
 import { reviewLink } from "@/lib/ops-pulse/review-periods";
@@ -71,6 +71,10 @@ function money(value: number | null | undefined) {
   return value == null ? "—" : `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
+function stationKey(value: string | null | undefined) {
+  return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
 function valueText(value: number | null) {
   return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
 }
@@ -94,22 +98,49 @@ function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociat
 export function PerformanceReviewDesk(props: Props) {
   const { canAdd, canCompleteStep, canEdit, canEditConnections, canComment, programManager, connections, updates, reviewChain, date, error, items, locations, metrics, notice, previousReviews, review, reviews, selectedLocation, snapshot, sourceBatchId, sourceType, sourceWeek, steps } = props;
   const selectedCode = selectedLocation.station_code;
-  const previousStationReviews = previousReviews.filter((entry) => entry.station_code === selectedCode);
+  const selectedStationKey = stationKey(selectedCode);
+  const previousStationReviews = previousReviews.filter((entry) => stationKey(entry.station_code) === selectedStationKey);
   const previousReview = previousStationReviews[0] ?? null;
   const selectedReviewIds = new Set([review?.id, ...previousStationReviews.map((entry) => entry.id)].filter(Boolean));
   const selectedItems = items.filter((item) => selectedReviewIds.has(item.review_id));
-  const itemByMetric = new Map(selectedItems.filter((item) => item.review_id === review?.id).map((item) => [item.metric_key, item]));
+  const currentItems = selectedItems.filter((item) => item.review_id === review?.id);
+  const itemByMetric = new Map<string, PerformanceReviewItem>();
+  for (const item of currentItems) {
+    itemByMetric.set(item.metric_key, item);
+    const labelKey = stationKey(item.metric_label);
+    if (labelKey && !itemByMetric.has(labelKey)) itemByMetric.set(labelKey, item);
+  }
+  const resolveItem = (metric: ReviewMetric) => itemByMetric.get(metric.key) ?? itemByMetric.get(stationKey(metric.label)) ?? itemByMetric.get(metric.label);
   const carriedActions = selectedItems.filter((item) => item.review_id !== review?.id);
   const misses = metrics.filter((metric) => metric.severity === "red" || metric.severity === "amber");
   // Saved RCA must remain visible even when a later source refresh makes its metric green or unavailable.
-  const rcaMetrics: ReviewMetric[] = [...misses, ...[...itemByMetric.values()].filter(item=>!misses.some(metric=>metric.key===item.metric_key)).map(item=>({
-    key:item.metric_key,label:item.metric_label,short:item.metric_label,severity:item.severity,
-    actual:item.actual_value==null?null:Number(item.actual_value),target:item.target_value==null?null:Number(item.target_value),direction:item.target_direction||"higher" as const
-  }))];
+  const savedOnlyRows: ReviewMetric[] = currentItems
+    .filter((item) => {
+      const linkedToMiss = misses.some((metric) => metric.key === item.metric_key || stationKey(metric.label) === stationKey(item.metric_label));
+      return !linkedToMiss && Boolean(item.root_cause || item.corrective_action);
+    })
+    .map((item) => {
+      const fromScorecard = metrics.find((metric) => metric.key === item.metric_key || stationKey(metric.label) === stationKey(item.metric_label));
+      return fromScorecard ?? {
+        actual: item.actual_value == null ? null : Number(item.actual_value),
+        direction: item.target_direction === "lower" ? "lower" : "higher",
+        key: item.metric_key,
+        label: item.metric_label,
+        severity: (item.severity === "amber" ? "amber" : "red") as ReviewMetric["severity"],
+        short: item.metric_label,
+        target: item.target_value == null ? null : Number(item.target_value)
+      };
+    });
+  const rcaRows = [...misses, ...savedOnlyRows];
+  const itemsByMetricForRca = new Map<string, PerformanceReviewItem>();
+  for (const metric of rcaRows) {
+    const item = resolveItem(metric);
+    if (item) itemsByMetricForRca.set(metric.key, item);
+  }
   const activeStep = review ? steps.find((step) => step.review_id === review.id && step.step_order === review.current_step_order) ?? null : null;
-  const reviewByStation = new Map(reviews.map((entry) => [entry.station_code, entry]));
-  const completedCount = locations.filter((location) => reviewByStation.get(location.station_code)?.status === "closed").length;
-  const inReviewCount = locations.filter((location) => ["open","in_review"].includes(reviewByStation.get(location.station_code)?.status??"")).length;
+  const reviewByStation = new Map(reviews.map((entry) => [stationKey(entry.station_code), entry]));
+  const completedCount = locations.filter((location) => reviewByStation.get(stationKey(location.station_code))?.status === "closed").length;
+  const inReviewCount = locations.filter((location) => ["open", "in_review"].includes(reviewByStation.get(stationKey(location.station_code))?.status ?? "")).length;
   const notStartedCount = locations.length - completedCount - inReviewCount;
   const selectedSteps = steps.filter((step) => step.review_id === review?.id && visibleReviewStep(step)).sort((a,b)=>a.step_order-b.step_order);
   const reviewUpdates = discussionFeedUpdates(updates.filter((update) => update.review_id === review?.id));
@@ -126,7 +157,7 @@ export function PerformanceReviewDesk(props: Props) {
     </section>
 
     <details className="performance-review-overview"><summary><span><strong>Station reviews · {formatDashboardDate(date)}</strong><small>Selected performance day only · {locations.length} permitted stations</small></span><span className="performance-review-overview-counts"><b>{completedCount} done</b><b>{inReviewCount} active</b><b>{notStartedCount} not started</b></span></summary><div>{locations.map(location=>{
-      const entry=reviewByStation.get(location.station_code);
+      const entry=reviewByStation.get(stationKey(location.station_code));
       const current=entry?steps.find(step=>step.review_id===entry.id&&step.step_order===entry.current_step_order&&step.status==="pending"):null;
       return <article key={location.id}><span><strong>{location.station_code}</strong><small>{formatDashboardDate(date)} · {location.station_name||location.city}</small></span><em className={entry?.status||"not-started"}>{entry?.status.replace("_"," ")||"Not started"}</em><p>{entry?.review_summary||"Takeaway pending"}{entry?<small>Started {new Date(entry.started_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}</small>:null}</p><span><b>{current?.proxy_reviewer_name||current?.reviewer_name||"—"}</b><Link href={reviewLink(date,location.station_code)}>View review →</Link></span></article>;
     })}</div></details>
@@ -148,7 +179,7 @@ export function PerformanceReviewDesk(props: Props) {
     {review ? <PerformanceReviewFlow key={`${review.id}-${review.current_step_order}-${review.updated_at}`} steps={selectedSteps} currentOrder={review.current_step_order} stationLeads={props.stationLeads}/> : <section className="performance-review-flow" aria-label="Review workflow">
       {reviewChain.map((step,index)=><div key={`${step.reviewerUserId}-${index}`}><i>{index+1}</i><span>{step.reviewerRole}<small>{step.reviewerName}</small><small>Reviews with {index>0?reviewChain[index-1].reviewerName:props.stationLeads}</small></span></div>)}
     </section>}
-    <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment?"Station access · update vehicle timings and noon EMD; view the full review":canEdit?"Your review · update RCA, actions and takeaway":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
+    <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update vehicle timings and noon EMD; view the full review":canEdit?"Your review · update RCA, actions, takeaway and station inputs":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
     {review ? <PerformanceReviewExceptions key={review.updated_at} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy}/> : null}
 
     <div className="review-station-updates">
@@ -177,13 +208,13 @@ export function PerformanceReviewDesk(props: Props) {
           <label className="wide">Review takeaway<textarea name="review_summary" defaultValue={review.review_summary ?? ""} placeholder="Only the key conclusion or escalation"/></label>
           <button className="button secondary">Save takeaway</button>
         </ReviewActionForm> : review ? <div className="review-takeaway-readonly"><strong>Review takeaway</strong><p>{review.review_summary || "Awaiting the first manager’s review."}</p></div> : null}
-        {review && rcaMetrics.length ? (
+        {review && rcaRows.length ? (
           <PerformanceRcaActions
             key={review.id}
             canEdit={canEdit}
             date={date}
-            itemsByMetric={itemByMetric}
-            misses={rcaMetrics}
+            itemsByMetric={itemsByMetricForRca}
+            rows={rcaRows}
             reviewId={review.id}
             reviewVersion={review.updated_at}
             stationCode={selectedCode}

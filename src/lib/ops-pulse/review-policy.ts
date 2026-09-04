@@ -47,7 +47,8 @@ export function reviewCapabilities(input: {
   const first = Boolean(input.firstReviewerId && input.firstReviewerId === input.userId);
   return {
     canStart: Boolean(visible && (input.canAdd || input.canEdit) && (canOverride || first || input.higherReviewer)),
-    canEditConnections: editor && (oversight || input.stationUser),
+    // Station team always; first manager on their stage can also enter timings when TL access is missing.
+    canEditConnections: editor && (oversight || input.stationUser || (!input.closed && current && first)),
     canEditRca: editor && (oversight || (!input.closed && current && (first || input.currentIsFirst === true))),
     canComment: editor && (oversight || (!input.closed && current)),
     canManageActions: editor && (oversight || first || (!input.closed && current)),

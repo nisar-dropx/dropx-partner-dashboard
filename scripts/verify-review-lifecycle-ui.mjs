@@ -10,10 +10,10 @@ assert.ok(!desk.includes('All-station review status'),'old expanded overview rem
 for(const component of ['PerformanceNoonEmdEntry','PerformanceReviewFlow','PerformanceReviewExceptions','PerformanceCodPending']) {
   assert.ok(desk.includes('<'+component+' '),component+' is mounted, not only imported');
 }
-assert.ok(desk.includes('review && rcaMetrics.length'),'saved RCA remains visible after source refresh');
+assert.ok(desk.includes('review && rcaRows.length'),'saved RCA remains visible after source refresh');
 const conn=read('src/components/performance-connections.tsx');
 for(const label of ['Vehicle arrival time','Vehicle unloading completed time','Station clearance time'])assert.ok(conn.includes(label),label);
-assert.ok(conn.includes('adding||!connections.length'),'first connection inputs visible without extra click');
+assert.ok(/adding\s*\|\|\s*!connections.length/.test(conn),'first connection inputs visible without extra click');
 const emd=read('src/components/performance-noon-emd.tsx');
 assert.ok(emd.includes('EMD at 12 p.m. (%)'));
 assert.ok(emd.includes('entry?.emd_noon_pct??""'),'zero is not rendered blank');
