@@ -6,6 +6,8 @@ import { loadEffectivePositionAccess } from "@/lib/position-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
+import { loadPeopleDesignations } from "@/lib/people-designation";
+import { getPreviewViewer, hasPreviewProductAccess, selectedPreviewUserId } from "@/lib/portal-preview";
 
 export type PermissionAction = "access" | "view" | "add" | "edit";
 
@@ -31,6 +33,11 @@ export type AuthorizationContext = {
   roleId: string | null;
   roleName: string | null;
   userId: string;
+  designationName?: string | null;
+  canPreviewUsers?: boolean;
+  isPreview?: boolean;
+  readOnly?: boolean;
+  viewerUserId?: string;
 };
 
 const noPermission: PagePermission = { canView: false, canAdd: false, canEdit: false };
@@ -213,6 +220,20 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
 
   if (!profile?.is_active) return null;
 
+  const viewerProfile = profile;
+  const previewViewer = await getPreviewViewer();
+  const requestedPreviewUserId = selectedPreviewUserId(viewerProfile.id);
+  if (requestedPreviewUserId && !previewViewer) redirect("/unauthorized?reason=preview-unavailable");
+  let isPreview = false;
+  if (requestedPreviewUserId && requestedPreviewUserId !== viewerProfile.id && viewerProfile.company_id) {
+    const target = await supabaseAdmin.from("profiles").select(profileColumns)
+      .eq("id", requestedPreviewUserId).eq("company_id", viewerProfile.company_id).eq("is_active", true).maybeSingle();
+    if (target.error || !target.data || !await hasPreviewProductAccess(viewerProfile.company_id, target.data.id, Boolean(target.data.is_master_owner))) redirect("/unauthorized?reason=preview-unavailable");
+    profile = target.data;
+    isPreview = true;
+  }
+  const effectiveEmail = isPreview ? normalizeEmail(profile.email) : normalizeEmail(profile.email) || signedInEmail;
+
   const permissions: Record<string, PagePermission> = Object.fromEntries(
     initializedPermissionCodes.map((code) => [code, { ...noPermission }])
   );
@@ -222,8 +243,8 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   let companyId: string | null = typeof profile.company_id === "string" ? profile.company_id : null;
   let companyCode: string | null = null;
   let companyName: string | null = null;
-  let isMasterCompany = signedInEmail === "nisar@dropxlogistics.com";
-  let isMasterOwner = Boolean(profile.is_master_owner) || signedInEmail === "nisar@dropxlogistics.com";
+  let isMasterCompany = effectiveEmail === "nisar@dropxlogistics.com";
+  let isMasterOwner = Boolean(profile.is_master_owner) || effectiveEmail === "nisar@dropxlogistics.com";
   let roleCode: string | null = null;
   let effectiveRoleIds: string[] = profile.role_id ? [profile.role_id] : [];
   let primaryRoleId: string | null = profile.role_id ?? null;
@@ -244,7 +265,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
       companyName = company.name;
       isMasterCompany = Boolean(company.is_master);
     }
-    await ensureMissingCurrentAccessPages(companyId as string);
+    if (!isPreview) await ensureMissingCurrentAccessPages(companyId as string);
   }
 
   const positionAccess = await loadEffectivePositionAccess(companyId as string, profile.id);
@@ -307,7 +328,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
       locationScopeIds = [];
     }
     const hasLocationRole = roles.some((role) => String(role.code ?? "").trim().toUpperCase() === "LOCATION");
-    if (hasLocationRole && data.user.email) {
+    if (hasLocationRole && effectiveEmail) {
       const { data: allEmailLocations } = await supabaseAdmin
         .from("stations")
         .select("id, station_email")
@@ -315,7 +336,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
         .eq("is_active", true)
         .not("station_email", "is", null);
       const emailLocationIds = (allEmailLocations ?? [])
-        .filter((location) => normalizeEmail(location.station_email) === signedInEmail)
+        .filter((location) => normalizeEmail(location.station_email) === effectiveEmail)
         .map((location) => location.id);
       locationScopeIds = Array.from(new Set([
         ...locationScopeIds,
@@ -384,11 +405,17 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     permissions.company_master = { ...noPermission };
   }
 
+  const designation = companyId ? (await loadPeopleDesignations(companyId, [profile.id])).get(profile.id) : undefined;
   return {
+    designationName: designation?.name ?? null,
+    canPreviewUsers: Boolean(previewViewer),
+    isPreview,
+    readOnly: isPreview,
+    viewerUserId: viewerProfile.id,
     companyCode,
     companyId,
     companyName,
-    email: data.user.email ?? null,
+    email: isPreview ? profile.email ?? null : data.user.email ?? null,
     effectiveRoleIds,
     fullName: profile.full_name,
     hasAllLocationAccess,
@@ -412,6 +439,7 @@ export function hasPermission(
   pageCode: string,
   action: PermissionAction
 ) {
+  if (authorization.readOnly && (action === "add" || action === "edit")) return false;
   if (isCompanyOwner(authorization)) return true;
   const permission = authorization.permissions[pageCode] ?? noPermission;
   if (action === "access") return permission.canView || permission.canAdd || permission.canEdit;

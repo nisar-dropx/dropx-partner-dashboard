@@ -106,6 +106,9 @@ function decodeCookieValue(value: string) {
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname || "/";
+  if (request.cookies.get("dropx_portal_preview_v1")?.value && !["GET", "HEAD", "OPTIONS"].includes(request.method) && path !== "/api/owner-preview") {
+    return NextResponse.json({ error: "User preview is read-only. Exit preview to make changes." }, { status: 403 });
+  }
   const host = request.headers.get("host")?.split(":")[0].toLowerCase() ?? "";
   const isPlatformAdminHost = host === "admin-panel.dropxlogistics.com";
   const isOpsHost = host === "ops.dropxlogistics.com";

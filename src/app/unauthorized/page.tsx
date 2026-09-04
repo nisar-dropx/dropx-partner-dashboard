@@ -1,6 +1,7 @@
 import { Headphones, LogOut, ShieldX } from "lucide-react";
 import { signOut } from "@/app/login/actions";
 import { SubmitButton } from "@/components/submit-button";
+import { PreviewRecovery } from "@/components/preview-recovery";
 
 const pageNames: Record<string, string> = {
   capacity: "Capacity",
@@ -34,6 +35,7 @@ export default function UnauthorizedPage({ searchParams }: { searchParams?: { pa
           <p>This account is signed in, but access to the requested platform or page has not been assigned. You have not been redirected to another DropX platform.</p>
           <div className="message-panel warning"><Headphones size={16} aria-hidden="true" /><span>Contact HR or your platform administrator to request access. Share the platform name and your station or jurisdiction.</span></div>
         </div>
+        <PreviewRecovery />
         <form action={signOut}>
           <SubmitButton className="button secondary" pendingText="Signing out">
             <LogOut size={15} aria-hidden="true" />
