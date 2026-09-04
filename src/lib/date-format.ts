@@ -1,5 +1,17 @@
 const dashboardTimeZone = "Asia/Kolkata";
 
+// Reuse ICU's formatter: constructing one for every cell in a monthly export
+// retains substantial native memory even when the worksheet itself is streamed.
+const dashboardDateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: true,
+  timeZone: dashboardTimeZone
+});
+
 export function dashboardDateInputValue(value: Date = new Date()) {
   return new Intl.DateTimeFormat("en-CA", {
     day: "2-digit",
@@ -43,13 +55,5 @@ export function formatDashboardDateTime(
   if (!value) return fallback;
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return fallback;
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: dashboardTimeZone
-  }).format(date);
+  return dashboardDateTimeFormatter.format(date);
 }
