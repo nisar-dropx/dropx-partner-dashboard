@@ -1,5 +1,11 @@
 import { supabaseAdmin } from "../supabase-admin";
 import { formatShiftClock, preferActiveRosterRow, preferActiveRosterRowsByKey, type RosterPlanPreference } from "../roster-plan-preference";
+import {
+  buildWeeklyRosterIndex,
+  isoWeekday as weeklyIsoWeekday,
+  weeklyRosterValueForDate,
+  type WeeklyRosterVersion
+} from "../weekly-roster";
 
 export type AttendanceReportType =
   | "performance"
@@ -203,8 +209,11 @@ type ShiftSchedule = {
 };
 
 function isoWeekday(value: string) {
-  const weekday = new Date(`${value}T00:00:00Z`).getUTCDay();
-  return weekday === 0 ? 7 : weekday;
+  return weeklyIsoWeekday(value);
+}
+
+function rosterWorkerType(profileType: string | null | undefined): "employee" | "contractor" {
+  return profileType === "employee" ? "employee" : "contractor";
 }
 
 type AttendanceRules = {
@@ -270,27 +279,44 @@ export async function loadWorkerShiftWindow({
 
   const plans = await supabaseAdmin
     .from("hr_roster_plans")
-    .select("id,effective_from,superseded_at")
+    .select("id,effective_from,superseded_at,revision_no")
     .eq("company_id", companyId)
     .eq("status", "approved")
     .eq("roster_kind", "recurring_weekly")
-    .lte("effective_from", workDate)
-    .order("effective_from", { ascending: false })
-    .limit(50);
+    .lte("effective_from", workDate);
   if (plans.error) return null;
-  const activePlan = (plans.data ?? []).find((plan) => !plan.superseded_at || workDate < plan.superseded_at);
-  if (!activePlan) return null;
+  const versions = ((plans.data ?? []) as WeeklyRosterVersion[])
+    .filter((plan) => !plan.superseded_at || workDate < plan.superseded_at);
+  const planIds = versions.map((plan) => plan.id);
+  if (!planIds.length) return null;
   const weekly = await supabaseAdmin
     .from("hr_roster_entries")
-    .select("day_type,roster_date,hr_shifts(start_time,end_time,break_minutes)")
+    .select("plan_id,worker_type,worker_id,day_type,roster_date,hr_shifts(start_time,end_time,break_minutes)")
     .eq("company_id", companyId)
-    .eq("plan_id", activePlan.id)
-    .eq("worker_id", workerId);
+    .eq("worker_id", workerId)
+    .in("plan_id", planIds);
   if (weekly.error) return null;
-  const entry = (weekly.data ?? []).find((row) => isoWeekday(row.roster_date) === isoWeekday(workDate));
-  const shiftValue = entry?.hr_shifts as { start_time?: string | null; end_time?: string | null; break_minutes?: number | null } | { start_time?: string | null; end_time?: string | null; break_minutes?: number | null }[] | null | undefined;
-  const shift = Array.isArray(shiftValue) ? shiftValue[0] : shiftValue;
-  return entry?.day_type === "working" && shift?.start_time && shift.end_time
+  const index = buildWeeklyRosterIndex(
+    versions,
+    ((weekly.data ?? []) as Array<{
+      plan_id: string;
+      worker_type: string | null;
+      worker_id: string;
+      day_type: string | null;
+      roster_date: string;
+      hr_shifts: { start_time?: string | null; end_time?: string | null; break_minutes?: number | null } | { start_time?: string | null; end_time?: string | null; break_minutes?: number | null }[] | null;
+    }>).map((entry) => ({
+      plan_id: entry.plan_id,
+      worker_type: entry.worker_type === "employee" ? "employee" as const : "contractor" as const,
+      worker_id: entry.worker_id,
+      roster_date: entry.roster_date,
+      value: entry
+    }))
+  );
+  const entry = weeklyRosterValueForDate(index, rosterWorkerType(profileType), workerId, workDate);
+  if (!entry) return null;
+  const shift = relationFirst(entry.hr_shifts);
+  return entry.day_type === "working" && shift?.start_time && shift.end_time
     ? { startTime: shift.start_time, endTime: shift.end_time, breakMinutes: Math.max(0, Number(shift.break_minutes ?? 0)) }
     : null;
 }
@@ -533,7 +559,7 @@ async function loadAttendanceScheduleContext({
       : Promise.resolve({ data: [], error: null }),
     supabaseAdmin
       .from("hr_roster_plans")
-      .select("id,effective_from,superseded_at")
+      .select("id,effective_from,superseded_at,revision_no")
       .eq("company_id", companyId)
       .eq("status", "approved")
       .eq("roster_kind", "recurring_weekly")
@@ -553,6 +579,7 @@ async function loadAttendanceScheduleContext({
   };
   type WeeklyRosterRow = {
     plan_id: string;
+    worker_type: string | null;
     worker_id: string;
     roster_date: string;
     day_type: string | null;
@@ -572,25 +599,29 @@ async function loadAttendanceScheduleContext({
       source: "Roster"
     });
   }
-  const recurringPlans = (recurringPlanResult.data ?? []).map((plan) => ({
-    id: plan.id,
-    effectiveFrom: String(plan.effective_from),
-    supersededAt: plan.superseded_at ? String(plan.superseded_at) : null
-  }));
-  const recurringPlanIds = recurringPlans.map((plan) => plan.id);
+  const recurringVersions = ((recurringPlanResult.data ?? []) as WeeklyRosterVersion[])
+    .filter((plan) => !plan.superseded_at || plan.superseded_at > fromDate);
+  const recurringPlanIds = recurringVersions.map((plan) => plan.id);
   const weeklyEntriesResult = recurringPlanIds.length && workerIds.length
     ? await supabaseAdmin
       .from("hr_roster_entries")
-      .select(`plan_id,worker_id,roster_date,day_type,hr_shifts(${shiftColumns})`)
+      .select(`plan_id,worker_type,worker_id,roster_date,day_type,hr_shifts(${shiftColumns})`)
       .eq("company_id", companyId)
       .in("plan_id", recurringPlanIds)
       .in("worker_id", workerIds)
     : { data: [], error: null };
   if (weeklyEntriesResult.error) throw new Error(weeklyEntriesResult.error.message);
-  const weeklyByPlanWorkerDay = new Map<string, WeeklyRosterRow>();
-  ((weeklyEntriesResult.data ?? []) as unknown as WeeklyRosterRow[]).forEach((entry) => {
-    weeklyByPlanWorkerDay.set(`${entry.plan_id}:${entry.worker_id}:${isoWeekday(entry.roster_date)}`, entry);
-  });
+  const weeklyIndex = buildWeeklyRosterIndex(
+    recurringVersions,
+    ((weeklyEntriesResult.data ?? []) as unknown as WeeklyRosterRow[]).map((entry) => ({
+      plan_id: entry.plan_id,
+      worker_type: entry.worker_type === "employee" ? "employee" as const : "contractor" as const,
+      worker_id: entry.worker_id,
+      roster_date: entry.roster_date,
+      value: entry
+    }))
+  );
+  const profileTypeById = new Map(workers.map((worker) => [worker.profileId, worker.profileType]));
 
   return {
     rules: (settingsResult.data ?? {}) as AttendanceRules,
@@ -598,8 +629,12 @@ async function loadAttendanceScheduleContext({
       if (!profileId) return { dayType: "unassigned", shift: null, source: "Unassigned" };
       const roster = rosterByWorkerDate.get(`${profileId}:${punchDate}`);
       if (roster) return roster;
-      const activePlan = recurringPlans.find((plan) => plan.effectiveFrom <= punchDate && (!plan.supersededAt || punchDate < plan.supersededAt));
-      const weekly = activePlan ? weeklyByPlanWorkerDay.get(`${activePlan.id}:${profileId}:${isoWeekday(punchDate)}`) : null;
+      const weekly = weeklyRosterValueForDate(
+        weeklyIndex,
+        rosterWorkerType(profileTypeById.get(profileId)),
+        profileId,
+        punchDate
+      );
       return weekly
         ? { dayType: weekly.day_type ?? "working", shift: relationFirst(weekly.hr_shifts), source: "Roster" }
         : { dayType: "unassigned", shift: null, source: "Unassigned" };
