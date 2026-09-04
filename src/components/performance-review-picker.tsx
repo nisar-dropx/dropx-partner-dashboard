@@ -33,7 +33,7 @@ export function PerformanceReviewPicker({
       review: nextStation,
       view: "reviews",
     });
-    startTransition(() => router.push(`/ops-pulse/performance?${params.toString()}`));
+    startTransition(() => router.push(`/performance?${params.toString()}`));
   }
 
   return <div className="performance-review-picker" aria-busy={isPending}>

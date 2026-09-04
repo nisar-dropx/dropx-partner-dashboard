@@ -19,7 +19,7 @@ function reviewHref(date: string, stationCode: string, notice?: string, error?: 
   const params = new URLSearchParams({ view: "reviews", date, review: stationCode });
   if (notice) params.set("notice", notice);
   if (error) params.set("error", error);
-  return `/ops-pulse/performance?${params.toString()}`;
+  return `/performance?${params.toString()}`;
 }
 
 function canUseStation(authorization: AuthorizationContext, stationId: string) {
