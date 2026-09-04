@@ -1,5 +1,5 @@
 import type { AuthorizationContext } from "@/lib/authorization";
-import { resolveConnectApproverUserId } from "@/lib/connect-approver-identity";
+import { managerReviewChain } from "@/lib/ops-pulse/review-policy";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { clockMinutes, resolveStationOpeningSchedule, stationOpeningLateMinutes } from "@/lib/ops-pulse/station-opening";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
@@ -74,7 +74,31 @@ export type PerformanceReviewUpdate = {
   note: string;
   created_at: string;
   created_by: string | null;
+  author_name: string | null;
+  author_role: string | null;
+  stage_label: string | null;
 };
+
+export type PerformanceConnection = {
+  id: string;
+  station_id: string;
+  service_date: string;
+  label: string;
+  arrival_at: string;
+  unloading_at: string | null;
+  clearance_at: string | null;
+  version: number;
+  updated_by_name: string;
+  updated_at: string;
+};
+
+export async function loadPerformanceConnections(companyId: string, stationId: string, date: string) {
+  if (!supabaseAdmin) return { connections: [] as PerformanceConnection[], error: "Database service is unavailable." };
+  const result = await supabaseAdmin.from("ops_performance_connections")
+    .select("id,station_id,service_date,label,arrival_at,unloading_at,clearance_at,version,updated_by_name,updated_at")
+    .eq("company_id", companyId).eq("station_id", stationId).eq("service_date", date).order("arrival_at");
+  return { connections: (result.data ?? []) as PerformanceConnection[], error: result.error?.message ?? null };
+}
 
 export type PerformanceOperationalSnapshot = {
   adHocCost: number | null;
@@ -225,7 +249,7 @@ export async function loadPerformanceReviewWorkspace(companyId: string, sourceDa
       ? supabaseAdmin.from("ops_performance_review_items").select("id,review_id,metric_key,metric_label,actual_value,target_value,target_direction,severity,root_cause,corrective_action,action_owner,due_date,status,created_at,updated_at").eq("company_id", companyId).in("review_id", itemReviewIds).order("created_at", { ascending: false }).limit(1000)
       : Promise.resolve({ data: [] as PerformanceReviewItem[], error: null }),
     selectedReviewIds.length
-      ? supabaseAdmin.from("ops_performance_review_updates").select("id,review_id,review_item_id,update_type,note,created_at,created_by").eq("company_id", companyId).in("review_id", selectedReviewIds).order("created_at", { ascending: false }).limit(500)
+      ? supabaseAdmin.from("ops_performance_review_updates").select("id,review_id,review_item_id,update_type,note,created_at,created_by,author_name,author_role,stage_label").eq("company_id", companyId).in("review_id", selectedReviewIds).order("created_at", { ascending: false }).limit(500)
       : Promise.resolve({ data: [] as PerformanceReviewUpdate[], error: null })
   ]);
   const childError = stepsResult.error ?? itemsResult.error ?? updatesResult.error;
@@ -566,18 +590,21 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
   return { rows: empty, error: null };
 }
 
-export async function resolvePerformanceReviewChain(companyId: string, stationId: string, authorization: AuthorizationContext): Promise<PerformanceReviewChainStep[]> {
+export async function resolvePerformanceReviewChain(companyId: string, stationId: string, _authorization?: AuthorizationContext): Promise<PerformanceReviewChainStep[]> {
   if (!supabaseAdmin) return [];
   const hierarchy = await loadPeopleOperationalHierarchy(companyId, [stationId]);
   if (hierarchy.error) throw new Error(hierarchy.error);
-  const peopleChain = hierarchy.byLocation.get(stationId)?.primaryReportingChain ?? [];
-  const resolved = await Promise.all(peopleChain.slice(0, 7).map(async (person) => ({
+  const stationHierarchy = hierarchy.byLocation.get(stationId);
+  const peopleChain = managerReviewChain(stationHierarchy?.managerReportingChain.length
+    ? stationHierarchy.managerReportingChain : stationHierarchy?.primaryReportingChain ?? []);
+  if (!peopleChain.length) return [];
+  const links = await supabaseAdmin.from("hr_user_person_links").select("person_id,user_id,profiles!hr_user_person_links_user_id_fkey(is_active)")
+    .eq("company_id", companyId).eq("status", "active").in("person_id", peopleChain.map((person) => person.personId));
+  if (links.error) throw new Error("Unable to resolve the People review chain.");
+  const userByPerson = new Map((links.data ?? []).filter((link) => one(link.profiles)?.is_active).map((link) => [link.person_id, link.user_id]));
+  return peopleChain.map((person) => ({
     reviewerName: person.name,
     reviewerRole: person.role,
-    reviewerUserId: await resolveConnectApproverUserId(companyId, person.personId)
-  })));
-  const chain = resolved.filter((person): person is PerformanceReviewChainStep => Boolean(person.reviewerUserId));
-  if (chain.length) return chain;
-
-  return [{ reviewerName: authorization.fullName || "Review owner", reviewerRole: authorization.roleName || "Reviewer", reviewerUserId: authorization.userId }];
+    reviewerUserId: userByPerson.get(person.personId) ?? null
+  }));
 }

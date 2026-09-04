@@ -28,6 +28,7 @@ export type LocationOperationalHierarchy = {
   areaOperationsManagers: OperationalHierarchyPerson[];
   reportingAuthorities: OperationalHierarchyPerson[];
   primaryReportingChain: OperationalHierarchyPerson[];
+  managerReportingChain: OperationalHierarchyPerson[];
   hasClusterManagerConflict: boolean;
 };
 
@@ -248,11 +249,19 @@ export function resolvePeopleOperationalHierarchy(
         reportingChainFor(right, assignmentById, managerBySubject).length - reportingChainFor(left, assignmentById, managerBySubject).length ||
         left.displayName.localeCompare(right.displayName)
       ))[0];
+    // Station-level reviews belong to the station's canonical manager, not whichever
+    // TL sorts first. An incomplete TL link must not hide an unambiguous People CM.
+    const managerRoot = clusterManagers.length === 1
+      ? assignmentById.get(clusterManagers[0].assignmentId)
+      : !clusterManagers.length && areaOperationsManagers.length === 1
+        ? assignmentById.get(areaOperationsManagers[0].assignmentId)
+        : undefined;
     return [locationId, {
       clusterManagers,
       areaOperationsManagers,
       reportingAuthorities,
       primaryReportingChain: primaryRoot ? reportingChainFor(primaryRoot, assignmentById, managerBySubject) : [],
+      managerReportingChain: managerRoot ? reportingChainFor(managerRoot, assignmentById, managerBySubject) : [],
       hasClusterManagerConflict: clusterManagers.length > 1 && clusterManagers[0].supportCount === clusterManagers[1].supportCount
     } satisfies LocationOperationalHierarchy] as const;
   }));

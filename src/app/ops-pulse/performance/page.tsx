@@ -6,14 +6,15 @@ import { AmazonWeekNavigator } from "@/components/amazon-week-navigator";
 import { PerformanceSortControl } from "@/components/performance-sort-control";
 import { PerformanceWorkspaceTabs } from "@/components/performance-workspace-tabs";
 import { PerformanceReviewDesk, type ReviewMetric } from "@/components/performance-review-desk";
-import { hasPermission, isCompanyOwner, requirePagePermission } from "@/lib/authorization";
+import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { loadPerformanceTargets, resolvePerformanceTargets, type PerformanceTarget } from "@/lib/ops-pulse/performance-targets";
 import { hawkeyeMetricDefinitions, hawkeyeValue, hawkeyeValueForTarget } from "@/lib/ops-pulse/hawkeye";
-import { loadPerformanceOperationalSnapshots, loadPerformanceReviewWorkspace } from "@/lib/ops-pulse/performance-review";
+import { loadPerformanceOperationalSnapshots, loadPerformanceReviewWorkspace, loadPerformanceConnections, resolvePerformanceReviewChain } from "@/lib/ops-pulse/performance-review";
+import { getReviewAccess } from "@/lib/ops-pulse/review-access";
 import { ACTIVE_DAILY_PERFORMANCE_SOURCE, ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL, selectActiveDailyBatchRows } from "@/lib/ops-pulse/performance-source-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -381,13 +382,12 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const selectedReview = selectedReviewLocation ? reviewWorkspace.reviews.find((review) => review.station_code === selectedReviewLocation.station_code) ?? null : null;
   const selectedSnapshot = selectedReviewLocation ? operationalResult.rows.get(selectedReviewLocation.station_code) ?? null : null;
   const canViewReviews = hasPermission(authorization, "performance_review", "access");
-  const canAddReview = hasPermission(authorization, "performance_review", "add");
-  const canEditReview = hasPermission(authorization, "performance_review", "edit");
-  const activeReviewStep = selectedReview
-    ? reviewWorkspace.steps.find((step) => step.review_id === selectedReview.id && step.step_order === selectedReview.current_step_order && step.status === "pending") ?? null
-    : null;
-  const canOverrideReview = isCompanyOwner(authorization) || /managing partner/i.test(`${authorization.roleCode ?? ""} ${authorization.roleName ?? ""}`);
-  const canCompleteReviewStep = canEditReview && Boolean(activeReviewStep) && (canOverrideReview || activeReviewStep?.reviewer_user_id === authorization.userId);
+  const [connectionResult, reviewChain] = selectedReviewLocation && view === "reviews" ? await Promise.all([
+    loadPerformanceConnections(companyId, selectedReviewLocation.id, selectedDate),
+    selectedReview ? Promise.resolve([]) : resolvePerformanceReviewChain(companyId, selectedReviewLocation.id)
+  ]) : [{connections:[],error:null},[]];
+  const reviewAccess = selectedReviewLocation && view === "reviews" ? await getReviewAccess(authorization,selectedReviewLocation.id,selectedReview,
+    selectedReview ? reviewWorkspace.steps.filter(step=>step.review_id===selectedReview.id) : reviewChain.map((step,index)=>({step_order:index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,status:"pending"}))) : null;
 
   return (
     <AppShell active={view === "reviews" ? "Review Desk" : "Performance"} pageCode={view === "reviews" ? "performance_review" : "performance"}>
@@ -402,11 +402,18 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
 
         {view === "reviews" ? (
           selectedReviewLocation && selectedSnapshot ? <PerformanceReviewDesk
-            canAdd={canAddReview}
-            canCompleteStep={canCompleteReviewStep}
-            canEdit={canEditReview}
+            canAdd={Boolean(reviewAccess?.canStart)}
+            canCompleteStep={Boolean(reviewAccess?.canComplete)}
+            canEdit={Boolean(reviewAccess?.canEditRca)}
+            canEditConnections={Boolean(reviewAccess?.canEditConnections)}
+            canComment={Boolean(reviewAccess?.canComment)}
+            programManager={Boolean(reviewAccess?.actor.programManager)}
+            connections={connectionResult.connections}
+            updates={reviewWorkspace.updates}
+            reviewChain={reviewChain}
+            routingIssue={reviewAccess?.routingIssue ?? null}
             date={selectedDate}
-            error={searchParams?.error || reviewWorkspace.error || operationalResult.error}
+            error={searchParams?.error || reviewWorkspace.error || operationalResult.error || connectionResult.error}
             items={reviewWorkspace.items}
             locations={permittedLocations}
             metrics={reviewMetrics}

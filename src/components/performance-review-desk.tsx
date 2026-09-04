@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { formatDashboardDate } from "@/lib/date-format";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
-import type { PerformanceAssociateDelivery, PerformanceOperationalSnapshot, PerformanceReview, PerformanceReviewCarryover, PerformanceReviewItem, PerformanceReviewStep } from "@/lib/ops-pulse/performance-review";
-import { completePerformanceReviewStep, savePerformanceReviewItem, savePerformanceReviewOperations, startPerformanceReview } from "@/app/ops-pulse/performance/actions";
+import type { PerformanceAssociateDelivery, PerformanceOperationalSnapshot, PerformanceReview, PerformanceReviewCarryover, PerformanceReviewItem, PerformanceReviewStep, PerformanceConnection, PerformanceReviewUpdate, PerformanceReviewChainStep } from "@/lib/ops-pulse/performance-review";
+import { savePerformanceReviewComment, savePerformanceReviewItem, savePerformanceReviewOperations, startPerformanceReview } from "@/app/ops-pulse/performance/actions";
 import { PerformanceReviewPicker } from "@/components/performance-review-picker";
+import { PerformanceConnections } from "@/components/performance-connections";
+import { ReviewActionForm } from "@/components/review-action-form";
+import { reviewRole } from "@/lib/ops-pulse/review-policy";
 
 export type ReviewMetric = {
   actual: number | null;
@@ -19,6 +22,13 @@ type Props = {
   canAdd: boolean;
   canCompleteStep: boolean;
   canEdit: boolean;
+  canEditConnections: boolean;
+  canComment: boolean;
+  programManager: boolean;
+  connections: PerformanceConnection[];
+  updates: PerformanceReviewUpdate[];
+  reviewChain: PerformanceReviewChainStep[];
+  routingIssue: string | null;
   date: string;
   error: string | null;
   items: PerformanceReviewItem[];
@@ -77,7 +87,7 @@ function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociat
 }
 
 export function PerformanceReviewDesk(props: Props) {
-  const { canAdd, canCompleteStep, canEdit, date, error, items, locations, metrics, notice, previousReviews, review, reviews, selectedLocation, snapshot, sourceBatchId, sourceType, sourceWeek, steps } = props;
+  const { canAdd, canCompleteStep, canEdit, canEditConnections, canComment, programManager, connections, updates, reviewChain, date, error, items, locations, metrics, notice, previousReviews, review, reviews, selectedLocation, snapshot, sourceBatchId, sourceType, sourceWeek, steps } = props;
   const selectedCode = selectedLocation.station_code;
   const previousStationReviews = previousReviews.filter((entry) => entry.station_code === selectedCode);
   const previousReview = previousStationReviews[0] ?? null;
@@ -92,6 +102,8 @@ export function PerformanceReviewDesk(props: Props) {
   const inReviewCount = locations.filter((location) => reviewByStation.get(location.station_code)?.status === "in_review").length;
   const notStartedCount = locations.length - completedCount - inReviewCount;
   const openingIsLate = (snapshot.openingLateMinutes ?? 0) > 0;
+  const selectedSteps = steps.filter((step) => step.review_id === review?.id && step.status !== "skipped" && ["cluster","aom","national"].includes(reviewRole(step.reviewer_role)));
+  const reviewUpdates = updates.filter((update) => update.review_id === review?.id);
   return <div className="performance-review-desk">
     {notice ? <div className="performance-review-message success">{notice}</div> : null}
     {error ? <div className="performance-review-message error">{error}</div> : null}
@@ -113,14 +125,18 @@ export function PerformanceReviewDesk(props: Props) {
       <div><span>Source</span><strong>{sourceType === "amazon_hawkeye_daily" ? "Hawkeye D-1" : sourceType === "daily_edsp_metrics" ? "Daily EDSP" : "Operational data"}</strong></div>
       <div><span>Review</span><strong>{review ? review.status.replace("_", " ") : "Not started"}</strong></div>
       <div><span>Current dependency</span><strong>{activeStep ? `${activeStep.reviewer_role} · ${activeStep.reviewer_name}` : review?.status === "closed" ? "Completed" : "Start review"}</strong></div>
-      {!review && canAdd ? <form action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button className="button">Start review</button></form> : null}
+      {!review && canAdd ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button className="button">Start review</button></ReviewActionForm> : null}
     </section>
 
-    {!review && misses.length ? <section className="performance-review-start-guide"><div><strong>{misses.length} metrics need RCA and action</strong><span>{canAdd ? "Start this station review to assign the RCA, action owner, due date and follow-up status." : "A station reviewer with Add access must start the review before RCA and actions can be recorded."}</span></div>{canAdd ? <form action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button className="button">Start & add RCA</button></form> : null}</section> : null}
+    {!review && misses.length ? <section className="performance-review-start-guide"><div><strong>{misses.length} metrics need RCA and action</strong><span>{canAdd ? "Start this station review to assign the RCA, action owner, due date and follow-up status." : "The first review manager will start the review and record RCA and actions."}</span></div>{canAdd ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button className="button">Start & add RCA</button></ReviewActionForm> : null}</section> : null}
+    {props.routingIssue ? <div className="alert warning" role="status">{props.routingIssue}</div> : null}
 
-    {review ? <section className="performance-review-flow" aria-label="Review workflow">
-      {steps.filter((step) => step.review_id === review.id).map((step) => <div className={`${step.status} ${step.step_order === review.current_step_order ? "current" : ""}`} key={step.id}><i>{step.step_order}</i><span>{step.reviewer_role}<small>{step.reviewer_name}</small></span></div>)}
-    </section> : null}
+    <section className="performance-review-flow" aria-label="Review workflow">
+      {review ? selectedSteps.map((step,index) => <div className={`${step.status} ${step.step_order === review.current_step_order ? "current" : ""}`} key={step.id}><i>{step.status === "completed" ? "✓" : index+1}</i><span>{step.reviewer_role}<small>{step.reviewer_name}</small><small>{step.status === "completed" ? "Reviewed" : step.step_order === review.current_step_order ? "Reviewing now" : "Up next"}</small></span></div>) : reviewChain.map((step,index)=><div key={`${step.reviewerUserId}-${index}`}><i>{index+1}</i><span>{step.reviewerRole}<small>{step.reviewerName}</small></span></div>)}
+      <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment?"Station access · update connection timings; view the full review":canEdit?"Your review · update RCA, actions and takeaway":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
+    </section>
+
+    <PerformanceConnections connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
 
     <div className="performance-review-columns">
       <section className="panel performance-review-section">
@@ -137,22 +153,20 @@ export function PerformanceReviewDesk(props: Props) {
           <summary><span>Performance scorecard</span><b>{metrics.length} metrics</b></summary>
           <div className="performance-review-metrics">{metrics.map((metric) => <article className={metric.severity} key={metric.key}><span title={metric.label}>{metric.short}</span><strong>{valueText(metric.actual)}</strong><small>{metric.target == null ? "Reference metric" : `Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}</small></article>)}</div>
         </details>
-        {review && canEdit ? <form action={savePerformanceReviewOperations} className="performance-operations-form">
+        {review && canEdit ? <ReviewActionForm action={savePerformanceReviewOperations} className="performance-operations-form">
           <input type="hidden" name="review_id" value={review.id}/><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/>
-          <label>Vehicle arrival<input type="time" name="vehicle_arrival_time" defaultValue={review.vehicle_arrival_time?.slice(0, 5) ?? ""}/></label>
-          <label>Unloading complete<input type="time" name="unloading_complete_time" defaultValue={review.unloading_complete_time?.slice(0, 5) ?? ""}/></label>
-          <label>Station clear<input type="time" name="station_clear_time" defaultValue={review.station_clear_time?.slice(0, 5) ?? ""}/></label>
-          <label className="wide">Review summary<textarea name="review_summary" defaultValue={review.review_summary ?? ""} placeholder="Only the key conclusion or escalation"/></label>
-          <button className="button secondary">Save details</button>
-        </form> : null}
+          <input type="hidden" name="review_version" value={review.updated_at}/>
+          <label className="wide">Review takeaway<textarea name="review_summary" defaultValue={review.review_summary ?? ""} placeholder="Only the key conclusion or escalation"/></label>
+          <button className="button secondary">Save takeaway</button>
+        </ReviewActionForm> : review ? <div className="review-takeaway-readonly"><strong>Review takeaway</strong><p>{review.review_summary || "Awaiting the first manager’s review."}</p></div> : null}
         {review && misses.length ? <div className="performance-review-actions"><h3>RCA and next-day actions</h3>{misses.map((metric) => {
           const item = itemByMetric.get(metric.key);
-          return <details className="performance-action-item" key={`action-${metric.key}`} open={Boolean(item && item.status !== "done")}><summary><span className={`metric-dot ${metric.severity}`}/><strong>{metric.label}</strong><b>{item?.status?.replace("_", " ") || "Needs RCA"}</b></summary>{canEdit ? <form action={savePerformanceReviewItem}>
-            <input type="hidden" name="review_id" value={review.id}/><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="metric_key" value={metric.key}/><input type="hidden" name="metric_label" value={metric.label}/><input type="hidden" name="actual_value" value={metric.actual ?? ""}/><input type="hidden" name="target_value" value={metric.target ?? ""}/><input type="hidden" name="target_direction" value={metric.direction}/><input type="hidden" name="severity" value={metric.severity}/>
+          return <details className="performance-action-item" key={`action-${metric.key}`} open={Boolean(item && item.status !== "done")}><summary><span className={`metric-dot ${metric.severity}`}/><strong>{metric.label}</strong><b>{item?.status?.replace("_", " ") || "Needs RCA"}</b></summary>{canEdit ? <ReviewActionForm action={savePerformanceReviewItem}>
+            <input type="hidden" name="review_id" value={review.id}/><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="review_version" value={review.updated_at}/><input type="hidden" name="metric_key" value={metric.key}/><input type="hidden" name="metric_label" value={metric.label}/><input type="hidden" name="actual_value" value={metric.actual ?? ""}/><input type="hidden" name="target_value" value={metric.target ?? ""}/><input type="hidden" name="target_direction" value={metric.direction}/><input type="hidden" name="severity" value={metric.severity}/>
             <label>Root cause<textarea required name="root_cause" defaultValue={item?.root_cause ?? ""} placeholder="What caused the miss?"/></label>
             <label>Next action<textarea required name="corrective_action" defaultValue={item?.corrective_action ?? ""} placeholder="Specific action before next review"/></label>
             <label>Owner<input required name="action_owner" defaultValue={item?.action_owner ?? ""}/></label><label>Due<input type="date" name="due_date" defaultValue={item?.due_date ?? date}/></label><label>Status<select name="status" defaultValue={item?.status ?? "open"}><option value="open">Open</option><option value="in_progress">In progress</option><option value="blocked">Blocked</option><option value="done">Done</option></select></label><button className="button secondary">Save action</button>
-          </form> : <div className="performance-action-readonly"><p><b>RCA</b>{item?.root_cause || "Awaiting update"}</p><p><b>Action</b>{item?.corrective_action || "Awaiting update"}</p></div>}</details>;
+          </ReviewActionForm> : <div className="performance-action-readonly"><p><b>RCA</b>{item?.root_cause || "Awaiting update"}</p><p><b>Action</b>{item?.corrective_action || "Awaiting update"}</p><p><b>Owner / due</b>{item?.action_owner || "—"}{item?.due_date ? ` · ${formatDashboardDate(item.due_date)}` : ""}</p></div>}</details>;
         })}</div> : null}
       </section>
 
@@ -170,6 +184,17 @@ export function PerformanceReviewDesk(props: Props) {
       </section>
     </div>
 
-    {review && review.status !== "closed" ? <section className="performance-review-complete"><div><strong>{activeStep ? `Pending with ${activeStep.reviewer_name} · ${activeStep.reviewer_role}` : "Review authority is not assigned"}</strong><span>{canCompleteStep ? "Completing this step moves the review to the next configured reporting layer." : "You can view or update permitted station details, but only the assigned reviewer can complete this approval layer."}</span></div>{canCompleteStep ? <form action={completePerformanceReviewStep}><input type="hidden" name="review_id" value={review.id}/><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input name="feedback" placeholder="Review feedback or escalation note"/><button className="button">Complete step</button></form> : null}</section> : null}
+    {review ? <section className="review-discussion">
+      <header><div><h3>Review discussion</h3><p>{review.status === "closed" ? "Review completed · all inputs remain visible" : activeStep ? `With ${activeStep.reviewer_name} · ${activeStep.reviewer_role}` : "Review manager not assigned"}</p></div><span>{reviewUpdates.length} updates</span></header>
+      {canComment || canCompleteStep ? <ReviewActionForm action={savePerformanceReviewComment} className="review-comment-form" resetOnSuccess>
+        <input type="hidden" name="review_id" value={review.id}/><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="step_id" value={activeStep?.id ?? ""}/>
+        <label>Your review input<textarea name="feedback" maxLength={4000} placeholder="Add context, feedback or the next follow-up…" rows={2}/></label>
+        <div className="review-comment-buttons">{canComment ? <button className="button secondary" name="intent" value="comment">Save comment</button> : null}{canCompleteStep ? <button className="button" name="intent" value="complete">Complete my review →</button> : null}</div>
+      </ReviewActionForm> : <p className="review-empty">All comments are visible here. Only the assigned manager can complete the current stage.</p>}
+      <div className="review-comment-feed">{reviewUpdates.length ? reviewUpdates.map(update=><article key={update.id}>
+        <header><strong>{update.author_name || "Recorded update"}</strong><span>{update.author_role || update.stage_label || "Review"}</span><time dateTime={update.created_at}>{new Intl.DateTimeFormat("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}).format(new Date(update.created_at))}</time></header>
+        <p>{update.note}</p>
+      </article>) : <p className="review-empty">No comments yet.</p>}</div>
+    </section> : null}
   </div>;
 }

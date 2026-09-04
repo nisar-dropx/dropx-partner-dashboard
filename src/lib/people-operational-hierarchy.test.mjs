@@ -70,3 +70,13 @@ test("never revives a legacy manager who is absent from People", () => {
   assert.deepEqual(result?.clusterManagers.map((person) => person.name), ["MUHAMMED ALI SHIHAB"]);
   assert.ok(!result?.clusterManagers.some((person) => person.name === "Dhananjay"));
 });
+
+test("station reviews retain the unambiguous CM chain when one TL has no reporting link", () => {
+  const result=resolvePeopleOperationalHierarchy(["PEUA"],[
+    assignment("tl","tl","Unlinked TL","PEUA","TL","Team Lead"),
+    assignment("ssa","ssa","Station SSA","PEUA","SSA","Station Support Associate"),
+    assignment("cm","cm","CM","HO","CLM","Cluster Manager"),
+    assignment("nh","nh","NH","HO","NH","National Head")
+  ],[{subjectAssignmentId:"ssa",managerAssignmentId:"cm"},{subjectAssignmentId:"cm",managerAssignmentId:"nh"}]).get("PEUA");
+  assert.deepEqual(result.managerReportingChain.map(person=>person.designationCode),["CLM","NH"]);
+});
