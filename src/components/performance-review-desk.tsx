@@ -1,6 +1,7 @@
 import { PerformanceCarriedActions } from "@/components/performance-carried-actions";
 import { PerformanceReviewExceptions } from "@/components/performance-review-exceptions";
 import { PerformanceReviewFlow } from "@/components/performance-review-flow";
+import type { StationReviewTargets } from "@/lib/ops-pulse/station-review-targets";
 import { PerformanceNoonEmdEntry } from "@/components/performance-noon-emd";
 import { PerformanceCodPending } from "@/components/performance-cod-pending";
 import type { ReviewCodSnapshot } from "@/lib/ops-pulse/review-cod";
@@ -41,6 +42,8 @@ type Props = {
   pendingExpanded: boolean;
   previousDay: string;
   followups: {rows:PerformanceFollowup[];count:number;error:string|null};
+  stationTargets: StationReviewTargets;
+  stationTargetsError: string|null;
   noonEmd: {row:PerformanceNoonEmd|null;error:string|null};
   canAdd: boolean;
   canCompleteStep: boolean;
@@ -207,9 +210,10 @@ export function PerformanceReviewDesk(props: Props) {
           <summary><span>Performance scorecard</span><b>{metrics.length} metrics</b></summary>
           <div className="performance-review-metrics">{metrics.map((metric) => <article className={metric.severity} key={metric.key}><span title={metric.label}>{metric.short}</span><strong>{valueText(metric.actual)}</strong><small>{metric.target == null ? "Reference metric" : `Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}</small></article>)}</div>
         </details>
+        {props.stationTargetsError ? <p role="alert">{props.stationTargetsError}</p> : null}
         <div className="review-station-updates">
-          <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
-          <PerformanceNoonEmdEntry entry={props.noonEmd.row} error={props.noonEmd.error} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
+          <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections} clearanceCutoff={props.stationTargets.clearanceCutoff}/>
+          <PerformanceNoonEmdEntry target={props.stationTargets.emdNoonTarget} entry={props.noonEmd.row} error={props.noonEmd.error} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
         </div>
         {review && rcaRows.length ? (
           <PerformanceRcaActions

@@ -60,6 +60,19 @@
 .performance-review-desk .review-station-times { margin: 0; padding: 12px; border: 1px solid #e9edf3; border-radius: 10px; background: #fafbfc; }
 .performance-review-desk .review-station-times label strong { display: block; min-height: 38px; padding: 8px 0; color: #172033; font-size: 14px; font-weight: 650; }
 .performance-review-desk .review-station-updates .review-noon-emd { align-content: start; align-items: flex-start; }
+.review-vehicles { min-width: 0; border: 1px solid #e9edf3; padding: 12px; border-radius: 10px; }
+.review-vehicles header,.review-vehicle > summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; }
+.review-vehicles header small,.review-vehicle > summary small { display: block; font-size: 11px; color: #64748b; margin-top: 4px; }
+.review-vehicle { border-top: 1px solid #e9edf3; margin-top: 10px; }
+.review-vehicle > summary { padding: 10px 0; cursor: pointer; }
+.review-vehicle > summary > span { min-width: 0; overflow-wrap: anywhere; }
+.performance-review-desk .review-vehicles .review-station-times { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.review-vehicles .review-station-times label { min-width: 0; }
+.review-vehicles input { width: 100%; min-width: 0; }
+.review-new-vehicle { margin-top: 10px; }
+.review-new-vehicle > small { color: #64748b; font-size: 11px; }
+.review-target-missed { color: #b91c1c; font-weight: 650; }
+.review-target-met { color: #15803d; font-weight: 650; }
 .review-cod-pending { margin: 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: white; }
 .review-cod-pending.red { border-color: #fca5a5; }
 .review-cod-pending.green { border-color: #86efac; }
@@ -74,7 +87,14 @@
 .review-cod-body { padding: 0 12px 12px; }
 .review-cod-source { display: block; color: #64748b; font-size: 11px; line-height: 1.5; }
 .review-cod-buckets { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
-.review-cod-buckets > span { display: grid; gap: 4px; border: 1px solid #e2e8f0; border-radius: 7px; padding: 8px; font-size: 13px; }
+.review-cod-buckets > button { display: grid; gap: 4px; border: 1px solid #e2e8f0; border-radius: 7px; padding: 8px 10px; min-height: 44px; font-size: 13px; background: white; color: #334155; text-align: left; cursor: pointer; }
+.review-cod-buckets > button[aria-pressed=true] { border-color: #334155; box-shadow: inset 0 0 0 1px #334155; }
+.review-cod-buckets > button:hover,.review-cod-row:hover { background: #f8fafc; }
+.review-cod-pending button:focus-visible,.review-cod-pending summary:focus-visible { outline: 2px solid #334155; outline-offset: 2px; }
+.review-cod-selection { display: flex; justify-content: space-between; gap: 8px; align-items: center; font-size: 12px; padding: 8px 0; flex-wrap: wrap; }
+.review-cod-selection > span { min-width: 0; overflow-wrap: anywhere; }
+.review-cod-selection small { display: block; color: #64748b; margin-top: 4px; }
+.review-cod-selection button { border: 1px solid #e2e8f0; background: white; padding: 8px; border-radius: 6px; cursor: pointer; }
 .review-cod-buckets small { font-size: 10px; }
 .review-cod-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin: 10px 0; }
 .review-cod-toolbar [role=group] { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -82,8 +102,13 @@
 .review-cod-toolbar button[aria-pressed=true] { background: #172033; color: white; }
 .review-cod-toolbar .button { font-size: 12px; padding: 7px; }
 .review-cod-rows { max-height: 330px; overflow-y: auto; }
-.review-cod-rows > div { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e2e8f0; padding: 8px 0; font-size: 12px; }
-.review-cod-rows > div span { min-width: 0; overflow-wrap: anywhere; }
+.review-cod-pending .review-cod-row { display: flex; width: 100%; justify-content: space-between; gap: 12px; align-items: center; border: 0; border-bottom: 1px solid #e2e8f0; padding: 10px 4px; min-height: 44px; font-size: 12px; text-align: left; color: inherit; background: white; cursor: pointer; list-style: none; }
+.review-cod-pending .review-cod-row.overdue { color: #b91c1c; }
+.review-cod-row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.review-cod-pending .review-cod-row strong,.review-cod-pending .review-cod-row > b { font-size: 12px; }
+.review-cod-tid dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin: 0; padding: 10px; background: #f8fafc; font-size: 11px; color: #334155; }
+.review-cod-tid dt { color: #64748b; }
+.review-cod-tid dd { margin: 3px 0 0; overflow-wrap: anywhere; }
 .review-cod-rows small { display: block; color: #64748b; font-size: 10px; margin-top: 4px; }
 .review-cod-rows b { white-space: nowrap; }
 .performance-review-desk .performance-action-item > summary { flex-wrap: wrap; min-height: 46px; padding: 10px; }

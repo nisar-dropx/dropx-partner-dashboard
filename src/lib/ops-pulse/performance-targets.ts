@@ -14,6 +14,7 @@ export type PerformanceTarget = {
   displayOrder: number;
   isActive: boolean;
   mappingVersion?: number;
+  explicitReviewTarget?: boolean;
 };
 
 const daily = [
@@ -141,7 +142,7 @@ export async function deletePerformanceTarget(companyId: string, id: string) {
 export function resolvePerformanceTargets(rows: PerformanceTarget[], reportType: "daily" | "sls") {
   const active = rows.filter((row) => row.isActive);
   return active.filter((row) => row.reportType === reportType).map((row) => {
-    if (row.target != null) return row;
+    if (row.target != null || row.explicitReviewTarget) return row;
     const equivalent = active.find((candidate) => candidate.reportType !== reportType && candidate.metricKey === row.metricKey && candidate.target != null);
     return equivalent ? { ...row, target: equivalent.target, direction: equivalent.direction, unit: equivalent.unit } : row;
   }).sort((a, b) => a.displayOrder - b.displayOrder);

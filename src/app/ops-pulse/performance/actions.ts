@@ -153,7 +153,7 @@ export async function savePerformanceConnection(data:FormData):Promise<ReviewAct
         id: text(data, "connection_id"),
         version: Number(text(data, "version")) || 1,
         service_date: date,
-        label: "Vehicle",
+        label: limited(data,"label",100,true),
         ...author(authorization, access.actor.label)
       }
     });

@@ -13,7 +13,8 @@ import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format"
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { loadPerformanceTargets, resolvePerformanceTargets, type PerformanceTarget } from "@/lib/performance-targets";
-import { hawkeyeMetricDefinitions, hawkeyeValue, hawkeyeValueForTarget } from "@/lib/ops-pulse/hawkeye";
+import { loadStationReviewTargets, emptyStationReviewTargets } from "@/lib/ops-pulse/station-review-targets-data";
+import { hawkeyeMetricDefinitions, hawkeyeTargetKey, hawkeyeValue, hawkeyeValueForTarget } from "@/lib/ops-pulse/hawkeye";
 import { loadPerformanceOperationalSnapshots, loadPerformanceReviewWorkspace, loadPerformanceReviewBacklog, loadPerformanceConnections, resolvePerformanceReviewChain, loadPerformanceFollowups, loadPerformanceNoonEmd, loadReviewStationLeads } from "@/lib/ops-pulse/performance-review";
 import { reviewPendingPage } from "@/lib/ops-pulse/review-periods";
 import { loadReviewCod } from "@/lib/ops-pulse/review-cod-data";
@@ -174,7 +175,8 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const authorization = await requirePagePermission(view === "reviews" ? "performance_review" : "performance", "access");
   const companyId = requireCompanyId(authorization);
   const targetResult = await loadPerformanceTargets(companyId);
-  const dailyMetricDefinitions = resolvePerformanceTargets(targetResult.rows, "daily").filter((target) => target.sourceIndex != null).map((target) => ({ ...target, index: target.sourceIndex as number }));
+  const allDailyTargets = resolvePerformanceTargets(targetResult.rows, "daily");
+  const dailyMetricDefinitions = allDailyTargets.filter((target) => target.sourceIndex != null).map((target) => ({ ...target, index: target.sourceIndex as number }));
   const orderedDailyMetricDefinitions = [...dailyMetricDefinitions].sort((left, right) =>
     Number(right.metricKey === "dsr") - Number(left.metricKey === "dsr") || left.displayOrder - right.displayOrder
   );
@@ -290,8 +292,8 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const latestAvailableDate = latestDailyResult.data?.[0]?.report_date ?? null;
   const dailySort = searchParams?.sort || "exceptions_desc";
   const metricSort = dailySort.match(/^metric_(\d+)_(asc|desc)$/);
-  const missedTargets = (row: MetricFact) => dailyMetricDefinitions.filter((metric) => {
-    const value = dailyMetricValue(row, metric);
+  const missedTargets = (row: MetricFact) => (row.source_type === "amazon_hawkeye_daily" ? allDailyTargets : dailyMetricDefinitions).filter((metric) => {
+    const value = row.source_type === "amazon_hawkeye_daily" ? hawkeyeValueForTarget(row.values_json,metric.metricKey) : dailyMetricValue(row,{...metric,index:metric.sourceIndex!});
     return value != null && metric.target != null && ragStatus(value, metric.target, metric.direction) !== "green";
   }).length;
   const sortedDailyRows = [...dailyRows].sort((a, b) => {
@@ -376,7 +378,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const selectedReviewRow = selectedReviewLocation ? dailyRows.find((row) => stationCode(row.station_code) === selectedReviewLocation.station_code) ?? null : null;
   const reviewMetrics: ReviewMetric[] = selectedReviewRow?.source_type === "amazon_hawkeye_daily"
     ? hawkeyeMetricDefinitions.map((definition) => {
-      const target = definition.targetKey ? dailyMetricDefinitions.find((metric) => metric.metricKey === definition.targetKey) : null;
+      const target = allDailyTargets.find((metric) => metric.metricKey === hawkeyeTargetKey(definition));
       const actual = hawkeyeValue(selectedReviewRow.values_json, definition.label);
       return { actual, direction: target?.direction ?? "higher", key: definition.targetKey || definition.label.toLowerCase().replace(/[^a-z0-9]+/g, "_"), label: definition.label, severity: ragStatus(actual, target?.target ?? null, target?.direction ?? "higher") as ReviewMetric["severity"], short: definition.short, target: target?.target ?? null };
     })
@@ -392,15 +394,16 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const canViewReviews = hasPermission(authorization, "performance_review", "access");
   // Prefer the selected station row — review.station_id can diverge and hide saved timings.
   const connectionStationId = selectedReviewLocation?.id || selectedReview?.station_id || null;
-  const [connectionResult, reviewChain, backlog, followups, noonEmd, stationLeads, codData] = selectedReviewLocation && connectionStationId && view === "reviews" ? await Promise.all([
+  const [connectionResult, reviewChain, backlog, followups, noonEmd, stationLeads, codData, stationTargets] = selectedReviewLocation && connectionStationId && view === "reviews" ? await Promise.all([
     loadPerformanceConnections(companyId, connectionStationId, selectedDate),
     selectedReview ? Promise.resolve([]) : resolvePerformanceReviewChain(companyId, selectedReviewLocation.id),
     loadPerformanceReviewBacklog(companyId, selectedDate, permittedCodes, reviewPendingPage(searchParams?.pendingPage)),
     loadPerformanceFollowups(companyId,connectionStationId,selectedDate),
     loadPerformanceNoonEmd(companyId,connectionStationId,selectedDate),
     loadReviewStationLeads(companyId,connectionStationId),
-    loadReviewCod(companyId,selectedReviewLocation.station_code)
-  ]) : [{connections:[],error:null},[],{rows:[],count:0,page:1,pageSize:15,error:null},{rows:[],count:0,error:null},{row:null,error:null},"Station TL",{snapshot:{stationCode:"",batchId:null,importedAt:null,fileName:null,summary:null,error:null},lines:[]}];
+    loadReviewCod(companyId,selectedReviewLocation.station_code),
+    loadStationReviewTargets(companyId,[connectionStationId])
+  ]) : [{connections:[],error:null},[],{rows:[],count:0,page:1,pageSize:15,error:null},{rows:[],count:0,error:null},{row:null,error:null},"Station TL",{snapshot:{stationCode:"",batchId:null,importedAt:null,fileName:null,summary:null,error:null},lines:[]},{rows:[],error:null}];
   const reviewConnections = connectionResult.connections.length
     ? connectionResult.connections
     : legacyConnectionsFromReview(selectedReview);
@@ -432,6 +435,8 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             canAccessProxy={Boolean(reviewAccess?.canAccessProxy)}
             canManageActions={Boolean(reviewAccess?.canManageActions)}
             followups={followups}
+            stationTargets={stationTargets.rows[0]?.targets ?? emptyStationReviewTargets}
+            stationTargetsError={stationTargets.error}
             noonEmd={noonEmd}
             stationLeads={stationLeads}
             backlog={backlog}
@@ -537,7 +542,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
                   {canViewReviews ? <div className="hawkeye-station-actions"><Link href={`/performance?view=reviews&date=${selectedDate}&review=${code}`}>Open review →</Link></div> : null}
                   <div>{hawkeyeMetricDefinitions.map((metric) => {
                   const value = hawkeyeValue(row.values_json, metric.label);
-                  const target = metric.targetKey ? dailyMetricDefinitions.find((definition) => definition.metricKey === metric.targetKey) : null;
+                  const target = allDailyTargets.find((definition) => definition.metricKey === hawkeyeTargetKey(metric));
                   const status = ragStatus(value, target?.target ?? null, target?.direction ?? "higher");
                   return <article className={status} key={metric.label}><span>{metric.short}</span><strong>{value == null ? "—" : percent(value)}</strong><small>{target?.target == null ? "Reference" : targetLabel(target.target, target.direction)}</small></article>;
                 })}</div></details>;

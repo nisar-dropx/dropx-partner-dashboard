@@ -18,9 +18,9 @@ assert.ok(exceptions.includes('disabled={!proxyEnabled}')&&exceptions.includes('
 assert.ok(exceptions.includes('review&&mode&&'),'unstarted or unavailable stages never render mutation forms');
 const conn=read('src/components/performance-connections.tsx');
 for(const label of ['Vehicle arrival','Unloading complete','Station clear'])assert.ok(conn.includes(label),label);
-assert.ok(!conn.includes('Connection / vehicle') && !conn.includes('+ Connection') && !conn.includes('Station connections'),'no multi-connection chrome');
+assert.ok(conn.includes('connections.map(')&&conn.includes('+ Add vehicle'),'all vehicles visible with add-another action');
 assert.ok(conn.includes('type="time"'),'simple time inputs');
-assert.ok(conn.includes('Save timings') || conn.includes('review-station-times'),'station timings form');
+assert.ok(conn.includes('Save vehicle timings') && conn.includes('review-station-times'),'station timings form');
 const emd=read('src/components/performance-noon-emd.tsx');
 assert.ok(emd.includes('EMD at 12 p.m. (%)'));
 assert.ok(emd.includes('entry?.emd_noon_pct??""'),'zero is not rendered blank');

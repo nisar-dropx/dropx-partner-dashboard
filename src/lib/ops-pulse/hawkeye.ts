@@ -59,6 +59,8 @@ export function hawkeyeValue(valuesJson: unknown, label: string) {
   return hawkeyeMetrics(valuesJson)?.get(normalized(label)) ?? null;
 }
 
+export const hawkeyeTargetKey = (definition:HawkeyeMetricDefinition) => definition.targetKey || definition.label.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+
 const targetMetricLabels: Record<string, string> = {
   afn_premium_lmc_dea: "AFN Prem LM Miss%",
   afn_standard_lmc_dea: "AFN Std LM Miss%",
@@ -74,6 +76,6 @@ const targetMetricLabels: Record<string, string> = {
 };
 
 export function hawkeyeValueForTarget(valuesJson: unknown, metricKey: string) {
-  const label = targetMetricLabels[metricKey];
+  const label = targetMetricLabels[metricKey] || hawkeyeMetricDefinitions.find(definition => hawkeyeTargetKey(definition) === metricKey)?.label;
   return label ? hawkeyeValue(valuesJson, label) : null;
 }

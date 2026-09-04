@@ -1,0 +1,10 @@
+.review-target-stations { padding: 16px; margin: 12px 0; }
+.review-target-stations > label { display: grid; gap: 6px; max-width: 440px; font-size: 13px; }
+.review-station-target-form { display: flex; gap: 12px; flex-wrap: wrap; align-items: start; margin-top: 14px; }
+.review-station-target-form label { display: grid; gap: 6px; flex: 1 1 200px; font-size: 13px; }
+.review-station-target-form input,.review-target-stations select,.review-target-metric-row input,.review-target-metric-row select { width: 100%; min-width: 0; min-height: 40px; padding: 8px; border: 1px solid #e2e8f0; border-radius: 7px; background: white; }
+.review-station-target-form small { color: #64748b; }
+.review-target-metric-list { padding: 0 16px 16px; }
+.review-target-metric-row { display: grid; grid-template-columns: minmax(150px,1.5fr) minmax(100px,1fr) minmax(130px,1fr) auto; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #e2e8f0; font-size: 13px; }
+.review-target-metric-row label { display: flex; align-items: center; gap: 6px; min-width: 0; }
+@media(max-width:650px) { .review-target-metric-row { grid-template-columns: minmax(0,1fr) minmax(0,1fr); } }

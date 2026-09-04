@@ -6,6 +6,53 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { createPerformanceTarget, deletePerformanceTarget, performanceTargetSeeds, savePerformanceTarget } from "@/lib/ops-pulse/performance-targets";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { loadPerformanceTargets } from "@/lib/ops-pulse/performance-targets";
+import { hawkeyeMetricDefinitions, hawkeyeTargetKey } from "@/lib/ops-pulse/hawkeye";
+import { parseStationReviewTargets } from "@/lib/ops-pulse/station-review-targets";
+import { stationTargetCode } from "@/lib/ops-pulse/station-review-targets-data";
+import { loadCodLocations } from "@/lib/ops-pulse/cod";
+
+function targetResult(error:string|null) {
+  revalidatePath("/master/performance-targets");
+  revalidatePath("/ops-pulse/performance");
+  revalidatePath("/performance");
+  redirect(`/master/performance-targets?view=targets&${error?`error=${encodeURIComponent(error)}`:"targets_saved=1"}`);
+}
+
+export async function updateReviewMetricTarget(formData:FormData) {
+  const authorization=await requirePagePermission("performance_master","edit");
+  const companyId=requireCompanyId(authorization);
+  const key=String(formData.get("metric_key")||"");
+  const definition=hawkeyeMetricDefinitions.find(row=>hawkeyeTargetKey(row)===key);
+  if(!definition)targetResult("Select a valid review metric.");
+  const text=String(formData.get("target_pct")??"").trim(),number=text?Number(text):null;
+  if(number!==null&&(!Number.isFinite(number)||number<0||number>100))targetResult("Target must be between 0 and 100%.");
+  const direction=String(formData.get("direction"));
+  if(direction!=="higher"&&direction!=="lower")targetResult("Choose a valid target direction.");
+  const loaded=await loadPerformanceTargets(companyId);
+  if(loaded.error)targetResult("Current targets could not be loaded. No changes saved.");
+  const current=loaded.rows.find(row=>row.reportType==="daily"&&row.metricKey===key);
+  const target={...(current??{metricKey:key,label:definition!.label,short:definition!.short,reportType:"daily" as const,sourceIndex:null,weight:0,unit:"percent" as const,displayOrder:100+hawkeyeMetricDefinitions.indexOf(definition!),isActive:true}),target:number===null?null:number/100,direction:direction as "higher"|"lower",explicitReviewTarget:true};
+  const error=current?.id?await savePerformanceTarget(companyId,current.id,target):await createPerformanceTarget(companyId,target);
+  targetResult(error);
+}
+
+export async function updateStationReviewTargets(formData:FormData) {
+  const authorization=await requirePagePermission("performance_master","edit");
+  const companyId=requireCompanyId(authorization),stationId=String(formData.get("station_id")||"");
+  const scope=await loadCodLocations(companyId,authorization.locationScopeIds,authorization.hasAllLocationAccess);
+  if(scope.error||!scope.locations.some(row=>row.id===stationId))targetResult("You can only configure your authorised stations.");
+  if(!supabaseAdmin)targetResult("Station targets are unavailable.");
+  let targets;
+  try {targets=parseStationReviewTargets(String(formData.get("clearance_cutoff")||""),String(formData.get("emd_noon_target")??""));}
+  catch(e){targetResult(e instanceof Error?e.message:"Check the station targets.");}
+  const sourceCode=stationTargetCode(stationId),version=String(formData.get("version")||"");
+  const values={description:JSON.stringify({...targets,updatedBy:authorization.userId}),updated_at:new Date().toISOString()};
+  const result=version
+    ?await supabaseAdmin!.from("report_import_master").update(values).eq("company_id",companyId).eq("source_code",sourceCode).eq("parser_type","performance_station_target").eq("updated_at",version).select("id")
+    :await supabaseAdmin!.from("report_import_master").insert({...values,company_id:companyId,source_code:sourceCode,name:"Station review targets",parser_type:"performance_station_target",file_types:[],day_offset:0,frequency:"daily",dedupe_fields:[stationId],is_active:true}).select("id");
+  targetResult(result.error||!result.data?.length?"Targets changed or could not be saved. Refresh and try again.":null);
+}
 
 function timeValue(value: FormDataEntryValue | null, fallback: string) {
   const candidate = String(value ?? "").trim();
