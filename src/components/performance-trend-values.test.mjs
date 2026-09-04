@@ -24,10 +24,10 @@ function load(file) {
     : name.startsWith(".") ? load(resolve(dirname(file), name + ".ts")) : localRequire(name) });
   return exports;
 }
-const { PerformanceTrendValues, recordedTrendTotal } = load(resolve(here, "performance-trend-values.tsx"));
+const { PerformanceTrendValues, recordedTrendTotal, trendPeriodPoints } = load(resolve(here, "performance-trend-values.tsx"));
 const points = Array.from({ length: 14 }, (_, i) => ({ date: `2026-09-${String(i+1).padStart(2,"0")}`, value: i === 13 ? null : i === 12 ? 0 : 100, note: i === 13 ? "No report" : "1 approved request" }));
 const base = { key: "ad_hoc_van", unit: "money", label: "Ad-hoc van amount", points, note: "Approved requests" };
-const render = (series = base, days = 7) => renderToStaticMarkup(createElement(PerformanceTrendValues, { series, days }));
+const render = (series = base, period = 7, endDate = "2026-09-14") => renderToStaticMarkup(createElement(PerformanceTrendValues, { series, period, endDate }));
 
 test("first view renders exact daily amounts newest first, no graph", () => {
   const html = render();
@@ -46,6 +46,14 @@ test("14-day switch includes all values without changing source points", () => {
   assert.equal((html.match(/<time /g) || []).length, 14);
   assert.match(html, /₹1,200/);
   assert.equal(JSON.stringify(points), before);
+});
+test("MTD includes every available current-month day through the selected date", () => {
+  const extended = Array.from({ length: 20 }, (_, i) => ({ date: `2026-09-${String(i + 1).padStart(2, "0")}`, value: 100 }));
+  assert.equal(trendPeriodPoints(extended, "mtd", "2026-09-20").length, 20);
+  const html = render({ ...base, points: extended }, "mtd", "2026-09-20");
+  assert.equal((html.match(/<time /g) || []).length, 20);
+  assert.match(html, /MTD recorded total/);
+  assert.match(html, /₹2,000/);
 });
 test("missing selected day does not substitute an older amount; zero is recorded", () => {
   assert.match(render(), /14 Sept<\/small><strong>No data/);
@@ -71,7 +79,10 @@ test("percentages retain targets, missed state, and exact numeric values", () =>
 test("metric cards are history triggers while cost details keep their own action", () => {
   const desk = readFileSync(resolve(here,"performance-review-desk.tsx"),"utf8");
   assert.match(desk, /metric=\{metric.key\} label=\{metric.short\} variant="card"/);
-  assert.equal((desk.match(/<TrendButton group="cost"/g) || []).length, 1);
+  assert.equal((desk.match(/<CostTrendCard metric=/g) || []).length, 6);
+  for (const metric of ["salary_da_cps", "ad_hoc_van", "ad_hoc_da", "daily_cps", "mtd_cps", "allocation"])
+    assert.match(desk, new RegExp(`metric="${metric}"`));
+  assert.match(desk, /Click a card for its 7-day, 14-day or MTD history/);
   assert.match(desk, /snapshot.adHocVanRequests.map/);
   const trends = readFileSync(resolve(here,"performance-trends.tsx"),"utf8");
   assert.match(trends, /!expanded \? <PerformanceTrendValues/);

@@ -20087,13 +20087,17 @@ td strong,
 .metric-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: #cbd5e1; }
 .metric-dot.red { background: #ef4444; }.metric-dot.amber { background: #f59e0b; }.metric-dot.green { background: #22c55e; }
 .performance-cps-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px; }
-.performance-cps-cards details { overflow: hidden; border: 1px solid #e5eaf0; border-radius: 10px; background: #fff; }
-.performance-cps-cards summary { display: block; position: relative; min-height: 88px; padding: 12px; cursor: pointer; list-style: none; background: linear-gradient(145deg, #fff, #f8fafc); }
-.performance-cps-cards summary::after { content: "+"; position: absolute; top: 10px; right: 10px; color: #f05a24; font-size: 17px; }
-.performance-cps-cards details[open] summary::after { content: "−"; }
-.performance-cps-cards summary strong { display: block; color: #172033; font-size: 20px; }
-.performance-cps-cards summary small { display: block; margin-top: 4px; color: #94a3b8; font-size: 8px; }
-.performance-cps-cards details > div { padding: 0 10px 8px; border-top: 1px solid #edf0f4; }
+.performance-cps-card { position: relative; overflow: hidden; border: 1px solid #e5eaf0; border-radius: 10px; background: #fff; }
+.performance-cps-card-body { position: relative; min-height: 88px; padding: 12px; background: linear-gradient(145deg, #fff, #f8fafc); }
+.performance-cps-card-body > span { display: block; margin-bottom: 3px; color: #64748b; font-size: 9px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+.performance-cps-card-body > strong { display: block; color: #172033; font-size: 20px; }
+.performance-cps-card-body > small { display: block; margin-top: 4px; color: #94a3b8; font-size: 8px; }
+.performance-cps-card-body > .review-trend-card { position: absolute; inset: 0; z-index: 1; width: 100% !important; height: 100% !important; padding: 0 !important; border: 1px solid transparent !important; border-radius: inherit !important; background: transparent !important; }
+.performance-cps-card-body > .review-trend-card:hover, .performance-cps-card-body > .review-trend-card[aria-expanded="true"] { border-color: #f97316 !important; background: #ffffff18 !important; }
+.performance-cps-card > details > summary { position: absolute; z-index: 2; top: 9px; right: 9px; display: grid; width: 24px; height: 24px; place-items: center; border: 1px solid #fed7aa; border-radius: 50%; color: #c2410c; background: #fff; cursor: pointer; list-style: none; font-size: 11px; font-weight: 850; }
+.performance-cps-card > details > summary::-webkit-details-marker { display: none; }
+.performance-cps-card > details[open] > summary { color: #fff; background: #f97316; }
+.performance-cps-card > details > div { position: relative; z-index: 3; padding: 0 10px 8px; border-top: 1px solid #edf0f4; background: #fff; }
 .performance-cps-cards p { display: flex; justify-content: space-between; gap: 8px; margin: 0; padding: 7px 1px; border-bottom: 1px dashed #edf0f4; color: #475569; font-size: 9px; }
 .performance-cps-cards p:last-child { border: 0; }.performance-cps-cards p b { color: #172033; text-align: right; }.performance-cps-cards p small { display: block; color: #94a3b8; }
 .performance-cps-note { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; margin: 0 12px 12px; padding: 10px; border-radius: 9px; color: #78350f; background: #fffbeb; font-size: 9px; }

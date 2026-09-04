@@ -51,7 +51,10 @@ export async function loadReviewTrends(
 ): Promise<TrendResponse> {
   if (!supabaseAdmin) throw Error("Trend data is temporarily unavailable.");
   const db = supabaseAdmin,
-    dates = trendDates(endDate),
+    dates = trendDates(
+      endDate,
+      group === "cost" ? Math.max(14, Number(endDate.slice(8, 10))) : 14,
+    ),
     from = dates[0],
     code = station.station_code;
   let series: TrendSeries[] = [];

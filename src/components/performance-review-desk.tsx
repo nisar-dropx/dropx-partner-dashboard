@@ -22,6 +22,7 @@ import { PerformanceConnections } from "@/components/performance-connections";
 import { PerformanceRcaActions } from "@/components/performance-rca-actions";
 import { ReviewActionForm } from "@/components/review-action-form";
 import { discussionFeedUpdates, visibleReviewStep } from "@/lib/ops-pulse/review-policy";
+import type { ReactNode } from "react";
 
 export type ReviewMetric = {
   actual: number | null;
@@ -85,6 +86,19 @@ function stationKey(value: string | null | undefined) {
 
 function valueText(value: number | null) {
   return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
+}
+
+function CostTrendCard({ metric, label, value, summary, children }: { metric: string; label: string; value: string; summary: string; children: ReactNode }) {
+  return <article className="performance-cps-card">
+    <div className="performance-cps-card-body">
+      <span>{label}</span><strong>{value}</strong><small>{summary}</small>
+      <TrendButton group="cost" metric={metric} label={label} variant="card"/>
+    </div>
+    <details>
+      <summary aria-label={`View ${label} details`} title={`View ${label} details`}>i</summary>
+      <div>{children}</div>
+    </details>
+  </article>;
 }
 
 function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociateDelivery[]; total: number }) {
@@ -249,14 +263,20 @@ export function PerformanceReviewDesk(props: Props) {
 
       <section className="panel performance-review-section performance-cps-review">
         <PerformanceCodPending key={`${selectedCode}-${props.codSnapshot.batchId}`} snapshot={props.codSnapshot}/>
-        <div className="panel-head"><div><span className="performance-review-kicker">02 · CPS</span><h2>Cost and allocation</h2><p className="subtle">Cards show the selected day. History shows daily amounts and CPS.</p></div><TrendButton group="cost" metric="ad_hoc_van" label="Cost and allocation"/></div>
+        <div className="panel-head"><div><span className="performance-review-kicker">02 · CPS</span><h2>Cost and allocation</h2><p className="subtle">Click a card for its 7-day, 14-day or MTD history. Use i for the selected-day details.</p></div></div>
         <div className="performance-cps-cards">
-          <details><summary><span>Salary DA CPS</span><strong>{money(snapshot.salaryDaCps)}</strong><small>{money(snapshot.salaryDaCost)} total</small></summary><div><p><span>Per-shipment / variable</span><b>{money(snapshot.variableDaPay)}</b></p><p><span>MG / salary</span><b>{money(snapshot.mgSalaryPay)}</b></p><p><span>Kilometre / fuel</span><b>{money(snapshot.fuelPay)}</b></p><p><span>FE payment setup gaps</span><b>{snapshot.unmappedFeCount}</b></p></div></details>
-          <details><summary><span>Ad-hoc van · info</span><strong>{money(snapshot.adHocVanCost)}</strong><small>{snapshot.adHocVanRequests.length} approved request{snapshot.adHocVanRequests.length === 1 ? "" : "s"} · click for reason</small></summary><div>{snapshot.adHocVanRequests.length ? snapshot.adHocVanRequests.map((request) => <p key={request.requestNo}><span>{request.requestNo} · {request.head}<small>{request.reason}</small></span><b>{money(request.amount)}</b></p>) : <p><span>No approved ad-hoc van request</span><b>₹0</b></p>}</div></details>
-          <details><summary><span>Ad-hoc DA · info</span><strong>{money(snapshot.adHocDaCost)}</strong><small>{snapshot.adHocDaRequests.length} approved request{snapshot.adHocDaRequests.length === 1 ? "" : "s"} · click for reason</small></summary><div>{snapshot.adHocDaRequests.length ? snapshot.adHocDaRequests.map((request) => <p key={request.requestNo}><span>{request.requestNo} · {request.head}<small>{request.reason}</small></span><b>{money(request.amount)}</b></p>) : <p><span>No approved ad-hoc DA request</span><b>₹0</b></p>}</div></details>
-          <details><summary><span>Daily CPS</span><strong>{money(snapshot.dailyCps)}</strong><small>{money(snapshot.dayCost)} total cost</small></summary><div>{snapshot.costBreakdown.length ? snapshot.costBreakdown.map((line, index) => <p key={`${line.head}-${line.subHead}-${index}`}><span>{line.head} · {line.subHead}<small>{line.source}</small></span><b>{money(line.amount)}<small>{money(line.cps)} CPS</small></b></p>) : <p><span>No cost breakup loaded</span><b>—</b></p>}</div></details>
-          <details><summary><span>MTD CPS</span><strong>{money(snapshot.mtdCps)}</strong><small>{money(snapshot.mtdCost)} / {snapshot.mtdDelivery.toLocaleString("en-IN")} delivered</small></summary><div><p><span>Month-to-date cost</span><b>{money(snapshot.mtdCost)}</b></p><p><span>Month-to-date delivery</span><b>{snapshot.mtdDelivery.toLocaleString("en-IN")}</b></p><p><span>Includes configured DA, UTR, van, fuel, rent and other heads</span><b>All heads</b></p></div></details>
-          <details><summary><span>Allocation</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / {snapshot.activeFeCount} FEs</small></summary><div><p><span>Delivered shipments</span><b>{snapshot.deliveredCount.toLocaleString("en-IN")}</b></p><p><span>Active FE IDs</span><b>{snapshot.activeFeCount}</b></p></div></details>
+          <CostTrendCard metric="salary_da_cps" label="Salary DA CPS" value={money(snapshot.salaryDaCps)} summary={`${money(snapshot.salaryDaCost)} total`}><p><span>Per-shipment / variable</span><b>{money(snapshot.variableDaPay)}</b></p><p><span>MG / salary</span><b>{money(snapshot.mgSalaryPay)}</b></p><p><span>Kilometre / fuel</span><b>{money(snapshot.fuelPay)}</b></p><p><span>FE payment setup gaps</span><b>{snapshot.unmappedFeCount}</b></p></CostTrendCard>
+          <CostTrendCard metric="ad_hoc_van" label="Ad-hoc van" value={money(snapshot.adHocVanCost)} summary={`${snapshot.adHocVanRequests.length} approved request${snapshot.adHocVanRequests.length === 1 ? "" : "s"}`}>
+            {snapshot.adHocVanRequests.length ? snapshot.adHocVanRequests.map((request) => <p key={request.requestNo}><span>{request.requestNo} · {request.head}<small>{request.reason}</small></span><b>{money(request.amount)}</b></p>) : <p><span>No approved ad-hoc van request</span><b>₹0</b></p>}
+          </CostTrendCard>
+          <CostTrendCard metric="ad_hoc_da" label="Ad-hoc DA" value={money(snapshot.adHocDaCost)} summary={`${snapshot.adHocDaRequests.length} approved request${snapshot.adHocDaRequests.length === 1 ? "" : "s"}`}>
+            {snapshot.adHocDaRequests.length ? snapshot.adHocDaRequests.map((request) => <p key={request.requestNo}><span>{request.requestNo} · {request.head}<small>{request.reason}</small></span><b>{money(request.amount)}</b></p>) : <p><span>No approved ad-hoc DA request</span><b>₹0</b></p>}
+          </CostTrendCard>
+          <CostTrendCard metric="daily_cps" label="Daily CPS" value={money(snapshot.dailyCps)} summary={`${money(snapshot.dayCost)} total cost`}>
+            {snapshot.costBreakdown.length ? snapshot.costBreakdown.map((line, index) => <p key={`${line.head}-${line.subHead}-${index}`}><span>{line.head} · {line.subHead}<small>{line.source}</small></span><b>{money(line.amount)}<small>{money(line.cps)} CPS</small></b></p>) : <p><span>No cost breakup loaded</span><b>—</b></p>}
+          </CostTrendCard>
+          <CostTrendCard metric="mtd_cps" label="MTD CPS" value={money(snapshot.mtdCps)} summary={`${money(snapshot.mtdCost)} / ${snapshot.mtdDelivery.toLocaleString("en-IN")} delivered`}><p><span>Month-to-date cost</span><b>{money(snapshot.mtdCost)}</b></p><p><span>Month-to-date delivery</span><b>{snapshot.mtdDelivery.toLocaleString("en-IN")}</b></p><p><span>Includes configured DA, UTR, van, fuel, rent and other heads</span><b>All heads</b></p></CostTrendCard>
+          <CostTrendCard metric="allocation" label="Allocation" value={snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)} summary={`${snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / ${snapshot.activeFeCount} FEs`}><p><span>Delivered shipments</span><b>{snapshot.deliveredCount.toLocaleString("en-IN")}</b></p><p><span>Active FE IDs</span><b>{snapshot.activeFeCount}</b></p></CostTrendCard>
         </div>
         <PerformanceVanFuel key={`fuel-${selectedCode}-${date}`} station={selectedCode} date={date}/>
         <div className="performance-cps-note"><strong>Cost completeness</strong><span>Values appear only when their source is loaded or configured. Missing rent, UTR or payment mappings remain visible as a data gap; OpsPulse does not estimate them.</span><Link href="/cps/inputs">Open CPS inputs →</Link></div>

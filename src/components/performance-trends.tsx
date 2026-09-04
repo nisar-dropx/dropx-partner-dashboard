@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { PerformanceTrendValues } from "@/components/performance-trend-values";
+import { PerformanceTrendValues, trendPeriodPoints, type TrendPeriod } from "@/components/performance-trend-values";
 import {
   formatTrendValue,
   trendGeometry,
@@ -64,7 +64,7 @@ export function PerformanceTrendProvider({
   children: ReactNode;
 }) {
   const [active, setActive] = useState<Selection | null>(null),
-    [days, setDays] = useState<7 | 14>(7),
+    [period, setPeriod] = useState<TrendPeriod>(7),
     [expanded, setExpanded] = useState(false);
   const [data, setData] = useState<TrendResponse | null>(null),
     [error, setError] = useState<string | null>(null),
@@ -93,6 +93,7 @@ export function PerformanceTrendProvider({
     setActive(selection);
     setExpanded(false);
     setHighlight(null);
+    setPeriod((current) => selection.group === "cost" || current !== "mtd" ? current : 7);
   }
   useEffect(() => {
     if (!group) return;
@@ -197,7 +198,7 @@ export function PerformanceTrendProvider({
     };
   }, [active, expanded]);
   const series = data?.series.find((s) => s.key === active?.metric),
-    points = series?.points.slice(-days) ?? [],
+    points = series ? trendPeriodPoints(series.points, period, date) : [],
     geometry = trendGeometry(points, series?.target);
   const valid = points.filter((p) => p.value != null),
     latest = valid.at(-1),
@@ -247,17 +248,17 @@ export function PerformanceTrendProvider({
                 </header>
                 <div className="review-trend-controls">
                   <div role="group" aria-label="Trend period">
-                    {([7, 14] as const).map((value) => (
+                    {([7, 14, ...(group === "cost" ? ["mtd" as const] : [])] as const).map((value) => (
                       <button
                         type="button"
                         key={value}
-                        aria-pressed={days === value}
+                        aria-pressed={period === value}
                         onClick={() => {
-                          setDays(value);
+                          setPeriod(value);
                           setHighlight(null);
                         }}
                       >
-                        {value} days
+                        {value === "mtd" ? "MTD" : `${value} days`}
                       </button>
                     ))}
                   </div>
@@ -303,7 +304,7 @@ export function PerformanceTrendProvider({
                         </select>
                       </label>
                     ) : null}
-                    {!expanded ? <PerformanceTrendValues series={series} days={days}/> : <div className="review-trend-summary">
+                    {!expanded ? <PerformanceTrendValues series={series} period={period} endDate={date}/> : <div className="review-trend-summary">
                       <strong>
                         {formatTrendValue(selected?.value ?? null, series.unit)}
                       </strong>
@@ -312,7 +313,7 @@ export function PerformanceTrendProvider({
                         {selected?.note ? <small>{selected.note}</small> : null}
                       </span>
                       <small>
-                        {valid.length}/{days} days available
+                        {valid.length}/{points.length} days available
                         {delta != null && valid.length > 1
                           ? ` · ${delta > 0 ? "+" : ""}${series.unit === "time" ? `${Math.round(delta)} min` : series.unit === "percent" ? `${delta.toFixed(1)} pp` : formatTrendValue(delta, series.unit)} change`
                           : ""}
@@ -400,7 +401,7 @@ export function PerformanceTrendProvider({
                       </svg>
                     ) : (
                       <p className="review-trend-message">
-                        No recorded data in these {days} days.
+                        No recorded data in this period.
                       </p>
                     ))}
                     {series.target != null ? (
