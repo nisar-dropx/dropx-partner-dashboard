@@ -2,9 +2,10 @@ import Link from "next/link";
 import { formatDashboardDate } from "@/lib/date-format";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import type { PerformanceAssociateDelivery, PerformanceOperationalSnapshot, PerformanceReview, PerformanceReviewCarryover, PerformanceReviewItem, PerformanceReviewStep, PerformanceConnection, PerformanceReviewUpdate, PerformanceReviewChainStep } from "@/lib/ops-pulse/performance-review";
-import { savePerformanceReviewComment, savePerformanceReviewItem, savePerformanceReviewOperations, startPerformanceReview } from "@/app/ops-pulse/performance/actions";
+import { savePerformanceReviewComment, savePerformanceReviewOperations, startPerformanceReview } from "@/app/ops-pulse/performance/actions";
 import { PerformanceReviewPicker } from "@/components/performance-review-picker";
 import { PerformanceConnections } from "@/components/performance-connections";
+import { PerformanceRcaActions } from "@/components/performance-rca-actions";
 import { ReviewActionForm } from "@/components/review-action-form";
 import { reviewRole } from "@/lib/ops-pulse/review-policy";
 
@@ -159,15 +160,17 @@ export function PerformanceReviewDesk(props: Props) {
           <label className="wide">Review takeaway<textarea name="review_summary" defaultValue={review.review_summary ?? ""} placeholder="Only the key conclusion or escalation"/></label>
           <button className="button secondary">Save takeaway</button>
         </ReviewActionForm> : review ? <div className="review-takeaway-readonly"><strong>Review takeaway</strong><p>{review.review_summary || "Awaiting the first manager’s review."}</p></div> : null}
-        {review && misses.length ? <div className="performance-review-actions"><h3>RCA and next-day actions</h3>{misses.map((metric) => {
-          const item = itemByMetric.get(metric.key);
-          return <details className="performance-action-item" key={`action-${metric.key}`} open={Boolean(item && item.status !== "done")}><summary><span className={`metric-dot ${metric.severity}`}/><strong>{metric.label}</strong><b>{item?.status?.replace("_", " ") || "Needs RCA"}</b></summary>{canEdit ? <ReviewActionForm action={savePerformanceReviewItem}>
-            <input type="hidden" name="review_id" value={review.id}/><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="review_version" value={review.updated_at}/><input type="hidden" name="metric_key" value={metric.key}/><input type="hidden" name="metric_label" value={metric.label}/><input type="hidden" name="actual_value" value={metric.actual ?? ""}/><input type="hidden" name="target_value" value={metric.target ?? ""}/><input type="hidden" name="target_direction" value={metric.direction}/><input type="hidden" name="severity" value={metric.severity}/>
-            <label>Root cause<textarea required name="root_cause" defaultValue={item?.root_cause ?? ""} placeholder="What caused the miss?"/></label>
-            <label>Next action<textarea required name="corrective_action" defaultValue={item?.corrective_action ?? ""} placeholder="Specific action before next review"/></label>
-            <label>Owner<input required name="action_owner" defaultValue={item?.action_owner ?? ""}/></label><label>Due<input type="date" name="due_date" defaultValue={item?.due_date ?? date}/></label><label>Status<select name="status" defaultValue={item?.status ?? "open"}><option value="open">Open</option><option value="in_progress">In progress</option><option value="blocked">Blocked</option><option value="done">Done</option></select></label><button className="button secondary">Save action</button>
-          </ReviewActionForm> : <div className="performance-action-readonly"><p><b>RCA</b>{item?.root_cause || "Awaiting update"}</p><p><b>Action</b>{item?.corrective_action || "Awaiting update"}</p><p><b>Owner / due</b>{item?.action_owner || "—"}{item?.due_date ? ` · ${formatDashboardDate(item.due_date)}` : ""}</p></div>}</details>;
-        })}</div> : null}
+        {review && misses.length ? (
+          <PerformanceRcaActions
+            canEdit={canEdit}
+            date={date}
+            itemsByMetric={itemByMetric}
+            misses={misses}
+            reviewId={review.id}
+            reviewVersion={review.updated_at}
+            stationCode={selectedCode}
+          />
+        ) : null}
       </section>
 
       <section className="panel performance-review-section performance-cps-review">
