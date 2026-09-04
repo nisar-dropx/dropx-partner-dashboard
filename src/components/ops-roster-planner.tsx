@@ -142,6 +142,7 @@ export function OpsRosterPlanner({
   const [isPreparing, setIsPreparing] = useState(false);
   const [isSaving, startSaving] = useTransition();
   const [isImporting, startImporting] = useTransition();
+  const [excelFileName, setExcelFileName] = useState<string | null>(null);
   const editingEnabledRef = useRef(editable);
   const pendingRecall = plan?.status === "pending_approval" && canStart && !editingEnabled;
   const assignmentsRef = useRef(initial);
@@ -285,6 +286,7 @@ export function OpsRosterPlanner({
         setMessage({ tone: "error", text: result.message });
         return;
       }
+      setExcelFileName(null);
       setMessage({ tone: "success", text: result.message });
       if (result.entries && result.periodStart) {
         const next = initialAssignments(result.entries);
@@ -649,23 +651,54 @@ export function OpsRosterPlanner({
 
     <div className={styles.legend}><span><i className={styles.workingLegend} /> Working shift</span><span><i className={styles.offLegend} /> Week off</span><span><i className={styles.holidayLegend} /> Holiday</span><span><i className={styles.dirtyLegend} /> Unsaved change</span>{dirtyKeys.size ? <strong><Check size={13} /> Review and save {dirtyKeys.size} changes</strong> : editingEnabled ? <strong>No unsaved changes</strong> : <strong>Saved roster pattern</strong>}</div>
     {editingEnabled && activePlanId ? <footer className={styles.approvalLine}><span><strong>{dirtyKeys.size ? `Save ${dirtyKeys.size} change${dirtyKeys.size === 1 ? "" : "s"} first` : !submissionCoverage.ready ? "Add at least one assignment" : !routeReady ? "Approval setup required" : submissionCoverage.missing ? `${submissionCoverage.missing} cells remain unassigned` : approvalRequired ? "Ready to submit" : "Ready to apply"}</strong><small>{dirtyKeys.size ? "Unsaved assignments cannot be submitted." : !submissionCoverage.ready ? "A blank draft is kept safely and will not replace the current roster." : submissionCoverage.missing ? `${submissionCoverage.ready} assignments are ready. Unassigned people remain blank.` : approvalSummary}</small></span><button type="button" className="button primary compact" onClick={submit} disabled={Boolean(dirtyKeys.size || !submissionCoverage.ready || !routeReady || isSaving)}>{approvalRequired ? <Send size={14} /> : <Check size={14} />} {approvalRequired ? "Send for approval" : "Apply roster"}</button></footer> : null}
-    {canUseExcel ? <details className={styles.excelImport}>
-      <summary><Upload size={14} /><span>Station Excel · {stationCode} people only · import fills the draft; submit still goes for approval</span></summary>
-      <div className={styles.excelImportBody}>
-        <p>Download the station template, fill Mon–Sun (or WO), then upload. Import never publishes on its own.</p>
-        <div className={styles.excelImportActions}>
-          <a className="button secondary compact" download href={templateHref}><Download size={14} /> Download template</a>
+    {canUseExcel ? <section className={styles.excelPanel} aria-label="Station Excel upload">
+      <div className={styles.excelHead}>
+        <span className={styles.excelIcon} aria-hidden="true"><Upload size={16} /></span>
+        <div>
+          <strong>Excel upload</strong>
+          <small>{stationCode} · active people at this station only</small>
+        </div>
+        <span className={styles.excelBadge}>Draft only</span>
+        <span className={styles.excelBadgeMuted}>Submit for approval after import</span>
+      </div>
+      <ol className={styles.excelSteps}>
+        <li>
+          <em>1</em>
+          <div>
+            <strong>Download template</strong>
+            <small>Mon–Sun columns · use WO for week off</small>
+          </div>
+          <a className="button secondary compact" download href={templateHref}><Download size={14} /> Download</a>
+        </li>
+        <li>
+          <em>2</em>
+          <div>
+            <strong>Upload completed file</strong>
+            <small>{editingEnabled && activePlanId ? "Fills this draft — does not publish" : pendingRecall ? "Recall & edit first, then upload" : "Start or edit the roster first"}</small>
+          </div>
           {editingEnabled && activePlanId ? (
             <form action={importWorkbook} encType="multipart/form-data" className={styles.excelImportForm}>
-              <input name="workbook" type="file" accept=".csv,.xlsx,.xls" required disabled={isImporting} aria-label="Completed station workbook" />
+              <label className={styles.excelFile}>
+                <input
+                  name="workbook"
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  required
+                  disabled={isImporting}
+                  onChange={(event) => setExcelFileName(event.target.files?.[0]?.name ?? null)}
+                />
+                <span>{excelFileName ?? "Choose file"}</span>
+              </label>
               <button className="button primary compact" type="submit" disabled={isImporting}>{isImporting ? "Importing…" : "Import"}</button>
             </form>
           ) : (
-            <span className={styles.excelImportHint}>{pendingRecall ? "Recall & edit first, then upload." : "Start or edit the roster before uploading."}</span>
+            <button className="button secondary compact" type="button" onClick={() => void ensureEditing()} disabled={isPreparing || !canStart}>
+              <PencilLine size={14} /> {pendingRecall ? "Recall & edit" : "Edit roster"}
+            </button>
           )}
-        </div>
-      </div>
-    </details> : null}
+        </li>
+      </ol>
+    </section> : null}
     {pointerDrag?.active ? <div ref={dragGhostRef} className={styles.dragGhost} style={{ left: pointerDrag.x, top: pointerDrag.y }} aria-hidden="true"><GripVertical size={13} /> {pointerDrag.label}</div> : null}
     {cellPicker ? <><button type="button" className={styles.pickerBackdrop} aria-label="Close shift picker" onClick={() => setCellPicker(null)} /><div className={styles.picker} role="dialog" aria-label={`Change shift for ${cellPicker.person.name} on ${dateLabel(cellPicker.date)}`} style={{ top: cellPicker.top, left: cellPicker.left }}><header className={styles.pickerHead}><strong>{cellPicker.person.name}</strong><small>{dayLabel(cellPicker.date)} · {dateLabel(cellPicker.date)}</small></header><div className={styles.pickerList}>{shifts.map((shift) => <button key={shift.id} type="button" className={styles.pickerOption} style={{ "--shift-color": shift.color || "#cb4b65" } as CSSProperties} onClick={() => applyPickerTool({ kind: "shift", shiftId: shift.id })}><span className={styles.pickerSwatch} aria-hidden="true" /><span className={styles.pickerOptionContent}><strong>{shift.code}</strong><small>{compactTime(shift.startTime)} – {compactTime(shift.endTime)}</small></span></button>)}<button type="button" className={`${styles.pickerOption} ${styles.off}`} onClick={() => applyPickerTool({ kind: "weekly_off" })}><span className={styles.pickerSwatch} aria-hidden="true" /><span className={styles.pickerOptionContent}><strong>Week Off</strong><small>Rest day</small></span></button><button type="button" className={`${styles.pickerOption} ${styles.clear}`} onClick={() => applyPickerTool({ kind: "clear" })}><Eraser size={14} aria-hidden="true" /><span className={styles.pickerOptionContent}><strong>Remove</strong><small>Clear this assignment</small></span></button></div></div></> : null}
     {(draggingLabel || pointerDrag?.active) && draggingAssignment ? <div className={styles.removeHint} role="status">Drag outside the grid to remove this assignment</div> : null}
