@@ -1,5 +1,7 @@
 /* Scoped to Review Desk: readable controls at browser zoom without widening the page. */
 .performance-review-desk { min-width: 0; max-width: 100%; }
+.review-rca-full-detail { padding: 16px; font-size: 14px; }
+.review-rca-full-detail p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
 .performance-review-desk :is(section, form, label, article, details, fieldset) { min-width: 0; }
 .performance-review-desk .performance-review-columns { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
 .performance-review-desk .performance-review-metrics { grid-template-columns: repeat(auto-fit,minmax(120px,1fr)); gap: 6px; }

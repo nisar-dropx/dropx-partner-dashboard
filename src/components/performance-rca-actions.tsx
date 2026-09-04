@@ -58,7 +58,7 @@ export function PerformanceRcaActions({
   const activeItem = activeMetric ? itemsByMetric.get(activeMetric.key) : null;
 
   function openEditor(metricKey: string, field: FocusField) {
-    if (!canEdit) return;
+    if (!canEdit && !itemsByMetric.has(metricKey)) return;
     setFocusField(field);
     setActiveKey(metricKey);
   }
@@ -99,7 +99,7 @@ export function PerformanceRcaActions({
       <div className="performance-rca-head">
         <div>
           <h3>RCA and next-day actions</h3>
-          <p>{misses.length} metric{misses.length === 1 ? "" : "s"} off target. Capture the root cause and the action before the next review.</p>
+          <p>Current exceptions and saved RCA · open any entry to read the full detail.</p>
         </div>
         <b>{misses.filter((metric) => itemsByMetric.get(metric.key)?.status === "done").length}/{misses.length} done</b>
       </div>
@@ -160,7 +160,7 @@ export function PerformanceRcaActions({
         })}
       </div>
 
-      {canEdit && activeMetric ? (
+      {activeMetric ? (
         <div className="modal-backdrop performance-rca-backdrop" role="presentation" onMouseDown={(event) => {
           if (event.target === event.currentTarget) closeEditor();
         }}>
@@ -181,7 +181,7 @@ export function PerformanceRcaActions({
 
             <p className="performance-rca-help">Write a clear root cause and one concrete next-day action. Keep ownership and due date visible so follow-up is easy.</p>
 
-            <ReviewActionForm
+            {canEdit ? <ReviewActionForm
               action={savePerformanceReviewItem}
               className="performance-rca-form"
               onSaved={closeEditor}
@@ -251,7 +251,12 @@ export function PerformanceRcaActions({
                 <button className="button secondary" type="button" onClick={closeEditor}>Cancel</button>
                 <button className="button" type="submit">Save RCA & action</button>
               </div>
-            </ReviewActionForm>
+            </ReviewActionForm> : <div className="review-rca-full-detail">
+              <h4>Root cause</h4><p>{activeItem?.root_cause||"Not entered"}</p>
+              <h4>Next action</h4><p>{activeItem?.corrective_action||"Not entered"}</p>
+              <p><strong>Owner:</strong> {activeItem?.action_owner||"Not assigned"} · <strong>ETA:</strong> {activeItem?.due_date?formatDashboardDate(activeItem.due_date):"Not set"}</p>
+              <p><strong>Status:</strong> {statusLabel(activeItem?.status)}</p>
+            </div>}
           </section>
         </div>
       ) : null}
