@@ -178,7 +178,11 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const slsMetricDefinitions = resolvePerformanceTargets(targetResult.rows, "sls");
   const locationsResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const context = resolveOperatingContext(locationsResult.locations);
-  const permittedLocations = context.selectedLocations;
+  // Review Desk / Station Performance must use every authorised station for the
+  // active operating model. Do not inherit the Command Center single-station
+  // Scope cookie (dropx-ops-locations), or managers with full access only see
+  // whichever location was last focused in OpsPulse.
+  const permittedLocations = context.modeLocations;
   const permittedCodes = permittedLocations.map((location) => location.station_code);
   const requestedCodes = String(searchParams?.stations ?? "").split(",").map((code) => code.trim().toUpperCase()).filter((code) => permittedCodes.includes(code));
   const selectedCodes = requestedCodes.length ? [...new Set(requestedCodes)] : permittedCodes;
@@ -357,7 +361,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const trendStationLocation = locationByCode.get(trendStationCode);
   const trendHref = (code: string) => `/ops-pulse/performance?view=daily&date=${selectedDate}${stationQuery}&trend=${encodeURIComponent(code)}#daily-trend`;
   const requestedReviewCode = stationCode(searchParams?.review ?? null);
-  const selectedReviewLocation = permittedLocations.find((location) => location.station_code === requestedReviewCode) ?? permittedLocations[0] ?? null;
+  const selectedReviewLocation = permittedLocations.find((location) => stationCode(location.station_code) === requestedReviewCode) ?? permittedLocations[0] ?? null;
   const reviewWorkspace = selectedReviewLocation
     ? await loadPerformanceReviewWorkspace(companyId, selectedDate, view === "reviews" ? permittedCodes : [selectedReviewLocation.station_code])
     : { settings: null, reviews: [], previousReviews: [], steps: [], items: [], updates: [], error: "No permitted station is available." };
