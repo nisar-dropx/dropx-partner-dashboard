@@ -1,0 +1,286 @@
+.review-trend-button {
+  display: inline-flex !important;
+  width: 26px !important;
+  height: 26px !important;
+  min-height: 26px !important;
+  align-items: center;
+  justify-content: center;
+  padding: 3px !important;
+  border: 1px solid #d9e2ed !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+  color: #64748b !important;
+  cursor: pointer;
+  box-shadow: none !important;
+  flex: none;
+}
+.review-trend-button:hover,
+.review-trend-button[aria-expanded="true"] {
+  color: #ea580c !important;
+  border-color: #fb923c !important;
+  background: #fff7ed !important;
+}
+.performance-review-metrics article {
+  position: relative;
+}
+.performance-review-desk .performance-review-metrics article > span {
+  padding-right: 24px;
+}
+.performance-review-metrics article > .review-trend-button {
+  position: absolute;
+  right: 3px;
+  top: 3px;
+  width: 22px !important;
+  height: 22px !important;
+  min-height: 22px !important;
+}
+.performance-review-facts > article,
+.performance-fact-card > summary,
+.performance-cps-cards > details > summary {
+  position: relative;
+}
+.performance-fact-card > summary > .review-trend-button,
+.performance-cps-cards > details > summary > .review-trend-button {
+  position: absolute;
+  right: 30px;
+  top: 5px;
+}
+.performance-review-facts > article > .review-trend-button {
+  position: absolute;
+  right: 6px;
+  top: 5px;
+}
+.performance-fact-card > summary > span,
+.performance-cps-cards > details > summary > span {
+  padding-right: 44px;
+}
+.review-noon-emd > div:first-child {
+  position: relative;
+  padding-right: 30px;
+}
+.review-noon-emd > div:first-child > .review-trend-button {
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+.review-vehicle-trends {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 6px 0;
+  font-size: 11px;
+  color: #64748b;
+}
+.review-vehicle-trends > span {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.review-trend-backdrop {
+  position: fixed;
+  inset: 0;
+  background: #0f172a55;
+  z-index: 1199;
+}
+.review-trend-popover {
+  position: fixed;
+  z-index: 1200;
+  background: #fff;
+  color: #172033;
+  border: 1px solid #dbe3ec;
+  border-radius: 12px;
+  box-shadow: 0 12px 45px #0f172a38;
+  padding: 14px;
+  max-height: min(550px, calc(100dvh - 24px));
+  overflow: auto;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.review-trend-popover.expanded {
+  max-height: calc(100dvh - 24px);
+}
+.review-trend-popover header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+}
+.review-trend-popover header strong {
+  font-size: 15px;
+  display: block;
+}
+.review-trend-popover small {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.review-trend-popover button {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  padding: 6px 9px;
+  cursor: pointer;
+  font-size: 12px;
+  min-height: 30px;
+}
+.review-trend-popover button:focus-visible,
+.review-trend-button:focus-visible,
+.review-trend-popover select:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+.review-trend-popover header > button {
+  font-size: 22px;
+  line-height: 1;
+  padding: 3px 8px;
+}
+.review-trend-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 0;
+}
+.review-trend-controls > div {
+  display: flex;
+  gap: 3px;
+}
+.review-trend-controls button[aria-pressed="true"] {
+  background: #172033;
+  color: #fff;
+  border-color: #172033;
+}
+.review-trend-measure {
+  font-size: 11px;
+  color: #64748b;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.review-trend-measure select {
+  min-width: 0;
+  flex: 1;
+  max-width: 100%;
+  padding: 6px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  border-radius: 6px;
+  color: #334155;
+  font-size: 12px;
+}
+.review-trend-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 12px 0 3px;
+}
+.review-trend-summary strong {
+  font-size: 22px;
+}
+.review-trend-summary span {
+  font-size: 12px;
+}
+.review-trend-summary > small {
+  flex-basis: 100%;
+}
+.review-trend-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+.review-trend-popover.expanded .review-trend-chart {
+  max-height: 300px;
+}
+.review-trend-chart text {
+  font-size: 10px;
+  fill: #64748b;
+}
+.trend-axis {
+  stroke: #e2e8f0;
+}
+.trend-target {
+  stroke: #94a3b8;
+  stroke-dasharray: 5 4;
+}
+.trend-line {
+  stroke: #f97316;
+  stroke-width: 2;
+}
+.trend-dot {
+  fill: #f97316;
+  cursor: pointer;
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+.trend-dot.met {
+  fill: #16a34a;
+}
+.trend-dot.missed {
+  fill: #dc2626;
+}
+.trend-dot:focus {
+  outline: none;
+  stroke: #1d4ed8;
+  stroke-width: 3;
+}
+.trend-gap {
+  stroke: #94a3b8;
+}
+.review-trend-note,
+.review-trend-target {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #64748b;
+  margin: 7px 0 0;
+}
+.review-trend-note {
+  border-top: 1px solid #edf1f6;
+  padding-top: 8px;
+}
+.review-trend-message {
+  font-size: 13px;
+  padding: 24px 2px;
+  color: #64748b;
+  display: grid;
+  gap: 10px;
+}
+.review-trend-table {
+  max-height: 250px;
+  overflow: auto;
+  margin-top: 10px;
+}
+.review-trend-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+.review-trend-table th,
+.review-trend-table td {
+  padding: 7px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.review-trend-table caption {
+  text-align: left;
+  font-size: 11px;
+  padding: 6px;
+  color: #64748b;
+}
+@media (max-width: 480px) {
+  .review-trend-popover {
+    padding: 10px;
+  }
+  .review-trend-table th,
+  .review-trend-table td {
+    padding: 5px;
+    font-size: 11px;
+  }
+  .review-trend-summary strong {
+    font-size: 19px;
+  }
+}

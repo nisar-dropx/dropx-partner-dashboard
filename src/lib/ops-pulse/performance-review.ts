@@ -324,12 +324,12 @@ export async function loadPerformanceReviewWorkspace(companyId: string, sourceDa
   };
 }
 
-function isAdHocHead(head: { code: string | null; name: string | null }) {
+export function isAdHocHead(head: { code: string | null; name: string | null }) {
   const candidate = `${normalized(head.code)}_${normalized(head.name)}`;
   return candidate.includes("ADHOC") || candidate.includes("AD_HOC") || candidate.includes("SPOT_MANPOWER");
 }
 
-function adHocCategory(head: { code: string | null; name: string | null }): PerformanceCostRequest["category"] {
+export function adHocCategory(head: { code: string | null; name: string | null }): PerformanceCostRequest["category"] {
   const candidate = `${normalized(head.code)}_${normalized(head.name)}`;
   if (candidate.includes("VAN") || candidate.includes("VEHICLE")) return "Van";
   if (candidate.includes("_DA") || candidate.includes("DRIVER") || candidate.includes("ASSOCIATE") || candidate.includes("MANPOWER")) return "DA";
@@ -349,7 +349,7 @@ function paymentReason(row: { remarks?: string | null; notes?: string | null; de
   return "Reason not recorded in the request";
 }
 
-function isApprovedPayment(request: { status: string | null; approval_status: string | null; current_approver_user_id: string | null; current_approver_role_id: string | null }) {
+export function isApprovedPayment(request: { status: string | null; approval_status: string | null; current_approver_user_id: string | null; current_approver_role_id: string | null }) {
   const status = normalized(request.status);
   const approval = normalized(request.approval_status);
   if ([status, approval].some((value) => ["REJECTED", "RETURNED", "CANCELLED"].includes(value))) return false;

@@ -4,6 +4,7 @@ import type { PerformanceConnection } from "@/lib/ops-pulse/performance-review";
 import { savePerformanceConnection } from "@/app/ops-pulse/performance/actions";
 import { ReviewActionForm } from "@/components/review-action-form";
 import { clearanceVariance } from "@/lib/ops-pulse/station-review-targets";
+import {TrendButton} from "@/components/performance-trends";
 
 function clockValue(value:string|null) {
   return value ? new Date(new Date(value).getTime()+330*60000).toISOString().slice(11,16) : "";
@@ -33,6 +34,7 @@ export function PerformanceConnections({connections,date,stationCode,canEdit,cle
     <header><span><strong>Station vehicles · {connections.length}</strong><small>{clearanceCutoff ? `Clearance cutoff ${clearanceCutoff} · IST` : "Arrival → unloading → clearance · each vehicle separately"}</small></span>
       {canEdit?<button type="button" className="button secondary" disabled={adding} onClick={()=>setAdding(true)}>+ Add vehicle</button>:null}
     </header>
+    <div className="review-vehicle-trends"><span>Arrival <TrendButton group="station" metric="arrival" label="Vehicle arrival"/></span><span>Unloading <TrendButton group="station" metric="unloading" label="Unloading complete"/></span><span>Clearance <TrendButton group="station" metric="clearance" label="Station clearance"/></span></div>
     {connections.map((connection,index)=>{
       const variance=clearanceVariance(connection.clearance_at,date,clearanceCutoff);
       return <details key={connection.id} className="review-vehicle" open={connections.length===1}>

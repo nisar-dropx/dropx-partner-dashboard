@@ -14,6 +14,7 @@ function compile(path,aliases={}){
 }
 const targets=compile('../lib/ops-pulse/station-review-targets.ts');
 const {PerformanceConnections}=compile('./performance-connections.tsx',{
+  '@/components/performance-trends':{TrendButton:()=>null},
   '@/lib/ops-pulse/station-review-targets':targets,
   '@/components/review-action-form':{ReviewActionForm:({children})=>React.createElement('form',{},children)}
 });

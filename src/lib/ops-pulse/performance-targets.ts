@@ -75,11 +75,12 @@ function parse(row: { id: string; description: string | null }) {
   try { return { ...(JSON.parse(row.description ?? "{}") as PerformanceTarget), id: row.id }; } catch { return null; }
 }
 
-export async function loadPerformanceTargets(companyId: string) {
+export async function loadPerformanceTargets(companyId: string, options: { readOnly?: boolean } = {}) {
   if (!supabaseAdmin) return { rows: [] as PerformanceTarget[], error: "Database service is unavailable." };
   const admin = supabaseAdmin;
   let result = await admin.from("report_import_master").select("id,description").eq("company_id", companyId).eq("parser_type", "performance_target").order("source_code");
   if (!result.error && !(result.data ?? []).length) {
+    if (options.readOnly) return { rows: performanceTargetSeeds, error: null };
     const seeded = await supabaseAdmin.from("report_import_master").upsert(performanceTargetSeeds.map((target) => ({
       company_id: companyId, source_code: sourceCode(target), name: target.label, description: payload(target),
       file_types: [], day_offset: 0, frequency: target.reportType === "daily" ? "daily" : "weekly",
@@ -97,7 +98,7 @@ export async function loadPerformanceTargets(companyId: string) {
       const corrected = { ...row, sourceIndex: canonical.sourceIndex, mappingVersion: 2 };
       row.sourceIndex = corrected.sourceIndex;
       row.mappingVersion = 2;
-      await admin.from("report_import_master").update({ description: payload(corrected), updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", row.id);
+      if (!options.readOnly) await admin.from("report_import_master").update({ description: payload(corrected), updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("id", row.id);
     }));
   }
   return { rows, error: result.error?.message ?? null };

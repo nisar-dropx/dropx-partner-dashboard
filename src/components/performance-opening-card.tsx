@@ -1,4 +1,5 @@
 import type { PerformanceOperationalSnapshot } from "@/lib/ops-pulse/performance-review";
+import {TrendButton} from "@/components/performance-trends";
 
 function timeText(value: string | null) {
   if (!value) return "—";
@@ -26,6 +27,7 @@ export function PerformanceOpeningCard({ snapshot }: { snapshot: OpeningSnapshot
     <summary>
       <span>Station opened · People</span>
       <strong>{timeText(snapshot.firstPunchAt)}</strong>
+      <TrendButton group="opening" metric="opening" label="Station opening"/>
       <small>{earlier ? <b className="opening-warning">Earlier non-People punch</b> : snapshot.firstPunchAt && snapshot.scheduledOpeningTime ? <b className={isLate ? "late" : "on-time"}>{variance}</b> : null}{snapshot.firstPunchBy || "No People opening punch"}</small>
     </summary>
     <div className="performance-opening-popover">

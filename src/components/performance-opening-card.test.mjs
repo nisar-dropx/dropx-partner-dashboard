@@ -11,7 +11,8 @@ const source = ts.transpileModule(readFileSync(new URL("./performance-opening-ca
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX }
 }).outputText;
 const exported = {};
-vm.runInNewContext(source, { exports: exported, require: createRequire(import.meta.url), Date, Intl });
+const localRequire = createRequire(import.meta.url);
+vm.runInNewContext(source, { exports: exported, require: (name) => name === "@/components/performance-trends" ? { TrendButton: () => null } : localRequire(name), Date, Intl });
 const snapshot = { firstPunchAt: "2026-09-03T02:30:00Z", firstPunchBy: "People Employee", openingLateMinutes: 0,
   scheduledOpeningTime: "08:00", openingShiftName: "Morning", openingShiftSource: "Approved roster",
   openingWindowStart: "02:00", openingWindowEnd: "10:00",
