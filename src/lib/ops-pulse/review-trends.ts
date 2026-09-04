@@ -6,7 +6,25 @@ import {
 import { ACTIVE_DAILY_PERFORMANCE_SOURCE } from "./performance-source-policy";
 
 export type TrendGroup = "performance" | "cost" | "station" | "opening";
-export type TrendPoint = { date: string; value: number | null; note?: string };
+export type TrendRequestDetail = {
+  requestNo: string;
+  amount: number;
+  reason: string;
+  remarks?: string;
+  fields?: { label: string; value: string }[];
+};
+export type TrendPointContext = {
+  vanCount?: number;
+  delivered?: number | null;
+  adHocVanShipments?: number | null;
+  requests?: TrendRequestDetail[];
+};
+export type TrendPoint = {
+  date: string;
+  value: number | null;
+  note?: string;
+  context?: TrendPointContext;
+};
 export type TrendSeries = {
   key: string;
   label: string;
@@ -131,6 +149,33 @@ export function performanceTrendSeries(
 }
 const sum = (rows: TrendRow[], key: string) =>
   rows.reduce((total, row) => total + (trendNumber(row[key]) ?? 0), 0);
+const text = (value: unknown) => String(value ?? "").trim();
+function paymentFields(row: TrendRow) {
+  return Array.isArray(row.request_fields)
+    ? row.request_fields.flatMap((field) => {
+        if (!field || typeof field !== "object") return [];
+        const candidate = field as Record<string, unknown>,
+          label = text(candidate.label),
+          value = text(candidate.value);
+        return label && value ? [{ label, value }] : [];
+      })
+    : [];
+}
+function fieldCount(
+  fields: { label: string; value: string }[],
+  kind: "van" | "shipment",
+) {
+  const field = fields.find(({ label }) => {
+    const normalized = label.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+    return kind === "van"
+      ? /(VAN|VEHICLE)/.test(normalized) && /(COUNT|NUMBER|NO|QTY|QUANTITY)/.test(normalized)
+      : /(SHIPMENT|PACKAGE|PARCEL|VOLUME)/.test(normalized) && /(COUNT|NUMBER|NO|QTY|QUANTITY|DELIVERED|CARRIED|LOAD)/.test(normalized);
+  });
+  if (!field) return null;
+  const match = field.value.replace(/,/g, "").match(/-?\d+(?:\.\d+)?/),
+    value = match ? Number(match[0]) : NaN;
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
 export function costTrendSeries(
   dates: string[],
   costs: TrendRow[],
@@ -162,7 +207,7 @@ export function costTrendSeries(
       unit,
       points: [],
       note: key.startsWith("ad_hoc")
-        ? "Approved requests by work date. Zero means no approved request recorded. CPS = amount ÷ delivered shipments."
+        ? "Recorded ad-hoc deployment by work date. Van history includes van count, station delivery volume and recorded van shipment volume. CPS = amount ÷ delivered shipments."
         : key === "mtd_cps"
           ? "Cumulative loaded cost ÷ cumulative delivered shipments, resetting each calendar month. Missing cost days are flagged; this is not a payroll-completeness certification."
           : "Recorded operational data only. Missing inputs remain gaps; cost mappings may be incomplete.",
@@ -222,6 +267,25 @@ export function costTrendSeries(
     ).length;
     const van = requests.filter((row) => row.category === "Van"),
       da = requests.filter((row) => row.category !== "Van");
+    const vanRequests = van.map((row) => {
+      const fields = paymentFields(row);
+      return {
+        requestNo: text(row.request_no) || "Request",
+        amount: trendNumber(row.approved_amount) ?? 0,
+        reason: text(row.request_reason) || "Reason not recorded",
+        remarks: text(row.request_remarks) || undefined,
+        fields,
+        vanCount: fieldCount(fields, "van") ?? 1,
+        shipments: fieldCount(fields, "shipment"),
+      };
+    });
+    const vanCount = vanRequests.reduce((total, row) => total + row.vanCount, 0),
+      recordedVanShipments = vanRequests.flatMap((row) => row.shipments == null ? [] : [row.shipments]),
+      adHocVanShipments = vanCount === 0
+        ? 0
+        : recordedVanShipments.length
+        ? recordedVanShipments.reduce((total, value) => total + value, 0)
+        : null;
     const vanAmount = sum(van, "approved_amount"),
       daAmount = sum(da, "approved_amount");
     const values: Record<string, number | null> = {
@@ -251,14 +315,32 @@ export function costTrendSeries(
     for (const s of series) {
       let note = values[s.key] == null ? "Data not available" : "";
       if (s.key.startsWith("ad_hoc_van"))
-        note = `${s.key.endsWith("mtd") ? monthPayments.filter((r) => r.category === "Van").length : van.length} approved requests${s.key.endsWith("cps") && !delivered ? " · Delivery missing" : ""}`;
+        note = `${vanCount} van${vanCount === 1 ? "" : "s"} · ${delivered == null ? "Delivery volume not available" : `${delivered.toLocaleString("en-IN")} total delivered`} · ${adHocVanShipments == null ? "Van shipment volume not recorded" : `${adHocVanShipments.toLocaleString("en-IN")} van shipments`}${s.key.endsWith("cps") && !delivered ? " · Delivery missing" : ""}`;
       if (s.key.startsWith("ad_hoc_da"))
-        note = `${s.key.endsWith("mtd") ? monthPayments.filter((r) => r.category !== "Van").length : da.length} approved requests${s.key.endsWith("cps") && !delivered ? " · Delivery missing" : ""}`;
+        note = `${s.key.endsWith("mtd") ? monthPayments.filter((r) => r.category !== "Van").length : da.length} DA deployment${(s.key.endsWith("mtd") ? monthPayments.filter((r) => r.category !== "Van").length : da.length) === 1 ? "" : "s"}${s.key.endsWith("cps") && !delivered ? " · Delivery missing" : ""}`;
       if (s.key.startsWith("salary") && unmapped)
         note = `${unmapped} payment mapping gaps · recorded cost only`;
       if (s.key === "mtd_cps")
         note = `${monthCosts.length} cost days loaded${missingCostDays ? ` · ${missingCostDays} delivery days missing costs` : ""} · ${monthDelivered} delivered`;
-      s.points.push({ date, value: values[s.key], note });
+      s.points.push({
+        date,
+        value: values[s.key],
+        note,
+        context: s.key.startsWith("ad_hoc_van")
+          ? {
+              vanCount,
+              delivered,
+              adHocVanShipments,
+              requests: vanRequests.map(({ requestNo, amount, reason, remarks, fields }) => ({
+                requestNo,
+                amount,
+                reason,
+                remarks,
+                fields,
+              })),
+            }
+          : undefined,
+      });
     }
   }
   return series;

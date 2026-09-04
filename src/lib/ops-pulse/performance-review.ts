@@ -336,7 +336,7 @@ export function adHocCategory(head: { code: string | null; name: string | null }
   return "Other";
 }
 
-function paymentReason(row: { remarks?: string | null; notes?: string | null; details?: unknown }) {
+export function paymentReason(row: { remarks?: string | null; notes?: string | null; details?: unknown }) {
   if (row.remarks?.trim()) return row.remarks.trim();
   if (row.notes?.trim()) return row.notes.trim();
   if (row.details && typeof row.details === "object" && !Array.isArray(row.details)) {

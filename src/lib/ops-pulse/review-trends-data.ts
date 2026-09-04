@@ -11,6 +11,7 @@ import {
   isAdHocHead,
   adHocCategory,
   isApprovedPayment,
+  paymentReason,
 } from "./performance-review";
 import {
   clockMinutes,
@@ -156,7 +157,7 @@ export async function loadReviewTrends(
           db
             .from("payment_requests")
             .select(
-              "work_date,payment_head_id,amount,amount_approved,amount_requested,status,approval_status,current_approver_user_id,current_approver_role_id",
+              "id,request_no,work_date,payment_head_id,amount,amount_approved,amount_requested,status,approval_status,current_approver_user_id,current_approver_role_id,remarks,notes,details,payment_request_answers(answer_value,payment_head_questions(question_text))",
             )
             .eq("company_id", companyId)
             .or(
@@ -189,6 +190,38 @@ export async function loadReviewTrends(
           trendNumber(row.amount_approved) ??
           trendNumber(row.amount) ??
           trendNumber(row.amount_requested),
+        request_reason: paymentReason(row),
+        request_remarks: String(row.remarks ?? row.notes ?? "").trim(),
+        request_fields: [
+          ...(Array.isArray(row.payment_request_answers)
+            ? row.payment_request_answers
+            : []
+          ).flatMap((answer) => {
+            if (!answer || typeof answer !== "object") return [];
+            const value = String((answer as Record<string, unknown>).answer_value ?? "").trim(),
+              relation = (answer as Record<string, unknown>).payment_head_questions,
+              question = Array.isArray(relation) ? relation[0] : relation,
+              label = question && typeof question === "object"
+                ? String((question as Record<string, unknown>).question_text ?? "").trim()
+                : "";
+            if (!label || !value) return [];
+            const normalized = label.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+            return /(REASON|REMARK|PURPOSE|DESCRIPTION|DEPLOYMENT|ROUTE|TRIP|VEHICLE|VAN|SHIPMENT|PACKAGE|PARCEL|VOLUME|VENDOR)/.test(normalized)
+              ? [{ label, value }]
+              : [];
+          }),
+          ...(row.details && typeof row.details === "object" && !Array.isArray(row.details)
+            ? Object.entries(row.details as Record<string, unknown>).flatMap(([key, rawValue]) => {
+                const normalized = key.toUpperCase().replace(/[^A-Z0-9]+/g, "_"),
+                  value = String(rawValue ?? "").trim();
+                if (!value || !/(REASON|REMARK|PURPOSE|DESCRIPTION|DEPLOYMENT|ROUTE|TRIP|VEHICLE|VAN|SHIPMENT|PACKAGE|PARCEL|VOLUME|VENDOR)/.test(normalized)) return [];
+                return [{
+                  label: key.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+                  value,
+                }];
+              })
+            : []),
+        ],
       }));
     if (approved.some((row) => row.approved_amount == null))
       throw Error(

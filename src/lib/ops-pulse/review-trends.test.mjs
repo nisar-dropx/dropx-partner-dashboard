@@ -118,6 +118,50 @@ test("cost trend distinguishes absent cost data from recorded zero; allocation a
     /1 delivery days missing costs/,
   );
 });
+test("ad-hoc van history carries vans, station volume, van shipments and request detail", () => {
+  const rows = t.costTrendSeries(
+    ["2026-09-01"],
+    [],
+    [{ work_date: "2026-09-01", delivered: 724, active_ids: 20 }],
+    [],
+    [{
+      work_date: "2026-09-01",
+      category: "Van",
+      approved_amount: 1800,
+      request_no: "PAY-101",
+      request_reason: "Peak load",
+      request_remarks: "Two routes",
+      request_fields: [
+        { label: "Number of vehicles", value: "2" },
+        { label: "Shipments carried", value: "185" },
+        { label: "Vehicle number", value: "KL11AX1234" },
+      ],
+    }],
+  );
+  const point = rows.find((s) => s.key === "ad_hoc_van").points[0];
+  assert.equal(point.value, 1800);
+  assert.deepEqual(
+    {
+      vanCount: point.context.vanCount,
+      delivered: point.context.delivered,
+      adHocVanShipments: point.context.adHocVanShipments,
+    },
+    { vanCount: 2, delivered: 724, adHocVanShipments: 185 },
+  );
+  assert.deepEqual(point.context.requests[0], {
+    requestNo: "PAY-101",
+    amount: 1800,
+    reason: "Peak load",
+    remarks: "Two routes",
+    fields: [
+      { label: "Number of vehicles", value: "2" },
+      { label: "Shipments carried", value: "185" },
+      { label: "Vehicle number", value: "KL11AX1234" },
+    ],
+  });
+  assert.match(point.note, /2 vans · 724 total delivered · 185 van shipments/);
+  assert.doesNotMatch(point.note, /approved request/i);
+});
 test("MTD totals reset per month and exclude future rows and ratio averaging", () => {
   const rows = t.costTrendSeries(
     ["2026-08-31", "2026-09-01", "2026-09-02"],

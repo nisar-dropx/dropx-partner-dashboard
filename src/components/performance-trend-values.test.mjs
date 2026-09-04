@@ -24,8 +24,18 @@ function load(file) {
     : name.startsWith(".") ? load(resolve(dirname(file), name + ".ts")) : localRequire(name) });
   return exports;
 }
-const { PerformanceTrendValues, recordedTrendTotal, trendPeriodPoints } = load(resolve(here, "performance-trend-values.tsx"));
-const points = Array.from({ length: 14 }, (_, i) => ({ date: `2026-09-${String(i+1).padStart(2,"0")}`, value: i === 13 ? null : i === 12 ? 0 : 100, note: i === 13 ? "No report" : "1 approved request" }));
+const { PerformanceTrendValues, TrendPointRequestDetails, recordedTrendTotal, trendPeriodPoints } = load(resolve(here, "performance-trend-values.tsx"));
+const points = Array.from({ length: 14 }, (_, i) => ({
+  date: `2026-09-${String(i+1).padStart(2,"0")}`,
+  value: i === 13 ? null : i === 12 ? 0 : 100,
+  note: i === 13 ? "No report" : "1 van · 500 total delivered · 90 van shipments",
+  context: {
+    vanCount: i === 13 ? 0 : 1,
+    delivered: 500,
+    adHocVanShipments: i === 13 ? 0 : 90,
+    requests: i === 12 ? [{ requestNo: "PAY-13", amount: 0, reason: "Peak load", remarks: "Extra route", fields: [{ label: "Vehicle number", value: "KL11AX1234" }] }] : [],
+  },
+}));
 const base = { key: "ad_hoc_van", unit: "money", label: "Ad-hoc van amount", points, note: "Approved requests" };
 const render = (series = base, period = 7, endDate = "2026-09-14") => renderToStaticMarkup(createElement(PerformanceTrendValues, { series, period, endDate }));
 
@@ -37,9 +47,32 @@ test("first view renders exact daily amounts newest first, no graph", () => {
   assert.match(html, /6\/7 days recorded/);
   assert.match(html, /7-day recorded total/);
   assert.match(html, /₹500/);
+  assert.match(html, /role="columnheader">Amount/);
+  assert.match(html, /class="review-history-value-amount" role="cell" aria-label="13 Sept: ₹0"><strong>₹0/);
+  assert.match(html, /class="review-history-value-amount" role="cell" aria-label="12 Sept: ₹100"><strong>₹100/);
+  assert.match(html, /6<\/strong> vans/);
+  assert.match(html, /3,500<\/strong> delivered/);
+  assert.match(html, /540<\/strong> van shipments/);
+  assert.match(html, /1 van · 500 total delivered · 90 van shipments/);
   assert.ok(html.indexOf('dateTime="2026-09-14"') < html.indexOf('dateTime="2026-09-08"'));
   assert.equal((html.match(/<time /g) || []).length, 7);
   assert.doesNotMatch(html, /<svg/);
+});
+test("expanded ad-hoc van detail shows request reason, remarks and operational fields", () => {
+  const html = renderToStaticMarkup(createElement(TrendPointRequestDetails, { series: base, point: points[12] }));
+  assert.match(html, /PAY-13/);
+  assert.match(html, /Peak load/);
+  assert.match(html, /Extra route/);
+  assert.match(html, /Vehicle number/);
+  assert.match(html, /KL11AX1234/);
+  assert.doesNotMatch(html, /approved request/i);
+});
+test("daily values use scoped grid rows so global table styles cannot hide amounts", () => {
+  const css = readFileSync(resolve(here, "../app/ops-pulse/performance/review-trends.css"), "utf8");
+  assert.match(css, /\.review-history-value-row\s*\{[^}]*display:\s*grid/);
+  assert.match(css, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s*minmax\(110px,\s*40%\)/);
+  assert.match(css, /\.review-history-value-amount strong\s*\{[^}]*visibility:\s*visible/);
+  assert.doesNotMatch(render(), /<table/);
 });
 test("14-day switch includes all values without changing source points", () => {
   const before = JSON.stringify(points), html = render(base, 14);

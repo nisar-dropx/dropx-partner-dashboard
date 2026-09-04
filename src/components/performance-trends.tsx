@@ -9,7 +9,13 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { PerformanceTrendValues, trendPeriodPoints, type TrendPeriod } from "@/components/performance-trend-values";
+import {
+  PerformanceTrendValues,
+  TrendPointRequestDetails,
+  trendPeriodPoints,
+  trendPointDetail,
+  type TrendPeriod,
+} from "@/components/performance-trend-values";
 import {
   formatTrendValue,
   trendGeometry,
@@ -404,6 +410,7 @@ export function PerformanceTrendProvider({
                         No recorded data in this period.
                       </p>
                     ))}
+                    {expanded ? <TrendPointRequestDetails series={series} point={selected}/> : null}
                     {series.target != null ? (
                       <p className="review-trend-target">
                         {expanded ? "Dashed line · current target" : "Current target"}{" "}
@@ -423,13 +430,13 @@ export function PerformanceTrendProvider({
                             </tr>
                           </thead>
                           <tbody>
-                            {[...points].reverse().map((point) => (
-                              <tr key={point.date}>
-                                <td>{point.date}</td>
+                            {[...points].map((point, index) => ({ point, index })).reverse().map(({ point, index }) => (
+                              <tr key={point.date} className={selected?.date === point.date ? "selected" : ""}>
+                                <td><button type="button" className="review-trend-day-button" onClick={() => setHighlight(index)}>{point.date}</button></td>
                                 <td>
                                   {formatTrendValue(point.value, series.unit)}
                                 </td>
-                                <td>{point.note || "—"}</td>
+                                <td>{trendPointDetail(series, point)}</td>
                               </tr>
                             ))}
                           </tbody>
