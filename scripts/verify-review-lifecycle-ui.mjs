@@ -6,6 +6,10 @@ assert.equal((desk.match(/action=\{startPerformanceReview\}/g)||[]).length,1,'on
 assert.ok(!desk.includes('Start & add RCA'),'no duplicate CTA');
 assert.ok(desk.indexOf('Loaded performance date')<desk.indexOf('Station reviews ·'),'selected date before station overview');
 assert.ok(desk.includes('Earlier pending reviews'),'dated backlog separate');
+assert.ok(!desk.includes('All-station review status'),'old expanded overview removed');
+for(const component of ['PerformanceNoonEmdEntry','PerformanceReviewFlow','PerformanceReviewExceptions','PerformanceCodPending']) {
+  assert.ok(desk.includes('<'+component+' '),component+' is mounted, not only imported');
+}
 assert.ok(desk.includes('review && rcaMetrics.length'),'saved RCA remains visible after source refresh');
 const conn=read('src/components/performance-connections.tsx');
 for(const label of ['Vehicle arrival time','Vehicle unloading completed time','Station clearance time'])assert.ok(conn.includes(label),label);
@@ -14,6 +18,12 @@ const emd=read('src/components/performance-noon-emd.tsx');
 assert.ok(emd.includes('EMD at 12 p.m. (%)'));
 assert.ok(emd.includes('entry?.emd_noon_pct??""'),'zero is not rendered blank');
 const actions=read('src/app/ops-pulse/performance/actions.ts');
+const codApi=read('src/app/api/ops-pulse/performance/cod/route.ts');
+assert.ok(codApi.includes('hasPermission(auth,"performance_review","access")'));
+assert.ok(codApi.includes('scope.locations.some(location=>location.station_code===station)'));
+const codData=read('src/lib/ops-pulse/review-cod-data.ts');
+assert.ok(codData.includes('.eq("company_id",companyId)')&&codData.includes('.eq("station_code",stationCode)'));
+assert.ok(codData.includes('count.count!==batch.row_count'),'incomplete imports not presented as green');
 for(const name of ['proxyPerformanceReview','bypassPerformanceReviewLevel','savePerformanceNoonEmd','savePerformanceFollowup','updateCarriedReviewAction'])assert.ok(actions.includes(name),name);
 assert.ok(actions.includes('access.canProxy')&&actions.includes('access.canBypass')&&actions.includes('access.canManageActions'));
 console.log('PASS review lifecycle UI: one start, dated backlog, retained RCA, visible station inputs, scoped actions.');
