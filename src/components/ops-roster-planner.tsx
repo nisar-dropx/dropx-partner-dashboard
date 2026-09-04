@@ -12,9 +12,9 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Eraser, GripVertical, PencilLine, Search, Send, UsersRound } from "lucide-react";
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Download, Eraser, GripVertical, PencilLine, Search, Send, Upload, UsersRound } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { prepareOpsRoster, saveOpsRosterAssignments, submitOpsRoster } from "@/app/ops-pulse/rostering/actions";
+import { importOpsRosterWorkbook, prepareOpsRoster, saveOpsRosterAssignments, submitOpsRoster } from "@/app/ops-pulse/rostering/actions";
 import type { OpsRosterEntry, OpsRosterHoliday, OpsRosterPerson, OpsRosterPlan, OpsRosterShift } from "@/lib/ops-pulse/rostering";
 import { formatShiftClock } from "@/lib/roster-plan-preference";
 import {
@@ -139,7 +139,9 @@ export function OpsRosterPlanner({
   const [draggingAssignment, setDraggingAssignment] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
   const [isSaving, startSaving] = useTransition();
+  const [isImporting, startImporting] = useTransition();
   const editingEnabledRef = useRef(editable);
+  const pendingRecall = plan?.status === "pending_approval" && canStart && !editingEnabled;
   const assignmentsRef = useRef(initial);
   const activePlanIdRef = useRef<string | null>(plan?.id ?? null);
   const templateStartRef = useRef(plan?.periodStart ?? blankPeriodStart);
@@ -219,7 +221,7 @@ export function OpsRosterPlanner({
       setMessage({
         tone: "error",
         text: plan?.status === "pending_approval"
-          ? "This roster change is awaiting approval. Recall it from the submitter or wait for a decision before editing."
+          ? "This roster change is awaiting approval. You need planner access to recall and edit it."
           : "This roster is view only for your current access."
       });
       return false;
@@ -227,7 +229,12 @@ export function OpsRosterPlanner({
     if (preparingRef.current) return false;
     preparingRef.current = true;
     setIsPreparing(true);
-    setMessage({ tone: "success", text: "Preparing an editable roster…" });
+    setMessage({
+      tone: "success",
+      text: plan?.status === "pending_approval"
+        ? "Recalling pending approval so you can edit…"
+        : "Preparing an editable roster…"
+    });
     let result: Awaited<ReturnType<typeof prepareOpsRoster>>;
     try {
       result = await prepareOpsRoster(stationId);
@@ -255,8 +262,34 @@ export function OpsRosterPlanner({
     setEditingEnabled(true);
     setDirtyKeys(new Set());
     setMessage({ tone: "success", text: result.message });
+    router.refresh();
     return true;
-  }, [canStart, stationId]);
+  }, [canStart, plan?.status, router, stationId]);
+
+  const importWorkbook = useCallback((formData: FormData) => {
+    if (!activePlanIdRef.current) {
+      setMessage({ tone: "error", text: "Prepare or recall an editable roster before uploading." });
+      return;
+    }
+    formData.set("plan_id", activePlanIdRef.current);
+    startImporting(async () => {
+      const result = await importOpsRosterWorkbook(formData);
+      if (!result.ok) {
+        setMessage({ tone: "error", text: result.message });
+        return;
+      }
+      setMessage({ tone: "success", text: result.message });
+      if (result.entries && result.periodStart) {
+        const next = initialAssignments(result.entries);
+        assignmentsRef.current = next;
+        setAssignments(next);
+        templateStartRef.current = result.periodStart;
+        setTemplateStart(result.periodStart);
+        setDirtyKeys(new Set());
+      }
+      router.refresh();
+    });
+  }, [router]);
 
   useEffect(() => {
     if (!cellPicker) return;
@@ -528,18 +561,24 @@ export function OpsRosterPlanner({
   const dockInstruction = interactionAllowed
     ? editingEnabled
       ? "Select a shift, click empty cells to assign, or drag shifts and assignments between cells."
-      : "Click a cell or drag a shift to prepare an editable copy automatically."
+      : pendingRecall
+        ? "This change is awaiting approval. Click Recall & edit (or any cell) to pull it back, then save and submit again."
+        : "Click a cell or drag a shift to prepare an editable copy automatically."
     : "View only for your current access.";
   const status = editingEnabled && !plan ? "draft" : plan?.status ?? "blank";
+  const templateHref = `/rostering/template?station=${encodeURIComponent(stationId)}${activePlanId ? `&plan=${encodeURIComponent(activePlanId)}` : ""}`;
+  const canUseExcel = canStart || editingEnabled;
 
   return <section className={`${styles.workspace}${draggingLabel || pointerDrag?.active ? ` ${styles.isDragging}` : ""}`}>
     <header className={styles.hero}>
       <div><span>{status === "approved" ? "Current approved roster" : status === "blank" ? "No roster configured" : "Roster change in progress"}</span><h2>{stationCode} · Monday to Sunday</h2><p>{plan ? `Effective ${fullDateLabel(plan.effectiveFrom ?? plan.periodStart)} · version ${plan.revisionNo} · repeats until changed` : "Start editing to prepare the station’s recurring roster."}</p></div>
       <div className={styles.heroActions}>
-        {canStart && !editingEnabled ? <button className="button primary compact" type="button" onClick={() => void ensureEditing()} disabled={isPreparing}><PencilLine size={14} /> {isPreparing ? "Preparing…" : plan ? "Edit roster" : "Start roster"}</button> : null}
+        {canStart && !editingEnabled ? <button className="button primary compact" type="button" onClick={() => void ensureEditing()} disabled={isPreparing}><PencilLine size={14} /> {isPreparing ? (pendingRecall ? "Recalling…" : "Preparing…") : pendingRecall ? "Recall & edit" : plan ? "Edit roster" : "Start roster"}</button> : null}
         <div className={styles.stats}><span><UsersRound size={15} /><strong>{people.length}</strong><small>active people</small></span><span><CalendarDays size={15} /><strong>{submissionCoverage.ready}</strong><small>days assigned</small></span><em className={`${styles.status} ${styles[String(status).replaceAll("_", "")] ?? ""}`}>{status.replaceAll("_", " ")}</em></div>
       </div>
     </header>
+
+    {!editingEnabled && pendingRecall ? <div className="message-panel" role="status">Awaiting approval. Use <strong>Recall & edit</strong> to change week offs or shifts, then save and submit for approval again.</div> : null}
 
     <div className={styles.toolbar}>
       <div className={styles.weekNavigation}><button type="button" aria-label="Previous week" onClick={() => moveWeek(-7)} disabled={weekStart <= initialWeekStart}><ChevronLeft size={16} /></button><span><CalendarDays size={15} /><strong>{dateLabel(dates[0])}</strong> to <strong>{dateLabel(dates[6])}</strong></span><button type="button" aria-label="Next week" onClick={() => moveWeek(7)}><ChevronRight size={16} /></button></div>
@@ -560,6 +599,19 @@ export function OpsRosterPlanner({
     </div>
 
     {editingEnabled ? <div className={styles.bulkBar}><span><UsersRound size={15} /><strong>{selectedPeople.size}</strong> people · <strong>{selectedDates.size}</strong> days</span><span className={styles.activeTool}>Applying: <strong>{activeShift?.code ?? (activeTool?.kind === "weekly_off" ? "Week Off" : activeTool?.kind === "clear" ? "Remove" : "Select a shift")}</strong></span><button type="button" className="button secondary small" onClick={() => void fillDefaultShifts()}>Fill default shifts</button><button type="button" className="button secondary small" onClick={() => void applyBulk()}>Apply to selected</button><button type="button" className="button primary small" onClick={save} disabled={!dirtyKeys.size || isSaving}>{isSaving ? "Saving…" : `Save ${dirtyKeys.size || ""} changes`}</button></div> : null}
+    {canUseExcel ? <details className={styles.bulkBar} style={{ display: "grid", gap: 10 }}>
+      <summary style={{ cursor: "pointer", listStyle: "none", display: "flex", alignItems: "center", gap: 8 }}>
+        <Upload size={15} />
+        <span><strong>Station Excel</strong> · {stationCode} people only · import fills the draft; submit still goes for approval</span>
+      </summary>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "end" }}>
+        <a className="button secondary compact" download href={templateHref}><Download size={14} /> Download station template</a>
+        {editingEnabled && activePlanId ? <form action={importWorkbook} encType="multipart/form-data" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "end" }}>
+          <label style={{ display: "grid", gap: 4 }}><span className="field-label">Completed workbook</span><input name="workbook" type="file" accept=".csv,.xlsx,.xls" required disabled={isImporting} /></label>
+          <button className="button primary compact" type="submit" disabled={isImporting}>{isImporting ? "Importing…" : "Validate & import"}</button>
+        </form> : <small>Prepare or recall an editable draft before uploading.</small>}
+      </div>
+    </details> : null}
     {message ? <div className={`message-panel ${message.tone === "error" ? "error" : "success"}`} role="status">{message.text}</div> : null}
 
     <div className={styles.calendarWrap}>

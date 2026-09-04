@@ -37,12 +37,13 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
   const canAdd = hasPermission(authorization, "ops_rostering", "add") && capabilities.canPlan;
   const canEdit = hasPermission(authorization, "ops_rostering", "edit") && capabilities.canPlan;
   const editable = Boolean(canEdit && selectedPlan && ["draft", "returned"].includes(selectedPlan.status));
-  // Open drafts are edited in place; canStart prepares a new draft only when none is open.
-  const canStart = Boolean(canAdd && workspace && (!workspace.openPlan || editable));
+  const canRecallPending = Boolean(canAdd && selectedPlan?.status === "pending_approval");
+  // Open drafts are edited in place; pending plans can be recalled by station planners.
+  const canStart = Boolean(canAdd && workspace && (!workspace.openPlan || editable || canRecallPending));
   const accessLabel = !capabilities.canPlan
     ? (capabilities.canApprove ? "Approver access" : "View only")
     : selectedPlan?.status === "pending_approval"
-      ? "Change pending approval"
+      ? (canRecallPending ? "Pending · can recall & edit" : "Change pending approval")
       : editable || canStart
         ? "Can prepare roster changes"
         : "View only";
@@ -76,6 +77,17 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
           <strong>{capabilities.designationName || authorization.roleName || "Authorised user"}</strong>
           <span>{accessLabel} · approval from People masters · location manager → reporting manager → HR</span>
         </div>
+        <section className="panel" style={{ marginBottom: 12 }}>
+          <div className="panel-body" style={{ display: "grid", gap: 6 }}>
+            <p style={{ margin: 0 }}>
+              Edit the draft → Save → Submit for approval (station owner → reporting manager → HR). Week off is part of the same weekly pattern as shifts.
+            </p>
+            <p style={{ margin: 0, opacity: 0.85 }}>
+              Person-to-person day switches stay on People (swap request → partner → manager). Use this page for station pattern and week-off changes.
+            </p>
+            {route?.summary ? <p style={{ margin: 0 }}><strong>Approval route:</strong> {route.summary}</p> : null}
+          </div>
+        </section>
         <OpsRosterPlanner
           key={`${selected.id}:${selectedPlan?.id ?? "blank"}`}
           stationId={selected.id}

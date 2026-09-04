@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import * as XLSX from "xlsx";
 import { hasPermission, isCompanyOwner, requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import {
@@ -16,6 +17,12 @@ import {
   rosterPlanLocationIds
 } from "@/lib/ops-pulse/rostering";
 import { nextRosterOccurrenceOnOrAfter } from "@/lib/ops-pulse/roster-interactions";
+import {
+  normalizeRosterCell,
+  recurringRosterDate,
+  recurringRosterDays,
+  resolveActiveRosterShift
+} from "@/lib/ops-pulse/recurring-roster-import";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -142,6 +149,45 @@ async function alignOpenOpsRosterToWeek(companyId: string, userId: string, plan:
   return updated.data;
 }
 
+async function archiveOpsRosterApprovalRound(companyId: string, planId: string) {
+  const [planResult, stepsResult] = await Promise.all([
+    db().from("hr_roster_plans").select("status,decision_note,approval_history").eq("company_id", companyId).eq("id", planId).maybeSingle(),
+    db().from("hr_roster_approval_steps").select("stage_no,stage_type,status,decision_note,decided_at,decided_by,approver_user_id").eq("company_id", companyId).eq("plan_id", planId).order("stage_no")
+  ]);
+  if (planResult.error) throw new Error(planResult.error.message);
+  if (stepsResult.error) throw new Error(stepsResult.error.message);
+  const priorHistory = Array.isArray(planResult.data?.approval_history) ? planResult.data.approval_history : [];
+  const steps = stepsResult.data ?? [];
+  if (!steps.length && !planResult.data?.decision_note) return;
+  const nextHistory = [...priorHistory, {
+    round: priorHistory.length + 1,
+    archivedAt: new Date().toISOString(),
+    planStatus: planResult.data?.status ?? null,
+    decisionNote: planResult.data?.decision_note ?? null,
+    steps: steps.map((step) => ({
+      stage_no: step.stage_no,
+      stage_type: step.stage_type,
+      status: step.status,
+      decision_note: step.decision_note,
+      decided_at: step.decided_at,
+      approver_user_id: step.approver_user_id
+    }))
+  }];
+  const saved = await db().from("hr_roster_plans").update({ approval_history: nextHistory }).eq("company_id", companyId).eq("id", planId);
+  if (saved.error) throw new Error(saved.error.message);
+}
+
+function mapPreparedEntries(entries: Array<{ worker_type: string; worker_id: string; roster_date: string; day_type: string; shift_id: string | null; notes: string | null }>): PreparedRosterEntry[] {
+  return entries.map((entry) => ({
+    workerType: entry.worker_type as "employee" | "contractor",
+    workerId: entry.worker_id,
+    rosterDate: entry.roster_date,
+    dayType: entry.day_type as "working" | "weekly_off",
+    shiftId: entry.shift_id,
+    notes: entry.notes
+  }));
+}
+
 export async function prepareOpsRoster(locationId: string): Promise<ActionResult> {
   try {
     const authorization = await requirePagePermission("ops_rostering", "add");
@@ -160,7 +206,41 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
       .limit(1)
       .maybeSingle();
     if (open.error) throw new Error(open.error.message);
-    if (open.data?.status === "pending_approval") return { ok: false, message: `${station.station_code} already has a roster change awaiting approval.` };
+
+    if (open.data?.status === "pending_approval") {
+      await archiveOpsRosterApprovalRound(companyId, open.data.id);
+      const cleared = await db().from("hr_roster_approval_steps").delete().eq("company_id", companyId).eq("plan_id", open.data.id);
+      if (cleared.error) throw new Error(cleared.error.message);
+      const now = new Date().toISOString();
+      const recalled = await db().from("hr_roster_plans")
+        .update({
+          status: "returned",
+          approver_user_id: null,
+          decided_at: null,
+          decision_note: null,
+          updated_by: authorization.userId,
+          updated_at: now
+        })
+        .eq("company_id", companyId)
+        .eq("id", open.data.id)
+        .eq("status", "pending_approval")
+        .select("id,period_start,hr_roster_entries(worker_type,worker_id,roster_date,day_type,shift_id,notes)")
+        .maybeSingle();
+      if (recalled.error) throw new Error(recalled.error.message);
+      if (!recalled.data) throw new Error("This roster is no longer awaiting approval.");
+      const aligned = recalled.data.period_start === start
+        ? recalled.data
+        : await alignOpenOpsRosterToWeek(companyId, authorization.userId, recalled.data, start);
+      refreshRosterViews();
+      return {
+        ok: true,
+        planId: aligned.id,
+        periodStart: start,
+        entries: mapPreparedEntries(aligned.hr_roster_entries ?? []),
+        message: "Pending approval recalled. Update week offs or shifts, save, then submit for approval again."
+      };
+    }
+
     if (open.data) {
       const aligned = open.data.period_start === start
         ? open.data
@@ -169,14 +249,7 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
         ok: true,
         planId: aligned.id,
         periodStart: start,
-        entries: (aligned.hr_roster_entries ?? []).map((entry) => ({
-          workerType: entry.worker_type as "employee" | "contractor",
-          workerId: entry.worker_id,
-          rosterDate: entry.roster_date,
-          dayType: entry.day_type as "working" | "weekly_off",
-          shiftId: entry.shift_id,
-          notes: entry.notes
-        })),
+        entries: mapPreparedEntries(aligned.hr_roster_entries ?? []),
         message: "The open roster change is ready."
       };
     }
@@ -430,6 +503,191 @@ export async function submitOpsRoster(planId: string): Promise<ActionResult> {
     return { ok: true, message: `Weekly roster sent for approval. ${route.summary}` };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "The roster could not be submitted." };
+  }
+}
+
+export async function importOpsRosterWorkbook(formData: FormData): Promise<ActionResult> {
+  try {
+    const authorization = await requirePagePermission("ops_rostering", "edit");
+    const companyId = requireCompanyId(authorization);
+    await assertPlanner(authorization);
+    const planId = String(formData.get("plan_id") ?? "").trim();
+    const file = formData.get("workbook");
+    if (!planId) return { ok: false, message: "Open an editable roster before uploading." };
+    if (!(file instanceof File) || !file.size || file.size > 15_000_000) {
+      return { ok: false, message: "Choose a CSV or Excel file smaller than 15 MB." };
+    }
+
+    const plan = await loadPlan(companyId, authorization, planId);
+    if (!["draft", "returned"].includes(plan.status) || !plan.location_id || plan.roster_kind !== "recurring_weekly") {
+      return { ok: false, message: "This roster is no longer editable. Recall or prepare a draft first." };
+    }
+    const station = await authorisedStation(companyId, authorization, plan.location_id);
+    const [manpower, shifts] = await Promise.all([
+      loadOpsStationManpower(companyId, [station], indiaToday()),
+      db().from("hr_shifts").select("id,code").eq("company_id", companyId).eq("is_active", true)
+    ]);
+    if (shifts.error) throw new Error(shifts.error.message);
+
+    const byCode = new Map(manpower.people.map((person) => [String(person.code).trim().toUpperCase(), person]));
+    const shiftByCode = new Map((shifts.data ?? []).map((shift) => [String(shift.code).trim().toUpperCase(), shift.id]));
+    const workbook = XLSX.read(Buffer.from(await file.arrayBuffer()), { type: "buffer", cellDates: false });
+    const firstSheet = workbook.SheetNames[0];
+    if (!firstSheet) return { ok: false, message: "The workbook has no readable sheet." };
+    const sourceRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[firstSheet], { defval: "", raw: true });
+    if (!sourceRows.length) return { ok: false, message: "The workbook has no roster rows." };
+
+    const readColumn = (source: Record<string, unknown>, aliases: string[]) => {
+      const match = Object.entries(source).find(([key]) => aliases.includes(key.trim().toUpperCase().replace(/[\s-]+/g, "_")));
+      return match?.[1] ?? "";
+    };
+    const normalizeDate = (value: unknown) => {
+      if (typeof value === "number") {
+        const parsed = XLSX.SSF.parse_date_code(value);
+        return parsed ? `${parsed.y}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}` : "";
+      }
+      const text = String(value ?? "").trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+      const match = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+      return match ? `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}` : "";
+    };
+
+    const sample = sourceRows[0] ?? {};
+    const hasWideDays = recurringRosterDays.some((day) => Object.keys(sample).some((key) => key.trim().toUpperCase().replace(/[\s-]+/g, "_") === day));
+    const upserts: Array<{
+      company_id: string;
+      plan_id: string;
+      worker_type: string;
+      worker_id: string;
+      location_id: string;
+      roster_date: string;
+      day_type: "working" | "weekly_off";
+      shift_id: string | null;
+      notes: string | null;
+    }> = [];
+    const removals: Array<{ workerType: string; workerId: string; date: string }> = [];
+    const errors: string[] = [];
+
+    if (hasWideDays) {
+      for (const [index, source] of sourceRows.entries()) {
+        const code = String(readColumn(source, ["DROPX_ID", "PEOPLE_ID", "EMPLOYEE_ID", "CONTRACTOR_ID"])).trim().toUpperCase();
+        const locationCode = String(readColumn(source, ["LOCATION_CODE", "LOCATION", "STATION_CODE"])).trim().toUpperCase();
+        const person = byCode.get(code);
+        const rowErrors: string[] = [];
+        if (locationCode && locationCode !== String(station.station_code).trim().toUpperCase()) rowErrors.push("station code must match this Ops station");
+        if (!code) rowErrors.push("People ID is missing");
+        else if (!person) rowErrors.push("People ID is not active at this station");
+
+        for (const day of recurringRosterDays) {
+          const cell = normalizeRosterCell(readColumn(source, [day, `${day}_SHIFT`, day.slice(0, 3)]));
+          const date = recurringRosterDate(plan.period_start, day);
+          if (cell.kind === "clear") {
+            if (person) removals.push({ workerType: person.workerType, workerId: person.id, date });
+            continue;
+          }
+          const shiftId = cell.kind === "working" ? resolveActiveRosterShift(shiftByCode, cell.shiftCode) : null;
+          if (cell.kind === "working" && !shiftId) rowErrors.push(`${day.toLowerCase()} shift code is inactive or invalid`);
+          else if (person) {
+            upserts.push({
+              company_id: companyId,
+              plan_id: planId,
+              worker_type: person.workerType,
+              worker_id: person.id,
+              location_id: plan.location_id,
+              roster_date: date,
+              day_type: cell.kind,
+              shift_id: shiftId,
+              notes: null
+            });
+          }
+        }
+        if (rowErrors.length && errors.length < 12) errors.push(`Row ${index + 2}: ${rowErrors.join(", ")}`);
+      }
+    } else {
+      for (const [index, source] of sourceRows.entries()) {
+        const codeRaw = String(readColumn(source, ["DROPX_ID", "PEOPLE_ID", "EMPLOYEE_ID", "CONTRACTOR_ID"])).trim();
+        const date = normalizeDate(readColumn(source, ["DATE", "ROSTER_DATE"]));
+        const shiftRaw = String(readColumn(source, ["SHIFT_CODE", "SHIFT"])).trim();
+        const locationCode = String(readColumn(source, ["LOCATION_CODE", "LOCATION", "STATION_CODE"])).trim().toUpperCase();
+        const rawDay = String(readColumn(source, ["DAY_TYPE", "TYPE"])).trim().toLowerCase().replace(/[\s-]+/g, "_") || "working";
+        const day = ["weekly_off", "week_off", "off", "wo"].includes(rawDay) ? "weekly_off" : rawDay === "working" || rawDay === "work" ? "working" : rawDay;
+        const notes = String(readColumn(source, ["NOTES", "REMARKS"])).trim();
+        const person = byCode.get(codeRaw.toUpperCase());
+        const shift = day === "weekly_off" ? null : resolveActiveRosterShift(shiftByCode, shiftRaw);
+        const problem = !codeRaw ? "People ID is missing"
+          : !person ? "People ID is not active at this station"
+          : locationCode && locationCode !== String(station.station_code).trim().toUpperCase() ? "station code must match this Ops station"
+          : !date || date < plan.period_start || date > plan.period_end ? "date is outside the plan week"
+          : !["working", "weekly_off"].includes(day) ? "day type must be working or weekly_off"
+          : day === "working" && !shift ? "shift code is missing or inactive"
+          : null;
+        if (problem) {
+          if (errors.length < 8) errors.push(`Row ${index + 2}: ${problem}`);
+          continue;
+        }
+        upserts.push({
+          company_id: companyId,
+          plan_id: planId,
+          worker_type: person!.workerType,
+          worker_id: person!.id,
+          location_id: plan.location_id,
+          roster_date: date,
+          day_type: day as "working" | "weekly_off",
+          shift_id: shift ?? null,
+          notes: notes || null
+        });
+      }
+    }
+
+    if (errors.length) {
+      return {
+        ok: false,
+        message: `Nothing imported. Fix ${errors.join("; ")}${sourceRows.length > errors.length ? ". Other rows may also need attention." : "."}`
+      };
+    }
+    if (!upserts.length && !removals.length) return { ok: false, message: "The workbook did not contain any roster cells to import." };
+    if (upserts.length + removals.length > 25_000) return { ok: false, message: "The workbook exceeds 25,000 roster cells." };
+
+    const touched = await db().from("hr_roster_plans")
+      .update({ updated_by: authorization.userId, updated_at: new Date().toISOString() })
+      .eq("company_id", companyId)
+      .eq("id", planId)
+      .in("status", ["draft", "returned"])
+      .select("id")
+      .maybeSingle();
+    if (touched.error || !touched.data) throw new Error(touched.error?.message ?? "This roster is no longer editable.");
+
+    if (upserts.length) {
+      const saved = await db().from("hr_roster_entries").upsert(upserts, { onConflict: "company_id,plan_id,worker_type,worker_id,roster_date" });
+      if (saved.error) throw new Error(saved.error.message);
+    }
+    for (const removal of removals) {
+      const removed = await db().from("hr_roster_entries").delete()
+        .eq("company_id", companyId)
+        .eq("plan_id", planId)
+        .eq("worker_type", removal.workerType)
+        .eq("worker_id", removal.workerId)
+        .eq("roster_date", removal.date);
+      if (removed.error) throw new Error(removed.error.message);
+    }
+
+    const refreshed = await db().from("hr_roster_entries")
+      .select("worker_type,worker_id,roster_date,day_type,shift_id,notes")
+      .eq("company_id", companyId)
+      .eq("plan_id", planId);
+    if (refreshed.error) throw new Error(refreshed.error.message);
+
+    refreshRosterViews();
+    const cellCount = upserts.length + removals.length;
+    return {
+      ok: true,
+      planId,
+      periodStart: plan.period_start,
+      entries: mapPreparedEntries(refreshed.data ?? []),
+      message: `${cellCount} roster ${cellCount === 1 ? "cell" : "cells"} imported into the draft. Review, save if needed, then submit for approval.`
+    };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "The workbook could not be imported." };
   }
 }
 
