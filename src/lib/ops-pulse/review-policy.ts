@@ -68,3 +68,77 @@ export function connectionTimes(values: { arrival: string; unloading: string; cl
   }
   return parsed;
 }
+
+/** Discussion feed: comments / stage completions / system notes only — not RCA or takeaway saves. */
+export function discussionFeedUpdates<T extends { id: string; update_type: string; note: string; created_by?: string | null; author_name?: string | null }>(updates: T[]) {
+  const seen = new Set<string>();
+  return updates.filter((update) => {
+    if (update.update_type === "action") return false;
+    if (update.update_type === "review" && /^takeaway:\s*/i.test(update.note.trim())) return false;
+    const key = `${update.created_by ?? update.author_name ?? ""}|${update.update_type}|${update.note.trim()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function istTimestamp(date: string, time: string | null) {
+  if (!time) return null;
+  const clock = String(time).slice(0, 8);
+  if (!/^\d{2}:\d{2}(:\d{2})?$/.test(clock)) return null;
+  const normalized = clock.length === 5 ? `${clock}:00` : clock;
+  const timestamp = new Date(`${date}T${normalized}+05:30`);
+  return Number.isFinite(timestamp.getTime()) ? timestamp.toISOString() : null;
+}
+
+function nextCalendarDay(date: string) {
+  const next = new Date(`${date}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString().slice(0, 10);
+}
+
+/** Rebuild the pre-connections vehicle timings that still live on the review row. */
+export function legacyConnectionsFromReview(review: {
+  id: string;
+  station_id: string;
+  source_date: string;
+  vehicle_arrival_time: string | null;
+  unloading_complete_time: string | null;
+  station_clear_time: string | null;
+  updated_at: string;
+} | null) {
+  if (!review?.vehicle_arrival_time) return [] as Array<{
+    id: string;
+    station_id: string;
+    service_date: string;
+    label: string;
+    arrival_at: string;
+    unloading_at: string | null;
+    clearance_at: string | null;
+    version: number;
+    updated_by_name: string;
+    updated_at: string;
+  }>;
+  const arrival = istTimestamp(review.source_date, review.vehicle_arrival_time);
+  if (!arrival) return [];
+  const unloadingDate = review.unloading_complete_time && review.unloading_complete_time < review.vehicle_arrival_time
+    ? nextCalendarDay(review.source_date)
+    : review.source_date;
+  const unloading = istTimestamp(unloadingDate, review.unloading_complete_time);
+  const clearanceBase = review.station_clear_time && review.unloading_complete_time && review.station_clear_time < review.unloading_complete_time
+    ? nextCalendarDay(unloadingDate)
+    : unloadingDate;
+  const clearance = unloading ? istTimestamp(clearanceBase, review.station_clear_time) : null;
+  return [{
+    id: `legacy-${review.id}`,
+    station_id: review.station_id,
+    service_date: review.source_date,
+    label: "Connection 1",
+    arrival_at: arrival,
+    unloading_at: unloading,
+    clearance_at: clearance,
+    version: 1,
+    updated_by_name: "Previous entry",
+    updated_at: review.updated_at
+  }];
+}

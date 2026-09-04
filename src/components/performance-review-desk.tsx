@@ -7,7 +7,7 @@ import { PerformanceReviewPicker } from "@/components/performance-review-picker"
 import { PerformanceConnections } from "@/components/performance-connections";
 import { PerformanceRcaActions } from "@/components/performance-rca-actions";
 import { ReviewActionForm } from "@/components/review-action-form";
-import { reviewRole } from "@/lib/ops-pulse/review-policy";
+import { discussionFeedUpdates, reviewRole } from "@/lib/ops-pulse/review-policy";
 
 export type ReviewMetric = {
   actual: number | null;
@@ -104,7 +104,7 @@ export function PerformanceReviewDesk(props: Props) {
   const notStartedCount = locations.length - completedCount - inReviewCount;
   const openingIsLate = (snapshot.openingLateMinutes ?? 0) > 0;
   const selectedSteps = steps.filter((step) => step.review_id === review?.id && step.status !== "skipped" && ["cluster","aom","national"].includes(reviewRole(step.reviewer_role)));
-  const reviewUpdates = updates.filter((update) => update.review_id === review?.id);
+  const reviewUpdates = discussionFeedUpdates(updates.filter((update) => update.review_id === review?.id));
   return <div className="performance-review-desk">
     {notice ? <div className="performance-review-message success">{notice}</div> : null}
     {error ? <div className="performance-review-message error">{error}</div> : null}

@@ -13,10 +13,13 @@ function displayTime(value:string|null,date:string) {
   const local=localTime(value);
   return `${local.slice(11)}${local.slice(0,10)!==date?` · ${local.slice(8,10)}/${local.slice(5,7)}`:""}`;
 }
+function persistedConnectionId(id: string | undefined) {
+  return id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id : "";
+}
 function ConnectionForm({ connection,date,stationCode,next,onSaved }: { connection?:PerformanceConnection;date:string;stationCode:string;next:number;onSaved?:()=>void }) {
   return <ReviewActionForm action={savePerformanceConnection} className="review-connection-form" onSaved={onSaved}>
     <input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={stationCode}/>
-    <input type="hidden" name="connection_id" value={connection?.id??""}/><input type="hidden" name="version" value={connection?.version??1}/>
+    <input type="hidden" name="connection_id" value={persistedConnectionId(connection?.id)}/><input type="hidden" name="version" value={connection?.version??1}/>
     <label>Connection / vehicle<input name="label" maxLength={100} required defaultValue={connection?.label??`Connection ${next}`}/></label>
     <label>Vehicle arrival<input name="arrival" type="datetime-local" required min={`${date}T00:00`} max={`${date}T23:59`} defaultValue={localTime(connection?.arrival_at??null)}/></label>
     <label>Unloading complete<input name="unloading" type="datetime-local" defaultValue={localTime(connection?.unloading_at??null)}/></label>

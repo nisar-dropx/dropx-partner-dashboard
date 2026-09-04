@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { managerReviewChain, reviewCapabilities, connectionTimes, reviewRole } from './review-policy.ts';
+import { managerReviewChain, reviewCapabilities, connectionTimes, discussionFeedUpdates, legacyConnectionsFromReview, reviewRole } from './review-policy.ts';
 const person=(role,id=role)=>({role,personId:id});
 test('CM to AOM to National Head; excludes station review stage',()=>{
   assert.deepEqual(managerReviewChain(['Team Lead','Cluster Manager','Area Operations Manager','National Head'].map(role=>person(role))).map(p=>p.role),['Cluster Manager','Area Operations Manager','National Head']);
@@ -47,4 +47,24 @@ test('partial connection allowed; chronology and invalid dates rejected',()=>{
     {arrival:'2026-02-30T07:00',unloading:'',clearance:''},
     {arrival:'2026-09-02T07:00',unloading:'',clearance:''}
   ])assert.throws(()=>connectionTimes(values,'2026-09-01'));
+});
+test('discussion feed hides RCA/takeaway noise and identical repeats',()=>{
+  const rows=discussionFeedUpdates([
+    {id:'1',update_type:'action',note:'DSR\nRCA: late',created_by:'a',author_name:'A'},
+    {id:'2',update_type:'review',note:'Takeaway: focus on DDS',created_by:'a',author_name:'A'},
+    {id:'3',update_type:'review',note:'Need FE coverage',created_by:'a',author_name:'A'},
+    {id:'4',update_type:'review',note:'Need FE coverage',created_by:'a',author_name:'A'},
+    {id:'5',update_type:'status',note:'Review route updated',created_by:null,author_name:'System'}
+  ]);
+  assert.deepEqual(rows.map((row)=>row.id),['3','5']);
+});
+test('legacy review vehicle times resurface as a connection',()=>{
+  const [connection]=legacyConnectionsFromReview({
+    id:'rev-1',station_id:'st-1',source_date:'2026-09-01',vehicle_arrival_time:'23:30:00',
+    unloading_complete_time:'00:20:00',station_clear_time:'01:00:00',updated_at:'2026-09-02T01:00:00.000Z'
+  });
+  assert.equal(connection.label,'Connection 1');
+  assert.equal(connection.arrival_at,'2026-09-01T18:00:00.000Z');
+  assert.equal(connection.unloading_at,'2026-09-01T18:50:00.000Z');
+  assert.equal(connection.clearance_at,'2026-09-01T19:30:00.000Z');
 });

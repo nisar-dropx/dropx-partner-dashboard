@@ -15,6 +15,7 @@ import { loadPerformanceTargets, resolvePerformanceTargets, type PerformanceTarg
 import { hawkeyeMetricDefinitions, hawkeyeValue, hawkeyeValueForTarget } from "@/lib/ops-pulse/hawkeye";
 import { loadPerformanceOperationalSnapshots, loadPerformanceReviewWorkspace, loadPerformanceConnections, resolvePerformanceReviewChain } from "@/lib/ops-pulse/performance-review";
 import { getReviewAccess } from "@/lib/ops-pulse/review-access";
+import { legacyConnectionsFromReview } from "@/lib/ops-pulse/review-policy";
 import { ACTIVE_DAILY_PERFORMANCE_SOURCE, ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL, selectActiveDailyBatchRows } from "@/lib/performance-source-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -386,10 +387,14 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
       ?? null
     : null;
   const canViewReviews = hasPermission(authorization, "performance_review", "access");
-  const [connectionResult, reviewChain] = selectedReviewLocation && view === "reviews" ? await Promise.all([
-    loadPerformanceConnections(companyId, selectedReviewLocation.id, selectedDate),
+  const connectionStationId = selectedReview?.station_id || selectedReviewLocation?.id || null;
+  const [connectionResult, reviewChain] = selectedReviewLocation && connectionStationId && view === "reviews" ? await Promise.all([
+    loadPerformanceConnections(companyId, connectionStationId, selectedDate),
     selectedReview ? Promise.resolve([]) : resolvePerformanceReviewChain(companyId, selectedReviewLocation.id)
   ]) : [{connections:[],error:null},[]];
+  const reviewConnections = connectionResult.connections.length
+    ? connectionResult.connections
+    : legacyConnectionsFromReview(selectedReview);
   const reviewAccess = selectedReviewLocation && view === "reviews" ? await getReviewAccess(authorization,selectedReviewLocation.id,selectedReview,
     selectedReview ? reviewWorkspace.steps.filter(step=>step.review_id===selectedReview.id) : reviewChain.map((step,index)=>({step_order:index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,status:"pending"}))) : null;
 
@@ -412,7 +417,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             canEditConnections={Boolean(reviewAccess?.canEditConnections)}
             canComment={Boolean(reviewAccess?.canComment)}
             programManager={Boolean(reviewAccess?.actor.programManager)}
-            connections={connectionResult.connections}
+            connections={reviewConnections}
             updates={reviewWorkspace.updates}
             reviewChain={reviewChain}
             routingIssue={reviewAccess?.routingIssue ?? null}
