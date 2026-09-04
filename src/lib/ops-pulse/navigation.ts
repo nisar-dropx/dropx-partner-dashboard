@@ -58,6 +58,7 @@ const cps: NavItem = {
   icon: "C",
   children: [
     { code: "cps_overview", label: "Overview", href: "/cps" },
+    { code: "cps_overview", label: "Adhoc Van & DA", href: "/cps/adhoc-activity" },
     { code: "cps_stations", label: "Stations", href: "/cps?view=stations" },
     { code: "cps_shipments", label: "Shipments", href: "/cps?view=shipments" },
     { code: "cps_associates", label: "Associates", href: "/cps?view=associates" },
