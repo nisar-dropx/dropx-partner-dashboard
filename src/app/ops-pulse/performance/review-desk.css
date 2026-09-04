@@ -24,6 +24,10 @@
 .review-manager-context blockquote { margin: 8px 0; padding-left: 12px; border-left: 3px solid #cbd5e1; white-space: pre-wrap; }
 .review-proxy-badge,.review-skip-badge { color: #9a3412; }
 .review-exception-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.review-exception-guidance { margin: 6px 0 0; color: #64748b; font-size: 12px; line-height: 1.5; }
+.review-exception-guidance a { color: #c2410c; white-space: nowrap; }
+.review-exception-buttons button:disabled { opacity: .6; cursor: not-allowed; }
+#start-station-review { scroll-margin-top: 100px; }
 .review-exception-form { display: grid; gap: 12px; padding: 14px; margin-top: 8px; border: 1px solid #fed7aa; border-radius: 10px; background: #fffaf5; max-width: 760px; }
 .review-exception-form p { margin: 0; font-size: 13px; }
 .review-noon-emd,.review-followups { padding: 14px; border: 1px solid #e5e9f0; border-radius: 12px; background: white; }

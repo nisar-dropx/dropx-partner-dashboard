@@ -33,6 +33,8 @@ type Props = {
   codSnapshot: ReviewCodSnapshot;
   canBypass: boolean;
   canProxy: boolean;
+  canAccessBypass: boolean;
+  canAccessProxy: boolean;
   canManageActions: boolean;
   stationLeads: string;
   backlog: PerformanceReviewBacklog;
@@ -170,7 +172,7 @@ export function PerformanceReviewDesk(props: Props) {
       <div><span>Source</span><strong>{sourceType === "amazon_hawkeye_daily" ? "Hawkeye D-1" : sourceType === "daily_edsp_metrics" ? "Daily EDSP" : "Operational data"}</strong></div>
       <div><span>Review</span><strong>{review ? review.status.replace("_", " ") : "Not started"}</strong></div>
       <div><span>Current dependency</span><strong>{activeStep ? `${activeStep.reviewer_role} · ${activeStep.proxy_reviewer_name||activeStep.reviewer_name}${activeStep.proxy_reviewer_name?" (proxy)":""}` : review?.status === "closed" ? "Completed" : "Start review"}</strong></div>
-      {!review && canAdd ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button className="button">Start review</button></ReviewActionForm> : null}
+      {!review && canAdd ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button id="start-station-review" className="button">Start review</button></ReviewActionForm> : null}
     </section>
 
     {!review && misses.length ? <div className="performance-review-start-guide"><strong>{misses.length} metrics need RCA and action</strong><span>Use Start review above, then record RCA and action items below.</span></div> : null}
@@ -180,7 +182,7 @@ export function PerformanceReviewDesk(props: Props) {
       {reviewChain.map((step,index)=><div key={`${step.reviewerUserId}-${index}`}><i>{index+1}</i><span>{step.reviewerRole}<small>{step.reviewerName}</small><small>Reviews with {index>0?reviewChain[index-1].reviewerName:props.stationLeads}</small></span></div>)}
     </section>}
     <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update vehicle timings and noon EMD; view the full review":canEdit?"Your review · update RCA, actions, takeaway and station timings":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
-    {review ? <PerformanceReviewExceptions key={review.updated_at} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy}/> : null}
+    <PerformanceReviewExceptions key={`${selectedCode}-${date}-${review?.updated_at??"not-started"}`} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy} canAccessBypass={props.canAccessBypass} canAccessProxy={props.canAccessProxy} canStart={canAdd} hasRoute={Boolean(review||reviewChain.length)}/>
 
     <div className="performance-review-columns">
       <section className="panel performance-review-section">

@@ -428,6 +428,8 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             canComment={Boolean(reviewAccess?.canComment)}
             canBypass={Boolean(reviewAccess?.canBypass)}
             canProxy={Boolean(reviewAccess?.canProxy)}
+            canAccessBypass={Boolean(reviewAccess?.canAccessBypass)}
+            canAccessProxy={Boolean(reviewAccess?.canAccessProxy)}
             canManageActions={Boolean(reviewAccess?.canManageActions)}
             followups={followups}
             noonEmd={noonEmd}

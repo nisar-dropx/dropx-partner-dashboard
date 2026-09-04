@@ -54,6 +54,9 @@ export function reviewCapabilities(input: {
     canManageActions: editor && (oversight || first || (!input.closed && current)),
     // Oversight uses an explicit, reason-required bypass, never an unassigned approval.
     canComplete: editor && !input.closed && Boolean(input.currentRole) && current,
+    // Visibility is separate from availability: explain inactive states instead of hiding tools.
+    canAccessBypass: Boolean(editor && canOverride),
+    canAccessProxy: Boolean(editor && (canOverride || input.higherReviewer)),
     canBypass: Boolean(editor && !input.closed && canOverride),
     canProxy: Boolean(editor && !input.closed && input.currentRole && !current && (canOverride || (!input.hasProxy && input.higherReviewer))),
   };
