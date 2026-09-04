@@ -13,6 +13,7 @@ import {
   rawPunchDeviceMatchLabel,
   rawPunchProfileType,
   rawPunchResultLabel,
+  rawPunchSourceDetails,
   resolveRawPunchDevice,
   safeRawPunchDate,
   safeRawPunchSearch,
@@ -124,11 +125,12 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
       if (authorization.hasAllLocationAccess || allowedDeviceIds.length) {
         let query = supabaseAdmin
           .from("biometric_raw_events")
-          .select("id, device_id, device_serial, terminal_id, trans_id, enrolment_id, punch_time, received_at, event_type, source_ip, worker_status, created_at", { count: "exact" })
+          .select("id, device_id, device_serial, terminal_id, trans_id, enrolment_id, employee_code, payload, punch_time, received_at, event_type, source_ip, worker_status, created_at", { count: "exact" })
           .eq("company_id", companyId)
           .eq("event_type", "TimeLog")
           .order("punch_time", { ascending: false, nullsFirst: false })
-          .order("created_at", { ascending: false });
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false });
 
         if (!authorization.hasAllLocationAccess) query = query.in("device_id", allowedDeviceIds);
         if (selectedLocations.length) {
@@ -139,7 +141,7 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
         if (from) query = query.gte("punch_time", `${from}T00:00:00+05:30`);
         if (to) query = query.lte("punch_time", `${to}T23:59:59.999+05:30`);
         if (search) {
-          query = query.or(`enrolment_id.ilike.%${search}%,device_serial.ilike.%${search}%,terminal_id.ilike.%${search}%,trans_id.ilike.%${search}%`);
+          query = query.or(`enrolment_id.ilike.%${search}%,employee_code.ilike.%${search}%,device_serial.ilike.%${search}%,terminal_id.ilike.%${search}%,trans_id.ilike.%${search}%`);
         }
 
         if (mapping.length && mapping.length < 3) {
@@ -243,7 +245,7 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
       <PageHead
         eyebrow="Reports"
         title="Raw Punches"
-        subtitle="Every biometric TimeLog received from devices, including unmapped, inactive, duplicate, and rejected enrolment IDs."
+        subtitle="Raw punches from middleware and imported Team Office history. Use all locations and devices for the complete archive; unverified source locations are not guessed."
         action={<RawPunchExportButton href={exportHref(searchParams)} />}
       />
       {error ? <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load raw punches</strong><p className="subtle">{error}</p></div></section> : null}
@@ -269,15 +271,16 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
             const accountId = rawPunchAccountId(punch);
             const worker = accountId && profileType ? workerByKey.get(`${profileType}:${accountId}`) : undefined;
             const result = rawPunchResultLabel(punch, alert);
+            const source = rawPunchSourceDetails(row);
             return <tr key={row.id}>
               <td><strong>{formatDashboardDateTime(row.punch_time ?? row.received_at ?? row.created_at)}</strong><small>Received {formatDashboardDateTime(row.created_at)}</small></td>
               <td><strong>{device?.location_id ? locationById.get(device.location_id) || "-" : "-"}</strong><small>{rawPunchDeviceMatchLabel(resolvedDevice.match)}</small></td>
-              <td><strong>{device?.device_no || row.device_serial}</strong><small>{row.device_serial}{device?.model ? ` · ${device.model}` : ""}</small></td>
-              <td><strong>{row.enrolment_id || "-"}</strong><small>{worker ? profileType === "employee" ? "People / HR" : "Workforce" : "Not mapped in either"}</small></td>
-              <td><strong>{worker?.full_name || "Profile not mapped"}</strong><small>{worker?.code || "-"}</small></td>
+              <td><strong>{source.isTeamOffice ? source.label : device?.device_no || row.device_serial}</strong><small>{source.isTeamOffice ? source.machine || "Source machine not provided" : `${row.device_serial}${device?.model ? ` · ${device.model}` : ""}`}</small></td>
+              <td><strong>{row.enrolment_id || "-"}</strong><small>{worker ? profileType === "employee" ? "People / HR" : "Workforce" : "Not mapped in either"}</small>{source.employeeCode ? <small>Source ID: {source.employeeCode}</small> : null}</td>
+              <td><strong>{worker?.full_name || "Profile not mapped"}</strong><small>{worker?.code || source.employeeCode || "-"}</small></td>
               <td><strong>{row.trans_id || "-"}</strong><small>{row.terminal_id || "No terminal ID"}</small></td>
               <td><span className={`status-pill ${result === "Recorded" ? "good" : result === "Raw only" ? "warn" : "bad"}`}>{result}</span></td>
-              <td>{alert?.message || (punch?.calculated ? "Included in attendance." : "Received but no attendance record was created.")}</td>
+              <td>{alert?.message || (punch?.calculated ? "Included in attendance." : source.note || "Received but no attendance record was created.")}</td>
             </tr>;
           })}
           {!rows.length ? <tr><td className="empty-cell" colSpan={8}>No raw punch records found.</td></tr> : null}

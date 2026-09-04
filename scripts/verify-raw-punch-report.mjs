@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import "./verify-raw-punch-source.mjs";
 
 const page = fs.readFileSync("src/app/reports/raw-punches/page.tsx", "utf8");
 const filters = fs.readFileSync("src/components/raw-punch-report-filters.tsx", "utf8");
