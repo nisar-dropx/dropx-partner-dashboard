@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isOpsRosterPlannerRole, isRosterDirectPublishDesignation } from "@/lib/approval-designation-labels";
 import { isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
@@ -200,10 +201,12 @@ type ActorIdentity = {
   assignmentId: string | null;
   designationId: string | null;
   designationName: string | null;
+  designationCode: string | null;
 };
 
 async function actorIdentity(authorization: AuthorizationContext): Promise<ActorIdentity> {
   const today = indiaToday();
+  const empty: ActorIdentity = { personId: null, workerType: null, workerId: null, assignmentId: null, designationId: null, designationName: null, designationCode: null };
   const link = await db().from("hr_user_person_links")
     .select("person_id")
     .eq("company_id", authorization.companyId)
@@ -211,7 +214,7 @@ async function actorIdentity(authorization: AuthorizationContext): Promise<Actor
     .eq("status", "active")
     .maybeSingle();
   if (link.error) throw new Error(link.error.message);
-  if (!link.data?.person_id) return { personId: null, workerType: null, workerId: null, assignmentId: null, designationId: null, designationName: null };
+  if (!link.data?.person_id) return empty;
 
   const engagement = await db().from("hr_engagements")
     .select("id,worker_type,employee_id,contractor_id")
@@ -222,7 +225,7 @@ async function actorIdentity(authorization: AuthorizationContext): Promise<Actor
     .limit(1)
     .maybeSingle();
   if (engagement.error) throw new Error(engagement.error.message);
-  if (!engagement.data) return { personId: link.data.person_id, workerType: null, workerId: null, assignmentId: null, designationId: null, designationName: null };
+  if (!engagement.data) return { ...empty, personId: link.data.person_id };
 
   const assignment = await db().from("hr_work_assignments")
     .select("id,designation_id")
@@ -236,7 +239,7 @@ async function actorIdentity(authorization: AuthorizationContext): Promise<Actor
     .maybeSingle();
   if (assignment.error) throw new Error(assignment.error.message);
   const designation = assignment.data?.designation_id
-    ? await db().from("designations").select("name").eq("company_id", authorization.companyId).eq("id", assignment.data.designation_id).maybeSingle()
+    ? await db().from("designations").select("name,code").eq("company_id", authorization.companyId).eq("id", assignment.data.designation_id).maybeSingle()
     : { data: null, error: null };
   if (designation.error) throw new Error(designation.error.message);
   const workerType = engagement.data.worker_type === "employee" || engagement.data.worker_type === "contractor" ? engagement.data.worker_type : null;
@@ -247,25 +250,33 @@ async function actorIdentity(authorization: AuthorizationContext): Promise<Actor
     workerId,
     assignmentId: assignment.data?.id ?? null,
     designationId: assignment.data?.designation_id ?? null,
-    designationName: designation.data?.name ?? null
+    designationName: designation.data?.name ?? null,
+    designationCode: designation.data?.code ?? null
   };
 }
 
 export async function loadOpsRosterCapabilities(authorization: AuthorizationContext): Promise<OpsRosterCapabilities> {
   const owner = isCompanyOwner(authorization);
   const identity = await actorIdentity(authorization);
+  const rolePlanner = owner || isOpsRosterPlannerRole(authorization.roleCode);
+  const designationPlanner = isRosterDirectPublishDesignation({
+    name: identity.designationName ?? "",
+    code: identity.designationCode
+  });
+
   if (!identity.designationId) {
     return {
       designationId: null,
       designationName: identity.designationName,
-      canPlan: owner,
+      canPlan: rolePlanner,
       canApprove: owner,
       canApproveL1: owner,
       canApproveL2: owner,
       canApproveHr: owner,
-      canPublishDirect: owner
+      canPublishDirect: rolePlanner
     };
   }
+
   const result = await db().from("hr_roster_designation_rules")
     .select("can_plan,can_approve,can_approve_l1,can_approve_l2,can_approve_hr,can_publish_direct")
     .eq("company_id", authorization.companyId)
@@ -275,9 +286,8 @@ export async function loadOpsRosterCapabilities(authorization: AuthorizationCont
   const canApproveL1 = Boolean(result.data?.can_approve_l1 ?? result.data?.can_approve);
   const canApproveL2 = Boolean(result.data?.can_approve_l2);
   const canApproveHr = Boolean(result.data?.can_approve_hr);
-  // Direct-publish designation flags do not skip weekly roster approval (People masters).
-  // They still allow planning when can_plan is unset for leadership/HR designations.
-  const canPublishDirect = owner || Boolean(result.data?.can_publish_direct);
+  // FSD / leadership can plan from designation or Ops role even when Settings can_plan is unset.
+  const canPublishDirect = owner || Boolean(result.data?.can_publish_direct) || designationPlanner || rolePlanner;
   const canPlan = owner || Boolean(result.data?.can_plan) || canPublishDirect;
   return {
     designationId: identity.designationId,

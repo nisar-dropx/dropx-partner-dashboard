@@ -37,12 +37,15 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
   const canAdd = hasPermission(authorization, "ops_rostering", "add") && capabilities.canPlan;
   const canEdit = hasPermission(authorization, "ops_rostering", "edit") && capabilities.canPlan;
   const editable = Boolean(canEdit && selectedPlan && ["draft", "returned"].includes(selectedPlan.status));
-  const canStart = Boolean(canAdd && workspace && !workspace.openPlan);
+  // Open drafts are edited in place; canStart prepares a new draft only when none is open.
+  const canStart = Boolean(canAdd && workspace && (!workspace.openPlan || editable));
   const accessLabel = !capabilities.canPlan
     ? (capabilities.canApprove ? "Approver access" : "View only")
     : selectedPlan?.status === "pending_approval"
       ? "Change pending approval"
-      : "Can prepare roster changes";
+      : editable || canStart
+        ? "Can prepare roster changes"
+        : "View only";
   const approvalSummary = route?.summary
     ?? (capabilities.canApprove ? "Open My approvals to act on assigned roster requests." : "Your access is view-only.");
 

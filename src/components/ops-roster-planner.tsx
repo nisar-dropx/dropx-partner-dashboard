@@ -216,7 +216,12 @@ export function OpsRosterPlanner({
   const ensureEditing = useCallback(async () => {
     if (editingEnabledRef.current) return true;
     if (!canStart) {
-      setMessage({ tone: "error", text: "This roster is view only for your current access." });
+      setMessage({
+        tone: "error",
+        text: plan?.status === "pending_approval"
+          ? "This roster change is awaiting approval. Recall it from the submitter or wait for a decision before editing."
+          : "This roster is view only for your current access."
+      });
       return false;
     }
     if (preparingRef.current) return false;
