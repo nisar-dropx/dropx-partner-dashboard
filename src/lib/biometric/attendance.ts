@@ -610,7 +610,7 @@ function summarizeFirstInLastOut(punchTimes: string[]) {
   };
 }
 
-async function loadDailyWorkerSnapshot({
+export async function loadDailyWorkerSnapshot({
   companyId,
   employeeId,
   fieldExecutiveId,
@@ -643,7 +643,7 @@ async function loadDailyWorkerSnapshot({
       workerName = employee.data.full_name ?? null;
       locationId = employee.data.location_id ?? locationId;
     }
-  } else if (accountId && ["field_executive", "contractor", "vendor", "worker"].includes(profileType ?? "")) {
+  } else if (accountId && ["workforce", "field_executive", "contractor", "vendor", "worker"].includes(profileType ?? "")) {
     const table = profileType === "contractor"
       ? "contractors"
       : profileType === "vendor"

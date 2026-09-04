@@ -3287,6 +3287,8 @@ h3 {
 .performance-trend-grid footer { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; color: #98a2b3; font-size: 7px; text-align: center; }
 .performance-trend-grid article > small { color: #667085; font-size: 8px; }
 .performance-row-trend-link { color: #e94f16; display: inline-block; font-size: 7px; font-weight: 850; margin-top: 3px; }
+.performance-row-review-link { display: grid; gap: 2px; text-decoration: none; }
+.performance-row-review-link span { color: #c2410c; font-size: 7px; font-weight: 850; }
 
 @media (max-width: 900px) {
   .performance-summary-grid { grid-template-columns: 1fr 1fr; }
@@ -20106,15 +20108,17 @@ td strong,
 .performance-opening-window-list span { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid #e5eaf0; border-radius: 999px; color: #64748b; background: #f8fafc; font-size: 8px; }.performance-opening-window-list b { color: #172033; }
 .hawkeye-station-stack { display: grid; gap: 7px; padding: 0 12px 12px; }
 .hawkeye-station-stack details { border: 1px solid #e5eaf0; border-radius: 10px; background: #fff; }
-.hawkeye-station-stack summary { display: grid; grid-template-columns: minmax(140px, 1fr) auto auto; align-items: center; gap: 12px; padding: 10px 12px; cursor: pointer; list-style: none; }
-.hawkeye-station-stack summary span, .hawkeye-station-stack summary small { display: block; }.hawkeye-station-stack summary strong { color: #172033; font-size: 12px; }.hawkeye-station-stack summary small { color: #94a3b8; font-size: 8px; }.hawkeye-station-stack summary b { color: #b42318; font-size: 9px; }.hawkeye-station-stack summary a { color: #c2410c; font-size: 9px; font-weight: 850; text-decoration: none; }
-.hawkeye-station-stack details > div { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 5px; padding: 0 10px 10px; }
+.hawkeye-station-stack summary { display: grid; grid-template-columns: minmax(140px, 1fr) auto; align-items: center; gap: 12px; padding: 10px 12px; cursor: pointer; list-style: none; }
+.hawkeye-station-stack summary span, .hawkeye-station-stack summary small { display: block; }.hawkeye-station-stack summary strong { color: #172033; font-size: 12px; }.hawkeye-station-stack summary small { color: #94a3b8; font-size: 8px; }.hawkeye-station-stack summary b { color: #b42318; font-size: 9px; }
+.hawkeye-station-actions { padding: 0 12px 8px; }
+.hawkeye-station-actions a { color: #c2410c; font-size: 9px; font-weight: 850; text-decoration: none; }
+.hawkeye-station-stack details > div:not(.hawkeye-station-actions) { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 5px; padding: 0 10px 10px; }
 .hawkeye-station-stack article { min-width: 0; padding: 7px; border: 1px solid #edf0f4; border-radius: 7px; background: #f8fafc; }.hawkeye-station-stack article.green { background: #f0fdf4; }.hawkeye-station-stack article.amber { background: #fffbeb; }.hawkeye-station-stack article.red { background: #fff1f2; }
 .hawkeye-station-stack article span, .hawkeye-station-stack article small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.hawkeye-station-stack article span { color: #64748b; font-size: 7px; font-weight: 800; }.hawkeye-station-stack article strong { display: block; margin: 2px 0; color: #172033; font-size: 12px; }.hawkeye-station-stack article small { color: #94a3b8; font-size: 6px; }
 @media (max-width: 1150px) {
   .performance-review-columns { grid-template-columns: 1fr; }
   .performance-action-item form { grid-template-columns: 1fr 1fr 1fr; }
-  .hawkeye-station-stack details > div { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .hawkeye-station-stack details > div:not(.hawkeye-station-actions) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .performance-review-cadence { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .performance-opening-window-form { grid-template-columns: 1fr 1fr 1fr; }.performance-opening-window-form button { grid-column: 1 / -1; }
 }
@@ -20126,8 +20130,8 @@ td strong,
   .performance-operations-form .wide { grid-column: auto; }
   .performance-cps-note { grid-template-columns: 1fr; }
   .performance-review-complete form { grid-template-columns: 1fr; }
-  .hawkeye-station-stack details > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .hawkeye-station-stack summary { grid-template-columns: 1fr auto; }.hawkeye-station-stack summary a { grid-column: 1 / -1; }
+  .hawkeye-station-stack details > div:not(.hawkeye-station-actions) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hawkeye-station-stack summary { grid-template-columns: 1fr auto; }
   .performance-review-cadence { grid-template-columns: 1fr; }
   .performance-review-start-guide { align-items: stretch; flex-direction: column; }
   .performance-review-overview > summary { align-items: flex-start; flex-direction: column; }.performance-review-overview article { grid-template-columns: 1fr auto; }.performance-review-overview article p { grid-column: 1 / -1; white-space: normal; }.performance-review-overview article > span:last-child { grid-column: 1 / -1; }

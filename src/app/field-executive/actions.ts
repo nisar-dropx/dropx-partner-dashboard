@@ -336,6 +336,7 @@ export async function createFieldExecutive(formData: FormData) {
       date_of_join: dateOfJoin,
       location_id: locationId,
       designation,
+      ...(table === "workforce" ? { designation_id: designationRuleResult.data.id } : {}),
       biometric_id: biometricId,
       dropx_id: dropxId,
       created_by: authorization.userId,
@@ -486,13 +487,20 @@ export async function updateFieldExecutive(formData: FormData) {
 
     const designationResult = await supabaseAdmin
       .from("designations")
-      .select("code, profile_field_rules, portal_permissions")
+      .select("id, code, profile_field_rules, portal_permissions")
       .eq("company_id", companyId)
       .eq("name", payload.designation)
       .eq("is_active", true)
       .maybeSingle();
     if (designationResult.error) throw new Error(designationResult.error.message);
     if (!designationResult.data) throw new Error("Selected designation is not available.");
+    if (table === "workforce") {
+      await assertDesignationRegister({
+        companyId,
+        designationId: designationResult.data.id,
+        expectedTables: [targetRegisterForWorkforceRoute(returnPath)]
+      });
+    }
     const accessSurface = currentAccessSurface();
     requireDesignationPortalAccess(designationResult.data, accessSurface, "edit", { isOwner: accessSurface === "dashboard" && isCompanyOwner(authorization) });
     const dashboardRules = (await loadWorkforceCategoryRules(
@@ -552,6 +560,7 @@ export async function updateFieldExecutive(formData: FormData) {
       date_of_join: payload.date_of_join,
       location_id: payload.location_id,
       designation: payload.designation,
+      ...(table === "workforce" ? { designation_id: designationResult.data.id } : {}),
       biometric_id: payload.biometric_id,
       is_active: payload.is_active,
       statutory_applicability: payload.statutory_applicability
@@ -911,6 +920,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
         date_of_join: row.dateOfJoin,
         location_id: locationId,
         designation: designation.name,
+        ...(table === "workforce" ? { designation_id: designation.id } : {}),
         created_by: authorization.userId,
         onboarding_status: "pending",
         ...(config.profileType === "field_executive" ? {
