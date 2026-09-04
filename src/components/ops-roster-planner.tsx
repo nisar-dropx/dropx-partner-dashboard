@@ -179,6 +179,7 @@ export function OpsRosterPlanner({
   const cutoffMessage = `Roster changes are allowed only until ${changeCutoffHours} hours before the rostered shift.`;
 
   const lockReason = useCallback((date: string, payload?: RosterDragPayload | null, fallback?: RosterAssignmentValue) => {
+    if (date < today) return "Past roster dates cannot be edited.";
     if (date < templateStartRef.current) return `This roster change starts on ${dateLabel(templateStartRef.current)}. Earlier dates are view only.`;
     const assignment = payload?.tool.kind === "shift"
       ? { dayType: "working" as const, shiftId: payload.tool.shiftId, notes: null }
