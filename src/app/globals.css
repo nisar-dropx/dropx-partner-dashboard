@@ -20072,7 +20072,8 @@ td strong,
 .performance-operations-form .wide { grid-column: 1 / 4; }
 .performance-operations-form textarea { min-height: 48px; resize: vertical; }
 .performance-review-actions { padding: 2px 12px 12px; }
-.performance-review-actions h3 { margin: 9px 0; color: #172033; font-size: 11px; }
+.performance-review-actions h3 { margin: 9px 0 4px; color: #172033; font-size: 11px; }
+.performance-rca-subhead { margin: 0 0 8px; color: #64748b; font-size: 10px; }
 .performance-action-item { margin-top: 6px; border: 1px solid #e5eaf0; border-radius: 9px; background: #fff; }
 .performance-action-item > summary { display: flex; align-items: center; gap: 8px; padding: 11px 13px; cursor: pointer; list-style: none; }
 .performance-action-item > summary::-webkit-details-marker { display: none; }

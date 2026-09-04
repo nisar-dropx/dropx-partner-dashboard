@@ -51,7 +51,7 @@ export function reviewCapabilities(input: {
     canEditConnections: editor && (oversight || input.stationUser || (!input.closed && current && first)),
     canEditRca: editor && (oversight || (!input.closed && current && (first || input.currentIsFirst === true))),
     canComment: editor && (oversight || (!input.closed && current)),
-    canManageActions: editor && (oversight || (!input.closed && (current || first))),
+    canManageActions: editor && (oversight || first || (!input.closed && current)),
     // Oversight uses an explicit, reason-required bypass, never an unassigned approval.
     canComplete: editor && !input.closed && Boolean(input.currentRole) && current,
     canBypass: Boolean(editor && !input.closed && canOverride),

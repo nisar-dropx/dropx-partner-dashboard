@@ -42,6 +42,7 @@ export function PerformanceRcaActions({
   return (
     <div className="performance-review-actions">
       <h3>RCA and next-day actions</h3>
+      <p className="performance-rca-subhead">Current exceptions and saved RCA · open a row to view or edit.</p>
       {rows.map((metric) => {
         const item = itemsByMetric.get(metric.key);
         return (
