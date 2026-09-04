@@ -44,9 +44,8 @@ export function PerformanceRcaActions({
       <h3>RCA and next-day actions</h3>
       {rows.map((metric) => {
         const item = itemsByMetric.get(metric.key);
-        const needsWork = !item || item.status !== "done";
         return (
-          <details className="performance-action-item" key={`action-${metric.key}`} open={needsWork}>
+          <details className="performance-action-item" key={`action-${metric.key}`}>
             <summary>
               <span className={`metric-dot ${metric.severity}`} />
               <strong>{metric.label}</strong>
