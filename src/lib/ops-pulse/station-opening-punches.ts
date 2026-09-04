@@ -8,7 +8,52 @@ export type OpeningPunch = {
   accountId?: string | null;
   name?: string | null;
   workerCode?: string | null;
+  isPeopleProfile?: boolean;
+  profileLabel?: string;
 };
+
+export type StationOpeningAttendance = {
+  peoplePunch: OpeningPunch | null;
+  firstOtherPunch: OpeningPunch | null;
+};
+
+export function peopleProfileReference(punch: OpeningPunch) {
+  // Only the People employee/contractor registers can qualify. Their designation
+  // must also belong to a People module; an ODCD contractor is Delivery Network.
+  if (punch.profileType === "contractor") {
+    const id = punch.accountId ?? punch.fieldExecutiveId;
+    return id ? { table: "contractors" as const, id } : null;
+  }
+  if (punch.profileType && punch.profileType !== "employee") return null;
+  const id = punch.profileType === "employee" ? punch.accountId ?? punch.employeeId : punch.employeeId;
+  return id ? { table: "employees" as const, id } : null;
+}
+
+export function isPeopleDesignation(peopleModule: string | null | undefined, onboardingCategories: unknown, table: string) {
+  return String(peopleModule ?? "").trim().toLowerCase().startsWith("people")
+    && Array.isArray(onboardingCategories) && onboardingCategories.includes(table);
+}
+
+export function openingProfileLabel(profileType: string | null | undefined, designation?: string | null) {
+  const label = ({ employee: "Unverified People profile", workforce: "Workforce", field_executive: "Workforce",
+    contractor: "Contractor", vendor: "Vendor", worker: "Helper" } as Record<string, string>)[profileType ?? ""] ?? "Unverified profile";
+  if (!designation?.trim()) return label;
+  if (/^(delivery associate|da)$/i.test(designation.trim())) return "Delivery associate (DA)";
+  return `${designation.trim()} · ${label}`;
+}
+
+export function peopleOpeningPunches(punches: OpeningPunch[], windows: Map<string, { start: string; end: string }>) {
+  const people = firstOpeningPunches(punches.filter((punch) => punch.isPeopleProfile === true), windows);
+  const others = firstOpeningPunches(punches.filter((punch) => punch.isPeopleProfile !== true), windows);
+  const result = new Map<string, StationOpeningAttendance>();
+  for (const locationId of new Set([...people.keys(), ...others.keys()])) {
+    const peoplePunch = people.get(locationId) ?? null;
+    const other = others.get(locationId) ?? null;
+    result.set(locationId, { peoplePunch,
+      firstOtherPunch: other && (!peoplePunch || Date.parse(other.time) < Date.parse(peoplePunch.time)) ? other : null });
+  }
+  return result;
+}
 
 export type PhysicalPunch = {
   device_id: string | null;

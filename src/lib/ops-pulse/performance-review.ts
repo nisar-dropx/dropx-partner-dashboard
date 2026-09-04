@@ -117,6 +117,7 @@ export type PerformanceOperationalSnapshot = {
   deliveredCount: number;
   firstPunchAt: string | null;
   firstPunchBy: string | null;
+  openingFirstOtherPunch: { time: string; name: string; profileLabel: string; workerCode: string } | null;
   openingLateMinutes: number | null;
   openingShiftName: string | null;
   openingShiftSource: string | null;
@@ -374,6 +375,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     deliveredCount: 0,
     firstPunchAt: null,
     firstPunchBy: null,
+    openingFirstOtherPunch: null,
     openingLateMinutes: null,
     openingShiftName: null,
     openingShiftSource: null,
@@ -556,8 +558,14 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
         return [location.id, { start: current.openingWindowStart, end: current.openingWindowEnd }];
       })));
     for (const location of locations) {
-      const punch = openings.get(location.id);
+      const opening = openings.get(location.id);
       const current = empty.get(location.station_code)!;
+      const other = opening?.firstOtherPunch;
+      if (other) current.openingFirstOtherPunch = {
+        time: other.time, name: other.name || other.workerCode || `Biometric ID ${other.enrolmentId}`,
+        profileLabel: other.profileLabel || "Unverified profile", workerCode: other.workerCode || `Biometric ID ${other.enrolmentId}`
+      };
+      const punch = opening?.peoplePunch;
       if (!punch) continue;
       current.firstPunchAt = punch.time;
       current.firstPunchBy = punch.name || punch.workerCode || `Biometric ID ${punch.enrolmentId}`;
