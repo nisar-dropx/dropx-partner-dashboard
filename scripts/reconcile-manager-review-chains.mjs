@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { readFileSync } from 'node:fs';
 import { resolvePeopleOperationalHierarchy } from '../src/lib/people-operational-hierarchy-core.ts';
 import { managerReviewChain } from '../src/lib/ops-pulse/review-policy.ts';
+import { loadReviewUserLinks } from '../src/lib/ops-pulse/review-user-links.ts';
 
 // Dry-run by default. Uses the same pure People resolver as the live Review Desk.
 // A connector-provided dataset can be supplied on stdin to produce a plan without credentials.
@@ -38,7 +39,7 @@ for(const company of new Set(reviews.map(r=>r.company_id))){
     db.from('hr_people').select('id,display_name').eq('company_id',company).eq('status','active'),
     db.from('designations').select('id,code,name').eq('company_id',company).eq('is_active',true),
     db.from('hr_reporting_relationships').select('subject_assignment_id,manager_assignment_id').eq('company_id',company).eq('relationship_type','solid_line').eq('is_primary',true).lte('effective_from',day).or(`effective_to.is.null,effective_to.gte.${day}`).order('effective_from',{ascending:false}),
-    db.from('hr_user_person_links').select('person_id,user_id,profiles!hr_user_person_links_user_id_fkey(is_active)').eq('company_id',company).eq('status','active')
+    db.from('hr_user_person_links').select('person_id,user_id').eq('company_id',company).eq('status','active')
   ]);
   for(const result of results)if(result.error)throw result.error;
   const [assignments,engagements,people,designations,relationships,links]=results.map(r=>r.data);
@@ -49,7 +50,7 @@ for(const company of new Set(reviews.map(r=>r.company_id))){
     return [{id:row.id,personId:person.id,displayName:person.display_name,locationId:row.location_id,designationCode:designation?.code,designationName:designation?.name,positionTitle:row.position_title}];
   });
   const hierarchy=resolvePeopleOperationalHierarchy(companyReviews.map(r=>r.station_id),rows,relationships.map(r=>({subjectAssignmentId:r.subject_assignment_id,managerAssignmentId:r.manager_assignment_id})));
-  const users=new Map(links.filter(link=>one(link.profiles)?.is_active).map(link=>[link.person_id,link.user_id]));
+  const users=await loadReviewUserLinks(db,company,links.map(link=>link.person_id));
   for(const review of companyReviews){
     const location=hierarchy.get(review.station_id);
     const chain=managerReviewChain(location?.managerReportingChain.length?location.managerReportingChain:location?.primaryReportingChain??[]).map(p=>({reviewerName:p.name,reviewerRole:p.role,reviewerUserId:users.get(p.personId)??null}));

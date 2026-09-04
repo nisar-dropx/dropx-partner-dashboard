@@ -1,5 +1,6 @@
 import type { AuthorizationContext } from "@/lib/authorization";
 import { managerReviewChain } from "@/lib/ops-pulse/review-policy";
+import { loadReviewUserLinks } from "@/lib/ops-pulse/review-user-links";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { resolveStationOpeningSchedule, stationOpeningLateMinutes } from "@/lib/ops-pulse/station-opening";
 import { loadStationOpeningAttendance } from "@/lib/ops-pulse/station-opening-attendance";
@@ -595,10 +596,7 @@ export async function resolvePerformanceReviewChain(companyId: string, stationId
   const peopleChain = managerReviewChain(stationHierarchy?.managerReportingChain.length
     ? stationHierarchy.managerReportingChain : stationHierarchy?.primaryReportingChain ?? []);
   if (!peopleChain.length) return [];
-  const links = await supabaseAdmin.from("hr_user_person_links").select("person_id,user_id,profiles!hr_user_person_links_user_id_fkey(is_active)")
-    .eq("company_id", companyId).eq("status", "active").in("person_id", peopleChain.map((person) => person.personId));
-  if (links.error) throw new Error("Unable to resolve the People review chain.");
-  const userByPerson = new Map((links.data ?? []).filter((link) => one(link.profiles)?.is_active).map((link) => [link.person_id, link.user_id]));
+  const userByPerson = await loadReviewUserLinks(supabaseAdmin,companyId,peopleChain.map(person=>person.personId));
   return peopleChain.map((person) => ({
     reviewerName: person.name,
     reviewerRole: person.role,
