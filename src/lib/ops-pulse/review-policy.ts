@@ -47,8 +47,8 @@ export function reviewCapabilities(input: {
   const first = Boolean(input.firstReviewerId && input.firstReviewerId === input.userId);
   return {
     canStart: Boolean(visible && (input.canAdd || input.canEdit) && (canOverride || first || input.higherReviewer)),
-    // Station team always; first manager on their stage can also enter timings when TL access is missing.
-    canEditConnections: editor && (oversight || input.stationUser || (!input.closed && current && first)),
+    // Station team always; first-stage manager (or their proxy) can enter timings when TL access is missing.
+    canEditConnections: editor && (oversight || input.stationUser || (!input.closed && current && (first || input.currentIsFirst === true))),
     canEditRca: editor && (oversight || (!input.closed && current && (first || input.currentIsFirst === true))),
     canComment: editor && (oversight || (!input.closed && current)),
     canManageActions: editor && (oversight || first || (!input.closed && current)),
@@ -107,6 +107,27 @@ export function connectionTimes(values: { arrival: string; unloading: string; cl
     if (value && new Date(value).getTime() - new Date(parsed.arrival).getTime() > 48 * 3600000) throw new Error("A connection must finish within 48 hours of arrival.");
   }
   return parsed;
+}
+
+/** Build connection timestamps from simple HH:MM fields (previous review-desk UI). */
+export function stationTimingClocks(values: { arrival: string; unloading: string; clearance: string }, serviceDate: string) {
+  const clock = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(trimmed)) throw new Error("Enter a valid time.");
+    return trimmed.slice(0, 5);
+  };
+  const arrival = clock(values.arrival);
+  if (!arrival) throw new Error("Enter the vehicle arrival time first.");
+  const unloading = clock(values.unloading);
+  const clearance = clock(values.clearance);
+  const unloadingDate = unloading && unloading < arrival ? nextCalendarDay(serviceDate) : serviceDate;
+  const clearanceDate = clearance && unloading && clearance < unloading ? nextCalendarDay(unloadingDate) : unloadingDate;
+  return connectionTimes({
+    arrival: `${serviceDate}T${arrival}`,
+    unloading: unloading ? `${unloadingDate}T${unloading}` : "",
+    clearance: clearance ? `${clearanceDate}T${clearance}` : ""
+  }, serviceDate);
 }
 
 /** Discussion feed: comments / stage completions / system notes only — not RCA or takeaway saves. */

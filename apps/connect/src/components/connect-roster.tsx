@@ -2,6 +2,7 @@
 
 import { ArrowLeftRight, CalendarDays, Check, Clock3, RefreshCw, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { formatShiftClock } from "@/lib/roster-plan-preference";
 import type { AppAccount } from "./connect-profile-app";
 
 type Shift = { id: string; name: string; code: string; start_time: string; end_time: string };
@@ -26,7 +27,11 @@ type RosterPayload = { days: RosterDay[]; requests: SwapRequest[]; leadHours: nu
 function displayDate(value: string) {
   return new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "2-digit", month: "short" }).format(new Date(`${value}T00:00:00`));
 }
-function shortTime(value?: string | null) { return value ? value.slice(0, 5) : ""; }
+
+function shortTime(value?: string | null) {
+  const clock = formatShiftClock(value);
+  return clock === "--:--" ? "" : clock;
+}
 function shiftLabel(shift: Shift | null, dayType: string) {
   return dayType === "weekly_off" ? "Weekly off" : shift ? `${shortTime(shift.start_time)}–${shortTime(shift.end_time)}` : "Shift not assigned";
 }

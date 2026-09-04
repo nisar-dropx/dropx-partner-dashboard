@@ -181,13 +181,8 @@ export function PerformanceReviewDesk(props: Props) {
     {review ? <PerformanceReviewFlow key={`${review.id}-${review.current_step_order}-${review.updated_at}`} steps={selectedSteps} currentOrder={review.current_step_order} stationLeads={props.stationLeads}/> : <section className="performance-review-flow" aria-label="Review workflow">
       {reviewChain.map((step,index)=><div key={`${step.reviewerUserId}-${index}`}><i>{index+1}</i><span>{step.reviewerRole}<small>{step.reviewerName}</small><small>Reviews with {index>0?reviewChain[index-1].reviewerName:props.stationLeads}</small></span></div>)}
     </section>}
-    <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update vehicle timings and noon EMD; view the full review":canEdit?"Your review · update RCA, actions, takeaway and station inputs":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
+    <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update vehicle timings and noon EMD; view the full review":canEdit?"Your review · update RCA, actions, takeaway and station timings":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
     <PerformanceReviewExceptions key={`${selectedCode}-${date}-${review?.updated_at??"not-started"}`} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy} canAccessBypass={props.canAccessBypass} canAccessProxy={props.canAccessProxy} canStart={canAdd} hasRoute={Boolean(review||reviewChain.length)}/>
-
-    <div className="review-station-updates">
-      <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
-      <PerformanceNoonEmdEntry entry={props.noonEmd.row} error={props.noonEmd.error} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
-    </div>
 
     <div className="performance-review-columns">
       <section className="panel performance-review-section">
@@ -198,18 +193,24 @@ export function PerformanceReviewDesk(props: Props) {
           <PerformanceOpeningCard snapshot={snapshot}/>
           <article><span>Metric health</span><strong>{metrics.length - misses.length}/{metrics.length}</strong><small>Within configured range</small></article>
         </div>
-        {previousReview ? <div className="performance-previous-takeaway"><span><strong>Previous review · {formatDashboardDate(previousReview.source_date)}</strong><small>{previousReview.status === "closed" ? "Completed" : "Carried forward"}</small></span><p>{previousReview.review_summary || "No takeaway was recorded."}</p></div> : null}
+        {previousReview?.review_summary ? (
+          <div className="performance-previous-takeaway">
+            <span>
+              <strong>Previous review · {formatDashboardDate(previousReview.source_date)}</strong>
+              <small>{previousReview.status === "closed" ? "Completed" : "Carried forward"}</small>
+            </span>
+            <p>{previousReview.review_summary}</p>
+          </div>
+        ) : null}
         <PerformanceCarriedActions items={carriedActions} previous={previousStationReviews} review={review} canUpdate={props.canManageActions}/>
         <details className="performance-inline-detail" open>
           <summary><span>Performance scorecard</span><b>{metrics.length} metrics</b></summary>
           <div className="performance-review-metrics">{metrics.map((metric) => <article className={metric.severity} key={metric.key}><span title={metric.label}>{metric.short}</span><strong>{valueText(metric.actual)}</strong><small>{metric.target == null ? "Reference metric" : `Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}</small></article>)}</div>
         </details>
-        {review && canEdit ? <ReviewActionForm key={review.id} action={savePerformanceReviewOperations} className="performance-operations-form">
-          <input type="hidden" name="review_id" value={review.id}/><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/>
-          <input type="hidden" name="review_version" value={review.updated_at}/>
-          <label className="wide">Review takeaway<textarea name="review_summary" defaultValue={review.review_summary ?? ""} placeholder="Only the key conclusion or escalation"/></label>
-          <button className="button secondary">Save takeaway</button>
-        </ReviewActionForm> : review ? <div className="review-takeaway-readonly"><strong>Review takeaway</strong><p>{review.review_summary || "Awaiting the first manager’s review."}</p></div> : null}
+        <div className="review-station-updates">
+          <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
+          <PerformanceNoonEmdEntry entry={props.noonEmd.row} error={props.noonEmd.error} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
+        </div>
         {review && rcaRows.length ? (
           <PerformanceRcaActions
             key={review.id}
@@ -221,6 +222,21 @@ export function PerformanceReviewDesk(props: Props) {
             reviewVersion={review.updated_at}
             stationCode={selectedCode}
           />
+        ) : null}
+        {review && canEdit ? (
+          <ReviewActionForm key={`takeaway-${review.id}`} action={savePerformanceReviewOperations} className="performance-operations-form">
+            <input type="hidden" name="review_id" value={review.id}/>
+            <input type="hidden" name="source_date" value={date}/>
+            <input type="hidden" name="station_code" value={selectedCode}/>
+            <input type="hidden" name="review_version" value={review.updated_at}/>
+            <label className="wide">Review takeaway<textarea name="review_summary" defaultValue={review.review_summary ?? ""} placeholder="Only the key conclusion or escalation"/></label>
+            <button className="button secondary">Save takeaway</button>
+          </ReviewActionForm>
+        ) : review ? (
+          <div className="review-takeaway-readonly">
+            <strong>Review takeaway</strong>
+            <p>{review.review_summary || "Awaiting the first manager’s review."}</p>
+          </div>
         ) : null}
       </section>
 

@@ -16,11 +16,13 @@ import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Eraser, GripVer
 import { useRouter } from "next/navigation";
 import { prepareOpsRoster, saveOpsRosterAssignments, submitOpsRoster } from "@/app/ops-pulse/rostering/actions";
 import type { OpsRosterEntry, OpsRosterHoliday, OpsRosterPerson, OpsRosterPlan, OpsRosterShift } from "@/lib/ops-pulse/rostering";
+import { formatShiftClock } from "@/lib/roster-plan-preference";
 import {
   applyRosterDrop,
   decodeRosterDragPayload,
   encodeRosterDragPayload,
   moveIsoDate,
+  nextRosterOccurrenceOnOrAfter,
   recurringTemplateDate,
   rosterAssignmentToDragPayload,
   rosterCoverage,
@@ -60,7 +62,10 @@ type PreparedEntry = {
 
 function personKey(person: Pick<OpsRosterPerson, "workerType" | "id">) { return `${person.workerType}:${person.id}`; }
 function cellKey(person: Pick<OpsRosterPerson, "workerType" | "id">, date: string) { return `${personKey(person)}:${date}`; }
-function compactTime(value: string) { return String(value ?? "").slice(0, 5); }
+function compactTime(value: string) {
+  const clock = formatShiftClock(value);
+  return clock === "--:--" ? "" : clock;
+}
 function dayLabel(date: string) { return new Intl.DateTimeFormat("en-IN", { weekday: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)); }
 function dateLabel(date: string) { return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)); }
 function fullDateLabel(date: string) { return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)); }
@@ -174,7 +179,6 @@ export function OpsRosterPlanner({
   const cutoffMessage = `Roster changes are allowed only until ${changeCutoffHours} hours before the rostered shift.`;
 
   const lockReason = useCallback((date: string, payload?: RosterDragPayload | null, fallback?: RosterAssignmentValue) => {
-    if (date < today) return "Past roster dates cannot be edited.";
     if (date < templateStartRef.current) return `This roster change starts on ${dateLabel(templateStartRef.current)}. Earlier dates are view only.`;
     const assignment = payload?.tool.kind === "shift"
       ? { dayType: "working" as const, shiftId: payload.tool.shiftId, notes: null }
@@ -184,8 +188,9 @@ export function OpsRosterPlanner({
     const startTime = assignment?.dayType === "working" && assignment.shiftId
       ? shiftById.get(assignment.shiftId)?.startTime
       : "00:00";
-    const rosterDate = recurringTemplateDate(templateStartRef.current, date);
-    return rosterInstant(rosterDate, startTime) - new Date(nowIso).getTime() < changeCutoffHours * 60 * 60 * 1000 ? cutoffMessage : null;
+    // Recurring pattern cells map to the template week; cut off against the next real occurrence of that weekday.
+    const cutoffDate = nextRosterOccurrenceOnOrAfter(recurringTemplateDate(templateStartRef.current, date), today);
+    return rosterInstant(cutoffDate, startTime) - new Date(nowIso).getTime() < changeCutoffHours * 60 * 60 * 1000 ? cutoffMessage : null;
   }, [changeCutoffHours, cutoffMessage, nowIso, shiftById, today]);
 
   useEffect(() => {
@@ -366,7 +371,7 @@ export function OpsRosterPlanner({
       const shiftId = defaultShifts[personKey(person)];
       if (!shiftId || !shiftById.has(shiftId)) continue;
       for (const date of templateDates) {
-        if (rosterInstant(date, shiftById.get(shiftId)?.startTime) - new Date(nowIso).getTime() < changeCutoffHours * 60 * 60 * 1000) continue;
+        if (rosterInstant(nextRosterOccurrenceOnOrAfter(date, today), shiftById.get(shiftId)?.startTime) - new Date(nowIso).getTime() < changeCutoffHours * 60 * 60 * 1000) continue;
         const key = cellKey(person, date);
         if (next.has(key)) continue;
         next.set(key, { dayType: "working", shiftId, notes: null });
