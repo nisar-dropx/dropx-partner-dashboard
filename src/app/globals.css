@@ -20333,3 +20333,10 @@ td strong,
   .review-access-hint { max-width: none; flex-basis: 100%; }
   .review-comment-buttons .button { flex: 1; }
 }
+
+.performance-fact-card.opening-warning > summary { background: #fff7ed; }
+.performance-fact-card.opening-warning > summary strong { color: #c2410c; }
+.performance-fact-card > summary small b.opening-warning { color: #9a3412; background: #ffedd5; }
+.performance-opening-exception { margin: 4px 0; padding: 4px 8px; border-left: 3px solid #f97316; border-radius: 4px; background: #fff7ed; }
+.performance-opening-exception .performance-opening-explanation { display: block; color: #9a3412; font-weight: 600; }
+.performance-opening-popover { max-height: 420px; overflow-y: auto; }

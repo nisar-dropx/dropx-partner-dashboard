@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PerformanceOpeningCard } from "@/components/performance-opening-card";
 import { formatDashboardDate } from "@/lib/date-format";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import type { PerformanceAssociateDelivery, PerformanceOperationalSnapshot, PerformanceReview, PerformanceReviewCarryover, PerformanceReviewItem, PerformanceReviewStep, PerformanceConnection, PerformanceReviewUpdate, PerformanceReviewChainStep } from "@/lib/ops-pulse/performance-review";
@@ -55,22 +56,6 @@ function valueText(value: number | null) {
   return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
 }
 
-function timeText(value: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (!Number.isNaN(date.getTime())) return new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }).format(date);
-  return value.slice(0, 5);
-}
-
-function durationText(minutes: number | null) {
-  if (minutes == null) return "Shift not linked";
-  if (minutes <= 0) return "On time";
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  if (!hours) return `${remainder} min late`;
-  return `${hours} hr${hours === 1 ? "" : "s"}${remainder ? ` ${remainder} min` : ""} late`;
-}
-
 function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociateDelivery[]; total: number }) {
   return <div className="performance-associate-popover">
     <div className="performance-associate-popover-scroll">
@@ -102,7 +87,6 @@ export function PerformanceReviewDesk(props: Props) {
   const completedCount = locations.filter((location) => reviewByStation.get(location.station_code)?.status === "closed").length;
   const inReviewCount = locations.filter((location) => reviewByStation.get(location.station_code)?.status === "in_review").length;
   const notStartedCount = locations.length - completedCount - inReviewCount;
-  const openingIsLate = (snapshot.openingLateMinutes ?? 0) > 0;
   const selectedSteps = steps.filter((step) => step.review_id === review?.id && step.status !== "skipped" && ["cluster","aom","national"].includes(reviewRole(step.reviewer_role)));
   const reviewUpdates = discussionFeedUpdates(updates.filter((update) => update.review_id === review?.id));
   return <div className="performance-review-desk">
@@ -145,7 +129,7 @@ export function PerformanceReviewDesk(props: Props) {
         <div className="performance-review-facts">
           <details className="performance-fact-card" name="performance-review-fact"><summary><span>Delivered · view split</span><strong>{snapshot.deliveredCount.toLocaleString("en-IN")}</strong><small>{snapshot.associateDeliveries.length} delivering associate{snapshot.associateDeliveries.length === 1 ? "" : "s"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></details>
           <details className="performance-fact-card" name="performance-review-fact"><summary><span>Average allocation · view split</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / {snapshot.activeFeCount} active FEs</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></details>
-          <details className={`performance-fact-card opening ${openingIsLate ? "late" : ""}`} name="performance-review-fact"><summary><span>Station opened · shift check</span><strong>{timeText(snapshot.firstPunchAt)}</strong><small>{snapshot.scheduledOpeningTime ? <b className={openingIsLate ? "late" : "on-time"}>{durationText(snapshot.openingLateMinutes)}</b> : null}{snapshot.firstPunchBy || "No valid opening punch"}</small></summary><div className="performance-opening-popover"><p><span>Station opening shift</span><b>{timeText(snapshot.scheduledOpeningTime)}</b></p><p><span>Opening punch</span><b>{timeText(snapshot.firstPunchAt)}</b></p><p><span>Reported by</span><b>{snapshot.firstPunchBy || "—"}</b></p><p><span>Variance</span><b className={openingIsLate ? "late" : ""}>{durationText(snapshot.openingLateMinutes)}</b></p><p><span>Opening schedule</span><b>{snapshot.openingShiftName || "Not linked"}</b></p><p><span>Source</span><b>{snapshot.openingShiftSource || "No approved station roster"}</b></p><p><span>Opening punch window</span><b>{snapshot.openingWindowStart.slice(0, 5)}–{snapshot.openingWindowEnd.slice(0, 5)}</b></p></div></details>
+          <PerformanceOpeningCard snapshot={snapshot}/>
           <article><span>Metric health</span><strong>{metrics.length - misses.length}/{metrics.length}</strong><small>Within configured range</small></article>
         </div>
         {previousReview ? <div className="performance-previous-takeaway"><span><strong>Previous review · {formatDashboardDate(previousReview.source_date)}</strong><small>{previousReview.status === "closed" ? "Completed" : "Carried forward"}</small></span><p>{previousReview.review_summary || "No takeaway was recorded."}</p></div> : null}
