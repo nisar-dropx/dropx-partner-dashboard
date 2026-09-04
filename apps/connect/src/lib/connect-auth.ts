@@ -10,6 +10,7 @@ import {
   workforceTable
 } from "@/lib/workforce-profiles";
 import { requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
+import { connectWfhEligible, loadConnectWfhPolicies } from "./connect-wfh-access";
 
 export type ConnectAccount = {
   id: string;
@@ -755,6 +756,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   }
   const pageAccessByDesignationId = new Map<string, string[] | null>();
   const designationNameById = new Map<string, string>();
+  const designationCodeById = new Map<string, string | null>();
   const pageAccessByDesignationKey = new Map<string, string[] | null>();
   const categoryIds = [...new Set(designationRows.map((designation) => designation.designation_category_id).filter(Boolean))] as string[];
   const designationCategoryResult = categoryIds.length
@@ -777,6 +779,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       : null;
     pageAccessByDesignationId.set(String(designation.id), pages);
     designationNameById.set(String(designation.id), String(designation.name || designation.code));
+    designationCodeById.set(String(designation.id), designation.code ? String(designation.code) : null);
     peopleModuleByDesignationId.set(
       String(designation.id),
       designation.designation_category_id
@@ -809,6 +812,9 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     throw new Error(preferenceResult.error.message);
   }
   const defaultPreference = preferenceResult.error ? null : preferenceResult.data;
+  const wfhPolicies = await loadConnectWfhPolicies(
+    [...new Set(loginAccounts.map((account) => account.company_id))]
+  );
 
   return Promise.all(loginAccounts
     .filter((account) => companyNameById.has(account.company_id))
@@ -824,6 +830,27 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         account.profile_type,
         account.designation_id ? peopleModuleByDesignationId.get(account.designation_id) : null
       );
+      const pageAccess = resolveConnectPageAccess(account.profile_type, categoryPages, designationPages);
+      const designationId = account.designation_id ?? null;
+      const designationLabel = designationId
+        ? {
+          name: designationNameById.get(designationId) ?? account.role ?? "",
+          code: designationCodeById.get(designationId) ?? null
+        }
+        : account.role
+          ? { name: account.role, code: null }
+          : null;
+      if (
+        (account.profile_type === "employee" || account.profile_type === "contractor")
+        && connectWfhEligible({
+          policy: wfhPolicies.get(account.company_id),
+          designationId,
+          designation: designationLabel
+        })
+        && !pageAccess.includes("wfh")
+      ) {
+        pageAccess.push("wfh");
+      }
 
       return {
       id: account.id,
@@ -842,7 +869,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       status: account.status ?? null,
       biometricId: account.biometric_id ?? null,
       profilePhotoUrl: await signedProfilePhotoUrl(account.profile_photo_path),
-      pageAccess: resolveConnectPageAccess(account.profile_type, categoryPages, designationPages),
+      pageAccess,
       isDefault: defaultPreference?.default_company_id === account.company_id &&
         defaultPreference?.default_profile_type === account.profile_type &&
         defaultPreference?.default_account_id === account.id,

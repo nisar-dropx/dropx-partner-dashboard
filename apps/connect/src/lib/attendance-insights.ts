@@ -11,6 +11,7 @@ export type AttendanceInsightRow = {
   workHours: string;
   punchCount: number;
   remark: string;
+  workMode?: "onsite" | "wfh" | string | null;
   lateMinutes?: number;
   earlyOutMinutes?: number;
   scheduledStart?: string;
@@ -161,6 +162,30 @@ export function attendanceDayInsight(
     };
   }
 
+  if (row.workMode === "wfh" || /work from home|\bwfh\b/.test(state) || /work from home|\bwfh\b/.test(remark)) {
+    return {
+      calendarClass: "full",
+      detail: "Approved work from home. Present · WFH is recorded for this working day.",
+      headline: "Present · WFH",
+      issues: [],
+      label: "Present · WFH",
+      needsRegularization: false,
+      tone: "green"
+    };
+  }
+
+  if (/weekly off|week off|rest day|holiday|no record/.test(state) || ["WO", "H"].includes(row.status.toUpperCase())) {
+    return {
+      calendarClass: "off",
+      detail: label,
+      headline: label,
+      issues: [],
+      label,
+      needsRegularization: false,
+      tone: "neutral"
+    };
+  }
+
   if (options.today && options.shiftOpen) {
     const late = issues.find((issue) => issue.code === "late");
     return {
@@ -243,18 +268,6 @@ export function attendanceDayInsight(
       label: "Half day",
       needsRegularization: false,
       tone: "amber"
-    };
-  }
-
-  if (/weekly off|week off|rest day|holiday|no record/.test(state) || ["WO", "H"].includes(row.status.toUpperCase())) {
-    return {
-      calendarClass: "off",
-      detail: label,
-      headline: label,
-      issues: [],
-      label,
-      needsRegularization: false,
-      tone: "neutral"
     };
   }
 

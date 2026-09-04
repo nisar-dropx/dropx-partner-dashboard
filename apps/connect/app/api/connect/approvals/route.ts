@@ -4,6 +4,7 @@ import { connectApproverIdentity } from "../../../../src/lib/connect-expense-dat
 import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval, listConnectReturnedRosters, resubmitConnectReturnedRoster } from "../../../../src/lib/connect-manager-approvals";
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
 import { connectReporteeMatches, loadConnectReporteeAccess, normalizeConnectReporteeScope, type ConnectReporteeAccess } from "../../../../src/lib/connect-reportee-scope";
+import { decideConnectWfhApproval, listConnectWfhApprovals } from "../../../../src/lib/connect-wfh-data";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
@@ -70,8 +71,18 @@ export async function GET(request: Request) {
     const account = await selectedAccount(request);
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     const reportees = await loadConnectReporteeAccess(account, scope);
-    const [leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters] = await Promise.all([
+    const [leaveApprovals, wfhApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters] = await Promise.all([
       listLeaveApprovals(account, reportees),
+      (async () => {
+        const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
+        const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
+        if (!approverUserId) return [];
+        return listConnectWfhApprovals({
+          companyId: account.companyId,
+          approverUserId,
+          matchesReportee: (profileType, profileId) => connectReporteeMatches(reportees, profileType, profileId)
+        });
+      })(),
       listConnectLocationSupportPackages(account, reportees),
       listConnectAttendanceApprovals(account, reportees),
       listConnectAttendanceHrApprovals(account, reportees),
@@ -79,7 +90,7 @@ export async function GET(request: Request) {
       listConnectRosterSwapApprovals(account),
       listConnectReturnedRosters(account)
     ]);
-    return NextResponse.json({ scope, leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({ scope, leaveApprovals, wfhApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load approvals." }, { status: 400 });
   }
@@ -125,6 +136,23 @@ export async function PATCH(request: Request) {
       const note = clean(body.note);
       const notice = await decideConnectRosterSwapApproval(account, rosterSwapRequestId, decision, note);
       return NextResponse.json({ ok: true, notice });
+    }
+    const wfhRequestId = clean(body.wfhRequestId);
+    if (wfhRequestId) {
+      const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
+      const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
+      if (!approverUserId) throw new Error("A linked People login is required to approve work from home.");
+      const decision = clean(body.decision);
+      const note = clean(body.note);
+      if (decision !== "approved" && decision !== "rejected") throw new Error("Choose Approve or Reject.");
+      const result = await decideConnectWfhApproval({
+        companyId: account.companyId,
+        approverUserId,
+        requestId: wfhRequestId,
+        decision: decision as "approved" | "rejected",
+        note
+      });
+      return NextResponse.json({ ok: true, notice: result.notice });
     }
     const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
     const approverUserId = account.profileType === "user" ? account.id : identity?.userId;

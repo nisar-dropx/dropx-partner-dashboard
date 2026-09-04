@@ -190,6 +190,7 @@ function minutes(value: string) {
 
 function attendanceLabel(row: Row | undefined) {
   if (!row) return "No record";
+  if (row.workMode === "wfh") return "Present · WFH";
   if (row.statusLabel) return row.statusLabel;
   if (row.attendanceStatus) return row.attendanceStatus;
   const status = row.status.toUpperCase();
@@ -213,6 +214,7 @@ function emptyAttendanceRow(date: string): Row {
     workHours: "",
     punchCount: 0,
     remark: "",
+    workMode: "onsite",
     regularization: null
   };
 }
@@ -482,7 +484,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
           {selected.remark ? <p className="dx-attendance-day-note">{selected.remark}</p> : null}
           <footer>
             {selected.regularization ? <span className={`dx-request-status ${selected.regularization.status}`}>Regularization {selected.regularization.status}</span> : null}
-            {selected.regularization?.status !== "pending" && selected.statusKind !== "leave" && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0) ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.needsRegularization ? "Regularize missing punch" : "Request regularization"}</button> : null}
+            {selected.regularization?.status !== "pending" && selected.statusKind !== "leave" && selected.workMode !== "wfh" && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0) ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.needsRegularization ? "Regularize missing punch" : "Request regularization"}</button> : null}
           </footer>
         </div> : null}
       </> : null}
@@ -816,15 +818,17 @@ function RegularizationSheet({
   const [attachmentOut, setAttachmentOut] = useState<File | null>(null);
   const needsDualProof = reason === "missed_both";
   const [saving, setSaving] = useState(false);
-  const requestsInTime = ["missed_in", "incorrect_in", "missed_both", "other"].includes(reason);
-  const requestsOutTime = ["missed_out", "incorrect_out", "missed_both", "other"].includes(reason);
+  const requestsInTime = ["missed_in", "incorrect_in", "missed_both", "late_in_permission"].includes(reason);
+  const requestsOutTime = ["missed_out", "incorrect_out", "missed_both", "early_out_permission"].includes(reason);
   const proofTimeLabel = !reason
     ? "requested attendance time"
-    : requestsInTime && requestsOutTime
-      ? "requested IN and OUT times"
-      : requestsInTime
-        ? "requested IN time"
-        : "requested OUT time";
+    : reason === "other"
+      ? "attendance day"
+      : requestsInTime && requestsOutTime
+        ? "requested IN and OUT times"
+        : requestsInTime
+          ? "requested IN time"
+          : "requested OUT time";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -892,12 +896,14 @@ function RegularizationSheet({
           <option value="missed_both">Missed both punches</option>
           <option value="incorrect_in">Incorrect IN time</option>
           <option value="incorrect_out">Incorrect OUT time</option>
-          <option value="other">Other</option>
+          <option value="late_in_permission">Permission – late IN</option>
+          <option value="early_out_permission">Permission – early OUT</option>
+          <option value="other">Other (remarks only)</option>
         </select></label>
-        {reason ? <div className={`dx-time-grid ${requestsInTime !== requestsOutTime ? "single" : ""}`}>
+        {reason && (requestsInTime || requestsOutTime) ? <div className={`dx-time-grid ${requestsInTime !== requestsOutTime ? "single" : ""}`}>
           {requestsInTime ? <label>Requested IN (24h)<TwentyFourHourTimeInput required value={inTime} onChange={setInTime} /></label> : null}
           {requestsOutTime ? <label>Requested OUT (24h)<TwentyFourHourTimeInput required value={outTime} onChange={setOutTime} /></label> : null}
-        </div> : <p className="dx-time-prompt">Select a reason to enter only the time that needs correction.</p>}
+        </div> : reason === "other" ? <p className="dx-time-prompt">Other keeps recorded times unchanged. Explain the correction in remarks and attach proof.</p> : <p className="dx-time-prompt">Select a reason to enter only the time that needs correction.</p>}
         <label>Remarks<textarea required minLength={5} placeholder="Briefly explain the correction" rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
         <div className="dx-evidence-info" role="note">
           <Info aria-hidden="true" />

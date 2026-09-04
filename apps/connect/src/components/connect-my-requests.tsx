@@ -64,6 +64,8 @@ function regularizationReasonLabel(reasonCode: string) {
     case "missed_both": return "Missed both punches";
     case "incorrect_in": return "Incorrect IN time";
     case "incorrect_out": return "Incorrect OUT time";
+    case "late_in_permission": return "Permission – late IN";
+    case "early_out_permission": return "Permission – early OUT";
     default: return "Other correction";
   }
 }

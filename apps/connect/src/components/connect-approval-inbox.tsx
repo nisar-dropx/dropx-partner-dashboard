@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ClipboardCheck, Clock3, FileText, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ClipboardCheck, Clock3, FileText, Home, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
@@ -35,6 +35,21 @@ type LeaveApproval = {
   stepName: string;
   stepOrder: number;
   leaveType: string;
+  startDate: string;
+  endDate: string;
+  days: number;
+  reason: string;
+  requesterName: string;
+  requesterCode: string;
+  profileType: "employee" | "contractor";
+};
+
+type WfhApproval = {
+  id: string;
+  requestId: string;
+  requestNo: string;
+  stepName: string;
+  stepOrder: number;
   startDate: string;
   endDate: string;
   days: number;
@@ -122,7 +137,7 @@ type ReturnedRoster = {
   updatedAt: string;
 };
 
-type ApprovalSection = "time-off" | "attendance" | "rosters" | "location-integrity" | "reimbursements";
+type ApprovalSection = "time-off" | "wfh" | "attendance" | "rosters" | "location-integrity" | "reimbursements";
 type ReporteeScope = "immediate" | "team";
 
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
@@ -150,6 +165,8 @@ function regularizationReasonLabel(reasonCode: string) {
     case "missed_both": return "Missed both punches";
     case "incorrect_in": return "Incorrect IN time";
     case "incorrect_out": return "Incorrect OUT time";
+    case "late_in_permission": return "Permission – late IN";
+    case "early_out_permission": return "Permission – early OUT";
     default: return "Other correction";
   }
 }
@@ -247,6 +264,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [reporteeScope, setReporteeScope] = useState<ReporteeScope>("immediate");
   const [reimbursements, setReimbursements] = useState<ReimbursementApproval[]>([]);
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
+  const [wfhApprovals, setWfhApprovals] = useState<WfhApproval[]>([]);
   const [attendanceApprovals, setAttendanceApprovals] = useState<AttendanceApproval[]>([]);
   const [attendanceHrApprovals, setAttendanceHrApprovals] = useState<AttendanceApproval[]>([]);
   const [rosterApprovals, setRosterApprovals] = useState<RosterApproval[]>([]);
@@ -274,6 +292,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       if (!leaveResponse.ok) throw new Error(leavePayload.error || "Unable to load time-off approvals.");
       setReimbursements(reimbursementPayload.approvals ?? []);
       setLeaveApprovals(leavePayload.leaveApprovals ?? []);
+      setWfhApprovals(leavePayload.wfhApprovals ?? []);
       setAttendanceApprovals(leavePayload.attendanceApprovals ?? []);
       setAttendanceHrApprovals(leavePayload.attendanceHrApprovals ?? []);
       setRosterApprovals(leavePayload.rosterApprovals ?? []);
@@ -282,6 +301,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       setSupportPackages(leavePayload.locationSupportPackages ?? []);
       setSection((current) => {
         if (current === "time-off" && !(leavePayload.leaveApprovals ?? []).length) {
+          if ((leavePayload.wfhApprovals ?? []).length) return "wfh";
           if ((leavePayload.attendanceApprovals ?? []).length || (leavePayload.attendanceHrApprovals ?? []).length) return "attendance";
           if ((leavePayload.rosterSwapApprovals ?? []).length || (leavePayload.rosterApprovals ?? []).length) return "rosters";
           if ((leavePayload.locationSupportPackages ?? []).length) return "location-integrity";
@@ -326,6 +346,27 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       if (!response.ok) throw new Error(payload.error || "Unable to update time-off approval.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [requestId]: "" })); await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update time-off approval."); }
+    finally { setSaving(false); }
+  }
+
+  async function decideWfh(requestId: string, decision: "approved" | "rejected") {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/approvals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: account.id,
+          profileType: account.profileType,
+          wfhRequestId: requestId,
+          decision,
+          note: notes[`wfh:${requestId}`] ?? ""
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to update WFH approval.");
+      setNotice(payload.notice); setNotes((current) => ({ ...current, [`wfh:${requestId}`]: "" })); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update WFH approval."); }
     finally { setSaving(false); }
   }
 
@@ -536,6 +577,9 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
         <button className={section === "time-off" ? "active" : ""} onClick={() => setSection("time-off")} type="button">
           Time off<span>{leaveApprovals.length}</span>
         </button>
+        <button className={section === "wfh" ? "active" : ""} onClick={() => setSection("wfh")} type="button">
+          WFH<span>{wfhApprovals.length}</span>
+        </button>
         <button className={section === "attendance" ? "active" : ""} onClick={() => setSection("attendance")} type="button">
           Attendance<span>{attendanceCount}</span>
         </button>
@@ -575,6 +619,34 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
             </article>
           )) : (
             <div className="dx-empty"><Clock3 /><strong>No time-off approvals</strong><small>No requests from your {scopeName} are waiting.</small></div>
+          )}
+        </div>
+      ) : null}
+
+      {!loading && section === "wfh" ? (
+        <div className="dx-approval-list">
+          {wfhApprovals.length ? wfhApprovals.map((approval) => (
+            <article className="dx-approval-card" key={approval.id}>
+              <ApprovalHead
+                badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+                eyebrow={`${approval.requestNo} · ${approval.stepName}`}
+                meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                name={approval.requesterName}
+              />
+              <dl className="dx-approval-facts">
+                <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
+                <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
+              </dl>
+              <ApprovalNote id={`wfh:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`wfh:${approval.requestId}`, value)} placeholder="Note for worker (optional)" />
+              <ApprovalToolbar
+                onApprove={() => void decideWfh(approval.requestId, "approved")}
+                onReject={() => void decideWfh(approval.requestId, "rejected")}
+                saving={saving}
+                showReturn={false}
+              />
+            </article>
+          )) : (
+            <div className="dx-empty"><Home /><strong>No WFH approvals</strong><small>No work-from-home requests from your {scopeName} are waiting.</small></div>
           )}
         </div>
       ) : null}

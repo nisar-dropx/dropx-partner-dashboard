@@ -131,12 +131,16 @@ export async function GET(request: NextRequest) {
 
     const responseRows = rows.map((row) => {
       const configured = labels.get(String(row.status ?? ""));
+      const isPaidLeave = configured?.is_paid ?? null;
+      const unpaidLeave = Boolean(configured) && isPaidLeave === false;
       return {
         date: row.punchDate,
         status: row.status,
-        statusLabel: configured?.attendance_label ?? null,
-        statusKind: configured ? "leave" as const : "attendance" as const,
-        isPaidLeave: configured?.is_paid ?? null,
+        statusLabel: unpaidLeave
+          ? (configured?.attendance_label ? `Absent (${configured.attendance_label})` : "Absent (LOP)")
+          : (configured?.attendance_label ?? null),
+        statusKind: configured && !unpaidLeave ? "leave" as const : "attendance" as const,
+        isPaidLeave,
         attendanceStatus: row.attendanceStatus,
         inTime: row.inTime,
         outTime: row.outTime,
@@ -152,6 +156,7 @@ export async function GET(request: NextRequest) {
         shiftCode: row.shiftCode,
         shiftSource: row.shiftSource,
         remark: row.remark,
+        workMode: row.workMode ?? "onsite",
         regularization: requestByDate.get(row.punchDate) ?? null
       };
     });
@@ -180,6 +185,7 @@ export async function GET(request: NextRequest) {
           shiftCode: "",
           shiftSource: "Unassigned",
           remark: "",
+          workMode: "onsite" as const,
           regularization
         });
       }
@@ -222,18 +228,31 @@ export async function POST(request: NextRequest) {
     if (!accountId) throw new Error("Account is required.");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(attendanceDate)) throw new Error("Attendance date is required.");
     if (attendanceDate > new Date().toISOString().slice(0, 10)) throw new Error("Future attendance cannot be regularized.");
-    if (!["missed_in", "missed_out", "missed_both", "incorrect_in", "incorrect_out", "other"].includes(reasonCode)) {
+    if (![
+      "missed_in",
+      "missed_out",
+      "missed_both",
+      "incorrect_in",
+      "incorrect_out",
+      "late_in_permission",
+      "early_out_permission",
+      "other"
+    ].includes(reasonCode)) {
       throw new Error("Select a regularization reason.");
     }
-    const requestsInTime = ["missed_in", "incorrect_in", "missed_both", "other"].includes(reasonCode);
-    const requestsOutTime = ["missed_out", "incorrect_out", "missed_both", "other"].includes(reasonCode);
+    const requestsInTime = ["missed_in", "incorrect_in", "missed_both", "late_in_permission"].includes(reasonCode);
+    const requestsOutTime = ["missed_out", "incorrect_out", "missed_both", "early_out_permission"].includes(reasonCode);
+    const remarksOnly = reasonCode === "other";
     const normalizedRequestedInTime = requestsInTime ? requestedInTime : currentInTime;
     const normalizedRequestedOutTime = requestsOutTime ? requestedOutTime : currentOutTime;
     if (requestsInTime && !validTime(requestedInTime)) throw new Error("Requested IN time is required for this reason.");
     if (requestsOutTime && !validTime(requestedOutTime)) throw new Error("Requested OUT time is required for this reason.");
-    if (!requestsInTime && !validTime(currentInTime)) throw new Error("The existing IN punch is missing. Select Missed both punches.");
-    if (!requestsOutTime && !validTime(currentOutTime)) throw new Error("The existing OUT punch is missing. Select Missed both punches.");
-    if (normalizedRequestedOutTime <= normalizedRequestedInTime) throw new Error("Requested OUT time must be after IN time.");
+    if (!remarksOnly && !requestsInTime && !validTime(currentInTime)) throw new Error("The existing IN punch is missing. Select Missed both punches.");
+    if (!remarksOnly && !requestsOutTime && !validTime(currentOutTime)) throw new Error("The existing OUT punch is missing. Select Missed both punches.");
+    if (!remarksOnly && normalizedRequestedOutTime <= normalizedRequestedInTime) throw new Error("Requested OUT time must be after IN time.");
+    if (remarksOnly && validTime(normalizedRequestedInTime) && validTime(normalizedRequestedOutTime) && normalizedRequestedOutTime <= normalizedRequestedInTime) {
+      throw new Error("Existing OUT time must be after IN time.");
+    }
     if (remarks.length < 5) throw new Error("Enter a short explanation.");
 
     const worker = await resolveConnectAttendanceWorker({ accountId, profileType });
@@ -320,8 +339,8 @@ export async function POST(request: NextRequest) {
       p_attendance_date: attendanceDate,
       p_current_in_time: currentInTime || null,
       p_current_out_time: currentOutTime || null,
-      p_requested_in_time: normalizedRequestedInTime,
-      p_requested_out_time: normalizedRequestedOutTime,
+      p_requested_in_time: validTime(normalizedRequestedInTime) ? normalizedRequestedInTime : null,
+      p_requested_out_time: validTime(normalizedRequestedOutTime) ? normalizedRequestedOutTime : null,
       p_reason_code: reasonCode,
       p_remarks: remarks,
       p_attachment_path: attachmentPath,

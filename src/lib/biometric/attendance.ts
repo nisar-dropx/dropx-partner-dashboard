@@ -34,6 +34,7 @@ export type AttendanceReportRow = {
   lateMinutes: number;
   earlyOutMinutes: number;
   remark: string;
+  workMode: "onsite" | "wfh";
   deviceSerial: string;
   labels: Record<string, string>;
 };
@@ -72,6 +73,7 @@ type DailyRow = {
   work_minutes: number | null;
   status: string | null;
   remark: string | null;
+  work_mode: string | null;
   employee_id: string | null;
   field_executive_id: string | null;
   location_id: string | null;
@@ -130,6 +132,7 @@ function normalizeDailyRows(rows: Partial<DailyRow>[]): DailyRow[] {
     work_minutes: row.work_minutes ?? 0,
     status: row.status ?? "P",
     remark: row.remark ?? null,
+    work_mode: row.work_mode ?? "onsite",
     employee_id: row.employee_id ?? null,
     field_executive_id: row.field_executive_id ?? null,
     location_id: row.location_id ?? null,
@@ -980,6 +983,7 @@ export async function loadAttendanceReportRows({
     work_minutes,
     status,
     remark,
+    work_mode,
     employee_id,
     field_executive_id,
     location_id,
@@ -1248,6 +1252,7 @@ export async function loadAttendanceReportRows({
       lateMinutes: variance.lateMinutes,
       earlyOutMinutes: variance.earlyOutMinutes,
       remark: row.remark ?? "",
+      workMode: row.work_mode === "wfh" ? "wfh" as const : "onsite" as const,
       deviceSerial: firstDevice,
       labels
     };

@@ -8,6 +8,7 @@ export const dropxOnePageOptions = [
   { value: "attendance", label: "Attendance" },
   { value: "roster", label: "Roster" },
   { value: "leave", label: "Leave" },
+  { value: "wfh", label: "Work from home" },
   { value: "performance", label: "Performance" },
   { value: "settings", label: "Settings" }
 ] as const;
