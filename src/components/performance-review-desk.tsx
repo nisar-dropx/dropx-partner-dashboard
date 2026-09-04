@@ -1,5 +1,6 @@
 import { PerformanceCarriedActions } from "@/components/performance-carried-actions";
 import {PerformanceTrendProvider,TrendButton} from "@/components/performance-trends";
+import { PerformanceVanFuel } from "@/components/performance-van-fuel";
 import "@/app/ops-pulse/performance/review-trends.css";
 import { PerformanceReviewExceptions } from "@/components/performance-review-exceptions";
 import { PerformanceReviewFlow } from "@/components/performance-review-flow";
@@ -257,6 +258,7 @@ export function PerformanceReviewDesk(props: Props) {
           <details><summary><span>MTD CPS</span><strong>{money(snapshot.mtdCps)}</strong><small>{money(snapshot.mtdCost)} / {snapshot.mtdDelivery.toLocaleString("en-IN")} delivered</small></summary><div><p><span>Month-to-date cost</span><b>{money(snapshot.mtdCost)}</b></p><p><span>Month-to-date delivery</span><b>{snapshot.mtdDelivery.toLocaleString("en-IN")}</b></p><p><span>Includes configured DA, UTR, van, fuel, rent and other heads</span><b>All heads</b></p></div></details>
           <details><summary><span>Allocation</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / {snapshot.activeFeCount} FEs</small></summary><div><p><span>Delivered shipments</span><b>{snapshot.deliveredCount.toLocaleString("en-IN")}</b></p><p><span>Active FE IDs</span><b>{snapshot.activeFeCount}</b></p></div></details>
         </div>
+        <PerformanceVanFuel key={`fuel-${selectedCode}-${date}`} station={selectedCode} date={date}/>
         <div className="performance-cps-note"><strong>Cost completeness</strong><span>Values appear only when their source is loaded or configured. Missing rent, UTR or payment mappings remain visible as a data gap; OpsPulse does not estimate them.</span><Link href="/cps/inputs">Open CPS inputs →</Link></div>
       </section>
     </div>
