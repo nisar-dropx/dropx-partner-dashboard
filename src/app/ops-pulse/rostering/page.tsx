@@ -19,6 +19,10 @@ export const dynamic = "force-dynamic";
 
 type Search = { station?: string; view?: string };
 
+function cleanApprovalSummary(summary: string | null | undefined) {
+  return String(summary ?? "").replace(/^Approval route:\s*/i, "").trim();
+}
+
 export default async function OpsRosteringPage({ searchParams }: { searchParams?: Search }) {
   const authorization = await requirePagePermission("ops_rostering", "access");
   const companyId = requireCompanyId(authorization);
@@ -38,24 +42,30 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
   const canEdit = hasPermission(authorization, "ops_rostering", "edit") && capabilities.canPlan;
   const editable = Boolean(canEdit && selectedPlan && ["draft", "returned"].includes(selectedPlan.status));
   const canRecallPending = Boolean(canAdd && selectedPlan?.status === "pending_approval");
-  // Open drafts are edited in place; pending plans can be recalled by station planners.
   const canStart = Boolean(canAdd && workspace && (!workspace.openPlan || editable || canRecallPending));
+  const roleLabel = capabilities.designationName || authorization.roleName || "Authorised user";
   const accessLabel = !capabilities.canPlan
-    ? (capabilities.canApprove ? "Approver access" : "View only")
+    ? (capabilities.canApprove ? "Approver" : "View only")
     : selectedPlan?.status === "pending_approval"
-      ? (canRecallPending ? "Pending · can recall & edit" : "Change pending approval")
-      : editable || canStart
-        ? "Can prepare roster changes"
-        : "View only";
-  const approvalSummary = route?.summary
-    ?? (capabilities.canApprove ? "Open My approvals to act on assigned roster requests." : "Your access is view-only.");
+      ? "Pending approval"
+      : editable
+        ? "Editing draft"
+        : canStart
+          ? "Can prepare changes"
+          : "View only";
+  const routeNames = cleanApprovalSummary(route?.summary);
+  const approvalSummary = routeNames
+    ? `Submits to ${routeNames}`
+    : capabilities.canApprove
+      ? "Open My approvals for assigned requests."
+      : "Your access is view-only.";
 
   return <AppShell active="Rostering" pageCode="ops_rostering">
     <div className="ops-command-center">
       <PageHead
         eyebrow="Workforce planning"
         title="Rostering"
-        subtitle="View, change and approve the same station roster used by People, attendance and payroll."
+        subtitle="Station weekly pattern for People, attendance and payroll. Day-to-day person swaps stay in People."
       />
       {locationResult.error ? <div className="message-panel error">{locationResult.error}</div> : null}
       <section className="panel" style={{ marginBottom: 12 }}>
@@ -73,21 +83,11 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
       </section>
 
       {view === "approvals" ? <OpsRosterApprovals approvals={approvals} /> : selected && workspace ? <>
-        <div className="capacity-action-line" style={{ marginBottom: 10 }}>
-          <strong>{capabilities.designationName || authorization.roleName || "Authorised user"}</strong>
-          <span>{accessLabel} · approval from People masters · location manager → reporting manager → HR</span>
+        <div className={rosterStyles.metaLine}>
+          <strong>{roleLabel}</strong>
+          <span>{accessLabel}</span>
+          {routeNames ? <span className={rosterStyles.metaRoute}>{routeNames}</span> : null}
         </div>
-        <section className="panel" style={{ marginBottom: 12 }}>
-          <div className="panel-body" style={{ display: "grid", gap: 6 }}>
-            <p style={{ margin: 0 }}>
-              Edit the draft → Save → Submit for approval (station owner → reporting manager → HR). Week off is part of the same weekly pattern as shifts.
-            </p>
-            <p style={{ margin: 0, opacity: 0.85 }}>
-              Person-to-person day switches stay on People (swap request → partner → manager). Use this page for station pattern and week-off changes.
-            </p>
-            {route?.summary ? <p style={{ margin: 0 }}><strong>Approval route:</strong> {route.summary}</p> : null}
-          </div>
-        </section>
         <OpsRosterPlanner
           key={`${selected.id}:${selectedPlan?.id ?? "blank"}`}
           stationId={selected.id}

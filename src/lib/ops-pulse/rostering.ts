@@ -497,10 +497,14 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
       .eq("is_active", true)
       .eq("day_type", "paid_holiday")
       .or(`location_id.is.null,location_id.eq.${location.id}`)
-      .gte("calendar_date", addRosterDays(rosterMonday(today), -366))
-      .lte("calendar_date", addRosterDays(rosterMonday(today), 735))
+      .gte("calendar_date", `${today.slice(0, 7)}-01`)
+      .lte("calendar_date", (() => {
+        const [year, month] = today.split("-").map(Number);
+        const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+        return `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      })())
       .order("calendar_date")
-      .limit(500)
+      .limit(62)
   ]);
   const supportingError = employeeDefaults.error ?? contractorDefaults.error ?? holidayResult.error;
   if (supportingError) throw new Error(supportingError.message);

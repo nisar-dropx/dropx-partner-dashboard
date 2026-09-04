@@ -31,6 +31,34 @@ export function moveIsoDate(value: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
+/** Inclusive last calendar day of the month that contains `today` (YYYY-MM-DD). */
+export function rosterMonthEnd(today: string) {
+  if (!validIsoDate(today)) throw new Error("A valid roster date is required.");
+  const [year, month] = today.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+}
+
+/** Monday on or before the given date. */
+export function rosterMondayOnOrBefore(value: string) {
+  const weekday = new Date(`${value}T00:00:00Z`).getUTCDay() || 7;
+  return moveIsoDate(value, 1 - weekday);
+}
+
+/**
+ * Latest week Monday that may be opened in the station roster week view.
+ * Navigation stays a normal week strip, but cannot leave the current calendar month.
+ */
+export function rosterMonthMaxWeekStart(today: string) {
+  return rosterMondayOnOrBefore(rosterMonthEnd(today));
+}
+
+/** Week dates for the planner, dropping any day that falls after the current month. */
+export function rosterWeekInCurrentMonth(weekStart: string, today: string) {
+  const monthEnd = rosterMonthEnd(today);
+  return rosterWeek(weekStart).filter((date) => date <= monthEnd);
+}
+
 export function recurringTemplateDate(templateMonday: string, displayedDate: string) {
   if (![templateMonday, displayedDate].every(validIsoDate)) throw new Error("A valid recurring roster date is required.");
   const weekday = new Date(`${displayedDate}T00:00:00Z`).getUTCDay() || 7;

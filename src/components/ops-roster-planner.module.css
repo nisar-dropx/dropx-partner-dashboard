@@ -3,6 +3,39 @@
 .tabs a { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border-radius: 7px; color: #667085; font-size: 9px; font-weight: 800; }
 .tabs a.activeTab { color: #fff; background: #1e293b; }
 .tabs a.activeTab :global(.status-pill) { color: #1e293b; background: #fff; }
+
+.metaLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid #e5e9ef;
+  border-radius: 10px;
+  background: #fff;
+}
+.metaLine strong {
+  color: #1e293b;
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.metaLine > span {
+  color: #64748b;
+  font-size: 11px;
+}
+.metaRoute {
+  margin-left: auto;
+  color: #475569 !important;
+  font-size: 11px !important;
+}
+.metaRoute::before {
+  content: "Route · ";
+  color: #94a3b8;
+  font-weight: 650;
+}
 .hero { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 18px; color: #fff; background: linear-gradient(112deg, #19243a, #42234b 58%, #c53a62); }
 .hero > div:first-child > span { color: #ffc39f; font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .hero h2 { margin: 2px 0; color: #fff; font-size: 20px; }
@@ -46,6 +79,62 @@
 .bulkBar { position: sticky; top: 64px; z-index: 11; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #e5e9ef; background: #f7f9fc; }
 .bulkBar > span { display: flex; align-items: center; gap: 4px; color: #7a8798; font-size: 10px; }
 .bulkBar .activeTool { margin-left: auto; }
+.excelImport {
+  border-top: 1px solid #e5e9ef;
+  background: #fff;
+}
+.excelImport > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+.excelImport > summary::-webkit-details-marker { display: none; }
+.excelImport > summary::after {
+  content: "Show";
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 700;
+}
+.excelImport[open] > summary::after { content: "Hide"; }
+.excelImportBody {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+.excelImportBody > p {
+  margin: 0;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.excelImportActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.excelImportForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.excelImportForm input[type="file"] {
+  max-width: min(280px, 100%);
+  font-size: 11px;
+}
+.excelImportHint {
+  color: #94a3b8;
+  font-size: 11px;
+}
 .workspace > :global(.message-panel) { margin: 8px 12px 0; }
 
 .calendarWrap { max-width: 100%; max-height: min(68vh, 720px); overflow: auto; background: #fff; }

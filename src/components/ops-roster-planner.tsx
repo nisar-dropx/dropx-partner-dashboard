@@ -26,7 +26,9 @@ import {
   recurringTemplateDate,
   rosterAssignmentToDragPayload,
   rosterCoverage,
+  rosterMonthMaxWeekStart,
   rosterWeek,
+  rosterWeekInCurrentMonth,
   type RosterAssignmentValue,
   type RosterDragPayload,
   type RosterTool
@@ -153,7 +155,8 @@ export function OpsRosterPlanner({
   const dragDropHandledRef = useRef(false);
   const activeDragPayloadRef = useRef<RosterDragPayload | null>(null);
 
-  const dates = useMemo(() => rosterWeek(weekStart), [weekStart]);
+  const dates = useMemo(() => rosterWeekInCurrentMonth(weekStart, today), [today, weekStart]);
+  const maxWeekStart = useMemo(() => rosterMonthMaxWeekStart(today), [today]);
   const holidayByDate = useMemo(() => new Map(holidays.map((holiday) => [holiday.calendarDate, holiday])), [holidays]);
   const shiftById = useMemo(() => new Map(shifts.map((shift) => [shift.id, shift])), [shifts]);
   const visiblePeople = useMemo(() => {
@@ -214,6 +217,10 @@ export function OpsRosterPlanner({
     setSelectedDates(new Set());
     setCellPicker(null);
   }, [blankPeriodStart, editable, initial, initialWeekStart, plan?.id, plan?.periodStart]);
+
+  useEffect(() => {
+    if (weekStart > maxWeekStart) setWeekStart(maxWeekStart);
+  }, [maxWeekStart, weekStart]);
 
   const ensureEditing = useCallback(async () => {
     if (editingEnabledRef.current) return true;
@@ -462,7 +469,9 @@ export function OpsRosterPlanner({
 
   function moveWeek(offset: number) {
     const next = moveIsoDate(weekStart, offset);
-    setWeekStart(next < initialWeekStart ? initialWeekStart : next);
+    if (next < initialWeekStart) setWeekStart(initialWeekStart);
+    else if (next > maxWeekStart) setWeekStart(maxWeekStart);
+    else setWeekStart(next);
     setSelectedDates(new Set());
   }
 
@@ -560,28 +569,42 @@ export function OpsRosterPlanner({
   const allVisibleSelected = visiblePeople.length > 0 && visiblePeople.every((person) => selectedPeople.has(personKey(person)));
   const dockInstruction = interactionAllowed
     ? editingEnabled
-      ? "Select a shift, click empty cells to assign, or drag shifts and assignments between cells."
+      ? "Select a shift, click cells to assign, or drag between people and days."
       : pendingRecall
-        ? "This change is awaiting approval. Click Recall & edit (or any cell) to pull it back, then save and submit again."
-        : "Click a cell or drag a shift to prepare an editable copy automatically."
+        ? "Pending approval — use Recall & edit to change this station pattern."
+        : "Click a cell to open an editable draft of this station pattern."
     : "View only for your current access.";
   const status = editingEnabled && !plan ? "draft" : plan?.status ?? "blank";
   const templateHref = `/rostering/template?station=${encodeURIComponent(stationId)}${activePlanId ? `&plan=${encodeURIComponent(activePlanId)}` : ""}`;
   const canUseExcel = canStart || editingEnabled;
+  const heroDetail = plan
+    ? `Effective ${fullDateLabel(plan.effectiveFrom ?? plan.periodStart)} · v${plan.revisionNo} · repeats until replaced`
+    : "Start editing to prepare this station’s recurring Monday–Sunday pattern.";
 
   return <section className={`${styles.workspace}${draggingLabel || pointerDrag?.active ? ` ${styles.isDragging}` : ""}`}>
     <header className={styles.hero}>
-      <div><span>{status === "approved" ? "Current approved roster" : status === "blank" ? "No roster configured" : "Roster change in progress"}</span><h2>{stationCode} · Monday to Sunday</h2><p>{plan ? `Effective ${fullDateLabel(plan.effectiveFrom ?? plan.periodStart)} · version ${plan.revisionNo} · repeats until changed` : "Start editing to prepare the station’s recurring roster."}</p></div>
+      <div>
+        <span>{status === "approved" ? "Current approved roster" : status === "blank" ? "No roster configured" : status === "pending_approval" ? "Awaiting approval" : "Roster change in progress"}</span>
+        <h2>{stationCode} · Monday to Sunday</h2>
+        <p>{heroDetail}</p>
+      </div>
       <div className={styles.heroActions}>
-        {canStart && !editingEnabled ? <button className="button primary compact" type="button" onClick={() => void ensureEditing()} disabled={isPreparing}><PencilLine size={14} /> {isPreparing ? (pendingRecall ? "Recalling…" : "Preparing…") : pendingRecall ? "Recall & edit" : plan ? "Edit roster" : "Start roster"}</button> : null}
-        <div className={styles.stats}><span><UsersRound size={15} /><strong>{people.length}</strong><small>active people</small></span><span><CalendarDays size={15} /><strong>{submissionCoverage.ready}</strong><small>days assigned</small></span><em className={`${styles.status} ${styles[String(status).replaceAll("_", "")] ?? ""}`}>{status.replaceAll("_", " ")}</em></div>
+        {canStart && !editingEnabled ? (
+          <button className="button primary compact" type="button" onClick={() => void ensureEditing()} disabled={isPreparing}>
+            <PencilLine size={14} />
+            {isPreparing ? (pendingRecall ? "Recalling…" : "Preparing…") : pendingRecall ? "Recall & edit" : plan ? "Edit roster" : "Start roster"}
+          </button>
+        ) : null}
+        <div className={styles.stats}>
+          <span><UsersRound size={15} /><strong>{people.length}</strong><small>active people</small></span>
+          <span><CalendarDays size={15} /><strong>{submissionCoverage.ready}</strong><small>days assigned</small></span>
+          <em className={`${styles.status} ${styles[String(status).replaceAll("_", "")] ?? ""}`}>{status.replaceAll("_", " ")}</em>
+        </div>
       </div>
     </header>
 
-    {!editingEnabled && pendingRecall ? <div className="message-panel" role="status">Awaiting approval. Use <strong>Recall & edit</strong> to change week offs or shifts, then save and submit for approval again.</div> : null}
-
     <div className={styles.toolbar}>
-      <div className={styles.weekNavigation}><button type="button" aria-label="Previous week" onClick={() => moveWeek(-7)} disabled={weekStart <= initialWeekStart}><ChevronLeft size={16} /></button><span><CalendarDays size={15} /><strong>{dateLabel(dates[0])}</strong> to <strong>{dateLabel(dates[6])}</strong></span><button type="button" aria-label="Next week" onClick={() => moveWeek(7)}><ChevronRight size={16} /></button></div>
+      <div className={styles.weekNavigation}><button type="button" aria-label="Previous week" onClick={() => moveWeek(-7)} disabled={weekStart <= initialWeekStart}><ChevronLeft size={16} /></button><span><CalendarDays size={15} /><strong>{dateLabel(dates[0])}</strong> to <strong>{dateLabel(dates[dates.length - 1] ?? dates[0])}</strong></span><button type="button" aria-label="Next week" onClick={() => moveWeek(7)} disabled={weekStart >= maxWeekStart}><ChevronRight size={16} /></button></div>
       <label className={styles.search}><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search person, ID or designation" /></label>
       <select aria-label="People type" value={workerType} onChange={(event) => setWorkerType(event.target.value)}><option value="all">Employees & contractors</option><option value="employee">Employees</option><option value="contractor">Independent contractors</option></select>
     </div>
@@ -599,19 +622,6 @@ export function OpsRosterPlanner({
     </div>
 
     {editingEnabled ? <div className={styles.bulkBar}><span><UsersRound size={15} /><strong>{selectedPeople.size}</strong> people · <strong>{selectedDates.size}</strong> days</span><span className={styles.activeTool}>Applying: <strong>{activeShift?.code ?? (activeTool?.kind === "weekly_off" ? "Week Off" : activeTool?.kind === "clear" ? "Remove" : "Select a shift")}</strong></span><button type="button" className="button secondary small" onClick={() => void fillDefaultShifts()}>Fill default shifts</button><button type="button" className="button secondary small" onClick={() => void applyBulk()}>Apply to selected</button><button type="button" className="button primary small" onClick={save} disabled={!dirtyKeys.size || isSaving}>{isSaving ? "Saving…" : `Save ${dirtyKeys.size || ""} changes`}</button></div> : null}
-    {canUseExcel ? <details className={styles.bulkBar} style={{ display: "grid", gap: 10 }}>
-      <summary style={{ cursor: "pointer", listStyle: "none", display: "flex", alignItems: "center", gap: 8 }}>
-        <Upload size={15} />
-        <span><strong>Station Excel</strong> · {stationCode} people only · import fills the draft; submit still goes for approval</span>
-      </summary>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "end" }}>
-        <a className="button secondary compact" download href={templateHref}><Download size={14} /> Download station template</a>
-        {editingEnabled && activePlanId ? <form action={importWorkbook} encType="multipart/form-data" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "end" }}>
-          <label style={{ display: "grid", gap: 4 }}><span className="field-label">Completed workbook</span><input name="workbook" type="file" accept=".csv,.xlsx,.xls" required disabled={isImporting} /></label>
-          <button className="button primary compact" type="submit" disabled={isImporting}>{isImporting ? "Importing…" : "Validate & import"}</button>
-        </form> : <small>Prepare or recall an editable draft before uploading.</small>}
-      </div>
-    </details> : null}
     {message ? <div className={`message-panel ${message.tone === "error" ? "error" : "success"}`} role="status">{message.text}</div> : null}
 
     <div className={styles.calendarWrap}>
@@ -633,12 +643,29 @@ export function OpsRosterPlanner({
           return <td key={date} data-roster-drop-key={key} data-roster-person-key={personKey(person)} data-roster-date={date} className={`${holidayByDate.has(date) ? styles.holiday : ""} ${dirtyKeys.has(key) ? styles.dirty : ""} ${dropTargetKey === key ? styles.dropTarget : ""} ${pickerOpen ? styles.pickerOpen : ""} ${reason ? styles.locked : ""}`} onDragEnter={(event) => { if (interactionAllowed) { event.preventDefault(); setDropTargetKey(key); } }} onDragOver={(event) => { if (interactionAllowed) { event.preventDefault(); event.dataTransfer.dropEffect = event.dataTransfer.effectAllowed === "move" ? "move" : "copy"; setDropTargetKey(key); } }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTargetKey((current) => current === key ? null : current); }} onDrop={(event) => { event.preventDefault(); const payload = decodeDrop(event); setDraggingLabel(null); setDropTargetKey(null); void dropPayload(person, date, payload); }}>
             <button type="button" aria-label={cellLabel} title={reason ?? undefined} aria-haspopup={editingEnabled && Boolean(assignment) && !reason ? "dialog" : undefined} aria-expanded={pickerOpen || undefined} disabled={!interactionAllowed} draggable={interactionAllowed && !reason && Boolean(assignmentPayload)} onDragStart={(event) => { if (assignmentPayload && !reason) beginNativeDrag(event, assignmentPayload, assignmentLabel); else event.preventDefault(); }} onDragEnd={finishNativeDrag} onPointerDown={(event) => { if (assignmentPayload && !reason) beginPointerDrag(event, assignmentPayload, assignmentLabel); }} onClick={(event) => void handleCellClick(person, date, assignment, event)} onContextMenu={(event) => handleCellContextMenu(person, date, event)} className={`${styles.cell} ${assignment?.dayType === "weekly_off" ? styles.cellOff : shift ? styles.working : styles.emptyCell}${pickerOpen ? ` ${styles.pickerOpen}` : ""}${reason ? ` ${styles.lockedCell}` : ""}`} style={shift ? { "--shift-color": shift.color || "#cb4b65" } as CSSProperties : undefined}>{assignmentPayload && !reason ? <span className={styles.cellDragGrip} data-roster-drag-handle aria-hidden="true"><GripVertical size={11} /></span> : null}{assignment?.dayType === "weekly_off" ? <><strong>Week Off</strong><small>{reason ? "Locked" : "Rest day"}</small></> : shift ? <><strong>{shift.code}</strong><small>{reason ? "Locked" : `${compactTime(shift.startTime)}–${compactTime(shift.endTime)}`}</small></> : <><span>{reason ? "–" : "+"}</span><small>{reason ? "Locked" : "Assign"}</small></>}</button>
           </td>;
-        })}</tr>) : <tr><td colSpan={8} className={styles.empty}>No active people match this view.</td></tr>}</tbody>
+        })}</tr>) : <tr><td colSpan={Math.max(2, dates.length + 1)} className={styles.empty}>No active people match this view.</td></tr>}</tbody>
       </table>
     </div>
 
     <div className={styles.legend}><span><i className={styles.workingLegend} /> Working shift</span><span><i className={styles.offLegend} /> Week off</span><span><i className={styles.holidayLegend} /> Holiday</span><span><i className={styles.dirtyLegend} /> Unsaved change</span>{dirtyKeys.size ? <strong><Check size={13} /> Review and save {dirtyKeys.size} changes</strong> : editingEnabled ? <strong>No unsaved changes</strong> : <strong>Saved roster pattern</strong>}</div>
     {editingEnabled && activePlanId ? <footer className={styles.approvalLine}><span><strong>{dirtyKeys.size ? `Save ${dirtyKeys.size} change${dirtyKeys.size === 1 ? "" : "s"} first` : !submissionCoverage.ready ? "Add at least one assignment" : !routeReady ? "Approval setup required" : submissionCoverage.missing ? `${submissionCoverage.missing} cells remain unassigned` : approvalRequired ? "Ready to submit" : "Ready to apply"}</strong><small>{dirtyKeys.size ? "Unsaved assignments cannot be submitted." : !submissionCoverage.ready ? "A blank draft is kept safely and will not replace the current roster." : submissionCoverage.missing ? `${submissionCoverage.ready} assignments are ready. Unassigned people remain blank.` : approvalSummary}</small></span><button type="button" className="button primary compact" onClick={submit} disabled={Boolean(dirtyKeys.size || !submissionCoverage.ready || !routeReady || isSaving)}>{approvalRequired ? <Send size={14} /> : <Check size={14} />} {approvalRequired ? "Send for approval" : "Apply roster"}</button></footer> : null}
+    {canUseExcel ? <details className={styles.excelImport}>
+      <summary><Upload size={14} /><span>Station Excel · {stationCode} people only · import fills the draft; submit still goes for approval</span></summary>
+      <div className={styles.excelImportBody}>
+        <p>Download the station template, fill Mon–Sun (or WO), then upload. Import never publishes on its own.</p>
+        <div className={styles.excelImportActions}>
+          <a className="button secondary compact" download href={templateHref}><Download size={14} /> Download template</a>
+          {editingEnabled && activePlanId ? (
+            <form action={importWorkbook} encType="multipart/form-data" className={styles.excelImportForm}>
+              <input name="workbook" type="file" accept=".csv,.xlsx,.xls" required disabled={isImporting} aria-label="Completed station workbook" />
+              <button className="button primary compact" type="submit" disabled={isImporting}>{isImporting ? "Importing…" : "Import"}</button>
+            </form>
+          ) : (
+            <span className={styles.excelImportHint}>{pendingRecall ? "Recall & edit first, then upload." : "Start or edit the roster before uploading."}</span>
+          )}
+        </div>
+      </div>
+    </details> : null}
     {pointerDrag?.active ? <div ref={dragGhostRef} className={styles.dragGhost} style={{ left: pointerDrag.x, top: pointerDrag.y }} aria-hidden="true"><GripVertical size={13} /> {pointerDrag.label}</div> : null}
     {cellPicker ? <><button type="button" className={styles.pickerBackdrop} aria-label="Close shift picker" onClick={() => setCellPicker(null)} /><div className={styles.picker} role="dialog" aria-label={`Change shift for ${cellPicker.person.name} on ${dateLabel(cellPicker.date)}`} style={{ top: cellPicker.top, left: cellPicker.left }}><header className={styles.pickerHead}><strong>{cellPicker.person.name}</strong><small>{dayLabel(cellPicker.date)} · {dateLabel(cellPicker.date)}</small></header><div className={styles.pickerList}>{shifts.map((shift) => <button key={shift.id} type="button" className={styles.pickerOption} style={{ "--shift-color": shift.color || "#cb4b65" } as CSSProperties} onClick={() => applyPickerTool({ kind: "shift", shiftId: shift.id })}><span className={styles.pickerSwatch} aria-hidden="true" /><span className={styles.pickerOptionContent}><strong>{shift.code}</strong><small>{compactTime(shift.startTime)} – {compactTime(shift.endTime)}</small></span></button>)}<button type="button" className={`${styles.pickerOption} ${styles.off}`} onClick={() => applyPickerTool({ kind: "weekly_off" })}><span className={styles.pickerSwatch} aria-hidden="true" /><span className={styles.pickerOptionContent}><strong>Week Off</strong><small>Rest day</small></span></button><button type="button" className={`${styles.pickerOption} ${styles.clear}`} onClick={() => applyPickerTool({ kind: "clear" })}><Eraser size={14} aria-hidden="true" /><span className={styles.pickerOptionContent}><strong>Remove</strong><small>Clear this assignment</small></span></button></div></div></> : null}
     {(draggingLabel || pointerDrag?.active) && draggingAssignment ? <div className={styles.removeHint} role="status">Drag outside the grid to remove this assignment</div> : null}
