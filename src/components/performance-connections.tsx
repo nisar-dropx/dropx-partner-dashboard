@@ -43,15 +43,15 @@ function ConnectionForm({
         <input name="label" maxLength={100} required defaultValue={connection?.label ?? `Connection ${next}`} />
       </label>
       <label>
-        Vehicle arrival
+        Vehicle arrival time
         <input name="arrival" type="datetime-local" required min={`${date}T00:00`} max={`${date}T23:59`} defaultValue={localTime(connection?.arrival_at ?? null)} />
       </label>
       <label>
-        Unloading complete
+        Vehicle unloading completed time
         <input name="unloading" type="datetime-local" defaultValue={localTime(connection?.unloading_at ?? null)} />
       </label>
       <label>
-        Station clearance
+        Station clearance time
         <input name="clearance" type="datetime-local" defaultValue={localTime(connection?.clearance_at ?? null)} />
       </label>
       <button className="button secondary">Save connection</button>
@@ -111,7 +111,13 @@ export function PerformanceConnections({
                 <em>{canEdit ? "Edit times" : connection.clearance_at ? "Cleared" : "In progress"}</em>
               </summary>
               {canEdit ? (
-                <ConnectionForm key={`${connection.id}-${connection.version}`} connection={connection} date={date} stationCode={stationCode} next={connections.length + 1} />
+                <ConnectionForm
+                  key={`${connection.id}-${connection.version}`}
+                  connection={connection}
+                  date={date}
+                  stationCode={stationCode}
+                  next={connections.length + 1}
+                />
               ) : null}
               <p className="review-connection-audit">
                 Updated by {connection.updated_by_name} ·{" "}
@@ -133,9 +139,9 @@ export function PerformanceConnections({
         </p>
       )}
 
-      {canEdit && adding ? (
+      {canEdit && (adding || !connections.length) ? (
         <ConnectionForm
-          key={`new-${connections.length}`}
+          key={`new-${date}-${stationCode}-${connections.length}`}
           date={date}
           stationCode={stationCode}
           next={connections.length + 1}

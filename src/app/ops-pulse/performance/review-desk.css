@@ -1,0 +1,66 @@
+/* Scoped to Review Desk: readable controls at browser zoom without widening the page. */
+.performance-review-desk { min-width: 0; max-width: 100%; }
+.performance-review-desk :is(section, form, label, article, details, fieldset) { min-width: 0; }
+.performance-review-desk .performance-review-columns { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
+.performance-review-desk .performance-review-metrics { grid-template-columns: repeat(auto-fit,minmax(120px,1fr)); gap: 6px; }
+.performance-review-desk .performance-review-metrics span { font-size: 11px; white-space: normal; }
+.performance-review-desk .performance-review-metrics strong { font-size: 16px; }
+.performance-review-desk .performance-review-metrics small { font-size: 10px; white-space: normal; }
+.performance-review-desk :is(.performance-operations-form,.performance-rca-form) label { font-size: 12px; }
+.performance-review-desk :is(input,select,textarea) { box-sizing: border-box; min-width: 0; max-width: 100%; font-size: 14px; }
+.performance-review-desk :is(.review-followup-form,.review-exception-form,.review-noon-emd) :is(input,select,textarea) { border: 1px solid #dfe4ec; border-radius: 7px; width: 100%; padding: 9px; background: #fff; color: #172033; font-family: inherit; }
+.performance-review-desk :is(.review-followup-form,.review-exception-form) label { display: grid; gap: 5px; font-size: 12px; color: #475569; }
+.review-manager-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.review-manager-tabs button { display: flex; gap: 10px; align-items: center; flex: 1 1 210px; max-width: 360px; border: 1px solid #dfe4ec; border-radius: 10px; padding: 11px; text-align: left; background: white; color: #172033; cursor: pointer; font-size: 13px; }
+.review-manager-tabs button.selected { border-color: #fb923c; box-shadow: 0 0 0 1px #fed7aa; }
+.review-manager-tabs button.completed i { background: #dcfce7; color: #166534; }
+.review-manager-tabs button.skipped i { background: #fff1f2; color: #9f1239; }
+.review-manager-tabs i { display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: #fff1e5; font-style: normal; }
+.review-manager-tabs small { display: block; font-size: 11px; margin-top: 3px; color: #64748b; }
+.review-manager-context { padding: 8px 2px; font-size: 13px; overflow-wrap: anywhere; }
+.review-manager-context p { margin: 4px 0; }
+.review-manager-context blockquote { margin: 8px 0; padding-left: 12px; border-left: 3px solid #cbd5e1; white-space: pre-wrap; }
+.review-proxy-badge,.review-skip-badge { color: #9a3412; }
+.review-exception-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.review-exception-form { display: grid; gap: 12px; padding: 14px; margin-top: 8px; border: 1px solid #fed7aa; border-radius: 10px; background: #fffaf5; max-width: 760px; }
+.review-exception-form p { margin: 0; font-size: 13px; }
+.review-noon-emd,.review-followups { padding: 14px; border: 1px solid #e5e9f0; border-radius: 12px; background: white; }
+.review-noon-emd { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.review-noon-emd h3,.review-followups h3 { margin: 0; font-size: 14px; }
+.review-noon-emd p,.review-followups header p { margin: 4px 0 0; font-size: 12px; color: #64748b; }
+.review-noon-emd form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.review-noon-emd input { max-width: 140px !important; }
+.review-noon-emd > small { color: #64748b; font-size: 11px; }
+.review-followups > header { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.review-followup-form { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; padding: 12px 0; }
+.review-followup-form .wide { grid-column: 1/-1; }
+.review-followup-form button { justify-self: start; }
+.review-followups > details { border: 1px solid #e5e9f0; border-radius: 8px; padding: 10px; margin-top: 8px; }
+.review-followups summary { display: flex; gap: 12px; align-items: center; justify-content: space-between; cursor: pointer; font-size: 13px; overflow-wrap: anywhere; }
+.review-followups summary small { display: block; color: #64748b; font-size: 11px; margin-top: 5px; }
+.review-followups summary b { font-size: 11px; flex-shrink: 0; color: #9a3412; }
+.review-followups details.done summary b { color: #166534; }
+.review-followups details > small { color: #64748b; font-size: 11px; }
+.review-done-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.review-done-toggle input { width: auto; }
+.review-backlog-pages { display: flex; justify-content: space-between; padding: 12px; gap: 12px; font-size: 12px; }
+.performance-review-overview article p small { display: block; margin-top: 4px; color: #64748b; font-size: 11px; }
+.performance-review-desk .performance-review-overview article { font-size: 13px; }
+.performance-review-desk .review-connection-form { grid-template-columns: repeat(auto-fit,minmax(190px,1fr)); }
+.performance-review-desk .review-connection-form label { font-size: 12px; }
+.performance-review-desk .review-connection-form input { font-size: 14px; min-height: 40px; }
+.performance-review-desk .review-connection-form .button { min-height: 40px; }
+@media (max-width:1200px) {
+  .performance-review-desk .performance-review-columns { grid-template-columns: minmax(0,1fr); }
+}
+@media (max-width:650px) {
+  .performance-review-desk .review-connection-form,.review-followup-form { grid-template-columns: minmax(0,1fr); }
+  .performance-review-desk :is(input,select,textarea) { font-size: 16px; }
+  .performance-review-desk .performance-review-statusbar { display: grid; grid-template-columns: minmax(0,1fr); }
+  .performance-review-desk .performance-review-overview article { grid-template-columns: minmax(0,1fr); gap: 7px; }
+  .performance-review-desk .performance-review-overview summary { flex-wrap: wrap; gap: 8px; }
+  .review-manager-tabs button { max-width: none; }
+  .review-followups > header { align-items: flex-start; }
+  .review-followups summary { align-items: flex-start; }
+  .review-noon-emd { align-items: flex-start; }
+}

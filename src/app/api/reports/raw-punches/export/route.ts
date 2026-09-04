@@ -6,6 +6,7 @@ import {
   normalizedEnrolmentId,
   rawPunchDeviceMatchLabel,
   rawPunchResultLabel,
+  rawPunchSourceDetails,
   resolveRawPunchDevice,
   safeRawPunchDate,
   safeRawPunchSearch,
@@ -110,14 +111,15 @@ export async function GET(request: NextRequest) {
       let query = admin
         .from("biometric_raw_events")
         .select(
-          "id, device_id, device_serial, terminal_id, trans_id, enrolment_id, punch_time, received_at, event_type, source_ip, worker_status, created_at",
+          "id, device_id, device_serial, terminal_id, trans_id, enrolment_id, employee_code, payload, punch_time, received_at, event_type, source_ip, worker_status, created_at",
           includeCount ? { count: "exact" } : undefined
         )
         .eq("company_id", companyId)
         .eq("event_type", "TimeLog")
         .lte("created_at", exportCutoff)
         .order("punch_time", { ascending: false, nullsFirst: false })
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false });
 
       if (!authorization.hasAllLocationAccess) {
         query = allowedDeviceIds.length ? query.in("device_id", allowedDeviceIds) : query.eq("device_id", "__no_authorized_devices__");
@@ -129,7 +131,7 @@ export async function GET(request: NextRequest) {
       if (selectedDevices.length) query = query.in("device_id", selectedDevices);
       if (from) query = query.gte("punch_time", `${from}T00:00:00+05:30`);
       if (to) query = query.lte("punch_time", `${to}T23:59:59.999+05:30`);
-      if (search) query = query.or(`enrolment_id.ilike.%${search}%,device_serial.ilike.%${search}%,terminal_id.ilike.%${search}%,trans_id.ilike.%${search}%`);
+      if (search) query = query.or(`enrolment_id.ilike.%${search}%,employee_code.ilike.%${search}%,device_serial.ilike.%${search}%,terminal_id.ilike.%${search}%,trans_id.ilike.%${search}%`);
 
       if (mapping.length && mapping.length < 3) {
         if (!includeUnmapped) {
@@ -239,6 +241,7 @@ export async function GET(request: NextRequest) {
       for (const row of rows) {
         const punch = punchByRawEvent.get(row.id);
         const alert = alertByRawEvent.get(row.id);
+        const source = rawPunchSourceDetails(row);
         const resolvedDevice = resolveRawPunchDevice(row, deviceIndex);
         const device = resolvedDevice.device;
         const enrolmentId = normalizedEnrolmentId(row.enrolment_id);
@@ -264,20 +267,30 @@ export async function GET(request: NextRequest) {
           mappingLabel,
           profileType?.replaceAll("_", " ") ?? "",
           worker?.full_name ?? "",
-          worker?.code ?? "",
+          worker?.code || source.employeeCode,
           row.trans_id ?? "",
           enrichProcessingHistory
             ? rawPunchResultLabel(punch, alert)
-            : row.worker_status === "inactive"
+            : source.isTeamOffice
+              ? "Raw only"
+              : row.worker_status === "inactive"
               ? "Inactive worker"
               : currentMapping
                 ? "Recorded"
                 : "Unmapped ID",
           enrichProcessingHistory
-            ? alert?.message ?? (punch?.calculated ? "Included in attendance." : "Received but no attendance record was created.")
-            : currentMapping
+            ? alert?.message ?? (punch?.calculated ? "Included in attendance." : source.note || "Received but no attendance record was created.")
+            : source.isTeamOffice
+              ? source.note
+              : currentMapping
               ? "Raw biometric event received; current profile mapping included."
-              : "Raw biometric event received; no current People or Workforce mapping found."
+              : "Raw biometric event received; no current People or Workforce mapping found.",
+          source.label,
+          source.employeeCode,
+          source.recordId,
+          source.machine,
+          source.isTeamOffice ? "Minute" : "As received",
+          source.possibleOverlapCount ? "Possible same-minute middleware overlap" : ""
         ];
       }
     }
@@ -287,9 +300,10 @@ export async function GET(request: NextRequest) {
       headers: [
         "Punch time", "Received at", "Location", "Location identified by", "Device", "Device serial",
         "Device model", "Terminal ID", "Source IP", "Enrolment ID", "Profile mapping", "Profile category",
-        "Employee / workforce name", "DropX / employee ID", "Transaction ID", "Capture result", "Reason"
+        "Employee / workforce name", "DropX / employee ID", "Transaction ID", "Capture result", "Reason",
+        "Source", "Source employee ID", "Source record ID", "Source machine (unverified)", "Time precision", "Overlap review"
       ],
-      columnWidths: [22, 22, 28, 23, 18, 18, 16, 16, 18, 16, 25, 22, 30, 20, 18, 20, 58],
+      columnWidths: [22, 22, 28, 23, 18, 18, 16, 16, 18, 16, 25, 22, 30, 20, 18, 20, 58, 22, 20, 20, 30, 18, 42],
       rows: excelRows()
     });
     console.info("Raw Punches export streaming", {

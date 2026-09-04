@@ -5,6 +5,7 @@ export function reviewRole(value: string | null | undefined) {
   if (/\b(CLM|CLUSTER MANAGER|CLUSTER HEAD)\b/.test(role)) return "cluster";
   if (/\b(AOM|AREA OPERATIONS? MANAGER)\b/.test(role)) return "aom";
   if (/\b(NH|NATIONAL HEAD)\b/.test(role)) return "national";
+  if (/\b(TECH|FSD|FULL STACK DEVELOPER)\b/.test(role)) return "tech";
   if (/\b(LOCATION|TL|ATL|STM|SSA|TEAM LEAD|TEAM LEADER|STATION MANAGER|STATION SUPPORT ASSOCIATE)\b/.test(role)) return "station";
   return "other";
 }
@@ -23,6 +24,11 @@ export function reviewCapabilities(input: {
   userId: string;
   owner: boolean;
   programManager: boolean;
+  nationalHead?: boolean;
+  tech?: boolean;
+  higherReviewer?: boolean;
+  currentIsFirst?: boolean;
+  hasProxy?: boolean;
   stationUser: boolean;
   inScope: boolean;
   canView: boolean;
@@ -36,17 +42,47 @@ export function reviewCapabilities(input: {
   const visible = input.inScope && input.canView;
   const editor = visible && input.canEdit;
   const oversight = input.owner || input.programManager;
+  const canOverride = oversight || input.nationalHead || input.tech;
   const current = Boolean(input.currentReviewerId && input.currentReviewerId === input.userId);
   const first = Boolean(input.firstReviewerId && input.firstReviewerId === input.userId);
   return {
-    canStart: visible && (input.canAdd || input.canEdit) && (oversight || first),
+    canStart: Boolean(visible && (input.canAdd || input.canEdit) && (canOverride || first || input.higherReviewer)),
     // Station team always; first manager on their stage can also enter timings when TL access is missing.
     canEditConnections: editor && (oversight || input.stationUser || (!input.closed && current && first)),
-    canEditRca: editor && (oversight || (!input.closed && current && first)),
+    canEditRca: editor && (oversight || (!input.closed && current && (first || input.currentIsFirst === true))),
     canComment: editor && (oversight || (!input.closed && current)),
-    // Programme oversight does not silently approve somebody else's review.
-    canComplete: editor && !input.closed && Boolean(input.currentRole) && (input.owner || current),
+    canManageActions: editor && (oversight || (!input.closed && (current || first))),
+    // Oversight uses an explicit, reason-required bypass, never an unassigned approval.
+    canComplete: editor && !input.closed && Boolean(input.currentRole) && current,
+    canBypass: Boolean(editor && !input.closed && canOverride),
+    canProxy: Boolean(editor && !input.closed && input.currentRole && !current && (canOverride || (!input.hasProxy && input.higherReviewer))),
   };
+}
+
+export function noonEmdValue(value: string) {
+  if (!value.trim()) return null;
+  const percent = Number(value);
+  if (!Number.isFinite(percent) || percent < 0 || percent > 100) throw new Error("EMD at 12 p.m. must be between 0 and 100%.");
+  return Math.round(percent * 100) / 100;
+}
+
+export function reviewBypassReason(value: string) {
+  const reason = value.trim();
+  if (reason.length < 5) throw new Error("Add a clear reason for skipping this review level.");
+  if (reason.length > 2000) throw new Error("Keep the skip reason within 2,000 characters.");
+  return reason;
+}
+
+export function visibleReviewStep(step: { status: string; reviewer_role: string; bypassed_at?: string | null }) {
+  return ["cluster", "aom", "national"].includes(reviewRole(step.reviewer_role)) &&
+    (step.status !== "skipped" || Boolean(step.bypassed_at));
+}
+
+export function reviewRoutingIssue(steps: { status: string; reviewer_role: string; bypassed_at?: string | null }[]) {
+  const configured = steps.filter(visibleReviewStep);
+  return configured.length > 0 && !configured.some(step => reviewRole(step.reviewer_role) === "national")
+    ? "The next reporting manager is not linked in People. Contact HR to complete the reporting line. You can still save review inputs."
+    : null;
 }
 
 export function connectionTimes(values: { arrival: string; unloading: string; clearance: string }, serviceDate: string) {

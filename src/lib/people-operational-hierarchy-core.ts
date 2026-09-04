@@ -24,6 +24,7 @@ export type OperationalHierarchyPerson = {
 };
 
 export type LocationOperationalHierarchy = {
+  stationLeads?: { name: string; role: string }[];
   clusterManagers: OperationalHierarchyPerson[];
   areaOperationsManagers: OperationalHierarchyPerson[];
   reportingAuthorities: OperationalHierarchyPerson[];
@@ -257,6 +258,8 @@ export function resolvePeopleOperationalHierarchy(
         ? assignmentById.get(areaOperationsManagers[0].assignmentId)
         : undefined;
     return [locationId, {
+      stationLeads: roots.filter(root => /(^| )(TL|ATL|STM|TEAM LEAD|TEAM LEADER|STATION MANAGER)( |$)/.test(normalizedRole(root)))
+        .map(root => ({name: root.displayName, role: root.designationName || root.positionTitle || "Station lead"})),
       clusterManagers,
       areaOperationsManagers,
       reportingAuthorities,

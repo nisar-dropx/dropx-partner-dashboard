@@ -6,6 +6,7 @@ import { AmazonWeekNavigator } from "@/components/amazon-week-navigator";
 import { PerformanceSortControl } from "@/components/performance-sort-control";
 import { PerformanceWorkspaceTabs } from "@/components/performance-workspace-tabs";
 import { PerformanceReviewDesk, type ReviewMetric } from "@/components/performance-review-desk";
+import "./review-desk.css";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
@@ -13,7 +14,8 @@ import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { loadPerformanceTargets, resolvePerformanceTargets, type PerformanceTarget } from "@/lib/performance-targets";
 import { hawkeyeMetricDefinitions, hawkeyeValue, hawkeyeValueForTarget } from "@/lib/ops-pulse/hawkeye";
-import { loadPerformanceOperationalSnapshots, loadPerformanceReviewWorkspace, loadPerformanceConnections, resolvePerformanceReviewChain } from "@/lib/ops-pulse/performance-review";
+import { loadPerformanceOperationalSnapshots, loadPerformanceReviewWorkspace, loadPerformanceReviewBacklog, loadPerformanceConnections, resolvePerformanceReviewChain, loadPerformanceFollowups, loadPerformanceNoonEmd, loadReviewStationLeads } from "@/lib/ops-pulse/performance-review";
+import { reviewPendingPage } from "@/lib/ops-pulse/review-periods";
 import { getReviewAccess } from "@/lib/ops-pulse/review-access";
 import { legacyConnectionsFromReview } from "@/lib/ops-pulse/review-policy";
 import { ACTIVE_DAILY_PERFORMANCE_SOURCE, ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL, selectActiveDailyBatchRows } from "@/lib/performance-source-policy";
@@ -21,7 +23,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = { view?: string; week?: string; date?: string; from?: string; to?: string; stations?: string; sort?: string; trend?: string; review?: string; notice?: string; error?: string };
+type SearchParams = { view?: string; week?: string; date?: string; from?: string; to?: string; stations?: string; sort?: string; trend?: string; review?: string; notice?: string; error?: string; pendingPage?: string };
 type MetricFact = {
   batch_id: string;
   source_type: string;
@@ -388,10 +390,14 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     : null;
   const canViewReviews = hasPermission(authorization, "performance_review", "access");
   const connectionStationId = selectedReview?.station_id || selectedReviewLocation?.id || null;
-  const [connectionResult, reviewChain] = selectedReviewLocation && connectionStationId && view === "reviews" ? await Promise.all([
+  const [connectionResult, reviewChain, backlog, followups, noonEmd, stationLeads] = selectedReviewLocation && connectionStationId && view === "reviews" ? await Promise.all([
     loadPerformanceConnections(companyId, connectionStationId, selectedDate),
-    selectedReview ? Promise.resolve([]) : resolvePerformanceReviewChain(companyId, selectedReviewLocation.id)
-  ]) : [{connections:[],error:null},[]];
+    selectedReview ? Promise.resolve([]) : resolvePerformanceReviewChain(companyId, selectedReviewLocation.id),
+    loadPerformanceReviewBacklog(companyId, selectedDate, permittedCodes, reviewPendingPage(searchParams?.pendingPage)),
+    loadPerformanceFollowups(companyId,connectionStationId,selectedDate),
+    loadPerformanceNoonEmd(companyId,connectionStationId,selectedDate),
+    loadReviewStationLeads(companyId,connectionStationId)
+  ]) : [{connections:[],error:null},[],{rows:[],count:0,page:1,pageSize:15,error:null},{rows:[],count:0,error:null},{row:null,error:null},"Station TL"];
   const reviewConnections = connectionResult.connections.length
     ? connectionResult.connections
     : legacyConnectionsFromReview(selectedReview);
@@ -416,6 +422,15 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             canEdit={Boolean(reviewAccess?.canEditRca)}
             canEditConnections={Boolean(reviewAccess?.canEditConnections)}
             canComment={Boolean(reviewAccess?.canComment)}
+            canBypass={Boolean(reviewAccess?.canBypass)}
+            canProxy={Boolean(reviewAccess?.canProxy)}
+            canManageActions={Boolean(reviewAccess?.canManageActions)}
+            followups={followups}
+            noonEmd={noonEmd}
+            stationLeads={stationLeads}
+            backlog={backlog}
+            pendingExpanded={Boolean(searchParams?.pendingPage)}
+            previousDay={defaultDailyDate}
             programManager={Boolean(reviewAccess?.actor.programManager)}
             connections={reviewConnections}
             updates={reviewWorkspace.updates}

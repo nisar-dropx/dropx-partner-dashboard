@@ -1,4 +1,8 @@
+import { PerformanceCarriedActions } from "@/components/performance-carried-actions";
 import Link from "next/link";
+import { PerformanceFollowups } from "@/components/performance-followups";
+import type { PerformanceReviewBacklog, PerformanceFollowup, PerformanceNoonEmd } from "@/lib/ops-pulse/performance-review";
+import { reviewLink } from "@/lib/ops-pulse/review-periods";
 import { PerformanceOpeningCard } from "@/components/performance-opening-card";
 import { formatDashboardDate } from "@/lib/date-format";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
@@ -8,7 +12,7 @@ import { PerformanceReviewPicker } from "@/components/performance-review-picker"
 import { PerformanceConnections } from "@/components/performance-connections";
 import { PerformanceRcaActions } from "@/components/performance-rca-actions";
 import { ReviewActionForm } from "@/components/review-action-form";
-import { discussionFeedUpdates, reviewRole } from "@/lib/ops-pulse/review-policy";
+import { discussionFeedUpdates, visibleReviewStep } from "@/lib/ops-pulse/review-policy";
 
 export type ReviewMetric = {
   actual: number | null;
@@ -21,6 +25,15 @@ export type ReviewMetric = {
 };
 
 type Props = {
+  canBypass: boolean;
+  canProxy: boolean;
+  canManageActions: boolean;
+  stationLeads: string;
+  backlog: PerformanceReviewBacklog;
+  pendingExpanded: boolean;
+  previousDay: string;
+  followups: {rows:PerformanceFollowup[];count:number;error:string|null};
+  noonEmd: {row:PerformanceNoonEmd|null;error:string|null};
   canAdd: boolean;
   canCompleteStep: boolean;
   canEdit: boolean;
@@ -85,15 +98,16 @@ export function PerformanceReviewDesk(props: Props) {
   const selectedReviewIds = new Set([review?.id, ...previousStationReviews.map((entry) => entry.id)].filter(Boolean));
   const selectedItems = items.filter((item) => selectedReviewIds.has(item.review_id));
   const currentItems = selectedItems.filter((item) => item.review_id === review?.id);
-  const itemByMetric = new Map<string, (typeof currentItems)[number]>();
+  const itemByMetric = new Map<string, PerformanceReviewItem>();
   for (const item of currentItems) {
     itemByMetric.set(item.metric_key, item);
     const labelKey = stationKey(item.metric_label);
     if (labelKey && !itemByMetric.has(labelKey)) itemByMetric.set(labelKey, item);
   }
   const resolveItem = (metric: ReviewMetric) => itemByMetric.get(metric.key) ?? itemByMetric.get(stationKey(metric.label)) ?? itemByMetric.get(metric.label);
-  const carriedActions = selectedItems.filter((item) => item.review_id !== review?.id && item.status !== "done").slice(0, 12);
+  const carriedActions = selectedItems.filter((item) => item.review_id !== review?.id);
   const misses = metrics.filter((metric) => metric.severity === "red" || metric.severity === "amber");
+  // Saved RCA must remain visible even when a later source refresh makes its metric green or unavailable.
   const savedOnlyRows: ReviewMetric[] = currentItems
     .filter((item) => {
       const linkedToMiss = misses.some((metric) => metric.key === item.metric_key || stationKey(metric.label) === stationKey(item.metric_label));
@@ -102,13 +116,13 @@ export function PerformanceReviewDesk(props: Props) {
     .map((item) => {
       const fromScorecard = metrics.find((metric) => metric.key === item.metric_key || stationKey(metric.label) === stationKey(item.metric_label));
       return fromScorecard ?? {
-        actual: typeof item.actual_value === "number" ? item.actual_value : null,
+        actual: item.actual_value == null ? null : Number(item.actual_value),
         direction: item.target_direction === "lower" ? "lower" : "higher",
         key: item.metric_key,
         label: item.metric_label,
         severity: (item.severity === "amber" ? "amber" : "red") as ReviewMetric["severity"],
         short: item.metric_label,
-        target: typeof item.target_value === "number" ? item.target_value : null
+        target: item.target_value == null ? null : Number(item.target_value)
       };
     });
   const rcaRows = [...misses, ...savedOnlyRows];
@@ -120,9 +134,9 @@ export function PerformanceReviewDesk(props: Props) {
   const activeStep = review ? steps.find((step) => step.review_id === review.id && step.step_order === review.current_step_order) ?? null : null;
   const reviewByStation = new Map(reviews.map((entry) => [stationKey(entry.station_code), entry]));
   const completedCount = locations.filter((location) => reviewByStation.get(stationKey(location.station_code))?.status === "closed").length;
-  const inReviewCount = locations.filter((location) => reviewByStation.get(stationKey(location.station_code))?.status === "in_review").length;
+  const inReviewCount = locations.filter((location) => ["open", "in_review"].includes(reviewByStation.get(stationKey(location.station_code))?.status ?? "")).length;
   const notStartedCount = locations.length - completedCount - inReviewCount;
-  const selectedSteps = steps.filter((step) => step.review_id === review?.id && step.status !== "skipped" && ["cluster","aom","national"].includes(reviewRole(step.reviewer_role)));
+  const selectedSteps = steps.filter((step) => step.review_id === review?.id && visibleReviewStep(step)).sort((a,b)=>a.step_order-b.step_order);
   const reviewUpdates = discussionFeedUpdates(updates.filter((update) => update.review_id === review?.id));
   return <div className="performance-review-desk">
     {notice ? <div className="performance-review-message success">{notice}</div> : null}
@@ -141,14 +155,24 @@ export function PerformanceReviewDesk(props: Props) {
       />
     </section>
 
+    <details className="performance-review-overview"><summary><span><strong>Station reviews · {formatDashboardDate(date)}</strong><small>Selected performance day only · {locations.length} permitted stations</small></span><span className="performance-review-overview-counts"><b>{completedCount} done</b><b>{inReviewCount} active</b><b>{notStartedCount} not started</b></span></summary><div>{locations.map(location=>{
+      const entry=reviewByStation.get(stationKey(location.station_code));
+      const current=entry?steps.find(step=>step.review_id===entry.id&&step.step_order===entry.current_step_order&&step.status==="pending"):null;
+      return <article key={location.id}><span><strong>{location.station_code}</strong><small>{formatDashboardDate(date)} · {location.station_name||location.city}</small></span><em className={entry?.status||"not-started"}>{entry?.status.replace("_"," ")||"Not started"}</em><p>{entry?.review_summary||"Takeaway pending"}{entry?<small>Started {new Date(entry.started_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}</small>:null}</p><span><b>{current?.proxy_reviewer_name||current?.reviewer_name||"—"}</b><Link href={reviewLink(date,location.station_code)}>View review →</Link></span></article>;
+    })}</div></details>
+    <details className="performance-review-overview review-earlier-pending" open={props.pendingExpanded}><summary><span><strong>Earlier pending reviews</strong><small>Before {formatDashboardDate(date)} · separate from the selected day</small></span><b>{props.backlog.count} pending</b></summary>
+      {props.backlog.error?<p role="alert">{props.backlog.error}</p>:<div>{props.backlog.rows.map(entry=><article key={entry.id}><span><strong>{entry.station_code}</strong><small>Performance {formatDashboardDate(entry.source_date)}</small></span><em className="in_review">Pending</em><p>{entry.pending_role}<small>{entry.pending_name||"Manager not linked"}</small></p><span><small>Started {new Date(entry.started_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}</small><Link href={reviewLink(entry.source_date,entry.station_code)}>Review {formatDashboardDate(entry.source_date)} →</Link></span></article>)}{!props.backlog.count?<p className="review-empty">No earlier pending reviews.</p>:null}</div>}
+      {props.backlog.count>props.backlog.pageSize?<nav className="review-backlog-pages">{props.backlog.page>1?<Link href={reviewLink(date,selectedCode,props.backlog.page-1)}>← Previous</Link>:null}<span>Page {props.backlog.page} of {Math.ceil(props.backlog.count/props.backlog.pageSize)}</span>{props.backlog.page*props.backlog.pageSize<props.backlog.count?<Link href={reviewLink(date,selectedCode,props.backlog.page+1)}>Next →</Link>:null}</nav>:null}
+    </details>
+
     <section className="performance-review-statusbar">
       <div><span>Source</span><strong>{sourceType === "amazon_hawkeye_daily" ? "Hawkeye D-1" : sourceType === "daily_edsp_metrics" ? "Daily EDSP" : "Operational data"}</strong></div>
       <div><span>Review</span><strong>{review ? review.status.replace("_", " ") : "Not started"}</strong></div>
-      <div><span>Current dependency</span><strong>{activeStep ? `${activeStep.reviewer_role} · ${activeStep.reviewer_name}` : review?.status === "closed" ? "Completed" : "Start review"}</strong></div>
+      <div><span>Current dependency</span><strong>{activeStep ? `${activeStep.reviewer_role} · ${activeStep.proxy_reviewer_name||activeStep.reviewer_name}${activeStep.proxy_reviewer_name?" (proxy)":""}` : review?.status === "closed" ? "Completed" : "Start review"}</strong></div>
       {!review && canAdd ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button className="button">Start review</button></ReviewActionForm> : null}
     </section>
 
-    {!review && misses.length ? <section className="performance-review-start-guide"><div><strong>{misses.length} metrics need RCA and action</strong><span>{canAdd ? "Start this station review to assign the RCA, action owner, due date and follow-up status." : "The first review manager will start the review and record RCA and actions."}</span></div>{canAdd ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button className="button">Start & add RCA</button></ReviewActionForm> : null}</section> : null}
+    {!review && misses.length ? <div className="performance-review-start-guide"><strong>{misses.length} metrics need RCA and action</strong><span>Use Start review above, then record RCA and action items below.</span></div> : null}
     {props.routingIssue ? <div className="alert warning" role="status">{props.routingIssue}</div> : null}
 
     <section className="performance-review-flow" aria-label="Review workflow">
@@ -168,7 +192,7 @@ export function PerformanceReviewDesk(props: Props) {
           <article><span>Metric health</span><strong>{metrics.length - misses.length}/{metrics.length}</strong><small>Within configured range</small></article>
         </div>
         {previousReview ? <div className="performance-previous-takeaway"><span><strong>Previous review · {formatDashboardDate(previousReview.source_date)}</strong><small>{previousReview.status === "closed" ? "Completed" : "Carried forward"}</small></span><p>{previousReview.review_summary || "No takeaway was recorded."}</p></div> : null}
-        {carriedActions.length ? <details className="performance-inline-detail carried-review-actions" open><summary><span>Open actions from earlier reviews</span><b>{carriedActions.length} carried</b></summary><div>{carriedActions.map((item) => <article key={item.id}><span><strong>{item.metric_label}</strong><small>{item.root_cause || "RCA pending"}</small></span><span><b>{item.corrective_action || "Action pending"}</b><small>{item.action_owner || "Owner pending"}{item.due_date ? ` · due ${formatDashboardDate(item.due_date)}` : ""}</small></span><em>{item.status.replace("_", " ")}</em></article>)}</div></details> : null}
+        <PerformanceCarriedActions items={carriedActions} previous={previousStationReviews} review={review} canUpdate={props.canManageActions}/>
         <details className="performance-inline-detail" open>
           <summary><span>Performance scorecard</span><b>{metrics.length} metrics</b></summary>
           <div className="performance-review-metrics">{metrics.map((metric) => <article className={metric.severity} key={metric.key}><span title={metric.label}>{metric.short}</span><strong>{valueText(metric.actual)}</strong><small>{metric.target == null ? "Reference metric" : `Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}</small></article>)}</div>
@@ -206,8 +230,9 @@ export function PerformanceReviewDesk(props: Props) {
       </section>
     </div>
 
-    {review ? <section className="review-discussion">
-      <header><div><h3>Review discussion</h3><p>{review.status === "closed" ? "Review completed · all inputs remain visible" : activeStep ? `With ${activeStep.reviewer_name} · ${activeStep.reviewer_role}` : "Review manager not assigned"}</p></div><span>{reviewUpdates.length} updates</span></header>
+    <PerformanceFollowups key={`${selectedCode}-${date}`} review={review} date={date} rows={props.followups.rows} count={props.followups.count} error={props.followups.error} canAdd={canEdit} canUpdate={props.canManageActions}/>
+    {review ? <section className="review-discussion" id="review-discussion">
+      <header><div><h3>Review discussion</h3><p>{review.status === "closed" ? "Review completed · all inputs remain visible" : activeStep ? `${activeStep.proxy_reviewer_name||activeStep.reviewer_name} reviews with ${selectedSteps.findIndex(step=>step.id===activeStep.id)>0?selectedSteps[selectedSteps.findIndex(step=>step.id===activeStep.id)-1].reviewer_name:props.stationLeads}` : "Review manager not assigned"}</p></div><span>{reviewUpdates.length} updates</span></header>
       {canComment || canCompleteStep ? <ReviewActionForm action={savePerformanceReviewComment} className="review-comment-form" resetOnSuccess>
         <input type="hidden" name="review_id" value={review.id}/><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="step_id" value={activeStep?.id ?? ""}/>
         <label>Your review input<textarea name="feedback" maxLength={4000} placeholder="Add context, feedback or the next follow-up…" rows={2}/></label>

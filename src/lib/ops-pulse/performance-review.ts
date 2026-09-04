@@ -7,6 +7,7 @@ import { loadStationOpeningAttendance } from "@/lib/ops-pulse/station-opening-at
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { REVIEW_PENDING_PAGE_SIZE } from "@/lib/ops-pulse/review-periods";
 
 export type PerformanceReviewSettings = {
   daily_review_time: string;
@@ -48,7 +49,71 @@ export type PerformanceReviewStep = {
   status: "pending" | "completed" | "skipped";
   feedback: string | null;
   completed_at: string | null;
+  bypass_reason: string | null;
+  bypassed_at: string | null;
+  bypassed_by_name: string | null;
+  proxy_reviewer_user_id: string | null;
+  proxy_reviewer_name: string | null;
+  proxy_reason: string | null;
+  proxy_started_at: string | null;
 };
+
+export type PerformancePendingReview = Pick<PerformanceReview, "id" | "station_code" | "source_date" | "review_type" | "status" | "started_at" | "current_step_order"> & {
+  pending_name: string | null;
+  pending_role: string | null;
+};
+export type PerformanceReviewBacklog = { rows: PerformancePendingReview[]; count: number; page: number; pageSize: number; error: string | null };
+
+export type PerformanceFollowup = {
+  id: string; review_id: string; station_id: string; source_date: string; action_number: number;
+  title: string; owner_label: string; due_date: string; status: "open" | "in_progress" | "blocked" | "done";
+  progress_note: string | null; version: number; updated_at: string; updated_by_name: string;
+};
+export type PerformanceNoonEmd = { emd_noon_pct: number | null; version: number; updated_at: string; updated_by_name: string };
+
+export async function loadPerformanceFollowups(companyId: string, stationId: string, date: string) {
+  if (!supabaseAdmin) return { rows: [] as PerformanceFollowup[], count: 0, error: "Station actions are unavailable." };
+  const result = await supabaseAdmin.from("ops_performance_followups")
+    .select("id,review_id,station_id,source_date,action_number,title,owner_label,due_date,status,progress_note,version,updated_at,updated_by_name", { count: "exact" })
+    .eq("company_id", companyId).eq("station_id", stationId).lte("source_date", date)
+    .order("is_resolved").order("due_date").order("source_date", { ascending: false }).order("action_number").limit(200);
+  return { rows: (result.data ?? []) as PerformanceFollowup[], count: result.count ?? 0,
+    error: result.error ? "Station actions could not be loaded. Refresh to try again." : null };
+}
+
+export async function loadPerformanceNoonEmd(companyId: string, stationId: string, date: string) {
+  if (!supabaseAdmin) return { row: null as PerformanceNoonEmd | null, error: "EMD entry is unavailable." };
+  const result = await supabaseAdmin.from("ops_performance_daily_inputs")
+    .select("emd_noon_pct,version,updated_at,updated_by_name").eq("company_id", companyId).eq("station_id", stationId).eq("source_date", date).maybeSingle();
+  return { row: result.data as PerformanceNoonEmd | null, error: result.error ? "EMD at 12 p.m. could not be loaded. Refresh to try again." : null };
+}
+
+export async function loadPerformanceReviewBacklog(companyId: string, date: string, stationCodes: string[], requestedPage = 1): Promise<PerformanceReviewBacklog> {
+  const empty = { rows: [], count: 0, page: 1, pageSize: REVIEW_PENDING_PAGE_SIZE, error: null };
+  if (!supabaseAdmin || !stationCodes.length) return empty;
+  const query = (page: number) => supabaseAdmin!.from("ops_performance_reviews")
+    .select("id,station_code,source_date,review_type,status,started_at,current_step_order", { count: "exact" })
+    .eq("company_id", companyId).eq("review_type", "daily_operations").in("station_code", stationCodes)
+    .lt("source_date", date).in("status", ["open", "in_review"])
+    .order("source_date").order("station_code").order("id")
+    .range((page - 1) * REVIEW_PENDING_PAGE_SIZE, page * REVIEW_PENDING_PAGE_SIZE - 1);
+  let result = await query(requestedPage);
+  if (result.error) return { ...empty, error: "Earlier pending reviews could not be loaded. Refresh to try again." };
+  const page = Math.min(requestedPage, Math.max(1, Math.ceil((result.count ?? 0) / REVIEW_PENDING_PAGE_SIZE)));
+  if (page !== requestedPage) result = await query(page);
+  if (result.error) return { ...empty, error: "Earlier pending reviews could not be loaded. Refresh to try again." };
+  const reviews = result.data ?? [];
+  const steps = reviews.length ? await supabaseAdmin.from("ops_performance_review_steps")
+    .select("review_id,step_order,reviewer_name,reviewer_role,status").eq("company_id", companyId)
+    .in("review_id", reviews.map(row => row.id)).eq("status", "pending") : { data: [], error: null };
+  if (steps.error) return { ...empty, error: "Earlier review dependencies could not be loaded. Refresh to try again." };
+  return {
+    rows: reviews.map(row => {
+      const step = steps.data?.find(step => step.review_id === row.id && step.step_order === row.current_step_order);
+      return { ...row, pending_name: step?.reviewer_name ?? null, pending_role: step?.reviewer_role ?? null } as PerformancePendingReview;
+    }), count: result.count ?? 0, page, pageSize: REVIEW_PENDING_PAGE_SIZE, error: null
+  };
+}
 
 export type PerformanceReviewItem = {
   id: string;
@@ -223,10 +288,10 @@ export async function loadPerformanceReviewWorkspace(companyId: string, sourceDa
       .eq("company_id", companyId).maybeSingle(),
     supabaseAdmin.from("ops_performance_reviews")
       .select("id,review_type,source_date,report_year,report_week,station_id,station_code,source_type,source_batch_id,status,current_step_order,vehicle_arrival_time,unloading_complete_time,station_clear_time,review_summary,started_at,closed_at,updated_at")
-      .eq("company_id", companyId).eq("source_date", sourceDate).in("station_code", stationCodes),
+      .eq("company_id", companyId).eq("review_type", "daily_operations").eq("source_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("ops_performance_reviews")
       .select("id,station_code,source_date,status,review_summary,closed_at,updated_at")
-      .eq("company_id", companyId).in("station_code", stationCodes).lt("source_date", sourceDate).order("source_date", { ascending: false }).limit(Math.max(400, stationCodes.length * 21))
+      .eq("company_id", companyId).eq("review_type", "daily_operations").in("station_code", stationCodes).lt("source_date", sourceDate).order("source_date", { ascending: false }).limit(Math.max(400, stationCodes.length * 21))
   ]);
   const schemaError = [settingsResult.error, reviewsResult.error, historicalReviewsResult.error].find((error) => error && missingSchema(error));
   if (schemaError) return { settings: fallback, reviews: [] as PerformanceReview[], previousReviews: [] as PerformanceReviewCarryover[], steps: [] as PerformanceReviewStep[], items: [] as PerformanceReviewItem[], updates: [] as PerformanceReviewUpdate[], error: "Performance review setup is being activated." };
@@ -238,7 +303,7 @@ export async function loadPerformanceReviewWorkspace(companyId: string, sourceDa
   const itemReviewIds = [...new Set([...selectedReviewIds, ...historicalReviewIds])];
   const [stepsResult, itemsResult, updatesResult] = await Promise.all([
     selectedReviewIds.length
-      ? supabaseAdmin.from("ops_performance_review_steps").select("id,review_id,step_order,reviewer_user_id,reviewer_name,reviewer_role,status,feedback,completed_at").eq("company_id", companyId).in("review_id", selectedReviewIds).order("step_order")
+      ? supabaseAdmin.from("ops_performance_review_steps").select("id,review_id,step_order,reviewer_user_id,reviewer_name,reviewer_role,status,feedback,completed_at,bypass_reason,bypassed_at,bypassed_by_name,proxy_reviewer_user_id,proxy_reviewer_name,proxy_reason,proxy_started_at").eq("company_id", companyId).in("review_id", selectedReviewIds).order("step_order")
       : Promise.resolve({ data: [] as PerformanceReviewStep[], error: null }),
     itemReviewIds.length
       ? supabaseAdmin.from("ops_performance_review_items").select("id,review_id,metric_key,metric_label,actual_value,target_value,target_direction,severity,root_cause,corrective_action,action_owner,due_date,status,created_at,updated_at").eq("company_id", companyId).in("review_id", itemReviewIds).order("created_at", { ascending: false }).limit(1000)
@@ -610,4 +675,11 @@ export async function resolvePerformanceReviewChain(companyId: string, stationId
     reviewerRole: person.role,
     reviewerUserId: userByPerson.get(person.personId) ?? null
   }));
+}
+
+export async function loadReviewStationLeads(companyId: string, stationId: string) {
+  const hierarchy = await loadPeopleOperationalHierarchy(companyId, [stationId]);
+  if (hierarchy.error) return "Station TL · unavailable";
+  const leads = hierarchy.byLocation.get(stationId)?.stationLeads ?? [];
+  return leads.length ? leads.map(person => `${person.name} · ${person.role}`).join(", ") : "Station TL · not assigned in People";
 }
