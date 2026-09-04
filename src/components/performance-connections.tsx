@@ -139,7 +139,7 @@ export function PerformanceConnections({
         </p>
       )}
 
-      {canEdit && (adding || !connections.length) ? (
+      {canEdit&&(adding||!connections.length)?(
         <ConnectionForm
           key={`new-${date}-${stationCode}-${connections.length}`}
           date={date}

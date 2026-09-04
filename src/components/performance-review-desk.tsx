@@ -1,5 +1,8 @@
 import { PerformanceCarriedActions } from "@/components/performance-carried-actions";
 import Link from "next/link";
+import { PerformanceReviewExceptions } from "@/components/performance-review-exceptions";
+import { PerformanceReviewFlow } from "@/components/performance-review-flow";
+import { PerformanceNoonEmdEntry } from "@/components/performance-noon-emd";
 import { PerformanceFollowups } from "@/components/performance-followups";
 import type { PerformanceReviewBacklog, PerformanceFollowup, PerformanceNoonEmd } from "@/lib/ops-pulse/performance-review";
 import { reviewLink } from "@/lib/ops-pulse/review-periods";
@@ -125,9 +128,9 @@ export function PerformanceReviewDesk(props: Props) {
         target: item.target_value == null ? null : Number(item.target_value)
       };
     });
-  const rcaRows = [...misses, ...savedOnlyRows];
+  const rcaMetrics = [...misses, ...savedOnlyRows];
   const itemsByMetricForRca = new Map<string, PerformanceReviewItem>();
-  for (const metric of rcaRows) {
+  for (const metric of rcaMetrics) {
     const item = resolveItem(metric);
     if (item) itemsByMetricForRca.set(metric.key, item);
   }
@@ -141,11 +144,6 @@ export function PerformanceReviewDesk(props: Props) {
   return <div className="performance-review-desk">
     {notice ? <div className="performance-review-message success">{notice}</div> : null}
     {error ? <div className="performance-review-message error">{error}</div> : null}
-    {locations.length > 1 ? <details className="performance-review-overview" open><summary><span><strong>All-station review status</strong><small>{formatDashboardDate(date)} · permitted scope only</small></span><span className="performance-review-overview-counts"><b>{completedCount} done</b><b>{inReviewCount} active</b><b>{notStartedCount} not started</b></span></summary><div>{locations.map((location) => {
-      const stationReview = reviewByStation.get(stationKey(location.station_code));
-      const stationStep = stationReview ? steps.find((step) => step.review_id === stationReview.id && step.step_order === stationReview.current_step_order) : null;
-      return <article key={location.id}><span><strong>{location.station_code}</strong><small>{location.station_name || location.city || "Station"}</small></span><em className={stationReview?.status || "not-started"}>{stationReview?.status?.replace("_", " ") || "Not started"}</em><p>{stationReview?.review_summary || (stationReview?.status === "closed" ? "Completed without a takeaway" : "Takeaway pending")}</p><span><b>{stationStep ? `${stationStep.reviewer_name} · ${stationStep.reviewer_role}` : stationReview?.status === "closed" ? "Completed" : "—"}</b><Link href={`/performance?view=reviews&date=${date}&review=${location.station_code}`}>Open</Link></span></article>;
-    })}</div></details> : null}
     <section className="ops-control-strip performance-review-control">
       <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatDashboardDate(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || selectedLocation.city || "Station"}</small></div>
       <PerformanceReviewPicker
@@ -175,12 +173,17 @@ export function PerformanceReviewDesk(props: Props) {
     {!review && misses.length ? <div className="performance-review-start-guide"><strong>{misses.length} metrics need RCA and action</strong><span>Use Start review above, then record RCA and action items below.</span></div> : null}
     {props.routingIssue ? <div className="alert warning" role="status">{props.routingIssue}</div> : null}
 
-    <section className="performance-review-flow" aria-label="Review workflow">
-      {review ? selectedSteps.map((step,index) => <div className={`${step.status} ${step.step_order === review.current_step_order ? "current" : ""}`} key={step.id}><i>{step.status === "completed" ? "✓" : index+1}</i><span>{step.reviewer_role}<small>{step.reviewer_name}</small><small>{step.status === "completed" ? "Reviewed" : step.step_order === review.current_step_order ? "Reviewing now" : "Up next"}</small></span></div>) : reviewChain.map((step,index)=><div key={`${step.reviewerUserId}-${index}`}><i>{index+1}</i><span>{step.reviewerRole}<small>{step.reviewerName}</small></span></div>)}
+    {review ? <>
+      <PerformanceReviewFlow steps={selectedSteps} currentOrder={review.current_step_order} stationLeads={props.stationLeads}/>
       <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update connection timings; view the full review":canEdit?"Your review · update RCA, actions, takeaway and connection timings":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
-    </section>
+      <PerformanceReviewExceptions review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy}/>
+    </> : <section className="performance-review-flow" aria-label="Review workflow">
+      {reviewChain.map((step,index)=><div key={`${step.reviewerUserId}-${index}`}><i>{index+1}</i><span>{step.reviewerRole}<small>{step.reviewerName}</small></span></div>)}
+      <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update connection timings; view the full review":canEdit?"Your review · update RCA, actions, takeaway and connection timings":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
+    </section>}
 
     <PerformanceConnections connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
+    <PerformanceNoonEmdEntry entry={props.noonEmd.row} date={date} stationCode={selectedCode} canEdit={canEditConnections} error={props.noonEmd.error}/>
 
     <div className="performance-review-columns">
       <section className="panel performance-review-section">
@@ -203,13 +206,13 @@ export function PerformanceReviewDesk(props: Props) {
           <label className="wide">Review takeaway<textarea name="review_summary" defaultValue={review.review_summary ?? ""} placeholder="Only the key conclusion or escalation"/></label>
           <button className="button secondary">Save takeaway</button>
         </ReviewActionForm> : review ? <div className="review-takeaway-readonly"><strong>Review takeaway</strong><p>{review.review_summary || "Awaiting the first manager’s review."}</p></div> : null}
-        {review && rcaRows.length ? (
+        {review && rcaMetrics.length ? (
           <PerformanceRcaActions
             key={review.id}
             canEdit={canEdit}
             date={date}
             itemsByMetric={itemsByMetricForRca}
-            rows={rcaRows}
+            rows={rcaMetrics}
             reviewId={review.id}
             reviewVersion={review.updated_at}
             stationCode={selectedCode}
