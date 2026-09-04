@@ -16,6 +16,7 @@ import { loadPerformanceTargets, resolvePerformanceTargets, type PerformanceTarg
 import { hawkeyeMetricDefinitions, hawkeyeValue, hawkeyeValueForTarget } from "@/lib/ops-pulse/hawkeye";
 import { loadPerformanceOperationalSnapshots, loadPerformanceReviewWorkspace, loadPerformanceReviewBacklog, loadPerformanceConnections, resolvePerformanceReviewChain, loadPerformanceFollowups, loadPerformanceNoonEmd, loadReviewStationLeads } from "@/lib/ops-pulse/performance-review";
 import { reviewPendingPage } from "@/lib/ops-pulse/review-periods";
+import { loadReviewCod } from "@/lib/ops-pulse/review-cod-data";
 import { getReviewAccess } from "@/lib/ops-pulse/review-access";
 import { legacyConnectionsFromReview } from "@/lib/ops-pulse/review-policy";
 import { ACTIVE_DAILY_PERFORMANCE_SOURCE, ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL, selectActiveDailyBatchRows } from "@/lib/performance-source-policy";
@@ -390,14 +391,15 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     : null;
   const canViewReviews = hasPermission(authorization, "performance_review", "access");
   const connectionStationId = selectedReview?.station_id || selectedReviewLocation?.id || null;
-  const [connectionResult, reviewChain, backlog, followups, noonEmd, stationLeads] = selectedReviewLocation && connectionStationId && view === "reviews" ? await Promise.all([
+  const [connectionResult, reviewChain, backlog, followups, noonEmd, stationLeads, codData] = selectedReviewLocation && connectionStationId && view === "reviews" ? await Promise.all([
     loadPerformanceConnections(companyId, connectionStationId, selectedDate),
     selectedReview ? Promise.resolve([]) : resolvePerformanceReviewChain(companyId, selectedReviewLocation.id),
     loadPerformanceReviewBacklog(companyId, selectedDate, permittedCodes, reviewPendingPage(searchParams?.pendingPage)),
     loadPerformanceFollowups(companyId,connectionStationId,selectedDate),
     loadPerformanceNoonEmd(companyId,connectionStationId,selectedDate),
-    loadReviewStationLeads(companyId,connectionStationId)
-  ]) : [{connections:[],error:null},[],{rows:[],count:0,page:1,pageSize:15,error:null},{rows:[],count:0,error:null},{row:null,error:null},"Station TL"];
+    loadReviewStationLeads(companyId,connectionStationId),
+    loadReviewCod(companyId,selectedReviewLocation.station_code)
+  ]) : [{connections:[],error:null},[],{rows:[],count:0,page:1,pageSize:15,error:null},{rows:[],count:0,error:null},{row:null,error:null},"Station TL",{snapshot:{stationCode:"",batchId:null,importedAt:null,fileName:null,summary:null,error:null},lines:[]}];
   const reviewConnections = connectionResult.connections.length
     ? connectionResult.connections
     : legacyConnectionsFromReview(selectedReview);
@@ -417,6 +419,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
 
         {view === "reviews" ? (
           selectedReviewLocation && selectedSnapshot ? <PerformanceReviewDesk
+            codSnapshot={codData.snapshot}
             canAdd={Boolean(reviewAccess?.canStart)}
             canCompleteStep={Boolean(reviewAccess?.canComplete)}
             canEdit={Boolean(reviewAccess?.canEditRca)}

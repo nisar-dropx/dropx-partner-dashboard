@@ -104,13 +104,13 @@ export async function loadPerformanceReviewBacklog(companyId: string, date: stri
   if (result.error) return { ...empty, error: "Earlier pending reviews could not be loaded. Refresh to try again." };
   const reviews = result.data ?? [];
   const steps = reviews.length ? await supabaseAdmin.from("ops_performance_review_steps")
-    .select("review_id,step_order,reviewer_name,reviewer_role,status").eq("company_id", companyId)
+    .select("review_id,step_order,reviewer_name,reviewer_role,status,proxy_reviewer_name").eq("company_id", companyId)
     .in("review_id", reviews.map(row => row.id)).eq("status", "pending") : { data: [], error: null };
   if (steps.error) return { ...empty, error: "Earlier review dependencies could not be loaded. Refresh to try again." };
   return {
     rows: reviews.map(row => {
       const step = steps.data?.find(step => step.review_id === row.id && step.step_order === row.current_step_order);
-      return { ...row, pending_name: step?.reviewer_name ?? null, pending_role: step?.reviewer_role ?? null } as PerformancePendingReview;
+      return { ...row, pending_name: step?.proxy_reviewer_name || step?.reviewer_name || null, pending_role: step?.reviewer_role ?? null } as PerformancePendingReview;
     }), count: result.count ?? 0, page, pageSize: REVIEW_PENDING_PAGE_SIZE, error: null
   };
 }
