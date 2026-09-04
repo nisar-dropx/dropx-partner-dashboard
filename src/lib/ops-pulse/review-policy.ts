@@ -40,7 +40,8 @@ export function reviewCapabilities(input: {
   const first = Boolean(input.firstReviewerId && input.firstReviewerId === input.userId);
   return {
     canStart: visible && (input.canAdd || input.canEdit) && (oversight || first),
-    canEditConnections: editor && (oversight || input.stationUser),
+    // Station team always; first manager on their stage can also enter timings when TL access is missing.
+    canEditConnections: editor && (oversight || input.stationUser || (!input.closed && current && first)),
     canEditRca: editor && (oversight || (!input.closed && current && first)),
     canComment: editor && (oversight || (!input.closed && current)),
     // Programme oversight does not silently approve somebody else's review.

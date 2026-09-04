@@ -16,9 +16,11 @@ test('station editor can only enter connection timings',()=>{
   const access=reviewCapabilities({...base,stationUser:true});
   assert.deepEqual(access,{canStart:false,canEditConnections:true,canEditRca:false,canComment:false,canComplete:false});
 });
-test('CM owns RCA and own stage only',()=>{
+test('CM owns RCA, own stage, and can enter connection timings',()=>{
   assert.equal(reviewCapabilities({...base,userId:'cm'}).canEditRca,true);
+  assert.equal(reviewCapabilities({...base,userId:'cm'}).canEditConnections,true);
   assert.equal(reviewCapabilities({...base,userId:'cm',currentReviewerId:'aom',currentRole:'Area Operations Manager'}).canEditRca,false);
+  assert.equal(reviewCapabilities({...base,userId:'cm',currentReviewerId:'aom',currentRole:'Area Operations Manager'}).canEditConnections,false);
 });
 test('AOM comments but does not overwrite cluster RCA',()=>{
   const access=reviewCapabilities({...base,userId:'aom',currentReviewerId:'aom',currentRole:'Area Operations Manager'});

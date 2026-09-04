@@ -226,7 +226,7 @@ export async function loadPerformanceReviewWorkspace(companyId: string, sourceDa
       .eq("company_id", companyId).eq("source_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("ops_performance_reviews")
       .select("id,station_code,source_date,status,review_summary,closed_at,updated_at")
-      .eq("company_id", companyId).in("station_code", stationCodes).lt("source_date", sourceDate).order("source_date", { ascending: false }).limit(200)
+      .eq("company_id", companyId).in("station_code", stationCodes).lt("source_date", sourceDate).order("source_date", { ascending: false }).limit(Math.max(400, stationCodes.length * 21))
   ]);
   const schemaError = [settingsResult.error, reviewsResult.error, historicalReviewsResult.error].find((error) => error && missingSchema(error));
   if (schemaError) return { settings: fallback, reviews: [] as PerformanceReview[], previousReviews: [] as PerformanceReviewCarryover[], steps: [] as PerformanceReviewStep[], items: [] as PerformanceReviewItem[], updates: [] as PerformanceReviewUpdate[], error: "Performance review setup is being activated." };

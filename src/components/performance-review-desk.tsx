@@ -52,6 +52,10 @@ function money(value: number | null | undefined) {
   return value == null ? "—" : `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
 
+function stationKey(value: string | null | undefined) {
+  return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
 function valueText(value: number | null) {
   return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
 }
@@ -75,17 +79,48 @@ function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociat
 export function PerformanceReviewDesk(props: Props) {
   const { canAdd, canCompleteStep, canEdit, canEditConnections, canComment, programManager, connections, updates, reviewChain, date, error, items, locations, metrics, notice, previousReviews, review, reviews, selectedLocation, snapshot, sourceBatchId, sourceType, sourceWeek, steps } = props;
   const selectedCode = selectedLocation.station_code;
-  const previousStationReviews = previousReviews.filter((entry) => entry.station_code === selectedCode);
+  const selectedStationKey = stationKey(selectedCode);
+  const previousStationReviews = previousReviews.filter((entry) => stationKey(entry.station_code) === selectedStationKey);
   const previousReview = previousStationReviews[0] ?? null;
   const selectedReviewIds = new Set([review?.id, ...previousStationReviews.map((entry) => entry.id)].filter(Boolean));
   const selectedItems = items.filter((item) => selectedReviewIds.has(item.review_id));
-  const itemByMetric = new Map(selectedItems.filter((item) => item.review_id === review?.id).map((item) => [item.metric_key, item]));
+  const currentItems = selectedItems.filter((item) => item.review_id === review?.id);
+  const itemByMetric = new Map<string, (typeof currentItems)[number]>();
+  for (const item of currentItems) {
+    itemByMetric.set(item.metric_key, item);
+    const labelKey = stationKey(item.metric_label);
+    if (labelKey && !itemByMetric.has(labelKey)) itemByMetric.set(labelKey, item);
+  }
+  const resolveItem = (metric: ReviewMetric) => itemByMetric.get(metric.key) ?? itemByMetric.get(stationKey(metric.label)) ?? itemByMetric.get(metric.label);
   const carriedActions = selectedItems.filter((item) => item.review_id !== review?.id && item.status !== "done").slice(0, 12);
   const misses = metrics.filter((metric) => metric.severity === "red" || metric.severity === "amber");
+  const savedOnlyRows: ReviewMetric[] = currentItems
+    .filter((item) => {
+      const linkedToMiss = misses.some((metric) => metric.key === item.metric_key || stationKey(metric.label) === stationKey(item.metric_label));
+      return !linkedToMiss && Boolean(item.root_cause || item.corrective_action);
+    })
+    .map((item) => {
+      const fromScorecard = metrics.find((metric) => metric.key === item.metric_key || stationKey(metric.label) === stationKey(item.metric_label));
+      return fromScorecard ?? {
+        actual: typeof item.actual_value === "number" ? item.actual_value : null,
+        direction: item.target_direction === "lower" ? "lower" : "higher",
+        key: item.metric_key,
+        label: item.metric_label,
+        severity: (item.severity === "amber" ? "amber" : "red") as ReviewMetric["severity"],
+        short: item.metric_label,
+        target: typeof item.target_value === "number" ? item.target_value : null
+      };
+    });
+  const rcaRows = [...misses, ...savedOnlyRows];
+  const itemsByMetricForRca = new Map<string, PerformanceReviewItem>();
+  for (const metric of rcaRows) {
+    const item = resolveItem(metric);
+    if (item) itemsByMetricForRca.set(metric.key, item);
+  }
   const activeStep = review ? steps.find((step) => step.review_id === review.id && step.step_order === review.current_step_order) ?? null : null;
-  const reviewByStation = new Map(reviews.map((entry) => [entry.station_code, entry]));
-  const completedCount = locations.filter((location) => reviewByStation.get(location.station_code)?.status === "closed").length;
-  const inReviewCount = locations.filter((location) => reviewByStation.get(location.station_code)?.status === "in_review").length;
+  const reviewByStation = new Map(reviews.map((entry) => [stationKey(entry.station_code), entry]));
+  const completedCount = locations.filter((location) => reviewByStation.get(stationKey(location.station_code))?.status === "closed").length;
+  const inReviewCount = locations.filter((location) => reviewByStation.get(stationKey(location.station_code))?.status === "in_review").length;
   const notStartedCount = locations.length - completedCount - inReviewCount;
   const selectedSteps = steps.filter((step) => step.review_id === review?.id && step.status !== "skipped" && ["cluster","aom","national"].includes(reviewRole(step.reviewer_role)));
   const reviewUpdates = discussionFeedUpdates(updates.filter((update) => update.review_id === review?.id));
@@ -93,7 +128,7 @@ export function PerformanceReviewDesk(props: Props) {
     {notice ? <div className="performance-review-message success">{notice}</div> : null}
     {error ? <div className="performance-review-message error">{error}</div> : null}
     {locations.length > 1 ? <details className="performance-review-overview" open><summary><span><strong>All-station review status</strong><small>{formatDashboardDate(date)} · permitted scope only</small></span><span className="performance-review-overview-counts"><b>{completedCount} done</b><b>{inReviewCount} active</b><b>{notStartedCount} not started</b></span></summary><div>{locations.map((location) => {
-      const stationReview = reviewByStation.get(location.station_code);
+      const stationReview = reviewByStation.get(stationKey(location.station_code));
       const stationStep = stationReview ? steps.find((step) => step.review_id === stationReview.id && step.step_order === stationReview.current_step_order) : null;
       return <article key={location.id}><span><strong>{location.station_code}</strong><small>{location.station_name || location.city || "Station"}</small></span><em className={stationReview?.status || "not-started"}>{stationReview?.status?.replace("_", " ") || "Not started"}</em><p>{stationReview?.review_summary || (stationReview?.status === "closed" ? "Completed without a takeaway" : "Takeaway pending")}</p><span><b>{stationStep ? `${stationStep.reviewer_name} · ${stationStep.reviewer_role}` : stationReview?.status === "closed" ? "Completed" : "—"}</b><Link href={`/performance?view=reviews&date=${date}&review=${location.station_code}`}>Open</Link></span></article>;
     })}</div></details> : null}
@@ -118,7 +153,7 @@ export function PerformanceReviewDesk(props: Props) {
 
     <section className="performance-review-flow" aria-label="Review workflow">
       {review ? selectedSteps.map((step,index) => <div className={`${step.status} ${step.step_order === review.current_step_order ? "current" : ""}`} key={step.id}><i>{step.status === "completed" ? "✓" : index+1}</i><span>{step.reviewer_role}<small>{step.reviewer_name}</small><small>{step.status === "completed" ? "Reviewed" : step.step_order === review.current_step_order ? "Reviewing now" : "Up next"}</small></span></div>) : reviewChain.map((step,index)=><div key={`${step.reviewerUserId}-${index}`}><i>{index+1}</i><span>{step.reviewerRole}<small>{step.reviewerName}</small></span></div>)}
-      <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment?"Station access · update connection timings; view the full review":canEdit?"Your review · update RCA, actions and takeaway":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
+      <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update connection timings; view the full review":canEdit?"Your review · update RCA, actions, takeaway and connection timings":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
     </section>
 
     <PerformanceConnections connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
@@ -144,12 +179,12 @@ export function PerformanceReviewDesk(props: Props) {
           <label className="wide">Review takeaway<textarea name="review_summary" defaultValue={review.review_summary ?? ""} placeholder="Only the key conclusion or escalation"/></label>
           <button className="button secondary">Save takeaway</button>
         </ReviewActionForm> : review ? <div className="review-takeaway-readonly"><strong>Review takeaway</strong><p>{review.review_summary || "Awaiting the first manager’s review."}</p></div> : null}
-        {review && misses.length ? (
+        {review && rcaRows.length ? (
           <PerformanceRcaActions
             canEdit={canEdit}
             date={date}
-            itemsByMetric={itemByMetric}
-            misses={misses}
+            itemsByMetric={itemsByMetricForRca}
+            rows={rcaRows}
             reviewId={review.id}
             reviewVersion={review.updated_at}
             stationCode={selectedCode}
