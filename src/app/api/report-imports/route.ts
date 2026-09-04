@@ -696,7 +696,31 @@ async function applyAmazonPaymentMappings(companyId: string, sourceRows: ReturnT
       && candidate.effective_from <= row.work_date
       && (!candidate.effective_to || candidate.effective_to >= row.work_date)
     ));
-    if (!mapping) return { ...row, mapping_status: "Unmapped", mapped_at: null, da_total_pay: 0 };
+    // A DA with no active payment mapping row at all previously left del_rate
+    // (and the other rate columns) completely unset here, which the upsert
+    // then sends through as null -- tripping cps_shipment_daily's del_rate
+    // NOT NULL constraint exactly like the NaN case above, just from a
+    // different cause (no mapping row vs. a garbage delivery_rate value on
+    // an existing one). Confirmed live: a 2026-09-04 batch failed on this
+    // exact path for an unmapped provider_employee_id. Every rate column the
+    // DB requires must default to 0 here too, not just when a mapping exists.
+    if (!mapping) {
+      return {
+        ...row,
+        c_return_rate: 0,
+        da_total_pay: 0,
+        del_rate: 0,
+        fuel_pay: 0,
+        fuel_rate: 0,
+        mapped_at: null,
+        mapping_status: "Unmapped",
+        mfn_rate: 0,
+        mfn_return_rate: 0,
+        mg_pay: 0,
+        mg_salary: 0,
+        variable_pay: 0
+      };
+    }
     const values = (mapping.payment_values && typeof mapping.payment_values === "object" ? mapping.payment_values : {}) as Record<string, unknown>;
     let variablePay = 0;
     let mgPay = 0;
