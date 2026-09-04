@@ -1,5 +1,9 @@
 /* Scoped to Review Desk: readable controls at browser zoom without widening the page. */
 .performance-review-desk { min-width: 0; max-width: 100%; }
+/* The facts row is an isolated stacking context. Raise the whole row while
+   a drill-down is open so later EMD headings/buttons cannot paint through it. */
+.performance-review-desk .performance-review-facts:has(> details[open]) { z-index: 20; }
+.performance-review-desk .performance-review-facts :is(.performance-opening-popover,.performance-associate-popover) { background: #fff; }
 .review-rca-full-detail { padding: 16px; font-size: 14px; }
 .review-rca-full-detail p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
 .performance-review-desk :is(section, form, label, article, details, fieldset) { min-width: 0; }
@@ -62,6 +66,7 @@
 .performance-review-desk .review-station-updates .review-noon-emd { align-content: start; align-items: flex-start; }
 .review-vehicles { min-width: 0; border: 1px solid #e9edf3; padding: 12px; border-radius: 10px; }
 .review-vehicles header,.review-vehicle > summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; }
+.review-vehicles header { flex-wrap: wrap; }
 .review-vehicles header small,.review-vehicle > summary small { display: block; font-size: 11px; color: #64748b; margin-top: 4px; }
 .review-vehicle { border-top: 1px solid #e9edf3; margin-top: 10px; }
 .review-vehicle > summary { padding: 10px 0; cursor: pointer; }

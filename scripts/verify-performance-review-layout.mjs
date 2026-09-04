@@ -5,8 +5,11 @@ const component = read("src/components/performance-review-desk.tsx");
 const opening = read("src/components/performance-opening-card.tsx");
 const picker = read("src/components/performance-review-picker.tsx");
 const styles = read("src/app/globals.css");
+const reviewStyles = read("src/app/ops-pulse/performance/review-desk.css");
 
 const checks = [
+  [reviewStyles.includes(".performance-review-desk .performance-review-facts:has(> details[open]) { z-index: 20; }"), "open fact drill-downs stay above later station/EMD controls"],
+  [reviewStyles.includes(".review-vehicles header { flex-wrap: wrap; }"), "vehicle header actions wrap instead of overlapping narrow layouts"],
   [styles.includes(".performance-review-facts { position: relative;"), "review facts provide one panel-bounded positioning context"],
   [styles.includes(".performance-associate-popover { right: auto; left: 0; width: min(760px, 100%); max-width: 100%; }"), "associate drill-down is contained by the performance panel"],
   [styles.includes(".performance-opening-popover { right: 0; left: auto; }"), "opening drill-down is aligned inside the performance panel"],

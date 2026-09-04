@@ -1,82 +1,60 @@
 .review-trend-button {
   display: inline-flex !important;
-  width: 26px !important;
-  height: 26px !important;
-  min-height: 26px !important;
+  width: auto !important;
+  min-height: 30px !important;
   align-items: center;
   justify-content: center;
-  padding: 3px !important;
+  padding: 5px 10px !important;
   border: 1px solid #d9e2ed !important;
-  border-radius: 6px !important;
+  border-radius: 7px !important;
   background: #fff !important;
-  color: #64748b !important;
+  color: #475569 !important;
   cursor: pointer;
   box-shadow: none !important;
   flex: none;
+  font-size: 12px !important;
+  font-weight: 600;
 }
 .review-trend-button:hover,
 .review-trend-button[aria-expanded="true"] {
-  color: #ea580c !important;
+  color: #c2410c !important;
   border-color: #fb923c !important;
   background: #fff7ed !important;
 }
-.performance-review-metrics article {
-  position: relative;
-}
-.performance-review-desk .performance-review-metrics article > span {
-  padding-right: 24px;
-}
-.performance-review-metrics article > .review-trend-button {
+.performance-review-metrics article { position: relative; }
+.performance-review-metrics article > .review-trend-card {
   position: absolute;
-  right: 3px;
-  top: 3px;
-  width: 22px !important;
-  height: 22px !important;
-  min-height: 22px !important;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  padding: 0 !important;
+  border: 1px solid transparent !important;
+  border-radius: inherit !important;
+  background: transparent !important;
 }
-.performance-review-facts > article,
-.performance-fact-card > summary,
-.performance-cps-cards > details > summary {
-  position: relative;
+.performance-review-metrics article > .review-trend-card:hover,
+.performance-review-metrics article > .review-trend-card[aria-expanded="true"] {
+  border-color: #f97316 !important;
+  background: #ffffff18 !important;
 }
-.performance-fact-card > summary > .review-trend-button,
-.performance-cps-cards > details > summary > .review-trend-button {
-  position: absolute;
-  right: 30px;
-  top: 5px;
-}
-.performance-review-facts > article > .review-trend-button {
-  position: absolute;
-  right: 6px;
-  top: 5px;
-}
-.performance-fact-card > summary > span,
-.performance-cps-cards > details > summary > span {
-  padding-right: 44px;
-}
-.review-noon-emd > div:first-child {
-  position: relative;
-  padding-right: 30px;
-}
-.review-noon-emd > div:first-child > .review-trend-button {
-  position: absolute;
-  right: 0;
-  top: 0;
-}
-.review-vehicle-trends {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-  margin: 6px 0;
-  font-size: 11px;
-  color: #64748b;
-}
-.review-vehicle-trends > span {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-}
+.review-history-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.review-history-hint { margin: 0 !important; padding: 2px 12px 7px; color: #64748b; font-size: 11px; }
+.review-opening-history { display: flex; justify-content: flex-end; margin-bottom: 5px; }
+.review-history-totals { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; }
+.review-history-totals > div { min-width: 0; }
+.review-history-totals strong { display: block; font-size: 21px; color: #172033; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.review-history-totals > div + div { text-align: right; }
+.review-history-caption { display: flex; justify-content: space-between; gap: 8px; padding: 7px 0; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 11px; }
+.review-history-values { max-height: 300px; overflow: auto; overscroll-behavior: contain; }
+.review-history-values:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+.review-history-values table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.review-history-values th { text-align: left; color: #64748b; font-size: 10px; font-weight: 500; padding: 4px 0; position: sticky; top: 0; background: #fff; }
+.review-history-values td { padding: 5px 0; border-bottom: 1px solid #edf1f6; }
+.review-history-values th:last-child, .review-history-values td:last-child { text-align: right; width: 40%; padding-left: 10px; }
+.review-history-values td strong { font-size: 14px; font-variant-numeric: tabular-nums; }
+.review-history-values td small { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; font-size: 10px; }
+.review-history-values .history-value-missed strong,
+.review-history-values .history-value-missed small { color: #b91c1c; }
 .review-trend-backdrop {
   position: fixed;
   inset: 0;

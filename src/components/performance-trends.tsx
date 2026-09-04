@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { PerformanceTrendValues } from "@/components/performance-trend-values";
 import {
   formatTrendValue,
   trendGeometry,
@@ -26,19 +27,21 @@ export function TrendButton({
   group,
   metric,
   label,
+  variant = "label",
 }: {
   group: TrendGroup;
   metric: string;
   label: string;
+  variant?: "label" | "card";
 }) {
   const context = useContext(Context);
   if (!context) return null;
   return (
     <button
       type="button"
-      className="review-trend-button"
-      title={`${label} · 7 / 14 day trend`}
-      aria-label={`View ${label} trend`}
+      className={`review-trend-button ${variant === "card" ? "review-trend-card" : ""}`}
+      title={`${label} · daily values and history`}
+      aria-label={`View ${label} history`}
       aria-haspopup="dialog"
       aria-expanded={context.active === `${group}:${metric}`}
       onClick={(event) => {
@@ -47,16 +50,7 @@ export function TrendButton({
         context.open({ group, metric, label }, event.currentTarget);
       }}
     >
-      <svg width="15" height="15" viewBox="0 0 20 20" aria-hidden="true">
-        <path
-          d="M3 3v14h14M5 12l4-4 3 2 5-6"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+      {variant === "card" ? null : <span>History</span>}
     </button>
   );
 }
@@ -209,7 +203,7 @@ export function PerformanceTrendProvider({
     latest = valid.at(-1),
     first = valid[0],
     delta = latest && first ? latest.value! - first.value! : null;
-  const selected = highlight == null ? latest : points[highlight];
+  const selected = highlight == null ? points.at(-1) : points[highlight];
   const changeMeasure = (value: string) => {
     if (!active) return;
     const next = data?.series.find((s) => s.key === value);
@@ -268,7 +262,7 @@ export function PerformanceTrendProvider({
                     ))}
                   </div>
                   <button type="button" onClick={() => setExpanded(!expanded)}>
-                    {expanded ? "Compact view" : "Expand details"}
+                    {expanded ? "Numbers only" : "Graph & details"}
                   </button>
                 </div>
                 {error ? (
@@ -309,7 +303,7 @@ export function PerformanceTrendProvider({
                         </select>
                       </label>
                     ) : null}
-                    <div className="review-trend-summary">
+                    {!expanded ? <PerformanceTrendValues series={series} days={days}/> : <div className="review-trend-summary">
                       <strong>
                         {formatTrendValue(selected?.value ?? null, series.unit)}
                       </strong>
@@ -323,8 +317,8 @@ export function PerformanceTrendProvider({
                           ? ` · ${delta > 0 ? "+" : ""}${series.unit === "time" ? `${Math.round(delta)} min` : series.unit === "percent" ? `${delta.toFixed(1)} pp` : formatTrendValue(delta, series.unit)} change`
                           : ""}
                       </small>
-                    </div>
-                    {valid.length ? (
+                    </div>}
+                    {expanded && (valid.length ? (
                       <svg
                         className="review-trend-chart"
                         viewBox="0 0 400 174"
@@ -408,10 +402,10 @@ export function PerformanceTrendProvider({
                       <p className="review-trend-message">
                         No recorded data in these {days} days.
                       </p>
-                    )}
+                    ))}
                     {series.target != null ? (
                       <p className="review-trend-target">
-                        Dashed line · current target{" "}
+                        {expanded ? "Dashed line · current target" : "Current target"}{" "}
                         {series.direction === "lower" ? "≤" : "≥"}{" "}
                         {formatTrendValue(series.target, series.unit)}
                       </p>

@@ -32,9 +32,8 @@ export function PerformanceConnections({connections,date,stationCode,canEdit,cle
   </ReviewActionForm>;
   return <section className="review-vehicles" aria-label="Station vehicles">
     <header><span><strong>Station vehicles · {connections.length}</strong><small>{clearanceCutoff ? `Clearance cutoff ${clearanceCutoff} · IST` : "Arrival → unloading → clearance · each vehicle separately"}</small></span>
-      {canEdit?<button type="button" className="button secondary" disabled={adding} onClick={()=>setAdding(true)}>+ Add vehicle</button>:null}
+      <div className="review-history-actions"><TrendButton group="station" metric="arrival" label="Vehicle timings and EMD"/>{canEdit?<button type="button" className="button secondary" disabled={adding} onClick={()=>setAdding(true)}>+ Add vehicle</button>:null}</div>
     </header>
-    <div className="review-vehicle-trends"><span>Arrival <TrendButton group="station" metric="arrival" label="Vehicle arrival"/></span><span>Unloading <TrendButton group="station" metric="unloading" label="Unloading complete"/></span><span>Clearance <TrendButton group="station" metric="clearance" label="Station clearance"/></span></div>
     {connections.map((connection,index)=>{
       const variance=clearanceVariance(connection.clearance_at,date,clearanceCutoff);
       return <details key={connection.id} className="review-vehicle" open={connections.length===1}>

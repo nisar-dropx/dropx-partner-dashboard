@@ -27,10 +27,9 @@ export function PerformanceOpeningCard({ snapshot }: { snapshot: OpeningSnapshot
     <summary>
       <span>Station opened · People</span>
       <strong>{timeText(snapshot.firstPunchAt)}</strong>
-      <TrendButton group="opening" metric="opening" label="Station opening"/>
       <small>{earlier ? <b className="opening-warning">Earlier non-People punch</b> : snapshot.firstPunchAt && snapshot.scheduledOpeningTime ? <b className={isLate ? "late" : "on-time"}>{variance}</b> : null}{snapshot.firstPunchBy || "No People opening punch"}</small>
     </summary>
-    <div className="performance-opening-popover">
+    <div className="performance-opening-popover"><div className="review-opening-history"><TrendButton group="opening" metric="opening" label="Station opening"/></div>
       <p><span>Station opening shift</span><b>{timeText(snapshot.scheduledOpeningTime)}</b></p>
       <p><span>First People opening punch</span><b>{timeText(snapshot.firstPunchAt)}</b></p>
       <p><span>People profile</span><b>{snapshot.firstPunchBy || "No People opening punch"}</b></p>
