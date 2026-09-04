@@ -21,9 +21,9 @@ function ConnectionForm({ connection,date,stationCode,next,onSaved }: { connecti
     <input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={stationCode}/>
     <input type="hidden" name="connection_id" value={persistedConnectionId(connection?.id)}/><input type="hidden" name="version" value={connection?.version??1}/>
     <label>Connection / vehicle<input name="label" maxLength={100} required defaultValue={connection?.label??`Connection ${next}`}/></label>
-    <label>Vehicle arrival<input name="arrival" type="datetime-local" required min={`${date}T00:00`} max={`${date}T23:59`} defaultValue={localTime(connection?.arrival_at??null)}/></label>
-    <label>Unloading complete<input name="unloading" type="datetime-local" defaultValue={localTime(connection?.unloading_at??null)}/></label>
-    <label>Station clearance<input name="clearance" type="datetime-local" defaultValue={localTime(connection?.clearance_at??null)}/></label>
+    <label>Vehicle arrival time<input name="arrival" type="datetime-local" required min={`${date}T00:00`} max={`${date}T23:59`} defaultValue={localTime(connection?.arrival_at??null)}/></label>
+    <label>Vehicle unloading completed time<input name="unloading" type="datetime-local" defaultValue={localTime(connection?.unloading_at??null)}/></label>
+    <label>Station clearance time<input name="clearance" type="datetime-local" defaultValue={localTime(connection?.clearance_at??null)}/></label>
     <button className="button secondary">Save connection</button>
   </ReviewActionForm>;
 }
@@ -36,6 +36,6 @@ export function PerformanceConnections({ connections,date,stationCode,canEdit }:
       {canEdit?<ConnectionForm key={connection.version} connection={connection} date={date} stationCode={stationCode} next={connections.length+1}/>:null}
       <p className="review-connection-audit">Updated by {connection.updated_by_name} · {new Intl.DateTimeFormat("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}).format(new Date(connection.updated_at))}</p>
     </details>)}</div>:<p className="review-empty">No connections recorded for this date.{canEdit?" Add the first arrival above.":" The station team can add timings here."}</p>}
-    {canEdit&&adding?<ConnectionForm key={`new-${connections.length}`} date={date} stationCode={stationCode} next={connections.length+1} onSaved={()=>setAdding(false)}/>:null}
+    {canEdit&&(adding||!connections.length)?<ConnectionForm key={`new-${date}-${stationCode}-${connections.length}`} date={date} stationCode={stationCode} next={connections.length+1} onSaved={()=>setAdding(false)}/>:null}
   </section>;
 }

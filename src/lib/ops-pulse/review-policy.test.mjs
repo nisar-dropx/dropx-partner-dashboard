@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { managerReviewChain, reviewCapabilities, connectionTimes, discussionFeedUpdates, legacyConnectionsFromReview, reviewRole } from './review-policy.ts';
+import { managerReviewChain, reviewCapabilities, connectionTimes, discussionFeedUpdates, legacyConnectionsFromReview, reviewRole, noonEmdValue, reviewBypassReason, visibleReviewStep } from './review-policy.ts';
 const person=(role,id=role)=>({role,personId:id});
 test('CM to AOM to National Head; excludes station review stage',()=>{
   assert.deepEqual(managerReviewChain(['Team Lead','Cluster Manager','Area Operations Manager','National Head'].map(role=>person(role))).map(p=>p.role),['Cluster Manager','Area Operations Manager','National Head']);
@@ -14,7 +14,7 @@ test('no cluster manager uses actual AOM and deduplicates identities',()=>{
 const base={userId:'tl',owner:false,programManager:false,stationUser:false,inScope:true,canView:true,canAdd:true,canEdit:true,closed:false,firstReviewerId:'cm',currentReviewerId:'cm',currentRole:'Cluster Manager'};
 test('station editor can only enter connection timings',()=>{
   const access=reviewCapabilities({...base,stationUser:true});
-  assert.deepEqual(access,{canStart:false,canEditConnections:true,canEditRca:false,canComment:false,canComplete:false});
+  assert.deepEqual(access,{canStart:false,canEditConnections:true,canEditRca:false,canComment:false,canComplete:false,canManageActions:false,canBypass:false,canProxy:false});
 });
 test('CM owns RCA and own stage only',()=>{
   assert.equal(reviewCapabilities({...base,userId:'cm'}).canEditRca,true);
@@ -67,4 +67,32 @@ test('legacy review vehicle times resurface as a connection',()=>{
   assert.equal(connection.arrival_at,'2026-09-01T18:00:00.000Z');
   assert.equal(connection.unloading_at,'2026-09-01T18:50:00.000Z');
   assert.equal(connection.clearance_at,'2026-09-01T19:30:00.000Z');
+});
+
+test('noon EMD accepts zero, rejects invalid values, and preserves missing separately',()=>{
+  assert.equal(noonEmdValue('0'),0);assert.equal(noonEmdValue(''),null);assert.equal(noonEmdValue('93.567'),93.57);
+  for(const value of ['-1','101','NaN','Infinity','word'])assert.throws(()=>noonEmdValue(value));
+});
+test('proxy requires a higher assigned manager or oversight, not station or unrelated manager',()=>{
+  assert.equal(reviewCapabilities({...base,userId:'aom',higherReviewer:true}).canProxy,true);
+  assert.equal(reviewCapabilities({...base,userId:'other'}).canProxy,false);
+  assert.equal(reviewCapabilities({...base,stationUser:true}).canProxy,false);
+  for(const role of [{owner:true},{programManager:true},{nationalHead:true},{tech:true}]) {
+    assert.equal(reviewCapabilities({...base,...role}).canProxy,true);
+    assert.equal(reviewCapabilities({...base,...role}).canBypass,true);
+    assert.equal(reviewCapabilities({...base,...role}).canComplete,false);
+  }
+  assert.equal(reviewCapabilities({...base,userId:'aom',higherReviewer:true,hasProxy:true}).canProxy,false);
+  assert.equal(reviewCapabilities({...base,userId:'aom',higherReviewer:true}).canBypass,false);
+});
+test('recorded first-level proxy can edit RCA and complete; original manager cannot complete',()=>{
+  const proxy={...base,userId:'aom',currentReviewerId:'aom',currentIsFirst:true,hasProxy:true};
+  assert.equal(reviewCapabilities(proxy).canEditRca,true);assert.equal(reviewCapabilities(proxy).canComplete,true);
+  assert.equal(reviewCapabilities({...proxy,userId:'cm'}).canComplete,false);
+});
+test('bypass requires reason and explicit skipped stages remain visible',()=>{
+  assert.throws(()=>reviewBypassReason(' '));assert.throws(()=>reviewBypassReason('x'.repeat(2001)));
+  assert.equal(reviewBypassReason(' Manager absent '),'Manager absent');
+  assert.equal(visibleReviewStep({status:'skipped',reviewer_role:'Cluster Manager'}),false);
+  assert.equal(visibleReviewStep({status:'skipped',reviewer_role:'Cluster Manager',bypassed_at:'2026-09-04'}),true);
 });

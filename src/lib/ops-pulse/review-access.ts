@@ -2,7 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { reviewCapabilities, reviewRole } from "@/lib/ops-pulse/review-policy";
+import { reviewCapabilities, reviewRole, reviewRoutingIssue } from "@/lib/ops-pulse/review-policy";
 
 export const loadReviewActor = cache(async (companyId: string, userId: string, roleCode: string | null, roleName: string | null) => {
   if (!supabaseAdmin) throw new Error("Review access is unavailable.");
@@ -29,12 +29,14 @@ export const loadReviewActor = cache(async (companyId: string, userId: string, r
   const roleLabels = labels.length ? labels : [`${roleCode ?? ""} ${roleName ?? ""}`];
   return {
     programManager: roleLabels.some((label) => reviewRole(label) === "program"),
+    nationalHead: roleLabels.some((label) => reviewRole(label) === "national"),
+    tech: roleLabels.some((label) => reviewRole(label) === "tech") || ["TECH", "OPERATIONS_TECH"].includes(roleCode ?? ""),
     stationUser: roleLabels.some((label) => reviewRole(label) === "station"),
     label: displayLabel || roleName || "Reviewer"
   };
 });
 
-export async function getReviewAccess(authorization: AuthorizationContext, stationId: string, review: { status: string; current_step_order: number } | null, steps: { step_order: number; reviewer_user_id: string | null; reviewer_role: string; status: string }[]) {
+export async function getReviewAccess(authorization: AuthorizationContext, stationId: string, review: { status: string; current_step_order: number } | null, steps: { step_order: number; reviewer_user_id: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[]) {
   const actor = await loadReviewActor(authorization.companyId!, authorization.userId, authorization.roleCode, authorization.roleName);
   const pendingSteps = steps.filter((step) => step.status !== "skipped" && ["cluster","aom","national"].includes(reviewRole(step.reviewer_role))).sort((a, b) => a.step_order - b.step_order);
   const current = pendingSteps.find((step) => step.step_order === review?.current_step_order && step.status === "pending");
@@ -42,6 +44,8 @@ export async function getReviewAccess(authorization: AuthorizationContext, stati
     userId: authorization.userId,
     owner: isCompanyOwner(authorization) || /managing[ _]partner/i.test(`${authorization.roleCode} ${authorization.roleName}`),
     programManager: actor.programManager,
+    nationalHead: actor.nationalHead,
+    tech: actor.tech,
     stationUser: actor.stationUser,
     inScope: authorization.hasAllLocationAccess || authorization.locationScopeIds.includes(stationId),
     canView: hasPermission(authorization, "performance_review", "access"),
@@ -49,11 +53,12 @@ export async function getReviewAccess(authorization: AuthorizationContext, stati
     canEdit: hasPermission(authorization, "performance_review", "edit"),
     closed: review?.status === "closed",
     firstReviewerId: pendingSteps[0]?.reviewer_user_id ?? null,
-    currentReviewerId: current?.reviewer_user_id ?? null,
+    currentReviewerId: current?.proxy_reviewer_user_id || current?.reviewer_user_id || null,
+    currentIsFirst: current?.step_order === pendingSteps[0]?.step_order,
+    hasProxy: Boolean(current?.proxy_reviewer_user_id),
+    higherReviewer: pendingSteps.some(step => step.reviewer_user_id === authorization.userId && step.step_order > (current?.step_order ?? pendingSteps[0]?.step_order ?? 0)),
     currentRole: current?.reviewer_role ?? null
   });
-  const routingIssue = pendingSteps.length > 0 && !pendingSteps.some(step => reviewRole(step.reviewer_role) === "national")
-    ? "The next reporting manager is not linked in People. Contact HR to complete the reporting line. You can still save review inputs."
-    : null;
+  const routingIssue = reviewRoutingIssue(steps);
   return { actor, routingIssue, ...capabilities, canComplete: capabilities.canComplete && !routingIssue };
 }
