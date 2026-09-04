@@ -175,30 +175,21 @@ export function canUseRosterLocation(authorization: AuthorizationContext, locati
 }
 
 export async function loadOpsRosteringPolicy(companyId: string, locationId?: string | null): Promise<OpsRosterPolicy> {
+  // Shared People masters: approval is always Location manager → next manager → HR.
+  // Location overrides were removed from Rostering Policy; ignore stale rows.
+  void locationId;
   const company = await db().from("hr_company_settings")
     .select("roster_submission_lead_days,roster_change_cutoff_hours,roster_approval_manager_levels,roster_approval_required,roster_approval_levels,roster_hr_approval_required")
     .eq("company_id", companyId)
     .maybeSingle();
   if (company.error) throw new Error(company.error.message);
 
-  let locationPolicy: { approval_required: boolean; approval_levels: number; hr_approval_required: boolean } | null = null;
-  if (locationId) {
-    const result = await db().from("hr_roster_location_policies")
-      .select("approval_required,approval_levels,hr_approval_required")
-      .eq("company_id", companyId)
-      .eq("location_id", locationId)
-      .maybeSingle();
-    if (result.error) throw new Error(result.error.message);
-    locationPolicy = result.data;
-  }
-
-  const approvalLevels = Number(locationPolicy?.approval_levels ?? company.data?.roster_approval_levels ?? company.data?.roster_approval_manager_levels ?? 1) === 2 ? 2 : 1;
   return {
     submissionLeadDays: Number(company.data?.roster_submission_lead_days ?? 3),
     changeCutoffHours: Number(company.data?.roster_change_cutoff_hours ?? 24),
-    approvalRequired: Boolean(locationPolicy?.approval_required ?? company.data?.roster_approval_required ?? true),
-    approvalLevels,
-    hrApprovalRequired: Boolean(locationPolicy?.hr_approval_required ?? company.data?.roster_hr_approval_required ?? false)
+    approvalRequired: true,
+    approvalLevels: 2,
+    hrApprovalRequired: true
   };
 }
 
@@ -284,9 +275,9 @@ export async function loadOpsRosterCapabilities(authorization: AuthorizationCont
   const canApproveL1 = Boolean(result.data?.can_approve_l1 ?? result.data?.can_approve);
   const canApproveL2 = Boolean(result.data?.can_approve_l2);
   const canApproveHr = Boolean(result.data?.can_approve_hr);
+  // Direct-publish designation flags do not skip weekly roster approval (People masters).
+  // They still allow planning when can_plan is unset for leadership/HR designations.
   const canPublishDirect = owner || Boolean(result.data?.can_publish_direct);
-  // Direct-publish designations (for example HR Head in Rostering Policy) can prepare
-  // and apply roster changes; page edit alone is not enough without these Settings flags.
   const canPlan = owner || Boolean(result.data?.can_plan) || canPublishDirect;
   return {
     designationId: identity.designationId,
@@ -386,9 +377,9 @@ async function locationRosterApprovalChain(authorization: AuthorizationContext, 
 export function canApproveOpsRosterHr(authorization: AuthorizationContext) {
   return isCompanyOwner(authorization)
     || [
-      "OWNER", "OWNER_BREAK_GLASS", "OPERATIONS_MANAGING_PARTNER",
+      "OWNER", "OWNER_BREAK_GLASS", "OPERATIONS_MANAGING_PARTNER", "PEOPLE_MANAGING_PARTNER",
       "HR_HEAD", "HR_HAEAD", "HR_OPERATIONS", "HR_EXECUTIVE",
-      "OPERATIONS_HRM", "OPERATIONS_HRE"
+      "OPERATIONS_HRM", "OPERATIONS_HRE", "PEOPLE_HRM", "PEOPLE_HRE"
     ].includes(String(authorization.roleCode ?? ""));
 }
 
@@ -396,9 +387,11 @@ export async function resolveOpsRosterApprovalRoute(
   authorization: AuthorizationContext,
   policy: OpsRosterPolicy,
   locationId: string | null | undefined,
-  options?: { canPublishDirect?: boolean }
+  _options?: { canPublishDirect?: boolean }
 ): Promise<OpsRosterApprovalRoute> {
-  if (options?.canPublishDirect) return { direct: true, approvalRequired: false, summary: "Applies directly under Rostering Policy for your designation.", error: null, steps: [] };
+  // People Rostering Policy: publication cannot bypass review. Direct-publish
+  // designation flags are ignored for weekly roster apply (same as People).
+  void _options;
   if (!policy.approvalRequired) return { direct: true, approvalRequired: false, summary: "Applies directly under the station policy.", error: null, steps: [] };
   if (!locationId) return { direct: false, approvalRequired: true, summary: "Choose a station before submitting the roster.", error: "Choose a station before submitting the roster.", steps: [] };
   const resolved = await locationRosterApprovalChain(authorization, locationId, policy.approvalLevels);

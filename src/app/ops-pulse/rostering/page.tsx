@@ -32,7 +32,7 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
     selected ? loadOpsRosterWorkspace(companyId, selected) : Promise.resolve(null),
     loadOpsRosteringPolicy(companyId, selected?.id)
   ]);
-  const route = capabilities.canPlan ? await resolveOpsRosterApprovalRoute(authorization, policy, selected?.id, { canPublishDirect: capabilities.canPublishDirect }) : null;
+  const route = capabilities.canPlan ? await resolveOpsRosterApprovalRoute(authorization, policy, selected?.id) : null;
   const selectedPlan = workspace?.selectedPlan ?? null;
   const canAdd = hasPermission(authorization, "ops_rostering", "add") && capabilities.canPlan;
   const canEdit = hasPermission(authorization, "ops_rostering", "edit") && capabilities.canPlan;
@@ -71,7 +71,7 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
       {view === "approvals" ? <OpsRosterApprovals approvals={approvals} /> : selected && workspace ? <>
         <div className="capacity-action-line" style={{ marginBottom: 10 }}>
           <strong>{capabilities.designationName || authorization.roleName || "Authorised user"}</strong>
-          <span>{accessLabel} · assigned approvers can act · {policy.approvalRequired && !capabilities.canPublishDirect ? "station owner → reporting manager → HR" : "direct apply"}</span>
+          <span>{accessLabel} · approval from People masters · location manager → reporting manager → HR</span>
         </div>
         <OpsRosterPlanner
           key={`${selected.id}:${selectedPlan?.id ?? "blank"}`}
