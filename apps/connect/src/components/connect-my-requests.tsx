@@ -155,7 +155,10 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
           { label: "Reason", value: item.reason || "—" },
           ...(item.reviewerNote ? [{ label: reviewNoteLabel(item.status), value: item.reviewerNote }] : [])
         ],
-        steps: []
+        steps: (item.steps ?? []).map((step: { stepName: string; status: string }) => ({
+          name: step.stepName,
+          status: step.status
+        }))
       });
     }
 

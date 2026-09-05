@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, ClipboardList, CreditCard, Files, Fingerprint, Gauge, Home, IndianRupee, Laptop, LockKeyhole, LogOut, Menu, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
+import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, ClipboardList, CreditCard, Files, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
 import { AttendanceLocationMonitor } from "./attendance-location-monitor";
@@ -9,7 +9,6 @@ import { ConnectNativeBridge } from "./connect-native-bridge";
 import { ConnectDashboard } from "./connect-dashboard";
 import { ConnectDocuments } from "./connect-documents";
 import { ConnectLeave } from "./connect-leave";
-import { ConnectWfh } from "./connect-wfh";
 import { ConnectRoster } from "./connect-roster";
 import { ConnectAdvances } from "./connect-advances";
 import { ConnectPerformance } from "./connect-performance";
@@ -54,8 +53,12 @@ const canViewApprovals = (account: AppAccount | null, hasReportees: boolean) => 
   !isWorkforceWorkspace(account) &&
   (isManagerAccount(account) || hasReportees || (account.pageAccess?.includes("approvals") ?? false))
 );
-const showLeaveNav = (account: AppAccount | null) => Boolean(account && active(account) && (allowed(account, "leave") || account.profileType === "contractor"));
-const showWfhNav = (account: AppAccount | null) => Boolean(account && active(account) && allowed(account, "wfh"));
+const showLeaveNav = (account: AppAccount | null) => Boolean(
+  account &&
+  active(account) &&
+  (allowed(account, "leave") || account.profileType === "contractor" || allowed(account, "wfh"))
+);
+const showWfhInLeave = (account: AppAccount | null) => Boolean(account && active(account) && allowed(account, "wfh"));
 
 function landingPage(account: AppAccount): Step {
   if (!active(account)) return "profile";
@@ -64,7 +67,6 @@ function landingPage(account: AppAccount): Step {
   if (allowed(account, "attendance")) return "attendance";
   if (allowed(account, "roster")) return "roster";
   if (showLeaveNav(account)) return "leave";
-  if (showWfhNav(account)) return "wfh";
   if (allowed(account, "performance")) return "performance";
   if (allowed(account, "profile")) return "profile";
   if (allowed(account, "settings")) return "settings";
@@ -98,6 +100,7 @@ export function ConnectLoginFlow() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [avatar, setAvatar] = useState("");
+  const [leaveSection, setLeaveSection] = useState<"leave" | "wfh">("leave");
   const [lockedAccounts, setLockedAccounts] = useState<AppAccount[]>([]);
   const [hasReportees, setHasReportees] = useState(false);
   const lastLoggedScreen = useRef("");
@@ -410,6 +413,13 @@ export function ConnectLoginFlow() {
   function open(next: Step) {
     setDrawer(false); setProfileMenu(false);
     if (next === "lop") next = "leave";
+    if (next === "wfh") {
+      if (!account || !showWfhInLeave(account)) return;
+      setLeaveSection("wfh");
+      next = "leave";
+    } else if (next === "leave") {
+      setLeaveSection("leave");
+    }
     if (!account) {
       setStep("accounts");
       return;
@@ -422,7 +432,6 @@ export function ConnectLoginFlow() {
     if (next === "attendance" && !allowed(account, "attendance")) return;
     if (next === "roster" && !allowed(account, "roster")) return;
     if (next === "leave" && !showLeaveNav(account)) return;
-    if (next === "wfh" && !showWfhNav(account)) return;
     if (next === "performance" && !allowed(account, "performance")) return;
     if (next === "profile" && !allowed(account, "profile")) return;
     if (next === "settings" && !allowed(account, "settings")) return;
@@ -465,7 +474,7 @@ export function ConnectLoginFlow() {
     roster: "Roster",
     leave: "Time off",
     lop: "Time off",
-    wfh: "Work from home",
+    wfh: "Time off",
     performance: "Performance",
     settings: "Settings"
   };
@@ -498,7 +507,6 @@ export function ConnectLoginFlow() {
         {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint />Attendance</button> : null}
         {allowed(account, "roster") ? <button aria-current={step === "roster" ? "page" : undefined} className={step === "roster" ? "active" : ""} onClick={() => open("roster")}><ArrowLeftRight />Roster</button> : null}
         {showLeaveNav(account) ? <button aria-current={step === "leave" ? "page" : undefined} className={step === "leave" ? "active" : ""} onClick={() => open("leave")}><CalendarDays />Leave</button> : null}
-        {showWfhNav(account) ? <button aria-current={step === "wfh" ? "page" : undefined} className={step === "wfh" ? "active" : ""} onClick={() => open("wfh")}><Laptop />Work from home</button> : null}
         {allowed(account, "performance") ? <button aria-current={step === "performance" ? "page" : undefined} className={step === "performance" ? "active" : ""} onClick={() => open("performance")}><Target />Performance</button> : null}
         <small className="dx-nav-label">Account</small>
         {allowed(account, "settings") ? <button aria-current={step === "settings" ? "page" : undefined} className={step === "settings" ? "active" : ""} onClick={() => open("settings")}><Settings />Settings</button> : null}
@@ -543,7 +551,6 @@ export function ConnectLoginFlow() {
         {allowed(account, "attendance") ? <button onClick={() => open("attendance")}><Fingerprint />Attendance<ChevronRight /></button> : null}
         {allowed(account, "roster") ? <button onClick={() => open("roster")}><ArrowLeftRight />Roster<ChevronRight /></button> : null}
         {showLeaveNav(account) ? <button onClick={() => open("leave")}><CalendarDays />Leave<ChevronRight /></button> : null}
-        {showWfhNav(account) ? <button onClick={() => open("wfh")}><Laptop />Work from home<ChevronRight /></button> : null}
         {allowed(account, "performance") ? <button onClick={() => open("performance")}><Target />Performance<ChevronRight /></button> : null}
         {allowed(account, "settings") ? <button onClick={() => open("settings")}><Settings />Settings<ChevronRight /></button> : null}
       </nav>
@@ -589,9 +596,8 @@ export function ConnectLoginFlow() {
       {step === "reimbursements" && account && peopleSelfService(account) && allowed(account, "reimbursements") ? <ConnectReimbursements account={account} /> : null}
       {step === "attendance" && account && allowed(account, "attendance") ? <ConnectAttendance account={account} /> : null}
       {step === "roster" && account && allowed(account, "roster") ? <ConnectRoster account={account} /> : null}
-      {step === "leave" && account && showLeaveNav(account) ? <ConnectLeave account={account} /> : null}
-      {step === "lop" && account && showLeaveNav(account) ? <ConnectLeave account={account} /> : null}
-      {step === "wfh" && account && showWfhNav(account) ? <ConnectWfh account={account} /> : null}
+      {step === "leave" && account && showLeaveNav(account) ? <ConnectLeave account={account} initialSection={leaveSection} /> : null}
+      {step === "lop" && account && showLeaveNav(account) ? <ConnectLeave account={account} initialSection={leaveSection} /> : null}
       {step === "performance" && account && allowed(account, "performance") ? <ConnectPerformance account={account} /> : null}
       {step === "settings" && account && allowed(account, "settings") ? <section className="dx-settings">
         <header className="dx-page-intro"><small>Personalisation</small><h1>Settings</h1><p>Control sign-in and the account you open first.</p></header>

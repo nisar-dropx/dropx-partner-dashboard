@@ -66,19 +66,81 @@ async function accountFromRequest(url: URL, body?: Record<string, unknown>) {
   return { account, workerType: supportedType };
 }
 
-async function leavePayload(account: ConnectAccount, type: LeaveWorkerType) {
+async function leaveApprovalPreview(account: ConnectAccount, type: LeaveWorkerType, days: number) {
+  try {
+    const approval = await resolveWorkforceLeaveApproval({
+      companyId: account.companyId,
+      workerId: account.id,
+      workerType: type,
+      days: Math.max(1, days)
+    });
+    if (approval.direct) {
+      return {
+        ready: true,
+        direct: true,
+        policyName: approval.policyName,
+        steps: [] as Array<{ stepOrder: number; stepName: string; approverName: string; detail: string }>,
+        error: ""
+      };
+    }
+    const personIds = [...new Set(approval.steps.map((step) => step.approver_person_id).filter(Boolean))];
+    const peopleResult = personIds.length
+      ? await db().from("hr_people").select("id,display_name").eq("company_id", account.companyId).in("id", personIds)
+      : { data: [] as Array<{ id: string; display_name: string | null }>, error: null };
+    if (peopleResult.error) throw new Error(peopleResult.error.message);
+    const names = new Map((peopleResult.data ?? []).map((person) => [person.id, person.display_name || "Approver"]));
+    return {
+      ready: true,
+      direct: false,
+      policyName: approval.policyName,
+      steps: approval.steps.map((step, index) => ({
+        stepOrder: index + 1,
+        stepName: step.step_name,
+        approverName: names.get(step.approver_person_id) ?? "Approver",
+        detail: "People approval workflow"
+      })),
+      error: ""
+    };
+  } catch (problem) {
+    return {
+      ready: false,
+      direct: false,
+      policyName: "",
+      steps: [] as Array<{ stepOrder: number; stepName: string; approverName: string; detail: string }>,
+      error: problem instanceof Error ? problem.message : "Leave approval workflow is not ready."
+    };
+  }
+}
+
+async function leavePayload(account: ConnectAccount, type: LeaveWorkerType, previewDays = 1) {
   const workerColumn = type === "employee" ? "employee_id" : "contractor_id";
   const year = Number(indiaToday().slice(0, 4));
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
-  const [entitlements, requestResult] = await Promise.all([
+  const [entitlements, requestResult, approvalRoute] = await Promise.all([
     resolveWorkforceLeaveEntitlements({ companyId: account.companyId, workerId: account.id, workerType: type }),
     db().from("hr_leave_requests")
       .select("id,leave_type_id,start_date,end_date,days,reason,status,requested_at,reviewer_note,proof_path,proof_file_name,proof_mime_type,hr_leave_types(name,code,color)")
       .eq("company_id", account.companyId).eq(workerColumn, account.id)
-      .order("requested_at", { ascending: false }).limit(50)
+      .order("requested_at", { ascending: false }).limit(50),
+    leaveApprovalPreview(account, type, previewDays)
   ]);
   if (requestResult.error) throw new Error(requestResult.error.message);
+  const requestIds = (requestResult.data ?? []).map((request) => request.id);
+  const stepsResult = requestIds.length
+    ? await db().from("hr_leave_approval_steps")
+      .select("request_id,step_order,step_name,status")
+      .eq("company_id", account.companyId)
+      .in("request_id", requestIds)
+      .order("step_order")
+    : { data: [] as Array<{ request_id: string; step_order: number; step_name: string; status: string }>, error: null };
+  if (stepsResult.error) throw new Error(stepsResult.error.message);
+  const stepsByRequest = new Map<string, Array<{ stepOrder: number; stepName: string; status: string }>>();
+  for (const step of stepsResult.data ?? []) {
+    const list = stepsByRequest.get(step.request_id) ?? [];
+    list.push({ stepOrder: step.step_order, stepName: step.step_name, status: step.status });
+    stepsByRequest.set(step.request_id, list);
+  }
   const requests = (requestResult.data ?? []).map((request) => {
     const leaveType = relation(request.hr_leave_types);
     return {
@@ -98,7 +160,8 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType) {
       proofMimeType: request.proof_mime_type,
       proofUrl: request.proof_path
         ? `/api/connect/leave/proof/${request.id}?${new URLSearchParams({ accountId: account.id, profileType: account.profileType })}`
-        : null
+        : null,
+      steps: stepsByRequest.get(request.id) ?? []
     };
   });
   const types = entitlements.map((leaveType) => {
@@ -124,6 +187,7 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType) {
     year,
     types,
     requests,
+    approvalRoute,
     summary: {
       available: types.reduce((total, leaveType) => total + (leaveType.available ?? 0), 0),
       pending: requests.filter((request) => request.status === "pending").length
@@ -182,8 +246,10 @@ async function validateLeaveSubmission({
 
 export async function GET(request: Request) {
   try {
-    const { account, workerType: type } = await accountFromRequest(new URL(request.url));
-    return NextResponse.json(await leavePayload(account, type), { headers: { "Cache-Control": "private, no-store" } });
+    const url = new URL(request.url);
+    const { account, workerType: type } = await accountFromRequest(url);
+    const previewDays = Math.max(1, Number(url.searchParams.get("days") || 1) || 1);
+    return NextResponse.json(await leavePayload(account, type, previewDays), { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load time off." }, { status: 400 });
   }

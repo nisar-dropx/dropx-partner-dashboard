@@ -47,7 +47,13 @@ function statusLabel(status: string) {
   }
 }
 
-export function ConnectWfh({ account }: { account: AppAccount }) {
+export function ConnectWfh({
+  account,
+  embedded = false
+}: {
+  account: AppAccount;
+  embedded?: boolean;
+}) {
   const [tab, setTab] = useState<WfhTab>("request");
   const [data, setData] = useState<WfhData | null>(null);
   const [fromDate, setFromDate] = useState("");
@@ -146,13 +152,8 @@ export function ConnectWfh({ account }: { account: AppAccount }) {
     }
   }
 
-  return (
-    <section className="dx-leave">
-      <header className="dx-page-intro">
-        <small>Attendance</small>
-        <h1>Work from home</h1>
-        <p>Request a date range. After manager approval, HR marks working days Present · WFH.</p>
-      </header>
+  const body = (
+    <>
       <div className="dx-leave-summary">
         <div><i><Home /></i><span><small>Max days / request</small><strong>{loading ? "—" : data?.policy.maxRequestDays ?? "—"}</strong></span></div>
         <div><i><Clock3 /></i><span><small>Pending</small><strong>{loading ? "—" : data?.summary.pending ?? 0}</strong></span></div>
@@ -201,6 +202,19 @@ export function ConnectWfh({ account }: { account: AppAccount }) {
           )) : <p>No WFH requests yet.</p>}
         </div> : null}
       </div>
+    </>
+  );
+
+  if (embedded) return <div className="dx-leave-embedded">{body}</div>;
+
+  return (
+    <section className="dx-leave">
+      <header className="dx-page-intro">
+        <small>Attendance</small>
+        <h1>Work from home</h1>
+        <p>Request a date range. After manager approval, HR marks working days Present · WFH.</p>
+      </header>
+      {body}
     </section>
   );
 }
