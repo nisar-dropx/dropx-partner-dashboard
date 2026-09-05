@@ -37,7 +37,8 @@
 .review-noon-emd,.review-followups { padding: 14px; border: 1px solid #e5e9f0; border-radius: 12px; background: white; }
 .review-noon-emd { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 .review-noon-emd h3,.review-followups h3 { margin: 0; font-size: 14px; }
-.review-noon-emd p,.review-followups header p { margin: 4px 0 0; font-size: 12px; color: #64748b; }
+.review-noon-emd p,.review-followups header p,.review-followups-guide { margin: 4px 0 10px; font-size: 12px; color: #64748b; line-height: 1.45; }
+.review-exception-guidance .review-exception-route { display: block; margin-top: 4px; color: #64748b; }
 .review-noon-emd form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .review-noon-emd input { max-width: 140px !important; }
 .review-noon-emd > small { color: #64748b; font-size: 11px; }

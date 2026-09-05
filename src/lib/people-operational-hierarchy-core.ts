@@ -64,6 +64,7 @@ export function peopleOperationalRoleFamily(assignment: PeopleHierarchyAssignmen
   ) return "aom";
   if (
     code === "CLM" ||
+    code === "CM" ||
     hasRoleToken(role, "CLUSTER MANAGER") ||
     hasRoleToken(role, "CLUSTER HEAD")
   ) return "cluster_manager";

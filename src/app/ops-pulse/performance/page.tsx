@@ -437,7 +437,8 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const connectionStationId = selectedReviewLocation?.id || selectedReview?.station_id || null;
   const [connectionResult, reviewChain, backlog, followups, noonEmd, stationLeads, codData, stationTargets] = selectedReviewLocation && connectionStationId && view === "reviews" ? await Promise.all([
     loadPerformanceConnections(companyId, connectionStationId, selectedDate),
-    selectedReview ? Promise.resolve([]) : resolvePerformanceReviewChain(companyId, selectedReviewLocation.id),
+    // Always resolve the People route so Proxy/Skip and Start stay available before a review row exists.
+    resolvePerformanceReviewChain(companyId, selectedReviewLocation.id),
     loadPerformanceReviewBacklog(companyId, selectedDate, permittedCodes, reviewPendingPage(searchParams?.pendingPage)),
     loadPerformanceFollowups(companyId,connectionStationId,selectedDate),
     loadPerformanceNoonEmd(companyId,connectionStationId,selectedDate),
@@ -449,7 +450,8 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     ? connectionResult.connections
     : legacyConnectionsFromReview(selectedReview);
   const reviewAccess = selectedReviewLocation && view === "reviews" ? await getReviewAccess(authorization,selectedReviewLocation.id,selectedReview,
-    selectedReview ? reviewWorkspace.steps.filter(step=>step.review_id===selectedReview.id) : reviewChain.map((step,index)=>({step_order:index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,status:"pending"}))) : null;
+    selectedReview ? reviewWorkspace.steps.filter(step=>step.review_id===selectedReview.id) : reviewChain.map((step,index)=>({step_order:index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,status:"pending"})),
+    { inScope: true }) : null;
 
   return (
     <AppShell active={view === "reviews" ? "Review Desk" : "Performance"} pageCode={view === "reviews" ? "performance_review" : "performance"}>

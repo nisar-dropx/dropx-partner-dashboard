@@ -36,10 +36,18 @@ export const loadReviewActor = cache(async (companyId: string, userId: string, r
   };
 });
 
-export async function getReviewAccess(authorization: AuthorizationContext, stationId: string, review: { status: string; current_step_order: number } | null, steps: { step_order: number; reviewer_user_id: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[]) {
+export async function getReviewAccess(
+  authorization: AuthorizationContext,
+  stationId: string,
+  review: { status: string; current_step_order: number } | null,
+  steps: { step_order: number; reviewer_user_id: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[],
+  options?: { inScope?: boolean }
+) {
   const actor = await loadReviewActor(authorization.companyId!, authorization.userId, authorization.roleCode, authorization.roleName);
   const pendingSteps = steps.filter((step) => step.status !== "skipped" && ["cluster","aom","national"].includes(reviewRole(step.reviewer_role))).sort((a, b) => a.step_order - b.step_order);
   const current = pendingSteps.find((step) => step.step_order === review?.current_step_order && step.status === "pending");
+  // Review Desk already filtered the station into permittedLocations — trust that over a second scope check.
+  const inScope = options?.inScope ?? (authorization.hasAllLocationAccess || authorization.locationScopeIds.includes(stationId));
   const capabilities = reviewCapabilities({
     userId: authorization.userId,
     owner: isCompanyOwner(authorization) || /managing[ _]partner/i.test(`${authorization.roleCode} ${authorization.roleName}`),
@@ -47,7 +55,7 @@ export async function getReviewAccess(authorization: AuthorizationContext, stati
     nationalHead: actor.nationalHead,
     tech: actor.tech,
     stationUser: actor.stationUser,
-    inScope: authorization.hasAllLocationAccess || authorization.locationScopeIds.includes(stationId),
+    inScope,
     canView: hasPermission(authorization, "performance_review", "access"),
     canAdd: hasPermission(authorization, "performance_review", "add"),
     canEdit: hasPermission(authorization, "performance_review", "edit"),

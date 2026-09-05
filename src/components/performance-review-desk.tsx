@@ -164,7 +164,27 @@ export function PerformanceReviewDesk(props: Props) {
   const completedCount = locations.filter((location) => reviewByStation.get(stationKey(location.station_code))?.status === "closed").length;
   const inReviewCount = locations.filter((location) => ["open", "in_review"].includes(reviewByStation.get(stationKey(location.station_code))?.status ?? "")).length;
   const notStartedCount = locations.length - completedCount - inReviewCount;
-  const selectedSteps = steps.filter((step) => step.review_id === review?.id && visibleReviewStep(step)).sort((a,b)=>a.step_order-b.step_order);
+  const selectedSteps = (review
+    ? steps.filter((step) => step.review_id === review.id && visibleReviewStep(step))
+    : reviewChain.map((step, index) => ({
+      id: `route-${index + 1}`,
+      review_id: "",
+      step_order: index + 1,
+      reviewer_user_id: step.reviewerUserId,
+      reviewer_name: step.reviewerName,
+      reviewer_role: step.reviewerRole,
+      status: "pending" as const,
+      feedback: null,
+      completed_at: null,
+      bypass_reason: null,
+      bypassed_at: null,
+      bypassed_by_name: null,
+      proxy_reviewer_user_id: null,
+      proxy_reviewer_name: null,
+      proxy_reason: null,
+      proxy_started_at: null
+    }))
+  ).sort((a,b)=>a.step_order-b.step_order);
   const reviewUpdates = discussionFeedUpdates(updates.filter((update) => update.review_id === review?.id));
   return <PerformanceTrendProvider key={`${selectedCode}-${date}`} station={selectedCode} date={date}><div className="performance-review-desk">
     {notice ? <div className="performance-review-message success">{notice}</div> : null}
@@ -202,7 +222,7 @@ export function PerformanceReviewDesk(props: Props) {
       {reviewChain.map((step,index)=><div key={`${step.reviewerUserId}-${index}`}><i>{index+1}</i><span>{step.reviewerRole}<small>{step.reviewerName}</small><small>Reviews with {index>0?reviewChain[index-1].reviewerName:props.stationLeads}</small></span></div>)}
     </section>}
     <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update vehicle timings and noon EMD; view the full review":canEdit?"Your review · update RCA, actions, takeaway and station timings":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
-    <PerformanceReviewExceptions key={`${selectedCode}-${date}-${review?.updated_at??"not-started"}`} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy} canAccessBypass={props.canAccessBypass} canAccessProxy={props.canAccessProxy} canStart={canAdd} hasRoute={Boolean(review||reviewChain.length)}/>
+    <PerformanceReviewExceptions key={`${selectedCode}-${date}-${review?.updated_at??"not-started"}`} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy} canAccessBypass={props.canAccessBypass} canAccessProxy={props.canAccessProxy} canStart={canAdd} hasRoute={Boolean(review||reviewChain.length)} routeLabel={reviewChain.map((step)=>`${step.reviewerRole} · ${step.reviewerName}`).join(" → ") || selectedSteps.map((step)=>`${step.reviewer_role} · ${step.reviewer_name}`).join(" → ")}/>
 
     <div className="performance-review-columns">
       <section className="panel performance-review-section">
@@ -222,11 +242,11 @@ export function PerformanceReviewDesk(props: Props) {
             <p>{previousReview.review_summary}</p>
           </div>
         ) : null}
-        <PerformanceCarriedActions items={carriedActions} previous={previousStationReviews} review={review} canUpdate={props.canManageActions}/>
         <details className="performance-inline-detail" open>
-          <summary><span>Performance scorecard</span><b>{metrics.length} metrics</b></summary>
-          <p className="review-history-hint">Click any metric for daily values · 7 or 14 days</p><div className="performance-review-metrics">{metrics.map((metric) => <article className={metric.severity} key={metric.key}><span title={metric.label}>{metric.short}</span><strong>{valueText(metric.actual)}</strong><small>{metric.target == null ? "Reference metric" : `Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}</small><TrendButton group="performance" metric={metric.key} label={metric.short} variant="card"/></article>)}</div>
+          <summary><span>Performance scorecard · today&apos;s uploaded metrics</span><b>{metrics.length} metrics</b></summary>
+          <p className="review-history-hint">This is where today&apos;s Hawkeye upload lands. Click any metric for daily values · 7 or 14 days</p><div className="performance-review-metrics">{metrics.map((metric) => <article className={metric.severity} key={metric.key}><span title={metric.label}>{metric.short}</span><strong>{valueText(metric.actual)}</strong><small>{metric.target == null ? "Reference metric" : `Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}</small><TrendButton group="performance" metric={metric.key} label={metric.short} variant="card"/></article>)}</div>
         </details>
+        <PerformanceCarriedActions items={carriedActions} previous={previousStationReviews} review={review} canUpdate={props.canManageActions} selectedDate={date}/>
         {props.stationTargetsError ? <p role="alert">{props.stationTargetsError}</p> : null}
         <div className="review-station-updates">
           <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections} clearanceCutoff={props.stationTargets.clearanceCutoff}/>

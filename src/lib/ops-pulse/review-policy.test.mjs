@@ -14,7 +14,7 @@ test('no cluster manager uses actual AOM and deduplicates identities',()=>{
 const base={userId:'tl',owner:false,programManager:false,stationUser:false,inScope:true,canView:true,canAdd:true,canEdit:true,closed:false,firstReviewerId:'cm',currentReviewerId:'cm',currentRole:'Cluster Manager'};
 test('station editor can only enter connection timings',()=>{
   const access=reviewCapabilities({...base,stationUser:true});
-  assert.deepEqual(access,{canStart:false,canEditConnections:true,canEditRca:false,canComment:false,canComplete:false,canManageActions:false,canAccessBypass:false,canAccessProxy:false,canBypass:false,canProxy:false});
+  assert.deepEqual(access,{canStart:false,canEditConnections:true,canEditRca:false,canComment:false,canComplete:false,canManageActions:false,canAccessBypass:false,canAccessProxy:true,canBypass:false,canProxy:false});
 });
 test('CM owns RCA, own stage, and can enter connection timings',()=>{
   assert.equal(reviewCapabilities({...base,userId:'cm'}).canEditRca,true);
@@ -108,6 +108,8 @@ test('authorised exception tools remain discoverable before starting and after c
   assert.equal(aom.canProxy,false);
   const own=reviewCapabilities({...base,userId:'nh',nationalHead:true,currentReviewerId:'nh',currentRole:'National Head'});
   assert.equal(own.canAccessProxy,true);assert.equal(own.canProxy,false);
+  const first=reviewCapabilities({...base,userId:'cm',currentReviewerId:null,currentRole:null});
+  assert.equal(first.canAccessProxy,true);assert.equal(first.canProxy,false);
 });
 test('bypass requires reason and explicit skipped stages remain visible',()=>{
   assert.throws(()=>reviewBypassReason(' '));assert.throws(()=>reviewBypassReason('x'.repeat(2001)));
