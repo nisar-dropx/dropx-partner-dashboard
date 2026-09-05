@@ -64,6 +64,9 @@ export function isOpsRosterPlannerRole(roleCode: string | null | undefined) {
   const code = String(roleCode ?? "").toUpperCase().replace(/[\s-]+/g, "_");
   return code === "OWNER"
     || code === "OWNER_BREAK_GLASS"
+    // Shared station mailboxes (tta5@…, tcc3@…) use OPERATIONS_LOCATION and have no People designation.
+    || code === "LOCATION"
+    || code === "OPERATIONS_LOCATION"
     || code.endsWith("_FSD")
     || code === "FSD"
     || code.includes("FULL_STACK");
