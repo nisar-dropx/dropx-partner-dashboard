@@ -59,7 +59,7 @@ export async function notifyExitWithdrawalReviewer(input: {
     `${input.employeeName} has requested to withdraw resignation ${caseNumber || ""}.`.replace(/\s+/g, " ").trim(),
     requestedDate ? `Requested last working date: ${requestedDate}.` : "",
     "",
-    "Open Approvals → Resign withdrawal in DropX One to accept the withdrawal or keep the exit open.",
+    "Open People → Approval inbox → Resign withdrawal to accept the withdrawal or keep the exit open.",
     "",
     "— DropX One"
   ].filter(Boolean).join("\n");
