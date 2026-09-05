@@ -181,19 +181,49 @@ export async function bypassPerformanceReviewLevel(data: FormData): Promise<Revi
   } catch (error) { return failure(error); }
 }
 
+export async function undoBypassPerformanceReviewLevel(data: FormData): Promise<ReviewActionResult> {
+  const authorization = await requirePagePermission("performance_review", "access");
+  try {
+    const { companyId, review, access, steps } = await context(authorization, data);
+    if (!access.canUndoBypass) throw new Error("Only Program Manager, National Head, Owner or Tech can undo a skipped review level.");
+    const step = steps.find((entry) => entry.id === text(data, "step_id") && entry.status === "skipped" && entry.bypassed_at);
+    if (!step) throw new Error("Only an explicit skipped level can be restored. Refresh to continue.");
+    const result = await supabaseAdmin!.rpc("ops_undo_bypass_review_level", {
+      p_company: companyId,
+      p_actor: authorization.userId,
+      p_review: review.id,
+      p_step: step.id,
+      p_expected_version: text(data, "review_version") || review.updated_at,
+    });
+    rpcError(result.error);
+    return finish("Skip undone. That level is pending again and Proxy is available.");
+  } catch (error) {
+    return failure(error);
+  }
+}
+
 export async function proxyPerformanceReview(data: FormData): Promise<ReviewActionResult> {
   const authorization = await requirePagePermission("performance_review", "access");
   try {
     const { companyId, review, access, steps } = await context(authorization, data);
     if (!access.canProxy) throw new Error("This review can be covered by a higher assigned manager or authorised oversight. Refresh if it is already being covered.");
-    const step = steps.find(entry => entry.id === text(data,"step_id") && entry.step_order === review.current_step_order && entry.status === "pending");
+    const step = steps.find((entry) => entry.id === text(data, "step_id") && entry.step_order === review.current_step_order && entry.status === "pending");
     if (!step) throw new Error("The review has moved to another stage. Refresh to continue.");
-    const reason = limited(data,"reason",2000,true);
+    const reason = limited(data, "reason", 2000, true);
     if (reason.length < 5) throw new Error("Explain why the assigned manager cannot conduct this review.");
-    const result = await supabaseAdmin!.rpc("ops_take_proxy_review", {p_company:companyId,p_actor:authorization.userId,p_review:review.id,p_step:step.id,p_reason:reason,p_expected_version:text(data,"review_version") || null});
+    const result = await supabaseAdmin!.rpc("ops_take_proxy_review", {
+      p_company: companyId,
+      p_actor: authorization.userId,
+      p_review: review.id,
+      p_step: step.id,
+      p_reason: reason,
+      p_expected_version: text(data, "review_version") || null,
+    });
     rpcError(result.error);
     return finish("You are now conducting this review on the assigned manager’s behalf. Add your inputs, then complete the review.");
-  } catch(error) { return failure(error); }
+  } catch (error) {
+    return failure(error);
+  }
 }
 
 export async function savePerformanceNoonEmd(data: FormData): Promise<ReviewActionResult> {

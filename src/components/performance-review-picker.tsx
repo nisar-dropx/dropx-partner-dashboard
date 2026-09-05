@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 type ReviewLocation = {
   code: string;
   name: string;
-  cluster?: string | null;
+  clusterKey?: string | null;
 };
 
 export function PerformanceReviewPicker({
@@ -20,7 +20,7 @@ export function PerformanceReviewPicker({
   date: string;
   locations: ReviewLocation[];
   stationCode: string;
-  clusters?: string[];
+  clusters?: { value: string; label: string }[];
   selectedCluster?: string;
   canFilterClusters?: boolean;
 }) {
@@ -38,7 +38,7 @@ export function PerformanceReviewPicker({
 
   const stationOptions = useMemo(() => {
     if (!cluster) return locations;
-    return locations.filter((location) => (location.cluster || "") === cluster);
+    return locations.filter((location) => (location.clusterKey || "") === cluster);
   }, [cluster, locations]);
 
   function open(nextDate: string, nextStation: string, nextCluster: string) {
@@ -57,11 +57,11 @@ export function PerformanceReviewPicker({
       setSelectedDate(nextDate);
       if (nextDate) open(nextDate, selectedStation, cluster);
     }}/></label>
-    {canFilterClusters && clusters.length ? <label>Cluster<select value={cluster} onChange={(event) => {
+    {canFilterClusters && clusters.length ? <label>Cluster / AOM<select value={cluster} onChange={(event) => {
       const nextCluster = event.target.value;
       setCluster(nextCluster);
       const nextStations = nextCluster
-        ? locations.filter((location) => (location.cluster || "") === nextCluster)
+        ? locations.filter((location) => (location.clusterKey || "") === nextCluster)
         : locations;
       const nextStation = nextStations.some((location) => location.code === selectedStation)
         ? selectedStation
@@ -69,8 +69,8 @@ export function PerformanceReviewPicker({
       setSelectedStation(nextStation);
       open(selectedDate, nextStation, nextCluster);
     }}>
-      <option value="">All clusters</option>
-      {clusters.map((name) => <option key={name} value={name}>{name}</option>)}
+      <option value="">All stations</option>
+      {clusters.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
     </select></label> : null}
     <label>Station<select value={selectedStation} onChange={(event) => {
       const nextStation = event.target.value;

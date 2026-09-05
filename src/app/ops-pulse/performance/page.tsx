@@ -19,7 +19,7 @@ import { loadPerformanceOperationalSnapshots, loadPerformanceReviewWorkspace, lo
 import { reviewPendingPage } from "@/lib/ops-pulse/review-periods";
 import { loadReviewCod } from "@/lib/ops-pulse/review-cod-data";
 import { getReviewAccess } from "@/lib/ops-pulse/review-access";
-import { legacyConnectionsFromReview } from "@/lib/ops-pulse/review-policy";
+import { filterLocationsByReviewCluster, legacyConnectionsFromReview, reviewClusterFilterOptions } from "@/lib/ops-pulse/review-policy";
 import { ACTIVE_DAILY_PERFORMANCE_SOURCE, ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL, selectActiveDailyBatchRows, selectStationDailyRow } from "@/lib/performance-source-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -396,16 +396,10 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const trendStationLocation = locationByCode.get(trendStationCode);
   const trendHref = (code: string) => `/performance?view=daily&date=${selectedDate}${stationQuery}&trend=${encodeURIComponent(code)}#daily-trend`;
   const canFilterClusters = hasPermission(authorization, "performance_review_cluster_filter", "access");
-  const clusterOptions = [...new Set(
-    permittedLocations
-      .map((location) => String(location.cluster_manager || location.cluster || "").trim())
-      .filter(Boolean)
-  )].sort((left, right) => left.localeCompare(right));
+  const clusterOptions = reviewClusterFilterOptions(permittedLocations);
   const requestedCluster = canFilterClusters ? String(searchParams?.cluster ?? "").trim() : "";
-  const selectedCluster = requestedCluster && clusterOptions.includes(requestedCluster) ? requestedCluster : "";
-  const clusterFilteredLocations = selectedCluster
-    ? permittedLocations.filter((location) => String(location.cluster_manager || location.cluster || "").trim() === selectedCluster)
-    : permittedLocations;
+  const selectedCluster = requestedCluster && clusterOptions.some((option) => option.value === requestedCluster) ? requestedCluster : "";
+  const clusterFilteredLocations = filterLocationsByReviewCluster(permittedLocations, selectedCluster);
   const deskLocations = clusterFilteredLocations.length ? clusterFilteredLocations : permittedLocations;
   const deskCodes = deskLocations.map((location) => location.station_code);
   const requestedReviewCode = stationCode(searchParams?.review ?? null);
@@ -497,6 +491,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             canProxy={Boolean(reviewAccess?.canProxy)}
             canAccessBypass={Boolean(reviewAccess?.canAccessBypass)}
             canAccessProxy={Boolean(reviewAccess?.canAccessProxy)}
+            canUndoBypass={Boolean(reviewAccess?.canUndoBypass)}
             canManageActions={Boolean(reviewAccess?.canManageActions)}
             followups={followups}
             stationTargets={stationTargets.rows[0]?.targets ?? emptyStationReviewTargets}

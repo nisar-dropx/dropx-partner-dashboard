@@ -40,6 +40,7 @@ type Props = {
   canProxy: boolean;
   canAccessBypass: boolean;
   canAccessProxy: boolean;
+  canUndoBypass: boolean;
   canManageActions: boolean;
   stationLeads: string;
   backlog: PerformanceReviewBacklog;
@@ -63,7 +64,7 @@ type Props = {
   error: string | null;
   items: PerformanceReviewItem[];
   locations: CodLocationRow[];
-  reviewClusters?: string[];
+  reviewClusters?: { value: string; label: string }[];
   selectedCluster?: string;
   canFilterClusters?: boolean;
   metrics: ReviewMetric[];
@@ -196,11 +197,15 @@ export function PerformanceReviewDesk(props: Props) {
       <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatDashboardDate(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || selectedLocation.city || "Station"}</small></div>
       <PerformanceReviewPicker
         date={date}
-        locations={locations.map((location) => ({
-          code: location.station_code,
-          name: location.station_name || location.city || location.station_code,
-          cluster: location.cluster_manager || location.cluster || null
-        }))}
+        locations={locations.map((location) => {
+          const cluster = location.cluster_manager || location.cluster || "";
+          const aom = location.aom || "";
+          return {
+            code: location.station_code,
+            name: location.station_name || location.city || location.station_code,
+            clusterKey: cluster ? `cm:${cluster}` : aom ? `aom:${aom}` : "",
+          };
+        })}
         stationCode={selectedCode}
         clusters={props.reviewClusters ?? []}
         selectedCluster={props.selectedCluster ?? ""}
@@ -233,7 +238,7 @@ export function PerformanceReviewDesk(props: Props) {
       {reviewChain.map((step,index)=><div key={`${step.reviewerUserId}-${index}`}><i>{index+1}</i><span>{step.reviewerRole}<small>{step.reviewerName}</small><small>Reviews with {index>0?reviewChain[index-1].reviewerName:props.stationLeads}</small></span></div>)}
     </section>}
     <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update vehicle timings and noon EMD; view the full review":canEdit?"Your review · update RCA, actions, takeaway and station timings":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
-    <PerformanceReviewExceptions key={`${selectedCode}-${date}-${review?.updated_at??"not-started"}`} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy} canAccessBypass={props.canAccessBypass} canAccessProxy={props.canAccessProxy} canStart={canAdd} hasRoute={Boolean(review||reviewChain.length)} routeLabel={reviewChain.map((step)=>`${step.reviewerRole} · ${step.reviewerName}`).join(" → ") || selectedSteps.map((step)=>`${step.reviewer_role} · ${step.reviewer_name}`).join(" → ")}/>
+    <PerformanceReviewExceptions key={`${selectedCode}-${date}-${review?.updated_at??"not-started"}`} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy} canAccessBypass={props.canAccessBypass} canAccessProxy={props.canAccessProxy} canUndoBypass={props.canUndoBypass} canStart={canAdd} hasRoute={Boolean(review||reviewChain.length)} routeLabel={reviewChain.map((step)=>`${step.reviewerRole} · ${step.reviewerName}`).join(" → ") || selectedSteps.map((step)=>`${step.reviewer_role} · ${step.reviewer_name}`).join(" → ")}/>
 
     <div className="performance-review-columns">
       <section className="panel performance-review-section">

@@ -13,9 +13,9 @@ const compiled=ts.transpileModule(readFileSync(new URL('./performance-review-exc
 const mod={exports:{}};
 new Function('require','exports','module',compiled)(name=>name.startsWith('@/')?{}:require(name),mod.exports,mod);
 const render=props=>renderToStaticMarkup(React.createElement(mod.exports.PerformanceReviewExceptions,props));
-const review={id:'review',status:'in_review',current_step_order:1,source_date:'2026-09-03',station_code:'TEST'};
+const review={id:'review',status:'in_review',current_step_order:1,source_date:'2026-09-03',station_code:'TEST',updated_at:'2026-09-03T10:00:00.000Z'};
 const steps=[{id:'step',step_order:1,status:'pending',reviewer_name:'Manager'}];
-const base={review,steps,canAccessBypass:true,canAccessProxy:true,canBypass:true,canProxy:true,canStart:true,hasRoute:true};
+const base={review,steps,canAccessBypass:true,canAccessProxy:true,canBypass:true,canProxy:true,canUndoBypass:true,canStart:true,hasRoute:true};
 test('unstarted station shows both disabled tools, guidance and no mutation form',()=>{
   const html=render({...base,review:null,steps:[],canProxy:false});
   assert.match(html,/Conduct proxy review/);assert.match(html,/Skip a level/);
@@ -38,6 +38,13 @@ test('own assigned level explains why proxy is not needed while skip is availabl
   const html=render({...base,canProxy:false});
   assert.equal((html.match(/disabled=""/g)||[]).length,1);assert.match(html,/This is your assigned review level/);
 });
+test('closed after skip offers undo and explains why proxy is disabled',()=>{
+  const skipped=[{id:'nh',step_order:2,status:'skipped',reviewer_name:'Akhil',reviewer_role:'National Head',bypassed_at:'2026-09-04',bypass_reason:'proxy'}];
+  const html=render({...base,review:{...review,status:'closed'},steps:skipped,canProxy:false,canBypass:false});
+  assert.match(html,/Undo skip/);
+  assert.match(html,/Proxy is unavailable while the review is closed after a skip/);
+  assert.equal((html.match(/disabled=""/g)||[]).length,2);
+});
 test('read-only station accounts never see exception tools',()=>{
-  assert.equal(render({...base,canAccessProxy:false,canAccessBypass:false,canProxy:false,canBypass:false}),'');
+  assert.equal(render({...base,canAccessProxy:false,canAccessBypass:false,canUndoBypass:false,canProxy:false,canBypass:false}),'');
 });

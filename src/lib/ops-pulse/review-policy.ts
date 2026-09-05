@@ -60,6 +60,8 @@ export function reviewCapabilities(input: {
     canAccessBypass: Boolean(editor && canOverride),
     canAccessProxy: Boolean(editor),
     canBypass: Boolean(editor && !input.closed && canOverride),
+    // Oversight can undo an accidental skip even after the review closed from skipping the last level.
+    canUndoBypass: Boolean(editor && canOverride),
     canProxy: Boolean(editor && !input.closed && input.currentRole && !current && (canOverride || (!input.hasProxy && input.higherReviewer))),
   };
 }
@@ -76,6 +78,44 @@ export function reviewBypassReason(value: string) {
   if (reason.length < 5) throw new Error("Add a clear reason for skipping this review level.");
   if (reason.length > 2000) throw new Error("Keep the skip reason within 2,000 characters.");
   return reason;
+}
+
+/** Cluster filter: CM when set; otherwise AOM for stations with no cluster. */
+export function stationReviewClusterScope(location: {
+  cluster_manager?: string | null;
+  cluster?: string | null;
+  aom?: string | null;
+}) {
+  const cluster = String(location.cluster_manager || location.cluster || "").trim();
+  if (cluster) return { value: `cm:${cluster}`, label: cluster, kind: "cm" as const };
+  const aom = String(location.aom || "").trim();
+  if (aom) return { value: `aom:${aom}`, label: `${aom} (AOM)`, kind: "aom" as const };
+  return null;
+}
+
+export function reviewClusterFilterOptions(locations: {
+  cluster_manager?: string | null;
+  cluster?: string | null;
+  aom?: string | null;
+}[]) {
+  const options = new Map<string, string>();
+  for (const location of locations) {
+    const scope = stationReviewClusterScope(location);
+    if (scope) options.set(scope.value, scope.label);
+  }
+  return [...options.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+export function filterLocationsByReviewCluster<T extends {
+  cluster_manager?: string | null;
+  cluster?: string | null;
+  aom?: string | null;
+}>(locations: T[], selected: string) {
+  const key = selected.trim();
+  if (!key) return locations;
+  return locations.filter((location) => stationReviewClusterScope(location)?.value === key);
 }
 
 export function visibleReviewStep(step: { status: string; reviewer_role: string; bypassed_at?: string | null }) {

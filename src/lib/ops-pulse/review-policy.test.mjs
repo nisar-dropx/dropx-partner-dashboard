@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { managerReviewChain, reviewCapabilities, connectionTimes, stationTimingClocks, discussionFeedUpdates, legacyConnectionsFromReview, reviewRole, noonEmdValue, reviewBypassReason, visibleReviewStep } from './review-policy.ts';
+import { managerReviewChain, reviewCapabilities, connectionTimes, stationTimingClocks, discussionFeedUpdates, legacyConnectionsFromReview, reviewRole, noonEmdValue, reviewBypassReason, visibleReviewStep, filterLocationsByReviewCluster, reviewClusterFilterOptions, stationReviewClusterScope } from './review-policy.ts';
 const person=(role,id=role)=>({role,personId:id});
 test('CM to AOM to National Head; excludes station review stage',()=>{
   assert.deepEqual(managerReviewChain(['Team Lead','Cluster Manager','Area Operations Manager','National Head'].map(role=>person(role))).map(p=>p.role),['Cluster Manager','Area Operations Manager','National Head']);
@@ -14,7 +14,7 @@ test('no cluster manager uses actual AOM and deduplicates identities',()=>{
 const base={userId:'tl',owner:false,programManager:false,stationUser:false,inScope:true,canView:true,canAdd:true,canEdit:true,closed:false,firstReviewerId:'cm',currentReviewerId:'cm',currentRole:'Cluster Manager'};
 test('station editor can only enter connection timings',()=>{
   const access=reviewCapabilities({...base,stationUser:true});
-  assert.deepEqual(access,{canStart:false,canEditConnections:true,canEditRca:false,canComment:false,canComplete:false,canManageActions:false,canAccessBypass:false,canAccessProxy:true,canBypass:false,canProxy:false});
+  assert.deepEqual(access,{canStart:false,canEditConnections:true,canEditRca:false,canComment:false,canComplete:false,canManageActions:false,canAccessBypass:false,canAccessProxy:true,canBypass:false,canUndoBypass:false,canProxy:false});
 });
 test('CM owns RCA, own stage, and can enter connection timings',()=>{
   assert.equal(reviewCapabilities({...base,userId:'cm'}).canEditRca,true);
@@ -101,11 +101,11 @@ test('authorised exception tools remain discoverable before starting and after c
     assert.equal(before.canProxy,false);
     const closed=reviewCapabilities({...base,...role,closed:true});
     assert.equal(closed.canAccessProxy,true);assert.equal(closed.canAccessBypass,true);
-    assert.equal(closed.canProxy,false);assert.equal(closed.canBypass,false);
+    assert.equal(closed.canProxy,false);assert.equal(closed.canBypass,false);assert.equal(closed.canUndoBypass,true);
   }
   const aom=reviewCapabilities({...base,userId:'aom',higherReviewer:true,currentReviewerId:null,currentRole:null});
   assert.equal(aom.canAccessProxy,true);assert.equal(aom.canAccessBypass,false);
-  assert.equal(aom.canProxy,false);
+  assert.equal(aom.canProxy,false);assert.equal(aom.canUndoBypass,false);
   const own=reviewCapabilities({...base,userId:'nh',nationalHead:true,currentReviewerId:'nh',currentRole:'National Head'});
   assert.equal(own.canAccessProxy,true);assert.equal(own.canProxy,false);
   const first=reviewCapabilities({...base,userId:'cm',currentReviewerId:null,currentRole:null});
@@ -116,4 +116,16 @@ test('bypass requires reason and explicit skipped stages remain visible',()=>{
   assert.equal(reviewBypassReason(' Manager absent '),'Manager absent');
   assert.equal(visibleReviewStep({status:'skipped',reviewer_role:'Cluster Manager'}),false);
   assert.equal(visibleReviewStep({status:'skipped',reviewer_role:'Cluster Manager',bypassed_at:'2026-09-04'}),true);
+});
+test('cluster filter uses CM when present and AOM only for stations without a cluster',()=>{
+  const withCm={cluster_manager:'Ravi',cluster:null,aom:'Asha'};
+  const aomOnly={cluster_manager:null,cluster:null,aom:'Asha'};
+  const bare={cluster_manager:null,cluster:null,aom:null};
+  assert.equal(stationReviewClusterScope(withCm)?.value,'cm:Ravi');
+  assert.equal(stationReviewClusterScope(aomOnly)?.value,'aom:Asha');
+  assert.equal(stationReviewClusterScope(bare),null);
+  const options=reviewClusterFilterOptions([withCm,aomOnly,bare]);
+  assert.deepEqual(options.map((option)=>option.value),['aom:Asha','cm:Ravi']);
+  assert.deepEqual(filterLocationsByReviewCluster([withCm,aomOnly], 'aom:Asha'),[aomOnly]);
+  assert.deepEqual(filterLocationsByReviewCluster([withCm,aomOnly], 'cm:Ravi'),[withCm]);
 });
