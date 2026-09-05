@@ -53,7 +53,7 @@ async function context(authorization: AuthorizationContext, data: FormData) {
   const steps = await supabaseAdmin.from("ops_performance_review_steps").select("id,step_order,reviewer_user_id,reviewer_role,status,bypassed_at,proxy_reviewer_user_id")
     .eq("company_id", companyId).eq("review_id", result.data.id).order("step_order");
   if (steps.error) throw new Error("Unable to check the current review stage.");
-  const access = await getReviewAccess(authorization, station.id, result.data, steps.data ?? []);
+  const access = await getReviewAccess(authorization, station.id, result.data, steps.data ?? [], { inScope: true });
   return { companyId, review: result.data, access, steps: steps.data ?? [] };
 }
 function author(authorization: AuthorizationContext, role: string) {
@@ -68,7 +68,7 @@ export async function startPerformanceReview(data: FormData): Promise<ReviewActi
     const sourceDate = dateValue(text(data, "source_date"));
     const chain = await resolvePerformanceReviewChain(companyId, station.id);
     if (!chain.length) throw new Error("The station review manager is not assigned in People. Contact your administrator.");
-    const access = await getReviewAccess(authorization, station.id, null, chain.map((step, index) => ({ step_order: index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,status:"pending" })));
+    const access = await getReviewAccess(authorization, station.id, null, chain.map((step, index) => ({ step_order: index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,status:"pending" })), { inScope: true });
     if (!access.canStart) throw new Error("Only the first review manager or authorised oversight team can start this review.");
     const result = await supabaseAdmin!.rpc("ops_start_manager_review", {
       p_company: companyId,p_actor:authorization.userId,p_station:station.id,p_chain:chain,
@@ -84,7 +84,8 @@ export async function savePerformanceReviewOperations(data: FormData): Promise<R
   try {
     const { companyId,review,access } = await context(authorization,data);
     if (!access.canEditRca) throw new Error("Only the first review manager during their stage, or Program Manager, can edit the takeaway.");
-    const result=await supabaseAdmin!.rpc("ops_mutate_manager_review",{p_company:companyId,p_actor:authorization.userId,p_review:review.id,p_action:"summary",p_data:{summary:limited(data,"review_summary"),expected_review_version:text(data,"review_version"),...author(authorization,access.actor.label)}});
+    // Use the freshly loaded review version — client hidden fields go stale after the first save on the page.
+    const result=await supabaseAdmin!.rpc("ops_mutate_manager_review",{p_company:companyId,p_actor:authorization.userId,p_review:review.id,p_action:"summary",p_data:{summary:limited(data,"review_summary"),expected_review_version:review.updated_at,...author(authorization,access.actor.label)}});
     rpcError(result.error);
     return finish("Takeaway saved.");
   } catch(error) { return failure(error); }
@@ -104,7 +105,7 @@ export async function savePerformanceReviewItem(data: FormData): Promise<ReviewA
       metric_key:metricKey,metric_label:limited(data,"metric_label",250,true),root_cause:limited(data,"root_cause",4000,true),
       corrective_action:limited(data,"corrective_action",4000,true),action_owner:limited(data,"action_owner",250,true),due_date:dateValue(text(data,"due_date")),
       status,severity:text(data,"severity")==="amber"?"amber":"red",actual_value:numberValue("actual_value"),target_value:numberValue("target_value"),target_direction:text(data,"target_direction")==="lower"?"lower":"higher",
-      expected_review_version:text(data,"review_version"),...author(authorization,access.actor.label)
+      expected_review_version:review.updated_at,...author(authorization,access.actor.label)
     }});
     rpcError(result.error);
     return finish("RCA and action saved.");
@@ -144,7 +145,7 @@ export async function savePerformanceConnection(data:FormData):Promise<ReviewAct
           .eq("company_id", companyId).eq("review_id", review.id).order("step_order")
       : { data: [] as { id: string; step_order: number; reviewer_user_id: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[], error: null };
     if (stepsResult.error) throw new Error("Unable to check the current review stage.");
-    const access=await getReviewAccess(authorization,station.id,review,stepsResult.data ?? []);
+    const access=await getReviewAccess(authorization,station.id,review,stepsResult.data ?? [],{ inScope: true });
     if (!access.canEditConnections) throw new Error("Only the station team, first review manager on their stage, or Program Manager can edit connection timings.");
     const times = stationTimingClocks({ arrival: text(data, "arrival"), unloading: text(data, "unloading"), clearance: text(data, "clearance") }, date);
     const result = await supabaseAdmin!.rpc("ops_save_review_connection", {
@@ -211,7 +212,7 @@ export async function savePerformanceNoonEmd(data: FormData): Promise<ReviewActi
           .eq("company_id", companyId).eq("review_id", review.id).order("step_order")
       : { data: [] as { id: string; step_order: number; reviewer_user_id: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[], error: null };
     if (stepsResult.error) throw new Error("Unable to check the current review stage.");
-    const access = await getReviewAccess(authorization,station.id,review,stepsResult.data ?? []);
+    const access = await getReviewAccess(authorization,station.id,review,stepsResult.data ?? [],{ inScope: true });
     if (!access.canEditConnections) throw new Error("Only the station team, first review manager on their stage, or Program Manager can update station inputs.");
     const value = noonEmdValue(text(data,"emd_noon_pct"));
     if (value === null) throw new Error("Enter EMD at 12 p.m. (0 to 100%).");

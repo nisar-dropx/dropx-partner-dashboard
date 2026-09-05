@@ -8,6 +8,7 @@ export const opsAccessPageCodes = [
   "ops_pulse",
   "performance",
   "performance_review",
+  "performance_review_cluster_filter",
   "capacity",
   "capacity_overview",
   "capacity_associates",

@@ -395,11 +395,32 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const trendMetrics = trendMetricKeys.map((key) => dailyMetricDefinitions.find((metric) => metric.metricKey === key)).filter((metric): metric is typeof dailyMetricDefinitions[number] => Boolean(metric));
   const trendStationLocation = locationByCode.get(trendStationCode);
   const trendHref = (code: string) => `/performance?view=daily&date=${selectedDate}${stationQuery}&trend=${encodeURIComponent(code)}#daily-trend`;
+  const canFilterClusters = hasPermission(authorization, "performance_review_cluster_filter", "access");
+  const clusterOptions = [...new Set(
+    permittedLocations
+      .map((location) => String(location.cluster_manager || location.cluster || "").trim())
+      .filter(Boolean)
+  )].sort((left, right) => left.localeCompare(right));
+  const requestedCluster = canFilterClusters ? String(searchParams?.cluster ?? "").trim() : "";
+  const selectedCluster = requestedCluster && clusterOptions.includes(requestedCluster) ? requestedCluster : "";
+  const clusterFilteredLocations = selectedCluster
+    ? permittedLocations.filter((location) => String(location.cluster_manager || location.cluster || "").trim() === selectedCluster)
+    : permittedLocations;
+  const deskLocations = clusterFilteredLocations.length ? clusterFilteredLocations : permittedLocations;
+  const deskCodes = deskLocations.map((location) => location.station_code);
   const requestedReviewCode = stationCode(searchParams?.review ?? null);
-  const selectedReviewLocation = permittedLocations.find((location) => stationCode(location.station_code) === requestedReviewCode) ?? permittedLocations[0] ?? null;
-  const reviewWorkspace = selectedReviewLocation
-    ? await loadPerformanceReviewWorkspace(companyId, selectedDate, view === "reviews" ? permittedCodes : [selectedReviewLocation.station_code])
+  const reviewWorkspace = deskLocations.length
+    ? await loadPerformanceReviewWorkspace(companyId, selectedDate, view === "reviews" ? deskCodes : [deskLocations[0]?.station_code].filter(Boolean) as string[])
     : { settings: null, reviews: [], previousReviews: [], steps: [], items: [], updates: [], error: "No permitted station is available." };
+  const activeReviewCodes = new Set(
+    reviewWorkspace.reviews
+      .filter((review) => review.status === "open" || review.status === "in_review")
+      .map((review) => stationCode(review.station_code))
+  );
+  const selectedReviewLocation = deskLocations.find((location) => stationCode(location.station_code) === requestedReviewCode)
+    ?? deskLocations.find((location) => activeReviewCodes.has(stationCode(location.station_code)))
+    ?? deskLocations[0]
+    ?? null;
   const operationalResult = selectedReviewLocation
     ? await loadPerformanceOperationalSnapshots(companyId, selectedDate, [selectedReviewLocation])
     : { rows: new Map(), error: "No permitted station is available." };
@@ -439,7 +460,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     loadPerformanceConnections(companyId, connectionStationId, selectedDate),
     // Always resolve the People route so Proxy/Skip and Start stay available before a review row exists.
     resolvePerformanceReviewChain(companyId, selectedReviewLocation.id),
-    loadPerformanceReviewBacklog(companyId, selectedDate, permittedCodes, reviewPendingPage(searchParams?.pendingPage)),
+    loadPerformanceReviewBacklog(companyId, selectedDate, deskCodes, reviewPendingPage(searchParams?.pendingPage)),
     loadPerformanceFollowups(companyId,connectionStationId,selectedDate),
     loadPerformanceNoonEmd(companyId,connectionStationId,selectedDate),
     loadReviewStationLeads(companyId,connectionStationId),
@@ -493,7 +514,10 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             date={selectedDate}
             error={searchParams?.error || reviewWorkspace.error || operationalResult.error || connectionResult.error || (!selectedReviewRow ? "No Amazon performance metrics are loaded for this station on this date. RCA exceptions appear after Hawkeye/EDSP data is imported." : null)}
             items={reviewWorkspace.items}
-            locations={permittedLocations}
+            locations={deskLocations}
+            reviewClusters={canFilterClusters ? clusterOptions : []}
+            selectedCluster={selectedCluster}
+            canFilterClusters={canFilterClusters}
             metrics={reviewMetrics}
             notice={searchParams?.notice || null}
             previousReviews={reviewWorkspace.previousReviews}

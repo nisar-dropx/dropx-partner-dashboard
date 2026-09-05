@@ -25,6 +25,7 @@ export const accessPages = [
   { code: "ops_pulse", name: "Ops Pulse", sort_order: 84 },
   { code: "performance", name: "Performance", sort_order: 84 },
   { code: "performance_review", name: "Performance Reviews", sort_order: 84 },
+  { code: "performance_review_cluster_filter", name: "Review Desk Cluster Filter", sort_order: 84 },
   { code: "capacity", name: "Capacity", sort_order: 84 },
   { code: "capacity_overview", name: "Capacity Overview", sort_order: 84 },
   { code: "capacity_associates", name: "Associate SPR", sort_order: 84 },

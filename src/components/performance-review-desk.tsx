@@ -63,6 +63,9 @@ type Props = {
   error: string | null;
   items: PerformanceReviewItem[];
   locations: CodLocationRow[];
+  reviewClusters?: string[];
+  selectedCluster?: string;
+  canFilterClusters?: boolean;
   metrics: ReviewMetric[];
   notice: string | null;
   previousReviews: PerformanceReviewCarryover[];
@@ -193,8 +196,15 @@ export function PerformanceReviewDesk(props: Props) {
       <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatDashboardDate(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || selectedLocation.city || "Station"}</small></div>
       <PerformanceReviewPicker
         date={date}
-        locations={locations.map((location) => ({ code: location.station_code, name: location.station_name || location.city || location.station_code }))}
+        locations={locations.map((location) => ({
+          code: location.station_code,
+          name: location.station_name || location.city || location.station_code,
+          cluster: location.cluster_manager || location.cluster || null
+        }))}
         stationCode={selectedCode}
+        clusters={props.reviewClusters ?? []}
+        selectedCluster={props.selectedCluster ?? ""}
+        canFilterClusters={Boolean(props.canFilterClusters)}
       />
     </section>
 
@@ -216,6 +226,7 @@ export function PerformanceReviewDesk(props: Props) {
     </section>
 
     {!review && misses.length ? <div className="performance-review-start-guide"><strong>{misses.length} metrics need RCA and action</strong><span>Use Start review above, then record RCA and action items below.</span></div> : null}
+    {review && !reviewUpdates.length && !currentItems.length ? <div className="performance-review-start-guide"><strong>Review started · no inputs saved yet</strong><span>This station is in review, but no RCA, takeaway or discussion has been saved. Add them below, or use Proxy / Skip if you are covering the assigned manager.</span></div> : null}
     {props.routingIssue ? <div className="alert warning" role="status">{props.routingIssue}</div> : null}
 
     {review ? <PerformanceReviewFlow key={`${review.id}-${review.current_step_order}-${review.updated_at}`} steps={selectedSteps} currentOrder={review.current_step_order} stationLeads={props.stationLeads}/> : <section className="performance-review-flow" aria-label="Review workflow">
