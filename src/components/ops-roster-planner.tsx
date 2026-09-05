@@ -600,7 +600,8 @@ export function OpsRosterPlanner({
     : "View only for your current access.";
   const status = editingEnabled && !plan ? "draft" : plan?.status ?? "blank";
   const templateHref = `/rostering/template?station=${encodeURIComponent(stationId)}${activePlanId ? `&plan=${encodeURIComponent(activePlanId)}` : ""}`;
-  const canUseExcel = canStart || editingEnabled;
+  // Excel follows the same gate as the grid: only once an editable draft is open.
+  const canUseExcel = editingEnabled && Boolean(activePlanId);
   const heroDetail = plan
     ? `Effective ${fullDateLabel(plan.effectiveFrom ?? plan.periodStart)} · v${plan.revisionNo} · repeats until replaced`
     : "Start editing to prepare this station’s recurring Monday–Sunday pattern.";

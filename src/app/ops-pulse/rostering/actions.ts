@@ -71,6 +71,22 @@ function rosterCutoffMessage(hours: number) {
   return `Roster changes are allowed only until ${hours} hours before the rostered shift. Past and locked dates cannot be edited.`;
 }
 
+/** Same lock window as grid save — import must not bypass it. */
+function isOpsRosterChangePastCutoff(input: {
+  rosterKind: string | null | undefined;
+  templateOrDate: string;
+  startTime?: string | null;
+  cutoffAsOf: string;
+  changeCutoffHours: number;
+  nowMs?: number;
+}) {
+  const cutoffDate = input.rosterKind === "recurring_weekly"
+    ? nextRosterOccurrenceOnOrAfter(input.templateOrDate, input.cutoffAsOf)
+    : input.templateOrDate;
+  return rosterChangeInstant(cutoffDate, input.startTime || "00:00") - (input.nowMs ?? Date.now())
+    < input.changeCutoffHours * 60 * 60 * 1000;
+}
+
 function isoWeekday(value: string) {
   const day = new Date(`${value}T00:00:00Z`).getUTCDay();
   return day === 0 ? 7 : day;
@@ -368,10 +384,13 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
         : change.remove && existing?.shift_id
           ? shiftStartById.get(existing.shift_id)
           : "00:00";
-      const cutoffDate = plan.roster_kind === "recurring_weekly"
-        ? nextRosterOccurrenceOnOrAfter(change.date, cutoffAsOf)
-        : change.date;
-      if (rosterChangeInstant(cutoffDate, startTime) - Date.now() < policy.changeCutoffHours * 60 * 60 * 1000) {
+      if (isOpsRosterChangePastCutoff({
+        rosterKind: plan.roster_kind,
+        templateOrDate: change.date,
+        startTime,
+        cutoffAsOf,
+        changeCutoffHours: policy.changeCutoffHours
+      })) {
         return { ok: false, message: rosterCutoffMessage(policy.changeCutoffHours) };
       }
     }
@@ -545,14 +564,21 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
     }
 
     const station = await authorisedStation(companyId, authorization, plan.location_id);
-    const [manpower, shifts] = await Promise.all([
+    const [manpower, shifts, policy, existingEntries] = await Promise.all([
       loadOpsStationManpower(companyId, [station], indiaToday()),
-      db().from("hr_shifts").select("id,code").eq("company_id", companyId).eq("is_active", true)
+      db().from("hr_shifts").select("id,code,start_time").eq("company_id", companyId).eq("is_active", true),
+      loadOpsRosteringPolicy(companyId, plan.location_id),
+      db().from("hr_roster_entries").select("worker_type,worker_id,roster_date,shift_id,day_type").eq("company_id", companyId).eq("plan_id", planId)
     ]);
     if (shifts.error) throw new Error(shifts.error.message);
+    if (existingEntries.error) throw new Error(existingEntries.error.message);
 
     const byCode = new Map(manpower.people.map((person) => [String(person.code).trim().toUpperCase(), person]));
     const shiftByCode = new Map((shifts.data ?? []).map((shift) => [String(shift.code).trim().toUpperCase(), shift.id]));
+    const shiftStartById = new Map((shifts.data ?? []).map((shift) => [shift.id, shift.start_time]));
+    const existingByKey = new Map((existingEntries.data ?? []).map((entry) => [`${entry.worker_type}:${entry.worker_id}:${entry.roster_date}`, entry]));
+    const today = indiaToday();
+    const cutoffAsOf = window.periodStart > today ? window.periodStart : today;
     const workbook = XLSX.read(Buffer.from(await file.arrayBuffer()), { type: "buffer", cellDates: false });
     const firstSheet = workbook.SheetNames[0];
     if (!firstSheet) return { ok: false, message: "The workbook has no readable sheet." };
@@ -670,6 +696,36 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
     }
     if (!upserts.length && !removals.length) return { ok: false, message: "The workbook did not contain any roster cells to import for the selected period." };
     if (upserts.length + removals.length > 25_000) return { ok: false, message: "The workbook exceeds 25,000 roster cells." };
+
+    for (const row of upserts) {
+      if (!validDate(row.roster_date) || row.roster_date < window.writeStart || row.roster_date > window.writeEnd) {
+        return { ok: false, message: "A selected person, shift or date is outside this roster." };
+      }
+      if (isOpsRosterChangePastCutoff({
+        rosterKind: plan.roster_kind,
+        templateOrDate: row.roster_date,
+        startTime: row.day_type === "working" && row.shift_id ? shiftStartById.get(row.shift_id) : "00:00",
+        cutoffAsOf,
+        changeCutoffHours: policy.changeCutoffHours
+      })) {
+        return { ok: false, message: rosterCutoffMessage(policy.changeCutoffHours) };
+      }
+    }
+    for (const removal of removals) {
+      if (!validDate(removal.date) || removal.date < window.writeStart || removal.date > window.writeEnd) {
+        return { ok: false, message: "A selected person, shift or date is outside this roster." };
+      }
+      const existing = existingByKey.get(`${removal.workerType}:${removal.workerId}:${removal.date}`);
+      if (isOpsRosterChangePastCutoff({
+        rosterKind: plan.roster_kind,
+        templateOrDate: removal.date,
+        startTime: existing?.shift_id ? shiftStartById.get(existing.shift_id) : "00:00",
+        cutoffAsOf,
+        changeCutoffHours: policy.changeCutoffHours
+      })) {
+        return { ok: false, message: rosterCutoffMessage(policy.changeCutoffHours) };
+      }
+    }
 
     const touched = await db().from("hr_roster_plans")
       .update({ updated_by: authorization.userId, updated_at: new Date().toISOString() })
