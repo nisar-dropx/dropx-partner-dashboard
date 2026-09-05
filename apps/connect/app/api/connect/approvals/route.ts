@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { connectApproverIdentity } from "../../../../src/lib/connect-expense-data";
-import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval, listConnectReturnedRosters, resubmitConnectReturnedRoster } from "../../../../src/lib/connect-manager-approvals";
+import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval, listConnectReturnedRosters, resubmitConnectReturnedRoster, listConnectExitApprovals, decideConnectExitApproval, listConnectExitWithdrawalApprovals, decideConnectExitWithdrawal } from "../../../../src/lib/connect-manager-approvals";
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
 import { connectReporteeMatches, loadConnectReporteeAccess, normalizeConnectReporteeScope, type ConnectReporteeAccess } from "../../../../src/lib/connect-reportee-scope";
 import { decideConnectWfhApproval, listConnectWfhApprovals } from "../../../../src/lib/connect-wfh-data";
@@ -71,7 +71,7 @@ export async function GET(request: Request) {
     const account = await selectedAccount(request);
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     const reportees = await loadConnectReporteeAccess(account, scope);
-    const [leaveApprovals, wfhApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters] = await Promise.all([
+    const [leaveApprovals, wfhApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals] = await Promise.all([
       listLeaveApprovals(account, reportees),
       (async () => {
         const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
@@ -88,9 +88,11 @@ export async function GET(request: Request) {
       listConnectAttendanceHrApprovals(account, reportees),
       listConnectRosterApprovals(account),
       listConnectRosterSwapApprovals(account),
-      listConnectReturnedRosters(account)
+      listConnectReturnedRosters(account),
+      listConnectExitApprovals(account),
+      listConnectExitWithdrawalApprovals(account)
     ]);
-    return NextResponse.json({ scope, leaveApprovals, wfhApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({ scope, leaveApprovals, wfhApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load approvals." }, { status: 400 });
   }
@@ -153,6 +155,20 @@ export async function PATCH(request: Request) {
         note
       });
       return NextResponse.json({ ok: true, notice: result.notice });
+    }
+    const exitWithdrawalCaseId = clean(body.exitWithdrawalCaseId);
+    if (exitWithdrawalCaseId) {
+      const decision = clean(body.decision);
+      const note = clean(body.note);
+      const notice = await decideConnectExitWithdrawal(account, exitWithdrawalCaseId, decision, note);
+      return NextResponse.json({ ok: true, notice });
+    }
+    const exitApprovalId = clean(body.exitApprovalId);
+    if (exitApprovalId) {
+      const decision = clean(body.decision);
+      const note = clean(body.note);
+      const notice = await decideConnectExitApproval(account, exitApprovalId, decision, note);
+      return NextResponse.json({ ok: true, notice });
     }
     const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
     const approverUserId = account.profileType === "user" ? account.id : identity?.userId;

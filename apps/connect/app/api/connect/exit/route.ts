@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
-import { notifyEmployeeExitSubmitted, notifyExitApprovalRequired } from "../../../../src/lib/connect-exit-notifications";
+import { notifyEmployeeExitSubmitted, notifyEmployeeExitWithdrawal, notifyExitApprovalRequired, notifyExitWithdrawalReviewer } from "../../../../src/lib/connect-exit-notifications";
 import { createAppNotification } from "../../../../src/lib/app-notifications";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { todayInIndia } from "../../../../src/lib/india-date";
@@ -395,28 +395,93 @@ export async function POST(request: Request) {
       if (policyResult.error || caseResult.error) throw new Error(policyResult.error?.message ?? caseResult.error?.message ?? "Unable to load exit request.");
       if (!policyResult.data?.withdrawal_allowed) throw new Error("Withdrawal requests are disabled by company policy.");
       const exitCase = caseResult.data;
-      if (!exitCase || ["documents_ready", "closed"].includes(exitCase.status)) throw new Error("This exit request can no longer be withdrawn.");
+      if (!exitCase || ["documents_ready", "closed", "withdrawal_requested"].includes(exitCase.status)) {
+        throw new Error(exitCase?.status === "withdrawal_requested"
+          ? "A withdrawal request is already waiting for the first approving manager."
+          : "This exit request can no longer be withdrawn.");
+      }
       const now = new Date().toISOString();
-      const updated = await db().from("hr_exit_cases").update({
-        status: "withdrawn",
-        current_stage: "closed",
+      const approvedSteps = await db().from("hr_exit_approvals")
+        .select("id,step_order,step_name,assigned_user_id,acted_by,status")
+        .eq("company_id", context.account.companyId)
+        .eq("case_id", exitCase.id)
+        .eq("is_required", true)
+        .eq("status", "approved")
+        .order("step_order");
+      if (approvedSteps.error) throw new Error(approvedSteps.error.message);
+      const firstApproved = (approvedSteps.data ?? [])[0] ?? null;
+      const reviewerUserId = firstApproved?.acted_by ?? firstApproved?.assigned_user_id ?? null;
+
+      // Before any required approval: employee may withdraw immediately.
+      if (!firstApproved || !reviewerUserId) {
+        const updated = await db().from("hr_exit_cases").update({
+          status: "withdrawn",
+          current_stage: "closed",
+          updated_at: now
+        }).eq("id", exitCase.id);
+        if (updated.error) throw new Error(updated.error.message);
+        const skipped = await db().from("hr_exit_approvals").update({ status: "skipped", updated_at: now })
+          .eq("case_id", exitCase.id).in("status", ["pending", "waiting"]);
+        if (skipped.error && !String(skipped.error.message).toLowerCase().includes("does not exist")) {
+          throw new Error(skipped.error.message);
+        }
+        await db().from("hr_exit_events").insert({
+          company_id: context.account.companyId,
+          case_id: exitCase.id,
+          event_code: "WITHDRAWN",
+          title: "Resignation withdrawn",
+          actor_name: context.account.name ?? context.worker.full_name,
+          details: {}
+        });
+        return NextResponse.json({ ok: true, notice: "Resignation withdrawn. You can submit a new request when ready." });
+      }
+
+      // After first-level approval: route withdrawal only to that first approver.
+      const requested = await db().from("hr_exit_cases").update({
+        status: "withdrawal_requested",
+        status_before_withdrawal: exitCase.status,
+        withdrawal_reviewer_user_id: reviewerUserId,
+        withdrawal_requested_at: now,
         updated_at: now
-      }).eq("id", exitCase.id);
-      if (updated.error) throw new Error(updated.error.message);
-      const skipped = await db().from("hr_exit_approvals").update({ status: "skipped", updated_at: now })
-        .eq("case_id", exitCase.id).in("status", ["pending", "waiting"]);
-      if (skipped.error && !String(skipped.error.message).toLowerCase().includes("does not exist")) {
-        throw new Error(skipped.error.message);
+      }).eq("id", exitCase.id).neq("status", "withdrawal_requested");
+      if (requested.error) {
+        if (/withdrawal_reviewer_user_id|status_before_withdrawal|schema cache|does not exist/i.test(requested.error.message)) {
+          const fallback = await db().from("hr_exit_cases").update({
+            status: "withdrawal_requested",
+            updated_at: now
+          }).eq("id", exitCase.id);
+          if (fallback.error) throw new Error(fallback.error.message);
+        } else {
+          throw new Error(requested.error.message);
+        }
       }
       await db().from("hr_exit_events").insert({
         company_id: context.account.companyId,
         case_id: exitCase.id,
-        event_code: "WITHDRAWN",
-        title: "Resignation withdrawn",
+        event_code: "WITHDRAWAL_REQUESTED",
+        title: "Withdrawal requested — waiting for first approver",
         actor_name: context.account.name ?? context.worker.full_name,
-        details: {}
+        details: { reviewer_user_id: reviewerUserId, first_step: firstApproved.step_name }
       });
-      return NextResponse.json({ ok: true, notice: "Resignation withdrawn. You can submit a new request when ready." });
+      await notifyEmployeeExitWithdrawal({
+        companyId: context.account.companyId,
+        caseId: exitCase.id,
+        employee: context.worker,
+        requestedDate: exitCase.requested_last_working_date ?? ""
+      });
+      const reviewer = await db().from("profiles").select("email,full_name").eq("company_id", context.account.companyId).eq("id", reviewerUserId).maybeSingle();
+      await notifyExitWithdrawalReviewer({
+        companyId: context.account.companyId,
+        caseId: exitCase.id,
+        reviewerUserId,
+        employeeName: context.worker.full_name,
+        caseNumber: exitCase.case_number,
+        requestedDate: exitCase.requested_last_working_date ?? ""
+      }).catch(() => undefined);
+      return NextResponse.json({
+        ok: true,
+        notice: `Withdrawal requested. Only ${reviewer.data?.full_name ?? "the first approving manager"} can accept it. Your request stays open until they decide.`
+      });
     }
 
     const reasonId = clean(body.reasonId);

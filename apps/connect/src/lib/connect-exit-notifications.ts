@@ -35,6 +35,59 @@ async function notifyEmployeeExit(input: EmployeeExitNotice, eventCode: "CASE_SU
 export async function notifyEmployeeExitSubmitted(input: EmployeeExitNotice) { return notifyEmployeeExit(input, "CASE_SUBMITTED"); }
 export async function notifyEmployeeExitWithdrawal(input: EmployeeExitNotice) { return notifyEmployeeExit(input, "WITHDRAWAL_REQUESTED"); }
 
+/** Notify the first approving manager that a resignation withdrawal needs their decision. */
+export async function notifyExitWithdrawalReviewer(input: {
+  companyId: string;
+  caseId: string;
+  reviewerUserId: string;
+  employeeName: string;
+  caseNumber?: string;
+  requestedDate?: string;
+}) {
+  if (!supabaseAdmin) return;
+  const [{ data: reviewer }, { data: exitCase }] = await Promise.all([
+    supabaseAdmin.from("profiles").select("email,full_name").eq("company_id", input.companyId).eq("id", input.reviewerUserId).maybeSingle(),
+    supabaseAdmin.from("hr_exit_cases").select("case_number,requested_last_working_date").eq("id", input.caseId).maybeSingle()
+  ]);
+  const to = reviewer?.email ? [String(reviewer.email).trim().toLowerCase()].filter(Boolean) : [];
+  const caseNumber = exitCase?.case_number ?? input.caseNumber ?? "";
+  const requestedDate = exitCase?.requested_last_working_date ?? input.requestedDate ?? "";
+  const subject = `Resignation withdrawal pending — ${caseNumber || input.employeeName}`;
+  const body = [
+    `Hi ${reviewer?.full_name ?? "Manager"},`,
+    "",
+    `${input.employeeName} has requested to withdraw resignation ${caseNumber || ""}.`.replace(/\s+/g, " ").trim(),
+    requestedDate ? `Requested last working date: ${requestedDate}.` : "",
+    "",
+    "Open Approvals → Resign withdrawal in DropX One to accept the withdrawal or keep the exit open.",
+    "",
+    "— DropX One"
+  ].filter(Boolean).join("\n");
+  let status = "sent";
+  let errorMessage: string | null = null;
+  try {
+    if (!to.length) {
+      status = "skipped";
+      errorMessage = "Reviewer has no email.";
+    } else {
+      await sendConnectEmail({ companyId: input.companyId, to, subject, body });
+    }
+  } catch (error) {
+    status = "failed";
+    errorMessage = error instanceof Error ? error.message : "Email failed.";
+  }
+  await supabaseAdmin.from("hr_exit_notification_log").insert({
+    company_id: input.companyId,
+    case_id: input.caseId,
+    event_code: "WITHDRAWAL_REVIEW_REQUIRED",
+    to_emails: to,
+    cc_emails: [],
+    subject,
+    status,
+    error_message: errorMessage
+  });
+}
+
 export async function notifyExitApprovalRequired(input: { companyId: string; caseId: string; approvalStepId: string }) {
   if (!supabaseAdmin) return;
   const [{ data: template }, { data: exitCase }, { data: approval }] = await Promise.all([

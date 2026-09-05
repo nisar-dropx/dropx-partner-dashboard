@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ClipboardCheck, Clock3, FileText, Home, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ClipboardCheck, Clock3, DoorOpen, FileText, Home, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
@@ -137,7 +137,33 @@ type ReturnedRoster = {
   updatedAt: string;
 };
 
-type ApprovalSection = "time-off" | "wfh" | "attendance" | "rosters" | "location-integrity" | "reimbursements";
+type ExitWithdrawalApproval = {
+  id: string;
+  caseId: string;
+  caseNumber: string;
+  requesterName: string;
+  requesterCode: string;
+  profileType: "employee" | "contractor";
+  requestedLastWorkingDate: string | null;
+  reason: string;
+  requestedAt: string | null;
+};
+
+type ExitApproval = {
+  id: string;
+  caseId: string;
+  caseNumber: string;
+  stepName: string;
+  stepOrder: number;
+  requesterName: string;
+  requesterCode: string;
+  profileType: "employee" | "contractor";
+  requestedLastWorkingDate: string | null;
+  reason: string;
+  submittedAt: string | null;
+};
+
+type ApprovalSection = "time-off" | "wfh" | "attendance" | "rosters" | "location-integrity" | "reimbursements" | "resign-withdrawal" | "resignations";
 type ReporteeScope = "immediate" | "team";
 
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
@@ -237,13 +263,17 @@ function ApprovalToolbar({
   onReturn,
   onReject,
   onApprove,
-  showReturn = true
+  showReturn = true,
+  approveLabel = "Approve",
+  rejectLabel = "Reject"
 }: {
   saving: boolean;
   onReturn?: () => void;
   onReject: () => void;
   onApprove: () => void;
   showReturn?: boolean;
+  approveLabel?: string;
+  rejectLabel?: string;
 }) {
   return (
     <div className={`dx-approval-toolbar${showReturn ? "" : " duo"}`}>
@@ -253,10 +283,10 @@ function ApprovalToolbar({
         </button>
       ) : null}
       <button className="toolbar-reject" disabled={saving} onClick={onReject} type="button">
-        <X />Reject
+        <X />{rejectLabel}
       </button>
       <button className="toolbar-approve" disabled={saving} onClick={onApprove} type="button">
-        <Check />Approve
+        <Check />{approveLabel}
       </button>
     </div>
   );
@@ -275,6 +305,8 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [returnedRosters, setReturnedRosters] = useState<ReturnedRoster[]>([]);
   const [editingReturnedRosterId, setEditingReturnedRosterId] = useState<string | null>(null);
   const [supportPackages, setSupportPackages] = useState<LocationSupportPackage[]>([]);
+  const [exitWithdrawalApprovals, setExitWithdrawalApprovals] = useState<ExitWithdrawalApproval[]>([]);
+  const [exitApprovals, setExitApprovals] = useState<ExitApproval[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -302,8 +334,12 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       setRosterSwapApprovals(leavePayload.rosterSwapApprovals ?? []);
       setReturnedRosters(leavePayload.returnedRosters ?? []);
       setSupportPackages(leavePayload.locationSupportPackages ?? []);
+      setExitWithdrawalApprovals(leavePayload.exitWithdrawalApprovals ?? []);
+      setExitApprovals(leavePayload.exitApprovals ?? []);
       setSection((current) => {
         if (current === "time-off" && !(leavePayload.leaveApprovals ?? []).length) {
+          if ((leavePayload.exitWithdrawalApprovals ?? []).length) return "resign-withdrawal";
+          if ((leavePayload.exitApprovals ?? []).length) return "resignations";
           if ((leavePayload.wfhApprovals ?? []).length) return "wfh";
           if ((leavePayload.attendanceApprovals ?? []).length || (leavePayload.attendanceHrApprovals ?? []).length) return "attendance";
           if ((leavePayload.rosterSwapApprovals ?? []).length || (leavePayload.rosterApprovals ?? []).length) return "rosters";
@@ -370,6 +406,48 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       if (!response.ok) throw new Error(payload.error || "Unable to update WFH approval.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [`wfh:${requestId}`]: "" })); await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update WFH approval."); }
+    finally { setSaving(false); }
+  }
+
+  async function decideExitWithdrawal(caseId: string, decision: "approved" | "rejected") {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/approvals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: account.id,
+          profileType: account.profileType,
+          exitWithdrawalCaseId: caseId,
+          decision,
+          note: notes[`exit-withdrawal:${caseId}`] ?? ""
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to review resignation withdrawal.");
+      setNotice(payload.notice); setNotes((current) => ({ ...current, [`exit-withdrawal:${caseId}`]: "" })); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to review resignation withdrawal."); }
+    finally { setSaving(false); }
+  }
+
+  async function decideExit(approvalId: string, decision: "approved" | "rejected") {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/approvals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: account.id,
+          profileType: account.profileType,
+          exitApprovalId: approvalId,
+          decision,
+          note: notes[`exit:${approvalId}`] ?? ""
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to update exit approval.");
+      setNotice(payload.notice); setNotes((current) => ({ ...current, [`exit:${approvalId}`]: "" })); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update exit approval."); }
     finally { setSaving(false); }
   }
 
@@ -580,6 +658,12 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
         <button className={section === "time-off" ? "active" : ""} onClick={() => setSection("time-off")} type="button">
           Time off<span>{leaveApprovals.length}</span>
         </button>
+        <button className={section === "resign-withdrawal" ? "active" : ""} onClick={() => setSection("resign-withdrawal")} type="button">
+          Resign withdrawal<span>{exitWithdrawalApprovals.length}</span>
+        </button>
+        <button className={section === "resignations" ? "active" : ""} onClick={() => setSection("resignations")} type="button">
+          Resignations<span>{exitApprovals.length}</span>
+        </button>
         <button className={section === "wfh" ? "active" : ""} onClick={() => setSection("wfh")} type="button">
           WFH<span>{wfhApprovals.length}</span>
         </button>
@@ -622,6 +706,66 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
             </article>
           )) : (
             <div className="dx-empty"><Clock3 /><strong>No time-off approvals</strong><small>No requests from your {scopeName} are waiting.</small></div>
+          )}
+        </div>
+      ) : null}
+
+      {!loading && section === "resign-withdrawal" ? (
+        <div className="dx-approval-list">
+          {exitWithdrawalApprovals.length ? exitWithdrawalApprovals.map((approval) => (
+            <article className="dx-approval-card" key={approval.id}>
+              <ApprovalHead
+                badge={<span className="dx-approval-badge">Withdraw</span>}
+                eyebrow={`${approval.caseNumber} · Resignation withdrawal`}
+                meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                name={approval.requesterName}
+              />
+              <dl className="dx-approval-facts">
+                <div><dt>Requested last day</dt><dd>{approval.requestedLastWorkingDate ? displayDate(approval.requestedLastWorkingDate) : "—"}</dd></div>
+                <div><dt>Worker note</dt><dd>{approval.reason || "—"}</dd></div>
+                <div><dt>Requested</dt><dd>{approval.requestedAt ? dateTime(approval.requestedAt) : "—"}</dd></div>
+              </dl>
+              <p className="dx-approval-hint">You were the first manager to approve this resignation. Accepting withdraws the exit; declining keeps it open.</p>
+              <ApprovalNote id={`exit-withdrawal:${approval.caseId}`} notes={notes} onChange={(value) => setNote(`exit-withdrawal:${approval.caseId}`, value)} placeholder="Required when keeping the exit open" />
+              <ApprovalToolbar
+                approveLabel="Accept withdrawal"
+                rejectLabel="Keep exit open"
+                onApprove={() => void decideExitWithdrawal(approval.caseId, "approved")}
+                onReject={() => void decideExitWithdrawal(approval.caseId, "rejected")}
+                saving={saving}
+                showReturn={false}
+              />
+            </article>
+          )) : (
+            <div className="dx-empty"><DoorOpen /><strong>No resignation withdrawals</strong><small>When a worker asks to withdraw after your first approval, the request appears here.</small></div>
+          )}
+        </div>
+      ) : null}
+
+      {!loading && section === "resignations" ? (
+        <div className="dx-approval-list">
+          {exitApprovals.length ? exitApprovals.map((approval) => (
+            <article className="dx-approval-card" key={approval.id}>
+              <ApprovalHead
+                badge={<span className="dx-approval-badge">Step {approval.stepOrder}</span>}
+                eyebrow={`${approval.caseNumber} · ${approval.stepName}`}
+                meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                name={approval.requesterName}
+              />
+              <dl className="dx-approval-facts">
+                <div><dt>Requested last day</dt><dd>{approval.requestedLastWorkingDate ? displayDate(approval.requestedLastWorkingDate) : "—"}</dd></div>
+                <div><dt>Reason</dt><dd>{approval.reason || "—"}</dd></div>
+              </dl>
+              <ApprovalNote id={`exit:${approval.id}`} notes={notes} onChange={(value) => setNote(`exit:${approval.id}`, value)} placeholder="Note for worker (required when rejecting)" />
+              <ApprovalToolbar
+                onApprove={() => void decideExit(approval.id, "approved")}
+                onReject={() => void decideExit(approval.id, "rejected")}
+                saving={saving}
+                showReturn={false}
+              />
+            </article>
+          )) : (
+            <div className="dx-empty"><DoorOpen /><strong>No resignation approvals</strong><small>Exit steps assigned to you will show here.</small></div>
           )}
         </div>
       ) : null}

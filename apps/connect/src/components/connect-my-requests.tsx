@@ -34,6 +34,7 @@ function statusBadgeClass(status: string) {
   if (["approved", "fulfilled", "completed", "accepted"].includes(status)) return "status-approved";
   if (["rejected", "cancelled", "withdrawn"].includes(status)) return "status-rejected";
   if (status === "returned") return "status-returned";
+  if (status === "withdrawal_requested") return "status-pending";
   return "status-pending";
 }
 function money(value: number | null | undefined) {

@@ -440,7 +440,7 @@ export async function listConnectExitApprovals(account: ConnectAccount) {
   return candidates.flatMap((step) => {
     const exitCase = caseById.get(step.case_id);
     const blocked = allSteps.some((item) => item.case_id === step.case_id && item.is_required && item.step_order < step.step_order && item.status !== "approved");
-    if (!exitCase || blocked || ["rejected", "closed", "cancelled", "withdrawn"].includes(exitCase.status)) return [];
+    if (!exitCase || blocked || ["rejected", "closed", "cancelled", "withdrawn", "withdrawal_requested"].includes(exitCase.status)) return [];
     const employee = one(exitCase.employees);
     const contractor = one(exitCase.contractors);
     return [{
@@ -498,6 +498,147 @@ export async function decideConnectExitApproval(account: ConnectAccount, approva
   await db().from("hr_exit_events").insert({ company_id: account.companyId, case_id: approval.case_id, event_code: "CASE_APPROVED", title: "Exit request fully approved", actor_name: account.name ?? "Approver", details: {} });
   await notifyConnectExitOutcome({ companyId: account.companyId, caseId: approval.case_id, event: "CASE_APPROVED" });
   return "Exit request fully approved and the requester was notified.";
+}
+
+export async function listConnectExitWithdrawalApprovals(account: ConnectAccount) {
+  const actorUserId = await approverUserId(account);
+  if (!actorUserId) return [];
+  const casesResult = await db().from("hr_exit_cases")
+    .select("id,case_number,worker_type,requested_last_working_date,employee_reason,status,submitted_at,withdrawal_requested_at,withdrawal_reviewer_user_id,employees(full_name,employee_code),contractors(full_name,dropx_id)")
+    .eq("company_id", account.companyId)
+    .eq("status", "withdrawal_requested")
+    .eq("withdrawal_reviewer_user_id", actorUserId)
+    .order("withdrawal_requested_at", { ascending: false });
+  if (casesResult.error) {
+    if (/withdrawal_reviewer_user_id|schema cache|does not exist/i.test(casesResult.error.message)) {
+      // Fallback before migration: match first approved step acted_by / assigned_user_id.
+      const open = await db().from("hr_exit_cases")
+        .select("id,case_number,worker_type,requested_last_working_date,employee_reason,status,submitted_at,employees(full_name,employee_code),contractors(full_name,dropx_id)")
+        .eq("company_id", account.companyId)
+        .eq("status", "withdrawal_requested")
+        .order("submitted_at", { ascending: false });
+      if (open.error) throw new Error(open.error.message);
+      const rows = open.data ?? [];
+      if (!rows.length) return [];
+      const steps = await db().from("hr_exit_approvals")
+        .select("case_id,assigned_user_id,acted_by,step_order,status")
+        .eq("company_id", account.companyId)
+        .in("case_id", rows.map((row) => row.id))
+        .eq("status", "approved")
+        .order("step_order");
+      if (steps.error) throw new Error(steps.error.message);
+      const firstApprover = new Map<string, string>();
+      for (const step of steps.data ?? []) {
+        if (firstApprover.has(step.case_id)) continue;
+        const reviewer = step.acted_by ?? step.assigned_user_id;
+        if (reviewer) firstApprover.set(step.case_id, reviewer);
+      }
+      return rows.flatMap((exitCase) => {
+        if (firstApprover.get(exitCase.id) !== actorUserId) return [];
+        const employee = one(exitCase.employees);
+        const contractor = one(exitCase.contractors);
+        return [{
+          id: exitCase.id,
+          caseId: exitCase.id,
+          caseNumber: exitCase.case_number,
+          requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
+          requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
+          profileType: exitCase.worker_type === "contractor" ? "contractor" : "employee",
+          requestedLastWorkingDate: exitCase.requested_last_working_date,
+          reason: exitCase.employee_reason ?? "No additional comment",
+          requestedAt: exitCase.submitted_at
+        }];
+      });
+    }
+    throw new Error(casesResult.error.message);
+  }
+  return (casesResult.data ?? []).map((exitCase) => {
+    const employee = one(exitCase.employees);
+    const contractor = one(exitCase.contractors);
+    return {
+      id: exitCase.id,
+      caseId: exitCase.id,
+      caseNumber: exitCase.case_number,
+      requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
+      requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
+      profileType: exitCase.worker_type === "contractor" ? "contractor" : "employee",
+      requestedLastWorkingDate: exitCase.requested_last_working_date,
+      reason: exitCase.employee_reason ?? "No additional comment",
+      requestedAt: exitCase.withdrawal_requested_at ?? exitCase.submitted_at
+    };
+  });
+}
+
+export async function decideConnectExitWithdrawal(account: ConnectAccount, caseIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
+  const actorUserId = await approverUserId(account);
+  if (!actorUserId) throw new Error("A linked People login is required to review an exit withdrawal.");
+  const caseId = clean(caseIdValue);
+  const decision = clean(decisionValue);
+  const note = clean(noteValue);
+  if (!/^[0-9a-f-]{36}$/i.test(caseId) || !["approved", "rejected"].includes(decision)) throw new Error("Choose Accept withdrawal or Keep exit open.");
+  if (decision === "rejected" && note.length < 3) throw new Error("Add a short note when keeping the exit open.");
+  const caseResult = await db().from("hr_exit_cases").select("*").eq("company_id", account.companyId).eq("id", caseId).maybeSingle();
+  if (caseResult.error || !caseResult.data) throw new Error(caseResult.error?.message ?? "Exit case was not found.");
+  const exitCase = caseResult.data;
+  if (exitCase.status !== "withdrawal_requested") throw new Error("This withdrawal request is no longer pending.");
+  let reviewerId = exitCase.withdrawal_reviewer_user_id as string | null;
+  if (!reviewerId) {
+    const firstApproved = await db().from("hr_exit_approvals")
+      .select("assigned_user_id,acted_by")
+      .eq("company_id", account.companyId)
+      .eq("case_id", caseId)
+      .eq("is_required", true)
+      .eq("status", "approved")
+      .order("step_order")
+      .limit(1)
+      .maybeSingle();
+    if (firstApproved.error) throw new Error(firstApproved.error.message);
+    reviewerId = firstApproved.data?.acted_by ?? firstApproved.data?.assigned_user_id ?? null;
+  }
+  if (reviewerId !== actorUserId) throw new Error("Only the first manager who approved this exit can review the withdrawal.");
+  const now = new Date().toISOString();
+  if (decision === "approved") {
+    const withdrawn = await db().from("hr_exit_cases").update({
+      status: "withdrawn",
+      current_stage: "closed",
+      withdrawal_reviewer_user_id: actorUserId,
+      reviewed_by: actorUserId,
+      reviewed_at: now,
+      updated_at: now
+    }).eq("company_id", account.companyId).eq("id", caseId).eq("status", "withdrawal_requested");
+    if (withdrawn.error) throw new Error(withdrawn.error.message);
+    const skipped = await db().from("hr_exit_approvals").update({ status: "skipped", updated_at: now })
+      .eq("company_id", account.companyId).eq("case_id", caseId).in("status", ["pending", "waiting"]);
+    if (skipped.error && !/does not exist|schema cache/i.test(skipped.error.message)) throw new Error(skipped.error.message);
+    await db().from("hr_exit_events").insert({
+      company_id: account.companyId,
+      case_id: caseId,
+      event_code: "WITHDRAWN",
+      title: "Withdrawal accepted — resignation withdrawn",
+      actor_name: account.name ?? "Approver",
+      details: { note: note || null, reviewed_by: actorUserId }
+    });
+    await notifyConnectExitOutcome({ companyId: account.companyId, caseId, event: "CASE_REJECTED" }).catch(() => undefined);
+    return "Withdrawal accepted. The exit case is withdrawn and the requester can see the updated status in One.";
+  }
+  const restoreStatus = String(exitCase.status_before_withdrawal ?? "submitted");
+  const restored = await db().from("hr_exit_cases").update({
+    status: restoreStatus,
+    withdrawal_reviewer_user_id: null,
+    withdrawal_requested_at: null,
+    status_before_withdrawal: null,
+    updated_at: now
+  }).eq("company_id", account.companyId).eq("id", caseId).eq("status", "withdrawal_requested");
+  if (restored.error) throw new Error(restored.error.message);
+  await db().from("hr_exit_events").insert({
+    company_id: account.companyId,
+    case_id: caseId,
+    event_code: "WITHDRAWAL_DECLINED",
+    title: "Withdrawal request declined — exit remains open",
+    actor_name: account.name ?? "Approver",
+    details: { note, restored_status: restoreStatus }
+  });
+  return "Withdrawal declined. The exit request remains open.";
 }
 
 async function workerDisplay(companyId: string, workerType: string, workerId: string) {

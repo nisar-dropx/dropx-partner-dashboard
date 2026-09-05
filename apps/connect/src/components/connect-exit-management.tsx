@@ -165,7 +165,7 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
   }
 
   const exitCase = data?.exitCase;
-  const canStart = !exitCase || ["rejected", "withdrawn", "cancelled", "settled", "withdrawal_requested"].includes(exitCase.status);
+  const canStart = !exitCase || ["rejected", "withdrawn", "cancelled", "settled"].includes(exitCase.status);
   const canWithdraw = Boolean(
     data?.flow === "people" &&
     exitCase &&
@@ -204,6 +204,8 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
       <article className="connect-exit-card status-card">
         <div className="connect-exit-status-head"><div><span className="connect-exit-eyebrow">{exitCase.caseNumber}</span><h2>{label(exitCase.status)}</h2></div><span className={`connect-status-badge ${exitCase.status}`}>{label(exitCase.stage)}</span></div>
         <div className="connect-exit-facts"><div><span>Reason</span><strong>{exitCase.reason || "Resignation"}</strong></div><div><span>Requested last day</span><strong>{displayDate(exitCase.requestedLastWorkingDate)}</strong></div><div><span>Approved last day</span><strong>{displayDate(exitCase.approvedLastWorkingDate)}</strong></div><div><span>Settlement</span><strong>{label(exitCase.settlementStatus || "not started")}</strong></div></div>
+        {exitCase.status === "withdrawal_requested" ? <div className="connect-exit-warning"><strong>Withdrawal pending</strong><span>Your withdrawal request was sent to the first manager who approved this resignation. Status will update here when they accept or keep the exit open.</span></div> : null}
+        {exitCase.status === "withdrawn" ? <div className="connect-exit-warning"><strong>Withdrawn</strong><span>This resignation is withdrawn. You can submit a new request when ready.</span></div> : null}
         {canWithdraw ? <button className="connect-secondary danger" disabled={pending} onClick={withdraw} type="button">Request withdrawal</button> : null}
       </article>
 
