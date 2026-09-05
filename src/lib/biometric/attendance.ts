@@ -162,6 +162,54 @@ function biometricIdVariants(values: string[]) {
   })));
 }
 
+/** Prefer the enrolment spelling that already holds the richest day summary. */
+function preferEnrolmentDailyRow(left: DailyRow, right: DailyRow) {
+  const leftScore =
+    Number(left.punch_count ?? 0) * 100 +
+    Number(Boolean(left.out_time)) * 10 +
+    String(left.enrolment_id).length;
+  const rightScore =
+    Number(right.punch_count ?? 0) * 100 +
+    Number(Boolean(right.out_time)) * 10 +
+    String(right.enrolment_id).length;
+  return rightScore > leftScore ? right : left;
+}
+
+/**
+ * Biometric devices / master sync sometimes store the same worker under both
+ * cleaned (`230878`) and zero-padded (`00230878`) enrolment ids. Collapse those
+ * duplicate daily rows before building the Connect/People attendance report.
+ */
+function mergeDailyRowsAcrossEnrolmentVariants(dailyRows: DailyRow[]) {
+  const groups = new Map<string, DailyRow>();
+  for (const row of dailyRows) {
+    const key = `${normalizeBiometricId(row.enrolment_id)}:${row.punch_date}`;
+    const existing = groups.get(key);
+    groups.set(key, existing ? preferEnrolmentDailyRow(existing, row) : row);
+  }
+  return Array.from(groups.values()).sort((left, right) =>
+    right.punch_date.localeCompare(left.punch_date) || left.enrolment_id.localeCompare(right.enrolment_id)
+  );
+}
+
+function punchesForDailyRow(
+  row: DailyRow,
+  punchesByKey: Map<string, PunchRow[]>
+) {
+  const merged = biometricIdVariants([row.enrolment_id]).flatMap(
+    (enrolmentId) => punchesByKey.get(`${enrolmentId}:${row.punch_date}`) ?? []
+  );
+  const seen = new Set<string>();
+  return merged
+    .filter((punch) => {
+      const stamp = String(punch.punch_time ?? "");
+      if (!stamp || seen.has(stamp)) return false;
+      seen.add(stamp);
+      return true;
+    })
+    .sort((left, right) => String(left.punch_time).localeCompare(String(right.punch_time)));
+}
+
 export function istDate(value: Date) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     day: "2-digit",
@@ -357,7 +405,7 @@ export async function resolveAttendanceWorkDate({
     .from("attendance_punches")
     .select("id")
     .eq("company_id", companyId)
-    .eq("enrolment_id", enrolmentId)
+    .in("enrolment_id", biometricIdVariants([enrolmentId]))
     .eq("punch_date", calendarDate)
     .eq("calculated", true)
     .limit(1);
@@ -367,7 +415,7 @@ export async function resolveAttendanceWorkDate({
     .from("attendance_punches")
     .select("punch_time")
     .eq("company_id", companyId)
-    .eq("enrolment_id", enrolmentId)
+    .in("enrolment_id", biometricIdVariants([enrolmentId]))
     .eq("punch_date", previousDate)
     .eq("calculated", true)
     .order("punch_time", { ascending: true });
@@ -762,17 +810,25 @@ export async function loadDailyWorkerSnapshot({
 export async function rebuildAttendanceDay(companyId: string, enrolmentId: string, punchDate: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
+  const enrolmentVariants = biometricIdVariants([enrolmentId]);
+  const canonicalEnrolmentId = normalizeBiometricId(enrolmentId);
   const { data, error } = await supabaseAdmin
     .from("attendance_punches")
-    .select("id, punch_time")
+    .select("id, punch_time, enrolment_id")
     .eq("company_id", companyId)
-    .eq("enrolment_id", enrolmentId)
+    .in("enrolment_id", enrolmentVariants)
     .eq("punch_date", punchDate)
     .eq("calculated", true)
     .order("punch_time", { ascending: true });
   if (error) throw new Error(error.message);
 
-  const punches = data ?? [];
+  const seenTimes = new Set<string>();
+  const punches = (data ?? []).filter((punch) => {
+    const stamp = String(punch.punch_time ?? "");
+    if (!stamp || seenTimes.has(stamp)) return false;
+    seenTimes.add(stamp);
+    return true;
+  });
   // Freeze punch times before order updates so rebuild never picks up approval/server "now".
   const punchTimes = punches.map((punch) => punch.punch_time).filter(Boolean) as string[];
   for (let index = 0; index < punches.length; index += 1) {
@@ -781,6 +837,7 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
     await supabaseAdmin
       .from("attendance_punches")
       .update({
+        enrolment_id: canonicalEnrolmentId,
         punch_order: order,
         punch_label: punchLabel(order),
         ...(preservedTime ? { punch_time: preservedTime } : {})
@@ -800,7 +857,7 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
     .from("attendance_punches")
     .select("worker_type, employee_id, field_executive_id, profile_type, account_id, location_id")
     .eq("company_id", companyId)
-    .eq("enrolment_id", enrolmentId)
+    .in("enrolment_id", enrolmentVariants)
     .eq("punch_date", punchDate)
     .eq("calculated", true)
     .order("punch_time", { ascending: false })
@@ -819,7 +876,7 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
 
   const basePayload = {
     company_id: companyId,
-    enrolment_id: enrolmentId,
+    enrolment_id: canonicalEnrolmentId,
     worker_type: latestPunch.data?.worker_type ?? null,
     employee_id: latestPunch.data?.employee_id ?? null,
     field_executive_id: latestPunch.data?.field_executive_id ?? null,
@@ -850,10 +907,20 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
       .from("attendance_daily")
       .upsert(basePayload, { onConflict: "company_id,enrolment_id,punch_date" });
     if (fallbackUpsert.error) throw new Error(fallbackUpsert.error.message);
-    return;
+  } else if (firstUpsert.error) {
+    throw new Error(firstUpsert.error.message);
   }
 
-  if (firstUpsert.error) throw new Error(firstUpsert.error.message);
+  // Drop padded/legacy duplicate daily rows for the same workday.
+  const staleVariants = enrolmentVariants.filter((value) => value !== canonicalEnrolmentId);
+  if (staleVariants.length) {
+    await supabaseAdmin
+      .from("attendance_daily")
+      .delete()
+      .eq("company_id", companyId)
+      .eq("punch_date", punchDate)
+      .in("enrolment_id", staleVariants);
+  }
 }
 
 type HistoricalRawPunchRow = {
@@ -1077,12 +1144,17 @@ export async function loadAttendanceReportRows({
   }
   if (dailyResult.error) throw new Error(dailyResult.error.message);
 
-  const dailyRows = normalizeDailyRows((dailyResult.data ?? []) as Partial<DailyRow>[]);
+  const dailyRows = mergeDailyRowsAcrossEnrolmentVariants(
+    normalizeDailyRows((dailyResult.data ?? []) as Partial<DailyRow>[])
+  );
   const employeeIds = Array.from(new Set(dailyRows.map((row) => row.employee_id).filter(Boolean))) as string[];
   const executiveIds = Array.from(new Set(dailyRows.map((row) => row.field_executive_id).filter(Boolean))) as string[];
   const dailyLocationIds = Array.from(new Set(dailyRows.map((row) => row.location_id).filter(Boolean))) as string[];
   const enrolmentIds = Array.from(new Set(dailyRows.map((row) => row.enrolment_id)));
-  const biometricVariants = biometricIdVariants(enrolmentIds);
+  const biometricVariants = biometricIdVariants([
+    ...enrolmentIds,
+    ...(requestedEnrolmentIds ?? [])
+  ]);
   const [employeeResult, executiveResult, locationResult, biometricEmployeeResult, biometricExecutiveResult, biometricContractorResult, biometricVendorResult, biometricWorkerResult, biometricHelperResult, biometricPickerResult] = await Promise.all([
     employeeIds.length
       ? supabaseAdmin
@@ -1196,13 +1268,13 @@ export async function loadAttendanceReportRows({
   const punchFilterDates = Array.from(new Set(dailyRows.map((row) => row.punch_date)));
   let punchesByKey = new Map<string, PunchRow[]>();
 
-  if (enrolmentIds.length && punchFilterDates.length) {
+  if (biometricVariants.length && punchFilterDates.length) {
     let punchQuery = supabaseAdmin
       .from("attendance_punches")
       .select("enrolment_id, punch_date, punch_time, punch_label, device_serial, calculated")
       .eq("company_id", companyId)
       .eq("calculated", true)
-      .in("enrolment_id", enrolmentIds)
+      .in("enrolment_id", biometricVariants)
       .in("punch_date", punchFilterDates)
       .order("punch_time", { ascending: true });
     if (locationIds?.length) punchQuery = punchQuery.in("location_id", locationIds);
@@ -1252,15 +1324,30 @@ export async function loadAttendanceReportRows({
       ? designationsById.get(biometricWorker.designation_id)
       : null;
     const station = row.location_id ? locationsById.get(row.location_id) : null;
-    const punches = punchesByKey.get(`${row.enrolment_id}:${row.punch_date}`) ?? [];
+    const punches = punchesForDailyRow(row, punchesByKey);
     const punchTimes = punches.map((punch) => punch.punch_time).filter(Boolean) as string[];
-    const punchSummary = punchTimes.length > Number(row.punch_count ?? 0)
+    const storedPunchCount = Number(row.punch_count ?? 0);
+    const shouldRecomputeFromPunches = punchTimes.length > 0 && (
+      punchTimes.length !== storedPunchCount ||
+      !row.out_time ||
+      (punchTimes.length >= 2 && Number(row.work_minutes ?? 0) <= 0)
+    );
+    const punchSummary = shouldRecomputeFromPunches
       ? summarizeFirstInLastOut(punchTimes)
       : null;
-    const effectiveInTime = punchSummary && punchTimes[0] ? punchTimes[0] : row.in_time;
-    const effectiveOutTime = punchSummary ? punchSummary.lastOutTime : row.out_time;
-    const effectivePunchCount = Math.max(Number(row.punch_count ?? 0), punches.length);
-    const effectiveWorkMinutes = punchSummary ? punchSummary.workMinutes : Number(row.work_minutes ?? 0);
+    const effectiveInTime = punchSummary && punchTimes[0]
+      ? punchTimes[0]
+      : (punchTimes[0] ?? row.in_time);
+    const effectiveOutTime = punchSummary
+      ? punchSummary.lastOutTime
+      : (punchTimes.length >= 2 ? punchTimes[punchTimes.length - 1] : row.out_time);
+    const effectivePunchCount = Math.max(storedPunchCount, punches.length);
+    const effectiveWorkMinutes = punchSummary
+      ? punchSummary.workMinutes
+      : Number(row.work_minutes ?? 0);
+    const effectiveRemark = punchSummary && punchTimes.length >= 2
+      ? (String(row.remark ?? "").toLowerCase().includes("single") ? "" : (row.remark ?? ""))
+      : (row.remark ?? "");
     const labels = Object.fromEntries(punches.map((punch) => [punch.punch_label, formatTime(punch.punch_time)]));
     const firstDevice = punches.find((punch) => punch.device_serial)?.device_serial ?? "";
     const profileType = row.employee_id || row.worker_type === "employee"
@@ -1308,7 +1395,7 @@ export async function loadAttendanceReportRows({
       attendanceStatus,
       lateMinutes: variance.lateMinutes,
       earlyOutMinutes: variance.earlyOutMinutes,
-      remark: row.remark ?? "",
+      remark: effectiveRemark,
       workMode: row.work_mode === "wfh" ? "wfh" as const : "onsite" as const,
       deviceSerial: firstDevice,
       labels

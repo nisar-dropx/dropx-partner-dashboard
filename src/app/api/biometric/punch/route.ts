@@ -663,7 +663,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const canonicalEnrolmentId = enrolment.enrolment_id;
+    const canonicalEnrolmentId = cleanEnrolmentId(enrolment.enrolment_id) || enrolment.enrolment_id;
+    const enrolmentVariants = enrolmentIdCandidates(canonicalEnrolmentId);
     const active = enrolment.status === "Active";
     const punchDate = await resolveAttendanceWorkDate({
       accountId: enrolment.account_id,
@@ -678,7 +679,7 @@ export async function POST(request: NextRequest) {
       .from("attendance_punches")
       .select("id, punch_time")
       .eq("company_id", device.company_id)
-      .eq("enrolment_id", canonicalEnrolmentId)
+      .in("enrolment_id", enrolmentVariants.length ? enrolmentVariants : [canonicalEnrolmentId])
       .eq("punch_date", punchDate)
       .eq("calculated", true)
       .order("punch_time", { ascending: true });
