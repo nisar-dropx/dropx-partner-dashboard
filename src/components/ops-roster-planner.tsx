@@ -72,6 +72,16 @@ function dayLabel(date: string) { return new Intl.DateTimeFormat("en-IN", { week
 function dateLabel(date: string) { return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)); }
 function fullDateLabel(date: string) { return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)); }
 function rosterInstant(date: string, startTime = "00:00") { return new Date(`${date}T${startTime.slice(0, 5)}:00+05:30`).getTime(); }
+function mondayOf(date: string) {
+  const value = new Date(`${date}T00:00:00Z`);
+  const day = value.getUTCDay() || 7;
+  value.setUTCDate(value.getUTCDate() - (day - 1));
+  return value.toISOString().slice(0, 10);
+}
+function currentIstMonth() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit" }).format(new Date());
+}
+type BulkPeriodMode = "week" | "month";
 function remapCellKeyToTemplate(key: string, templateMonday: string) {
   const separator = key.lastIndexOf(":");
   return `${key.slice(0, separator)}:${recurringTemplateDate(templateMonday, key.slice(separator + 1))}`;
@@ -143,6 +153,9 @@ export function OpsRosterPlanner({
   const [isSaving, startSaving] = useTransition();
   const [isImporting, startImporting] = useTransition();
   const [excelFileName, setExcelFileName] = useState<string | null>(null);
+  const [bulkPeriodMode, setBulkPeriodMode] = useState<BulkPeriodMode>("week");
+  const [bulkRosterMonth, setBulkRosterMonth] = useState(currentIstMonth);
+  const [bulkWeekStart, setBulkWeekStart] = useState(() => mondayOf(today));
   const editingEnabledRef = useRef(editable);
   const pendingRecall = plan?.status === "pending_approval" && canStart && !editingEnabled;
   const assignmentsRef = useRef(initial);
@@ -274,12 +287,18 @@ export function OpsRosterPlanner({
     return true;
   }, [canStart, plan?.status, router, stationId]);
 
+  const bulkWeekMonday = useMemo(() => mondayOf(bulkWeekStart || today), [bulkWeekStart, today]);
+  const bulkWeekSunday = useMemo(() => moveIsoDate(bulkWeekMonday, 6), [bulkWeekMonday]);
+
   const importWorkbook = useCallback((formData: FormData) => {
     if (!activePlanIdRef.current) {
       setMessage({ tone: "error", text: "Prepare or recall an editable roster before uploading." });
       return;
     }
     formData.set("plan_id", activePlanIdRef.current);
+    formData.set("roster_period", bulkPeriodMode);
+    formData.set("roster_month", bulkRosterMonth);
+    formData.set("week_start", bulkWeekMonday);
     startImporting(async () => {
       const result = await importOpsRosterWorkbook(formData);
       if (!result.ok) {
@@ -294,11 +313,12 @@ export function OpsRosterPlanner({
         setAssignments(next);
         templateStartRef.current = result.periodStart;
         setTemplateStart(result.periodStart);
+        setWeekStart(result.periodStart < initialWeekStart ? initialWeekStart : result.periodStart);
         setDirtyKeys(new Set());
       }
       router.refresh();
     });
-  }, [router]);
+  }, [bulkPeriodMode, bulkRosterMonth, bulkWeekMonday, initialWeekStart, router]);
 
   useEffect(() => {
     if (!cellPicker) return;
@@ -656,17 +676,48 @@ export function OpsRosterPlanner({
         <span className={styles.excelIcon} aria-hidden="true"><Upload size={16} /></span>
         <div>
           <strong>Excel upload</strong>
-          <small>{stationCode} · active people at this station only</small>
+          <small>{stationCode} · choose a week or month, same as People</small>
         </div>
         <span className={styles.excelBadge}>Draft only</span>
         <span className={styles.excelBadgeMuted}>Submit for approval after import</span>
       </div>
+
+      <div className={styles.excelPeriod}>
+        <div className={styles.excelPeriodToggle} role="group" aria-label="Upload period">
+          <button type="button" className={bulkPeriodMode === "week" ? styles.excelPeriodActive : undefined} onClick={() => setBulkPeriodMode("week")}>Week</button>
+          <button type="button" className={bulkPeriodMode === "month" ? styles.excelPeriodActive : undefined} onClick={() => setBulkPeriodMode("month")}>Month</button>
+        </div>
+        {bulkPeriodMode === "week" ? (
+          <label className={styles.excelPeriodField}>
+            <span>Week starting</span>
+            <input
+              type="date"
+              value={bulkWeekMonday}
+              onChange={(event) => setBulkWeekStart(mondayOf(event.target.value || today))}
+              disabled={isImporting}
+            />
+            <small>Mon {dateLabel(bulkWeekMonday)} → Sun {dateLabel(bulkWeekSunday)}</small>
+          </label>
+        ) : (
+          <label className={styles.excelPeriodField}>
+            <span>Roster month</span>
+            <input
+              type="month"
+              value={bulkRosterMonth}
+              onChange={(event) => setBulkRosterMonth(event.target.value)}
+              disabled={isImporting}
+            />
+            <small>Writes only dates inside {bulkRosterMonth}</small>
+          </label>
+        )}
+      </div>
+
       <ol className={styles.excelSteps}>
         <li>
           <em>1</em>
           <div>
             <strong>Download template</strong>
-            <small>Mon–Sun columns · use WO for week off</small>
+            <small>Mon–Sun pattern · WO for week off</small>
           </div>
           <a className="button secondary compact" download href={templateHref}><Download size={14} /> Download</a>
         </li>
@@ -674,7 +725,11 @@ export function OpsRosterPlanner({
           <em>2</em>
           <div>
             <strong>Upload completed file</strong>
-            <small>{editingEnabled && activePlanId ? "Fills this draft — does not publish" : pendingRecall ? "Recall & edit first, then upload" : "Start or edit the roster first"}</small>
+            <small>
+              {editingEnabled && activePlanId
+                ? (bulkPeriodMode === "week" ? "Imports the selected week into this draft" : `Applies the weekly pattern inside ${bulkRosterMonth}`)
+                : pendingRecall ? "Recall & edit first, then upload" : "Start or edit the roster first"}
+            </small>
           </div>
           {editingEnabled && activePlanId ? (
             <form action={importWorkbook} encType="multipart/form-data" className={styles.excelImportForm}>
@@ -689,7 +744,9 @@ export function OpsRosterPlanner({
                 />
                 <span>{excelFileName ?? "Choose file"}</span>
               </label>
-              <button className="button primary compact" type="submit" disabled={isImporting}>{isImporting ? "Importing…" : "Import"}</button>
+              <button className="button primary compact" type="submit" disabled={isImporting}>
+                {isImporting ? "Importing…" : `Import ${bulkPeriodMode}`}
+              </button>
             </form>
           ) : (
             <button className="button secondary compact" type="button" onClick={() => void ensureEditing()} disabled={isPreparing || !canStart}>

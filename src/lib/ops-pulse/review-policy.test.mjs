@@ -37,6 +37,7 @@ test('location scope and page permissions remain enforced even for oversight',()
 });
 test('role classification includes TL, location mail accounts and People PGM',()=>{
   assert.equal(reviewRole('OPERATIONS_LOCATION'), 'station');assert.equal(reviewRole('TL Team Lead'),'station');assert.equal(reviewRole('PGM Program Manager'),'program');assert.equal(reviewRole('PROGRAM_HEAD'),'program');
+  assert.equal(reviewRole('CM'),'cluster');assert.equal(reviewRole('AM'),'aom');
 });
 test('connection handles overnight completion and saves in IST',()=>{
   assert.deepEqual(connectionTimes({arrival:'2026-09-01T23:30',unloading:'2026-09-02T00:20',clearance:'2026-09-02T01:00'},'2026-09-01'),{arrival:'2026-09-01T18:00:00.000Z',unloading:'2026-09-01T18:50:00.000Z',clearance:'2026-09-01T19:30:00.000Z'});

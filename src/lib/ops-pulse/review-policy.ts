@@ -2,8 +2,9 @@
 export function reviewRole(value: string | null | undefined) {
   const role = ` ${String(value ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, " ")} `;
   if (/\b(PGM|PROGRAM MANAGER|PROGRAM HEAD)\b/.test(role)) return "program";
-  if (/\b(CLM|CLUSTER MANAGER|CLUSTER HEAD)\b/.test(role)) return "cluster";
-  if (/\b(AOM|AREA OPERATIONS? MANAGER)\b/.test(role)) return "aom";
+  // CM / CLM are used interchangeably in People designations for cluster managers.
+  if (/\b(CLM|CM|CLUSTER MANAGER|CLUSTER HEAD|CLUSTER MGR)\b/.test(role)) return "cluster";
+  if (/\b(AOM|AM|AREA OPERATIONS? MANAGER|AREA MANAGER)\b/.test(role)) return "aom";
   if (/\b(NH|NATIONAL HEAD)\b/.test(role)) return "national";
   if (/\b(TECH|FSD|FULL STACK DEVELOPER)\b/.test(role)) return "tech";
   if (/\b(LOCATION|TL|ATL|STM|SSA|TEAM LEAD|TEAM LEADER|STATION MANAGER|STATION SUPPORT ASSOCIATE)\b/.test(role)) return "station";

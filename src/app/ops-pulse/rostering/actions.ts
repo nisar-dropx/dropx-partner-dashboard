@@ -21,7 +21,8 @@ import {
   normalizeRosterCell,
   recurringRosterDate,
   recurringRosterDays,
-  resolveActiveRosterShift
+  resolveActiveRosterShift,
+  resolveRosterBulkUploadWindow
 } from "@/lib/ops-pulse/recurring-roster-import";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -518,10 +519,27 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
       return { ok: false, message: "Choose a CSV or Excel file smaller than 15 MB." };
     }
 
-    const plan = await loadPlan(companyId, authorization, planId);
+    let window;
+    try {
+      window = resolveRosterBulkUploadWindow({
+        mode: String(formData.get("roster_period") ?? "week"),
+        rosterMonth: String(formData.get("roster_month") ?? ""),
+        weekStart: String(formData.get("week_start") ?? ""),
+        today: indiaToday()
+      });
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : "Choose a valid roster period." };
+    }
+
+    let plan = await loadPlan(companyId, authorization, planId);
     if (!["draft", "returned"].includes(plan.status) || !plan.location_id || plan.roster_kind !== "recurring_weekly") {
       return { ok: false, message: "This roster is no longer editable. Recall or prepare a draft first." };
     }
+    if (plan.period_start !== window.periodStart) {
+      const aligned = await alignOpenOpsRosterToWeek(companyId, authorization.userId, plan, window.periodStart);
+      plan = await loadPlan(companyId, authorization, aligned.id);
+    }
+
     const station = await authorisedStation(companyId, authorization, plan.location_id);
     const [manpower, shifts] = await Promise.all([
       loadOpsStationManpower(companyId, [station], indiaToday()),
@@ -580,7 +598,8 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
 
         for (const day of recurringRosterDays) {
           const cell = normalizeRosterCell(readColumn(source, [day, `${day}_SHIFT`, day.slice(0, 3)]));
-          const date = recurringRosterDate(plan.period_start, day);
+          const date = recurringRosterDate(window.periodStart, day);
+          if (date < window.writeStart || date > window.writeEnd) continue;
           if (cell.kind === "clear") {
             if (person) removals.push({ workerType: person.workerType, workerId: person.id, date });
             continue;
@@ -617,7 +636,7 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
         const problem = !codeRaw ? "People ID is missing"
           : !person ? "People ID is not active at this station"
           : locationCode && locationCode !== String(station.station_code).trim().toUpperCase() ? "station code must match this Ops station"
-          : !date || date < plan.period_start || date > plan.period_end ? "date is outside the plan week"
+          : !date || date < window.writeStart || date > window.writeEnd ? `date is outside the selected ${window.mode === "week" ? "week" : "month"}`
           : !["working", "weekly_off"].includes(day) ? "day type must be working or weekly_off"
           : day === "working" && !shift ? "shift code is missing or inactive"
           : null;
@@ -645,7 +664,7 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
         message: `Nothing imported. Fix ${errors.join("; ")}${sourceRows.length > errors.length ? ". Other rows may also need attention." : "."}`
       };
     }
-    if (!upserts.length && !removals.length) return { ok: false, message: "The workbook did not contain any roster cells to import." };
+    if (!upserts.length && !removals.length) return { ok: false, message: "The workbook did not contain any roster cells to import for the selected period." };
     if (upserts.length + removals.length > 25_000) return { ok: false, message: "The workbook exceeds 25,000 roster cells." };
 
     const touched = await db().from("hr_roster_plans")
@@ -671,6 +690,13 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
       if (removed.error) throw new Error(removed.error.message);
     }
 
+    if (window.mode === "month") {
+      const trimmedEarly = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", planId).lt("roster_date", window.writeStart);
+      if (trimmedEarly.error) throw new Error(trimmedEarly.error.message);
+      const trimmedLate = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", planId).gt("roster_date", window.writeEnd);
+      if (trimmedLate.error) throw new Error(trimmedLate.error.message);
+    }
+
     const refreshed = await db().from("hr_roster_entries")
       .select("worker_type,worker_id,roster_date,day_type,shift_id,notes")
       .eq("company_id", companyId)
@@ -682,9 +708,9 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
     return {
       ok: true,
       planId,
-      periodStart: plan.period_start,
+      periodStart: window.periodStart,
       entries: mapPreparedEntries(refreshed.data ?? []),
-      message: `${cellCount} roster ${cellCount === 1 ? "cell" : "cells"} imported into the draft. Review, save if needed, then submit for approval.`
+      message: `${cellCount} roster ${cellCount === 1 ? "cell" : "cells"} imported for ${window.label}. Review, then submit for approval.`
     };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "The workbook could not be imported." };

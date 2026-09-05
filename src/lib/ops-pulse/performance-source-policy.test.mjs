@@ -3,13 +3,15 @@ import test from "node:test";
 import {
   ACTIVE_DAILY_PERFORMANCE_SOURCE,
   selectActiveDailyBatchRows,
+  selectStationDailyRow,
 } from "./performance-source-policy.ts";
 
-const fact = (source_type, batch_id, created_at, report_date = "2026-09-02") => ({
+const fact = (source_type, batch_id, created_at, report_date = "2026-09-02", station_code = "KOZA") => ({
   batch_id,
   created_at,
   report_date,
   source_type,
+  station_code,
 });
 
 test("uses Hawkeye as the active temporary daily performance source", () => {
@@ -36,3 +38,13 @@ test("selects every station row from the latest Hawkeye batch", () => {
   assert.ok(selected.rows.every((row) => row.source_type === "amazon_hawkeye_daily"));
 });
 
+test("keeps a station row when a newer Hawkeye batch omitted that station", () => {
+  const norm = (value) => String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const rows = [
+    fact("amazon_hawkeye_daily", "hawkeye-latest", "2026-09-05T10:00:00Z", "2026-09-04", "KOZA"),
+    fact("amazon_hawkeye_daily", "hawkeye-old", "2026-09-05T09:00:00Z", "2026-09-04", "TLPB"),
+    fact("amazon_hawkeye_daily", "hawkeye-old", "2026-09-05T09:00:00Z", "2026-09-04", "KOZA"),
+  ];
+  assert.equal(selectActiveDailyBatchRows(rows, "2026-09-04").rows.map((row) => row.station_code).join(","), "KOZA");
+  assert.equal(selectStationDailyRow(rows, "2026-09-04", "TLPB", norm)?.station_code, "TLPB");
+});

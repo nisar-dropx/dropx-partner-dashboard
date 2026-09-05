@@ -20,7 +20,7 @@ import { reviewPendingPage } from "@/lib/ops-pulse/review-periods";
 import { loadReviewCod } from "@/lib/ops-pulse/review-cod-data";
 import { getReviewAccess } from "@/lib/ops-pulse/review-access";
 import { legacyConnectionsFromReview } from "@/lib/ops-pulse/review-policy";
-import { ACTIVE_DAILY_PERFORMANCE_SOURCE, ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL, selectActiveDailyBatchRows } from "@/lib/performance-source-policy";
+import { ACTIVE_DAILY_PERFORMANCE_SOURCE, ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL, selectActiveDailyBatchRows, selectStationDailyRow } from "@/lib/performance-source-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -190,37 +190,57 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   // Scope cookie (dropx-ops-locations), or managers with full access only see
   // whichever location was last focused in OpsPulse.
   const permittedLocations = context.modeLocations;
+  const permittedByCode = new Map(permittedLocations.map((location) => [stationCode(location.station_code), location]));
   const permittedCodes = permittedLocations.map((location) => location.station_code);
-  const requestedCodes = String(searchParams?.stations ?? "").split(",").map((code) => code.trim().toUpperCase()).filter((code) => permittedCodes.includes(code));
+  const requestedCodes = String(searchParams?.stations ?? "")
+    .split(",")
+    .map((code) => stationCode(code))
+    .map((code) => permittedByCode.get(code)?.station_code)
+    .filter((code): code is string => Boolean(code));
   const selectedCodes = requestedCodes.length ? [...new Set(requestedCodes)] : permittedCodes;
+  const selectedCodeSet = new Set(selectedCodes.map(stationCode));
+  const sameStation = (left: string | null | undefined, right: string | null | undefined) => stationCode(left ?? null) === stationCode(right ?? null);
   const defaultDailyDate = dateShift(today(), -1);
   const selectedDate = validDate(searchParams?.date, validDate(searchParams?.to, defaultDailyDate));
   const selectedDailyWeek = amazonWeekNumber(selectedDate);
   const selectedDailyWeekRange = weekDates(Number(selectedDate.slice(0, 4)), selectedDailyWeek);
   const trendFrom = selectedDailyWeekRange.start;
   const trendTo = selectedDailyWeekRange.end < defaultDailyDate ? selectedDailyWeekRange.end : defaultDailyDate;
+  const metricSelect = "batch_id,source_type,report_year,report_week,report_date,station_code,row_label,raw_text,values_json,created_at";
   const metricQuery = !supabaseAdmin || !selectedCodes.length
     ? null
     : view === "daily" || view === "reviews"
       ? supabaseAdmin.from("report_metric_facts")
-        .select("batch_id,source_type,report_year,report_week,report_date,station_code,row_label,raw_text,values_json,created_at")
+        .select(metricSelect)
         .eq("company_id", companyId)
         .in("station_code", selectedCodes)
         .eq("source_type", ACTIVE_DAILY_PERFORMANCE_SOURCE)
         .gte("report_date", trendFrom)
         .lte("report_date", trendTo)
         .order("created_at", { ascending: false })
-        .limit(3000)
+        .limit(5000)
       : supabaseAdmin.from("report_metric_facts")
-        .select("batch_id,source_type,report_year,report_week,report_date,station_code,row_label,raw_text,values_json,created_at")
+        .select(metricSelect)
         .eq("company_id", companyId)
         .in("station_code", selectedCodes)
         .eq("source_type", "edsp_sls_scorecard")
         .order("created_at", { ascending: false })
         .limit(5000);
+  // One-day fetch so stations omitted from the week-window limit still get today's Hawkeye row.
+  const selectedDayMetricQuery = !supabaseAdmin || !selectedCodes.length || (view !== "daily" && view !== "reviews")
+    ? null
+    : supabaseAdmin.from("report_metric_facts")
+      .select(metricSelect)
+      .eq("company_id", companyId)
+      .in("station_code", selectedCodes)
+      .eq("source_type", ACTIVE_DAILY_PERFORMANCE_SOURCE)
+      .eq("report_date", selectedDate)
+      .order("created_at", { ascending: false })
+      .limit(5000);
 
-  const [metricResult, shipmentResult, dateCoverageResult, latestDailyResult] = !supabaseAdmin || !selectedCodes.length
+  const [metricResult, dayMetricResult, shipmentResult, dateCoverageResult, latestDailyResult] = !supabaseAdmin || !selectedCodes.length
     ? [
+      { data: [] as MetricFact[], error: null },
       { data: [] as MetricFact[], error: null },
       { data: [] as ShipmentFact[], error: null },
       { data: [] as Array<Pick<MetricFact, "batch_id" | "created_at" | "report_date" | "station_code">>, error: null },
@@ -228,6 +248,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     ]
     : await Promise.all([
       metricQuery!,
+      selectedDayMetricQuery ?? Promise.resolve({ data: [] as MetricFact[], error: null }),
       supabaseAdmin.from("cps_shipment_daily")
         .select("work_date,station_code,amazon_delivery,c_return,mfn,mfn_return,total_delivery")
         .eq("company_id", companyId).in("station_code", selectedCodes)
@@ -238,7 +259,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
         .eq("source_type", ACTIVE_DAILY_PERFORMANCE_SOURCE)
         .eq("report_date", selectedDate)
         .not("station_code", "is", null)
-        .limit(1000),
+        .limit(2000),
       supabaseAdmin.from("report_metric_facts")
         .select("report_date")
         .eq("company_id", companyId)
@@ -248,15 +269,21 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
         .limit(1)
     ]);
 
-  const allFacts = (metricResult.data ?? []) as MetricFact[];
-  const scopedFacts = allFacts.filter((row) => !row.station_code || selectedCodes.includes(stationCode(row.station_code)));
+  const mergedFacts = [...(dayMetricResult.data ?? []), ...(metricResult.data ?? [])] as MetricFact[];
+  const seenFactKeys = new Set<string>();
+  const allFacts = mergedFacts.filter((row) => {
+    const key = `${row.batch_id}|${row.station_code}|${row.report_date}|${row.created_at}`;
+    if (seenFactKeys.has(key)) return false;
+    seenFactKeys.add(key);
+    return true;
+  });  const scopedFacts = allFacts.filter((row) => !row.station_code || selectedCodeSet.has(stationCode(row.station_code)));
   const availableWeeks = [...new Set(scopedFacts.filter((row) => row.source_type === "edsp_sls_scorecard" && row.report_week).map((row) => Number(row.report_week)))].sort((a, b) => b - a);
   const selectedWeek = Number(searchParams?.week) || availableWeeks[0] || 1;
   const stationQuery = selectedCodes.length === permittedCodes.length ? "" : `&stations=${encodeURIComponent(selectedCodes.join(","))}`;
   const currentWeek = amazonWeekNumber(today());
   const slsCandidates = scopedFacts.filter((row) => {
     const values = metricValues(row);
-    return row.source_type === "edsp_sls_scorecard" && Number(row.report_week) === selectedWeek && row.station_code && selectedCodes.includes(stationCode(row.station_code)) && values.length > 2 && values[1] > 0 && values[1] <= 1;
+    return row.source_type === "edsp_sls_scorecard" && Number(row.report_week) === selectedWeek && row.station_code && selectedCodeSet.has(stationCode(row.station_code)) && values.length > 2 && values[1] > 0 && values[1] <= 1;
   });
   const latestSlsBatch = slsCandidates[0]?.batch_id ?? null;
   const latestSlsBatchRows = latestSlsBatch ? slsCandidates.filter((row) => row.batch_id === latestSlsBatch) : [];
@@ -279,7 +306,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const suppressedSlsRows = Math.max(0, latestSlsBatchRows.length - slsRows.length);
   const dailyCandidates = scopedFacts.filter((row) => {
     return row.source_type === ACTIVE_DAILY_PERFORMANCE_SOURCE
-      && row.station_code && selectedCodes.includes(stationCode(row.station_code))
+      && row.station_code && selectedCodeSet.has(stationCode(row.station_code))
       && Boolean(hawkeyeValue(row.values_json, "AFN Std PDD DSR%") != null);
   });
   const reportDay = (row: MetricFact) => row.report_date;
@@ -324,16 +351,17 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     return `/performance?${params.toString()}`;
   };
   const shipments = (shipmentResult.data ?? []) as ShipmentFact[];
-  const locationByCode = new Map(permittedLocations.map((location) => [location.station_code, location]));
+  const locationByCode = new Map(permittedLocations.map((location) => [stationCode(location.station_code), location]));
   const shipmentMap = new Map<string, { delivered: number; cReturn: number; mfn: number; mfnReturn: number; total: number }>();
   shipments.forEach((row) => {
-    const current = shipmentMap.get(row.station_code) ?? { delivered: 0, cReturn: 0, mfn: 0, mfnReturn: 0, total: 0 };
+    const code = stationCode(row.station_code);
+    const current = shipmentMap.get(code) ?? { delivered: 0, cReturn: 0, mfn: 0, mfnReturn: 0, total: 0 };
     current.delivered += number(row.amazon_delivery);
     current.cReturn += number(row.c_return);
     current.mfn += number(row.mfn);
     current.mfnReturn += number(row.mfn_return);
     current.total += number(row.total_delivery);
-    shipmentMap.set(row.station_code, current);
+    shipmentMap.set(code, current);
   });
   const weekRange = weekDates(Number(selectedDate.slice(0, 4)), selectedWeek);
   const averageSls = slsRows.length ? slsRows.reduce((total, row) => total + metricValues(row)[1], 0) / slsRows.length : 0;
@@ -343,7 +371,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const totalCReturn = shipments.reduce((total, row) => total + number(row.c_return), 0);
   const totalMfn = shipments.reduce((total, row) => total + number(row.mfn), 0);
   const coveredStationCodes = new Set(dailyRows.map((row) => stationCode(row.station_code)));
-  const missingStationCodes = selectedCodes.filter((code) => !coveredStationCodes.has(code));
+  const missingStationCodes = selectedCodes.filter((code) => !coveredStationCodes.has(stationCode(code)));
   const latestLoadAt = [...dailyRows.map((row) => row.created_at), ...dateCoverageRows.map((row) => row.created_at)].sort().at(-1) ?? null;
   const actionRows = [...dailyRows].filter((row) => missedTargets(row) > 0).sort((a, b) => missedTargets(b) - missedTargets(a)).slice(0, 5);
   const averageDsrValues = dsrMetric ? dailyRows.map((row) => dailyMetricValue(row, dsrMetric) ?? 0).filter((value) => value > 0) : [];
@@ -359,7 +387,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   });
   const requestedTrendCode = stationCode(searchParams?.trend ?? null);
   const defaultTrendCode = stationCode(sortedDailyRows[0]?.station_code ?? selectedCodes[0] ?? null);
-  const trendStationCode = selectedCodes.includes(requestedTrendCode) ? requestedTrendCode : defaultTrendCode;
+  const trendStationCode = selectedCodeSet.has(requestedTrendCode) ? requestedTrendCode : defaultTrendCode;
   const trendStationRows = [...historyByStationDate.values()]
     .filter((row) => stationCode(row.station_code) === trendStationCode)
     .sort((left, right) => String(left.report_date).localeCompare(String(right.report_date)));
@@ -375,7 +403,16 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const operationalResult = selectedReviewLocation
     ? await loadPerformanceOperationalSnapshots(companyId, selectedDate, [selectedReviewLocation])
     : { rows: new Map(), error: "No permitted station is available." };
-  const selectedReviewRow = selectedReviewLocation ? dailyRows.find((row) => stationCode(row.station_code) === selectedReviewLocation.station_code) ?? null : null;
+  const selectedReviewRow = selectedReviewLocation
+    ? selectStationDailyRow(
+      scopedFacts.filter((row) => row.source_type === ACTIVE_DAILY_PERFORMANCE_SOURCE),
+      selectedDate,
+      selectedReviewLocation.station_code,
+      stationCode
+    )
+      ?? dailyRows.find((row) => sameStation(row.station_code, selectedReviewLocation.station_code))
+      ?? null
+    : null;
   const reviewMetrics: ReviewMetric[] = selectedReviewRow?.source_type === "amazon_hawkeye_daily"
     ? hawkeyeMetricDefinitions.map((definition) => {
       const target = allDailyTargets.find((metric) => metric.metricKey === hawkeyeTargetKey(definition));
@@ -385,10 +422,14 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     : selectedReviewRow
       ? orderedDailyMetricDefinitions.map((metric) => ({ actual: dailyMetricValue(selectedReviewRow, metric), direction: metric.direction, key: metric.metricKey, label: metric.label, severity: ragStatus(dailyMetricValue(selectedReviewRow, metric), metric.target, metric.direction) as ReviewMetric["severity"], short: metric.short, target: metric.target }))
       : [];
-  const selectedReview = selectedReviewLocation ? reviewWorkspace.reviews.find((review) => stationCode(review.station_code) === stationCode(selectedReviewLocation.station_code)) ?? null : null;
+  const selectedReview = selectedReviewLocation
+    ? reviewWorkspace.reviews.find((review) =>
+      review.station_id === selectedReviewLocation.id || sameStation(review.station_code, selectedReviewLocation.station_code)
+    ) ?? null
+    : null;
   const selectedSnapshot = selectedReviewLocation
     ? operationalResult.rows.get(selectedReviewLocation.station_code)
-      ?? [...operationalResult.rows.entries()].find(([code]) => stationCode(code) === stationCode(selectedReviewLocation.station_code))?.[1]
+      ?? [...operationalResult.rows.entries()].find(([code]) => sameStation(code, selectedReviewLocation.station_code))?.[1]
       ?? null
     : null;
   const canViewReviews = hasPermission(authorization, "performance_review", "access");
@@ -419,10 +460,10 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
           <PerformanceStationFilter stations={permittedLocations.map((location) => ({ code: location.station_code, name: location.station_name || location.city || location.station_code }))} selectedCodes={selectedCodes} view={view} date={selectedDate} week={selectedWeek} />
         </div> : null}
 
-        {metricResult.error || shipmentResult.error || dateCoverageResult.error || latestDailyResult.error || targetResult.error ? <section className="panel message-panel error"><div className="panel-body">{metricResult.error?.message ?? shipmentResult.error?.message ?? dateCoverageResult.error?.message ?? latestDailyResult.error?.message ?? targetResult.error}</div></section> : null}
+        {metricResult.error || dayMetricResult.error || shipmentResult.error || dateCoverageResult.error || latestDailyResult.error || targetResult.error ? <section className="panel message-panel error"><div className="panel-body">{metricResult.error?.message ?? dayMetricResult.error?.message ?? shipmentResult.error?.message ?? dateCoverageResult.error?.message ?? latestDailyResult.error?.message ?? targetResult.error}</div></section> : null}
 
         {view === "reviews" ? (
-          selectedReviewLocation && selectedSnapshot ? <PerformanceReviewDesk
+          selectedReviewLocation ? <PerformanceReviewDesk
             codSnapshot={codData.snapshot}
             canAdd={Boolean(reviewAccess?.canStart)}
             canCompleteStep={Boolean(reviewAccess?.canComplete)}
@@ -446,9 +487,9 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             connections={reviewConnections}
             updates={reviewWorkspace.updates}
             reviewChain={reviewChain}
-            routingIssue={reviewAccess?.routingIssue ?? null}
+            routingIssue={reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "A review manager needs to be assigned in People for this station. Contact HR so Proxy / Skip and RCA can run." : null)}
             date={selectedDate}
-            error={searchParams?.error || reviewWorkspace.error || operationalResult.error || connectionResult.error}
+            error={searchParams?.error || reviewWorkspace.error || operationalResult.error || connectionResult.error || (!selectedReviewRow ? "No Amazon performance metrics are loaded for this station on this date. RCA exceptions appear after Hawkeye/EDSP data is imported." : null)}
             items={reviewWorkspace.items}
             locations={permittedLocations}
             metrics={reviewMetrics}
@@ -457,12 +498,20 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             review={selectedReview}
             reviews={reviewWorkspace.reviews}
             selectedLocation={selectedReviewLocation}
-            snapshot={selectedSnapshot}
+            snapshot={selectedSnapshot ?? {
+              adHocCost: null, adHocDaCost: 0, adHocDaRequests: [], adHocVanCost: 0, adHocVanRequests: [],
+              activeFeCount: 0, associateDeliveries: [], averageAllocation: null, costBreakdown: [],
+              dailyCps: null, dayCost: null, deliveredCount: 0, firstPunchAt: null, firstPunchBy: null,
+              openingFirstOtherPunch: null, openingLateMinutes: null, openingShiftName: null, openingShiftSource: null,
+              openingWindowEnd: "10:00:00", openingWindowStart: "02:00:00", scheduledOpeningTime: null,
+              fuelPay: 0, mgSalaryPay: 0, mtdCost: 0, mtdCps: null, mtdDelivery: 0, overallCps: null,
+              salaryDaCost: 0, salaryDaCps: null, unmappedFeCount: 0, variableDaPay: 0
+            }}
             sourceBatchId={selectedReviewRow?.batch_id ?? null}
             sourceType={selectedReviewRow?.source_type ?? "operational_data"}
             sourceWeek={selectedDailyWeek}
             steps={reviewWorkspace.steps}
-          /> : <section className="panel message-panel error"><div className="panel-body">{selectedReviewLocation ? (operationalResult.error || "Operational data for this station could not be loaded.") : "No permitted station is available for review."}</div></section>
+          /> : <section className="panel message-panel error"><div className="panel-body">No permitted station is available for review.</div></section>
         ) : view === "daily" ? (
           <>
             <section className="ops-control-strip performance-day-control">
@@ -490,7 +539,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             {missingDsrStations ? <section className="performance-data-warning"><div><strong>DSR/PSR source value is zero for {missingDsrStations} station{missingDsrStations === 1 ? "" : "s"}.</strong><span>The dashboard is preserving the uploaded report value. Upload a corrected Hawkeye report containing the metric; the system will not manufacture a replacement percentage.</span></div><a href="https://dashboard.dropxlogistics.com/imports">Open report imports</a></section> : null}
             {missingStationCodes.length && dailyRows.length ? <section className="performance-coverage-gap"><div><span>Missing stations</span><strong>{missingStationCodes.join(", ")}</strong></div><small>Selected stations absent from this source report.</small></section> : null}
             {trendStationCode ? <section className="panel performance-daily-trend" id="daily-trend">
-              <div className="panel-head"><div><h2>Amazon Week {selectedDailyWeek} station trend</h2><p className="subtle">{trendStationCode} · {trendStationLocation?.station_name || trendStationLocation?.city || trendStationCode} · {selectedDailyWeekRange.start.split("-").reverse().join("/")}–{selectedDailyWeekRange.end.split("-").reverse().join("/")}</p></div><form className="performance-trend-station-form"><input type="hidden" name="view" value="daily"/><input type="hidden" name="date" value={selectedDate}/>{selectedCodes.length !== permittedCodes.length ? <input type="hidden" name="stations" value={selectedCodes.join(",")}/> : null}<label>Station<select name="trend" defaultValue={trendStationCode}>{selectedCodes.map((code) => <option key={code} value={code}>{code} · {locationByCode.get(code)?.station_name || locationByCode.get(code)?.city || code}</option>)}</select></label><button>View trend</button></form></div>
+              <div className="panel-head"><div><h2>Amazon Week {selectedDailyWeek} station trend</h2><p className="subtle">{trendStationCode} · {trendStationLocation?.station_name || trendStationLocation?.city || trendStationCode} · {selectedDailyWeekRange.start.split("-").reverse().join("/")}–{selectedDailyWeekRange.end.split("-").reverse().join("/")}</p></div><form className="performance-trend-station-form"><input type="hidden" name="view" value="daily"/><input type="hidden" name="date" value={selectedDate}/>{selectedCodes.length !== permittedCodes.length ? <input type="hidden" name="stations" value={selectedCodes.join(",")}/> : null}<label>Station<select name="trend" defaultValue={trendStationCode}>{selectedCodes.map((code) => <option key={code} value={code}>{code} · {locationByCode.get(stationCode(code))?.station_name || locationByCode.get(stationCode(code))?.city || code}</option>)}</select></label><button>View trend</button></form></div>
               {trendStationRows.length ? <div className="performance-trend-grid">{trendMetrics.map((metric) => {
                 const points = trendStationRows.map((row) => dailyMetricValue(row, metric) ?? 0);
                 const first = points[0] ?? 0;

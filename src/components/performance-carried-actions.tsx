@@ -4,7 +4,9 @@ import { updateCarriedReviewAction } from "@/app/ops-pulse/performance/actions";
 import { formatDashboardDate } from "@/lib/date-format";
 export function PerformanceCarriedActions({items,previous,review,canUpdate}:{items:PerformanceReviewItem[];previous:PerformanceReviewCarryover[];review:PerformanceReview|null;canUpdate:boolean}) {
   if(!items.length)return null;
-  return <details className="review-followups" open><summary>Earlier RCA actions · {items.filter(item=>item.status!=="done").length} open</summary>{items.map(item=><details key={item.id}>
+  return <details className="review-followups" open>
+    <summary>Open actions from earlier reviews · {items.filter(item=>item.status!=="done").length} open <small>(not today’s scorecard)</small></summary>
+    {items.map(item=><details key={item.id}>
     <summary><span><strong>{item.metric_label} · {item.corrective_action||"Action pending"}</strong><small>From {formatDashboardDate(previous.find(row=>row.id===item.review_id)?.source_date??"")} · {item.action_owner||"Owner pending"} · ETA {item.due_date?formatDashboardDate(item.due_date):"Not set"}</small></span><b>{item.status==="done"?"Done":item.due_date&&review&&item.due_date<review.source_date?"Overdue":item.status.replace("_"," ")}</b></summary>
     <p>{item.root_cause}</p>
     {review&&canUpdate?<ReviewActionForm action={updateCarriedReviewAction} className="review-followup-form" key={item.updated_at}>
