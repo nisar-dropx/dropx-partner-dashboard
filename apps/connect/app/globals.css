@@ -143,9 +143,13 @@
 }
 
 .dx-days button.full { color: #fff; background: #15915f; }
-.dx-days button.half { color: #fff; background: #d88700; }
+.dx-days button.half { color: #fff; background: #ea580c; }
 .dx-days button.review { color: #fff; background: #d7434e; }
-.dx-days button.on-shift { color: #fff; background: #1678d2; }
+.dx-days button.on-shift {
+  color: #0b4f8a;
+  background: #e8f3fc;
+  box-shadow: inset 0 0 0 2px #1678d2;
+}
 
 .dx-days button.has-issue::after {
   position: absolute;
@@ -155,7 +159,7 @@
   height: 7px;
   border: 2px solid #fff;
   border-radius: 50%;
-  background: #ffb020;
+  background: #c026d3;
   content: "";
 }
 
@@ -198,7 +202,7 @@
 }
 
 .dx-legend .issue::before {
-  background: #ffb020;
+  background: #c026d3;
 }
 
 .dx-dashboard-flashes {
@@ -208,28 +212,36 @@
 .dx-days button.full.selected { color: #15915f; background: #fff; }
 .dx-days button.half.selected { color: #b66a00; background: #fff; }
 .dx-days button.review.selected { color: #c3313d; background: #fff; }
-.dx-days button.on-shift.selected { color: #1678d2; background: #fff; }
+.dx-days button.on-shift.selected {
+  color: #0b4f8a;
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #1678d2;
+}
 
 .dx-legend {
   flex-wrap: wrap;
 }
 
 .dx-legend .full::before { background: #15915f; }
-.dx-legend .half::before { background: #d88700; }
+.dx-legend .half::before { background: #ea580c; }
 .dx-legend .review::before { background: #d7434e; }
 
 .dx-attendance-list em.full,
-.dx-selected-day em.full,
-.dx-attendance-list em.on-shift,
-.dx-selected-day em.on-shift {
+.dx-selected-day em.full {
   color: #08794d;
   background: #e7f7ef;
 }
 
+.dx-attendance-list em.on-shift,
+.dx-selected-day em.on-shift {
+  color: #0b4f8a;
+  background: #e8f3fc;
+}
+
 .dx-attendance-list em.half,
 .dx-selected-day em.half {
-  color: #9b5a00;
-  background: #fff2d6;
+  color: #c2410c;
+  background: #ffedd5;
 }
 
 .dx-attendance-list em.absent,
@@ -11184,6 +11196,11 @@ img.dx-selfie-live {
   background: #5b65c8;
 }
 
+.dx-legend .on-shift::before {
+  background: #e8f3fc;
+  box-shadow: inset 0 0 0 1.5px #1678d2;
+}
+
 .dx-attendance-list em.leave,
 .dx-selected-day em.leave {
   color: #454ca8;
@@ -16143,13 +16160,21 @@ img.dx-selfie-live {
 }
 
 .dx-days button.full { color: #fff; background: #15915f; }
-.dx-days button.half { color: #fff; background: #d88700; }
+.dx-days button.half { color: #fff; background: #ea580c; }
 .dx-days button.review { color: #fff; background: #d7434e; }
-.dx-days button.on-shift { color: #fff; background: #1678d2; }
+.dx-days button.on-shift {
+  color: #0b4f8a;
+  background: #e8f3fc;
+  box-shadow: inset 0 0 0 2px #1678d2;
+}
 .dx-days button.full.selected { color: #15915f; background: #fff; }
 .dx-days button.half.selected { color: #b66a00; background: #fff; }
 .dx-days button.review.selected { color: #c3313d; background: #fff; }
-.dx-days button.on-shift.selected { color: #1678d2; background: #fff; }
+.dx-days button.on-shift.selected {
+  color: #0b4f8a;
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #1678d2;
+}
 
 @media (max-width: 520px) {
   .dx-attendance-summary {

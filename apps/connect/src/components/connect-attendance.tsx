@@ -456,7 +456,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
                 return <button aria-label={`${date}: ${future ? "Future" : insight.label}`} className={`${future ? "off" : insight.calendarClass} ${insight.issues.length ? "has-issue" : ""} ${selected?.date === date ? "selected" : ""}`} disabled={future} key={day} onClick={() => !future && setSelected(row ?? emptyAttendanceRow(date))}><span>{day}</span></button>;
               })}
             </div>
-            <div className="dx-legend"><span className="full">Full day</span><span className="half">Half day</span><span className="leave">Leave</span><span className="absent">Absent</span><span className="review">Review</span><span className="off">Off</span><span className="issue">Late / early</span></div>
+            <div className="dx-legend"><span className="full">Full day</span><span className="half">Half day</span><span className="leave">Leave</span><span className="on-shift">On shift</span><span className="absent">Absent</span><span className="review">Review</span><span className="off">Off</span><span className="issue">Late / early</span></div>
           </div> : null}
           {tab === "list" ? <div className="dx-attendance-list">
             {[...data.rows].sort((left, right) => right.date.localeCompare(left.date)).map((row) => {

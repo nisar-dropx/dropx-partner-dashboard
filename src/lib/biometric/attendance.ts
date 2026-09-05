@@ -1253,6 +1253,14 @@ export async function loadAttendanceReportRows({
       : null;
     const station = row.location_id ? locationsById.get(row.location_id) : null;
     const punches = punchesByKey.get(`${row.enrolment_id}:${row.punch_date}`) ?? [];
+    const punchTimes = punches.map((punch) => punch.punch_time).filter(Boolean) as string[];
+    const punchSummary = punchTimes.length > Number(row.punch_count ?? 0)
+      ? summarizeFirstInLastOut(punchTimes)
+      : null;
+    const effectiveInTime = punchSummary && punchTimes[0] ? punchTimes[0] : row.in_time;
+    const effectiveOutTime = punchSummary ? punchSummary.lastOutTime : row.out_time;
+    const effectivePunchCount = Math.max(Number(row.punch_count ?? 0), punches.length);
+    const effectiveWorkMinutes = punchSummary ? punchSummary.workMinutes : Number(row.work_minutes ?? 0);
     const labels = Object.fromEntries(punches.map((punch) => [punch.punch_label, formatTime(punch.punch_time)]));
     const firstDevice = punches.find((punch) => punch.device_serial)?.device_serial ?? "";
     const profileType = row.employee_id || row.worker_type === "employee"
@@ -1262,19 +1270,19 @@ export async function loadAttendanceReportRows({
     const schedule = scheduleContext.scheduleFor(profileId, row.punch_date);
     const scheduledMinutes = scheduledDuration(schedule.shift);
     const variance = attendanceVariance({
-      inTime: row.in_time,
-      outTime: row.out_time,
+      inTime: effectiveInTime,
+      outTime: effectiveOutTime,
       punchDate: row.punch_date,
       rules: scheduleContext.rules,
       shift: schedule.shift
     });
     const attendanceStatus = attendanceDayStatus({
       dayType: schedule.dayType,
-      punchCount: Number(row.punch_count ?? 0),
+      punchCount: effectivePunchCount,
       rules: scheduleContext.rules,
       scheduledMinutes,
       status: row.status ?? "P",
-      workMinutes: Number(row.work_minutes ?? 0)
+      workMinutes: effectiveWorkMinutes
     });
     const reportRow: AttendanceReportRow = {
       enrolmentId: row.enrolment_id,
@@ -1291,11 +1299,11 @@ export async function loadAttendanceReportRows({
       scheduledEnd: formatClock(schedule.shift?.end_time),
       scheduledMinutes,
       punchDate: row.punch_date,
-      inTime: formatTime(row.in_time),
-      outTime: formatTime(row.out_time),
+      inTime: formatTime(effectiveInTime),
+      outTime: formatTime(effectiveOutTime),
       punchTimes: punches.map((punch) => formatTime(punch.punch_time)),
-      workHours: formatDuration(row.work_minutes),
-      punchCount: Number(row.punch_count ?? 0),
+      workHours: formatDuration(effectiveWorkMinutes),
+      punchCount: effectivePunchCount,
       status: row.status ?? "P",
       attendanceStatus,
       lateMinutes: variance.lateMinutes,

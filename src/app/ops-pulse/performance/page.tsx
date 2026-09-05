@@ -78,7 +78,7 @@ function isStandingLabel(value: string | null) {
   return /^(FANTASTIC|GREAT|FAIR|POOR)$/i.test(String(value ?? "").trim());
 }
 
-function stationCode(value: string | null) {
+function stationCode(value: string | null | undefined) {
   return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
