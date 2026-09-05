@@ -613,7 +613,6 @@ export function ConnectLoginFlow() {
       {isWorkforceWorkspace(account) && allowed(account, "advances") ? <button aria-current={step === "advances" ? "page" : undefined} className={step === "advances" ? "active" : ""} onClick={() => open("advances")}><IndianRupee /><span>Advances</span></button> : null}
       {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint /><span>Attendance</span></button> : null}
       {allowed(account, "roster") ? <button aria-current={step === "roster" ? "page" : undefined} className={step === "roster" ? "active" : ""} onClick={() => open("roster")}><ArrowLeftRight /><span>Roster</span></button> : null}
-      {showLeaveNav(account) ? <button aria-current={step === "leave" ? "page" : undefined} className={step === "leave" ? "active" : ""} onClick={() => open("leave")}><CalendarDays /><span>Leave</span></button> : null}
       {allowed(account, "performance") ? <button aria-current={step === "performance" ? "page" : undefined} className={step === "performance" ? "active" : ""} onClick={() => open("performance")}><Target /><span>Performance</span></button> : null}
     </nav> : null}
   </div>;

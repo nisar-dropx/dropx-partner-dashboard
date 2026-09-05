@@ -169,12 +169,22 @@ export function ConnectWfh({
         {notice ? <div className="dx-alert success" aria-live="polite">{notice}</div> : null}
 
         {!loading && tab === "request" ? <form onSubmit={submit}>
-          <div className="dx-leave-dates">
-            <label>From date<input min={minimumDate} onChange={(event) => setFromDate(event.target.value)} type="date" value={fromDate} /></label>
-            <label>To date<input min={fromDate || minimumDate} onChange={(event) => setToDate(event.target.value)} type="date" value={toDate} /></label>
+          <div className="dx-wfh-date-range">
+            <span className="dx-wfh-date-range-label">Date range</span>
+            <div className="dx-wfh-date-fields">
+              <label>
+                <span>From</span>
+                <input min={minimumDate} onChange={(event) => setFromDate(event.target.value)} type="date" value={fromDate} />
+              </label>
+              <em aria-hidden="true">→</em>
+              <label>
+                <span>To</span>
+                <input min={fromDate || minimumDate} onChange={(event) => setToDate(event.target.value)} type="date" value={toDate} />
+              </label>
+            </div>
+            {requestedDays ? <small className="dx-wfh-date-hint">{requestedDays} calendar day{requestedDays === 1 ? "" : "s"} · offs & holidays skipped at HR apply</small> : <small className="dx-wfh-date-hint">Pick the first and last WFH day</small>}
           </div>
-          {requestedDays ? <p className="dx-leave-balance">{requestedDays} calendar day(s) · weekly offs and holidays are skipped when HR applies attendance</p> : null}
-          <label>Reason<textarea onChange={(event) => setReason(event.target.value)} placeholder="Why do you need to work from home?" rows={4} value={reason} /></label>
+          <label>Reason<textarea onChange={(event) => setReason(event.target.value)} placeholder="Why do you need to work from home?" rows={3} value={reason} /></label>
           <div className="dx-leave-actions">
             <button className="dx-save" disabled={submitting || !fromDate || !toDate || reason.trim().length < 3 || requestedDays > maxDays} type="submit">
               {submitting ? "Saving…" : "Submit request"}
