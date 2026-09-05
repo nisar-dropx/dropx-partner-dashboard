@@ -8,7 +8,8 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { allowedCapacityWorkspaceTabs } from "@/lib/ops-pulse/capacity-access";
 import { loadCapacityRules } from "@/lib/ops-pulse/capacity";
-import { capacityWorkload, loadShipmentCountAssociateDays } from "@/lib/ops-pulse/capacity-shipments";
+import { loadShipmentCountAssociateDays } from "@/lib/ops-pulse/capacity-shipments";
+import { officialAssociateDeliveryCount } from "@/lib/ops-pulse/associate-delivery-count";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { isAmazonEdspXptLocation } from "@/lib/ops-pulse/operating-context";
 import { associateIdentityKey, isScientificAssociateId, normalizeAssociateName } from "@/lib/ops-pulse/associate-identity";
@@ -66,7 +67,7 @@ export default async function SprAssociatesPage({ searchParams }: { searchParams
       daily: new Map<string, number>(),
       delivered: 0
     };
-    const delivered = capacityWorkload(row);
+    const delivered = officialAssociateDeliveryCount(row.amazon_delivery);
     current.delivered += delivered;
     current.daily.set(row.work_date, (current.daily.get(row.work_date) ?? 0) + delivered);
     if (current.name === "Unmapped name" && row.provider_employee_name) current.name = row.provider_employee_name;
@@ -103,11 +104,11 @@ export default async function SprAssociatesPage({ searchParams }: { searchParams
       : !evidenceReady
         ? { label: "Observe", tone: "neutral", action: `Only ${daily.length} active day${daily.length === 1 ? "" : "s"} available; wait for at least 3 days before action.` }
         : level === "high"
-          ? { label: "Reduce workload", tone: "risk", action: `Rebalance ${fmt(average - safe, 1)} workload/day away from this route and review repeated high-load days.` }
+          ? { label: "Reduce allocation", tone: "risk", action: `Rebalance ${fmt(average - safe, 1)} Amazon deliveries/day away from this route and review repeated high-allocation days.` }
           : level === "low"
             ? { label: "Allocation review", tone: "warn", action: `Review route allocation, attendance and available volume; average is ${fmt(target - average, 1)} below target.` }
             : highDays > 0
-              ? { label: "Monitor peaks", tone: "warn", action: `${highDays} high-load day${highDays === 1 ? "" : "s"} occurred despite an in-range average; inspect the daily route mix.` }
+              ? { label: "Monitor peaks", tone: "warn", action: `${highDays} high-allocation day${highDays === 1 ? "" : "s"} occurred despite an in-range average; inspect the daily route mix.` }
               : { label: "Maintain", tone: "balanced", action: "Allocation is within the configured target-to-safe range; maintain and monitor." };
     return {
       stationCode: aggregate.stationCode,
@@ -159,13 +160,13 @@ export default async function SprAssociatesPage({ searchParams }: { searchParams
     const highShare = stationAssociates.length ? high / stationAssociates.length : 0;
     const lowShare = stationAssociates.length ? low / stationAssociates.length : 0;
     const recommendation = !stationAssociates.length
-      ? { label: "No data", tone: "neutral", rank: 0, action: "No associate workload is available for the selected period." }
+      ? { label: "No data", tone: "neutral", rank: 0, action: "No Amazon associate delivery count is available for the selected period." }
       : target == null || safe == null
         ? { label: "Target required", tone: "unconfigured", rank: 4, action: "Configure station SPR targets before taking an allocation decision." }
         : evidenceReady === 0
           ? { label: "Observe", tone: "neutral", rank: 2, action: "Select WTD, MTD or a custom range with at least 3 active days before taking station action." }
           : high > 0 && low > 0
-          ? { label: "Rebalance routes", tone: "risk", rank: 5, action: `Move workload from ${high} above-safe DA${high === 1 ? "" : "s"} toward ${low} below-target DA${low === 1 ? "" : "s"} after checking route compatibility.` }
+          ? { label: "Rebalance routes", tone: "risk", rank: 5, action: `Move Amazon delivery allocation from ${high} above-safe DA${high === 1 ? "" : "s"} toward ${low} below-target DA${low === 1 ? "" : "s"} after checking route compatibility.` }
           : average > safe || highShare >= 0.2
             ? { label: "Split high loads", tone: "risk", rank: 5, action: `${high} DA${high === 1 ? "" : "s"} need route relief; keep daily allocation below the ${fmt(safe, 1)} safe ceiling.` }
             : average < target || lowShare >= 0.4
@@ -187,7 +188,7 @@ export default async function SprAssociatesPage({ searchParams }: { searchParams
   }).sort((left, right) => right.recommendation.rank - left.recommendation.rank || right.high - left.high || left.stationCode.localeCompare(right.stationCode));
   const stationsForAction = stationRecommendations.filter((row) => row.recommendation.rank >= 3).length;
   const associateActions = allAssociates.filter((row) => row.evidenceReady && (row.level === "high" || row.level === "low")).length;
-  const recommendationRank: Record<string, number> = { "Target required": 6, "Reduce workload": 5, "Allocation review": 4, "Monitor peaks": 3, Observe: 2, Maintain: 1 };
+  const recommendationRank: Record<string, number> = { "Target required": 6, "Reduce allocation": 5, "Allocation review": 4, "Monitor peaks": 3, Observe: 2, Maintain: 1 };
   const recommendationAssociates = [...associates];
   if (!searchParams?.sort) recommendationAssociates.sort((left, right) => {
     const rank = (recommendationRank[right.recommendation.label] ?? 0) - (recommendationRank[left.recommendation.label] ?? 0);
@@ -218,7 +219,7 @@ export default async function SprAssociatesPage({ searchParams }: { searchParams
   const scopeStations = locations.map((location) => ({ code: location.station_code, name: location.station_name || location.city || location.station_code, cluster: location.cluster || "", region: location.region || "" }));
 
   return <AppShell active="Capacity" pageCode="capacity_associates"><div className="ops-command-center capacity-workspace">
-    <PageHead eyebrow="Associate Productivity" title="Associate SPR" subtitle="Station and associate workload productivity across the selected period." />
+    <PageHead eyebrow="Associate Productivity" title="Associate SPR" subtitle="Amazon associate delivery productivity across the selected period." />
     <div className="capacity-tabs-toolbar"><CapacityWorkspaceTabs active="associates" allowed={workspaceTabs} /><CapacityScopeFilter selectedCodes={selectedCodes} stations={scopeStations}/></div>
     <CapacityAssociateViewTabs active={activeView} />
     {locationResult.error || ruleResult.error || associateResult.error ? <div className="message-panel error">{locationResult.error || ruleResult.error || associateResult.error?.message}</div> : null}
@@ -226,7 +227,7 @@ export default async function SprAssociatesPage({ searchParams }: { searchParams
 
     {activeView === "productivity" ? <>
       <section className="performance-summary-grid"><article><span>All associates</span><strong>{allAssociates.length}</strong><small>{`${queryLocations.length} stations`}</small></article><article><span>Below target</span><strong>{lowCount}</strong><small>Average below station target SPR</small></article><article><span>Target to safe</span><strong>{targetCount}</strong><small>Within configured range</small></article><article><span>Above safe</span><strong>{highCount}</strong><small>Average above safe SPR</small></article></section>
-      <section className="panel"><div className="panel-head"><div><h2>Associate productivity</h2><p className="subtle">SPR = workload ÷ active days. Select an associate for the daily trend.</p></div><div className="capacity-table-pager"><span>{associates.length ? `${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, associates.length)} of ${associates.length}` : "0 associates"}</span>{currentPage > 1 ? <a href={pageHref(currentPage - 1)}>←</a> : <i>←</i>}<b>{currentPage}/{pageCount}</b>{currentPage < pageCount ? <a href={pageHref(currentPage + 1)}>→</a> : <i>→</i>}</div></div><div className="table-wrap"><table className="capacity-daily-table"><thead><tr><th><a href={sortHref("name")}>Associate <small>{sortMark("name")}</small></a></th><th><a href={sortHref("station")}>Station <small>{sortMark("station")}</small></a></th><th><a href={sortHref("days")}>Active days <small>{sortMark("days")}</small></a></th><th><a href={sortHref("delivered")}>Total workload <small>{sortMark("delivered")}</small></a></th><th><a href={sortHref("average")}>Average SPR <small>{sortMark("average")}</small></a></th><th><a href={sortHref("peak")}>Peak <small>{sortMark("peak")}</small></a></th><th><a href={sortHref("highDays")}>High days <small>{sortMark("highDays")}</small></a></th><th><a href={sortHref("level")}>SPR position <small>{sortMark("level")}</small></a></th></tr></thead><tbody>
+      <section className="panel"><div className="panel-head"><div><h2>Associate productivity</h2><p className="subtle">SPR = Amazon delivery count ÷ active days. Select an associate for the daily trend.</p></div><div className="capacity-table-pager"><span>{associates.length ? `${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, associates.length)} of ${associates.length}` : "0 associates"}</span>{currentPage > 1 ? <a href={pageHref(currentPage - 1)}>←</a> : <i>←</i>}<b>{currentPage}/{pageCount}</b>{currentPage < pageCount ? <a href={pageHref(currentPage + 1)}>→</a> : <i>→</i>}</div></div><div className="table-wrap"><table className="capacity-daily-table"><thead><tr><th><a href={sortHref("name")}>Associate <small>{sortMark("name")}</small></a></th><th><a href={sortHref("station")}>Station <small>{sortMark("station")}</small></a></th><th><a href={sortHref("days")}>Active days <small>{sortMark("days")}</small></a></th><th><a href={sortHref("delivered")}>Amazon deliveries <small>{sortMark("delivered")}</small></a></th><th><a href={sortHref("average")}>Average SPR <small>{sortMark("average")}</small></a></th><th><a href={sortHref("peak")}>Peak <small>{sortMark("peak")}</small></a></th><th><a href={sortHref("highDays")}>High days <small>{sortMark("highDays")}</small></a></th><th><a href={sortHref("level")}>SPR position <small>{sortMark("level")}</small></a></th></tr></thead><tbody>
         {shownAssociates.map((row) => <tr key={associateIdentityKey(row.stationCode, row.id, row.name)}><td><a className="capacity-station-link" href={`/ops-pulse/capacity/associates/${encodeURIComponent(row.id)}?station=${row.stationCode}&from=${start}&to=${end}&name=${encodeURIComponent(row.name)}`}><strong>{row.name}</strong><small>{row.id}</small></a></td><td><a href={`/ops-pulse/capacity/${row.stationCode}`}>{row.stationCode}</a></td><td>{row.dates}</td><td>{fmt(row.delivered)}</td><td><strong className={row.level === "high" ? "metric-bad-text" : row.level === "low" ? "metric-warn-text" : row.level === "target" ? "metric-good-text" : ""}>{fmt(row.average, 1)}</strong></td><td>{fmt(row.peak)}</td><td>{row.highDays}</td><td><span className={`capacity-decision ${row.level === "high" ? "risk" : row.level === "low" ? "unconfigured" : row.level === "target" ? "balanced" : "no_data"}`}>{row.level === "high" ? `Above ${fmt(row.safe ?? 0, 1)}` : row.level === "low" ? `Below ${fmt(row.target ?? 0, 1)}` : row.level === "target" ? `${fmt(row.target ?? 0, 1)}–${fmt(row.safe ?? 0, 1)}` : "Target required"}</span></td></tr>)}
         {!associates.length ? <tr><td className="empty-cell" colSpan={8}>No associates match these filters.</td></tr> : null}
       </tbody></table></div></section>
