@@ -830,7 +830,11 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         account.profile_type,
         account.designation_id ? peopleModuleByDesignationId.get(account.designation_id) : null
       );
-      const pageAccess = resolveConnectPageAccess(account.profile_type, categoryPages, designationPages);
+      // WFH is never granted via designation/category app_page_access.
+      // It is shown only when People → Attendance master → Work From Home Policy
+      // lists the worker's designation in eligible_designation_ids.
+      const pageAccess = resolveConnectPageAccess(account.profile_type, categoryPages, designationPages)
+        .filter((page) => page !== "wfh");
       const designationId = account.designation_id ?? null;
       const designationLabel = designationId
         ? {
@@ -847,7 +851,6 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
           designationId,
           designation: designationLabel
         })
-        && !pageAccess.includes("wfh")
       ) {
         pageAccess.push("wfh");
       }

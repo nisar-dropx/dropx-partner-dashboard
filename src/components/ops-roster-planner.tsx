@@ -208,8 +208,10 @@ export function OpsRosterPlanner({
     const startTime = assignment?.dayType === "working" && assignment.shiftId
       ? shiftById.get(assignment.shiftId)?.startTime
       : "00:00";
-    // Recurring pattern cells map to the template week; cut off against the next real occurrence of that weekday.
-    const cutoffDate = nextRosterOccurrenceOnOrAfter(recurringTemplateDate(templateStartRef.current, date), today);
+    // Cut off against the weekday occurrence in the week being viewed (e.g. 12–13 Sep),
+    // not an earlier same weekday in the template week (e.g. 5–6 Sep).
+    const templateDate = recurringTemplateDate(templateStartRef.current, date);
+    const cutoffDate = nextRosterOccurrenceOnOrAfter(templateDate, date > today ? date : today);
     return rosterInstant(cutoffDate, startTime) - new Date(nowIso).getTime() < changeCutoffHours * 60 * 60 * 1000 ? cutoffMessage : null;
   }, [changeCutoffHours, cutoffMessage, nowIso, shiftById, today]);
 
@@ -467,7 +469,7 @@ export function OpsRosterPlanner({
         : { workerType: workerTypeValue as "employee" | "contractor", workerId, date, remove: true as const };
     });
     startSaving(async () => {
-      const result = await saveOpsRosterAssignments({ planId, changes });
+      const result = await saveOpsRosterAssignments({ planId, changes, viewWeekStart: weekStart });
       setMessage({ tone: result.ok ? "success" : "error", text: result.message });
       if (result.ok) {
         setDirtyKeys(new Set());

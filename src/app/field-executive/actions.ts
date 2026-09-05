@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { waitUntil } from "@vercel/functions";
 import * as XLSX from "xlsx";
 import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
@@ -95,6 +95,19 @@ function generatedDropxId(category: "field_executive" | "contractor" | "vendor" 
         ? "VEN"
         : "WRK";
   return `${prefix}-${Date.now().toString(36).toUpperCase()}`;
+}
+
+/** Canonical Workforce rows must self-identify; DB rejects null source_profile_type. */
+function workforceIdentityFields() {
+  const id = randomUUID();
+  return {
+    id,
+    source_profile_type: "canonical" as const,
+    source_profile_id: id,
+    compatibility_mode: false,
+    migration_state: "canonical",
+    synced_at: new Date().toISOString()
+  };
 }
 
 const fieldExecutiveDocumentFields = [
@@ -336,7 +349,7 @@ export async function createFieldExecutive(formData: FormData) {
       date_of_join: dateOfJoin,
       location_id: locationId,
       designation,
-      ...(table === "workforce" ? { designation_id: designationRuleResult.data.id } : {}),
+      ...(table === "workforce" ? { designation_id: designationRuleResult.data.id, ...workforceIdentityFields() } : {}),
       biometric_id: biometricId,
       dropx_id: dropxId,
       created_by: authorization.userId,
@@ -920,7 +933,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
         date_of_join: row.dateOfJoin,
         location_id: locationId,
         designation: designation.name,
-        ...(table === "workforce" ? { designation_id: designation.id } : {}),
+        ...(table === "workforce" ? { designation_id: designation.id, ...workforceIdentityFields() } : {}),
         created_by: authorization.userId,
         onboarding_status: "pending",
         ...(config.profileType === "field_executive" ? {

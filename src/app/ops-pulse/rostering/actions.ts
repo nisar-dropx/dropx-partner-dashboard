@@ -327,7 +327,7 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
   }
 }
 
-export async function saveOpsRosterAssignments(input: { planId: string; changes: RosterChange[] }): Promise<ActionResult> {
+export async function saveOpsRosterAssignments(input: { planId: string; changes: RosterChange[]; viewWeekStart?: string }): Promise<ActionResult> {
   try {
     const authorization = await requirePagePermission("ops_rostering", "edit");
     const companyId = requireCompanyId(authorization);
@@ -350,6 +350,10 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
     const shiftIds = new Set((shifts.data ?? []).map((shift) => shift.id));
     const shiftStartById = new Map((shifts.data ?? []).map((shift) => [shift.id, shift.start_time]));
     const existingByKey = new Map((existingEntries.data ?? []).map((entry) => [`${entry.worker_type}:${entry.worker_id}:${entry.roster_date}`, entry]));
+    const today = indiaToday();
+    const cutoffAsOf = input.viewWeekStart && validDate(input.viewWeekStart) && input.viewWeekStart > today
+      ? input.viewWeekStart
+      : today;
     const unique = new Map<string, RosterChange>();
     for (const change of input.changes) unique.set(`${change.workerType}:${change.workerId}:${change.date}`, change);
     for (const change of unique.values()) {
@@ -365,7 +369,7 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
           ? shiftStartById.get(existing.shift_id)
           : "00:00";
       const cutoffDate = plan.roster_kind === "recurring_weekly"
-        ? nextRosterOccurrenceOnOrAfter(change.date, indiaToday())
+        ? nextRosterOccurrenceOnOrAfter(change.date, cutoffAsOf)
         : change.date;
       if (rosterChangeInstant(cutoffDate, startTime) - Date.now() < policy.changeCutoffHours * 60 * 60 * 1000) {
         return { ok: false, message: rosterCutoffMessage(policy.changeCutoffHours) };
