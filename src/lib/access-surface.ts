@@ -9,6 +9,7 @@ export const opsAccessPageCodes = [
   "performance",
   "performance_review",
   "performance_review_cluster_filter",
+  "performance_review_status",
   "capacity",
   "capacity_overview",
   "capacity_associates",

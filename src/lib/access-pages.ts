@@ -26,6 +26,7 @@ export const accessPages = [
   { code: "performance", name: "Performance", sort_order: 84 },
   { code: "performance_review", name: "Performance Reviews", sort_order: 84 },
   { code: "performance_review_cluster_filter", name: "Review Desk Cluster Filter", sort_order: 84 },
+  { code: "performance_review_status", name: "Review Status", sort_order: 84 },
   { code: "capacity", name: "Capacity", sort_order: 84 },
   { code: "capacity_overview", name: "Capacity Overview", sort_order: 84 },
   { code: "capacity_associates", name: "Associate SPR", sort_order: 84 },
@@ -498,6 +499,7 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_executive_reconciliation"], "cod_cash_in_associate");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_reports"], "performance");
     await seedTargetPermissionsFromSources(supabase, companyId, ["performance"], "performance_review");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["performance_review"], "performance_review_status");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity_overview");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity_associates");

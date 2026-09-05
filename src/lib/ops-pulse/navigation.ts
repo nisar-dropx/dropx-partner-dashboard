@@ -11,6 +11,7 @@ const commonStart: NavItem[] = [
     children: [
       { code: "performance", label: "Daily Performance", href: "/performance?view=daily" },
       { code: "performance_review", label: "Review Desk", href: "/performance?view=reviews" },
+      { code: "performance_review_status", label: "Review Status", href: "/performance/review-status" },
       { code: "performance", label: "Amazon SLS", href: "/performance?view=sls" }
     ]
   },

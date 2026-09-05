@@ -6,6 +6,10 @@ const opening = read("src/components/performance-opening-card.tsx");
 const picker = read("src/components/performance-review-picker.tsx");
 const styles = read("src/app/globals.css");
 const reviewStyles = read("src/app/ops-pulse/performance/review-desk.css");
+const statusPage = read("src/app/ops-pulse/performance/review-status/page.tsx");
+const statusStyles = read("src/app/ops-pulse/performance/review-status/review-status.css");
+const navigation = read("src/lib/ops-pulse/navigation.ts");
+const accessPages = read("src/lib/access-pages.ts");
 
 const checks = [
   [reviewStyles.includes(".performance-review-desk .performance-review-facts:has(> details[open]) { z-index: 20; }"), "open fact drill-downs stay above later station/EMD controls"],
@@ -23,6 +27,12 @@ const checks = [
   [(picker.match(/onChange=/g) ?? []).length >= 2 && picker.includes("router.push"), "date and station changes apply immediately"],
   [picker.includes("All stations") && picker.includes("canFilterClusters") && picker.includes("Cluster / AOM"), "cluster filter is available to authorised roles only"],
   [component.includes("Loaded performance date"), "loaded source date is explicit beside the picker"],
+  [navigation.includes('code: "performance_review_status", label: "Review Status"'), "review status has its own OpsPulse submenu and permission code"],
+  [accessPages.includes('["performance_review"], "performance_review_status"'), "review status starts from existing review grants and remains independently configurable"],
+  [statusPage.includes("buildReviewStatusRows") && statusPage.includes('status === "not_started"'), "review register includes station-days where nobody started a review"],
+  [statusPage.includes("Cluster manager") && statusPage.includes("<span>AOM</span>") && statusPage.includes("All statuses"), "compact register filters by hierarchy and workflow status"],
+  [statusPage.includes("<StepStatus row={row}") && statusPage.includes("Open RCA / actions") && statusPage.includes("Latest discussion"), "expanded rows expose reviewer history, RCA, actions and discussion"],
+  [statusStyles.includes("content-visibility: auto") && statusStyles.includes("@media (max-width: 720px)"), "long date ranges stay efficient and responsive"],
 ];
 
 const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);

@@ -448,6 +448,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
       ?? null
     : null;
   const canViewReviews = hasPermission(authorization, "performance_review", "access");
+  const canViewReviewStatus = hasPermission(authorization, "performance_review_status", "access");
   // Prefer the selected station row — review.station_id can diverge and hide saved timings.
   const connectionStationId = selectedReviewLocation?.id || selectedReview?.station_id || null;
   const [connectionResult, reviewChain, backlog, followups, noonEmd, stationLeads, codData, stationTargets] = selectedReviewLocation && connectionStationId && view === "reviews" ? await Promise.all([
@@ -472,7 +473,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     <AppShell active={view === "reviews" ? "Review Desk" : "Performance"} pageCode={view === "reviews" ? "performance_review" : "performance"}>
       <div className="ops-command-center performance-workspace">
         <PageHead eyebrow="Performance" title="Station Performance" subtitle="Daily metrics, weekly scorecards and delivery data." />
-        <PerformanceWorkspaceTabs active={view} canViewReviews={canViewReviews} />
+        <PerformanceWorkspaceTabs active={view} canViewReviews={canViewReviews} canViewReviewStatus={canViewReviewStatus} />
         {view !== "reviews" ? <div className="performance-local-filter-row">
           <PerformanceStationFilter stations={permittedLocations.map((location) => ({ code: location.station_code, name: location.station_name || location.city || location.station_code }))} selectedCodes={selectedCodes} view={view} date={selectedDate} week={selectedWeek} />
         </div> : null}
