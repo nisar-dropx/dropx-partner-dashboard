@@ -25,7 +25,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = { view?: string; week?: string; date?: string; from?: string; to?: string; stations?: string; sort?: string; trend?: string; review?: string; notice?: string; error?: string; pendingPage?: string };
+type SearchParams = { view?: string; week?: string; date?: string; from?: string; to?: string; stations?: string; sort?: string; trend?: string; review?: string; cluster?: string; notice?: string; error?: string; pendingPage?: string };
 type MetricFact = {
   batch_id: string;
   source_type: string;
