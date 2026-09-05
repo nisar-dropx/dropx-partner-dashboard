@@ -185,7 +185,9 @@ export async function undoBypassPerformanceReviewLevel(data: FormData): Promise<
   const authorization = await requirePagePermission("performance_review", "access");
   try {
     const { companyId, review, access, steps } = await context(authorization, data);
-    if (!access.canUndoBypass) throw new Error("Only Program Manager, National Head, Owner or Tech can undo a skipped review level.");
+    if (!access.canAccessBypass || !access.canUndoBypass) {
+      throw new Error("Only people who can skip a review level can undo a skip.");
+    }
     const step = steps.find((entry) => entry.id === text(data, "step_id") && entry.status === "skipped" && entry.bypassed_at);
     if (!step) throw new Error("Only an explicit skipped level can be restored. Refresh to continue.");
     const result = await supabaseAdmin!.rpc("ops_undo_bypass_review_level", {

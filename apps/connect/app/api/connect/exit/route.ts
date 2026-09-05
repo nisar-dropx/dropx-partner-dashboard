@@ -346,6 +346,10 @@ async function serializeCase(row: Record<string, any>) {
   };
 }
 
+function isTerminalExitStatus(status: string | null | undefined) {
+  return ["rejected", "withdrawn", "cancelled", "settled", "closed"].includes(String(status ?? ""));
+}
+
 export async function GET(request: Request) {
   try {
     const params = new URL(request.url).searchParams;
@@ -356,9 +360,12 @@ export async function GET(request: Request) {
       caseQuery(context).order("submitted_at", { ascending: false }).limit(1).maybeSingle()
     ]);
     if (policyResult.error || reasonsResult.error || caseResult.error) throw new Error(policyResult.error?.message ?? reasonsResult.error?.message ?? caseResult.error?.message ?? "Unable to load exit request.");
+    const latestCase = caseResult.data;
+    // After a rejected/withdrawn/cancelled case the form is shown again — still resolve the route.
+    const canStartNew = !latestCase || isTerminalExitStatus(latestCase.status);
     let approvalRoute: ApprovalRoutePreview[] = [];
     let approvalRouteError = "";
-    if (!caseResult.data) {
+    if (canStartNew) {
       try {
         approvalRoute = (await configuredApprovalRoute(context, "resignation")).preview;
       } catch (problem) {
@@ -372,9 +379,9 @@ export async function GET(request: Request) {
       policy: policyResult.data ?? { resignation_notice_days: 30, withdrawal_allowed: true },
       reasons: reasonsResult.data ?? [],
       approvalRoute,
-      approvalRouteReady: !approvalRouteError,
+      approvalRouteReady: !approvalRouteError && approvalRoute.length > 0,
       approvalRouteError,
-      exitCase: caseResult.data ? await serializeCase(caseResult.data) : null
+      exitCase: latestCase ? await serializeCase(latestCase) : null
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load exit request." }, { status: 400 });

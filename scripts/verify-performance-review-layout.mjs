@@ -21,7 +21,7 @@ const checks = [
   [component.includes("<PerformanceReviewPicker"), "review desk uses the synchronized date and station picker"],
   [picker.includes('value={selectedDate}') && picker.includes('value={selectedStation}'), "picker controls remain synchronized with the loaded review"],
   [(picker.match(/onChange=/g) ?? []).length >= 2 && picker.includes("router.push"), "date and station changes apply immediately"],
-  [picker.includes("All clusters") && picker.includes("canFilterClusters"), "cluster filter is available to authorised roles only"],
+  [picker.includes("All stations") && picker.includes("canFilterClusters") && picker.includes("Cluster / AOM"), "cluster filter is available to authorised roles only"],
   [component.includes("Loaded performance date"), "loaded source date is explicit beside the picker"],
 ];
 

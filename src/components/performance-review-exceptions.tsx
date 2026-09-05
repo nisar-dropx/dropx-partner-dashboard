@@ -34,7 +34,7 @@ export function PerformanceReviewExceptions({
     (!review ? steps.find((step) => step.status === "pending") : undefined);
   const pending = steps.filter((step) => step.status === "pending");
   const skipped = steps.filter((step) => step.status === "skipped" && step.bypassed_at);
-  if (!canAccessBypass && !canAccessProxy && !canUndoBypass) return null;
+  if (!canAccessBypass && !canAccessProxy) return null;
 
   const inactiveReason = !hasRoute
     ? "A review manager needs to be assigned in People. Contact HR so this station gets a Cluster Manager → National Head route."
@@ -52,7 +52,8 @@ export function PerformanceReviewExceptions({
 
   const proxyEnabled = Boolean(review && pending.length && current && canProxy);
   const skipEnabled = Boolean(review && pending.length && canBypass);
-  const undoEnabled = Boolean(review && skipped.length && canUndoBypass);
+  // Same audience as Skip (PGM / NH / Owner / Tech) — never Proxy-only editors.
+  const undoEnabled = Boolean(review && skipped.length && canAccessBypass && canUndoBypass);
 
   const proxyHint =
     inactiveReason ||
@@ -93,7 +94,7 @@ export function PerformanceReviewExceptions({
             Skip a level…
           </button>
         ) : null}
-        {canUndoBypass && skipped.length ? (
+        {canAccessBypass && skipped.length ? (
           <button type="button" className="button secondary" disabled={!undoEnabled} onClick={() => setMode(mode === "undo" ? null : "undo")}>
             Undo skip…
           </button>
