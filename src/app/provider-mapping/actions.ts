@@ -677,6 +677,47 @@ function providerFirstMappingRedirect(params: { error?: string; notice?: string 
   redirect("/provider-mapping/provider-first");
 }
 
+/** Saves the full provider-member-first worksheet.  It deliberately reuses the
+ * same row validator and history-safe save path as the existing worksheet. */
+export async function saveProviderFirstMappingWorksheet(formData: FormData) {
+  const authorization = await getAuthorization();
+  if (!authorization) redirect("/login");
+  const companyId = requireCompanyId(authorization);
+  if (!hasPermission(authorization, "provider_mapping", "add") && !hasPermission(authorization, "provider_mapping", "edit")) {
+    redirect("/unauthorized?page=provider_mapping&action=edit");
+  }
+
+  let savedRows = 0;
+  try {
+    const rowCount = Number(formData.get("row_count") ?? 0);
+    const saveRow = clean(formData.get("save_row"));
+    let indexes: number[];
+    if (saveRow !== null) {
+      indexes = [Number(saveRow)];
+    } else {
+      const parsed = JSON.parse(clean(formData.get("dirty_row_indexes")) ?? "[]") as unknown;
+      if (!Array.isArray(parsed)) throw new Error("Unable to identify edited rows. Refresh the page and try again.");
+      indexes = parsed.filter((value): value is number => Number.isInteger(value));
+    }
+    if (!indexes.length) throw new Error("No rows to save.");
+
+    const allowedLocationIds = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER"
+      ? null
+      : new Set(authorization.locationScopeIds);
+    for (const index of indexes) {
+      if (index < 0 || index >= rowCount) throw new Error("Invalid row selected.");
+      await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds);
+      savedRows += 1;
+    }
+    revalidatePath("/provider-mapping");
+    revalidatePath("/provider-mapping/provider-first");
+    revalidatePath("/payments/workforce-payouts");
+  } catch (error) {
+    providerFirstMappingRedirect({ error: error instanceof Error ? error.message : "Unable to save provider-first mappings." });
+  }
+  providerFirstMappingRedirect({ notice: `${savedRows} row${savedRows === 1 ? "" : "s"} saved.` });
+}
+
 /** Links an imported provider member to an existing canonical workforce record.
  * Payment-method and rate configuration remains on the existing worksheet. */
 export async function saveProviderFirstMapping(formData: FormData) {
