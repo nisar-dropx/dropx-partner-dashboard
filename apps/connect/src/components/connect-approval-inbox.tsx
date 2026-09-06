@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ClipboardCheck, Clock3, FileText, Home, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ClipboardCheck, Clock3, FileText, Home, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
@@ -26,6 +26,24 @@ type ReimbursementApproval = {
     requesterCode: string;
     hr_expense_items?: ExpenseItem[];
     attachments?: Attachment[];
+  };
+};
+
+type PreRequestApproval = {
+  id: string;
+  request_id: string;
+  assignee_role: string;
+  request: {
+    id: string;
+    request_no: string;
+    purpose: string;
+    estimated_amount?: number | null;
+    trip_from?: string | null;
+    trip_to?: string | null;
+    notes?: string | null;
+    created_at: string;
+    requesterName: string;
+    requesterCode: string;
   };
 };
 
@@ -270,6 +288,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [section, setSection] = useState<ApprovalSection>("time-off");
   const [reporteeScope, setReporteeScope] = useState<ReporteeScope>("immediate");
   const [reimbursements, setReimbursements] = useState<ReimbursementApproval[]>([]);
+  const [preRequestApprovals, setPreRequestApprovals] = useState<PreRequestApproval[]>([]);
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
   const [wfhApprovals, setWfhApprovals] = useState<WfhApproval[]>([]);
   const [attendanceApprovals, setAttendanceApprovals] = useState<AttendanceApproval[]>([]);
@@ -284,6 +303,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [othersOpen, setOthersOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -297,7 +317,10 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const leavePayload = await leaveResponse.json();
       if (!reimbursementResponse.ok) throw new Error(reimbursementPayload.error || "Unable to load approvals.");
       if (!leaveResponse.ok) throw new Error(leavePayload.error || "Unable to load time-off approvals.");
-      setReimbursements(reimbursementPayload.approvals ?? []);
+      const nextClaims = reimbursementPayload.approvals ?? [];
+      const nextPreRequests = reimbursementPayload.preRequestApprovals ?? [];
+      setReimbursements(nextClaims);
+      setPreRequestApprovals(nextPreRequests);
       setLeaveApprovals(leavePayload.leaveApprovals ?? []);
       setWfhApprovals(leavePayload.wfhApprovals ?? []);
       setAttendanceApprovals(leavePayload.attendanceApprovals ?? []);
@@ -308,11 +331,11 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       setSupportPackages(leavePayload.locationSupportPackages ?? []);
       setSection((current) => {
         if (current === "time-off" && !(leavePayload.leaveApprovals ?? []).length) {
-          if ((leavePayload.wfhApprovals ?? []).length) return "wfh";
+          if (nextClaims.length || nextPreRequests.length) return "reimbursements";
           if ((leavePayload.attendanceApprovals ?? []).length || (leavePayload.attendanceHrApprovals ?? []).length) return "attendance";
           if ((leavePayload.rosterSwapApprovals ?? []).length || (leavePayload.rosterApprovals ?? []).length) return "rosters";
           if ((leavePayload.locationSupportPackages ?? []).length) return "location-integrity";
-          if ((reimbursementPayload.approvals ?? []).length) return "reimbursements";
+          if ((leavePayload.wfhApprovals ?? []).length) return "wfh";
         }
         return current;
       });
@@ -332,12 +355,34 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const response = await fetch("/api/connect/reimbursements", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: account.id, profileType: account.profileType, claimId, action, note: notes[claimId] ?? "" })
+        body: JSON.stringify({ accountId: account.id, profileType: account.profileType, kind: "claim", claimId, action, note: notes[claimId] ?? "" })
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update reimbursement.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [claimId]: "" })); await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update reimbursement."); }
+    finally { setSaving(false); }
+  }
+
+  async function decidePreRequest(requestId: string, action: "approved" | "rejected") {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/reimbursements", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: account.id,
+          profileType: account.profileType,
+          kind: "pre_request",
+          requestId,
+          action,
+          note: notes[`pre:${requestId}`] ?? ""
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to update reimbursement request.");
+      setNotice(payload.notice); setNotes((current) => ({ ...current, [`pre:${requestId}`]: "" })); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update reimbursement request."); }
     finally { setSaving(false); }
   }
 
@@ -474,7 +519,16 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
 
   const attendanceCount = attendanceApprovals.length + attendanceHrApprovals.length;
   const rosterCount = rosterApprovals.length + rosterSwapApprovals.length + returnedRosters.length;
+  const reimbursementCount = reimbursements.length + preRequestApprovals.length;
   const scopeName = reporteeScope === "immediate" ? "immediate reportees" : "entire reporting team";
+  const othersCount = leaveApprovals.length + reimbursementCount + wfhApprovals.length;
+  const othersActive = section === "time-off" || section === "reimbursements" || section === "wfh";
+  const othersLabel = section === "time-off" ? "Time off" : section === "reimbursements" ? "Reimbursements" : section === "wfh" ? "WFH" : "Others";
+
+  function selectSection(next: ApprovalSection) {
+    setSection(next);
+    setOthersOpen(false);
+  }
 
   function selectReporteeScope(scope: ReporteeScope) {
     if (scope === reporteeScope) return;
@@ -581,24 +635,60 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
       <nav aria-label="Approval sections" className="dx-approval-tabs">
-        <button className={section === "time-off" ? "active" : ""} onClick={() => setSection("time-off")} type="button">
-          Time off<span>{leaveApprovals.length}</span>
-        </button>
-        <button className={section === "wfh" ? "active" : ""} onClick={() => setSection("wfh")} type="button">
-          WFH<span>{wfhApprovals.length}</span>
-        </button>
-        <button className={section === "attendance" ? "active" : ""} onClick={() => setSection("attendance")} type="button">
-          Attendance<span>{attendanceCount}</span>
-        </button>
-        <button className={section === "rosters" ? "active" : ""} onClick={() => setSection("rosters")} type="button">
-          Rosters<span>{rosterCount}</span>
-        </button>
-        <button className={section === "location-integrity" ? "active" : ""} onClick={() => setSection("location-integrity")} type="button">
-          Location<span>{supportPackages.length}</span>
-        </button>
-        <button className={section === "reimbursements" ? "active" : ""} onClick={() => setSection("reimbursements")} type="button">
-          Claims<span>{reimbursements.length}</span>
-        </button>
+        <div className="dx-approval-tabs-primary">
+          <button className={section === "attendance" ? "active" : ""} onClick={() => selectSection("attendance")} type="button">
+            Attendance<span>{attendanceCount}</span>
+          </button>
+          <button className={section === "rosters" ? "active" : ""} onClick={() => selectSection("rosters")} type="button">
+            Rosters<span>{rosterCount}</span>
+          </button>
+          <button className={section === "location-integrity" ? "active" : ""} onClick={() => selectSection("location-integrity")} type="button">
+            Location<span>{supportPackages.length}</span>
+          </button>
+          <div className={`dx-approval-others${othersOpen ? " open" : ""}`}>
+            <button
+              aria-expanded={othersOpen}
+              className={othersActive ? "active" : ""}
+              onClick={() => setOthersOpen((current) => !current)}
+              type="button"
+            >
+              {othersLabel}<span>{othersCount}</span><ChevronDown />
+            </button>
+            {othersOpen ? (
+              <div className="dx-approval-others-menu" role="menu">
+                <button className={section === "time-off" ? "active" : ""} onClick={() => selectSection("time-off")} type="button">
+                  Time off<span>{leaveApprovals.length}</span>
+                </button>
+                <button className={section === "reimbursements" ? "active" : ""} onClick={() => selectSection("reimbursements")} type="button">
+                  Reimbursements<span>{reimbursementCount}</span>
+                </button>
+                <button className={section === "wfh" ? "active" : ""} onClick={() => selectSection("wfh")} type="button">
+                  WFH<span>{wfhApprovals.length}</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="dx-approval-tabs-desktop">
+          <button className={section === "time-off" ? "active" : ""} onClick={() => selectSection("time-off")} type="button">
+            Time off<span>{leaveApprovals.length}</span>
+          </button>
+          <button className={section === "reimbursements" ? "active" : ""} onClick={() => selectSection("reimbursements")} type="button">
+            Reimbursements<span>{reimbursementCount}</span>
+          </button>
+          <button className={section === "attendance" ? "active" : ""} onClick={() => selectSection("attendance")} type="button">
+            Attendance<span>{attendanceCount}</span>
+          </button>
+          <button className={section === "rosters" ? "active" : ""} onClick={() => selectSection("rosters")} type="button">
+            Rosters<span>{rosterCount}</span>
+          </button>
+          <button className={section === "location-integrity" ? "active" : ""} onClick={() => selectSection("location-integrity")} type="button">
+            Location<span>{supportPackages.length}</span>
+          </button>
+          <button className={section === "wfh" ? "active" : ""} onClick={() => selectSection("wfh")} type="button">
+            WFH<span>{wfhApprovals.length}</span>
+          </button>
+        </div>
       </nav>
     {loading ? <div className="dx-loader"><span /><small>Loading approvals…</small></div> : null}
 
@@ -818,11 +908,35 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
 
       {!loading && section === "reimbursements" ? (
         <div className="dx-approval-list">
-          {reimbursements.length ? reimbursements.map((approval) => (
+          {preRequestApprovals.map((approval) => (
+            <article className="dx-approval-card" key={`pre-${approval.id}`}>
+              <ApprovalHead
+                badge={<span className="dx-approval-badge">{approval.request.estimated_amount != null ? money(approval.request.estimated_amount) : "Request"}</span>}
+                eyebrow={`${approval.request.request_no} · Pre-request · ${statusLabel(approval.assignee_role)}`}
+                meta={approval.request.requesterCode || "—"}
+                name={approval.request.requesterName}
+              />
+              <dl className="dx-approval-facts">
+                <div><dt>Purpose</dt><dd>{approval.request.purpose}</dd></div>
+                {(approval.request.trip_from || approval.request.trip_to) ? (
+                  <div><dt>Dates</dt><dd>{approval.request.trip_from || "—"} → {approval.request.trip_to || "—"}</dd></div>
+                ) : null}
+                {approval.request.notes ? <div><dt>Notes</dt><dd>{approval.request.notes}</dd></div> : null}
+              </dl>
+              <ApprovalNote id={`pre:${approval.request.id}`} notes={notes} onChange={(value) => setNote(`pre:${approval.request.id}`, value)} placeholder="Required when rejecting" />
+              <ApprovalToolbar
+                onApprove={() => void decidePreRequest(approval.request.id, "approved")}
+                onReject={() => void decidePreRequest(approval.request.id, "rejected")}
+                saving={saving}
+                showReturn={false}
+              />
+            </article>
+          ))}
+          {reimbursements.map((approval) => (
             <article className="dx-approval-card" key={approval.id}>
               <ApprovalHead
                 badge={<span className="dx-approval-badge">{money(approval.claim.total_claimed)}</span>}
-                eyebrow={`${approval.claim.claim_no} · ${approval.step_name}`}
+                eyebrow={`${approval.claim.claim_no} · Claim · ${approval.step_name}`}
                 meta={approval.claim.purpose}
                 name={approval.claim.requesterName}
               />
@@ -832,10 +946,13 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
                     <dt>{first(item.hr_expense_categories)?.name ?? "Expense"}</dt>
                     <dd>
                       {item.expense_date} · {money(item.amount)}
-                      {approval.claim.attachments?.filter((attachment) => attachment.item_id === item.id && attachment.url).map((attachment) => (
-                        <a href={attachment.url ?? "#"} key={attachment.id} rel="noreferrer" target="_blank"><FileText />{attachment.file_name}</a>
-                      ))}
                     </dd>
+                  </div>
+                ))}
+                {approval.claim.attachments?.filter((attachment) => attachment.url).map((attachment) => (
+                  <div key={attachment.id}>
+                    <dt>Receipt pack</dt>
+                    <dd><a href={attachment.url ?? "#"} rel="noreferrer" target="_blank"><FileText />{attachment.file_name}</a></dd>
                   </div>
                 ))}
               </dl>
@@ -847,9 +964,10 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
                 saving={saving}
               />
             </article>
-          )) : (
-            <div className="dx-empty"><Clock3 /><strong>No claims waiting</strong><small>No claims from your {scopeName} are waiting.</small></div>
-          )}
+          ))}
+          {!preRequestApprovals.length && !reimbursements.length ? (
+            <div className="dx-empty"><Clock3 /><strong>No reimbursements waiting</strong><small>No requests or claims from your {scopeName} are waiting.</small></div>
+          ) : null}
         </div>
       ) : null}
 

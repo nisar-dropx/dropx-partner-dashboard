@@ -164,12 +164,31 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
     }
 
     const reimbursement = reimbursementResult.status === "fulfilled" ? reimbursementResult.value : null;
+    for (const request of reimbursement?.preRequests ?? []) {
+      unified.push({
+        id: `reimbursement-request:${request.id}`,
+        kind: "reimbursement",
+        title: `${request.request_no}${request.estimated_amount != null ? ` – ${money(request.estimated_amount)}` : ""}`,
+        eyebrow: `Request · ${request.purpose}`,
+        submittedAt: request.created_at,
+        status: request.status,
+        facts: [
+          ...(request.decision_note ? [{ label: "Decision note", value: request.decision_note }] : []),
+          ...(request.consumed_claim_id ? [{ label: "Claim", value: "Submitted" }] : request.status === "approved" ? [{ label: "Next step", value: "Submit claim with receipts" }] : [])
+        ],
+        steps: (request.assignees ?? []).map((assignee: { assignee_role: string; status: string; decision_note?: string | null }) => ({
+          name: assignee.assignee_role === "finance_head" ? "Finance head" : "Reporting manager",
+          status: assignee.status,
+          note: assignee.decision_note
+        }))
+      });
+    }
     for (const claim of reimbursement?.claims ?? []) {
       unified.push({
         id: `reimbursement:${claim.id}`,
         kind: "reimbursement",
         title: `${claim.claim_no} – ${money(claim.total_claimed)}`,
-        eyebrow: claim.purpose,
+        eyebrow: `Claim · ${claim.purpose}`,
         submittedAt: claim.submitted_at ?? claim.created_at,
         status: claim.status,
         facts: [

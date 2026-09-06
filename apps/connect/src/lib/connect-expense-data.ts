@@ -195,3 +195,100 @@ export async function expensePayoutReadiness(account: ConnectAccount) {
   const ready = Boolean(String(row?.bank_account_no ?? "").trim() && String(row?.[ifscColumn] ?? "").trim());
   return { ready, message: ready ? null : "Complete your bank account and IFSC in My Profile before submitting a reimbursement." };
 }
+
+export type ExpenseClaimRequestAssignee = {
+  assignee_role: "reporting_manager" | "finance_head";
+  approver_user_id: string;
+  approver_person_id: string | null;
+};
+
+async function resolveImmediateReportingManager(account: ConnectAccount, identity: Awaited<ReturnType<typeof expenseIdentity>>): Promise<ExpenseClaimRequestAssignee | null> {
+  const relationship = await db().from("hr_reporting_relationships").select("manager_assignment_id")
+    .eq("company_id", account.companyId).eq("subject_assignment_id", identity.assignment.id)
+    .eq("relationship_type", "solid_line").eq("is_primary", true)
+    .lte("effective_from", identity.today).or(`effective_to.is.null,effective_to.gte.${identity.today}`)
+    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+  if (relationship.error) throw new Error(relationship.error.message);
+  if (!relationship.data) return null;
+  const assignment = await db().from("hr_work_assignments").select("id,engagement_id,position_title")
+    .eq("company_id", account.companyId).eq("id", relationship.data.manager_assignment_id).maybeSingle();
+  if (assignment.error || !assignment.data) return null;
+  const engagement = await db().from("hr_engagements").select("person_id,status")
+    .eq("company_id", account.companyId).eq("id", assignment.data.engagement_id).maybeSingle();
+  if (engagement.error || !engagement.data || engagement.data.status !== "active") return null;
+  if (engagement.data.person_id === identity.personId) return null;
+  const link = await db().from("hr_user_person_links").select("user_id,status")
+    .eq("company_id", account.companyId).eq("person_id", engagement.data.person_id).maybeSingle();
+  if (link.error || !link.data || link.data.status !== "active") {
+    throw new Error(`${assignment.data.position_title} does not have an active One/People login.`);
+  }
+  return {
+    assignee_role: "reporting_manager",
+    approver_user_id: link.data.user_id,
+    approver_person_id: engagement.data.person_id
+  };
+}
+
+async function resolveFinanceHeadAssignee(account: ConnectAccount, excludeUserIds: Set<string>): Promise<ExpenseClaimRequestAssignee | null> {
+  const head = await db().from("payment_heads")
+    .select("payment_process_role_ids")
+    .eq("company_id", account.companyId)
+    .eq("code", "EMPLOYEE_REIMBURSEMENT")
+    .eq("is_active", true)
+    .maybeSingle();
+  if (head.error) throw new Error(head.error.message);
+  const roleIds = (head.data?.payment_process_role_ids ?? []).filter(Boolean);
+  if (roleIds.length) {
+    const profiles = await db().from("profiles")
+      .select("id")
+      .eq("company_id", account.companyId)
+      .eq("is_active", true)
+      .in("role_id", roleIds)
+      .order("full_name")
+      .limit(20);
+    if (profiles.error) throw new Error(profiles.error.message);
+    const match = (profiles.data ?? []).find((row) => !excludeUserIds.has(row.id));
+    if (match) return { assignee_role: "finance_head", approver_user_id: match.id, approver_person_id: null };
+  }
+
+  const fallbackRoles = await db().from("user_roles")
+    .select("id")
+    .eq("company_id", account.companyId)
+    .eq("is_active", true)
+    .in("code", ["PAYROLL_APPROVER", "OWNER", "OWNER_BREAK_GLASS"]);
+  if (fallbackRoles.error) throw new Error(fallbackRoles.error.message);
+  const fallbackRoleIds = (fallbackRoles.data ?? []).map((role) => role.id);
+  if (!fallbackRoleIds.length) return null;
+  const fallbackProfiles = await db().from("profiles")
+    .select("id")
+    .eq("company_id", account.companyId)
+    .eq("is_active", true)
+    .in("role_id", fallbackRoleIds)
+    .order("full_name")
+    .limit(20);
+  if (fallbackProfiles.error) throw new Error(fallbackProfiles.error.message);
+  const match = (fallbackProfiles.data ?? []).find((row) => !excludeUserIds.has(row.id));
+  return match ? { assignee_role: "finance_head", approver_user_id: match.id, approver_person_id: null } : null;
+}
+
+/** Single-layer dual assignee: reporting manager and/or finance head (first decision wins). */
+export async function resolveExpenseClaimRequestAssignees(account: ConnectAccount) {
+  const identity = await expenseIdentity(account);
+  const assignees: ExpenseClaimRequestAssignee[] = [];
+  const exclude = new Set<string>();
+  if (identity.userId) exclude.add(identity.userId);
+
+  const manager = await resolveImmediateReportingManager(account, identity);
+  if (manager) {
+    assignees.push(manager);
+    exclude.add(manager.approver_user_id);
+  }
+
+  const finance = await resolveFinanceHeadAssignee(account, exclude);
+  if (finance) assignees.push(finance);
+
+  if (!assignees.length) {
+    throw new Error("Configure a reporting manager or finance payment processor before requesting reimbursement approval.");
+  }
+  return { identity, assignees };
+}

@@ -28,7 +28,8 @@ async function recipientAccounts(companyId: string, userId: string) {
 
 export async function notifyExpenseUser(input: {
   companyId: string;
-  claimId: string;
+  claimId?: string | null;
+  claimRequestId?: string | null;
   recipientUserId: string | null;
   eventCode: string;
   title: string;
@@ -49,20 +50,25 @@ export async function notifyExpenseUser(input: {
       title: input.title,
       body: input.body,
       route: input.route ?? "reimbursements",
-      data: { claimId: input.claimId }
+      data: {
+        ...(input.claimId ? { claimId: input.claimId } : {}),
+        ...(input.claimRequestId ? { claimRequestId: input.claimRequestId } : {})
+      }
     });
   }
   const email = recipient.profile?.email?.trim();
   if (!email) return { status: "skipped" as const, error: "Recipient email is missing." };
-  const log = await db().from("hr_expense_notification_log").insert({
+  const logPayload: Record<string, unknown> = {
     company_id: input.companyId,
-    claim_id: input.claimId,
     event_code: input.eventCode,
     recipient_user_id: input.recipientUserId,
     recipient_email: email,
     channel: "email",
     status: "sending"
-  }).select("id").single();
+  };
+  if (input.claimId) logPayload.claim_id = input.claimId;
+  if (input.claimRequestId) logPayload.claim_request_id = input.claimRequestId;
+  const log = await db().from("hr_expense_notification_log").insert(logPayload).select("id").single();
   try {
     await sendConnectEmail({ companyId: input.companyId, to: [email], subject: input.emailSubject, body: input.emailBody });
     if (log.data) await db().from("hr_expense_notification_log").update({ status: "sent", sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", log.data.id);
