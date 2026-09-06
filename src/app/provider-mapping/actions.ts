@@ -666,3 +666,80 @@ export async function saveProviderMappingWorksheet(formData: FormData) {
 
   mappingRedirect({ notice: `${savedRows} row${savedRows === 1 ? "" : "s"} saved.` });
 }
+
+function providerFirstMappingRedirect(params: { error?: string; notice?: string }) {
+  cookies().set("dropx_provider_mapping_flash", JSON.stringify(params), {
+    httpOnly: true,
+    maxAge: 15,
+    path: "/provider-mapping",
+    sameSite: "lax"
+  });
+  redirect("/provider-mapping/provider-first");
+}
+
+/** Links an imported provider member to an existing canonical workforce record.
+ * Payment-method and rate configuration remains on the existing worksheet. */
+export async function saveProviderFirstMapping(formData: FormData) {
+  const authorization = await getAuthorization();
+  if (!authorization) redirect("/login");
+  const companyId = requireCompanyId(authorization);
+  if (!hasPermission(authorization, "provider_mapping", "add") && !hasPermission(authorization, "provider_mapping", "edit")) {
+    redirect("/unauthorized?page=provider_mapping&action=edit");
+  }
+
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const providerMemberId = clean(formData.get("provider_member_id"));
+    const workforceId = clean(formData.get("workforce_id"));
+    const stationId = clean(formData.get("station_id"));
+    if (!providerMemberId || !workforceId || !stationId) throw new Error("Provider Member ID, workforce DropX ID, and location are required.");
+
+    const allowedLocationIds = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER"
+      ? null
+      : new Set(authorization.locationScopeIds);
+    if (allowedLocationIds && !allowedLocationIds.has(stationId)) throw new Error("This location is not allocated to your account.");
+
+    const [{ data: worker, error: workerError }, { data: station, error: stationError }, { data: memberMapping, error: memberMappingError }, { data: workerMapping, error: workerMappingError }] = await Promise.all([
+      supabaseAdmin.from("workforce").select("id, full_name, location_id, is_active").eq("id", workforceId).eq("company_id", companyId).is("deleted_at", null).maybeSingle(),
+      supabaseAdmin.from("stations").select("id, provider_id").eq("id", stationId).eq("company_id", companyId).eq("is_active", true).maybeSingle(),
+      supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id").eq("company_id", companyId).eq("provider_member_id", providerMemberId).is("effective_to", null).neq("status", "cancelled").maybeSingle(),
+      supabaseAdmin.from("field_executive_provider_mappings").select("id, payment_method_id, payment_values, pay_type, effective_from").eq("company_id", companyId).eq("workforce_id", workforceId).is("effective_to", null).neq("status", "cancelled").order("created_at", { ascending: false }).limit(1).maybeSingle()
+    ]);
+    if (workerError || stationError || memberMappingError || workerMappingError) throw new Error(workerError?.message || stationError?.message || memberMappingError?.message || workerMappingError?.message || "Unable to load mapping data.");
+    if (!worker?.is_active) throw new Error("The selected workforce record is no longer active.");
+    if (!station?.provider_id) throw new Error("The selected location does not have a provider configured.");
+    if (memberMapping && memberMapping.workforce_id !== workforceId) throw new Error("This Provider Member ID is already actively linked to another workforce record.");
+
+    const now = new Date().toISOString();
+    if (workerMapping) {
+      const { error } = await supabaseAdmin.from("field_executive_provider_mappings").update({
+        provider_member_id: providerMemberId,
+        provider_id: station.provider_id,
+        station_id: stationId,
+        updated_at: now
+      }).eq("id", workerMapping.id).eq("company_id", companyId);
+      if (error) throw new Error(error.message);
+    } else {
+      const { error } = await supabaseAdmin.from("field_executive_provider_mappings").insert(withCompany({
+        workforce_id: workforceId,
+        provider_id: station.provider_id,
+        station_id: stationId,
+        provider_member_id: providerMemberId,
+        effective_from: new Date().toISOString().slice(0, 10),
+        payment_method_id: null,
+        payment_values: {},
+        pay_type: "UNALLOCATED",
+        status: "active",
+        created_by: authorization.userId,
+        updated_at: now
+      }, companyId));
+      if (error) throw new Error(error.message);
+    }
+    revalidatePath("/provider-mapping");
+    revalidatePath("/provider-mapping/provider-first");
+    revalidatePath("/payments/workforce-payouts");
+  } catch (error) {
+    providerFirstMappingRedirect({ error: error instanceof Error ? error.message : "Unable to save provider-first mapping." });
+  }
+  providerFirstMappingRedirect({ notice: "Provider Member ID linked to workforce. Configure payment and rates in the Existing mapping worksheet if needed." });
+}

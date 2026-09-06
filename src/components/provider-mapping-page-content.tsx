@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import {
@@ -339,6 +340,11 @@ export async function ProviderMappingPageContent({
         title="ID & pay mapping"
         subtitle="Maintain DropX ID to Provider Member ID mappings, date-effective history, and payout rates in editable rows."
       />
+
+      <nav className="performance-tabs" aria-label="ID mapping views">
+        <Link className="active" href="/provider-mapping">Existing worksheet</Link>
+        <Link href="/provider-mapping/provider-first">Provider member first</Link>
+      </nav>
 
       {error || flashError || flashNotice ? (
         <section
