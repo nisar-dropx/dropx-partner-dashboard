@@ -94,7 +94,7 @@ function csvCell(value: string | number) {
   return `"${String(value).replace(/"/g, '""')}"`;
 }
 
-function BulkIdUpload({ canEdit }: { canEdit: boolean }) {
+function BulkIdUpload({ canEdit, paymentMethods }: { canEdit: boolean; paymentMethods: PaymentMethodOption[] }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
@@ -132,11 +132,33 @@ function BulkIdUpload({ canEdit }: { canEdit: boolean }) {
     }
   }
 
+  function downloadTemplate() {
+    const rateColumns = Array.from(new Set(paymentMethods.flatMap((method) => method.components.map((component) => component.code))));
+    const headers = [
+      "DROPX_ID",
+      "PROVIDER_MEMBER_ID",
+      "PAYMENT_METHOD_CODE",
+      "EFFECTIVE_FROM",
+      "EFFECTIVE_TO",
+      ...rateColumns
+    ];
+    const csv = `${headers.map(csvCell).join(",")}\r\n`;
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "id-pay-mapping-bulk-upload-template.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <form className="mapping-id-upload-form" onSubmit={upload}>
       <label>Excel / CSV file
         <input accept=".xlsx,.xls,.csv" disabled={!canEdit || pending} name="mapping_file" type="file" />
       </label>
+      <button className="button secondary" onClick={downloadTemplate} type="button">Download template</button>
       <button className="button" disabled={!canEdit || pending} type="submit">{pending ? "Uploading..." : "Upload mappings"}</button>
       {reportUrl ? <a className="button secondary" download={`provider-id-upload-report-${new Date().toISOString().slice(0, 10)}.csv`} href={reportUrl}>Download report</a> : null}
       {message ? <span className={error ? "mapping-upload-error" : "mapping-upload-success"}>{message}</span> : null}
@@ -513,10 +535,10 @@ export function ProviderMappingWorksheet({
     <section className="panel mapping-id-upload-panel">
       <div>
         <h2>Bulk ID mapping</h2>
-        <p className="subtle">Upload only DropX ID and Provider Member ID now. Payment method, rates and effective dates can be allocated later.</p>
+        <p className="subtle">Upload DropX and Provider Member IDs with optional payment method, rates, and effective dates.</p>
       </div>
-      <BulkIdUpload canEdit={canEdit} />
-      <small className="subtle">Accepted headers: DROPX_ID and PROVIDER_MEMBER_ID. Empty or incomplete rows are skipped.</small>
+      <BulkIdUpload canEdit={canEdit} paymentMethods={paymentMethods} />
+      <small className="subtle">Template includes the active payment-method rate columns. DropX ID and Provider Member ID are required for each uploaded row.</small>
     </section>
     <form action={saveProviderMappingWorksheet} autoComplete="off" className="worksheet-form" noValidate onSubmit={handleSubmit}>
       <input type="hidden" name="row_count" value={rows.length} />
