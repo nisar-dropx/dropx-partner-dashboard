@@ -87,6 +87,10 @@ type DailyRow = {
   employee_code: string | null;
   station_code: string | null;
   worker_name: string | null;
+  in_source?: string | null;
+  out_source?: string | null;
+  manual_in_request_id?: string | null;
+  manual_out_request_id?: string | null;
 };
 
 type EmployeeLookupRow = {
@@ -145,8 +149,19 @@ function normalizeDailyRows(rows: Partial<DailyRow>[]): DailyRow[] {
     location_id: row.location_id ?? null,
     employee_code: row.employee_code ?? null,
     station_code: row.station_code ?? null,
-    worker_name: row.worker_name ?? null
+    worker_name: row.worker_name ?? null,
+    in_source: row.in_source ?? null,
+    out_source: row.out_source ?? null,
+    manual_in_request_id: row.manual_in_request_id ?? null,
+    manual_out_request_id: row.manual_out_request_id ?? null
   })).filter((row) => row.enrolment_id && row.punch_date);
+}
+
+function isManualRegularizationDay(row: DailyRow) {
+  return row.in_source === "manual_regularization"
+    || row.out_source === "manual_regularization"
+    || Boolean(row.manual_in_request_id || row.manual_out_request_id)
+    || /attendance regularized/i.test(String(row.remark ?? ""));
 }
 
 function normalizeBiometricId(value: string | null | undefined) {
@@ -1105,7 +1120,11 @@ export async function loadAttendanceReportRows({
     location_id,
     employee_code,
     station_code,
-    worker_name
+    worker_name,
+    in_source,
+    out_source,
+    manual_in_request_id,
+    manual_out_request_id
   `;
   const fallbackSelect = `
     enrolment_id,
@@ -1327,21 +1346,26 @@ export async function loadAttendanceReportRows({
     const punches = punchesForDailyRow(row, punchesByKey);
     const punchTimes = punches.map((punch) => punch.punch_time).filter(Boolean) as string[];
     const storedPunchCount = Number(row.punch_count ?? 0);
-    const shouldRecomputeFromPunches = punchTimes.length > 0 && (
-      punchTimes.length !== storedPunchCount ||
-      !row.out_time ||
-      (punchTimes.length >= 2 && Number(row.work_minutes ?? 0) <= 0)
+    const regularized = isManualRegularizationDay(row);
+    // Only rebuild from raw punches when they are richer than the stored day.
+    // Approved regularizations often update attendance_daily without inserting a
+    // matching OUT punch row — never overwrite those approved times.
+    const shouldRecomputeFromPunches = !regularized && punchTimes.length > 0 && (
+      punchTimes.length > storedPunchCount
+      || (punchTimes.length >= 2 && (!row.out_time || Number(row.work_minutes ?? 0) <= 0))
     );
     const punchSummary = shouldRecomputeFromPunches
       ? summarizeFirstInLastOut(punchTimes)
       : null;
     const effectiveInTime = punchSummary && punchTimes[0]
       ? punchTimes[0]
-      : (punchTimes[0] ?? row.in_time);
+      : (regularized ? row.in_time : (punchTimes[0] ?? row.in_time));
     const effectiveOutTime = punchSummary
       ? punchSummary.lastOutTime
-      : (punchTimes.length >= 2 ? punchTimes[punchTimes.length - 1] : row.out_time);
-    const effectivePunchCount = Math.max(storedPunchCount, punches.length);
+      : row.out_time;
+    const effectivePunchCount = regularized
+      ? Math.max(storedPunchCount, 2)
+      : Math.max(storedPunchCount, punches.length);
     const effectiveWorkMinutes = punchSummary
       ? punchSummary.workMinutes
       : Number(row.work_minutes ?? 0);

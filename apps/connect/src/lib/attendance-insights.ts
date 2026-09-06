@@ -150,7 +150,9 @@ export function attendanceDayInsight(
   const remark = normalized(row.remark);
   const lateMinutes = resolveLateMinutes(row);
   const earlyOutMinutes = resolveEarlyOutMinutes(row);
-  const missingPunch = row.punchCount < 2 || !row.outTime || /single|missing/.test(remark);
+  const missingPunch = row.status.toUpperCase() !== "A"
+    && row.punchCount > 0
+    && (row.punchCount < 2 || !row.outTime || /single|missing/.test(remark));
   const needsPolicyReview = state.includes("needs review");
 
   const issues: AttendanceIssue[] = [];
