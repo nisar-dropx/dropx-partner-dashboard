@@ -421,7 +421,7 @@ async function saveExecutiveMappingRow(
         .select("id, full_name")
         .eq("id", id)
         .eq("company_id", companyId)
-        .eq("is_active", true)
+        .is("deleted_at", null)
         .maybeSingle(),
     supabaseAdmin
       .from("stations")
@@ -706,6 +706,20 @@ export async function saveProviderFirstMappingWorksheet(formData: FormData) {
       : new Set(authorization.locationScopeIds);
     for (const index of indexes) {
       if (index < 0 || index >= rowCount) throw new Error("Invalid row selected.");
+      const workforceId = rowRequired(formData, index, "id", "DropX workforce ID");
+      const providerMemberId = rowRequired(formData, index, "provider_member_id", "Provider Member ID");
+      const { data: currentMapping, error: currentMappingError } = await supabaseAdmin!
+        .from("field_executive_provider_mappings")
+        .select("id, provider_member_id")
+        .eq("company_id", companyId)
+        .eq("workforce_id", workforceId)
+        .is("effective_to", null)
+        .neq("status", "cancelled")
+        .maybeSingle();
+      if (currentMappingError) throw new Error(currentMappingError.message);
+      if (currentMapping && String(currentMapping.provider_member_id) !== providerMemberId) {
+        throw new Error(`Row ${index + 1}: This DropX ID is already mapped to Provider Member ID ${currentMapping.provider_member_id}.`);
+      }
       await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds);
       savedRows += 1;
     }

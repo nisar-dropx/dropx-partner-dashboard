@@ -18,6 +18,9 @@ export type ProviderFirstWorker = {
   paymentValues: Record<string, string>;
   effectiveFrom: string;
   effectiveTo: string;
+  mappedProviderMemberId: string;
+  locationLabel: string;
+  onboardingStatus: string;
 };
 
 export type ProviderFirstMappingRow = {
@@ -40,8 +43,27 @@ function signature(row: ProviderFirstMappingRow) {
   return [row.providerMemberId, row.stationId, row.workforceId, row.mappingId, row.paymentMethodId, JSON.stringify(row.paymentValues), row.effectiveFrom, row.effectiveTo].join("|");
 }
 
-function RowButton({ canEdit, dirty, index }: { canEdit: boolean; dirty: boolean; index: number }) {
-  return <button className={`button compact mapping-row-save${dirty ? "" : " secondary"}`} disabled={!canEdit || !dirty} name="save_row" type="submit" value={index}>{dirty ? "Save" : "Saved"}</button>;
+function nameTokens(value: string) {
+  return value.split("/")[0].normalize("NFKD").toLocaleUpperCase()
+    .split(/[^\p{L}\p{N}]+/u).map((token) => token.trim()).filter(Boolean);
+}
+
+function namesMateriallyMatch(providerName: string, dropxName: string) {
+  const providerTokens = new Set(nameTokens(providerName));
+  const dropxTokens = new Set(nameTokens(dropxName));
+  if (!providerTokens.size || !dropxTokens.size) return false;
+  const matching = Array.from(providerTokens).filter((token) => dropxTokens.has(token)).length;
+  const smaller = Math.min(providerTokens.size, dropxTokens.size);
+  const larger = Math.max(providerTokens.size, dropxTokens.size);
+  return matching >= 2 && matching === smaller && matching / larger >= 2 / 3;
+}
+
+function isMappedToAnotherMember(row: ProviderFirstMappingRow, worker: ProviderFirstWorker | undefined) {
+  return Boolean(worker?.mappedProviderMemberId && worker.mappedProviderMemberId !== row.providerMemberId);
+}
+
+function RowButton({ canEdit, dirty, index, nameMatches }: { canEdit: boolean; dirty: boolean; index: number; nameMatches: boolean }) {
+  return <button className={`button compact mapping-row-save${dirty ? "" : " secondary"}`} disabled={!canEdit || !dirty || !nameMatches} name="save_row" type="submit" value={index}>{dirty ? "Save" : "Saved"}</button>;
 }
 
 export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paymentMethods }: {
@@ -59,6 +81,8 @@ export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paym
 
   const dirtyRows = rows.map((row, index) => signature(row) !== initialSignatures[index]);
   const hasDirty = dirtyRows.some(Boolean);
+  const hasDirtyNameMismatch = rows.some((row, index) => dirtyRows[index] && Boolean(row.workforceId) && !namesMateriallyMatch(row.providerMemberName, row.dropxName));
+  const hasDirtyMappingConflict = rows.some((row, index) => dirtyRows[index] && isMappedToAnotherMember(row, workers.find((worker) => worker.id === row.workforceId)));
 
   function update(index: number, change: Partial<ProviderFirstMappingRow>) {
     setErrors((current) => { const next = { ...current }; delete next[index]; return next; });
@@ -91,6 +115,8 @@ export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paym
 
   function validate(row: ProviderFirstMappingRow, index: number) {
     if (!row.workforceId) return `Row ${index + 1}: Select a DropX workforce ID.`;
+    if (isMappedToAnotherMember(row, workers.find((worker) => worker.id === row.workforceId))) return `Row ${index + 1}: This DropX ID is already mapped to another Provider Member ID.`;
+    if (!namesMateriallyMatch(row.providerMemberName, row.dropxName)) return `Row ${index + 1}: Provider member name does not materially match the selected DropX name.`;
     if (!row.providerId) return `Row ${index + 1}: The selected location has no provider.`;
     if (!row.paymentMethodId) return `Row ${index + 1}: Payment method is required.`;
     if (!row.effectiveFrom) return `Row ${index + 1}: Effective from is required.`;
@@ -121,10 +147,12 @@ export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paym
     <input name="row_count" type="hidden" value={rows.length} />
     <input name="dirty_row_indexes" type="hidden" value={JSON.stringify(dirtyRows.flatMap((dirty, index) => dirty ? [index] : []))} />
     <section className="panel">
-      <div className="panel-head"><div><h2>Provider member → DropX ID & pay mapping</h2><p className="subtle">Provider Member ID is read-only. Select the DropX workforce ID, then configure payment method, rates and dates exactly as in the existing worksheet.</p></div><SubmitButton className="button mapping-save-all" disabled={!canEdit || !hasDirty} disabledText={!canEdit ? "No edit access" : "No edits"}>Save all</SubmitButton></div>
+      <div className="panel-head"><div><h2>Provider member → DropX ID & pay mapping</h2><p className="subtle">Provider Member ID is read-only. Select the DropX workforce ID, then configure payment method, rates and dates exactly as in the existing worksheet.</p></div><SubmitButton className="button mapping-save-all" disabled={!canEdit || !hasDirty || hasDirtyNameMismatch || hasDirtyMappingConflict} disabledText={!canEdit ? "No edit access" : hasDirtyMappingConflict ? "Resolve mapping conflicts" : hasDirtyNameMismatch ? "Fix name mismatches" : "No edits"}>Save all</SubmitButton></div>
       <div className="mapping-rows">{rows.map((row, index) => {
-        const availableWorkers = workers.filter((worker) => worker.stationId === row.stationId);
-        const workerOptions = availableWorkers.map((worker) => ({ value: worker.id, label: `${worker.dropxId} — ${worker.fullName}`, helper: row.stationLabel }));
+        const availableWorkers = workers;
+        const selectedWorker = workers.find((worker) => worker.id === row.workforceId);
+        const mappingConflict = isMappedToAnotherMember(row, selectedWorker);
+        const workerOptions = availableWorkers.map((worker) => ({ value: worker.id, label: `${worker.dropxId} — ${worker.fullName}`, helper: `${worker.locationLabel} · ${worker.onboardingStatus || "No status"}${worker.mappedProviderMemberId && worker.mappedProviderMemberId !== row.providerMemberId ? " · Already mapped" : ""}` }));
         const components = paymentMethodById.get(row.paymentMethodId)?.components ?? [];
         return <div className={`mapping-row-card ${dirtyRows[index] ? "unsaved-row" : ""}`} key={row.providerMemberId}>
           <input name={`rows[${index}][id]`} type="hidden" value={row.workforceId} />
@@ -139,13 +167,15 @@ export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paym
           {dirtyRows[index] ? <span className="unsaved-badge mapping-unsaved-badge">Unsaved</span> : null}
           <div className="mapping-identity"><span className="mapping-dropx-id mono">{row.providerMemberId}</span><strong>{row.providerMemberName}</strong><span>{row.stationLabel}</span></div>
           <div className="mapping-edit-grid">
-            <div className="mapping-field mapping-payment-method-select"><span className="mapping-field-label">DropX workforce ID</span><SearchableSelect disabled={!canEdit} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={workerOptions} placeholder="Search DropX ID or name" value={row.workforceId} /></div>
+            <div className="mapping-field mapping-payment-method-select provider-first-workforce-select"><span className="mapping-field-label">DropX workforce ID</span><SearchableSelect disabled={!canEdit} maxOptions={5000} name={`provider_first_worker_${index}`} onValueChange={(value) => chooseWorker(index, value)} options={workerOptions} placeholder="Search DropX ID or name" value={row.workforceId} /></div>
             <div className="mapping-field mapping-payment-method-select"><span className="mapping-field-label">Payment method</span><SearchableSelect disabled={!canEdit || !row.workforceId} name={`rows[${index}][payment_method_id]`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {} })} options={paymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} /></div>
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEdit || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
             <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEdit || !row.workforceId} name={`rows[${index}][effective_from]`} onChange={(event) => update(index, { effectiveFrom: event.target.value })} type="date" value={row.effectiveFrom} /></label><label>Effective to<input className="worksheet-input" disabled={!canEdit || !row.workforceId} name={`rows[${index}][effective_to]`} onChange={(event) => update(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label></div>
+            {row.workforceId && !namesMateriallyMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch: “{row.providerMemberName.split("/")[0].trim()}” does not sufficiently match “{row.dropxName}”. Save is blocked.</div> : null}
+            {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}
             {errors[index] ? <div className="mapping-row-error">{errors[index]}</div> : null}
           </div>
-          <div className="mapping-row-actions"><RowButton canEdit={canEdit} dirty={dirtyRows[index]} index={index} /></div>
+          <div className="mapping-row-actions"><RowButton canEdit={canEdit} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || namesMateriallyMatch(row.providerMemberName, row.dropxName)) && !mappingConflict} /></div>
         </div>;
       })}</div>
     </section>

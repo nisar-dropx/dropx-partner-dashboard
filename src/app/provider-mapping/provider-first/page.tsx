@@ -30,7 +30,7 @@ export default async function ProviderFirstMappingPage() {
 
   const [stationsResult, workersResult, providerResult, mappingsResult, methodsResult] = await Promise.all([
     supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id").eq("company_id", companyId).eq("is_active", true).order("station_code"),
-    supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join").eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).order("dropx_id"),
+    supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status").eq("company_id", companyId).is("deleted_at", null).order("dropx_id"),
     supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, provider_employee_name, station_code, work_date").eq("company_id", companyId).order("work_date", { ascending: false }).limit(50000),
     supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, effective_from, effective_to, status").eq("company_id", companyId).neq("status", "cancelled").order("effective_from", { ascending: false }).order("created_at", { ascending: false }),
     supabaseAdmin.from("payment_methods").select("id, code, name, payment_method_components(component_code, component_type, label, sort_order)").eq("company_id", companyId).eq("is_active", true).order("code")
@@ -42,9 +42,10 @@ export default async function ProviderFirstMappingPage() {
   const mappingByWorkforce = new Map(activeMappings.filter((mapping) => mapping.workforce_id).map((mapping) => [mapping.workforce_id!, mapping]));
   const mappingByMember = new Map(activeMappings.map((mapping) => [String(mapping.provider_member_id), mapping]));
   const workforceById = new Map((workersResult.data ?? []).map((worker) => [worker.id, worker]));
+  const stationLabelById = new Map(stations.map((station) => [station.id, station.station_name && station.station_name !== station.station_code ? `${station.station_code} - ${station.station_name}` : station.station_code]));
   const workers: ProviderFirstWorker[] = (workersResult.data ?? []).filter((worker) => allowed(worker.location_id) && worker.dropx_id).map((worker) => {
     const mapping = mappingByWorkforce.get(worker.id);
-    return { id: worker.id, dropxId: String(worker.dropx_id), fullName: String(worker.full_name), stationId: String(worker.location_id ?? ""), providerId: mapping?.provider_id ?? "", dateOfJoin: String(worker.date_of_join ?? ""), mappingId: mapping?.id ?? "", paymentMethodId: mapping?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(mapping?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), effectiveFrom: mapping?.effective_from ?? String(worker.date_of_join ?? ""), effectiveTo: mapping?.effective_to ?? "" };
+    return { id: worker.id, dropxId: String(worker.dropx_id), fullName: String(worker.full_name), stationId: String(worker.location_id ?? ""), providerId: mapping?.provider_id ?? "", dateOfJoin: String(worker.date_of_join ?? ""), mappingId: mapping?.id ?? "", paymentMethodId: mapping?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(mapping?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), effectiveFrom: mapping?.effective_from ?? String(worker.date_of_join ?? ""), effectiveTo: mapping?.effective_to ?? "", mappedProviderMemberId: mapping?.provider_member_id ?? "", locationLabel: stationLabelById.get(String(worker.location_id ?? "")) ?? "No location", onboardingStatus: String(worker.onboarding_status ?? "") };
   });
   const latestMembers = new Map<string, { id: string; name: string; stationId: string; stationLabel: string; providerId: string }>();
   for (const provider of providerResult.data ?? []) {

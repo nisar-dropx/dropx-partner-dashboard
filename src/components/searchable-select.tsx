@@ -17,10 +17,11 @@ type SearchableSelectProps = {
   placeholder: string;
   required?: boolean;
   disabled?: boolean;
+  maxOptions?: number;
   onValueChange?: (value: string) => void;
 };
 
-export function SearchableSelect({ name, options, defaultValue, value: controlledValue, placeholder, required, disabled, onValueChange }: SearchableSelectProps) {
+export function SearchableSelect({ name, options, defaultValue, value: controlledValue, placeholder, required, disabled, maxOptions = 30, onValueChange }: SearchableSelectProps) {
   const isControlled = controlledValue !== undefined;
   const initialValue = isControlled ? controlledValue ?? "" : defaultValue ?? "";
   const initialOption = options.find((option) => option.value === initialValue);
@@ -41,12 +42,12 @@ export function SearchableSelect({ name, options, defaultValue, value: controlle
     const selected = options.find((option) => option.value === value);
     const showingSelectedLabel = selected?.label.toLowerCase() === term;
 
-    if (!term || showingSelectedLabel) return options.slice(0, 30);
+    if (!term || showingSelectedLabel) return options.slice(0, maxOptions);
 
     return options
       .filter((option) => `${option.label} ${option.helper ?? ""}`.toLowerCase().includes(term))
-      .slice(0, 30);
-  }, [options, query, value]);
+      .slice(0, maxOptions);
+  }, [maxOptions, options, query, value]);
 
   function choose(option: SearchableSelectOption) {
     if (disabledRef.current) return;
