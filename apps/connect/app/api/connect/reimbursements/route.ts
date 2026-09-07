@@ -116,9 +116,20 @@ async function claimPayload(account: ConnectAccount, reportees: ConnectReporteeA
     events: [...(claim.hr_expense_events ?? [])].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)),
     attachments: await signedAttachments(claim.hr_expense_attachments)
   })));
+  const assigneeUserIds = [...new Set((requestsResult.data ?? []).flatMap((request) =>
+    (request.hr_expense_claim_request_assignees ?? []).map((assignee) => assignee.approver_user_id).filter(Boolean)
+  ))];
+  const profiles = assigneeUserIds.length
+    ? await db().from("profiles").select("id,full_name").eq("company_id", account.companyId).in("id", assigneeUserIds)
+    : { data: [], error: null };
+  if (profiles.error) throw new Error(profiles.error.message);
+  const nameByUserId = new Map((profiles.data ?? []).map((profile) => [profile.id, profile.full_name ?? "Approver"]));
   const preRequests = (requestsResult.data ?? []).map((request) => ({
     ...request,
-    assignees: [...(request.hr_expense_claim_request_assignees ?? [])]
+    assignees: (request.hr_expense_claim_request_assignees ?? []).map((assignee) => ({
+      ...assignee,
+      approver_name: nameByUserId.get(assignee.approver_user_id) ?? "Approver"
+    }))
   }));
   const [approvals, preRequestApprovals] = await Promise.all([
     approvalPayload(account.companyId, identity.userId, reportees),

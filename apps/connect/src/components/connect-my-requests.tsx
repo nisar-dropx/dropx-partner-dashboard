@@ -176,8 +176,8 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
           ...(request.decision_note ? [{ label: "Decision note", value: request.decision_note }] : []),
           ...(request.consumed_claim_id ? [{ label: "Claim", value: "Submitted" }] : request.status === "approved" ? [{ label: "Next step", value: "Submit claim with receipts" }] : [])
         ],
-        steps: (request.assignees ?? []).map((assignee: { assignee_role: string; status: string; decision_note?: string | null }) => ({
-          name: assignee.assignee_role === "finance_head" ? "Finance head" : "Reporting manager",
+        steps: (request.assignees ?? []).map((assignee: { assignee_role: string; status: string; approver_name?: string | null; decision_note?: string | null }) => ({
+          name: `${assignee.approver_name || "Approver"} · ${assignee.assignee_role === "finance_head" ? "Finance head" : "Reporting manager"}`,
           status: assignee.status,
           note: assignee.decision_note
         }))

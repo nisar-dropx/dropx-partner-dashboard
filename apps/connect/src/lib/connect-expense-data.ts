@@ -240,31 +240,69 @@ async function resolveFinanceHeadAssignee(account: ConnectAccount, excludeUserId
   const roleIds = (head.data?.payment_process_role_ids ?? []).filter(Boolean);
   if (roleIds.length) {
     const profiles = await db().from("profiles")
-      .select("id")
+      .select("id,created_at")
       .eq("company_id", account.companyId)
       .eq("is_active", true)
       .in("role_id", roleIds)
-      .order("full_name")
+      .order("created_at")
       .limit(20);
     if (profiles.error) throw new Error(profiles.error.message);
     const match = (profiles.data ?? []).find((row) => !excludeUserIds.has(row.id));
     if (match) return { assignee_role: "finance_head", approver_user_id: match.id, approver_person_id: null };
   }
 
+  // Prefer the active People Finance Manager designation when payment-processor roles are empty.
+  const today = indiaToday();
+  const financeDesignations = await db().from("designations")
+    .select("id,code,name")
+    .eq("company_id", account.companyId)
+    .eq("is_active", true)
+    .or("code.ilike.%FINMGR%,code.ilike.%FINANCE%,name.ilike.%finance manager%,name.ilike.%finance head%");
+  if (financeDesignations.error) throw new Error(financeDesignations.error.message);
+  const designationIds = (financeDesignations.data ?? []).map((row) => row.id);
+  if (designationIds.length) {
+    const assignments = await db().from("hr_work_assignments")
+      .select("id,engagement_id,designation_id")
+      .eq("company_id", account.companyId)
+      .eq("is_primary", true)
+      .in("designation_id", designationIds)
+      .lte("effective_from", today)
+      .or(`effective_to.is.null,effective_to.gte.${today}`)
+      .order("effective_from", { ascending: false })
+      .limit(20);
+    if (assignments.error) throw new Error(assignments.error.message);
+    for (const assignment of assignments.data ?? []) {
+      const engagement = await db().from("hr_engagements").select("person_id,status")
+        .eq("company_id", account.companyId).eq("id", assignment.engagement_id).maybeSingle();
+      if (engagement.error) throw new Error(engagement.error.message);
+      if (!engagement.data || engagement.data.status !== "active") continue;
+      const link = await db().from("hr_user_person_links").select("user_id,status")
+        .eq("company_id", account.companyId).eq("person_id", engagement.data.person_id).maybeSingle();
+      if (link.error) throw new Error(link.error.message);
+      if (!link.data || link.data.status !== "active" || excludeUserIds.has(link.data.user_id)) continue;
+      return {
+        assignee_role: "finance_head",
+        approver_user_id: link.data.user_id,
+        approver_person_id: engagement.data.person_id
+      };
+    }
+  }
+
+  // Last resort: earliest active Owner login (avoids alphabetical pick of secondary owners).
   const fallbackRoles = await db().from("user_roles")
     .select("id")
     .eq("company_id", account.companyId)
     .eq("is_active", true)
-    .in("code", ["PAYROLL_APPROVER", "OWNER", "OWNER_BREAK_GLASS"]);
+    .in("code", ["OWNER", "OWNER_BREAK_GLASS", "PAYROLL_APPROVER"]);
   if (fallbackRoles.error) throw new Error(fallbackRoles.error.message);
   const fallbackRoleIds = (fallbackRoles.data ?? []).map((role) => role.id);
   if (!fallbackRoleIds.length) return null;
   const fallbackProfiles = await db().from("profiles")
-    .select("id")
+    .select("id,created_at")
     .eq("company_id", account.companyId)
     .eq("is_active", true)
     .in("role_id", fallbackRoleIds)
-    .order("full_name")
+    .order("created_at")
     .limit(20);
   if (fallbackProfiles.error) throw new Error(fallbackProfiles.error.message);
   const match = (fallbackProfiles.data ?? []).find((row) => !excludeUserIds.has(row.id));

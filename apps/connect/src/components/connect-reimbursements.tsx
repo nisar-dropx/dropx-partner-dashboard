@@ -10,7 +10,7 @@ type ExpenseItem = { id: string; categoryId: string; expenseDate: string; mercha
 type PreRequest = {
   id: string; request_no: string; purpose: string; estimated_amount?: number | null; trip_from?: string | null; trip_to?: string | null; notes?: string | null;
   status: string; decision_note?: string | null; decided_at?: string | null; consumed_claim_id?: string | null; created_at: string;
-  assignees: Array<{ id: string; assignee_role: string; status: string; decision_note?: string | null; decided_at?: string | null }>;
+  assignees: Array<{ id: string; assignee_role: string; status: string; approver_name?: string | null; decision_note?: string | null; decided_at?: string | null }>;
 };
 type Claim = {
   id: string; claim_no: string; claim_request_id?: string | null; purpose: string; trip_from?: string | null; trip_to?: string | null; total_claimed: number; total_approved?: number | null; status: string; return_reason?: string | null; rejection_reason?: string | null;
@@ -221,8 +221,8 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
                 {request.assignees.map((assignee) => (
                   <div className="dx-expense-row" key={assignee.id}>
                     <span>
-                      <strong>{statusLabel(assignee.assignee_role)}</strong>
-                      <small>{statusLabel(assignee.status)}{assignee.decided_at ? ` · ${dateTime(assignee.decided_at)}` : ""}</small>
+                      <strong>{assignee.approver_name || "Approver"}</strong>
+                      <small>{statusLabel(assignee.assignee_role)} · {statusLabel(assignee.status)}{assignee.decided_at ? ` · ${dateTime(assignee.decided_at)}` : ""}</small>
                     </span>
                   </div>
                 ))}
