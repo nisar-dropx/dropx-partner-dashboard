@@ -1,9 +1,8 @@
 import "server-only";
 
-import type { ConnectAccount } from "./connect-auth";
-import { connectApproverIdentity } from "./connect-expense-data";
-import { resolveConnectActorUserId, resolveConnectActorUserIds } from "./connect-approver-identity";
 import { notifyAttendanceApprovalRequired } from "../../../../src/lib/connect-attendance-notifications";
+import { resolveConnectActorUserId, resolveConnectActorUserIds } from "./connect-approver-identity";
+import { notifyApproverMobile } from "./approver-mobile-notifications";
 import {
   connectWorkforceMatches,
   loadConnectAccessibleWorkforceIds,
@@ -13,6 +12,8 @@ import { type ConnectReporteeAccess } from "./connect-reportee-scope";
 import { notifyConnectExitOutcome, notifyExitApprovalRequired } from "./connect-exit-notifications";
 import { todayInIndia } from "./india-date";
 import { supabaseAdmin } from "./supabase-admin";
+import type { ConnectAccount } from "./connect-auth";
+import { connectApproverIdentity } from "./connect-expense-data";
 
 type Decision = "approved" | "returned" | "rejected";
 
@@ -435,6 +436,16 @@ export async function decideConnectRosterApproval(account: ConnectAccount, planI
     if (activated.error) throw new Error(activated.error.message);
     const routed = await db().from("hr_roster_plans").update({ approver_user_id: next.data.approver_user_id ?? null }).eq("company_id", account.companyId).eq("id", planId);
     if (routed.error) throw new Error(routed.error.message);
+    await notifyApproverMobile({
+      companyId: account.companyId,
+      recipientUserId: next.data.approver_user_id,
+      eventCode: "ROSTER_APPROVAL_REQUIRED",
+      title: "Weekly roster needs approval",
+      body: "A weekly roster step is waiting in Approval Inbox.",
+      route: "approvals",
+      sourceKey: `${planId}:${next.data.id}`,
+      data: { planId, stepId: next.data.id }
+    });
     return "Roster step approved and routed to the next approver.";
   }
   const ended = await db().from("hr_roster_plans").update({ superseded_at: plan.effective_from }).eq("company_id", account.companyId).eq("location_id", plan.location_id).eq("roster_kind", "recurring_weekly").eq("status", "approved").is("superseded_at", null).neq("id", planId);
@@ -812,6 +823,16 @@ export async function decideConnectRosterSwapApproval(account: ConnectAccount, r
         source_key: requestId,
         data: { requestId, rosterDate: decided.roster_date }
       }, { onConflict: "company_id,event_code,source_key,recipient_user_id", ignoreDuplicates: true });
+      await notifyApproverMobile({
+        companyId: account.companyId,
+        recipientUserId: decided.approver_user_id,
+        eventCode: "roster_swap_approval_required",
+        title: "Shift swap awaiting approval",
+        body: `A shift swap for ${decided.roster_date} is ready for your approval in DropX One.`,
+        route: "approvals",
+        sourceKey: requestId,
+        data: { requestId, rosterDate: decided.roster_date }
+      });
       return "Approval recorded and sent to the next approver.";
     }
     await notifyRosterSwapWorkers({

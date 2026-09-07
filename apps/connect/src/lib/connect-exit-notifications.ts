@@ -1,4 +1,5 @@
 import { sendConnectEmail } from "./connect-email";
+import { notifyApproverMobile, notifyApproversMobile } from "./approver-mobile-notifications";
 import { todayInIndia } from "./india-date";
 import { supabaseAdmin } from "./supabase-admin";
 
@@ -86,6 +87,16 @@ export async function notifyExitWithdrawalReviewer(input: {
     status,
     error_message: errorMessage
   });
+  await notifyApproverMobile({
+    companyId: input.companyId,
+    recipientUserId: input.reviewerUserId,
+    eventCode: "WITHDRAWAL_REVIEW_REQUIRED",
+    title: "Resignation withdrawal pending",
+    body: `${input.employeeName} requested to withdraw resignation ${caseNumber || ""}. Open Approval Inbox → Exits.`.replace(/\s+/g, " ").trim(),
+    route: "approvals",
+    sourceKey: `${input.caseId}:withdrawal`,
+    data: { caseId: input.caseId }
+  });
 }
 
 export async function notifyExitApprovalRequired(input: { companyId: string; caseId: string; approvalStepId: string }) {
@@ -138,6 +149,16 @@ export async function notifyExitApprovalRequired(input: { companyId: string; cas
     errorMessage = error instanceof Error ? error.message : "Email failed.";
   }
   await supabaseAdmin.from("hr_exit_notification_log").insert({ company_id: input.companyId, case_id: input.caseId, event_code: "APPROVAL_REQUIRED", to_emails: to, cc_emails: cc, subject, status, error_message: errorMessage });
+  await notifyApproversMobile({
+    companyId: input.companyId,
+    recipientUserIds: ownerIds,
+    eventCode: "EXIT_APPROVAL_REQUIRED",
+    title: "Exit approval required",
+    body: `${employee?.full_name ?? "Employee"} · ${exitCase.case_number} · ${approval.step_name}. Open Approval Inbox.`,
+    route: "approvals",
+    sourceKey: `${input.caseId}:${input.approvalStepId}`,
+    data: { caseId: input.caseId, approvalStepId: input.approvalStepId }
+  });
 }
 
 export async function notifyConnectExitOutcome(input: { companyId: string; caseId: string; event: "CASE_APPROVED" | "CASE_REJECTED" }) {

@@ -9,6 +9,7 @@ import {
   loadConnectAttendanceApproveScope
 } from "./connect-people-attendance-access";
 import { connectWfhEligible, loadConnectWfhPolicies, type ConnectWfhPolicy } from "./connect-wfh-access";
+import { notifyApproverMobile } from "./approver-mobile-notifications";
 import { supabaseAdmin } from "./supabase-admin";
 
 export type WfhWorkerType = "employee" | "contractor";
@@ -267,6 +268,19 @@ export async function createConnectWfhRequest(input: {
       await db().from("hr_wfh_requests").delete().eq("id", requestId);
       throw new Error(stepsResult.error.message);
     }
+    const firstApprover = stepRows[0]?.approver_user_id;
+    if (firstApprover) {
+      await notifyApproverMobile({
+        companyId: input.companyId,
+        recipientUserId: firstApprover,
+        eventCode: "WFH_APPROVAL_REQUIRED",
+        title: "WFH needs approval",
+        body: `${identity.workerName || "Team member"} requested WFH (${input.fromDate} – ${input.toDate}). Open Approval Inbox.`,
+        route: "approvals",
+        sourceKey: requestId,
+        data: { wfhRequestId: requestId }
+      });
+    }
   }
 
   return {
@@ -377,6 +391,33 @@ export async function decideConnectWfhApproval(input: {
   });
   if (result.error) throw new Error(result.error.message);
   const status = String(result.data ?? "");
+  if (status === "pending_manager") {
+    const next = await db().from("hr_wfh_approval_steps")
+      .select("approver_user_id,request_id")
+      .eq("company_id", input.companyId)
+      .eq("request_id", input.requestId)
+      .eq("status", "pending")
+      .order("step_order")
+      .limit(1)
+      .maybeSingle();
+    if (!next.error && next.data?.approver_user_id) {
+      const request = await db().from("hr_wfh_requests")
+        .select("worker_name,start_date,end_date")
+        .eq("company_id", input.companyId)
+        .eq("id", input.requestId)
+        .maybeSingle();
+      await notifyApproverMobile({
+        companyId: input.companyId,
+        recipientUserId: next.data.approver_user_id,
+        eventCode: "WFH_APPROVAL_REQUIRED",
+        title: "WFH needs approval",
+        body: `${request.data?.worker_name || "Team member"} requested WFH (${request.data?.start_date ?? ""} – ${request.data?.end_date ?? ""}). Open Approval Inbox.`,
+        route: "approvals",
+        sourceKey: `${input.requestId}:${next.data.approver_user_id}`,
+        data: { wfhRequestId: input.requestId }
+      });
+    }
+  }
   return {
     status,
     notice: status === "pending_hr"

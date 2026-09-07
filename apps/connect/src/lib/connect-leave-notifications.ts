@@ -1,4 +1,5 @@
 import { sendConnectEmail } from "./connect-email";
+import { notifyApproverMobile } from "./approver-mobile-notifications";
 import { supabaseAdmin } from "./supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database is unavailable."); return supabaseAdmin; }
@@ -15,10 +16,21 @@ export async function notifyConnectLeaveSubmitted(input:{companyId:string;reques
   ]);
   if(templateResult.error||requestResult.error||stepResult.error)throw new Error(templateResult.error?.message??requestResult.error?.message??stepResult.error?.message??"Leave notification could not be loaded.");
   const template=templateResult.data;const request=requestResult.data;const step=stepResult.data;
-  if(!template?.is_enabled||!request||!step)return {status:"skipped" as const};
+  if(!request||!step)return {status:"skipped" as const};
   const profile=await database.from("profiles").select("full_name,email").eq("company_id",input.companyId).eq("id",step.approver_user_id).eq("is_active",true).maybeSingle();
   if(profile.error)throw new Error(profile.error.message);
   const employee=one(request.employees);const contractor=one(request.contractors);const leaveType=one(request.hr_leave_types);
+  await notifyApproverMobile({
+    companyId: input.companyId,
+    recipientUserId: step.approver_user_id,
+    eventCode: "LEAVE_APPROVAL_REQUIRED",
+    title: "Time off needs approval",
+    body: `${employee?.full_name ?? contractor?.full_name ?? "Team member"} requested ${leaveType?.name ?? "time off"} (${request.start_date} – ${request.end_date}). Open Approval Inbox.`,
+    route: "approvals",
+    sourceKey: step.id,
+    data: { leaveRequestId: input.requestId, approvalStepId: step.id }
+  });
+  if(!template?.is_enabled)return {status:"skipped" as const};
   const to=emails([profile.data?.email]);
   const values={employee_name:employee?.full_name??contractor?.full_name??"Team member",worker_code:employee?.employee_code??contractor?.dropx_id??"",leave_name:leaveType?.name??"time off",leave_code:leaveType?.code??"",start_date:request.start_date,end_date:request.end_date,days:String(request.days),reason:request.reason,approver_name:profile.data?.full_name??"Manager",next_approver_name:"",reviewer_note:"",approval_url:`${process.env.PEOPLE_APP_URL?.replace(/\/$/,"")||"https://people.dropxlogistics.com"}/approvals`};
   const subject=fill(template.subject_template,values);const body=fill(template.body_template,values);
@@ -53,7 +65,7 @@ export async function notifyConnectLeaveWorkflow(input: { companyId: string; req
   if (templateResult.error || requestResult.error || stepsResult.error) throw new Error(templateResult.error?.message ?? requestResult.error?.message ?? stepsResult.error?.message ?? "Leave notification could not be loaded.");
   const template = templateResult.data;
   const request = requestResult.data;
-  if (!template?.is_enabled || !request) return { status: "skipped" as const };
+  if (!request) return { status: "skipped" as const };
   const steps = stepsResult.data ?? [];
   const eventStep = input.approvalStepId ? steps.find((step) => step.id === input.approvalStepId) : null;
   const nextStep = steps.find((step) => step.status === "pending") ?? null;
@@ -69,6 +81,19 @@ export async function notifyConnectLeaveWorkflow(input: { companyId: string; req
   const requesterEmails = emails([employee?.email, contractor?.email, profileFor(request.requested_by)?.email]);
   const approvalOwner = profileFor((input.event === "APPROVAL_REQUIRED" ? currentStep : nextStep)?.approver_user_id);
   const approver = profileFor(currentStep?.approver_user_id ?? request.reviewed_by);
+  if (input.event === "APPROVAL_REQUIRED") {
+    await notifyApproverMobile({
+      companyId: input.companyId,
+      recipientUserId: currentStep?.approver_user_id ?? approvalOwner?.id,
+      eventCode: "LEAVE_APPROVAL_REQUIRED",
+      title: "Time off needs approval",
+      body: `${employee?.full_name ?? contractor?.full_name ?? "Team member"} requested ${leaveType?.name ?? "time off"} (${request.start_date} – ${request.end_date}). Open Approval Inbox.`,
+      route: "approvals",
+      sourceKey: input.approvalStepId ?? input.requestId,
+      data: { leaveRequestId: input.requestId, approvalStepId: input.approvalStepId ?? null }
+    });
+  }
+  if (!template?.is_enabled) return { status: "skipped" as const };
   const to = input.event === "APPROVAL_REQUIRED" ? emails([approvalOwner?.email]) : requesterEmails;
   const values = {
     employee_name: employee?.full_name ?? contractor?.full_name ?? "Team member",
