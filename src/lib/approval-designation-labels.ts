@@ -13,20 +13,21 @@ export function isTeamLeadDesignation(designation: DesignationLabel | null | und
     || name.includes("team-lead");
 }
 
-/** Station-floor roles that must not be the final roster approver. */
+/** Station-floor roles skipped in roster approval (TL / SM / STM). Senior Store Manager (SRSM) may approve. */
 export function isStationFloorRosterDesignation(designation: DesignationLabel | null | undefined) {
   if (!designation) return false;
   if (isTeamLeadDesignation(designation)) return true;
   const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
-  const name = designation.name.toLowerCase();
+  const name = designation.name.toLowerCase().replaceAll("-", " ");
+  if (code === "SRSM" || code === "SENIOR_STORE_MANAGER" || name.includes("senior store manager")) {
+    return false;
+  }
   return code === "STM"
     || code === "SM"
-    || code === "SRSM"
     || code === "STATION_MANAGER"
     || code === "STORE_MANAGER"
-    || code === "SENIOR_STORE_MANAGER"
     || name.includes("station manager")
-    || name.includes("store manager");
+    || (name.includes("store manager") && !name.includes("senior store manager"));
 }
 
 /** Leadership / HR / FSD designations that can prepare roster changes in Ops and People. */

@@ -372,7 +372,7 @@ async function isActiveApproverUser(companyId: string, userId: string) {
  * Build manager approvers for a station roster:
  * 1. Walk station owner → solid-line managers
  * 2. Drop submitter and everyone at/below them
- * 3. Drop station-floor roles and missing/inactive users — auto-skip to the next manager up
+ * 3. Drop Store Manager / Station Manager / TL (not Senior Store Manager) and missing/inactive users — auto-skip to the next manager up
  * 4. Take up to `requiredLevels` usable managers (shortfall is filled by HR when configured)
  */
 async function locationRosterApprovalChain(authorization: AuthorizationContext, locationId: string, requiredLevels: number) {
