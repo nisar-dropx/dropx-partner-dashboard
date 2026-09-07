@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.dropxlogistics.one",
+      "sha256_cert_fingerprints": [
+        "44:FF:57:8E:D5:30:9C:2E:B9:56:65:A4:DA:4F:A5:EB:21:00:12:56:B4:5C:23:50:6D:E8:93:54:39:B2:1E:61"
+      ]
+    }
+  }
+]
