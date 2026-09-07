@@ -109,13 +109,6 @@ function successfulBatchCoversDate(batch: ImportBatch, sourceCode: string, date:
     && batchMatchesDate(batch, date);
 }
 
-function successfulBatchUploadedOn(batch: ImportBatch, sourceCode: string, date: string) {
-  const status = batch.status.toLowerCase();
-  return batch.source_type === sourceCode
-    && (status === "completed" || status === "success" || status === "succeeded")
-    && createdDateInIndia(batch.created_at) === date;
-}
-
 async function loadImportMaster(companyId: string | null) {
   if (!companyId || !supabaseAdmin) return { rows: [] as ReportImportMaster[], error: null as string | null };
   const { data, error } = await supabaseAdmin
@@ -248,7 +241,6 @@ export async function ReportUploadPageContent({
     const reportDate = addDays(date, report.day_offset);
     const batch = batches.find((candidate) =>
       successfulBatchCoversDate(candidate, report.source_code, reportDate))
-      ?? batches.find((candidate) => successfulBatchUploadedOn(candidate, report.source_code, date))
       ?? batches.find((candidate) =>
         candidate.source_type === report.source_code
         && (batchMatchesDate(candidate, reportDate) || createdDateInIndia(candidate.created_at) === date));
@@ -275,10 +267,8 @@ export async function ReportUploadPageContent({
         dueDate = addDays(dueDate, -7);
       }
     }
-    const missing = expectedPeriods.filter(({ dueDate, reportDate }) =>
-      !batches.some((batch) =>
-        successfulBatchCoversDate(batch, report.source_code, reportDate)
-        || successfulBatchUploadedOn(batch, report.source_code, dueDate)));
+    const missing = expectedPeriods.filter(({ reportDate }) =>
+      !batches.some((batch) => successfulBatchCoversDate(batch, report.source_code, reportDate)));
     return missing.length ? [{ report, missing }] : [];
   });
   const recentBatches = batches.slice(0, 10);
