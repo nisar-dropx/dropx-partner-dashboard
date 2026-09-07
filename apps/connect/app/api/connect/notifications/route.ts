@@ -30,7 +30,79 @@ export async function GET(request: Request) {
       .order("created_at", { ascending: false })
       .limit(50);
     if (result.error) throw result.error;
-    const notifications = result.data ?? [];
+
+    const rows = result.data ?? [];
+    const requestIds = [...new Set(rows.flatMap((row) => {
+      const data = (row.data ?? {}) as Record<string, unknown>;
+      const id = String(data.claimRequestId ?? "").trim();
+      return row.event_code === "REIMBURSEMENT_REQUEST_APPROVAL_REQUIRED" && id ? [id] : [];
+    }))];
+    const claimIds = [...new Set(rows.flatMap((row) => {
+      const data = (row.data ?? {}) as Record<string, unknown>;
+      const id = String(data.claimId ?? "").trim();
+      return row.event_code === "REIMBURSEMENT_APPROVAL_REQUIRED" && id ? [id] : [];
+    }))];
+
+    const staleIds = new Set<string>();
+    if (requestIds.length) {
+      const requests = await supabaseAdmin.from("hr_expense_claim_requests")
+        .select("id,status")
+        .eq("company_id", account.companyId)
+        .in("id", requestIds);
+      if (!requests.error) {
+        const pending = new Set((requests.data ?? []).filter((row) => row.status === "pending").map((row) => row.id));
+        for (const row of rows) {
+          const data = (row.data ?? {}) as Record<string, unknown>;
+          const id = String(data.claimRequestId ?? "").trim();
+          if (row.event_code === "REIMBURSEMENT_REQUEST_APPROVAL_REQUIRED" && id && !pending.has(id)) staleIds.add(row.id);
+        }
+      }
+    }
+    if (claimIds.length) {
+      const steps = await supabaseAdmin.from("hr_expense_approval_steps")
+        .select("claim_id,status,approver_user_id")
+        .eq("company_id", account.companyId)
+        .in("claim_id", claimIds)
+        .eq("status", "pending");
+      const actorUserId = account.profileType === "user" ? account.id : null;
+      let linkedUserId = actorUserId;
+      if (!linkedUserId && (account.profileType === "employee" || account.profileType === "contractor")) {
+        const identity = await supabaseAdmin.from("hr_engagements")
+          .select("person_id")
+          .eq("company_id", account.companyId)
+          .eq(account.profileType === "employee" ? "employee_id" : "contractor_id", account.id)
+          .eq("status", "active")
+          .maybeSingle();
+        if (identity.data?.person_id) {
+          const link = await supabaseAdmin.from("hr_user_person_links")
+            .select("user_id,status")
+            .eq("company_id", account.companyId)
+            .eq("person_id", identity.data.person_id)
+            .maybeSingle();
+          if (link.data?.status === "active") linkedUserId = link.data.user_id;
+        }
+      }
+      const pendingClaims = new Set(
+        (steps.data ?? [])
+          .filter((step) => !linkedUserId || step.approver_user_id === linkedUserId)
+          .map((step) => step.claim_id)
+      );
+      for (const row of rows) {
+        const data = (row.data ?? {}) as Record<string, unknown>;
+        const id = String(data.claimId ?? "").trim();
+        if (row.event_code === "REIMBURSEMENT_APPROVAL_REQUIRED" && id && !pendingClaims.has(id)) staleIds.add(row.id);
+      }
+    }
+
+    if (staleIds.size) {
+      const now = new Date().toISOString();
+      await supabaseAdmin.from("mob_app_notifications")
+        .update({ read_at: now, archived_at: now })
+        .eq("company_id", account.companyId)
+        .in("id", [...staleIds]);
+    }
+
+    const notifications = rows.filter((row) => !staleIds.has(row.id));
     return NextResponse.json({
       notifications,
       unreadCount: notifications.filter((row) => !row.read_at).length

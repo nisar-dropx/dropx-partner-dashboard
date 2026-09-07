@@ -11,7 +11,7 @@ import {
   resolveExpenseApprovers,
   resolveExpenseClaimRequestAssignees
 } from "../../../../src/lib/connect-expense-data";
-import { notifyExpenseUser } from "../../../../src/lib/connect-expense-notifications";
+import { notifyExpenseUser, dismissExpenseApprovalNotifications } from "../../../../src/lib/connect-expense-notifications";
 import { loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
 import { mergeExpenseReceiptsToPdf } from "../../../../src/lib/merge-expense-receipts";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
@@ -437,6 +437,7 @@ export async function PATCH(request: Request) {
         p_note: note || null
       });
       if (result.error) throw new Error(result.error.message);
+      await dismissExpenseApprovalNotifications({ companyId: account.companyId, claimRequestId: requestId });
       return NextResponse.json({ ok: true, notice: "Reimbursement request withdrawn." });
     }
 
@@ -456,6 +457,7 @@ export async function PATCH(request: Request) {
         p_note: note || null
       });
       if (result.error) throw new Error(result.error.message);
+      await dismissExpenseApprovalNotifications({ companyId: account.companyId, claimRequestId: requestId });
       const requestRow = await db().from("hr_expense_claim_requests")
         .select("request_no,purpose,estimated_amount,claimant_user_id")
         .eq("company_id", account.companyId)
@@ -485,6 +487,9 @@ export async function PATCH(request: Request) {
     const result = await db().rpc("hr_decide_expense_claim", { p_company_id: account.companyId, p_claim_id: claimId, p_actor_user_id: approverUserId, p_action: action, p_note: note || null });
     if (result.error) throw new Error(result.error.message);
     const decision = Array.isArray(result.data) ? result.data[0] : result.data;
+    if (!decision?.next_approver_user_id) {
+      await dismissExpenseApprovalNotifications({ companyId: account.companyId, claimId });
+    }
     const claim = await db().from("hr_expense_claims").select("claim_no,purpose,total_claimed,claimant_user_id").eq("company_id", account.companyId).eq("id", claimId).single();
     if (claim.error) throw new Error(claim.error.message);
     const nextUserId = decision?.next_approver_user_id ?? null;

@@ -26,6 +26,26 @@ async function recipientAccounts(companyId: string, userId: string) {
   return { profile: profile.data, accounts };
 }
 
+export async function dismissExpenseApprovalNotifications(input: {
+  companyId: string;
+  claimId?: string | null;
+  claimRequestId?: string | null;
+}) {
+  if (!input.claimId && !input.claimRequestId) return;
+  const now = new Date().toISOString();
+  let query = db().from("mob_app_notifications")
+    .update({ read_at: now, archived_at: now })
+    .eq("company_id", input.companyId)
+    .in("event_code", ["REIMBURSEMENT_REQUEST_APPROVAL_REQUIRED", "REIMBURSEMENT_APPROVAL_REQUIRED"])
+    .is("archived_at", null);
+  if (input.claimRequestId) query = query.contains("data", { claimRequestId: input.claimRequestId });
+  if (input.claimId) query = query.contains("data", { claimId: input.claimId });
+  const result = await query;
+  if (result.error && !/mob_app_notifications|schema cache|does not exist/i.test(result.error.message)) {
+    throw new Error(result.error.message);
+  }
+}
+
 export async function notifyExpenseUser(input: {
   companyId: string;
   claimId?: string | null;
@@ -42,7 +62,7 @@ export async function notifyExpenseUser(input: {
   const recipient = await recipientAccounts(input.companyId, input.recipientUserId);
   const uniqueAccounts = Array.from(new Map(recipient.accounts.map((item) => [`${item.profileType}:${item.accountId}`, item])).values());
   for (const account of uniqueAccounts) {
-    await db().from("mob_app_notifications").insert({
+    const inserted = await db().from("mob_app_notifications").insert({
       company_id: input.companyId,
       recipient_profile_type: account.profileType,
       recipient_account_id: account.accountId,
@@ -55,6 +75,9 @@ export async function notifyExpenseUser(input: {
         ...(input.claimRequestId ? { claimRequestId: input.claimRequestId } : {})
       }
     });
+    if (inserted.error && !/mob_app_notifications|schema cache|does not exist/i.test(inserted.error.message)) {
+      throw new Error(inserted.error.message);
+    }
   }
   const email = recipient.profile?.email?.trim();
   if (!email) return { status: "skipped" as const, error: "Recipient email is missing." };
