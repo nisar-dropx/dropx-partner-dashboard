@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
-import { connectApproverIdentity } from "../../../../src/lib/connect-expense-data";
+import { resolveConnectActorUserId } from "../../../../src/lib/connect-approver-identity";
 import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval, listConnectReturnedRosters, resubmitConnectReturnedRoster, listConnectExitApprovals, decideConnectExitApproval, listConnectExitWithdrawalApprovals, decideConnectExitWithdrawal } from "../../../../src/lib/connect-manager-approvals";
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
-import { connectReporteeMatches, loadConnectReporteeAccess, normalizeConnectReporteeScope, type ConnectReporteeAccess } from "../../../../src/lib/connect-reportee-scope";
+import { loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
 import { decideConnectWfhApproval, listConnectWfhApprovals } from "../../../../src/lib/connect-wfh-data";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
@@ -20,9 +20,16 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>)
   return requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
 }
 
-async function listLeaveApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
-  const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
-  const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
+async function requireActorUserId(account: ConnectAccount, actionLabel: string) {
+  const actorUserId = await resolveConnectActorUserId(account);
+  if (!actorUserId) {
+    throw new Error(`A DropX One manager login is required to ${actionLabel}. Sign in with the mobile number linked to your People record.`);
+  }
+  return actorUserId;
+}
+
+async function listLeaveApprovals(account: ConnectAccount) {
+  const approverUserId = await resolveConnectActorUserId(account);
   if (!approverUserId) return [];
   const stepResult = await db().from("hr_leave_approval_steps")
     .select("id,request_id,step_order,step_name,status")
@@ -40,10 +47,8 @@ async function listLeaveApprovals(account: ConnectAccount, reportees: ConnectRep
     .in("id", steps.map((step) => step.request_id));
   if (requestResult.error) throw new Error(requestResult.error.message);
   const stepByRequest = new Map(steps.map((step) => [step.request_id, step]));
+  // Steps are assigned explicitly — do not hide them behind reportee-scope filters.
   return (requestResult.data ?? []).flatMap((request) => {
-    const profileType = request.contractor_id ? "contractor" : "employee";
-    const profileId = request.contractor_id ?? request.employee_id;
-    if (!connectReporteeMatches(reportees, profileType, profileId)) return [];
     const step = stepByRequest.get(request.id);
     if (!step) return [];
     const employee = relation(request.employees);
@@ -61,7 +66,7 @@ async function listLeaveApprovals(account: ConnectAccount, reportees: ConnectRep
       reason: request.reason,
       requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
       requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
-      profileType
+      profileType: request.contractor_id ? "contractor" as const : "employee" as const
     }];
   });
 }
@@ -71,18 +76,17 @@ export async function GET(request: Request) {
     const account = await selectedAccount(request);
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     const reportees = await loadConnectReporteeAccess(account, scope);
+    const approverUserId = await resolveConnectActorUserId(account);
     const [leaveApprovals, wfhApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals] = await Promise.all([
-      listLeaveApprovals(account, reportees),
-      (async () => {
-        const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
-        const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
-        if (!approverUserId) return [];
-        return listConnectWfhApprovals({
-          companyId: account.companyId,
-          approverUserId,
-          matchesReportee: (profileType, profileId) => connectReporteeMatches(reportees, profileType, profileId)
-        });
-      })(),
+      listLeaveApprovals(account),
+      approverUserId
+        ? listConnectWfhApprovals({
+            companyId: account.companyId,
+            approverUserId,
+            // Explicit step assignment — show regardless of reporting-tree toggle.
+            matchesReportee: () => true
+          })
+        : Promise.resolve([]),
       listConnectLocationSupportPackages(account, reportees),
       listConnectAttendanceApprovals(account, reportees),
       listConnectAttendanceHrApprovals(account, reportees),
@@ -141,9 +145,7 @@ export async function PATCH(request: Request) {
     }
     const wfhRequestId = clean(body.wfhRequestId);
     if (wfhRequestId) {
-      const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
-      const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
-      if (!approverUserId) throw new Error("A linked People login is required to approve work from home.");
+      const approverUserId = await requireActorUserId(account, "approve work from home");
       const decision = clean(body.decision);
       const note = clean(body.note);
       if (decision !== "approved" && decision !== "rejected") throw new Error("Choose Approve or Reject.");
@@ -170,9 +172,7 @@ export async function PATCH(request: Request) {
       const notice = await decideConnectExitApproval(account, exitApprovalId, decision, note);
       return NextResponse.json({ ok: true, notice });
     }
-    const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
-    const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
-    if (!approverUserId) throw new Error("A linked People login is required to approve time off.");
+    const approverUserId = await requireActorUserId(account, "approve time off");
     const requestId = clean(body.requestId);
     const decision = clean(body.decision);
     const note = clean(body.note);

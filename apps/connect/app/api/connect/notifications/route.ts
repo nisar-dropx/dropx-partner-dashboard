@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
+import { resolveConnectActorUserId } from "../../../../src/lib/connect-approver-identity";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function setupMessage(error: unknown) {
@@ -64,24 +65,7 @@ export async function GET(request: Request) {
         .eq("company_id", account.companyId)
         .in("claim_id", claimIds)
         .eq("status", "pending");
-      const actorUserId = account.profileType === "user" ? account.id : null;
-      let linkedUserId = actorUserId;
-      if (!linkedUserId && (account.profileType === "employee" || account.profileType === "contractor")) {
-        const identity = await supabaseAdmin.from("hr_engagements")
-          .select("person_id")
-          .eq("company_id", account.companyId)
-          .eq(account.profileType === "employee" ? "employee_id" : "contractor_id", account.id)
-          .eq("status", "active")
-          .maybeSingle();
-        if (identity.data?.person_id) {
-          const link = await supabaseAdmin.from("hr_user_person_links")
-            .select("user_id,status")
-            .eq("company_id", account.companyId)
-            .eq("person_id", identity.data.person_id)
-            .maybeSingle();
-          if (link.data?.status === "active") linkedUserId = link.data.user_id;
-        }
-      }
+      const linkedUserId = await resolveConnectActorUserId(account);
       const pendingClaims = new Set(
         (steps.data ?? [])
           .filter((step) => !linkedUserId || step.approver_user_id === linkedUserId)

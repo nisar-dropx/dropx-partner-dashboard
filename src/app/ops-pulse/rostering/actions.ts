@@ -811,12 +811,37 @@ export async function decideOpsRoster(input: { planId: string; stepId: string; d
       const finished = await db().from("hr_roster_plans").update({ status: input.decision, decision_note: input.note.trim(), decided_at: now, approver_user_id: null, updated_by: authorization.userId, updated_at: now }).eq("company_id", companyId).eq("id", input.planId).eq("status", "pending_approval");
       if (finished.error) throw new Error(finished.error.message);
     } else {
-      const next = await db().from("hr_roster_approval_steps").select("id,approver_user_id").eq("company_id", companyId).eq("plan_id", input.planId).eq("status", "waiting").order("stage_no").limit(1).maybeSingle();
-      if (next.error) throw new Error(next.error.message);
-      if (next.data) {
-        const activated = await db().from("hr_roster_approval_steps").update({ status: "pending", updated_at: now }).eq("company_id", companyId).eq("id", next.data.id);
-        if (activated.error) throw new Error(activated.error.message);
-        const routed = await db().from("hr_roster_plans").update({ approver_user_id: next.data.approver_user_id ?? null, updated_by: authorization.userId, updated_at: now }).eq("company_id", companyId).eq("id", input.planId);
+      const waiting = await db().from("hr_roster_approval_steps")
+        .select("id,stage_type,approver_user_id")
+        .eq("company_id", companyId)
+        .eq("plan_id", input.planId)
+        .eq("status", "waiting")
+        .order("stage_no");
+      if (waiting.error) throw new Error(waiting.error.message);
+      let activated: { id: string; approver_user_id: string | null } | null = null;
+      for (const nextStep of waiting.data ?? []) {
+        const isHr = nextStep.stage_type === "hr" || !nextStep.approver_user_id;
+        if (!isHr) {
+          const profile = await db().from("profiles").select("id,is_active").eq("id", nextStep.approver_user_id).maybeSingle();
+          if (profile.error) throw new Error(profile.error.message);
+          if (!profile.data?.is_active) {
+            const skippedMissing = await db().from("hr_roster_approval_steps").update({
+              status: "skipped",
+              decision_note: "Approver missing or inactive — auto-advanced to next manager",
+              decided_at: now,
+              updated_at: now
+            }).eq("company_id", companyId).eq("id", nextStep.id).eq("status", "waiting");
+            if (skippedMissing.error) throw new Error(skippedMissing.error.message);
+            continue;
+          }
+        }
+        const madePending = await db().from("hr_roster_approval_steps").update({ status: "pending", updated_at: now }).eq("company_id", companyId).eq("id", nextStep.id);
+        if (madePending.error) throw new Error(madePending.error.message);
+        activated = { id: nextStep.id, approver_user_id: nextStep.approver_user_id ?? null };
+        break;
+      }
+      if (activated) {
+        const routed = await db().from("hr_roster_plans").update({ approver_user_id: activated.approver_user_id, updated_by: authorization.userId, updated_at: now }).eq("company_id", companyId).eq("id", input.planId);
         if (routed.error) throw new Error(routed.error.message);
       } else {
         await publishPlan(companyId, authorization, plan, input.note.trim() || "All approvals complete", true);

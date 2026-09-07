@@ -1,9 +1,9 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
+import { resolveConnectActorUserId } from "../../../../src/lib/connect-approver-identity";
 import {
   activeExpenseCategories,
-  connectApproverIdentity,
   expenseCategoriesForPolicy,
   expenseIdentity,
   expensePayoutReadiness,
@@ -137,9 +137,10 @@ async function claimPayload(account: ConnectAccount) {
       approver_name: nameByUserId.get(assignee.approver_user_id) ?? "Approver"
     }))
   }));
+  const actorUserId = await resolveConnectActorUserId(account);
   const [approvals, preRequestApprovals] = await Promise.all([
-    approvalPayload(account.companyId, identity.userId),
-    preRequestApprovalPayload(account.companyId, identity.userId)
+    approvalPayload(account.companyId, actorUserId),
+    preRequestApprovalPayload(account.companyId, actorUserId)
   ]);
   return { categories, payout, claims, preRequests, approvals, preRequestApprovals };
 }
@@ -425,14 +426,14 @@ export async function PATCH(request: Request) {
 
     if (kind === "pre_request" && action === "withdrawn") {
       const account = await selectedAccount(request, body, false);
-      const identity = await expenseIdentity(account);
-      if (!identity.userId) throw new Error("Your One account is not linked to a People login.");
+      const actorUserId = await resolveConnectActorUserId(account);
+      if (!actorUserId) throw new Error("Your One account is not linked to a People login.");
       const requestId = clean(body.requestId);
       if (!requestId) throw new Error("Select the reimbursement request to withdraw.");
       const result = await db().rpc("hr_withdraw_expense_claim_request", {
         p_company_id: account.companyId,
         p_request_id: requestId,
-        p_actor_user_id: identity.userId,
+        p_actor_user_id: actorUserId,
         p_note: note || null
       });
       if (result.error) throw new Error(result.error.message);
@@ -441,8 +442,7 @@ export async function PATCH(request: Request) {
     }
 
     const account = await selectedAccount(request, body, true);
-    const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
-    const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
+    const approverUserId = await resolveConnectActorUserId(account);
     if (!approverUserId) throw new Error("Your One account is not linked to a People approver login.");
 
     if (kind === "pre_request") {

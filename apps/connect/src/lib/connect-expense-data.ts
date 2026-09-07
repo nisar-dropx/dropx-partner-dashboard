@@ -2,6 +2,7 @@ import "server-only";
 
 import { isBusinessOrNationalHeadDesignation, isManagingPartnerDesignation } from "./approval-designation-labels";
 import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
+import { resolveConnectApproverUserId } from "./connect-approver-identity";
 import { supabaseAdmin } from "./supabase-admin";
 import type { ConnectAccount } from "./connect-auth";
 
@@ -198,13 +199,14 @@ export async function resolveExpenseApprovers(account: ConnectAccount, amount: n
     if (engagement.error || !engagement.data || engagement.data.status !== "active") throw new Error(`Reporting manager level ${level} is not active.`);
     if (seen.has(engagement.data.person_id)) throw new Error("The reporting hierarchy contains a cycle.");
     seen.add(engagement.data.person_id);
-    const link = await db().from("hr_user_person_links").select("user_id,status")
-      .eq("company_id", account.companyId).eq("person_id", engagement.data.person_id).maybeSingle();
-    if (link.error || !link.data || link.data.status !== "active") throw new Error(`${assignment.data.position_title} does not have an active One/People login.`);
+    const approverUserId = await resolveConnectApproverUserId(account.companyId, engagement.data.person_id);
+    if (!approverUserId) {
+      throw new Error(`${assignment.data.position_title} does not have an active One/People login.`);
+    }
     steps.push({
       step_order: level,
       step_name: `${assignment.data.position_title} approval`,
-      approver_user_id: link.data.user_id,
+      approver_user_id: approverUserId,
       approver_person_id: engagement.data.person_id
     });
     subjectAssignmentId = assignment.data.id;
@@ -278,14 +280,13 @@ async function resolveImmediateReportingManager(account: ConnectAccount, identit
     .eq("company_id", account.companyId).eq("id", assignment.data.engagement_id).maybeSingle();
   if (engagement.error || !engagement.data || engagement.data.status !== "active") return null;
   if (engagement.data.person_id === identity.personId) return null;
-  const link = await db().from("hr_user_person_links").select("user_id,status")
-    .eq("company_id", account.companyId).eq("person_id", engagement.data.person_id).maybeSingle();
-  if (link.error || !link.data || link.data.status !== "active") {
+  const approverUserId = await resolveConnectApproverUserId(account.companyId, engagement.data.person_id);
+  if (!approverUserId) {
     throw new Error(`${assignment.data.position_title} does not have an active One/People login.`);
   }
   return {
     assignee_role: "reporting_manager",
-    approver_user_id: link.data.user_id,
+    approver_user_id: approverUserId,
     approver_person_id: engagement.data.person_id
   };
 }

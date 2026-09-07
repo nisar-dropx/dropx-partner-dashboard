@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ClipboardCheck, Clock3, FileText, Home, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ClipboardCheck, Clock3, DoorOpen, FileText, Home, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
@@ -155,7 +155,33 @@ type ReturnedRoster = {
   updatedAt: string;
 };
 
-type ApprovalSection = "time-off" | "wfh" | "attendance" | "rosters" | "location-integrity" | "reimbursements";
+type ExitApproval = {
+  id: string;
+  caseId: string;
+  caseNumber: string;
+  stepName: string;
+  stepOrder: number;
+  requesterName: string;
+  requesterCode: string;
+  profileType: "employee" | "contractor";
+  requestedLastWorkingDate: string;
+  reason: string;
+  submittedAt: string | null;
+};
+
+type ExitWithdrawalApproval = {
+  id: string;
+  caseId: string;
+  caseNumber: string;
+  requesterName: string;
+  requesterCode: string;
+  profileType: "employee" | "contractor";
+  requestedLastWorkingDate: string;
+  reason: string;
+  requestedAt: string | null;
+};
+
+type ApprovalSection = "time-off" | "wfh" | "attendance" | "rosters" | "location-integrity" | "reimbursements" | "exits";
 type ReporteeScope = "immediate" | "team";
 
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
@@ -297,6 +323,8 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [rosterSwapApprovals, setRosterSwapApprovals] = useState<RosterSwapApproval[]>([]);
   const [returnedRosters, setReturnedRosters] = useState<ReturnedRoster[]>([]);
   const [editingReturnedRosterId, setEditingReturnedRosterId] = useState<string | null>(null);
+  const [exitApprovals, setExitApprovals] = useState<ExitApproval[]>([]);
+  const [exitWithdrawalApprovals, setExitWithdrawalApprovals] = useState<ExitWithdrawalApproval[]>([]);
   const [supportPackages, setSupportPackages] = useState<LocationSupportPackage[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -328,12 +356,15 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       setRosterApprovals(leavePayload.rosterApprovals ?? []);
       setRosterSwapApprovals(leavePayload.rosterSwapApprovals ?? []);
       setReturnedRosters(leavePayload.returnedRosters ?? []);
+      setExitApprovals(leavePayload.exitApprovals ?? []);
+      setExitWithdrawalApprovals(leavePayload.exitWithdrawalApprovals ?? []);
       setSupportPackages(leavePayload.locationSupportPackages ?? []);
       setSection((current) => {
         if (current === "time-off" && !(leavePayload.leaveApprovals ?? []).length) {
           if (nextClaims.length || nextPreRequests.length) return "reimbursements";
           if ((leavePayload.attendanceApprovals ?? []).length || (leavePayload.attendanceHrApprovals ?? []).length) return "attendance";
           if ((leavePayload.rosterSwapApprovals ?? []).length || (leavePayload.rosterApprovals ?? []).length) return "rosters";
+          if ((leavePayload.exitApprovals ?? []).length || (leavePayload.exitWithdrawalApprovals ?? []).length) return "exits";
           if ((leavePayload.locationSupportPackages ?? []).length) return "location-integrity";
           if ((leavePayload.wfhApprovals ?? []).length) return "wfh";
         }
@@ -517,13 +548,56 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     finally { setSaving(false); }
   }
 
+  async function decideExit(approvalId: string, decision: "approved" | "rejected") {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/approvals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: account.id,
+          profileType: account.profileType,
+          exitApprovalId: approvalId,
+          decision,
+          note: notes[`exit:${approvalId}`] ?? ""
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to update exit approval.");
+      setNotice(payload.notice); setNotes((current) => ({ ...current, [`exit:${approvalId}`]: "" })); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update exit approval."); }
+    finally { setSaving(false); }
+  }
+
+  async function decideExitWithdrawal(caseId: string, decision: "approved" | "rejected") {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/approvals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: account.id,
+          profileType: account.profileType,
+          exitWithdrawalCaseId: caseId,
+          decision,
+          note: notes[`exit-withdraw:${caseId}`] ?? ""
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to update exit withdrawal.");
+      setNotice(payload.notice); setNotes((current) => ({ ...current, [`exit-withdraw:${caseId}`]: "" })); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update exit withdrawal."); }
+    finally { setSaving(false); }
+  }
+
   const attendanceCount = attendanceApprovals.length + attendanceHrApprovals.length;
   const rosterCount = rosterApprovals.length + rosterSwapApprovals.length + returnedRosters.length;
   const reimbursementCount = reimbursements.length + preRequestApprovals.length;
+  const exitCount = exitApprovals.length + exitWithdrawalApprovals.length;
   const scopeName = reporteeScope === "immediate" ? "immediate reportees" : "entire reporting team";
-  const othersCount = leaveApprovals.length + reimbursementCount + wfhApprovals.length;
-  const othersActive = section === "time-off" || section === "reimbursements" || section === "wfh";
-  const othersLabel = section === "time-off" ? "Time off" : section === "reimbursements" ? "Reimbursements" : section === "wfh" ? "WFH" : "Others";
+  const othersCount = leaveApprovals.length + reimbursementCount + wfhApprovals.length + exitCount;
+  const othersActive = section === "time-off" || section === "reimbursements" || section === "wfh" || section === "exits";
+  const othersLabel = section === "time-off" ? "Time off" : section === "reimbursements" ? "Reimbursements" : section === "wfh" ? "WFH" : section === "exits" ? "Exits" : "Others";
 
   function selectSection(next: ApprovalSection) {
     setSection(next);
@@ -665,6 +739,9 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
                 <button className={section === "wfh" ? "active" : ""} onClick={() => selectSection("wfh")} type="button">
                   WFH<span>{wfhApprovals.length}</span>
                 </button>
+                <button className={section === "exits" ? "active" : ""} onClick={() => selectSection("exits")} type="button">
+                  Exits<span>{exitCount}</span>
+                </button>
               </div>
             ) : null}
           </div>
@@ -687,6 +764,9 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
           </button>
           <button className={section === "wfh" ? "active" : ""} onClick={() => selectSection("wfh")} type="button">
             WFH<span>{wfhApprovals.length}</span>
+          </button>
+          <button className={section === "exits" ? "active" : ""} onClick={() => selectSection("exits")} type="button">
+            Exits<span>{exitCount}</span>
           </button>
         </div>
       </nav>
@@ -715,7 +795,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
               />
             </article>
           )) : (
-            <div className="dx-empty"><Clock3 /><strong>No time-off approvals</strong><small>No requests from your {scopeName} are waiting.</small></div>
+            <div className="dx-empty"><Clock3 /><strong>No time-off approvals</strong><small>No time-off steps assigned to you are waiting.</small></div>
           )}
         </div>
       ) : null}
@@ -743,7 +823,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
               />
             </article>
           )) : (
-            <div className="dx-empty"><Home /><strong>No WFH approvals</strong><small>No work-from-home requests from your {scopeName} are waiting.</small></div>
+            <div className="dx-empty"><Home /><strong>No WFH approvals</strong><small>No work-from-home steps assigned to you are waiting.</small></div>
           )}
         </div>
       ) : null}
@@ -769,7 +849,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
             </>
           ) : null}
           {!attendanceApprovals.length && !attendanceHrApprovals.length ? (
-            <div className="dx-empty"><CalendarClock /><strong>No attendance regularizations</strong><small>No requests from your {scopeName} are waiting.</small></div>
+            <div className="dx-empty"><CalendarClock /><strong>No attendance regularizations</strong><small>No attendance steps assigned to you are waiting.</small></div>
           ) : null}
         </div>
       ) : null}
@@ -971,7 +1051,61 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
         </div>
       ) : null}
 
-      <p className="dx-approval-footnote"><ClipboardCheck /> Scope follows active primary reporting lines in the Org Chart.</p>
+      {!loading && section === "exits" ? (
+        <div className="dx-approval-list">
+          {exitWithdrawalApprovals.map((approval) => (
+            <article className="dx-approval-card" key={`exit-withdraw:${approval.caseId}`}>
+              <ApprovalHead
+                badge={<span className="dx-approval-badge">Withdraw</span>}
+                eyebrow={`${approval.caseNumber} · Withdrawal review`}
+                meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                name={approval.requesterName}
+              />
+              <dl className="dx-approval-facts">
+                <div><dt>Last working day</dt><dd>{displayDate(approval.requestedLastWorkingDate)}</dd></div>
+                <div><dt>Exit reason</dt><dd>{approval.reason}</dd></div>
+                <div><dt>Requested</dt><dd>{dateTime(approval.requestedAt)}</dd></div>
+              </dl>
+              <ApprovalNote id={`exit-withdraw:${approval.caseId}`} notes={notes} onChange={(value) => setNote(`exit-withdraw:${approval.caseId}`, value)} placeholder="Required when keeping the exit open" />
+              <ApprovalToolbar
+                approveLabel="Accept withdrawal"
+                onApprove={() => void decideExitWithdrawal(approval.caseId, "approved")}
+                onReject={() => void decideExitWithdrawal(approval.caseId, "rejected")}
+                rejectLabel="Keep exit open"
+                saving={saving}
+                showReturn={false}
+              />
+            </article>
+          ))}
+          {exitApprovals.map((approval) => (
+            <article className="dx-approval-card" key={approval.id}>
+              <ApprovalHead
+                badge={<span className="dx-approval-badge">Step {approval.stepOrder}</span>}
+                eyebrow={`${approval.caseNumber} · ${approval.stepName}`}
+                meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                name={approval.requesterName}
+              />
+              <dl className="dx-approval-facts">
+                <div><dt>Last working day</dt><dd>{displayDate(approval.requestedLastWorkingDate)}</dd></div>
+                <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
+                <div><dt>Submitted</dt><dd>{dateTime(approval.submittedAt)}</dd></div>
+              </dl>
+              <ApprovalNote id={`exit:${approval.id}`} notes={notes} onChange={(value) => setNote(`exit:${approval.id}`, value)} placeholder="Required when rejecting" />
+              <ApprovalToolbar
+                onApprove={() => void decideExit(approval.id, "approved")}
+                onReject={() => void decideExit(approval.id, "rejected")}
+                saving={saving}
+                showReturn={false}
+              />
+            </article>
+          ))}
+          {!exitApprovals.length && !exitWithdrawalApprovals.length ? (
+            <div className="dx-empty"><DoorOpen /><strong>No exit approvals</strong><small>Exit and withdrawal steps assigned to you will appear here.</small></div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <p className="dx-approval-footnote"><ClipboardCheck /> Assigned steps appear here for your One account. Location checks still follow the reporting-tree toggle above.</p>
     </section>
   );
 }

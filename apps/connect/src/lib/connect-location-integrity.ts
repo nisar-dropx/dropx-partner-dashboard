@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { ConnectAccount } from "./connect-auth";
-import { connectApproverIdentity } from "./connect-expense-data";
+import { resolveConnectActorUserId } from "./connect-approver-identity";
 import { connectReporteeMatches, loadConnectReporteeAccess, type ConnectReporteeAccess, type ConnectReporteeScope } from "./connect-reportee-scope";
 import { supabaseAdmin } from "./supabase-admin";
 
@@ -246,8 +246,8 @@ export async function reviewConnectLocationSupportPackage(
   if (!/^[0-9a-f-]{36}$/i.test(reviewId)) throw new Error("Support package is invalid.");
   if (!["approve", "return", "reject"].includes(action)) throw new Error("Choose Approve, Return, or Reject.");
 
-  const identity = await connectApproverIdentity(account);
-  if (!identity.userId) throw new Error("A linked People login is required to review support packages.");
+  const actorUserId = await resolveConnectActorUserId(account);
+  if (!actorUserId) throw new Error("A DropX One manager login is required to review support packages.");
 
   const existing = await db().from("attendance_location_reviews")
     .select("id, status, flag_id, profile_type, profile_id")
@@ -270,7 +270,7 @@ export async function reviewConnectLocationSupportPackage(
     .update({
       status,
       review_remarks: note || (action === "reject" ? "Rejected" : action === "return" ? "Returned for another support package" : null),
-      reviewed_by: identity.userId,
+      reviewed_by: actorUserId,
       reviewed_at: now,
       updated_at: now
     })
@@ -279,7 +279,7 @@ export async function reviewConnectLocationSupportPackage(
   if (update.error) throw new Error(update.error.message);
 
   if (action === "approve" && existing.data.flag_id) {
-    await resolveIntegrityFlagMinimal(String(existing.data.flag_id), identity.userId);
+    await resolveIntegrityFlagMinimal(String(existing.data.flag_id), actorUserId);
     void purgeSupportSelfieForReviewId(account.companyId, reviewId).catch((error) => {
       console.error("approve package selfie purge failed", error instanceof Error ? error.message : error);
     });
@@ -292,7 +292,7 @@ export async function reviewConnectLocationSupportPackage(
   if (action === "reject") {
     if (existing.data.flag_id) {
       await db().from("attendance_integrity_flags")
-        .update({ status: "dismissed", resolved_at: now, resolved_by: identity.userId, updated_at: now })
+        .update({ status: "dismissed", resolved_at: now, resolved_by: actorUserId, updated_at: now })
         .eq("company_id", account.companyId)
         .eq("id", existing.data.flag_id)
         .eq("status", "open");

@@ -83,13 +83,26 @@ async function workforceContactForPerson(companyId: string, personId: string) {
   return null;
 }
 
-async function findProfileByMobile(companyId: string, mobile: string, countryCode: string) {
+async function findProfilesByMobile(companyId: string, mobile: string, countryCode: string) {
   const localMobile = mobile.startsWith(countryCode) ? mobile.slice(countryCode.length) : mobile;
-  const profile = await db().from("profiles").select("id")
+  const profiles = await db().from("profiles").select("id,email,mobile")
     .eq("company_id", companyId).eq("is_active", true)
-    .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`).limit(1).maybeSingle();
-  if (profile.error) throw new Error(profile.error.message);
-  return profile.data?.id ?? null;
+    .or(`mobile.eq.${mobile},mobile.eq.${localMobile}`).limit(20);
+  if (profiles.error) throw new Error(profiles.error.message);
+  return profiles.data ?? [];
+}
+
+async function preferLinkedProfileId(companyId: string, personId: string, candidateIds: string[]) {
+  if (!candidateIds.length) return null;
+  const links = await db().from("hr_user_person_links").select("user_id,status,person_id")
+    .eq("company_id", companyId).in("user_id", candidateIds);
+  if (links.error && !/does not exist|schema cache/i.test(links.error.message)) {
+    throw new Error(links.error.message);
+  }
+  const forPerson = (links.data ?? []).find((row) => row.person_id === personId && row.status === "active");
+  if (forPerson?.user_id) return forPerson.user_id;
+  const anyActive = (links.data ?? []).find((row) => row.status === "active");
+  return anyActive?.user_id ?? candidateIds[0] ?? null;
 }
 
 /**
@@ -106,13 +119,29 @@ export async function resolveConnectApproverUserId(companyId: string, personId: 
   if (link.data?.status === "active" && link.data.user_id) return link.data.user_id;
 
   const contact = await workforceContactForPerson(companyId, personId);
-  if (!contact?.mobile) return null;
+  if (!contact?.mobile && !contact?.email) return null;
 
-  const existingProfileId = await findProfileByMobile(companyId, contact.mobile, contact.countryCode);
-  if (existingProfileId) {
-    await ensurePersonLink(companyId, personId, existingProfileId);
-    return existingProfileId;
+  if (contact.email) {
+    const byEmail = await db().from("profiles").select("id")
+      .eq("company_id", companyId).eq("is_active", true).ilike("email", contact.email).limit(5);
+    if (byEmail.error) throw new Error(byEmail.error.message);
+    const preferred = await preferLinkedProfileId(companyId, personId, (byEmail.data ?? []).map((row) => row.id));
+    if (preferred) {
+      await ensurePersonLink(companyId, personId, preferred);
+      return preferred;
+    }
   }
+
+  if (contact.mobile) {
+    const mobileProfiles = await findProfilesByMobile(companyId, contact.mobile, contact.countryCode);
+    const preferred = await preferLinkedProfileId(companyId, personId, mobileProfiles.map((row) => row.id));
+    if (preferred) {
+      await ensurePersonLink(companyId, personId, preferred);
+      return preferred;
+    }
+  }
+
+  if (!contact.mobile) return null;
 
   const email = contact.email || connectOnlyEmail({
     companyId,
@@ -165,5 +194,39 @@ export async function resolveConnectApproverUserId(companyId: string, personId: 
 
   await ensurePersonLink(companyId, personId, userId);
   return userId;
+}
+
+type ConnectActorAccount = {
+  id: string;
+  companyId: string;
+  profileType: "user" | "employee" | "contractor" | string;
+};
+
+/**
+ * Portal user id for the currently selected One account (mobile employee/contractor or user).
+ * Must match approver_user_id on approval steps — never return employees.id / contractors.id.
+ */
+export async function resolveConnectActorUserId(account: ConnectActorAccount): Promise<string | null> {
+  if (account.profileType === "user") return account.id;
+
+  const workerType = account.profileType === "employee" || account.profileType === "contractor"
+    ? account.profileType
+    : null;
+  if (!workerType) return null;
+
+  const workerColumn = workerType === "employee" ? "employee_id" : "contractor_id";
+  const engagement = await db().from("hr_engagements").select("person_id,status")
+    .eq("company_id", account.companyId).eq("worker_type", workerType).eq(workerColumn, account.id)
+    .eq("status", "active").limit(1).maybeSingle();
+  if (engagement.error || !engagement.data?.person_id) return null;
+
+  const link = await db().from("hr_user_person_links").select("user_id,status")
+    .eq("company_id", account.companyId).eq("person_id", engagement.data.person_id).maybeSingle();
+  if (link.error && !/does not exist|schema cache/i.test(link.error.message)) {
+    throw new Error(link.error.message);
+  }
+  if (link.data?.status === "active" && link.data.user_id) return link.data.user_id;
+
+  return resolveConnectApproverUserId(account.companyId, engagement.data.person_id);
 }
 

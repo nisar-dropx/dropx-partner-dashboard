@@ -360,12 +360,20 @@ function isFloorRosterApprover(candidate: ApprovalCandidate) {
   });
 }
 
+async function isActiveApproverUser(companyId: string, userId: string) {
+  const profile = await db().from("profiles").select("id,is_active,company_id").eq("id", userId).maybeSingle();
+  if (profile.error) throw new Error(profile.error.message);
+  if (!profile.data?.is_active) return false;
+  if (profile.data.company_id && profile.data.company_id !== companyId) return false;
+  return true;
+}
+
 /**
  * Build manager approvers for a station roster:
  * 1. Walk station owner → solid-line managers
- * 2. Drop the submitter and everyone at/below them
- * 3. Drop station-floor roles (TL / STM / SM / SRSM) — they prepare, they do not approve
- * 4. Take the next `requiredLevels` eligible managers
+ * 2. Drop submitter and everyone at/below them
+ * 3. Drop station-floor roles and missing/inactive users — auto-skip to the next manager up
+ * 4. Take up to `requiredLevels` usable managers (shortfall is filled by HR when configured)
  */
 async function locationRosterApprovalChain(authorization: AuthorizationContext, locationId: string, requiredLevels: number) {
   const companyId = authorization.companyId!;
@@ -387,20 +395,16 @@ async function locationRosterApprovalChain(authorization: AuthorizationContext, 
   if (assignmentResult.error) throw new Error(assignmentResult.error.message);
   const owner = [...(assignmentResult.data ?? [])].sort((left, right) => (order.get(left.responsibility_role_id) ?? 9999) - (order.get(right.responsibility_role_id) ?? 9999))[0];
   if (!owner?.assignee_user_id) return { chain: [] as ApprovalCandidate[], error: missingOwner };
+
   const ownerAssignmentId = owner.assignment_id ?? await assignmentForUser(companyId, owner.assignee_user_id);
   const ownerApprover = ownerAssignmentId ? await approverFromAssignment(companyId, ownerAssignmentId) : null;
   const full: ApprovalCandidate[] = [];
   const push = (candidate: ApprovalCandidate | null) => {
+    // Missing / unresolvable people are skipped — walk continues to the next manager.
     if (candidate && !full.some((item) => item.userId === candidate.userId)) full.push(candidate);
   };
-  push(ownerApprover ?? {
-    assignmentId: ownerAssignmentId,
-    userId: owner.assignee_user_id,
-    designationId: null,
-    designationCode: null,
-    designationName: null,
-    name: "Station roster owner"
-  });
+  push(ownerApprover);
+
   let subjectAssignmentId = ownerAssignmentId;
   const seen = new Set(subjectAssignmentId ? [subjectAssignmentId] : []);
   const today = indiaToday();
@@ -420,10 +424,20 @@ async function locationRosterApprovalChain(authorization: AuthorizationContext, 
 
   const submitterIndex = full.findIndex((candidate) => candidate.userId === authorization.userId);
   const aboveSubmitter = submitterIndex >= 0 ? full.slice(submitterIndex + 1) : full;
-  const chain = aboveSubmitter.filter((candidate) => !isFloorRosterApprover(candidate)).slice(0, requiredLevels);
-  return chain.length < requiredLevels
-    ? { chain, error: `The station has only ${chain.length} active manager level${chain.length === 1 ? "" : "s"} above the submitter. Complete its People reporting line before submitting.` }
-    : { chain, error: null };
+  const usable: ApprovalCandidate[] = [];
+  for (const candidate of aboveSubmitter) {
+    if (isFloorRosterApprover(candidate)) continue;
+    if (!(await isActiveApproverUser(companyId, candidate.userId))) continue;
+    usable.push(candidate);
+    if (usable.length >= requiredLevels) break;
+  }
+
+  return {
+    chain: usable,
+    error: usable.length
+      ? null
+      : "No active manager above the submitter could be resolved. Complete the People reporting line, or ensure HR roster approval is enabled."
+  };
 }
 
 export function canApproveOpsRosterHr(authorization: AuthorizationContext) {
@@ -447,8 +461,11 @@ export async function resolveOpsRosterApprovalRoute(
   if (!policy.approvalRequired) return { direct: true, approvalRequired: false, summary: "Applies directly under the station policy.", error: null, steps: [] };
   if (!locationId) return { direct: false, approvalRequired: true, summary: "Choose a station before submitting the roster.", error: "Choose a station before submitting the roster.", steps: [] };
   const resolved = await locationRosterApprovalChain(authorization, locationId, policy.approvalLevels);
-  if (resolved.error) return { direct: false, approvalRequired: true, summary: resolved.error, error: resolved.error, steps: [] };
-  const managerSteps: OpsRosterApprovalRoute["steps"] = resolved.chain.slice(0, policy.approvalLevels).map((approver, index) => ({
+  const managers = resolved.chain.slice(0, policy.approvalLevels);
+  if (!managers.length && !policy.hrApprovalRequired) {
+    return { direct: false, approvalRequired: true, summary: resolved.error ?? "No roster approver is available.", error: resolved.error ?? "No roster approver is available.", steps: [] };
+  }
+  const managerSteps: OpsRosterApprovalRoute["steps"] = managers.map((approver, index) => ({
     stageNo: index + 1,
     stageType: index === 0 ? "level_1" : "level_2",
     approverUserId: approver.userId,
