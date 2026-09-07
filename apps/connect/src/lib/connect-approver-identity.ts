@@ -230,3 +230,52 @@ export async function resolveConnectActorUserId(account: ConnectActorAccount): P
   return resolveConnectApproverUserId(account.companyId, engagement.data.person_id);
 }
 
+async function personIdForAccount(account: ConnectActorAccount): Promise<string | null> {
+  if (account.profileType === "user") {
+    const link = await db().from("hr_user_person_links").select("person_id,status")
+      .eq("company_id", account.companyId).eq("user_id", account.id).eq("status", "active")
+      .limit(1).maybeSingle();
+    if (link.error && !/does not exist|schema cache/i.test(link.error.message)) {
+      throw new Error(link.error.message);
+    }
+    return link.data?.person_id ?? null;
+  }
+  const workerType = account.profileType === "employee" || account.profileType === "contractor"
+    ? account.profileType
+    : null;
+  if (!workerType) return null;
+  const workerColumn = workerType === "employee" ? "employee_id" : "contractor_id";
+  const engagement = await db().from("hr_engagements").select("person_id,status")
+    .eq("company_id", account.companyId).eq("worker_type", workerType).eq(workerColumn, account.id)
+    .eq("status", "active").limit(1).maybeSingle();
+  if (engagement.error || !engagement.data?.person_id) return null;
+  return engagement.data.person_id;
+}
+
+/**
+ * All portal user ids that may own approval steps for this One account
+ * (Gmail profile + mobile-provisioned profile for the same person).
+ */
+export async function resolveConnectActorUserIds(account: ConnectActorAccount): Promise<string[]> {
+  const ids = new Set<string>();
+  const primary = await resolveConnectActorUserId(account);
+  if (primary) ids.add(primary);
+  if (account.profileType === "user") ids.add(account.id);
+
+  const personId = await personIdForAccount(account);
+  if (personId) {
+    const links = await db().from("hr_user_person_links").select("user_id,status")
+      .eq("company_id", account.companyId).eq("person_id", personId).eq("status", "active");
+    if (links.error && !/does not exist|schema cache/i.test(links.error.message)) {
+      throw new Error(links.error.message);
+    }
+    for (const row of links.data ?? []) {
+      if (row.user_id) ids.add(row.user_id);
+    }
+    const provisioned = await resolveConnectApproverUserId(account.companyId, personId);
+    if (provisioned) ids.add(provisioned);
+  }
+
+  return [...ids];
+}
+

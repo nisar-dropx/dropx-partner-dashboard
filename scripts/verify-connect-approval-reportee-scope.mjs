@@ -21,10 +21,11 @@ const checks = [
   [reportingTree.includes("while (queue.length)"), "Entire team recursively traverses the reporting tree"],
   [approvals.includes("loadConnectReporteeAccess(account, scope)"), "leave, attendance and location APIs load one shared reportee scope"],
   [
-    attendance.includes('eq("approver_user_id", actorUserId)')
+    attendance.includes('.in("approver_user_id", actorUserIds)')
       && attendance.includes("Explicit step assignment")
+      && attendance.includes("CONNECT_ATTENDANCE_HR_ROLE_CODES")
       && !attendance.includes("connectReporteeMatches(reportees"),
-    "manager and HR attendance queues are assignee-scoped (not org-chart filtered)"
+    "manager attendance is assignee-scoped; HR finalization is Owner/HR-role gated"
   ],
   [
     approvals.includes("Steps are assigned explicitly")
@@ -33,7 +34,7 @@ const checks = [
     "leave and WFH queues are assignee-scoped (not org-chart filtered)"
   ],
   [
-    reimbursements.includes('eq("approver_user_id", userId)')
+    reimbursements.includes('.in("approver_user_id", userIds)')
       && reimbursements.includes("Do not require org-chart reportee scope")
       && !reimbursements.includes("connectReporteeMatches(reportees"),
     "claims are assignee-scoped (not org-chart filtered)"

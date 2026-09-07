@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
-import { resolveConnectActorUserId } from "../../../../src/lib/connect-approver-identity";
+import { resolveConnectActorUserId, resolveConnectActorUserIds } from "../../../../src/lib/connect-approver-identity";
 import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval, listConnectReturnedRosters, resubmitConnectReturnedRoster, listConnectExitApprovals, decideConnectExitApproval, listConnectExitWithdrawalApprovals, decideConnectExitWithdrawal } from "../../../../src/lib/connect-manager-approvals";
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
 import { loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
@@ -29,12 +29,12 @@ async function requireActorUserId(account: ConnectAccount, actionLabel: string) 
 }
 
 async function listLeaveApprovals(account: ConnectAccount) {
-  const approverUserId = await resolveConnectActorUserId(account);
-  if (!approverUserId) return [];
+  const approverUserIds = await resolveConnectActorUserIds(account);
+  if (!approverUserIds.length) return [];
   const stepResult = await db().from("hr_leave_approval_steps")
     .select("id,request_id,step_order,step_name,status")
     .eq("company_id", account.companyId)
-    .eq("approver_user_id", approverUserId)
+    .in("approver_user_id", approverUserIds)
     .eq("status", "pending")
     .order("created_at");
   if (stepResult.error) throw new Error(stepResult.error.message);
@@ -76,13 +76,13 @@ export async function GET(request: Request) {
     const account = await selectedAccount(request);
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     const reportees = await loadConnectReporteeAccess(account, scope);
-    const approverUserId = await resolveConnectActorUserId(account);
+    const approverUserIds = await resolveConnectActorUserIds(account);
     const [leaveApprovals, wfhApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals] = await Promise.all([
       listLeaveApprovals(account),
-      approverUserId
+      approverUserIds.length
         ? listConnectWfhApprovals({
             companyId: account.companyId,
-            approverUserId,
+            approverUserIds,
             // Explicit step assignment — show regardless of reporting-tree toggle.
             matchesReportee: () => true
           })

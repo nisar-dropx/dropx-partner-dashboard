@@ -306,13 +306,19 @@ export async function cancelConnectWfhRequest(input: {
 
 export async function listConnectWfhApprovals(input: {
   companyId: string;
-  approverUserId: string;
+  approverUserId?: string;
+  approverUserIds?: string[];
   matchesReportee: (profileType: string, profileId: string | null) => boolean;
 }) {
+  const approverIds = [...new Set([
+    ...(input.approverUserIds ?? []),
+    ...(input.approverUserId ? [input.approverUserId] : [])
+  ].filter(Boolean))];
+  if (!approverIds.length) return [];
   const stepResult = await db().from("hr_wfh_approval_steps")
     .select("id,request_id,step_order,step_name,status")
     .eq("company_id", input.companyId)
-    .eq("approver_user_id", input.approverUserId)
+    .in("approver_user_id", approverIds)
     .eq("status", "pending")
     .order("created_at");
   if (stepResult.error) {

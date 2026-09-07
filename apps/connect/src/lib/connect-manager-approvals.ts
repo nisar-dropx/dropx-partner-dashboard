@@ -2,7 +2,7 @@ import "server-only";
 
 import type { ConnectAccount } from "./connect-auth";
 import { connectApproverIdentity } from "./connect-expense-data";
-import { resolveConnectActorUserId } from "./connect-approver-identity";
+import { resolveConnectActorUserId, resolveConnectActorUserIds } from "./connect-approver-identity";
 import { notifyAttendanceApprovalRequired } from "../../../../src/lib/connect-attendance-notifications";
 import { type ConnectReporteeAccess } from "./connect-reportee-scope";
 import { notifyConnectExitOutcome, notifyExitApprovalRequired } from "./connect-exit-notifications";
@@ -57,29 +57,57 @@ async function approverUserId(account: ConnectAccount) {
   return resolveConnectActorUserId(account);
 }
 
+async function approverUserIds(account: ConnectAccount) {
+  return resolveConnectActorUserIds(account);
+}
+
+/** People HR / Owner roles that may finalize attendance after manager approval. Line managers with attendance.approve must not see this company queue. */
+const CONNECT_ATTENDANCE_HR_ROLE_CODES = new Set([
+  "OWNER",
+  "OWNER_BREAK_GLASS",
+  "PEOPLE_MANAGING_PARTNER",
+  "HR_HEAD",
+  "HR_HAEAD",
+  "HR_OPERATIONS",
+  "HR_EXECUTIVE",
+  "PEOPLE_HRM",
+  "PEOPLE_HRE"
+]);
+
+function isConnectAttendanceHrRoleCode(value: unknown) {
+  return CONNECT_ATTENDANCE_HR_ROLE_CODES.has(String(value ?? "").trim().toUpperCase());
+}
+
 async function canConnectFinalizeAttendance(companyId: string, userId: string) {
-  const pageResult = await db().from("hr_permission_pages")
-    .select("id").eq("company_id", companyId).eq("code", "attendance").eq("is_active", true).maybeSingle();
-  if (pageResult.error || !pageResult.data) return false;
-  const permissionResult = await db().from("hr_role_page_permissions")
-    .select("role_id").eq("company_id", companyId).eq("page_id", pageResult.data.id).eq("can_approve", true);
-  if (permissionResult.error) throw new Error(permissionResult.error.message);
-  const roleIds = [...new Set((permissionResult.data ?? []).map((row) => row.role_id))];
-  if (!roleIds.length) return false;
   const today = todayInIndia();
-  const grantResult = await db().from("hr_access_grants").select("id")
-    .eq("company_id", companyId).eq("user_id", userId).eq("is_active", true).in("role_id", roleIds)
-    .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`).limit(1);
-  if (grantResult.error && !String(grantResult.error.message).toLowerCase().includes("does not exist")) {
+  const legacy = await db().from("hr_user_access").select("role_code,role_id")
+    .eq("company_id", companyId).eq("user_id", userId).eq("is_active", true);
+  if (legacy.error && !/does not exist|schema cache/i.test(legacy.error.message)) {
+    throw new Error(legacy.error.message);
+  }
+  if ((legacy.data ?? []).some((row) => isConnectAttendanceHrRoleCode(row.role_code))) return true;
+
+  const grantResult = await db().from("hr_access_grants")
+    .select("role_id,hr_roles(code)")
+    .eq("company_id", companyId).eq("user_id", userId).eq("is_active", true)
+    .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`);
+  if (grantResult.error && !/does not exist|schema cache/i.test(grantResult.error.message)) {
     throw new Error(grantResult.error.message);
   }
-  if ((grantResult.data ?? []).length) return true;
-  const legacyResult = await db().from("hr_user_access").select("id")
-    .eq("company_id", companyId).eq("user_id", userId).eq("is_active", true).in("role_id", roleIds).limit(1);
-  if (legacyResult.error && !String(legacyResult.error.message).toLowerCase().includes("does not exist")) {
-    throw new Error(legacyResult.error.message);
+  if ((grantResult.data ?? []).some((row) => isConnectAttendanceHrRoleCode(one(row.hr_roles)?.code))) {
+    return true;
   }
-  return Boolean((legacyResult.data ?? []).length);
+
+  const roleIds = [...new Set([
+    ...(legacy.data ?? []).map((row) => row.role_id),
+    ...(grantResult.data ?? []).map((row) => row.role_id)
+  ].filter(Boolean))];
+  if (!roleIds.length) return false;
+  const roles = await db().from("hr_roles").select("id,code").eq("company_id", companyId).in("id", roleIds);
+  if (roles.error && !/does not exist|schema cache/i.test(roles.error.message)) {
+    throw new Error(roles.error.message);
+  }
+  return (roles.data ?? []).some((row) => isConnectAttendanceHrRoleCode(row.code));
 }
 
 async function signedEvidence(path: string | null | undefined) {
@@ -89,12 +117,12 @@ async function signedEvidence(path: string | null | undefined) {
 }
 
 export async function listConnectAttendanceApprovals(account: ConnectAccount, _reportees: ConnectReporteeAccess) {
-  const actorUserId = await approverUserId(account);
-  if (!actorUserId) return [];
+  const actorUserIds = await approverUserIds(account);
+  if (!actorUserIds.length) return [];
   if (await isTeamLeadRegularizationApprover(account)) return [];
   const stepsResult = await db().from("attendance_regularization_approval_steps")
     .select("id,request_id,step_order,step_name")
-    .eq("company_id", account.companyId).eq("approver_user_id", actorUserId).eq("status", "pending")
+    .eq("company_id", account.companyId).in("approver_user_id", actorUserIds).eq("status", "pending")
     .order("created_at");
   if (stepsResult.error) throw new Error(stepsResult.error.message);
   const steps = stepsResult.data ?? [];
@@ -157,7 +185,7 @@ export async function listConnectAttendanceHrApprovals(account: ConnectAccount, 
     status: string;
     created_at: string;
   }>;
-  // HR finalizers with attendance approve permission see company-scoped pending_hr / legacy pending.
+  // Company-wide pending_hr is People HR work — only Owner / HR role codes above.
   const filtered = [];
   for (const request of rows) {
     if (request.status === "pending_hr") {
@@ -199,7 +227,7 @@ export async function decideConnectAttendanceHrApproval(
   const actorUserId = await approverUserId(account);
   if (!actorUserId) throw new Error("A linked People login is required to finalize attendance.");
   if (!(await canConnectFinalizeAttendance(account.companyId, actorUserId))) {
-    throw new Error("Attendance finalization is not enabled for this account.");
+    throw new Error("Attendance finalization is only available to People HR / Owner roles.");
   }
   const requestId = clean(requestIdValue);
   const decision = clean(decisionValue);
@@ -229,7 +257,8 @@ export async function decideConnectAttendanceHrApproval(
 }
 
 export async function decideConnectAttendanceApproval(account: ConnectAccount, requestIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
-  const actorUserId = await approverUserId(account);
+  const actorUserIds = await approverUserIds(account);
+  const actorUserId = actorUserIds[0] ?? null;
   if (!actorUserId) throw new Error("A linked People login is required to approve attendance.");
   if (await isTeamLeadRegularizationApprover(account)) {
     throw new Error("Team leads cannot approve attendance regularizations.");
@@ -238,9 +267,10 @@ export async function decideConnectAttendanceApproval(account: ConnectAccount, r
   const decision = clean(decisionValue);
   const note = clean(noteValue);
   if (!/^[0-9a-f-]{36}$/i.test(requestId) || !["approved", "rejected"].includes(decision)) throw new Error("Choose Approve or Reject.");
-  const assigned = await db().from("attendance_regularization_approval_steps").select("id")
-    .eq("company_id", account.companyId).eq("request_id", requestId).eq("approver_user_id", actorUserId).eq("status", "pending").maybeSingle();
+  const assigned = await db().from("attendance_regularization_approval_steps").select("id,approver_user_id")
+    .eq("company_id", account.companyId).eq("request_id", requestId).in("approver_user_id", actorUserIds).eq("status", "pending").maybeSingle();
   if (assigned.error || !assigned.data) throw new Error(assigned.error?.message ?? "This attendance approval is no longer assigned to you.");
+  const actingUserId = assigned.data.approver_user_id || actorUserId;
   const request = await db().from("attendance_regularization_requests").select("attachment_path")
     .eq("company_id", account.companyId).eq("id", requestId).is("request_kind", null).maybeSingle();
   if (request.error || !request.data) throw new Error(request.error?.message ?? "Attendance request was not found.");
@@ -250,7 +280,7 @@ export async function decideConnectAttendanceApproval(account: ConnectAccount, r
   const result = await db().rpc("hr_decide_attendance_regularization_step", {
     p_company_id: account.companyId,
     p_request_id: requestId,
-    p_actor_user_id: actorUserId,
+    p_actor_user_id: actingUserId,
     p_decision: decision,
     p_note: note
   });
@@ -283,19 +313,13 @@ async function canApproveUnassignedRosterHr(account: ConnectAccount) {
   if (/owner/i.test(account.role ?? "")) return true;
   const userId = await approverUserId(account);
   if (!userId) return false;
-  const result = await db().from("hr_user_access").select("role_code")
-    .eq("company_id", account.companyId).eq("user_id", userId).eq("is_active", true).maybeSingle();
-  if (result.error) throw new Error(result.error.message);
-  return [
-    "OWNER", "OWNER_BREAK_GLASS", "PEOPLE_MANAGING_PARTNER",
-    "HR_HEAD", "HR_HAEAD", "HR_OPERATIONS", "HR_EXECUTIVE",
-    "PEOPLE_HRM", "PEOPLE_HRE"
-  ].includes(String(result.data?.role_code ?? "").toUpperCase());
+  return canConnectFinalizeAttendance(account.companyId, userId);
 }
 
 export async function listConnectRosterApprovals(account: ConnectAccount) {
-  const actorUserId = await approverUserId(account);
-  if (!actorUserId) return [];
+  const actorUserIds = await approverUserIds(account);
+  if (!actorUserIds.length) return [];
+  const actorIdSet = new Set(actorUserIds);
   const [stepsResult, canApproveHr] = await Promise.all([
     db().from("hr_roster_approval_steps")
       .select("id,plan_id,stage_no,stage_type,approver_user_id,status,hr_roster_plans!inner(id,name,location_id,period_start,period_end,status,roster_kind,effective_from,revision_no,submitted_at,stations!hr_roster_plans_location_id_fkey(station_code,station_name),hr_roster_entries(id))")
@@ -303,7 +327,7 @@ export async function listConnectRosterApprovals(account: ConnectAccount) {
     canApproveUnassignedRosterHr(account)
   ]);
   if (stepsResult.error) throw new Error(stepsResult.error.message);
-  const staged = (stepsResult.data ?? []).filter((step) => step.approver_user_id === actorUserId || (step.stage_type === "hr" && !step.approver_user_id && canApproveHr));
+  const staged = (stepsResult.data ?? []).filter((step) => (step.approver_user_id && actorIdSet.has(step.approver_user_id)) || (step.stage_type === "hr" && !step.approver_user_id && canApproveHr));
   const rows = staged.flatMap((step) => {
     const plan = one(step.hr_roster_plans);
     const station = one(plan?.stations);
@@ -324,7 +348,7 @@ export async function listConnectRosterApprovals(account: ConnectAccount) {
   });
   const legacyResult = await db().from("hr_roster_plans")
     .select("id,name,location_id,period_start,period_end,status,roster_kind,effective_from,revision_no,stations!hr_roster_plans_location_id_fkey(station_code,station_name),hr_roster_entries(id)")
-    .eq("company_id", account.companyId).eq("approver_user_id", actorUserId).eq("status", "pending_approval").order("submitted_at");
+    .eq("company_id", account.companyId).in("approver_user_id", actorUserIds).eq("status", "pending_approval").order("submitted_at");
   if (legacyResult.error) throw new Error(legacyResult.error.message);
   const stagedPlanIds = new Set(rows.map((row) => row.planId));
   return [...rows, ...(legacyResult.data ?? []).flatMap((plan) => {
@@ -406,14 +430,16 @@ async function actorRoleIds(companyId: string, actorUserId: string) {
 }
 
 export async function listConnectExitApprovals(account: ConnectAccount) {
-  const actorUserId = await approverUserId(account);
-  if (!actorUserId) return [];
+  const actorUserIds = await approverUserIds(account);
+  if (!actorUserIds.length) return [];
+  const actorUserId = actorUserIds[0];
+  const actorIdSet = new Set(actorUserIds);
   const roles = await actorRoleIds(account.companyId, actorUserId);
   const stepsResult = await db().from("hr_exit_approvals")
     .select("id,case_id,workflow_step_id,step_order,step_name,approver_source,approver_role_id,assigned_user_id,is_required,status,created_at")
     .eq("company_id", account.companyId).eq("status", "pending").order("created_at");
   if (stepsResult.error) throw new Error(stepsResult.error.message);
-  const candidates = (stepsResult.data ?? []).filter((step) => step.assigned_user_id === actorUserId || (!step.assigned_user_id && step.approver_role_id && roles.has(step.approver_role_id)));
+  const candidates = (stepsResult.data ?? []).filter((step) => (step.assigned_user_id && actorIdSet.has(step.assigned_user_id)) || (!step.assigned_user_id && step.approver_role_id && roles.has(step.approver_role_id)));
   if (!candidates.length) return [];
   const caseIds = [...new Set(candidates.map((step) => step.case_id))];
   const [casesResult, allStepsResult] = await Promise.all([
@@ -639,12 +665,12 @@ async function workerDisplay(companyId: string, workerType: string, workerId: st
 }
 
 export async function listConnectRosterSwapApprovals(account: ConnectAccount) {
-  const actorUserId = await approverUserId(account);
-  if (!actorUserId) return [];
+  const actorUserIds = await approverUserIds(account);
+  if (!actorUserIds.length) return [];
   const result = await db().from("hr_roster_swap_requests")
     .select("id,roster_date,status,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,requester_day_type,partner_day_type,requester_shift_id,partner_shift_id,requester_note,partner_note,requested_at")
     .eq("company_id", account.companyId)
-    .eq("approver_user_id", actorUserId)
+    .in("approver_user_id", actorUserIds)
     .eq("status", "pending_manager")
     .order("requested_at", { ascending: false });
   if (result.error) throw new Error(result.error.message);

@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
-import { resolveConnectActorUserId } from "../../../../src/lib/connect-approver-identity";
+import { resolveConnectActorUserId, resolveConnectActorUserIds } from "../../../../src/lib/connect-approver-identity";
 import {
   activeExpenseCategories,
   expenseCategoriesForPolicy,
@@ -38,11 +38,11 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>,
   return requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
 }
 
-async function approvalPayload(companyId: string, userId: string | null) {
-  if (!userId) return [];
+async function approvalPayload(companyId: string, userIds: string[]) {
+  if (!userIds.length) return [];
   const result = await db().from("hr_expense_approval_steps")
     .select("id,claim_id,step_order,step_name,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
-    .eq("company_id", companyId).eq("approver_user_id", userId).eq("status", "pending").order("created_at");
+    .eq("company_id", companyId).in("approver_user_id", userIds).eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
   // Claim steps are assigned explicitly (RM / finance head). Do not require org-chart reportee scope —
   // finance L2 is often outside the claimant's reporting tree.
@@ -64,11 +64,11 @@ async function approvalPayload(companyId: string, userId: string | null) {
   }));
 }
 
-async function preRequestApprovalPayload(companyId: string, userId: string | null) {
-  if (!userId) return [];
+async function preRequestApprovalPayload(companyId: string, userIds: string[]) {
+  if (!userIds.length) return [];
   const result = await db().from("hr_expense_claim_request_assignees")
     .select("id,request_id,assignee_role,status,hr_expense_claim_requests(id,request_no,purpose,estimated_amount,trip_from,trip_to,notes,status,created_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id))")
-    .eq("company_id", companyId).eq("approver_user_id", userId).eq("status", "pending").order("created_at");
+    .eq("company_id", companyId).in("approver_user_id", userIds).eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
   return (result.data ?? []).flatMap((row) => {
     const request = relation(row.hr_expense_claim_requests);
@@ -137,10 +137,10 @@ async function claimPayload(account: ConnectAccount) {
       approver_name: nameByUserId.get(assignee.approver_user_id) ?? "Approver"
     }))
   }));
-  const actorUserId = await resolveConnectActorUserId(account);
+  const actorUserIds = await resolveConnectActorUserIds(account);
   const [approvals, preRequestApprovals] = await Promise.all([
-    approvalPayload(account.companyId, actorUserId),
-    preRequestApprovalPayload(account.companyId, actorUserId)
+    approvalPayload(account.companyId, actorUserIds),
+    preRequestApprovalPayload(account.companyId, actorUserIds)
   ]);
   return { categories, payout, claims, preRequests, approvals, preRequestApprovals };
 }
@@ -150,9 +150,10 @@ export async function GET(request: Request) {
     const account = await selectedAccount(request, undefined, true);
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     if (account.profileType === "user") {
+      const actorUserIds = await resolveConnectActorUserIds(account);
       const [approvals, preRequestApprovals] = await Promise.all([
-        approvalPayload(account.companyId, account.id),
-        preRequestApprovalPayload(account.companyId, account.id)
+        approvalPayload(account.companyId, actorUserIds),
+        preRequestApprovalPayload(account.companyId, actorUserIds)
       ]);
       return NextResponse.json({
         categories: [],
