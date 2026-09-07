@@ -363,35 +363,53 @@ async function resolveFinanceHeadAssignees(account: ConnectAccount, excludeUserI
         .eq("company_id", account.companyId).eq("id", assignment.engagement_id).maybeSingle();
       if (engagement.error) throw new Error(engagement.error.message);
       if (!engagement.data || engagement.data.status !== "active") continue;
-      const link = await db().from("hr_user_person_links").select("user_id,status")
-        .eq("company_id", account.companyId).eq("person_id", engagement.data.person_id).maybeSingle();
-      if (link.error) throw new Error(link.error.message);
-      if (!link.data || link.data.status !== "active") continue;
-      await add(link.data.user_id, engagement.data.person_id);
+      const approverUserId = await resolveConnectApproverUserId(account.companyId, engagement.data.person_id);
+      if (!approverUserId) continue;
+      await add(approverUserId, engagement.data.person_id);
     }
   }
 
   return [...found.values()];
 }
 
+async function excludePortalUserIdsForPerson(companyId: string, personId: string | null | undefined, exclude: Set<string>) {
+  if (!personId) return;
+  const links = await db().from("hr_user_person_links").select("user_id,status")
+    .eq("company_id", companyId).eq("person_id", personId).eq("status", "active");
+  if (links.error && !/does not exist|schema cache/i.test(links.error.message)) {
+    throw new Error(links.error.message);
+  }
+  for (const row of links.data ?? []) {
+    if (row.user_id) exclude.add(row.user_id);
+  }
+}
+
 /** Single-layer multi-assignee: reporting manager and/or finance owners (first decision wins). */
 export async function resolveExpenseClaimRequestAssignees(account: ConnectAccount) {
   const identity = await expenseIdentity(account);
-  const assignees: ExpenseClaimRequestAssignee[] = [];
-  const exclude = new Set<string>();
+  const { resolveConnectActorUserIds } = await import("./connect-approver-identity");
+  const exclude = new Set<string>(await resolveConnectActorUserIds(account));
   if (identity.userId) exclude.add(identity.userId);
+  await excludePortalUserIdsForPerson(account.companyId, identity.personId, exclude);
 
+  const assignees: ExpenseClaimRequestAssignee[] = [];
   const manager = await resolveImmediateReportingManager(account, identity);
   if (manager) {
     assignees.push(manager);
     exclude.add(manager.approver_user_id);
+    await excludePortalUserIdsForPerson(account.companyId, manager.approver_person_id, exclude);
   }
 
   const financeAssignees = await resolveFinanceHeadAssignees(account, exclude);
-  assignees.push(...financeAssignees);
-
-  if (!assignees.length) {
+  // One row per portal user — unique(company_id, request_id, approver_user_id).
+  const byUser = new Map<string, ExpenseClaimRequestAssignee>();
+  for (const assignee of [...assignees, ...financeAssignees]) {
+    if (!assignee.approver_user_id || byUser.has(assignee.approver_user_id)) continue;
+    byUser.set(assignee.approver_user_id, assignee);
+  }
+  const uniqueAssignees = [...byUser.values()];
+  if (!uniqueAssignees.length) {
     throw new Error("Configure a reporting manager or finance payment processor before requesting reimbursement approval.");
   }
-  return { identity, assignees };
+  return { identity, assignees: uniqueAssignees };
 }
