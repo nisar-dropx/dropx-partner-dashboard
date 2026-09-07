@@ -21,7 +21,12 @@ const checks = [
   [reportingTree.includes("while (queue.length)"), "Entire team recursively traverses the reporting tree"],
   [approvals.includes("loadConnectReporteeAccess(account, scope)"), "leave, attendance and location APIs load one shared reportee scope"],
   [attendance.match(/connectReporteeMatches\(reportees/g)?.length >= 2, "manager and HR attendance queues are both reportee-scoped"],
-  [reimbursements.includes("connectReporteeMatches(reportees"), "claims are reportee-scoped"],
+  [
+    reimbursements.includes('eq("approver_user_id", userId)')
+      && reimbursements.includes("Do not require org-chart reportee scope")
+      && !reimbursements.includes("connectReporteeMatches(reportees"),
+    "claims are assignee-scoped (not org-chart filtered)"
+  ],
   [location.includes("loadConnectReporteeAccess(account, reporteeScope)"), "location review authorization follows the selected reporting scope"]
 ];
 

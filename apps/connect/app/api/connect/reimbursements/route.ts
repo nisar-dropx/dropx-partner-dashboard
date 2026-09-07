@@ -12,7 +12,7 @@ import {
   resolveExpenseClaimRequestAssignees
 } from "../../../../src/lib/connect-expense-data";
 import { notifyExpenseUser, dismissExpenseApprovalNotifications } from "../../../../src/lib/connect-expense-notifications";
-import { loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
+import { normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
 import { mergeExpenseReceiptsToPdf } from "../../../../src/lib/merge-expense-receipts";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
@@ -148,7 +148,6 @@ export async function GET(request: Request) {
   try {
     const account = await selectedAccount(request, undefined, true);
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
-    const reportees = await loadConnectReporteeAccess(account, scope);
     if (account.profileType === "user") {
       const [approvals, preRequestApprovals] = await Promise.all([
         approvalPayload(account.companyId, account.id),

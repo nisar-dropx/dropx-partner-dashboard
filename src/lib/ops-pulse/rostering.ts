@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isOpsRosterPlannerRole, isRosterDirectPublishDesignation } from "@/lib/approval-designation-labels";
+import { isOpsRosterPlannerRole, isRosterDirectPublishDesignation, isStationFloorRosterDesignation } from "@/lib/approval-designation-labels";
 import { isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
@@ -305,6 +305,8 @@ type ApprovalCandidate = {
   assignmentId: string | null;
   userId: string;
   designationId: string | null;
+  designationCode: string | null;
+  designationName: string | null;
   name: string;
 };
 
@@ -328,14 +330,43 @@ async function approverFromAssignment(companyId: string, assignmentId: string): 
   const engagement = await db().from("hr_engagements").select("person_id").eq("company_id", companyId).eq("id", assignment.data.engagement_id).eq("status", "active").maybeSingle();
   if (engagement.error) throw new Error(engagement.error.message);
   if (!engagement.data?.person_id) return null;
-  const [person, link] = await Promise.all([
+  const [person, link, designation] = await Promise.all([
     db().from("hr_people").select("display_name").eq("company_id", companyId).eq("id", engagement.data.person_id).eq("status", "active").maybeSingle(),
-    db().from("hr_user_person_links").select("user_id").eq("company_id", companyId).eq("person_id", engagement.data.person_id).eq("status", "active").maybeSingle()
+    db().from("hr_user_person_links").select("user_id").eq("company_id", companyId).eq("person_id", engagement.data.person_id).eq("status", "active").maybeSingle(),
+    assignment.data.designation_id
+      ? db().from("designations").select("code,name").eq("company_id", companyId).eq("id", assignment.data.designation_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null })
   ]);
-  if (person.error || link.error) throw new Error(person.error?.message ?? link.error?.message ?? "The station reporting line could not be resolved.");
-  return link.data?.user_id ? { assignmentId, userId: link.data.user_id, designationId: assignment.data.designation_id, name: person.data?.display_name ?? "Station manager" } : null;
+  if (person.error || link.error || designation.error) {
+    throw new Error(person.error?.message ?? link.error?.message ?? designation.error?.message ?? "The station reporting line could not be resolved.");
+  }
+  return link.data?.user_id
+    ? {
+      assignmentId,
+      userId: link.data.user_id,
+      designationId: assignment.data.designation_id,
+      designationCode: designation.data?.code ?? null,
+      designationName: designation.data?.name ?? null,
+      name: person.data?.display_name ?? "Station manager"
+    }
+    : null;
 }
 
+function isFloorRosterApprover(candidate: ApprovalCandidate) {
+  if (candidate.name === "Station roster owner") return true;
+  return isStationFloorRosterDesignation({
+    name: candidate.designationName ?? "",
+    code: candidate.designationCode
+  });
+}
+
+/**
+ * Build manager approvers for a station roster:
+ * 1. Walk station owner → solid-line managers
+ * 2. Drop the submitter and everyone at/below them
+ * 3. Drop station-floor roles (TL / STM / SM / SRSM) — they prepare, they do not approve
+ * 4. Take the next `requiredLevels` eligible managers
+ */
 async function locationRosterApprovalChain(authorization: AuthorizationContext, locationId: string, requiredLevels: number) {
   const companyId = authorization.companyId!;
   const roleResult = await db().from("station_responsibility_roles").select("id,code,escalation_order,routes_approvals")
@@ -358,15 +389,22 @@ async function locationRosterApprovalChain(authorization: AuthorizationContext, 
   if (!owner?.assignee_user_id) return { chain: [] as ApprovalCandidate[], error: missingOwner };
   const ownerAssignmentId = owner.assignment_id ?? await assignmentForUser(companyId, owner.assignee_user_id);
   const ownerApprover = ownerAssignmentId ? await approverFromAssignment(companyId, ownerAssignmentId) : null;
-  const chain: ApprovalCandidate[] = [];
-  const add = (candidate: ApprovalCandidate | null) => {
-    if (candidate && candidate.userId !== authorization.userId && !chain.some((item) => item.userId === candidate.userId)) chain.push(candidate);
+  const full: ApprovalCandidate[] = [];
+  const push = (candidate: ApprovalCandidate | null) => {
+    if (candidate && !full.some((item) => item.userId === candidate.userId)) full.push(candidate);
   };
-  add(ownerApprover ?? { assignmentId: ownerAssignmentId, userId: owner.assignee_user_id, designationId: null, name: "Station roster owner" });
+  push(ownerApprover ?? {
+    assignmentId: ownerAssignmentId,
+    userId: owner.assignee_user_id,
+    designationId: null,
+    designationCode: null,
+    designationName: null,
+    name: "Station roster owner"
+  });
   let subjectAssignmentId = ownerAssignmentId;
   const seen = new Set(subjectAssignmentId ? [subjectAssignmentId] : []);
   const today = indiaToday();
-  for (let depth = 0; subjectAssignmentId && chain.length < requiredLevels && depth < 12; depth += 1) {
+  for (let depth = 0; subjectAssignmentId && depth < 12; depth += 1) {
     const relationship = await db().from("hr_reporting_relationships").select("manager_assignment_id")
       .eq("company_id", companyId).eq("subject_assignment_id", subjectAssignmentId)
       .eq("relationship_type", "solid_line").eq("is_primary", true)
@@ -377,10 +415,14 @@ async function locationRosterApprovalChain(authorization: AuthorizationContext, 
     if (!nextAssignmentId || seen.has(nextAssignmentId)) break;
     seen.add(nextAssignmentId);
     subjectAssignmentId = nextAssignmentId;
-    add(await approverFromAssignment(companyId, nextAssignmentId));
+    push(await approverFromAssignment(companyId, nextAssignmentId));
   }
+
+  const submitterIndex = full.findIndex((candidate) => candidate.userId === authorization.userId);
+  const aboveSubmitter = submitterIndex >= 0 ? full.slice(submitterIndex + 1) : full;
+  const chain = aboveSubmitter.filter((candidate) => !isFloorRosterApprover(candidate)).slice(0, requiredLevels);
   return chain.length < requiredLevels
-    ? { chain, error: `The station has only ${chain.length} active manager level${chain.length === 1 ? "" : "s"}. Complete its People reporting line before submitting.` }
+    ? { chain, error: `The station has only ${chain.length} active manager level${chain.length === 1 ? "" : "s"} above the submitter. Complete its People reporting line before submitting.` }
     : { chain, error: null };
 }
 

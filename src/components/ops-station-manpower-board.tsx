@@ -305,7 +305,7 @@ function StationTimetable({ people, locationCode }: { people: OpsStationManpower
               <span className="station-timetable-person"><span className="station-timetable-person-name"><b>{person.name}</b><PunchLocationBadge person={person} /></span><small>{person.designation}</small></span>
               <span className="station-timetable-shift"><b>Week off</b><small>Approved roster</small></span>
               <span className="station-timetable-lane">
-                <span className="station-timetable-off-label">Not scheduled</span>
+                <span className="station-timetable-off-label">Week off</span>
                 {arrival !== null && actualEnd !== null ? <span className="station-timetable-actual off-worked" style={{ left: `${actualLeft}%`, width: `${actualWidth}%` }} /> : null}
                 {arrival !== null ? <span className="station-timetable-arrival away" style={{ left: `${actualLeft}%` }} title={`Reported ${clock(person.today.inTime)} on week off`} /> : null}
               </span>
