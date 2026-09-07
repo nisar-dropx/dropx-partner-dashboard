@@ -47,7 +47,7 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [editingClaimId, setEditingClaimId] = useState<string | null>(null);
-  const [withdrawRequestId, setWithdrawRequestId] = useState<string | null>(null);
+  const [withdrawTarget, setWithdrawTarget] = useState<{ kind: "pre_request" | "claim"; id: string } | null>(null);
   const [withdrawReason, setWithdrawReason] = useState("");
 
   const load = useCallback(async () => {
@@ -90,24 +90,24 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
     setNotice("Complete expense lines and attach receipts for the approved request.");
   }
 
-  function openWithdrawModal(requestId: string) {
-    setWithdrawRequestId(requestId);
+  function openWithdrawModal(kind: "pre_request" | "claim", id: string) {
+    setWithdrawTarget({ kind, id });
     setWithdrawReason("");
     setError("");
   }
 
   function closeWithdrawModal() {
     if (saving) return;
-    setWithdrawRequestId(null);
+    setWithdrawTarget(null);
     setWithdrawReason("");
   }
 
   async function confirmWithdraw(event: FormEvent) {
     event.preventDefault();
-    if (!withdrawRequestId) return;
+    if (!withdrawTarget) return;
     const reason = withdrawReason.trim();
     if (reason.length < 3) {
-      setError("Enter a short reason (at least 3 characters) to withdraw this request.");
+      setError(`Enter a short reason (at least 3 characters) to withdraw this ${withdrawTarget.kind === "claim" ? "claim" : "request"}.`);
       return;
     }
     setSaving(true); setError(""); setNotice("");
@@ -118,20 +118,22 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
         body: JSON.stringify({
           accountId: account.id,
           profileType: account.profileType,
-          kind: "pre_request",
+          kind: withdrawTarget.kind,
           action: "withdrawn",
-          requestId: withdrawRequestId,
+          ...(withdrawTarget.kind === "claim"
+            ? { claimId: withdrawTarget.id }
+            : { requestId: withdrawTarget.id }),
           note: reason
         })
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to withdraw request.");
-      setNotice(payload.notice || "Reimbursement request withdrawn.");
+      if (!response.ok) throw new Error(payload.error || `Unable to withdraw ${withdrawTarget.kind === "claim" ? "claim" : "request"}.`);
+      setNotice(payload.notice || (withdrawTarget.kind === "claim" ? "Reimbursement claim withdrawn." : "Reimbursement request withdrawn."));
       setExpanded(null);
-      setWithdrawRequestId(null);
+      setWithdrawTarget(null);
       setWithdrawReason("");
       await load();
-    } catch (reasonValue) { setError(reasonValue instanceof Error ? reasonValue.message : "Unable to withdraw request."); }
+    } catch (reasonValue) { setError(reasonValue instanceof Error ? reasonValue.message : "Unable to withdraw."); }
     finally { setSaving(false); }
   }
 
@@ -279,7 +281,7 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
                 <button className="dx-save" onClick={() => startClaimFromRequest(request)} type="button"><ReceiptText /> Submit claim</button>
               ) : null}
               {request.status === "pending" ? (
-                <button className="dx-small-action danger" disabled={saving} onClick={() => openWithdrawModal(request.id)} type="button"><RotateCcw /> Withdraw request</button>
+                <button className="dx-small-action danger" disabled={saving} onClick={() => openWithdrawModal("pre_request", request.id)} type="button"><RotateCcw /> Withdraw request</button>
               ) : null}
               {request.consumed_claim_id ? <p className="dx-expense-help">Claim already submitted for this request.</p> : null}
             </div> : null}
@@ -413,26 +415,33 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
             {claim.payment.bank_processing_remarks ? <p>{claim.payment.bank_processing_remarks}</p> : null}
           </section> : null}
           {claim.status === "returned" ? <button className="dx-save" onClick={() => correctReturnedClaim(claim)} type="button"><RotateCcw /> Correct and resubmit</button> : null}
+          {claim.status === "pending_approval" || claim.status === "returned" ? (
+            <button className="dx-small-action danger" disabled={saving} onClick={() => openWithdrawModal("claim", claim.id)} type="button"><RotateCcw /> Withdraw claim</button>
+          ) : null}
         </div> : null}
       </article>) : <div className="dx-empty"><ReceiptText /><strong>No reimbursement claims yet</strong><small>Approved requests become claims once receipts are submitted.</small></div>}</div>
     </> : null}
 
-    {withdrawRequestId ? (
+    {withdrawTarget ? (
       <div className="dx-advance-modal" role="presentation">
         <button aria-label="Close" className="backdrop" onClick={closeWithdrawModal} type="button" />
         <form aria-labelledby="dx-reimbursement-withdraw-title" aria-modal="true" onSubmit={confirmWithdraw} role="dialog">
           <header>
-            <h2 id="dx-reimbursement-withdraw-title">Withdraw request?</h2>
+            <h2 id="dx-reimbursement-withdraw-title">{withdrawTarget.kind === "claim" ? "Withdraw claim?" : "Withdraw request?"}</h2>
             <button aria-label="Close" disabled={saving} onClick={closeWithdrawModal} type="button"><X /></button>
           </header>
-          <p className="dx-expense-help">Approvers will no longer see this request. You can raise a new one later if needed.</p>
+          <p className="dx-expense-help">
+            {withdrawTarget.kind === "claim"
+              ? "Approvers will no longer see this claim, and uploaded receipt files will be deleted from storage."
+              : "Approvers will no longer see this request. You can raise a new one later if needed."}
+          </p>
           <label>Reason
             <textarea
               autoFocus
               maxLength={500}
               minLength={3}
               onChange={(event) => setWithdrawReason(event.target.value)}
-              placeholder="Why are you withdrawing this request?"
+              placeholder={withdrawTarget.kind === "claim" ? "Why are you withdrawing this claim?" : "Why are you withdrawing this request?"}
               required
               rows={4}
               value={withdrawReason}

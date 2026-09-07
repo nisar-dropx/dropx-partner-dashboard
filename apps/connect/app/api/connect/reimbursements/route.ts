@@ -425,21 +425,43 @@ export async function PATCH(request: Request) {
     const action = clean(body.action).toLowerCase();
     const note = clean(body.note);
 
-    if (kind === "pre_request" && action === "withdrawn") {
+    if (action === "withdrawn") {
       const account = await selectedAccount(request, body, false);
       const actorUserId = await resolveConnectActorUserId(account);
       if (!actorUserId) throw new Error("Your One account is not linked to a People login.");
-      const requestId = clean(body.requestId);
-      if (!requestId) throw new Error("Select the reimbursement request to withdraw.");
-      const result = await db().rpc("hr_withdraw_expense_claim_request", {
+
+      if (kind === "pre_request") {
+        const requestId = clean(body.requestId);
+        if (!requestId) throw new Error("Select the reimbursement request to withdraw.");
+        const result = await db().rpc("hr_withdraw_expense_claim_request", {
+          p_company_id: account.companyId,
+          p_request_id: requestId,
+          p_actor_user_id: actorUserId,
+          p_note: note || null
+        });
+        if (result.error) throw new Error(result.error.message);
+        await dismissExpenseApprovalNotifications({ companyId: account.companyId, claimRequestId: requestId });
+        return NextResponse.json({ ok: true, notice: "Reimbursement request withdrawn." });
+      }
+
+      const claimId = clean(body.claimId);
+      if (!claimId) throw new Error("Select the reimbursement claim to withdraw.");
+      const result = await db().rpc("hr_withdraw_expense_claim", {
         p_company_id: account.companyId,
-        p_request_id: requestId,
+        p_claim_id: claimId,
         p_actor_user_id: actorUserId,
         p_note: note || null
       });
       if (result.error) throw new Error(result.error.message);
-      await dismissExpenseApprovalNotifications({ companyId: account.companyId, claimRequestId: requestId });
-      return NextResponse.json({ ok: true, notice: "Reimbursement request withdrawn." });
+      const withdrawn = Array.isArray(result.data) ? result.data[0] : result.data;
+      const storagePaths = Array.isArray(withdrawn?.storage_paths)
+        ? withdrawn.storage_paths.map((path: unknown) => String(path || "").trim()).filter(Boolean)
+        : [];
+      if (storagePaths.length) {
+        await db().storage.from("hr-expense-receipts").remove(storagePaths);
+      }
+      await dismissExpenseApprovalNotifications({ companyId: account.companyId, claimId });
+      return NextResponse.json({ ok: true, notice: "Reimbursement claim withdrawn. Receipt files were removed." });
     }
 
     const account = await selectedAccount(request, body, true);
