@@ -13,6 +13,10 @@ const performanceData = read("apps/connect/src/lib/connect-operational-performan
 const performancePeriods = read("apps/connect/src/lib/performance-periods.ts");
 const styles = read("apps/connect/app/globals.css");
 const mobileNav = flow.slice(flow.indexOf('aria-label="Primary navigation"'), flow.indexOf("</nav> : null}", flow.indexOf('aria-label="Primary navigation"')));
+const mobileNavCssStart = styles.indexOf("\n.dx-mobile-nav {");
+const mobileNavCss = mobileNavCssStart >= 0
+  ? styles.slice(mobileNavCssStart, styles.indexOf("\n.dx-mobile-nav button.active", mobileNavCssStart))
+  : "";
 
 const checks = [
   [auth.includes('profileType === "employee" || profileType === "contractor"') && auth.includes('? ["performance"]'), "employee and independent-contractor accounts inherit Performance without a designation tick"],
@@ -20,7 +24,13 @@ const checks = [
   [performanceApi.includes('clean(department.data?.code).toUpperCase() === "OPS"') && performanceApi.includes("context.operationsEligible") && performanceApi.includes(": Promise.resolve(null)"), "operational scorecard and CPS data are restricted server-side to the active People Operations department"],
   [performance.includes('const visibleSection = operational ? section : "reviews"') && performance.includes('{operational ? <nav className="dx-performance-sections"') && performance.includes("Your goals, feedback and individual performance reviews."), "non-Operations people receive the individual performance view without Scorecard or CPS controls"],
   [mobileNav.includes("<span>Performance</span>") && !mobileNav.includes("<span>Approvals</span>") && !mobileNav.includes("<span>Profile</span>") && !mobileNav.includes("<span>Settings</span>"), "mobile primary row prioritises performance while approvals remain in Home and the menu"],
-  [styles.includes("grid-template-columns: repeat(5, minmax(0, 1fr))"), "mobile primary navigation has a fixed one-row five-action grid"],
+  [
+    mobileNavCss.includes("display: flex;")
+      && mobileNavCss.includes("justify-content: space-between;")
+      && mobileNavCss.includes("flex: 1 1 0;")
+      && !mobileNavCss.includes("grid-template-columns: repeat(5, minmax(0, 1fr))"),
+    "mobile primary navigation flexes equal-width actions for the visible one-row items"
+  ],
   [performance.includes('setSection("cps")') && performance.includes('aria-label="Performance sections"'), "CPS has a separate monthly section"],
   [performance.includes("availableCpsMonths") && performance.includes('query.set("cpsMonth", cpsMonth)') && performanceData.includes("oldestCpsResult"), "CPS exposes current MTD and every closed month available in scoped history"],
   [performanceData.includes('cpsPeriodState: "mtd" | "closed"') && performance.includes('"MTD CPS" : "Monthly CPS"') && !performance.includes('"MTD" : "Closed"'), "CPS labels the current month as MTD without showing a redundant closed badge"],
