@@ -125,42 +125,43 @@ export async function resolveExpenseApprovers(account: ConnectAccount, amount: n
     };
   }
 
-  // Default claim chain when no Approval Workflow Master route exists:
-  // L1 reporting manager → L2 finance head (Nisar / Finance Manager).
-  const exclude = new Set<string>();
-  if (identity.userId) exclude.add(identity.userId);
-  const manager = await resolveImmediateReportingManager(account, identity);
-  if (!manager?.approver_person_id) throw new Error("Reporting manager is not configured for this reimbursement claim.");
-  exclude.add(manager.approver_user_id);
-  const finance = await resolveFinanceHeadAssignee(account, exclude);
-  if (!finance) throw new Error("Finance head is not configured for this reimbursement claim.");
-  let financePersonId = finance.approver_person_id;
-  if (!financePersonId) {
-    const link = await db().from("hr_user_person_links").select("person_id,status")
-      .eq("company_id", account.companyId).eq("user_id", finance.approver_user_id).maybeSingle();
-    if (link.error) throw new Error(link.error.message);
-    financePersonId = link.data?.status === "active" ? link.data.person_id : null;
+  // Default claim chain: walk the reporting line for policy.manager_levels
+  // (typically RM then Managing Partner). Finance owners stay on the pre-request only.
+  const steps: Array<{ step_order: number; step_name: string; approver_user_id: string; approver_person_id: string }> = [];
+  const seen = new Set<string>([identity.personId]);
+  let subjectAssignmentId = identity.assignment.id;
+  for (let level = 1; level <= policy.manager_levels; level += 1) {
+    const relationship = await db().from("hr_reporting_relationships").select("manager_assignment_id")
+      .eq("company_id", account.companyId).eq("subject_assignment_id", subjectAssignmentId)
+      .eq("relationship_type", "solid_line").eq("is_primary", true)
+      .lte("effective_from", identity.today).or(`effective_to.is.null,effective_to.gte.${identity.today}`)
+      .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+    if (relationship.error) throw new Error(relationship.error.message);
+    if (!relationship.data) {
+      if (policy.allow_short_manager_chain && steps.length > 0) break;
+      throw new Error(`Reporting manager level ${level} is not configured for this reimbursement policy.`);
+    }
+    const assignment = await db().from("hr_work_assignments").select("id,engagement_id,position_title")
+      .eq("company_id", account.companyId).eq("id", relationship.data.manager_assignment_id).maybeSingle();
+    if (assignment.error || !assignment.data) throw new Error(`Reporting manager level ${level} is not active.`);
+    const engagement = await db().from("hr_engagements").select("person_id,status")
+      .eq("company_id", account.companyId).eq("id", assignment.data.engagement_id).maybeSingle();
+    if (engagement.error || !engagement.data || engagement.data.status !== "active") throw new Error(`Reporting manager level ${level} is not active.`);
+    if (seen.has(engagement.data.person_id)) throw new Error("The reporting hierarchy contains a cycle.");
+    seen.add(engagement.data.person_id);
+    const link = await db().from("hr_user_person_links").select("user_id,status")
+      .eq("company_id", account.companyId).eq("person_id", engagement.data.person_id).maybeSingle();
+    if (link.error || !link.data || link.data.status !== "active") throw new Error(`${assignment.data.position_title} does not have an active One/People login.`);
+    steps.push({
+      step_order: level,
+      step_name: `${assignment.data.position_title} approval`,
+      approver_user_id: link.data.user_id,
+      approver_person_id: engagement.data.person_id
+    });
+    subjectAssignmentId = assignment.data.id;
   }
-  if (!financePersonId) throw new Error("Finance head does not have an active People profile link.");
-
-  return {
-    identity,
-    policy,
-    steps: [
-      {
-        step_order: 1,
-        step_name: "Reporting manager approval",
-        approver_user_id: manager.approver_user_id,
-        approver_person_id: manager.approver_person_id
-      },
-      {
-        step_order: 2,
-        step_name: "Finance head approval",
-        approver_user_id: finance.approver_user_id,
-        approver_person_id: financePersonId
-      }
-    ]
-  };
+  if (!steps.length) throw new Error("No reporting manager is configured. Configure a reporting line or policy fallback before submission.");
+  return { identity, policy, steps };
 }
 
 export async function activeExpenseCategories(account: ConnectAccount) {
@@ -236,7 +237,25 @@ async function resolveImmediateReportingManager(account: ConnectAccount, identit
   };
 }
 
-async function resolveFinanceHeadAssignee(account: ConnectAccount, excludeUserIds: Set<string>): Promise<ExpenseClaimRequestAssignee | null> {
+async function personIdForUser(companyId: string, userId: string) {
+  const link = await db().from("hr_user_person_links").select("person_id,status")
+    .eq("company_id", companyId).eq("user_id", userId).maybeSingle();
+  if (link.error) throw new Error(link.error.message);
+  return link.data?.status === "active" ? link.data.person_id : null;
+}
+
+/** Collect every finance / owner login that may approve a pre-request (first decision wins). */
+async function resolveFinanceHeadAssignees(account: ConnectAccount, excludeUserIds: Set<string>): Promise<ExpenseClaimRequestAssignee[]> {
+  const found = new Map<string, ExpenseClaimRequestAssignee>();
+  const add = async (userId: string, personId: string | null) => {
+    if (!userId || excludeUserIds.has(userId) || found.has(userId)) return;
+    found.set(userId, {
+      assignee_role: "finance_head",
+      approver_user_id: userId,
+      approver_person_id: personId ?? await personIdForUser(account.companyId, userId)
+    });
+  };
+
   const head = await db().from("payment_heads")
     .select("payment_process_role_ids")
     .eq("company_id", account.companyId)
@@ -244,24 +263,31 @@ async function resolveFinanceHeadAssignee(account: ConnectAccount, excludeUserId
     .eq("is_active", true)
     .maybeSingle();
   if (head.error) throw new Error(head.error.message);
-  const roleIds = (head.data?.payment_process_role_ids ?? []).filter(Boolean);
+  const roleIds = [...(head.data?.payment_process_role_ids ?? [])].filter(Boolean);
+
+  const ownerRoles = await db().from("user_roles")
+    .select("id")
+    .eq("company_id", account.companyId)
+    .eq("is_active", true)
+    .in("code", ["OWNER", "OWNER_BREAK_GLASS", "PAYROLL_APPROVER"]);
+  if (ownerRoles.error) throw new Error(ownerRoles.error.message);
+  roleIds.push(...(ownerRoles.data ?? []).map((role) => role.id));
+
   if (roleIds.length) {
     const profiles = await db().from("profiles")
-      .select("id,created_at")
+      .select("id")
       .eq("company_id", account.companyId)
       .eq("is_active", true)
-      .in("role_id", roleIds)
+      .in("role_id", [...new Set(roleIds)])
       .order("created_at")
-      .limit(20);
+      .limit(40);
     if (profiles.error) throw new Error(profiles.error.message);
-    const match = (profiles.data ?? []).find((row) => !excludeUserIds.has(row.id));
-    if (match) return { assignee_role: "finance_head", approver_user_id: match.id, approver_person_id: null };
+    for (const profile of profiles.data ?? []) await add(profile.id, null);
   }
 
-  // Prefer the active People Finance Manager designation when payment-processor roles are empty.
   const today = indiaToday();
   const financeDesignations = await db().from("designations")
-    .select("id,code,name")
+    .select("id")
     .eq("company_id", account.companyId)
     .eq("is_active", true)
     .or("code.ilike.%FINMGR%,code.ilike.%FINANCE%,name.ilike.%finance manager%,name.ilike.%finance head%");
@@ -269,14 +295,14 @@ async function resolveFinanceHeadAssignee(account: ConnectAccount, excludeUserId
   const designationIds = (financeDesignations.data ?? []).map((row) => row.id);
   if (designationIds.length) {
     const assignments = await db().from("hr_work_assignments")
-      .select("id,engagement_id,designation_id")
+      .select("id,engagement_id")
       .eq("company_id", account.companyId)
       .eq("is_primary", true)
       .in("designation_id", designationIds)
       .lte("effective_from", today)
       .or(`effective_to.is.null,effective_to.gte.${today}`)
       .order("effective_from", { ascending: false })
-      .limit(20);
+      .limit(40);
     if (assignments.error) throw new Error(assignments.error.message);
     for (const assignment of assignments.data ?? []) {
       const engagement = await db().from("hr_engagements").select("person_id,status")
@@ -286,37 +312,15 @@ async function resolveFinanceHeadAssignee(account: ConnectAccount, excludeUserId
       const link = await db().from("hr_user_person_links").select("user_id,status")
         .eq("company_id", account.companyId).eq("person_id", engagement.data.person_id).maybeSingle();
       if (link.error) throw new Error(link.error.message);
-      if (!link.data || link.data.status !== "active" || excludeUserIds.has(link.data.user_id)) continue;
-      return {
-        assignee_role: "finance_head",
-        approver_user_id: link.data.user_id,
-        approver_person_id: engagement.data.person_id
-      };
+      if (!link.data || link.data.status !== "active") continue;
+      await add(link.data.user_id, engagement.data.person_id);
     }
   }
 
-  // Last resort: earliest active Owner login (avoids alphabetical pick of secondary owners).
-  const fallbackRoles = await db().from("user_roles")
-    .select("id")
-    .eq("company_id", account.companyId)
-    .eq("is_active", true)
-    .in("code", ["OWNER", "OWNER_BREAK_GLASS", "PAYROLL_APPROVER"]);
-  if (fallbackRoles.error) throw new Error(fallbackRoles.error.message);
-  const fallbackRoleIds = (fallbackRoles.data ?? []).map((role) => role.id);
-  if (!fallbackRoleIds.length) return null;
-  const fallbackProfiles = await db().from("profiles")
-    .select("id,created_at")
-    .eq("company_id", account.companyId)
-    .eq("is_active", true)
-    .in("role_id", fallbackRoleIds)
-    .order("created_at")
-    .limit(20);
-  if (fallbackProfiles.error) throw new Error(fallbackProfiles.error.message);
-  const match = (fallbackProfiles.data ?? []).find((row) => !excludeUserIds.has(row.id));
-  return match ? { assignee_role: "finance_head", approver_user_id: match.id, approver_person_id: null } : null;
+  return [...found.values()];
 }
 
-/** Single-layer dual assignee: reporting manager and/or finance head (first decision wins). */
+/** Single-layer multi-assignee: reporting manager and/or finance owners (first decision wins). */
 export async function resolveExpenseClaimRequestAssignees(account: ConnectAccount) {
   const identity = await expenseIdentity(account);
   const assignees: ExpenseClaimRequestAssignee[] = [];
@@ -329,8 +333,8 @@ export async function resolveExpenseClaimRequestAssignees(account: ConnectAccoun
     exclude.add(manager.approver_user_id);
   }
 
-  const finance = await resolveFinanceHeadAssignee(account, exclude);
-  if (finance) assignees.push(finance);
+  const financeAssignees = await resolveFinanceHeadAssignees(account, exclude);
+  assignees.push(...financeAssignees);
 
   if (!assignees.length) {
     throw new Error("Configure a reporting manager or finance payment processor before requesting reimbursement approval.");

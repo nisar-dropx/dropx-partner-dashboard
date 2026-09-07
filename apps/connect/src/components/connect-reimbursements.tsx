@@ -14,6 +14,7 @@ type PreRequest = {
 };
 type Claim = {
   id: string; claim_no: string; claim_request_id?: string | null; purpose: string; trip_from?: string | null; trip_to?: string | null; total_claimed: number; total_approved?: number | null; status: string; return_reason?: string | null; rejection_reason?: string | null;
+  submitted_at?: string | null; created_at?: string;
   items: Array<{ id: string; expense_date: string; merchant?: string | null; description: string; amount: number; approved_amount?: number | null; hr_expense_categories?: { id: string; name: string; code: string } | Array<{ id: string; name: string; code: string }> | null }>;
   steps: Array<{ id: string; step_order: number; step_name: string; status: string; approver_name?: string | null; decision_note?: string | null; decided_at?: string | null }>;
   events: Array<{ id: string; event_type: string; actor_name?: string | null; actor_role?: string | null; comments?: string | null; created_at: string; metadata?: Record<string, unknown> }>;
@@ -46,6 +47,8 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [editingClaimId, setEditingClaimId] = useState<string | null>(null);
+  const [withdrawRequestId, setWithdrawRequestId] = useState<string | null>(null);
+  const [withdrawReason, setWithdrawReason] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -85,6 +88,51 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
     setEditingClaimId(null);
     setTab("claims");
     setNotice("Complete expense lines and attach receipts for the approved request.");
+  }
+
+  function openWithdrawModal(requestId: string) {
+    setWithdrawRequestId(requestId);
+    setWithdrawReason("");
+    setError("");
+  }
+
+  function closeWithdrawModal() {
+    if (saving) return;
+    setWithdrawRequestId(null);
+    setWithdrawReason("");
+  }
+
+  async function confirmWithdraw(event: FormEvent) {
+    event.preventDefault();
+    if (!withdrawRequestId) return;
+    const reason = withdrawReason.trim();
+    if (reason.length < 3) {
+      setError("Enter a short reason (at least 3 characters) to withdraw this request.");
+      return;
+    }
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/reimbursements", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: account.id,
+          profileType: account.profileType,
+          kind: "pre_request",
+          action: "withdrawn",
+          requestId: withdrawRequestId,
+          note: reason
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to withdraw request.");
+      setNotice(payload.notice || "Reimbursement request withdrawn.");
+      setExpanded(null);
+      setWithdrawRequestId(null);
+      setWithdrawReason("");
+      await load();
+    } catch (reasonValue) { setError(reasonValue instanceof Error ? reasonValue.message : "Unable to withdraw request."); }
+    finally { setSaving(false); }
   }
 
   async function submitRequest(event: FormEvent) {
@@ -180,7 +228,7 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
       <form className="dx-expense-form" onSubmit={submitRequest}>
         <section className="dx-expense-card">
           <h2>New reimbursement request</h2>
-          <p className="dx-expense-help">Your reporting manager or finance head can approve this request. One approval unlocks claim submission.</p>
+          <p className="dx-expense-help">Your reporting manager, or finance owners (for example Nisar / Jamsheer), can approve. Anyone’s approval unlocks claim submission.</p>
           <label>Purpose<textarea maxLength={500} onChange={(event) => setPurpose(event.target.value)} placeholder="Example: Client visit and local conveyance for Kozhikode cluster" required rows={3} value={purpose} /></label>
           <div className="dx-expense-dates three">
             <label>Estimated amount<input min="0" onChange={(event) => setEstimatedAmount(event.target.value)} placeholder="Optional" step="0.01" type="number" value={estimatedAmount} /></label>
@@ -229,6 +277,9 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
               </section>
               {request.status === "approved" && !request.consumed_claim_id ? (
                 <button className="dx-save" onClick={() => startClaimFromRequest(request)} type="button"><ReceiptText /> Submit claim</button>
+              ) : null}
+              {request.status === "pending" ? (
+                <button className="dx-small-action danger" disabled={saving} onClick={() => openWithdrawModal(request.id)} type="button"><RotateCcw /> Withdraw request</button>
               ) : null}
               {request.consumed_claim_id ? <p className="dx-expense-help">Claim already submitted for this request.</p> : null}
             </div> : null}
@@ -332,20 +383,24 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
           </section>
           <section>
             <h3>Tracking</h3>
-            <div className="dx-expense-timeline">{(claim.steps.length ? claim.steps : claim.events.map((event) => ({
-              id: event.id,
-              step_name: statusLabel(event.event_type),
-              status: event.event_type.includes("reject") ? "rejected" : event.event_type.includes("return") ? "returned" : event.event_type.includes("submit") ? "submitted" : "approved",
-              approver_name: event.actor_name || "System",
-              decision_note: event.comments,
-              decided_at: event.created_at
-            }))).map((step) => <div key={step.id}>
-              <i>{step.status === "rejected" ? <X /> : step.status === "returned" ? <RotateCcw /> : step.status === "pending" || step.status === "waiting" ? <ClipboardList /> : step.status === "submitted" ? <ReceiptText /> : <Check />}</i>
-              <span>
-                <strong>{step.approver_name ? `${step.approver_name} · ${step.step_name}` : step.step_name}</strong>
-                <small>{statusLabel(step.status)}{step.decided_at ? ` · ${dateTime(step.decided_at)}` : ""}{step.decision_note ? ` · ${step.decision_note}` : ""}</small>
-              </span>
-            </div>)}</div>
+            <div className="dx-expense-timeline">
+              <div>
+                <i><ReceiptText /></i>
+                <span>
+                  <strong>Submitted</strong>
+                  <small>{dateTime(claim.submitted_at || claim.created_at || "")}</small>
+                </span>
+              </div>
+              {claim.steps.map((step) => (
+                <div key={step.id}>
+                  <i>{step.status === "rejected" ? <X /> : step.status === "returned" ? <RotateCcw /> : step.status === "pending" || step.status === "waiting" ? <ClipboardList /> : <Check />}</i>
+                  <span>
+                    <strong>{step.approver_name ? `${step.approver_name} · ${step.step_name}` : step.step_name}</strong>
+                    <small>{statusLabel(step.status)}{step.decided_at ? ` · ${dateTime(step.decided_at)}` : ""}{step.decision_note ? ` · ${step.decision_note}` : ""}</small>
+                  </span>
+                </div>
+              ))}
+            </div>
           </section>
           {claim.payment ? <section className="dx-payment-track">
             <h3>Payment</h3>
@@ -361,5 +416,33 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
         </div> : null}
       </article>) : <div className="dx-empty"><ReceiptText /><strong>No reimbursement claims yet</strong><small>Approved requests become claims once receipts are submitted.</small></div>}</div>
     </> : null}
+
+    {withdrawRequestId ? (
+      <div className="dx-advance-modal" role="presentation">
+        <button aria-label="Close" className="backdrop" onClick={closeWithdrawModal} type="button" />
+        <form aria-labelledby="dx-reimbursement-withdraw-title" aria-modal="true" onSubmit={confirmWithdraw} role="dialog">
+          <header>
+            <h2 id="dx-reimbursement-withdraw-title">Withdraw request?</h2>
+            <button aria-label="Close" disabled={saving} onClick={closeWithdrawModal} type="button"><X /></button>
+          </header>
+          <p className="dx-expense-help">Approvers will no longer see this request. You can raise a new one later if needed.</p>
+          <label>Reason
+            <textarea
+              autoFocus
+              maxLength={500}
+              minLength={3}
+              onChange={(event) => setWithdrawReason(event.target.value)}
+              placeholder="Why are you withdrawing this request?"
+              required
+              rows={4}
+              value={withdrawReason}
+            />
+          </label>
+          <button className="submit" disabled={saving || withdrawReason.trim().length < 3} type="submit">
+            {saving ? "Withdrawing…" : "Confirm withdrawal"}
+          </button>
+        </form>
+      </div>
+    ) : null}
   </section>;
 }

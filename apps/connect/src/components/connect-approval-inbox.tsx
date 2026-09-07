@@ -966,7 +966,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
             </article>
           ))}
           {!preRequestApprovals.length && !reimbursements.length ? (
-            <div className="dx-empty"><Clock3 /><strong>No reimbursements waiting</strong><small>No requests or claims from your {scopeName} are waiting.</small></div>
+            <div className="dx-empty"><Clock3 /><strong>No reimbursements waiting</strong><small>No reimbursement requests or claims are assigned to you right now.</small></div>
           ) : null}
         </div>
       ) : null}

@@ -420,13 +420,30 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
+    const kind = clean(body.kind).toLowerCase() || "claim";
+    const action = clean(body.action).toLowerCase();
+    const note = clean(body.note);
+
+    if (kind === "pre_request" && action === "withdrawn") {
+      const account = await selectedAccount(request, body, false);
+      const identity = await expenseIdentity(account);
+      if (!identity.userId) throw new Error("Your One account is not linked to a People login.");
+      const requestId = clean(body.requestId);
+      if (!requestId) throw new Error("Select the reimbursement request to withdraw.");
+      const result = await db().rpc("hr_withdraw_expense_claim_request", {
+        p_company_id: account.companyId,
+        p_request_id: requestId,
+        p_actor_user_id: identity.userId,
+        p_note: note || null
+      });
+      if (result.error) throw new Error(result.error.message);
+      return NextResponse.json({ ok: true, notice: "Reimbursement request withdrawn." });
+    }
+
     const account = await selectedAccount(request, body, true);
     const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
     const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
     if (!approverUserId) throw new Error("Your One account is not linked to a People approver login.");
-    const kind = clean(body.kind).toLowerCase() || "claim";
-    const action = clean(body.action).toLowerCase();
-    const note = clean(body.note);
 
     if (kind === "pre_request") {
       const requestId = clean(body.requestId);
