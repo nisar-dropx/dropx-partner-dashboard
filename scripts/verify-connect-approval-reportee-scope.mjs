@@ -20,7 +20,18 @@ const checks = [
   [scope.includes('relationship_type", "solid_line"') && scope.includes('is_primary", true'), "scope follows active primary solid-line Org Chart relationships"],
   [reportingTree.includes("while (queue.length)"), "Entire team recursively traverses the reporting tree"],
   [approvals.includes("loadConnectReporteeAccess(account, scope)"), "leave, attendance and location APIs load one shared reportee scope"],
-  [attendance.match(/connectReporteeMatches\(reportees/g)?.length >= 2, "manager and HR attendance queues are both reportee-scoped"],
+  [
+    attendance.includes('eq("approver_user_id", actorUserId)')
+      && attendance.includes("Explicit step assignment")
+      && !attendance.includes("connectReporteeMatches(reportees"),
+    "manager and HR attendance queues are assignee-scoped (not org-chart filtered)"
+  ],
+  [
+    approvals.includes("Steps are assigned explicitly")
+      && approvals.includes("matchesReportee: () => true")
+      && !approvals.includes("connectReporteeMatches(reportees, profileType, profileId)"),
+    "leave and WFH queues are assignee-scoped (not org-chart filtered)"
+  ],
   [
     reimbursements.includes('eq("approver_user_id", userId)')
       && reimbursements.includes("Do not require org-chart reportee scope")
