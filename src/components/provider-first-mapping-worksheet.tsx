@@ -73,6 +73,7 @@ export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paym
   const hasDirty = dirtyRows.some(Boolean);
   const hasDirtyNameMismatch = rows.some((row, index) => dirtyRows[index] && Boolean(row.workforceId) && !namesMateriallyMatch(row.providerMemberName, row.dropxName));
   const hasDirtyMappingConflict = rows.some((row, index) => dirtyRows[index] && isMappedToAnotherMember(row, workers.find((worker) => worker.id === row.workforceId)));
+  const hasDirtyLocationMismatch = rows.some((row, index) => dirtyRows[index] && Boolean(row.workforceId) && workers.find((worker) => worker.id === row.workforceId)?.stationId !== row.stationId);
 
   function update(index: number, change: Partial<ProviderFirstMappingRow>) {
     setErrors((current) => { const next = { ...current }; delete next[index]; return next; });
@@ -105,6 +106,7 @@ export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paym
 
   function validate(row: ProviderFirstMappingRow, index: number) {
     if (!row.workforceId) return `Row ${index + 1}: Select a DropX workforce ID.`;
+    if (workers.find((worker) => worker.id === row.workforceId)?.stationId !== row.stationId) return `Row ${index + 1}: Location mismatch.`;
     if (isMappedToAnotherMember(row, workers.find((worker) => worker.id === row.workforceId))) return `Row ${index + 1}: This DropX ID is already mapped to another Provider Member ID.`;
     if (!namesMateriallyMatch(row.providerMemberName, row.dropxName)) return `Row ${index + 1}: Name mismatch.`;
     if (!row.providerId) return `Row ${index + 1}: The selected location has no provider.`;
@@ -137,11 +139,12 @@ export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paym
     <input name="row_count" type="hidden" value={rows.length} />
     <input name="dirty_row_indexes" type="hidden" value={JSON.stringify(dirtyRows.flatMap((dirty, index) => dirty ? [index] : []))} />
     <section className="panel">
-      <div className="panel-head"><div><h2>Provider member → DropX ID & pay mapping</h2><p className="subtle">Provider Member ID is read-only. Select the DropX workforce ID, then configure payment method, rates and dates exactly as in the existing worksheet.</p></div><SubmitButton className="button mapping-save-all" disabled={!canEdit || !hasDirty || hasDirtyNameMismatch || hasDirtyMappingConflict} disabledText={!canEdit ? "No edit access" : hasDirtyMappingConflict ? "Resolve mapping conflicts" : hasDirtyNameMismatch ? "Fix name mismatches" : "No edits"}>Save all</SubmitButton></div>
+      <div className="panel-head"><div><h2>Provider member → DropX ID & pay mapping</h2><p className="subtle">Provider Member ID is read-only. Select the DropX workforce ID, then configure payment method, rates and dates exactly as in the existing worksheet.</p></div><SubmitButton className="button mapping-save-all" disabled={!canEdit || !hasDirty || hasDirtyNameMismatch || hasDirtyMappingConflict || hasDirtyLocationMismatch} disabledText={!canEdit ? "No edit access" : hasDirtyLocationMismatch ? "Fix location mismatches" : hasDirtyMappingConflict ? "Resolve mapping conflicts" : hasDirtyNameMismatch ? "Fix name mismatches" : "No edits"}>Save all</SubmitButton></div>
       <div className="mapping-rows">{rows.map((row, index) => {
         const availableWorkers = workers;
         const selectedWorker = workers.find((worker) => worker.id === row.workforceId);
         const mappingConflict = isMappedToAnotherMember(row, selectedWorker);
+        const locationMismatch = Boolean(selectedWorker && selectedWorker.stationId !== row.stationId);
         const workerOptions = availableWorkers.map((worker) => ({ value: worker.id, label: `${worker.dropxId} — ${worker.fullName}`, helper: `${worker.locationLabel} · ${worker.onboardingStatus || "No status"}${worker.mappedProviderMemberId && worker.mappedProviderMemberId !== row.providerMemberId ? " · Already mapped" : ""}` }));
         const components = paymentMethodById.get(row.paymentMethodId)?.components ?? [];
         return <div className={`mapping-row-card ${dirtyRows[index] ? "unsaved-row" : ""}`} key={row.providerMemberId}>
@@ -162,10 +165,11 @@ export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paym
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEdit || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
             <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEdit || !row.workforceId} name={`rows[${index}][effective_from]`} onChange={(event) => update(index, { effectiveFrom: event.target.value })} type="date" value={row.effectiveFrom} /></label><label>Effective to<input className="worksheet-input" disabled={!canEdit || !row.workforceId} name={`rows[${index}][effective_to]`} onChange={(event) => update(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label></div>
             {row.workforceId && !namesMateriallyMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
+            {locationMismatch ? <div className="mapping-row-error">Location mismatch</div> : null}
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}
             {errors[index] ? <div className="mapping-row-error">{errors[index]}</div> : null}
           </div>
-          <div className="mapping-row-actions"><RowButton canEdit={canEdit} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || namesMateriallyMatch(row.providerMemberName, row.dropxName)) && !mappingConflict} /></div>
+          <div className="mapping-row-actions"><RowButton canEdit={canEdit} dirty={dirtyRows[index]} index={index} nameMatches={(!row.workforceId || namesMateriallyMatch(row.providerMemberName, row.dropxName)) && !mappingConflict && !locationMismatch} /></div>
         </div>;
       })}</div>
     </section>

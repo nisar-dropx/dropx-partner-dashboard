@@ -390,7 +390,7 @@ async function saveExecutiveMappingRow(
           .maybeSingle()
         : supabaseAdmin
         .from("workforce")
-        .select("id, full_name")
+        .select("id, full_name, location_id")
         .eq("id", id)
         .eq("company_id", companyId)
         .is("deleted_at", null)
@@ -417,6 +417,9 @@ async function saveExecutiveMappingRow(
   if (canonicalWorkerResult.error) throw new Error(canonicalWorkerResult.error.message);
   const worker = legacyWorker ?? canonicalWorkerResult.data;
   if (!worker) throw new Error(`Row ${index + 1}: Field Operations worker was not found for this company.`);
+  if (sourceType === "workforce" && String((worker as { location_id?: string | null }).location_id ?? "") !== stationId) {
+    throw new Error(`Row ${index + 1}: Location mismatch.`);
+  }
   const dropxName = String((worker as { full_name?: string | null }).full_name ?? "").trim();
   const { data: uploadedMember, error: uploadedMemberError } = await supabaseAdmin
     .from("cps_shipment_daily")
