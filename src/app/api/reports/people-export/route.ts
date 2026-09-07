@@ -1,6 +1,7 @@
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { timingSafeEqual } from "crypto";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -72,6 +73,15 @@ function csv(value: unknown) {
   return `"${spreadsheetValue(value).replace(/"/g, '""')}"`;
 }
 
+function hasIntegrationAccess(request: Request) {
+  const expected = process.env.PEOPLE_EXPORT_API_KEY?.trim();
+  const received = request.headers.get("x-dropx-export-key")?.trim();
+  if (!expected || !received) return false;
+  const expectedBytes = Buffer.from(expected);
+  const receivedBytes = Buffer.from(received);
+  return expectedBytes.length === receivedBytes.length && timingSafeEqual(expectedBytes, receivedBytes);
+}
+
 function csvResponse(rows: ExportRow[]) {
   const headers: Array<keyof ExportRow> = [
     "personType", "dropxId", "fullName", "bankAccountNo", "ifsc", "email", "staffStatus", "stationCode", "stationProvider"
@@ -91,16 +101,27 @@ function csvResponse(rows: ExportRow[]) {
 
 export async function GET(request: Request) {
   const authorization = await getAuthorization();
-  if (!authorization || !hasPermission(authorization, "people_review", "access")) {
+  const integrationAccess = hasIntegrationAccess(request);
+  if (!integrationAccess && (!authorization || !hasPermission(authorization, "people_review", "access"))) {
     return Response.json({ error: "People export access denied." }, { status: 403 });
   }
   if (!supabaseAdmin) return Response.json({ error: "Database unavailable." }, { status: 500 });
 
-  const companyId = requireCompanyId(authorization);
   const db = supabaseAdmin;
+  let companyId: string;
+  if (integrationAccess) {
+    const companies = await db.from("companies").select("id").order("created_at").limit(2);
+    if (companies.error) return Response.json({ error: "Unable to determine the export company." }, { status: 500 });
+    if ((companies.data?.length ?? 0) !== 1) {
+      return Response.json({ error: "People export integration needs a company scope configuration." }, { status: 503 });
+    }
+    companyId = companies.data![0].id;
+  } else {
+    companyId = requireCompanyId(authorization!);
+  }
   const [stations, employees, workforce, contractors, vendors, helpers] = await Promise.all([
     allRows((from, to) => db.from("stations").select("id, station_code, providers(name)").eq("company_id", companyId).order("station_code").range(from, to)),
-    allRows<PersonRecord>((from, to) => db.from("employees").select("id, employee_code, full_name, bank_account_no, ifsc, email, profile_completion_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to)),
+    allRows<PersonRecord>((from, to) => db.from("employes").select("id, employee_code, full_name, bank_account_no, ifsc, email, profile_completion_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to))),
     allRows<PersonRecord>((from, to) => db.from("workforce").select("id, dropx_id, full_name, bank_account_no, ifsc_code, email, onboarding_status, lifecycle_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to)),
     allRows<PersonRecord>((from, to) => db.from("contractors").select("id, dropx_id, full_name, bank_account_no, ifsc_code, email, onboarding_status, lifecycle_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to)),
     allRows<PersonRecord>((from, to) => db.from("vendors").select("id, dropx_id, full_name, bank_account_no, ifsc_code, email, onboarding_status, lifecycle_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to)),
@@ -110,8 +131,8 @@ export async function GET(request: Request) {
   const failed = [stations, employees, workforce, contractors, vendors, helpers].find((result) => result.error);
   if (failed?.error) return Response.json({ error: `Unable to prepare people export: ${failed.error.message}` }, { status: 500 });
 
-  const allLocations = authorization.hasAllLocationAccess || authorization.isMasterOwner || authorization.roleCode === "OWNER";
-  const permittedLocationIds = new Set(authorization.locationScopeIds);
+  const allLocations = integrationAccess || authorization!.hasAllLocationAccess || authorization!.isMasterOwner || authorization!.roleCode === "OWNER";
+  const permittedLocationIds = new Set(authorization?.locationScopeIds ?? []);
   const stationMap = new Map((stations.data as Station[]).map((station) => {
     const provider = relationValue(station.providers);
     return [station.id, { code: station.station_code ?? "", provider: provider?.name ?? "" }];
