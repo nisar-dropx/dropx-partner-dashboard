@@ -5,6 +5,7 @@ import { saveProviderFirstMappingWorksheet } from "@/app/provider-mapping/action
 import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
 import type { PaymentMethodOption } from "@/components/provider-mapping-worksheet";
+import { matchNames } from "@/lib/name-match";
 
 export type ProviderFirstWorker = {
   id: string;
@@ -43,34 +44,8 @@ function signature(row: ProviderFirstMappingRow) {
   return [row.providerMemberId, row.stationId, row.workforceId, row.mappingId, row.paymentMethodId, JSON.stringify(row.paymentValues), row.effectiveFrom, row.effectiveTo].join("|");
 }
 
-function nameTokens(value: string) {
-  return value.split("/")[0].normalize("NFKD").toLocaleUpperCase()
-    .split(/[^\p{L}\p{N}]+/u).map((token) => token.trim()).filter(Boolean);
-}
-
-const COMMON_NAME_TOKENS = new Set([
-  "KUMAR", "KUMARI", "AHAMMED", "AHMED", "AHMAD", "MOHAMMED", "MUHAMMED", "MOHAMMAD", "MOHD", "MD",
-  "SINGH", "DEVI", "DAS", "LAL", "RAJ", "KRISHNA", "PRASAD", "KUMARAN", "BEGUM", "BI", "BEE"
-]);
-
-function tokenDistance(first: string, second: string) {
-  const previous = Array.from({ length: second.length + 1 }, (_, index) => index);
-  for (let row = 1; row <= first.length; row += 1) {
-    const current = [row];
-    for (let column = 1; column <= second.length; column += 1) {
-      current[column] = Math.min(current[column - 1] + 1, previous[column] + 1, previous[column - 1] + (first[row - 1] === second[column - 1] ? 0 : 1));
-    }
-    for (let index = 0; index < current.length; index += 1) previous[index] = current[index];
-  }
-  return previous[second.length];
-}
-
 function namesMateriallyMatch(providerName: string, dropxName: string) {
-  const providerTokens = nameTokens(providerName).filter((token) => token.length >= 4 && !COMMON_NAME_TOKENS.has(token));
-  const dropxTokens = nameTokens(dropxName).filter((token) => token.length >= 4 && !COMMON_NAME_TOKENS.has(token));
-  return providerTokens.some((providerToken) => dropxTokens.some((dropxToken) =>
-    providerToken === dropxToken || (Math.min(providerToken.length, dropxToken.length) >= 6 && tokenDistance(providerToken, dropxToken) <= 1)
-  ));
+  return matchNames(providerName, dropxName).status !== "none";
 }
 
 function isMappedToAnotherMember(row: ProviderFirstMappingRow, worker: ProviderFirstWorker | undefined) {
