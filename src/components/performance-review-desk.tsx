@@ -67,6 +67,7 @@ type Props = {
   reviewClusters?: { value: string; label: string }[];
   selectedCluster?: string;
   canFilterClusters?: boolean;
+  readOnlyPreview?: boolean;
   metrics: ReviewMetric[];
   notice: string | null;
   previousReviews: PerformanceReviewCarryover[];
@@ -225,7 +226,9 @@ export function PerformanceReviewDesk(props: Props) {
       {!review && canAdd ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button id="start-station-review" className="button">Start review</button></ReviewActionForm> : null}
     </section>
 
-    {!review && misses.length ? <div className="performance-review-start-guide"><strong>{misses.length} metrics need RCA and action</strong><span>Use Start review above, then record RCA and action items below.</span></div> : null}
+    {props.readOnlyPreview && !review ? <div className="alert warning" role="status">Read-only user preview hides Start review. Exit preview and open Review Desk as this user, or have them sign in, to start the review.</div> : null}
+    {!review && !canAdd && !props.readOnlyPreview && reviewChain.length ? <div className="alert warning" role="status">Only the first review manager on this route ({reviewChain[0]?.reviewerRole} · {reviewChain[0]?.reviewerName}) or Program Manager can start this review.</div> : null}
+    {!review && misses.length ? <div className="performance-review-start-guide"><strong>{misses.length} metrics need RCA and action</strong><span>{canAdd ? "Use Start review above, then record RCA and action items below." : "Start review becomes available once the assigned manager opens this station."}</span></div> : null}
     {review && !reviewUpdates.length && !currentItems.length ? <div className="performance-review-start-guide"><strong>Review started · no inputs saved yet</strong><span>This station is in review, but no RCA, takeaway or discussion has been saved. Add them below, or use Proxy / Skip if you are covering the assigned manager.</span></div> : null}
     {props.routingIssue ? <div className="alert warning" role="status">{props.routingIssue}</div> : null}
 

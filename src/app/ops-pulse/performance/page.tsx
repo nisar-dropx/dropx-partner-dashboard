@@ -531,6 +531,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             reviewClusters={canFilterClusters ? clusterOptions : []}
             selectedCluster={selectedCluster}
             canFilterClusters={canFilterClusters}
+            readOnlyPreview={Boolean(authorization.readOnly)}
             metrics={reviewMetrics}
             notice={searchParams?.notice || null}
             previousReviews={reviewWorkspace.previousReviews}

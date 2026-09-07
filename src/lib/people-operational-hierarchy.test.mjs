@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolvePeopleOperationalHierarchy } from "./people-operational-hierarchy-core.ts";
+import { resolveManagerChainForPersonIds, resolvePeopleOperationalHierarchy } from "./people-operational-hierarchy-core.ts";
 
 const assignment = (id, personId, displayName, locationId, designationCode, designationName) => ({
   id,
@@ -79,4 +79,40 @@ test("station reviews retain the unambiguous CM chain when one TL has no reporti
     assignment("nh","nh","NH","HO","NH","National Head")
   ],[{subjectAssignmentId:"ssa",managerAssignmentId:"cm"},{subjectAssignmentId:"cm",managerAssignmentId:"nh"}]).get("PEUA");
   assert.deepEqual(result.managerReportingChain.map(person=>person.designationCode),["CLM","NH"]);
+});
+
+test("ops-scoped CM personal chain is available when a station has no People roots", () => {
+  const chain = resolveManagerChainForPersonIds(
+    ["p-cm", "p-aom", "p-nh"],
+    [
+      assignment("cm", "p-cm", "BHARAT", "HO", "CLM", "Cluster Manager"),
+      assignment("aom", "p-aom", "NAGOOR", "HO", "AOM", "Area Operations Manager"),
+      assignment("nh", "p-nh", "ABDUL", "HO", "NH", "National Head")
+    ],
+    [
+      { subjectAssignmentId: "cm", managerAssignmentId: "aom" },
+      { subjectAssignmentId: "aom", managerAssignmentId: "nh" }
+    ]
+  );
+  assert.deepEqual(chain.map((person) => person.designationCode), ["CLM", "AOM", "NH"]);
+  assert.equal(chain[0].name, "BHARAT");
+});
+
+test("multiple station CMs still produce a manager review chain from the top-ranked CM", () => {
+  const result = resolvePeopleOperationalHierarchy(
+    ["XAPL"],
+    [
+      assignment("tl1", "p-tl1", "TL One", "XAPL", "TL", "Team Lead"),
+      assignment("cm1", "p-cm1", "Alpha CM", "HO", "CLM", "Cluster Manager"),
+      assignment("cm2", "p-cm2", "Beta CM", "HO", "CLM", "Cluster Manager"),
+      assignment("nh", "p-nh", "NH", "HO", "NH", "National Head")
+    ],
+    [
+      { subjectAssignmentId: "tl1", managerAssignmentId: "cm1" },
+      { subjectAssignmentId: "cm1", managerAssignmentId: "nh" },
+      { subjectAssignmentId: "cm2", managerAssignmentId: "nh" }
+    ]
+  ).get("XAPL");
+  assert.equal(result?.managerReportingChain[0]?.name, "Alpha CM");
+  assert.deepEqual(result?.managerReportingChain.map((person) => person.designationCode), ["CLM", "NH"]);
 });

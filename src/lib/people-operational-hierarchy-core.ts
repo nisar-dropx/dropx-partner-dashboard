@@ -134,6 +134,40 @@ function reportingChainFor(
   return chain;
 }
 
+/** Build CM → AOM → NH chain from a person's own People assignment when a station has no local roots. */
+export function resolveManagerChainForPersonIds(
+  personIds: string[],
+  assignments: PeopleHierarchyAssignment[],
+  relationships: PeopleHierarchyRelationship[]
+) {
+  const wanted = new Set(personIds.filter(Boolean));
+  if (!wanted.size) return [] as OperationalHierarchyPerson[];
+  const assignmentById = new Map(assignments.map((assignment) => [assignment.id, assignment]));
+  const managerBySubject = new Map<string, string>();
+  relationships.forEach((relationship) => {
+    if (!managerBySubject.has(relationship.subjectAssignmentId)) {
+      managerBySubject.set(relationship.subjectAssignmentId, relationship.managerAssignmentId);
+    }
+  });
+
+  const candidates = assignments
+    .filter((assignment) => wanted.has(assignment.personId))
+    .map((assignment) => {
+      const family = peopleOperationalRoleFamily(assignment);
+      const priority = family === "cluster_manager" ? 0 : family === "aom" ? 1 : family === "higher_authority" ? 2 : 9;
+      const chain = reportingChainFor(assignment, assignmentById, managerBySubject);
+      return { assignment, family, priority, chain };
+    })
+    .filter((candidate) => candidate.priority < 9 && candidate.chain.length)
+    .sort((left, right) => (
+      left.priority - right.priority ||
+      right.chain.length - left.chain.length ||
+      left.assignment.displayName.localeCompare(right.assignment.displayName)
+    ));
+
+  return candidates[0]?.chain ?? [];
+}
+
 function addCandidate(
   candidates: Map<string, CandidateStats>,
   assignment: PeopleHierarchyAssignment,
@@ -251,11 +285,11 @@ export function resolvePeopleOperationalHierarchy(
         reportingChainFor(right, assignmentById, managerBySubject).length - reportingChainFor(left, assignmentById, managerBySubject).length ||
         left.displayName.localeCompare(right.displayName)
       ))[0];
-    // Station-level reviews belong to the station's canonical manager, not whichever
-    // TL sorts first. An incomplete TL link must not hide an unambiguous People CM.
-    const managerRoot = clusterManagers.length === 1
+    // Prefer the strongest CM; if none, the strongest AOM. Multiple CMs still
+    // get a review route from the top-ranked manager instead of blocking Start.
+    const managerRoot = clusterManagers.length
       ? assignmentById.get(clusterManagers[0].assignmentId)
-      : !clusterManagers.length && areaOperationsManagers.length === 1
+      : areaOperationsManagers.length
         ? assignmentById.get(areaOperationsManagers[0].assignmentId)
         : undefined;
     return [locationId, {

@@ -5,7 +5,7 @@ import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { resolveStationOpeningSchedule, stationOpeningLateMinutes } from "@/lib/ops-pulse/station-opening";
 import { loadStationOpeningAttendance } from "@/lib/ops-pulse/station-opening-attendance";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
-import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
+import { loadOpsScopedManagerReviewChain, loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { REVIEW_PENDING_PAGE_SIZE } from "@/lib/ops-pulse/review-periods";
 
@@ -666,8 +666,15 @@ export async function resolvePerformanceReviewChain(companyId: string, stationId
   const hierarchy = await loadPeopleOperationalHierarchy(companyId, [stationId]);
   if (hierarchy.error) throw new Error(hierarchy.error);
   const stationHierarchy = hierarchy.byLocation.get(stationId);
-  const peopleChain = managerReviewChain(stationHierarchy?.managerReportingChain.length
+  let peopleChain = managerReviewChain(stationHierarchy?.managerReportingChain.length
     ? stationHierarchy.managerReportingChain : stationHierarchy?.primaryReportingChain ?? []);
+  // Stations in a CM's Ops scope may have no People roots yet (no TL posted).
+  // Fall back to the Ops-scoped manager's own reporting line so Start review works.
+  if (!peopleChain.length) {
+    const scoped = await loadOpsScopedManagerReviewChain(companyId, stationId);
+    if (scoped.error) throw new Error(scoped.error);
+    peopleChain = managerReviewChain(scoped.chain);
+  }
   if (!peopleChain.length) return [];
   const userByPerson = await loadReviewUserLinks(supabaseAdmin,companyId,peopleChain.map(person=>person.personId));
   return peopleChain.map((person) => ({
