@@ -72,14 +72,6 @@ function previousDate(dateValue: string) {
   return date.toISOString().slice(0, 10);
 }
 
-function comparableProviderName(value: string) {
-  return value
-    .split("/")[0]
-    .normalize("NFKD")
-    .replace(/[^\p{L}\p{N}]+/gu, "")
-    .toLocaleUpperCase();
-}
-
 function providerNameTokens(value: string) {
   return value
     .split("/")[0]
@@ -90,15 +82,29 @@ function providerNameTokens(value: string) {
     .filter(Boolean);
 }
 
-function providerHolderMatches(holderName: string, workerName: string) {
-  if (comparableProviderName(holderName) === comparableProviderName(workerName)) return true;
+const COMMON_NAME_TOKENS = new Set([
+  "KUMAR", "KUMARI", "AHAMMED", "AHMED", "AHMAD", "MOHAMMED", "MUHAMMED", "MOHAMMAD", "MOHD", "MD",
+  "SINGH", "DEVI", "DAS", "LAL", "RAJ", "KRISHNA", "PRASAD", "KUMARAN", "BEGUM", "BI", "BEE"
+]);
 
-  const holderTokens = new Set(providerNameTokens(holderName));
-  const workerTokens = new Set(providerNameTokens(workerName));
-  if (!holderTokens.size || !workerTokens.size) return false;
-  // Provider feeds commonly omit a first/last name or use a slightly
-  // different spelling. One substantial shared name token is sufficient.
-  return Array.from(holderTokens).some((token) => token.length >= 3 && workerTokens.has(token));
+function tokenDistance(first: string, second: string) {
+  const previous = Array.from({ length: second.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= first.length; row += 1) {
+    const current = [row];
+    for (let column = 1; column <= second.length; column += 1) {
+      current[column] = Math.min(current[column - 1] + 1, previous[column] + 1, previous[column - 1] + (first[row - 1] === second[column - 1] ? 0 : 1));
+    }
+    for (let index = 0; index < current.length; index += 1) previous[index] = current[index];
+  }
+  return previous[second.length];
+}
+
+function providerHolderMatches(holderName: string, workerName: string) {
+  const holderTokens = providerNameTokens(holderName).filter((token) => token.length >= 4 && !COMMON_NAME_TOKENS.has(token));
+  const workerTokens = providerNameTokens(workerName).filter((token) => token.length >= 4 && !COMMON_NAME_TOKENS.has(token));
+  return holderTokens.some((holderToken) => workerTokens.some((workerToken) =>
+    holderToken === workerToken || (Math.min(holderToken.length, workerToken.length) >= 6 && tokenDistance(holderToken, workerToken) <= 1)
+  ));
 }
 
 function normalizedHeader(value: unknown) {
