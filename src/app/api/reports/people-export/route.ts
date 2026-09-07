@@ -121,7 +121,7 @@ export async function GET(request: Request) {
   }
   const [stations, employees, workforce, contractors, vendors, helpers] = await Promise.all([
     allRows((from, to) => db.from("stations").select("id, station_code, providers(name)").eq("company_id", companyId).order("station_code").range(from, to)),
-    allRows<PersonRecord>((from, to) => db.from("employes").select("id, employee_code, full_name, bank_account_no, ifsc, email, profile_completion_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to))),
+    allRows<PersonRecord>((from, to) => db.from("employees").select("id, employee_code, full_name, bank_account_no, ifsc, email, profile_completion_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to)),
     allRows<PersonRecord>((from, to) => db.from("workforce").select("id, dropx_id, full_name, bank_account_no, ifsc_code, email, onboarding_status, lifecycle_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to)),
     allRows<PersonRecord>((from, to) => db.from("contractors").select("id, dropx_id, full_name, bank_account_no, ifsc_code, email, onboarding_status, lifecycle_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to)),
     allRows<PersonRecord>((from, to) => db.from("vendors").select("id, dropx_id, full_name, bank_account_no, ifsc_code, email, onboarding_status, lifecycle_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to)),
