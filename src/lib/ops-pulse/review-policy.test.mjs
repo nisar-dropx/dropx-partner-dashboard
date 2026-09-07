@@ -117,15 +117,16 @@ test('bypass requires reason and explicit skipped stages remain visible',()=>{
   assert.equal(visibleReviewStep({status:'skipped',reviewer_role:'Cluster Manager'}),false);
   assert.equal(visibleReviewStep({status:'skipped',reviewer_role:'Cluster Manager',bypassed_at:'2026-09-04'}),true);
 });
-test('cluster filter uses CM when present and AOM only for stations without a cluster',()=>{
-  const withCm={cluster_manager:'Ravi',cluster:null,aom:'Asha'};
-  const aomOnly={cluster_manager:null,cluster:null,aom:'Asha'};
-  const bare={cluster_manager:null,cluster:null,aom:null};
+test('cluster filter matches person on CM or AOM names, not only primary bucket',()=>{
+  const withCm={cluster_manager:'Ravi',cluster:null,cluster_manager_names:['Ravi'],aom:'Asha',aom_names:['Asha']};
+  const aomOnly={cluster_manager:null,cluster:null,cluster_manager_names:[],aom:'Asha',aom_names:['Asha']};
+  const bare={cluster_manager:null,cluster:null,cluster_manager_names:[],aom:null,aom_names:[]};
+  const shared={cluster_manager:'Priya',cluster:null,cluster_manager_names:['Priya','Ravi'],aom:'Asha',aom_names:['Asha']};
   assert.equal(stationReviewClusterScope(withCm)?.value,'cm:Ravi');
   assert.equal(stationReviewClusterScope(aomOnly)?.value,'aom:Asha');
   assert.equal(stationReviewClusterScope(bare),null);
-  const options=reviewClusterFilterOptions([withCm,aomOnly,bare]);
-  assert.deepEqual(options.map((option)=>option.value),['aom:Asha','cm:Ravi']);
-  assert.deepEqual(filterLocationsByReviewCluster([withCm,aomOnly], 'aom:Asha'),[aomOnly]);
-  assert.deepEqual(filterLocationsByReviewCluster([withCm,aomOnly], 'cm:Ravi'),[withCm]);
+  const options=reviewClusterFilterOptions([withCm,aomOnly,bare,shared]);
+  assert.deepEqual(options.map((option)=>option.value).sort(),['aom:Asha','cm:Priya','cm:Ravi']);
+  assert.deepEqual(filterLocationsByReviewCluster([withCm,aomOnly,shared], 'aom:Asha').map((row)=>row.aom),['Asha','Asha','Asha']);
+  assert.deepEqual(filterLocationsByReviewCluster([withCm,aomOnly,shared], 'cm:Ravi'),[withCm,shared]);
 });

@@ -197,15 +197,10 @@ export function PerformanceReviewDesk(props: Props) {
       <div className="ops-context-summary"><span>Loaded performance date</span><strong>{formatDashboardDate(date)}</strong><small>{selectedCode} · {selectedLocation.station_name || selectedLocation.city || "Station"}</small></div>
       <PerformanceReviewPicker
         date={date}
-        locations={locations.map((location) => {
-          const cluster = location.cluster_manager || location.cluster || "";
-          const aom = location.aom || "";
-          return {
-            code: location.station_code,
-            name: location.station_name || location.city || location.station_code,
-            clusterKey: cluster ? `cm:${cluster}` : aom ? `aom:${aom}` : "",
-          };
-        })}
+        locations={locations.map((location) => ({
+          code: location.station_code,
+          name: location.station_name || location.city || location.station_code,
+        }))}
         stationCode={selectedCode}
         clusters={props.reviewClusters ?? []}
         selectedCluster={props.selectedCluster ?? ""}

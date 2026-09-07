@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 type ReviewLocation = {
   code: string;
   name: string;
-  clusterKey?: string | null;
 };
 
 export function PerformanceReviewPicker({
@@ -36,10 +35,7 @@ export function PerformanceReviewPicker({
     setCluster(selectedCluster);
   }, [date, stationCode, selectedCluster]);
 
-  const stationOptions = useMemo(() => {
-    if (!cluster) return locations;
-    return locations.filter((location) => (location.clusterKey || "") === cluster);
-  }, [cluster, locations]);
+  const stationOptions = locations;
 
   function open(nextDate: string, nextStation: string, nextCluster: string) {
     const params = new URLSearchParams({
@@ -60,14 +56,9 @@ export function PerformanceReviewPicker({
     {canFilterClusters && clusters.length ? <label>Cluster / AOM<select value={cluster} onChange={(event) => {
       const nextCluster = event.target.value;
       setCluster(nextCluster);
-      const nextStations = nextCluster
-        ? locations.filter((location) => (location.clusterKey || "") === nextCluster)
-        : locations;
-      const nextStation = nextStations.some((location) => location.code === selectedStation)
-        ? selectedStation
-        : (nextStations[0]?.code || selectedStation);
-      setSelectedStation(nextStation);
-      open(selectedDate, nextStation, nextCluster);
+      // Server re-scopes stations for the selected person; keep current review code
+      // and let the page fall back to the first station in the new set if needed.
+      open(selectedDate, selectedStation, nextCluster);
     }}>
       <option value="">All stations</option>
       {clusters.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}

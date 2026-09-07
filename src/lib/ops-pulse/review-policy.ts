@@ -80,26 +80,65 @@ export function reviewBypassReason(value: string) {
   return reason;
 }
 
-/** Cluster filter: CM when set; otherwise AOM for stations with no cluster. */
+function normalizeClusterPersonName(value: string | null | undefined) {
+  return String(value ?? "").trim().replace(/\s+/g, " ");
+}
+
+export function parseReviewClusterFilterKey(selected: string) {
+  const key = selected.trim();
+  const match = /^(cm|aom):(.+)$/i.exec(key);
+  if (!match) return null;
+  const name = normalizeClusterPersonName(match[2]);
+  if (!name) return null;
+  return { kind: match[1].toLowerCase() as "cm" | "aom", name, value: `${match[1].toLowerCase()}:${name}` };
+}
+
+/** Primary bucket for dropdown options: CM when set; otherwise AOM. */
 export function stationReviewClusterScope(location: {
   cluster_manager?: string | null;
   cluster?: string | null;
   aom?: string | null;
 }) {
-  const cluster = String(location.cluster_manager || location.cluster || "").trim();
+  const cluster = normalizeClusterPersonName(location.cluster_manager || location.cluster);
   if (cluster) return { value: `cm:${cluster}`, label: cluster, kind: "cm" as const };
-  const aom = String(location.aom || "").trim();
+  const aom = normalizeClusterPersonName(location.aom);
   if (aom) return { value: `aom:${aom}`, label: `${aom} (AOM)`, kind: "aom" as const };
   return null;
+}
+
+function locationClusterPersonNames(location: {
+  cluster_manager?: string | null;
+  cluster?: string | null;
+  cluster_manager_names?: string[] | null;
+  aom?: string | null;
+  aom_names?: string[] | null;
+}) {
+  const clusterNames = [
+    location.cluster_manager,
+    location.cluster,
+    ...(location.cluster_manager_names ?? [])
+  ].map(normalizeClusterPersonName).filter(Boolean);
+  const aomNames = [
+    location.aom,
+    ...(location.aom_names ?? [])
+  ].map(normalizeClusterPersonName).filter(Boolean);
+  return { clusterNames, aomNames };
 }
 
 export function reviewClusterFilterOptions(locations: {
   cluster_manager?: string | null;
   cluster?: string | null;
+  cluster_manager_names?: string[] | null;
   aom?: string | null;
+  aom_names?: string[] | null;
 }[]) {
   const options = new Map<string, string>();
   for (const location of locations) {
+    const { clusterNames, aomNames } = locationClusterPersonNames(location);
+    for (const name of clusterNames) options.set(`cm:${name}`, name);
+    for (const name of aomNames) {
+      if (!clusterNames.includes(name)) options.set(`aom:${name}`, `${name} (AOM)`);
+    }
     const scope = stationReviewClusterScope(location);
     if (scope) options.set(scope.value, scope.label);
   }
@@ -108,14 +147,26 @@ export function reviewClusterFilterOptions(locations: {
     .sort((left, right) => left.label.localeCompare(right.label));
 }
 
+/** Stations where this person appears as CM or AOM in People hierarchy. */
 export function filterLocationsByReviewCluster<T extends {
   cluster_manager?: string | null;
   cluster?: string | null;
+  cluster_manager_names?: string[] | null;
   aom?: string | null;
+  aom_names?: string[] | null;
 }>(locations: T[], selected: string) {
-  const key = selected.trim();
-  if (!key) return locations;
-  return locations.filter((location) => stationReviewClusterScope(location)?.value === key);
+  const parsed = parseReviewClusterFilterKey(selected);
+  if (!parsed) return selected.trim() ? [] : locations;
+  const target = parsed.name.toLowerCase();
+  return locations.filter((location) => {
+    const { clusterNames, aomNames } = locationClusterPersonNames(location);
+    if (parsed.kind === "cm") {
+      return clusterNames.some((name) => name.toLowerCase() === target)
+        || aomNames.some((name) => name.toLowerCase() === target);
+    }
+    return aomNames.some((name) => name.toLowerCase() === target)
+      || clusterNames.some((name) => name.toLowerCase() === target);
+  });
 }
 
 export function visibleReviewStep(step: { status: string; reviewer_role: string; bypassed_at?: string | null }) {

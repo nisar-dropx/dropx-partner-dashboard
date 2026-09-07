@@ -20,6 +20,7 @@ import { reviewPendingPage } from "@/lib/ops-pulse/review-periods";
 import { loadReviewCod } from "@/lib/ops-pulse/review-cod-data";
 import { getReviewAccess } from "@/lib/ops-pulse/review-access";
 import { filterLocationsByReviewCluster, legacyConnectionsFromReview, reviewClusterFilterOptions } from "@/lib/ops-pulse/review-policy";
+import { loadReviewClusterPersonLocationScope } from "@/lib/ops-pulse/review-cluster-scope";
 import { ACTIVE_DAILY_PERFORMANCE_SOURCE, ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL, selectActiveDailyBatchRows, selectStationDailyRow } from "@/lib/performance-source-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -399,8 +400,24 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const clusterOptions = reviewClusterFilterOptions(permittedLocations);
   const requestedCluster = canFilterClusters ? String(searchParams?.cluster ?? "").trim() : "";
   const selectedCluster = requestedCluster && clusterOptions.some((option) => option.value === requestedCluster) ? requestedCluster : "";
-  const clusterFilteredLocations = filterLocationsByReviewCluster(permittedLocations, selectedCluster);
-  const deskLocations = clusterFilteredLocations.length ? clusterFilteredLocations : permittedLocations;
+  const hierarchyClusterLocations = filterLocationsByReviewCluster(permittedLocations, selectedCluster);
+  const personScope = selectedCluster
+    ? await loadReviewClusterPersonLocationScope(companyId, selectedCluster)
+    : null;
+  const scopeClusterLocations = !selectedCluster || !personScope
+    ? []
+    : personScope.hasAllLocationAccess
+      ? permittedLocations
+      : permittedLocations.filter((location) => personScope.locationIds.has(location.id));
+  const clusterLocationIds = new Set<string>();
+  const clusterFilteredLocations = [...hierarchyClusterLocations, ...scopeClusterLocations].filter((location) => {
+    if (clusterLocationIds.has(location.id)) return false;
+    clusterLocationIds.add(location.id);
+    return true;
+  });
+  const deskLocations = selectedCluster
+    ? (clusterFilteredLocations.length ? clusterFilteredLocations : permittedLocations)
+    : permittedLocations;
   const deskCodes = deskLocations.map((location) => location.station_code);
   const requestedReviewCode = stationCode(searchParams?.review ?? null);
   const reviewWorkspace = deskLocations.length
