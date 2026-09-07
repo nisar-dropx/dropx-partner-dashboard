@@ -1,10 +1,40 @@
 import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { isManagingPartnerDesignation } from "@/lib/approval-designation-labels";
 import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
 import { createAppNotification } from "@/lib/app-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
+
+function indiaToday() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
+async function isDirectAdvanceRequester(companyId: string, profileType: WorkforceProfileType, accountId: string) {
+  if (!supabaseAdmin) return false;
+  const workerColumn = profileType === "employee" ? "employee_id" : "contractor_id";
+  const today = indiaToday();
+  const engagement = await supabaseAdmin.from("hr_engagements").select("id,person_id,status")
+    .eq("company_id", companyId).eq("worker_type", profileType).eq(workerColumn, accountId).eq("status", "active")
+    .limit(1).maybeSingle();
+  if (engagement.error || !engagement.data) return false;
+  const assignment = await supabaseAdmin.from("hr_work_assignments")
+    .select("id,designation_id,is_top_level,effective_from,effective_to")
+    .eq("company_id", companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true)
+    .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`)
+    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+  if (assignment.error || !assignment.data) return false;
+  if (assignment.data.is_top_level) return true;
+  if (!assignment.data.designation_id) return false;
+  const designation = await supabaseAdmin.from("designations").select("code,name")
+    .eq("company_id", companyId).eq("id", assignment.data.designation_id).maybeSingle();
+  if (designation.error || !designation.data) return false;
+  return isManagingPartnerDesignation({
+    code: designation.data.code as string | null,
+    name: String(designation.data.name ?? "")
+  });
+}
 
 async function resolveAccount(accountId: string, profileType: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
@@ -106,6 +136,7 @@ export async function POST(request: NextRequest) {
     if (purpose.length < 3) throw new Error("Enter the purpose for this advance.");
     if (purpose.length > 500) throw new Error("Purpose must be 500 characters or fewer.");
 
+    const directApprove = await isDirectAdvanceRequester(account.companyId, account.profileType, account.accountId);
     const result = await supabaseAdmin
       .from("payment_advance_requests")
       .insert({
@@ -118,7 +149,9 @@ export async function POST(request: NextRequest) {
         designation: account.designation || null,
         amount,
         purpose,
-        status: "submitted"
+        status: directApprove ? "approved" : "submitted",
+        approved_amount: directApprove ? amount : null,
+        decision_comment: directApprove ? "Auto-approved for managing partner / top-level assignment." : null
       })
       .select("id, amount, purpose, status, approved_amount, decision_comment, requested_at, updated_at")
       .single();
@@ -126,12 +159,16 @@ export async function POST(request: NextRequest) {
     await createAppNotification({
       accountId: account.accountId,
       companyId: account.companyId,
-      eventCode: "advance_request_raised",
+      eventCode: directApprove ? "advance_request_approved" : "advance_request_raised",
       profileType: account.profileType,
       sourceKey: String(result.data.id),
       variables: { amount: amount.toLocaleString("en-IN", { maximumFractionDigits: 2 }) }
     });
-    return NextResponse.json({ ok: true, request: result.data }, { status: 201 });
+    return NextResponse.json({
+      ok: true,
+      request: result.data,
+      notice: directApprove ? "Advance request approved." : "Advance request submitted."
+    }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to submit advance request.";
     return NextResponse.json({ error: message }, { status: statusCode(message) });

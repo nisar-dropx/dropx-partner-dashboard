@@ -8,9 +8,16 @@ import {
   expenseIdentity,
   expensePayoutReadiness,
   expenseWorkerType,
+  isDirectExpenseRequester,
   resolveExpenseApprovers,
   resolveExpenseClaimRequestAssignees
 } from "../../../../src/lib/connect-expense-data";
+import {
+  isExpensePurposeCode,
+  normalizeExpectedExpenses,
+  purposeLabel,
+  sumExpectedExpenses
+} from "../../../../src/lib/expense-request-form";
 import { notifyExpenseUser, dismissExpenseApprovalNotifications } from "../../../../src/lib/connect-expense-notifications";
 import { normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
 import { mergeExpenseReceiptsToPdf } from "../../../../src/lib/merge-expense-receipts";
@@ -93,18 +100,33 @@ async function preRequestApprovalPayload(companyId: string, userIds: string[]) {
 async function claimPayload(account: ConnectAccount) {
   const identity = await expenseIdentity(account);
   const workerColumn = identity.workerType === "employee" ? "employee_id" : "contractor_id";
-  const [categories, payout, claimsResult, requestsResult] = await Promise.all([
+  const [categories, payout, claimsResult, requestsResult, stationsResult] = await Promise.all([
     activeExpenseCategories(account),
     expensePayoutReadiness(account),
     db().from("hr_expense_claims")
       .select("id,claim_no,claim_request_id,purpose,trip_from,trip_to,total_claimed,total_approved,status,current_step,submitted_at,created_at,return_reason,rejection_reason,payment_request_id,hr_expense_items(id,expense_date,merchant,description,amount,approved_amount,reviewer_note,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path),hr_expense_approval_steps(id,step_order,step_name,approver_user_id,status,decision_note,decided_by,decided_at),hr_expense_events(id,event_type,from_status,to_status,actor_name,actor_role,comments,metadata,created_at),payment_requests(request_no,status,approval_status,utr_cin,bank_status,bank_processing_remarks,processing_started_at,processed_at)")
       .eq("company_id", account.companyId).eq(workerColumn, account.id).order("created_at", { ascending: false }).limit(50),
     db().from("hr_expense_claim_requests")
-      .select("id,request_no,purpose,estimated_amount,trip_from,trip_to,notes,status,decision_note,decided_at,consumed_claim_id,created_at,hr_expense_claim_request_assignees(id,assignee_role,approver_user_id,status,decision_note,decided_at)")
-      .eq("company_id", account.companyId).eq(workerColumn, account.id).order("created_at", { ascending: false }).limit(50)
+      .select("id,request_no,purpose,purpose_code,estimated_amount,trip_from,trip_to,notes,visit_station_ids,expected_expenses,status,decision_note,decided_at,consumed_claim_id,created_at,hr_expense_claim_request_assignees(id,assignee_role,approver_user_id,status,decision_note,decided_at)")
+      .eq("company_id", account.companyId).eq(workerColumn, account.id).order("created_at", { ascending: false }).limit(50),
+    db().from("stations")
+      .select("id,station_code,station_name,region,cluster_name")
+      .eq("company_id", account.companyId)
+      .eq("is_active", true)
+      .or("hide_from_location_list.is.null,hide_from_location_list.eq.false")
+      .order("station_code")
   ]);
   if (claimsResult.error) throw new Error(claimsResult.error.message ?? "Unable to load reimbursements.");
   if (requestsResult.error) throw new Error(requestsResult.error.message ?? "Unable to load reimbursement requests.");
+  if (stationsResult.error) throw new Error(stationsResult.error.message ?? "Unable to load stations.");
+  const stations = (stationsResult.data ?? []).map((station) => ({
+    id: station.id as string,
+    code: String(station.station_code ?? ""),
+    name: String(station.station_name ?? station.station_code ?? ""),
+    region: station.region ? String(station.region) : null,
+    cluster: station.cluster_name ? String(station.cluster_name) : null
+  }));
+  const stationById = new Map(stations.map((station) => [station.id, station]));
   const stepUserIds = [...new Set((claimsResult.data ?? []).flatMap((claim) =>
     (claim.hr_expense_approval_steps ?? []).map((step) => step.approver_user_id).filter(Boolean)
   ))];
@@ -130,19 +152,25 @@ async function claimPayload(account: ConnectAccount) {
     events: [...(claim.hr_expense_events ?? [])].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)),
     attachments: await signedAttachments(claim.hr_expense_attachments)
   })));
-  const preRequests = (requestsResult.data ?? []).map((request) => ({
-    ...request,
-    assignees: (request.hr_expense_claim_request_assignees ?? []).map((assignee) => ({
-      ...assignee,
-      approver_name: nameByUserId.get(assignee.approver_user_id) ?? "Approver"
-    }))
-  }));
+  const preRequests = (requestsResult.data ?? []).map((request) => {
+    const visitStationIds = Array.isArray(request.visit_station_ids) ? request.visit_station_ids as string[] : [];
+    return {
+      ...request,
+      purpose_label: purposeLabel(request.purpose_code, request.purpose),
+      expected_expenses: normalizeExpectedExpenses(request.expected_expenses),
+      visit_stations: visitStationIds.map((id) => stationById.get(id)).filter(Boolean),
+      assignees: (request.hr_expense_claim_request_assignees ?? []).map((assignee) => ({
+        ...assignee,
+        approver_name: nameByUserId.get(assignee.approver_user_id) ?? "Approver"
+      }))
+    };
+  });
   const actorUserIds = await resolveConnectActorUserIds(account);
   const [approvals, preRequestApprovals] = await Promise.all([
     approvalPayload(account.companyId, actorUserIds),
     preRequestApprovalPayload(account.companyId, actorUserIds)
   ]);
-  return { categories, payout, claims, preRequests, approvals, preRequestApprovals };
+  return { categories, stations, payout, claims, preRequests, approvals, preRequestApprovals };
 }
 
 export async function GET(request: Request) {
@@ -157,6 +185,7 @@ export async function GET(request: Request) {
       ]);
       return NextResponse.json({
         categories: [],
+        stations: [],
         payout: { ready: false, message: null },
         claims: [],
         preRequests: [],
@@ -175,16 +204,88 @@ export async function GET(request: Request) {
 type InputItem = { id: string; categoryId: string; expenseDate: string; merchant: string; description: string; amount: number };
 
 async function submitPreRequest(form: FormData, account: ConnectAccount) {
-  const purpose = clean(form.get("purpose"));
+  const purposeCode = clean(form.get("purposeCode"));
   const notes = clean(form.get("notes"));
   const tripFrom = clean(form.get("tripFrom")) || null;
   const tripTo = clean(form.get("tripTo")) || null;
   const estimatedRaw = clean(form.get("estimatedAmount"));
   const estimatedAmount = estimatedRaw ? Number(estimatedRaw) : null;
-  if (purpose.length < 3 || purpose.length > 500) throw new Error("Enter a purpose between 3 and 500 characters.");
-  if (tripFrom && tripTo && tripTo < tripFrom) throw new Error("Trip end date cannot be before its start date.");
-  if (estimatedAmount != null && (!Number.isFinite(estimatedAmount) || estimatedAmount < 0)) throw new Error("Enter a valid estimated amount.");
-  if (notes.length > 1000) throw new Error("Notes must be 1000 characters or fewer.");
+  let visitStationIds: string[] = [];
+  try {
+    const parsed = JSON.parse(clean(form.get("visitStationIds")) || "[]") as unknown;
+    visitStationIds = Array.isArray(parsed) ? parsed.map((id) => clean(id)).filter(Boolean) : [];
+  } catch {
+    throw new Error("Select at least one visiting station or location.");
+  }
+  const expectedExpenses = normalizeExpectedExpenses(JSON.parse(clean(form.get("expectedExpenses")) || "{}"));
+  const breakdownTotal = sumExpectedExpenses(expectedExpenses);
+
+  if (!isExpensePurposeCode(purposeCode)) throw new Error("Select a visit purpose.");
+  const purpose = purposeCode === "other"
+    ? (notes.trim() || "Other")
+    : purposeLabel(purposeCode);
+  if (purposeCode === "other" && notes.trim().length < 3) {
+    throw new Error("Remarks are required when purpose is Other.");
+  }
+  if (notes.length > 1000) throw new Error("Remarks must be 1000 characters or fewer.");
+  if (tripFrom && tripTo && tripTo < tripFrom) throw new Error("Visit end date cannot be before its start date.");
+  if (estimatedAmount == null || !Number.isFinite(estimatedAmount) || estimatedAmount <= 0) {
+    throw new Error("Enter a total estimated amount greater than zero.");
+  }
+  if (Math.abs(estimatedAmount - breakdownTotal) > 0.01) {
+    throw new Error("Total estimated amount must match the expected expense breakdown.");
+  }
+  if (!visitStationIds.length) throw new Error("Select at least one visiting station or location.");
+  if ([...new Set(visitStationIds)].length !== visitStationIds.length) {
+    throw new Error("Remove duplicate stations from the visit list.");
+  }
+
+  const stationsCheck = await db().from("stations")
+    .select("id")
+    .eq("company_id", account.companyId)
+    .eq("is_active", true)
+    .in("id", visitStationIds);
+  if (stationsCheck.error) throw new Error(stationsCheck.error.message);
+  if ((stationsCheck.data ?? []).length !== visitStationIds.length) {
+    throw new Error("One or more selected stations are inactive or invalid.");
+  }
+
+  const direct = await isDirectExpenseRequester(account);
+  if (direct.direct) {
+    const requestId = randomUUID();
+    const requestNo = `ERR-${new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).replaceAll("-", "")}-${requestId.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
+    const insert = await db().from("hr_expense_claim_requests").insert({
+      id: requestId,
+      company_id: account.companyId,
+      request_no: requestNo,
+      worker_type: direct.identity.workerType,
+      employee_id: direct.identity.workerType === "employee" ? direct.identity.workerId : null,
+      contractor_id: direct.identity.workerType === "contractor" ? direct.identity.workerId : null,
+      claimant_person_id: direct.identity.personId,
+      claimant_user_id: direct.identity.userId,
+      assignment_id: direct.identity.assignment.id,
+      location_id: direct.identity.assignment.location_id,
+      designation_id: direct.identity.assignment.designation_id,
+      purpose,
+      purpose_code: purposeCode,
+      estimated_amount: estimatedAmount,
+      trip_from: tripFrom,
+      trip_to: tripTo,
+      notes: notes || null,
+      visit_station_ids: visitStationIds,
+      expected_expenses: expectedExpenses,
+      status: "approved",
+      decided_by: direct.identity.userId,
+      decided_at: new Date().toISOString(),
+      decision_note: "Auto-approved for managing partner / top-level assignment."
+    }).select("id").single();
+    if (insert.error) throw new Error(insert.error.message);
+    return NextResponse.json({
+      ok: true,
+      requestId,
+      notice: "Request approved. You can submit the claim with receipts."
+    });
+  }
 
   const { identity, assignees } = await resolveExpenseClaimRequestAssignees(account);
   const requestId = randomUUID();
@@ -203,27 +304,30 @@ async function submitPreRequest(form: FormData, account: ConnectAccount) {
     p_trip_from: tripFrom,
     p_trip_to: tripTo,
     p_notes: notes || null,
-    p_assignees: assignees
+    p_assignees: assignees,
+    p_purpose_code: purposeCode,
+    p_visit_station_ids: visitStationIds,
+    p_expected_expenses: expectedExpenses
   });
   if (rpc.error) throw new Error(rpc.error.message);
 
-  const estimateLabel = estimatedAmount != null ? `Rs ${estimatedAmount.toLocaleString("en-IN")}` : "an estimated amount";
+  const estimateLabel = `Rs ${estimatedAmount.toLocaleString("en-IN")}`;
   await Promise.all(assignees.map((assignee) => notifyExpenseUser({
     companyId: account.companyId,
     claimRequestId: requestId,
     recipientUserId: assignee.approver_user_id,
     eventCode: "REIMBURSEMENT_REQUEST_APPROVAL_REQUIRED",
-    title: "Reimbursement request needs approval",
+    title: "Expense request needs approval",
     body: `${account.name ?? "A team member"} requested approval to claim ${estimateLabel} for ${purpose}.`,
-    emailSubject: `Reimbursement request · ${account.name ?? "Team member"}`,
-    emailBody: `${account.name ?? "A team member"} requested permission to submit a reimbursement for ${purpose}${estimatedAmount != null ? ` (estimate Rs ${estimatedAmount.toLocaleString("en-IN")})` : ""}. Open DropX One or People Approval Inbox to approve or reject.`,
+    emailSubject: `Expense request · ${account.name ?? "Team member"}`,
+    emailBody: `${account.name ?? "A team member"} requested permission to submit an expense claim for ${purpose} (estimate Rs ${estimatedAmount.toLocaleString("en-IN")}). Open DropX One or People Approval Inbox to approve or reject.`,
     route: "approvals"
   })));
 
   return NextResponse.json({
     ok: true,
     requestId,
-    notice: "Request submitted. Your reporting manager or finance head can approve it."
+    notice: "Request submitted for approval."
   });
 }
 
@@ -382,16 +486,33 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
     if (attachmentResult.error) throw new Error(attachmentResult.error.message);
     if (isResubmit && priorPaths.length) await db().storage.from("hr-expense-receipts").remove(priorPaths);
 
+    if (approval.directToPayment) {
+      const actorUserId = approval.identity.userId;
+      if (!actorUserId) throw new Error("A linked People login is required to send this claim to Payments.");
+      const paymentRpc = await db().rpc("hr_expense_claim_send_to_payment", {
+        p_company_id: account.companyId,
+        p_claim_id: claimId,
+        p_actor_user_id: actorUserId
+      });
+      if (paymentRpc.error) throw new Error(paymentRpc.error.message);
+      return NextResponse.json({
+        ok: true,
+        claimId,
+        notice: "Claim submitted and sent to Payments for finance processing."
+      });
+    }
+
     const firstApprover = approval.steps[0];
+    if (!firstApprover) throw new Error("No approval step is configured.");
     const notification = await notifyExpenseUser({
       companyId: account.companyId,
       claimId,
       recipientUserId: firstApprover.approver_user_id,
       eventCode: "REIMBURSEMENT_APPROVAL_REQUIRED",
-      title: "Reimbursement needs approval",
+      title: "Expense claim needs approval",
       body: `${account.name ?? "A team member"} submitted Rs ${total.toLocaleString("en-IN")} for ${purpose}.`,
-      emailSubject: `Reimbursement approval required · ${account.name ?? "Team member"}`,
-      emailBody: `${account.name ?? "A team member"} submitted a reimbursement claim for Rs ${total.toLocaleString("en-IN")} (${purpose}). Open DropX One or People Approval Inbox to review it.`,
+      emailSubject: `Expense claim approval · ${account.name ?? "Team member"}`,
+      emailBody: `${account.name ?? "A team member"} submitted an expense claim for Rs ${total.toLocaleString("en-IN")} (${purpose}). Open DropX One or People Approval Inbox to review it.`,
       route: "approvals"
     });
     return NextResponse.json({

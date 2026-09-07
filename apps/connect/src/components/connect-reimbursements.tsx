@@ -1,14 +1,26 @@
 "use client";
 
-import { Check, ChevronDown, ClipboardList, FileText, Plus, ReceiptText, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import { Check, ChevronDown, ClipboardList, FileText, MapPin, Plus, ReceiptText, RotateCcw, Search, Trash2, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { todayInIndia } from "@/lib/india-date";
+import {
+  emptyExpectedExpenses,
+  EXPECTED_EXPENSE_KEYS,
+  EXPENSE_PURPOSE_OPTIONS,
+  type ExpectedExpenseKey,
+  type ExpectedExpenses,
+  purposeLabel,
+  sumExpectedExpenses
+} from "@/lib/expense-request-form";
 import type { AppAccount } from "./connect-profile-app";
 
 type Category = { id: string; code: string; name: string; description?: string | null; receipt_required: boolean; receipt_threshold: number; per_item_limit?: number | null; per_day_limit?: number | null };
+type Station = { id: string; code: string; name: string; region?: string | null; cluster?: string | null };
 type ExpenseItem = { id: string; categoryId: string; expenseDate: string; merchant: string; description: string; amount: string };
 type PreRequest = {
-  id: string; request_no: string; purpose: string; estimated_amount?: number | null; trip_from?: string | null; trip_to?: string | null; notes?: string | null;
+  id: string; request_no: string; purpose: string; purpose_code?: string | null; purpose_label?: string | null;
+  estimated_amount?: number | null; trip_from?: string | null; trip_to?: string | null; notes?: string | null;
+  visit_station_ids?: string[]; visit_stations?: Station[]; expected_expenses?: ExpectedExpenses;
   status: string; decision_note?: string | null; decided_at?: string | null; consumed_claim_id?: string | null; created_at: string;
   assignees: Array<{ id: string; assignee_role: string; status: string; approver_name?: string | null; decision_note?: string | null; decided_at?: string | null }>;
 };
@@ -21,7 +33,13 @@ type Claim = {
   attachments: Array<{ id: string; item_id?: string | null; file_name: string; content_type?: string | null; url?: string | null }>;
   payment?: { request_no: string; status: string; approval_status?: string | null; utr_cin?: string | null; bank_status?: string | null; bank_processing_remarks?: string | null; processed_at?: string | null } | null;
 };
-type Payload = { categories: Category[]; payout: { ready: boolean; message?: string | null }; claims: Claim[]; preRequests: PreRequest[] };
+type Payload = {
+  categories: Category[];
+  stations: Station[];
+  payout: { ready: boolean; message?: string | null };
+  claims: Claim[];
+  preRequests: PreRequest[];
+};
 
 function uid() { return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`; }
 function newItem(): ExpenseItem { return { id: uid(), categoryId: "", expenseDate: todayInIndia(), merchant: "", description: "", amount: "" }; }
@@ -29,15 +47,20 @@ function money(value: number | string | null | undefined) { return `₹${Number(
 function dateTime(value: string) { return new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }); }
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
 function statusLabel(status: string) { return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
+function amountInput(value: number) { return value > 0 ? String(value) : ""; }
 
 export function ConnectReimbursements({ account }: { account: AppAccount }) {
   const [data, setData] = useState<Payload | null>(null);
   const [tab, setTab] = useState<"requests" | "claims">("requests");
-  const [purpose, setPurpose] = useState("");
+  const [purposeCode, setPurposeCode] = useState("");
   const [notes, setNotes] = useState("");
-  const [estimatedAmount, setEstimatedAmount] = useState("");
   const [tripFrom, setTripFrom] = useState("");
   const [tripTo, setTripTo] = useState("");
+  const [selectedStationIds, setSelectedStationIds] = useState<string[]>([]);
+  const [stationQuery, setStationQuery] = useState("");
+  const [stationPickerOpen, setStationPickerOpen] = useState(false);
+  const [expectedExpenses, setExpectedExpenses] = useState<ExpectedExpenses>(emptyExpectedExpenses());
+  const [purpose, setPurpose] = useState("");
   const [items, setItems] = useState<ExpenseItem[]>([newItem()]);
   const [receipts, setReceipts] = useState<File[]>([]);
   const [selectedRequestId, setSelectedRequestId] = useState("");
@@ -56,9 +79,13 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
       const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
       const response = await fetch(`/api/connect/reimbursements?${query}`, { cache: "no-store" });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to load reimbursements.");
-      setData({ ...payload, preRequests: payload.preRequests ?? [] });
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load reimbursements."); }
+      if (!response.ok) throw new Error(payload.error || "Unable to load expense requests.");
+      setData({
+        ...payload,
+        stations: payload.stations ?? [],
+        preRequests: payload.preRequests ?? []
+      });
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load expense requests."); }
     finally { setLoading(false); }
   }, [account.id, account.profileType]);
 
@@ -73,14 +100,62 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
     () => claimableRequests.find((request) => request.id === selectedRequestId) ?? null,
     [claimableRequests, selectedRequestId]
   );
+  const estimatedTotal = useMemo(() => sumExpectedExpenses(expectedExpenses), [expectedExpenses]);
+  const selectedStations = useMemo(
+    () => (data?.stations ?? []).filter((station) => selectedStationIds.includes(station.id)),
+    [data?.stations, selectedStationIds]
+  );
+  const filteredStations = useMemo(() => {
+    const query = stationQuery.trim().toLowerCase();
+    return (data?.stations ?? []).filter((station) => {
+      if (selectedStationIds.includes(station.id)) return false;
+      if (!query) return true;
+      return [station.code, station.name, station.region, station.cluster]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+    }).slice(0, 40);
+  }, [data?.stations, selectedStationIds, stationQuery]);
+  const remarksRequired = purposeCode === "other";
+  const canSubmitRequest = Boolean(
+    purposeCode
+    && selectedStationIds.length
+    && estimatedTotal > 0
+    && (!remarksRequired || notes.trim().length >= 3)
+  );
 
   function changeItem(id: string, changes: Partial<ExpenseItem>) {
     setItems((current) => current.map((item) => item.id === id ? { ...item, ...changes } : item));
   }
 
+  function setExpectedAmount(key: ExpectedExpenseKey, raw: string) {
+    const amount = Number(raw);
+    setExpectedExpenses((current) => ({
+      ...current,
+      [key]: Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) / 100 : 0
+    }));
+  }
+
+  function toggleStation(id: string) {
+    setSelectedStationIds((current) => current.includes(id)
+      ? current.filter((entry) => entry !== id)
+      : [...current, id]);
+    setStationQuery("");
+    setStationPickerOpen(false);
+  }
+
+  function resetRequestForm() {
+    setPurposeCode("");
+    setNotes("");
+    setTripFrom("");
+    setTripTo("");
+    setSelectedStationIds([]);
+    setStationQuery("");
+    setExpectedExpenses(emptyExpectedExpenses());
+  }
+
   function startClaimFromRequest(request: PreRequest) {
     setSelectedRequestId(request.id);
-    setPurpose(request.purpose);
+    setPurpose(request.purpose_label || request.purpose);
     setTripFrom(request.trip_from ?? "");
     setTripTo(request.trip_to ?? "");
     setItems([newItem()]);
@@ -128,7 +203,7 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || `Unable to withdraw ${withdrawTarget.kind === "claim" ? "claim" : "request"}.`);
-      setNotice(payload.notice || (withdrawTarget.kind === "claim" ? "Reimbursement claim withdrawn." : "Reimbursement request withdrawn."));
+      setNotice(payload.notice || (withdrawTarget.kind === "claim" ? "Claim withdrawn." : "Request withdrawn."));
       setExpanded(null);
       setWithdrawTarget(null);
       setWithdrawReason("");
@@ -140,20 +215,23 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
   async function submitRequest(event: FormEvent) {
     event.preventDefault(); setSaving(true); setError(""); setNotice("");
     try {
+      if (!canSubmitRequest) throw new Error("Complete the required expense request fields.");
       const form = new FormData();
       form.set("kind", "pre_request");
       form.set("accountId", account.id);
       form.set("profileType", account.profileType);
-      form.set("purpose", purpose);
+      form.set("purposeCode", purposeCode);
       form.set("notes", notes);
-      form.set("estimatedAmount", estimatedAmount);
+      form.set("estimatedAmount", String(estimatedTotal));
       form.set("tripFrom", tripFrom);
       form.set("tripTo", tripTo);
+      form.set("visitStationIds", JSON.stringify(selectedStationIds));
+      form.set("expectedExpenses", JSON.stringify(expectedExpenses));
       const response = await fetch("/api/connect/reimbursements", { method: "POST", body: form });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to submit request.");
       setNotice(payload.notice);
-      setPurpose(""); setNotes(""); setEstimatedAmount(""); setTripFrom(""); setTripTo("");
+      resetRequestForm();
       await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to submit request."); }
     finally { setSaving(false); }
@@ -177,11 +255,11 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
       for (const file of receipts) form.append("receipts", file);
       const response = await fetch("/api/connect/reimbursements", { method: "POST", body: form });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to submit reimbursement.");
+      if (!response.ok) throw new Error(payload.error || "Unable to submit claim.");
       setNotice(payload.notice);
       setPurpose(""); setTripFrom(""); setTripTo(""); setItems([newItem()]); setReceipts([]); setSelectedRequestId(""); setEditingClaimId(null);
       await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to submit reimbursement."); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to submit claim."); }
     finally { setSaving(false); }
   }
 
@@ -208,8 +286,8 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
   return <section className="dx-expenses">
     <header className="dx-page-intro">
       <small>Payments</small>
-      <h1>Reimbursements</h1>
-      <p>Request approval first. After your manager or finance head approves, submit the claim with receipts.</p>
+      <h1>Expense requests</h1>
+      <p>Get prior approval before any business visit or expense. After approval, submit the actual claim with bills.</p>
     </header>
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
@@ -224,22 +302,122 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
       </button>
     </nav>
 
-    {loading ? <div className="dx-loader"><span /><small>Loading reimbursements…</small></div> : null}
+    {loading ? <div className="dx-loader"><span /><small>Loading expense requests…</small></div> : null}
 
     {!loading && tab === "requests" ? <>
       <form className="dx-expense-form" onSubmit={submitRequest}>
-        <section className="dx-expense-card">
-          <h2>New reimbursement request</h2>
-          <p className="dx-expense-help">Your reporting manager, or finance owners (for example Nisar / Jamsheer), can approve. Anyone’s approval unlocks claim submission.</p>
-          <label>Purpose<textarea maxLength={500} onChange={(event) => setPurpose(event.target.value)} placeholder="Example: Client visit and local conveyance for Kozhikode cluster" required rows={3} value={purpose} /></label>
-          <div className="dx-expense-dates three">
-            <label>Estimated amount<input min="0" onChange={(event) => setEstimatedAmount(event.target.value)} placeholder="Optional" step="0.01" type="number" value={estimatedAmount} /></label>
-            <label>Assignment from<input onChange={(event) => setTripFrom(event.target.value)} type="date" value={tripFrom} /></label>
-            <label>Assignment to<input min={tripFrom || undefined} onChange={(event) => setTripTo(event.target.value)} type="date" value={tripTo} /></label>
+        <section className="dx-expense-card dx-expense-request-card">
+          <div className="dx-expense-request-hero">
+            <span>
+              <small>Prior approval</small>
+              <h2>New expense request</h2>
+              <p>Tell us the visit purpose, stations, dates, and expected spend before anything is incurred.</p>
+            </span>
+            <em>{money(estimatedTotal)}</em>
           </div>
-          <label>Notes<small>Optional context for approvers</small><textarea maxLength={1000} onChange={(event) => setNotes(event.target.value)} placeholder="Any policy or trip notes" rows={2} value={notes} /></label>
+
+          <label className="dx-expense-field">
+            Purpose
+            <select onChange={(event) => setPurposeCode(event.target.value)} required value={purposeCode}>
+              <option value="">Select purpose</option>
+              {EXPENSE_PURPOSE_OPTIONS.map((option) => (
+                <option key={option.code} value={option.code}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <div className="dx-expense-field">
+            <span className="dx-expense-field-label">Visiting station / location</span>
+            {selectedStations.length ? (
+              <div className="dx-station-chips">
+                {selectedStations.map((station) => (
+                  <button className="dx-station-chip" key={station.id} onClick={() => toggleStation(station.id)} type="button">
+                    <MapPin />
+                    <span>{station.code}</span>
+                    <small>{station.name}</small>
+                    <X />
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <div className={`dx-station-picker${stationPickerOpen ? " open" : ""}`}>
+              <label className="dx-station-search">
+                <Search />
+                <input
+                  onBlur={() => window.setTimeout(() => setStationPickerOpen(false), 120)}
+                  onChange={(event) => { setStationQuery(event.target.value); setStationPickerOpen(true); }}
+                  onFocus={() => setStationPickerOpen(true)}
+                  placeholder={selectedStations.length ? "Add another station" : "Search KOZD, KGQA, TLPA…"}
+                  value={stationQuery}
+                />
+              </label>
+              {stationPickerOpen ? (
+                <div className="dx-station-results">
+                  {filteredStations.length ? filteredStations.map((station) => (
+                    <button key={station.id} onMouseDown={(event) => event.preventDefault()} onClick={() => toggleStation(station.id)} type="button">
+                      <strong>{station.code}</strong>
+                      <span>{station.name}</span>
+                      <small>{[station.cluster, station.region].filter(Boolean).join(" · ") || "Active station"}</small>
+                    </button>
+                  )) : <p>No matching active stations.</p>}
+                </div>
+              ) : null}
+            </div>
+            <small className="dx-expense-hint">Select one or more active stations for this visit.</small>
+          </div>
+
+          <div className="dx-expense-dates">
+            <label className="dx-expense-field">Visit from<input onChange={(event) => setTripFrom(event.target.value)} type="date" value={tripFrom} /></label>
+            <label className="dx-expense-field">Visit to<input min={tripFrom || undefined} onChange={(event) => setTripTo(event.target.value)} type="date" value={tripTo} /></label>
+          </div>
+
+          <label className="dx-expense-field">
+            Business justification / remarks
+            <small>{remarksRequired ? "Required for Other purpose" : "Optional context for approvers"}</small>
+            <textarea
+              maxLength={1000}
+              minLength={remarksRequired ? 3 : undefined}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder={remarksRequired ? "Describe the other purpose clearly" : "Why is this visit needed?"}
+              required={remarksRequired}
+              rows={3}
+              value={notes}
+            />
+          </label>
+
+          <div className="dx-expense-breakdown">
+            <header>
+              <div>
+                <h3>Expected expense</h3>
+                <p>Enter estimates by category. Total updates automatically.</p>
+              </div>
+              <strong>{money(estimatedTotal)}</strong>
+            </header>
+            <div className="dx-expense-breakdown-grid">
+              {EXPECTED_EXPENSE_KEYS.map((entry) => (
+                <label key={entry.key}>
+                  {entry.label}
+                  <input
+                    inputMode="decimal"
+                    min="0"
+                    onChange={(event) => setExpectedAmount(entry.key, event.target.value)}
+                    placeholder="0.00"
+                    step="0.01"
+                    type="number"
+                    value={amountInput(expectedExpenses[entry.key])}
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="dx-expense-total-row">
+              <span>Total estimated amount</span>
+              <b>{money(estimatedTotal)}</b>
+            </div>
+          </div>
         </section>
-        <button className="dx-save" disabled={saving || purpose.trim().length < 3} type="submit">{saving ? "Submitting…" : "Submit request"}</button>
+        <button className="dx-save" disabled={saving || !canSubmitRequest} type="submit">
+          {saving ? "Submitting…" : "Submit request"}
+        </button>
       </form>
 
       <div className="dx-expense-list">
@@ -248,7 +426,7 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
             <button className="dx-expense-claim-head" onClick={() => setExpanded((current) => current === request.id ? null : request.id)} type="button">
               <span>
                 <small>{request.request_no}</small>
-                <strong>{request.purpose}</strong>
+                <strong>{request.purpose_label || purposeLabel(request.purpose_code, request.purpose)}</strong>
                 <em>{statusLabel(request.status)}</em>
               </span>
               <b>{request.estimated_amount != null ? money(request.estimated_amount) : "—"}</b>
@@ -259,23 +437,33 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
                 <h3>Request</h3>
                 <div className="dx-expense-row">
                   <span>
-                    <strong>{request.trip_from || request.trip_to ? `${request.trip_from || "—"} → ${request.trip_to || "—"}` : "No trip dates"}</strong>
+                    <strong>{request.trip_from || request.trip_to ? `${request.trip_from || "—"} → ${request.trip_to || "—"}` : "No visit dates"}</strong>
                     <small>Raised {dateTime(request.created_at)}</small>
+                    {request.visit_stations?.length ? (
+                      <p className="dx-station-inline">{request.visit_stations.map((station) => station.code).join(" + ")}</p>
+                    ) : null}
                     {request.notes ? <p>{request.notes}</p> : null}
                     {request.decision_note ? <p>{request.decision_note}</p> : null}
                   </span>
                 </div>
+                {request.expected_expenses ? (
+                  <div className="dx-expense-mini-breakdown">
+                    {EXPECTED_EXPENSE_KEYS.filter((entry) => Number(request.expected_expenses?.[entry.key] ?? 0) > 0).map((entry) => (
+                      <span key={entry.key}><small>{entry.label}</small><b>{money(request.expected_expenses?.[entry.key])}</b></span>
+                    ))}
+                  </div>
+                ) : null}
               </section>
               <section>
                 <h3>Assignees</h3>
-                {request.assignees.map((assignee) => (
+                {request.assignees.length ? request.assignees.map((assignee) => (
                   <div className="dx-expense-row" key={assignee.id}>
                     <span>
                       <strong>{assignee.approver_name || "Approver"}</strong>
                       <small>{statusLabel(assignee.assignee_role)} · {statusLabel(assignee.status)}{assignee.decided_at ? ` · ${dateTime(assignee.decided_at)}` : ""}</small>
                     </span>
                   </div>
-                ))}
+                )) : <p className="dx-expense-help">Directly approved.</p>}
               </section>
               {request.status === "approved" && !request.consumed_claim_id ? (
                 <button className="dx-save" onClick={() => startClaimFromRequest(request)} type="button"><ReceiptText /> Submit claim</button>
@@ -286,13 +474,13 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
               {request.consumed_claim_id ? <p className="dx-expense-help">Claim already submitted for this request.</p> : null}
             </div> : null}
           </article>
-        )) : <div className="dx-empty"><ReceiptText /><strong>No reimbursement requests yet</strong><small>Raise a request to get manager or finance approval before claiming.</small></div>}
+        )) : <div className="dx-empty"><ReceiptText /><strong>No expense requests yet</strong><small>Raise a request to get prior approval before submitting the claim.</small></div>}
       </div>
     </> : null}
 
     {!loading && tab === "claims" ? <>
       {(claimableRequests.length || editingClaimId) ? <form className="dx-expense-form" onSubmit={submitClaim}>
-        {editingClaimId ? <div className="dx-alert warning">You are correcting a returned reimbursement. Previous decisions remain in the audit timeline.</div> : null}
+        {editingClaimId ? <div className="dx-alert warning">You are correcting a returned claim. Previous decisions remain in the audit timeline.</div> : null}
         <section className="dx-expense-summary">
           <div><ReceiptText /><span><small>Report total</small><strong>{money(total)}</strong></span></div>
           <div><FileText /><span><small>Receipt files</small><strong>{receipts.length}</strong></span></div>
@@ -305,22 +493,22 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
                 const request = claimableRequests.find((entry) => entry.id === event.target.value);
                 setSelectedRequestId(event.target.value);
                 if (request) {
-                  setPurpose(request.purpose);
+                  setPurpose(request.purpose_label || request.purpose);
                   setTripFrom(request.trip_from ?? "");
                   setTripTo(request.trip_to ?? "");
                 }
               }} required value={selectedRequestId}>
                 <option value="">Select approved request</option>
                 {claimableRequests.map((request) => (
-                  <option key={request.id} value={request.id}>{request.request_no} · {request.purpose}</option>
+                  <option key={request.id} value={request.id}>{request.request_no} · {request.purpose_label || request.purpose}</option>
                 ))}
               </select>
             </label>
           ) : null}
           <label>Purpose<textarea maxLength={500} onChange={(event) => setPurpose(event.target.value)} required rows={3} value={purpose} /></label>
           <div className="dx-expense-dates">
-            <label>Assignment from<input onChange={(event) => setTripFrom(event.target.value)} type="date" value={tripFrom} /></label>
-            <label>Assignment to<input min={tripFrom || undefined} onChange={(event) => setTripTo(event.target.value)} type="date" value={tripTo} /></label>
+            <label>Visit from<input onChange={(event) => setTripFrom(event.target.value)} type="date" value={tripFrom} /></label>
+            <label>Visit to<input min={tripFrom || undefined} onChange={(event) => setTripTo(event.target.value)} type="date" value={tripTo} /></label>
           </div>
           {selectedRequest ? <p className="dx-expense-help">Linked request {selectedRequest.request_no}. Receipts are merged into one PDF for approvers.</p> : null}
         </section>
@@ -361,7 +549,7 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
         <button className="dx-save" disabled={saving || total <= 0 || !data?.payout.ready || (!editingClaimId && !selectedRequestId)} type="submit">
           {saving ? "Submitting…" : `${editingClaimId ? "Resubmit" : "Submit"} ${money(total)} claim`}
         </button>
-      </form> : <div className="dx-alert warning">Approve a reimbursement request first, then return here to submit the claim with receipts.</div>}
+      </form> : <div className="dx-alert warning">Approve an expense request first, then return here to submit the claim with receipts.</div>}
 
       <div className="dx-expense-list">{data?.claims.length ? data.claims.map((claim) => <article className="dx-expense-claim" key={claim.id}>
         <button className="dx-expense-claim-head" onClick={() => setExpanded((current) => current === claim.id ? null : claim.id)} type="button">
@@ -419,7 +607,7 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
             <button className="dx-small-action danger" disabled={saving} onClick={() => openWithdrawModal("claim", claim.id)} type="button"><RotateCcw /> Withdraw claim</button>
           ) : null}
         </div> : null}
-      </article>) : <div className="dx-empty"><ReceiptText /><strong>No reimbursement claims yet</strong><small>Approved requests become claims once receipts are submitted.</small></div>}</div>
+      </article>) : <div className="dx-empty"><ReceiptText /><strong>No claims yet</strong><small>Approved requests become claims once receipts are submitted.</small></div>}</div>
     </> : null}
 
     {withdrawTarget ? (

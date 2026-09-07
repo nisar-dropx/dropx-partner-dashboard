@@ -72,3 +72,12 @@ export function isOpsRosterPlannerRole(roleCode: string | null | undefined) {
     || code === "FSD"
     || code.includes("FULL_STACK");
 }
+
+export function isManagingPartnerDesignation(designation: DesignationLabel | null | undefined) {
+  if (!designation) return false;
+  const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
+  const name = designation.name.toLowerCase();
+  return code === "MP"
+    || code === "MANAGING_PARTNER"
+    || name.includes("managing partner");
+}

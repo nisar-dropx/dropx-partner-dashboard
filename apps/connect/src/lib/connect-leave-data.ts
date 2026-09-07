@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isManagingPartnerDesignation } from "./approval-designation-labels";
 import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
 import { supabaseAdmin } from "./supabase-admin";
 import { canUseAvailableManagerChain } from "./leave-approval-chain";
@@ -128,10 +129,21 @@ export async function resolveWorkforceLeaveApproval({ companyId, workerId, worke
   const requesterLink = await db().from("hr_user_person_links").select("user_id,status")
     .eq("company_id", companyId).eq("person_id", engagement.person_id).maybeSingle();
   if (requesterLink.error) throw new Error(requesterLink.error.message);
-  if (assignment.is_top_level) {
+  let managingPartner = false;
+  if (assignment.designation_id) {
+    const designation = await db().from("designations").select("code,name")
+      .eq("company_id", companyId).eq("id", assignment.designation_id).maybeSingle();
+    if (designation.error) throw new Error(designation.error.message);
+    managingPartner = isManagingPartnerDesignation(
+      designation.data
+        ? { code: designation.data.code as string | null, name: String(designation.data.name ?? "") }
+        : null
+    );
+  }
+  if (assignment.is_top_level || managingPartner) {
     return {
       direct: true,
-      policyName: "Top-level direct record",
+      policyName: managingPartner ? "Managing partner direct record" : "Top-level direct record",
       requesterUserId: requesterLink.data?.status === "active" ? requesterLink.data.user_id : null,
       steps: [] as LeaveApprovalStep[]
     };

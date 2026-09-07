@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isWfhHardBlockedDesignation } from "./approval-designation-labels";
+import { isManagingPartnerDesignation, isWfhHardBlockedDesignation } from "./approval-designation-labels";
 import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
 import type { ConnectAccount } from "./connect-auth";
 import {
@@ -204,8 +204,10 @@ export async function createConnectWfhRequest(input: {
     approver_name: string;
   }> = [];
   let routeName = "Reporting manager";
+  const skipManagerChain = Boolean(access.context.assignment.is_top_level)
+    || isManagingPartnerDesignation(access.designation);
 
-  if (!access.context.assignment.is_top_level) {
+  if (!skipManagerChain) {
     const configured = await resolveConfiguredApprovalWorkflow({
       companyId: input.companyId,
       workflowCode: "work_from_home",
@@ -224,6 +226,8 @@ export async function createConnectWfhRequest(input: {
       approver_person_id: step.approver_person_id,
       approver_name: step.approver_name
     }));
+  } else {
+    routeName = "Managing partner / top-level";
   }
 
   const requestNo = await nextWfhRequestNo(input.companyId);

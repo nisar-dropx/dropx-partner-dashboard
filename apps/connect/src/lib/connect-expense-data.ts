@@ -152,8 +152,44 @@ async function trimReimbursementStepsAfterBusinessHead(
   return kept.map((step, index) => ({ ...step, step_order: index + 1 }));
 }
 
+/** Top-level / Managing Partner requesters approve their own request trail. */
+export async function isDirectExpenseRequester(account: ConnectAccount) {
+  const identity = await expenseIdentity(account);
+  if (identity.assignment.is_top_level) {
+    return { direct: true as const, identity, reason: "top_level" as const };
+  }
+  if (!identity.assignment.designation_id) {
+    return { direct: false as const, identity, reason: null };
+  }
+  const designation = await db().from("designations").select("code,name")
+    .eq("company_id", account.companyId).eq("id", identity.assignment.designation_id).maybeSingle();
+  if (designation.error) throw new Error(designation.error.message);
+  const label = designation.data
+    ? { code: designation.data.code as string | null, name: String(designation.data.name ?? "") }
+    : null;
+  if (isManagingPartnerDesignation(label)) {
+    return { direct: true as const, identity, reason: "managing_partner" as const };
+  }
+  return { direct: false as const, identity, reason: null };
+}
+
 export async function resolveExpenseApprovers(account: ConnectAccount, amount: number) {
   const { identity, policy } = await resolveExpensePolicy(account, amount);
+  if (identity.assignment.is_top_level) {
+    return { identity, policy, steps: [] as ExpenseApprovalStepDraft[], directToPayment: true as const };
+  }
+  if (identity.assignment.designation_id) {
+    const designation = await db().from("designations").select("code,name")
+      .eq("company_id", account.companyId).eq("id", identity.assignment.designation_id).maybeSingle();
+    if (designation.error) throw new Error(designation.error.message);
+    const label = designation.data
+      ? { code: designation.data.code as string | null, name: String(designation.data.name ?? "") }
+      : null;
+    if (isManagingPartnerDesignation(label)) {
+      return { identity, policy, steps: [] as ExpenseApprovalStepDraft[], directToPayment: true as const };
+    }
+  }
+
   const configured = await resolveConfiguredApprovalWorkflow({
     companyId: account.companyId,
     workflowCode: "reimbursement",
@@ -171,7 +207,8 @@ export async function resolveExpenseApprovers(account: ConnectAccount, amount: n
     return {
       identity,
       policy,
-      steps: await trimReimbursementStepsAfterBusinessHead(account.companyId, identity.today, configuredSteps)
+      steps: await trimReimbursementStepsAfterBusinessHead(account.companyId, identity.today, configuredSteps),
+      directToPayment: false as const
     };
   }
 
@@ -215,7 +252,8 @@ export async function resolveExpenseApprovers(account: ConnectAccount, amount: n
   return {
     identity,
     policy,
-    steps: await trimReimbursementStepsAfterBusinessHead(account.companyId, identity.today, steps)
+    steps: await trimReimbursementStepsAfterBusinessHead(account.companyId, identity.today, steps),
+    directToPayment: false as const
   };
 }
 
