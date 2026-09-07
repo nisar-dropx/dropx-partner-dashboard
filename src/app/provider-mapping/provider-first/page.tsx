@@ -42,7 +42,7 @@ export default async function ProviderFirstMappingPage() {
   const mappingByWorkforce = new Map(activeMappings.filter((mapping) => mapping.workforce_id).map((mapping) => [mapping.workforce_id!, mapping]));
   const mappingByMember = new Map(activeMappings.map((mapping) => [String(mapping.provider_member_id), mapping]));
   const workforceById = new Map((workersResult.data ?? []).map((worker) => [worker.id, worker]));
-  const stationLabelById = new Map(stations.map((station) => [station.id, station.station_name && station.station_name !== station.station_code ? `${station.station_code} - ${station.station_name}` : station.station_code]));
+  const stationLabelById = new Map(stations.map((station) => [station.id, station.station_code]));
   const workers: ProviderFirstWorker[] = (workersResult.data ?? []).filter((worker) => allowed(worker.location_id) && worker.dropx_id).map((worker) => {
     const mapping = mappingByWorkforce.get(worker.id);
     return { id: worker.id, dropxId: String(worker.dropx_id), fullName: String(worker.full_name), stationId: String(worker.location_id ?? ""), providerId: mapping?.provider_id ?? "", dateOfJoin: String(worker.date_of_join ?? ""), mappingId: mapping?.id ?? "", paymentMethodId: mapping?.payment_method_id ?? "", paymentValues: Object.fromEntries(Object.entries(mapping?.payment_values ?? {}).map(([key, value]) => [key, String(value)])), effectiveFrom: mapping?.effective_from ?? String(worker.date_of_join ?? ""), effectiveTo: mapping?.effective_to ?? "", mappedProviderMemberId: mapping?.provider_member_id ?? "", locationLabel: stationLabelById.get(String(worker.location_id ?? "")) ?? "No location", onboardingStatus: String(worker.onboarding_status ?? "") };
