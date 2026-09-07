@@ -52,10 +52,7 @@ function namesMateriallyMatch(providerName: string, dropxName: string) {
   const providerTokens = new Set(nameTokens(providerName));
   const dropxTokens = new Set(nameTokens(dropxName));
   if (!providerTokens.size || !dropxTokens.size) return false;
-  const matching = Array.from(providerTokens).filter((token) => dropxTokens.has(token)).length;
-  const smaller = Math.min(providerTokens.size, dropxTokens.size);
-  const larger = Math.max(providerTokens.size, dropxTokens.size);
-  return matching >= 2 && matching === smaller && matching / larger >= 2 / 3;
+  return Array.from(providerTokens).some((token) => token.length >= 3 && dropxTokens.has(token));
 }
 
 function isMappedToAnotherMember(row: ProviderFirstMappingRow, worker: ProviderFirstWorker | undefined) {
@@ -116,7 +113,7 @@ export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paym
   function validate(row: ProviderFirstMappingRow, index: number) {
     if (!row.workforceId) return `Row ${index + 1}: Select a DropX workforce ID.`;
     if (isMappedToAnotherMember(row, workers.find((worker) => worker.id === row.workforceId))) return `Row ${index + 1}: This DropX ID is already mapped to another Provider Member ID.`;
-    if (!namesMateriallyMatch(row.providerMemberName, row.dropxName)) return `Row ${index + 1}: Provider member name does not materially match the selected DropX name.`;
+    if (!namesMateriallyMatch(row.providerMemberName, row.dropxName)) return `Row ${index + 1}: Name mismatch.`;
     if (!row.providerId) return `Row ${index + 1}: The selected location has no provider.`;
     if (!row.paymentMethodId) return `Row ${index + 1}: Payment method is required.`;
     if (!row.effectiveFrom) return `Row ${index + 1}: Effective from is required.`;
@@ -171,7 +168,7 @@ export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paym
             <div className="mapping-field mapping-payment-method-select"><span className="mapping-field-label">Payment method</span><SearchableSelect disabled={!canEdit || !row.workforceId} name={`rows[${index}][payment_method_id]`} onValueChange={(value) => update(index, { paymentMethodId: value, paymentValues: {} })} options={paymentOptions} placeholder="Search payment method" required value={row.paymentMethodId} /></div>
             {components.map((component) => <label key={component.code}>{component.label}<input className="worksheet-input" disabled={!canEdit || !row.workforceId} min="0" onChange={(event) => update(index, { paymentValues: { ...row.paymentValues, [component.code]: event.target.value } })} placeholder="0.00" step="0.01" type="number" value={row.paymentValues[component.code] ?? ""} /></label>)}
             <div className="mapping-period-row"><label>Effective from<input className="worksheet-input" disabled={!canEdit || !row.workforceId} name={`rows[${index}][effective_from]`} onChange={(event) => update(index, { effectiveFrom: event.target.value })} type="date" value={row.effectiveFrom} /></label><label>Effective to<input className="worksheet-input" disabled={!canEdit || !row.workforceId} name={`rows[${index}][effective_to]`} onChange={(event) => update(index, { effectiveTo: event.target.value })} type="date" value={row.effectiveTo} /></label></div>
-            {row.workforceId && !namesMateriallyMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch: “{row.providerMemberName.split("/")[0].trim()}” does not sufficiently match “{row.dropxName}”. Save is blocked.</div> : null}
+            {row.workforceId && !namesMateriallyMatch(row.providerMemberName, row.dropxName) ? <div className="mapping-row-error">Name mismatch</div> : null}
             {mappingConflict ? <div className="mapping-row-error">This DropX ID is already mapped to Provider Member ID {selectedWorker?.mappedProviderMemberId}. Select another DropX ID. Save is blocked.</div> : null}
             {errors[index] ? <div className="mapping-row-error">{errors[index]}</div> : null}
           </div>

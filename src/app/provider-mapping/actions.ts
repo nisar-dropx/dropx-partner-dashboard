@@ -96,13 +96,9 @@ function providerHolderMatches(holderName: string, workerName: string) {
   const holderTokens = new Set(providerNameTokens(holderName));
   const workerTokens = new Set(providerNameTokens(workerName));
   if (!holderTokens.size || !workerTokens.size) return false;
-  const matchingTokens = Array.from(holderTokens).filter((token) => workerTokens.has(token)).length;
-  const smallerNameSize = Math.min(holderTokens.size, workerTokens.size);
-  const largerNameSize = Math.max(holderTokens.size, workerTokens.size);
-
-  return matchingTokens >= 2
-    && matchingTokens === smallerNameSize
-    && matchingTokens / largerNameSize >= 2 / 3;
+  // Provider feeds commonly omit a first/last name or use a slightly
+  // different spelling. One substantial shared name token is sufficient.
+  return Array.from(holderTokens).some((token) => token.length >= 3 && workerTokens.has(token));
 }
 
 function normalizedHeader(value: unknown) {
@@ -461,7 +457,7 @@ async function saveExecutiveMappingRow(
     throw new Error(`Row ${index + 1}: No uploaded holder was found for this Provider Member ID.`);
   }
   if (!dropxName || !providerHolderMatches(uploadedHolderName, dropxName)) {
-    throw new Error(`Row ${index + 1}: Uploaded holder name does not match the DropX name.`);
+    throw new Error(`Row ${index + 1}: Name mismatch.`);
   }
   if (sourceType === "contractor") {
     const contractorDesignation = String((worker as { designation?: string | null }).designation ?? "").trim().toLowerCase();
