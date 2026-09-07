@@ -524,17 +524,6 @@ export async function POST(request: Request) {
     if (reasonResult.data.comment_required && comments.length < 3) throw new Error("Comments are required for this resignation reason.");
     if (existingResult.data?.length) throw new Error("An active exit request already exists.");
 
-    // Prefer storing Athul-style people profiles as employees when the worker id is an employee row.
-    let workerType = context.workerType;
-    let workerId = context.workerId;
-    if (workerType === "contractor") {
-      const employeeMatch = await db().from("employees").select("id").eq("company_id", context.account.companyId).eq("id", context.workerId).maybeSingle();
-      if (employeeMatch.data?.id) {
-        workerType = "employee";
-        workerId = employeeMatch.data.id;
-      }
-    }
-
     const approvalRoute = await configuredApprovalRoute(context, "resignation");
     const approvalRows = approvalRoute.rows;
 
@@ -544,9 +533,9 @@ export async function POST(request: Request) {
     const insert = {
       company_id: context.account.companyId,
       case_number: caseNumber,
-      employee_id: workerType === "employee" ? workerId : null,
-      contractor_id: workerType === "contractor" ? workerId : null,
-      worker_type: workerType,
+      employee_id: context.workerType === "employee" ? context.workerId : null,
+      contractor_id: context.workerType === "contractor" ? context.workerId : null,
+      worker_type: context.workerType,
       source: "employee",
       scenario: "resignation",
       reason_id: reasonResult.data.id,
