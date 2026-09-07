@@ -12,7 +12,7 @@ import {
   resolveExpenseClaimRequestAssignees
 } from "../../../../src/lib/connect-expense-data";
 import { notifyExpenseUser } from "../../../../src/lib/connect-expense-notifications";
-import { connectReporteeMatches, loadConnectReporteeAccess, normalizeConnectReporteeScope, type ConnectReporteeAccess } from "../../../../src/lib/connect-reportee-scope";
+import { loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
 import { mergeExpenseReceiptsToPdf } from "../../../../src/lib/merge-expense-receipts";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
@@ -38,23 +38,20 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>,
   return requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
 }
 
-async function approvalPayload(companyId: string, userId: string | null, reportees: ConnectReporteeAccess) {
+async function approvalPayload(companyId: string, userId: string | null) {
   if (!userId) return [];
   const result = await db().from("hr_expense_approval_steps")
     .select("id,claim_id,step_order,step_name,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
     .eq("company_id", companyId).eq("approver_user_id", userId).eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
-  const scopedApprovals = (result.data ?? []).flatMap((step) => {
+  // Claim steps are assigned explicitly (RM / finance head). Do not require org-chart reportee scope —
+  // finance L2 is often outside the claimant's reporting tree.
+  return Promise.all((result.data ?? []).flatMap((step) => {
     const claim = relation(step.hr_expense_claims);
-    const profileType = claim?.contractor_id ? "contractor" : "employee";
-    const profileId = claim?.contractor_id ?? claim?.employee_id;
-    if (!claim || !connectReporteeMatches(reportees, profileType, profileId)) return [];
-    return [{ step, claim }];
-  });
-  return Promise.all(scopedApprovals.map(async ({ step, claim }) => {
+    if (!claim) return [];
     const employee = relation(claim.employees);
     const contractor = relation(claim.contractors);
-    return {
+    return [(async () => ({
       kind: "claim" as const,
       ...step,
       claim: {
@@ -63,7 +60,7 @@ async function approvalPayload(companyId: string, userId: string | null, reporte
         requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
         attachments: await signedAttachments(claim.hr_expense_attachments)
       }
-    };
+    }))()];
   }));
 }
 
@@ -93,7 +90,7 @@ async function preRequestApprovalPayload(companyId: string, userId: string | nul
   });
 }
 
-async function claimPayload(account: ConnectAccount, reportees: ConnectReporteeAccess) {
+async function claimPayload(account: ConnectAccount) {
   const identity = await expenseIdentity(account);
   const workerColumn = identity.workerType === "employee" ? "employee_id" : "contractor_id";
   const [categories, payout, claimsResult, requestsResult] = await Promise.all([
@@ -108,22 +105,31 @@ async function claimPayload(account: ConnectAccount, reportees: ConnectReporteeA
   ]);
   if (claimsResult.error) throw new Error(claimsResult.error.message ?? "Unable to load reimbursements.");
   if (requestsResult.error) throw new Error(requestsResult.error.message ?? "Unable to load reimbursement requests.");
+  const stepUserIds = [...new Set((claimsResult.data ?? []).flatMap((claim) =>
+    (claim.hr_expense_approval_steps ?? []).map((step) => step.approver_user_id).filter(Boolean)
+  ))];
+  const assigneeUserIds = [...new Set((requestsResult.data ?? []).flatMap((request) =>
+    (request.hr_expense_claim_request_assignees ?? []).map((assignee) => assignee.approver_user_id).filter(Boolean)
+  ))];
+  const profileIds = [...new Set([...stepUserIds, ...assigneeUserIds])];
+  const profiles = profileIds.length
+    ? await db().from("profiles").select("id,full_name").eq("company_id", account.companyId).in("id", profileIds)
+    : { data: [], error: null };
+  if (profiles.error) throw new Error(profiles.error.message);
+  const nameByUserId = new Map((profiles.data ?? []).map((profile) => [profile.id, profile.full_name ?? "Approver"]));
   const claims = await Promise.all((claimsResult.data ?? []).map(async (claim) => ({
     ...claim,
     payment: relation(claim.payment_requests),
     items: claim.hr_expense_items,
-    steps: [...(claim.hr_expense_approval_steps ?? [])].sort((a, b) => a.step_order - b.step_order),
+    steps: [...(claim.hr_expense_approval_steps ?? [])]
+      .sort((a, b) => a.step_order - b.step_order)
+      .map((step) => ({
+        ...step,
+        approver_name: nameByUserId.get(step.approver_user_id) ?? "Approver"
+      })),
     events: [...(claim.hr_expense_events ?? [])].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)),
     attachments: await signedAttachments(claim.hr_expense_attachments)
   })));
-  const assigneeUserIds = [...new Set((requestsResult.data ?? []).flatMap((request) =>
-    (request.hr_expense_claim_request_assignees ?? []).map((assignee) => assignee.approver_user_id).filter(Boolean)
-  ))];
-  const profiles = assigneeUserIds.length
-    ? await db().from("profiles").select("id,full_name").eq("company_id", account.companyId).in("id", assigneeUserIds)
-    : { data: [], error: null };
-  if (profiles.error) throw new Error(profiles.error.message);
-  const nameByUserId = new Map((profiles.data ?? []).map((profile) => [profile.id, profile.full_name ?? "Approver"]));
   const preRequests = (requestsResult.data ?? []).map((request) => ({
     ...request,
     assignees: (request.hr_expense_claim_request_assignees ?? []).map((assignee) => ({
@@ -132,7 +138,7 @@ async function claimPayload(account: ConnectAccount, reportees: ConnectReporteeA
     }))
   }));
   const [approvals, preRequestApprovals] = await Promise.all([
-    approvalPayload(account.companyId, identity.userId, reportees),
+    approvalPayload(account.companyId, identity.userId),
     preRequestApprovalPayload(account.companyId, identity.userId)
   ]);
   return { categories, payout, claims, preRequests, approvals, preRequestApprovals };
@@ -145,7 +151,7 @@ export async function GET(request: Request) {
     const reportees = await loadConnectReporteeAccess(account, scope);
     if (account.profileType === "user") {
       const [approvals, preRequestApprovals] = await Promise.all([
-        approvalPayload(account.companyId, account.id, reportees),
+        approvalPayload(account.companyId, account.id),
         preRequestApprovalPayload(account.companyId, account.id)
       ]);
       return NextResponse.json({
@@ -158,7 +164,7 @@ export async function GET(request: Request) {
         scope
       }, { headers: { "Cache-Control": "private, no-store" } });
     }
-    const payload = await claimPayload(account, reportees);
+    const payload = await claimPayload(account);
     return NextResponse.json({ ...payload, scope }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load reimbursements." }, { status: 400 });

@@ -196,8 +196,8 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
           ...(claim.rejection_reason ? [{ label: "Rejection reason", value: claim.rejection_reason }] : []),
           ...(claim.payment?.utr_cin ? [{ label: "UTR", value: claim.payment.utr_cin }] : [])
         ],
-        steps: (claim.steps ?? []).map((step: { step_name: string; status: string; decision_note?: string | null }) => ({
-          name: step.step_name,
+        steps: (claim.steps ?? []).map((step: { step_name: string; status: string; approver_name?: string | null; decision_note?: string | null }) => ({
+          name: step.approver_name ? `${step.approver_name} · ${step.step_name}` : step.step_name,
           status: step.status,
           note: step.decision_note
         }))

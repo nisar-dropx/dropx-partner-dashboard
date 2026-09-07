@@ -124,36 +124,43 @@ export async function resolveExpenseApprovers(account: ConnectAccount, amount: n
       }))
     };
   }
-  const steps: Array<{ step_order: number; step_name: string; approver_user_id: string; approver_person_id: string }> = [];
-  const seen = new Set<string>([identity.personId]);
-  let subjectAssignmentId = identity.assignment.id;
-  for (let level = 1; level <= policy.manager_levels; level += 1) {
-    const relationship = await db().from("hr_reporting_relationships").select("manager_assignment_id")
-      .eq("company_id", account.companyId).eq("subject_assignment_id", subjectAssignmentId)
-      .eq("relationship_type", "solid_line").eq("is_primary", true)
-      .lte("effective_from", identity.today).or(`effective_to.is.null,effective_to.gte.${identity.today}`)
-      .order("effective_from", { ascending: false }).limit(1).maybeSingle();
-    if (relationship.error) throw new Error(relationship.error.message);
-    if (!relationship.data) {
-      if (policy.allow_short_manager_chain && steps.length > 0) break;
-      throw new Error(`Reporting manager level ${level} is not configured for this reimbursement policy.`);
-    }
-    const assignment = await db().from("hr_work_assignments").select("id,engagement_id,position_title")
-      .eq("company_id", account.companyId).eq("id", relationship.data.manager_assignment_id).maybeSingle();
-    if (assignment.error || !assignment.data) throw new Error(`Reporting manager level ${level} is not active.`);
-    const engagement = await db().from("hr_engagements").select("person_id,status")
-      .eq("company_id", account.companyId).eq("id", assignment.data.engagement_id).maybeSingle();
-    if (engagement.error || !engagement.data || engagement.data.status !== "active") throw new Error(`Reporting manager level ${level} is not active.`);
-    if (seen.has(engagement.data.person_id)) throw new Error("The reporting hierarchy contains a cycle.");
-    seen.add(engagement.data.person_id);
-    const link = await db().from("hr_user_person_links").select("user_id,status")
-      .eq("company_id", account.companyId).eq("person_id", engagement.data.person_id).maybeSingle();
-    if (link.error || !link.data || link.data.status !== "active") throw new Error(`${assignment.data.position_title} does not have an active One/People login.`);
-    steps.push({ step_order: level, step_name: `${assignment.data.position_title} approval`, approver_user_id: link.data.user_id, approver_person_id: engagement.data.person_id });
-    subjectAssignmentId = assignment.data.id;
+
+  // Default claim chain when no Approval Workflow Master route exists:
+  // L1 reporting manager → L2 finance head (Nisar / Finance Manager).
+  const exclude = new Set<string>();
+  if (identity.userId) exclude.add(identity.userId);
+  const manager = await resolveImmediateReportingManager(account, identity);
+  if (!manager?.approver_person_id) throw new Error("Reporting manager is not configured for this reimbursement claim.");
+  exclude.add(manager.approver_user_id);
+  const finance = await resolveFinanceHeadAssignee(account, exclude);
+  if (!finance) throw new Error("Finance head is not configured for this reimbursement claim.");
+  let financePersonId = finance.approver_person_id;
+  if (!financePersonId) {
+    const link = await db().from("hr_user_person_links").select("person_id,status")
+      .eq("company_id", account.companyId).eq("user_id", finance.approver_user_id).maybeSingle();
+    if (link.error) throw new Error(link.error.message);
+    financePersonId = link.data?.status === "active" ? link.data.person_id : null;
   }
-  if (!steps.length) throw new Error("No reporting manager is configured. Configure a reporting line or policy fallback before submission.");
-  return { identity, policy, steps };
+  if (!financePersonId) throw new Error("Finance head does not have an active People profile link.");
+
+  return {
+    identity,
+    policy,
+    steps: [
+      {
+        step_order: 1,
+        step_name: "Reporting manager approval",
+        approver_user_id: manager.approver_user_id,
+        approver_person_id: manager.approver_person_id
+      },
+      {
+        step_order: 2,
+        step_name: "Finance head approval",
+        approver_user_id: finance.approver_user_id,
+        approver_person_id: financePersonId
+      }
+    ]
+  };
 }
 
 export async function activeExpenseCategories(account: ConnectAccount) {

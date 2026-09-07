@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, FileText, IndianRupee, Plus, ReceiptText, RotateCcw, Trash2, Upload, X } from "lucide-react";
+import { Check, ChevronDown, ClipboardList, FileText, Plus, ReceiptText, RotateCcw, Trash2, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { todayInIndia } from "@/lib/india-date";
 import type { AppAccount } from "./connect-profile-app";
@@ -15,7 +15,7 @@ type PreRequest = {
 type Claim = {
   id: string; claim_no: string; claim_request_id?: string | null; purpose: string; trip_from?: string | null; trip_to?: string | null; total_claimed: number; total_approved?: number | null; status: string; return_reason?: string | null; rejection_reason?: string | null;
   items: Array<{ id: string; expense_date: string; merchant?: string | null; description: string; amount: number; approved_amount?: number | null; hr_expense_categories?: { id: string; name: string; code: string } | Array<{ id: string; name: string; code: string }> | null }>;
-  steps: Array<{ id: string; step_order: number; step_name: string; status: string; decision_note?: string | null; decided_at?: string | null }>;
+  steps: Array<{ id: string; step_order: number; step_name: string; status: string; approver_name?: string | null; decision_note?: string | null; decided_at?: string | null }>;
   events: Array<{ id: string; event_type: string; actor_name?: string | null; actor_role?: string | null; comments?: string | null; created_at: string; metadata?: Record<string, unknown> }>;
   attachments: Array<{ id: string; item_id?: string | null; file_name: string; content_type?: string | null; url?: string | null }>;
   payment?: { request_no: string; status: string; approval_status?: string | null; utr_cin?: string | null; bank_status?: string | null; bank_processing_remarks?: string | null; processed_at?: string | null } | null;
@@ -332,12 +332,18 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
           </section>
           <section>
             <h3>Tracking</h3>
-            <div className="dx-expense-timeline">{claim.events.map((event) => <div key={event.id}>
-              <i>{event.event_type.includes("reject") ? <X /> : event.event_type.includes("return") ? <RotateCcw /> : event.event_type.includes("payment") ? <IndianRupee /> : <Check />}</i>
+            <div className="dx-expense-timeline">{(claim.steps.length ? claim.steps : claim.events.map((event) => ({
+              id: event.id,
+              step_name: statusLabel(event.event_type),
+              status: event.event_type.includes("reject") ? "rejected" : event.event_type.includes("return") ? "returned" : event.event_type.includes("submit") ? "submitted" : "approved",
+              approver_name: event.actor_name || "System",
+              decision_note: event.comments,
+              decided_at: event.created_at
+            }))).map((step) => <div key={step.id}>
+              <i>{step.status === "rejected" ? <X /> : step.status === "returned" ? <RotateCcw /> : step.status === "pending" || step.status === "waiting" ? <ClipboardList /> : step.status === "submitted" ? <ReceiptText /> : <Check />}</i>
               <span>
-                <strong>{statusLabel(event.event_type)}</strong>
-                <small>{event.actor_name || "System"}{event.actor_role ? ` · ${event.actor_role}` : ""} · {dateTime(event.created_at)}</small>
-                {event.comments ? <p>{event.comments}</p> : null}
+                <strong>{step.approver_name ? `${step.approver_name} · ${step.step_name}` : step.step_name}</strong>
+                <small>{statusLabel(step.status)}{step.decided_at ? ` · ${dateTime(step.decided_at)}` : ""}{step.decision_note ? ` · ${step.decision_note}` : ""}</small>
               </span>
             </div>)}</div>
           </section>
