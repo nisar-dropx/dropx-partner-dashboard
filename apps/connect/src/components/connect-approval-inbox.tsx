@@ -75,6 +75,9 @@ type WfhApproval = {
   requesterName: string;
   requesterCode: string;
   profileType: "employee" | "contractor";
+  managerName?: string | null;
+  managerNote?: string | null;
+  queue?: "manager" | "hr";
 };
 
 type LocationSupportPackage = {
@@ -317,6 +320,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [preRequestApprovals, setPreRequestApprovals] = useState<PreRequestApproval[]>([]);
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
   const [wfhApprovals, setWfhApprovals] = useState<WfhApproval[]>([]);
+  const [wfhHrApprovals, setWfhHrApprovals] = useState<WfhApproval[]>([]);
   const [attendanceApprovals, setAttendanceApprovals] = useState<AttendanceApproval[]>([]);
   const [attendanceHrApprovals, setAttendanceHrApprovals] = useState<AttendanceApproval[]>([]);
   const [rosterApprovals, setRosterApprovals] = useState<RosterApproval[]>([]);
@@ -351,6 +355,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       setPreRequestApprovals(nextPreRequests);
       setLeaveApprovals(leavePayload.leaveApprovals ?? []);
       setWfhApprovals(leavePayload.wfhApprovals ?? []);
+      setWfhHrApprovals(leavePayload.wfhHrApprovals ?? []);
       setAttendanceApprovals(leavePayload.attendanceApprovals ?? []);
       setAttendanceHrApprovals(leavePayload.attendanceHrApprovals ?? []);
       setRosterApprovals(leavePayload.rosterApprovals ?? []);
@@ -366,7 +371,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
           if ((leavePayload.rosterSwapApprovals ?? []).length || (leavePayload.rosterApprovals ?? []).length) return "rosters";
           if ((leavePayload.exitApprovals ?? []).length || (leavePayload.exitWithdrawalApprovals ?? []).length) return "exits";
           if ((leavePayload.locationSupportPackages ?? []).length) return "location-integrity";
-          if ((leavePayload.wfhApprovals ?? []).length) return "wfh";
+          if ((leavePayload.wfhApprovals ?? []).length || (leavePayload.wfhHrApprovals ?? []).length) return "wfh";
         }
         return current;
       });
@@ -432,7 +437,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
     finally { setSaving(false); }
   }
 
-  async function decideWfh(requestId: string, decision: "approved" | "rejected") {
+  async function decideWfh(requestId: string, decision: "approved" | "rejected" | "returned", queue: "manager" | "hr" = "manager") {
     setSaving(true); setError(""); setNotice("");
     try {
       const response = await fetch("/api/connect/approvals", {
@@ -442,8 +447,10 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
           accountId: account.id,
           profileType: account.profileType,
           wfhRequestId: requestId,
+          wfhQueue: queue,
           decision,
-          note: notes[`wfh:${requestId}`] ?? ""
+          note: notes[`wfh:${requestId}`] ?? "",
+          ...(queue === "hr" ? { defaultIn: "09:00", defaultOut: "18:00" } : {})
         })
       });
       const payload = await response.json();
@@ -595,7 +602,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const reimbursementCount = reimbursements.length + preRequestApprovals.length;
   const exitCount = exitApprovals.length + exitWithdrawalApprovals.length;
   const scopeName = reporteeScope === "immediate" ? "immediate reportees" : "entire reporting team";
-  const othersCount = leaveApprovals.length + reimbursementCount + wfhApprovals.length + exitCount;
+  const othersCount = leaveApprovals.length + reimbursementCount + wfhApprovals.length + wfhHrApprovals.length + exitCount;
   const othersActive = section === "time-off" || section === "reimbursements" || section === "wfh" || section === "exits";
   const othersLabel = section === "time-off" ? "Time off" : section === "reimbursements" ? "Reimbursements" : section === "wfh" ? "WFH" : section === "exits" ? "Exits" : "Others";
 
@@ -681,7 +688,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       <header className="dx-page-intro">
         <small>Manager workspace</small>
         <h1>Approval inbox</h1>
-        <p>Shows steps assigned to your One login. Attendance HR finalization stays in People.</p>
+        <p>Assigned approval steps plus HR attendance/WFH finalization in your People attendance scope — managers no longer need People for these queues.</p>
       </header>
       <div className="dx-approval-scope">
         <div aria-label="Choose reportee view" className="dx-approval-scope-switch" role="group">
@@ -737,7 +744,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
                   Reimbursements<span>{reimbursementCount}</span>
                 </button>
                 <button className={section === "wfh" ? "active" : ""} onClick={() => selectSection("wfh")} type="button">
-                  WFH<span>{wfhApprovals.length}</span>
+                  WFH<span>{wfhApprovals.length + wfhHrApprovals.length}</span>
                 </button>
                 <button className={section === "exits" ? "active" : ""} onClick={() => selectSection("exits")} type="button">
                   Exits<span>{exitCount}</span>
@@ -763,7 +770,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
             Location<span>{supportPackages.length}</span>
           </button>
           <button className={section === "wfh" ? "active" : ""} onClick={() => selectSection("wfh")} type="button">
-            WFH<span>{wfhApprovals.length}</span>
+            WFH<span>{wfhApprovals.length + wfhHrApprovals.length}</span>
           </button>
           <button className={section === "exits" ? "active" : ""} onClick={() => selectSection("exits")} type="button">
             Exits<span>{exitCount}</span>
@@ -802,29 +809,68 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
 
       {!loading && section === "wfh" ? (
         <div className="dx-approval-list">
-          {wfhApprovals.length ? wfhApprovals.map((approval) => (
-            <article className="dx-approval-card" key={approval.id}>
-              <ApprovalHead
-                badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
-                eyebrow={`${approval.requestNo} · ${approval.stepName}`}
-                meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                name={approval.requesterName}
-              />
-              <dl className="dx-approval-facts">
-                <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
-                <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
-              </dl>
-              <ApprovalNote id={`wfh:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`wfh:${approval.requestId}`, value)} placeholder="Note for worker (optional)" />
-              <ApprovalToolbar
-                onApprove={() => void decideWfh(approval.requestId, "approved")}
-                onReject={() => void decideWfh(approval.requestId, "rejected")}
-                saving={saving}
-                showReturn={false}
-              />
-            </article>
-          )) : (
-            <div className="dx-empty"><Home /><strong>No WFH approvals</strong><small>No work-from-home steps assigned to you are waiting.</small></div>
-          )}
+          {wfhApprovals.length ? (
+            <>
+              <header className="dx-approval-section-head">
+                <strong>Reporting manager</strong>
+                <span>{wfhApprovals.length} pending</span>
+              </header>
+              {wfhApprovals.map((approval) => (
+                <article className="dx-approval-card" key={approval.id}>
+                  <ApprovalHead
+                    badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+                    eyebrow={`${approval.requestNo} · ${approval.stepName}`}
+                    meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                    name={approval.requesterName}
+                  />
+                  <dl className="dx-approval-facts">
+                    <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
+                    <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
+                  </dl>
+                  <ApprovalNote id={`wfh:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`wfh:${approval.requestId}`, value)} placeholder="Note for worker (optional)" />
+                  <ApprovalToolbar
+                    onApprove={() => void decideWfh(approval.requestId, "approved", "manager")}
+                    onReject={() => void decideWfh(approval.requestId, "rejected", "manager")}
+                    saving={saving}
+                    showReturn={false}
+                  />
+                </article>
+              ))}
+            </>
+          ) : null}
+          {wfhHrApprovals.length ? (
+            <>
+              <header className="dx-approval-section-head">
+                <strong>HR finalization</strong>
+                <span>{wfhHrApprovals.length} pending</span>
+              </header>
+              {wfhHrApprovals.map((approval) => (
+                <article className="dx-approval-card" key={`hr:${approval.id}`}>
+                  <ApprovalHead
+                    badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+                    eyebrow={`${approval.requestNo} · Present · WFH`}
+                    meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                    name={approval.requesterName}
+                  />
+                  <dl className="dx-approval-facts">
+                    <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
+                    <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
+                    {approval.managerName ? <div><dt>Manager</dt><dd>{approval.managerName}{approval.managerNote ? ` · ${approval.managerNote}` : ""}</dd></div> : null}
+                  </dl>
+                  <ApprovalNote id={`wfh:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`wfh:${approval.requestId}`, value)} placeholder="Note when returning or rejecting" />
+                  <ApprovalToolbar
+                    onApprove={() => void decideWfh(approval.requestId, "approved", "hr")}
+                    onReject={() => void decideWfh(approval.requestId, "rejected", "hr")}
+                    onReturn={() => void decideWfh(approval.requestId, "returned", "hr")}
+                    saving={saving}
+                  />
+                </article>
+              ))}
+            </>
+          ) : null}
+          {!wfhApprovals.length && !wfhHrApprovals.length ? (
+            <div className="dx-empty"><Home /><strong>No WFH approvals</strong><small>No work-from-home steps or HR finalizations in your scope are waiting.</small></div>
+          ) : null}
         </div>
       ) : null}
 
@@ -849,7 +895,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
             </>
           ) : null}
           {!attendanceApprovals.length && !attendanceHrApprovals.length ? (
-            <div className="dx-empty"><CalendarClock /><strong>No attendance regularizations</strong><small>No attendance steps assigned to you are waiting.</small></div>
+            <div className="dx-empty"><CalendarClock /><strong>No attendance regularizations</strong><small>No manager steps or HR finalizations in your attendance scope are waiting.</small></div>
           ) : null}
         </div>
       ) : null}
@@ -1105,7 +1151,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
         </div>
       ) : null}
 
-      <p className="dx-approval-footnote"><ClipboardCheck /> Assigned steps for your One account only. Attendance HR finalization stays in People. Location checks still follow the reporting-tree toggle above.</p>
+      <p className="dx-approval-footnote"><ClipboardCheck /> Assigned steps for your One account, plus HR attendance/WFH finalization when you have People attendance.approve scope. Location checks still follow the reporting-tree toggle above.</p>
     </section>
   );
 }

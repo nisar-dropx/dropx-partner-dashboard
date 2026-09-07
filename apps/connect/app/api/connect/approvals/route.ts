@@ -4,7 +4,7 @@ import { resolveConnectActorUserId, resolveConnectActorUserIds } from "../../../
 import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval, listConnectReturnedRosters, resubmitConnectReturnedRoster, listConnectExitApprovals, decideConnectExitApproval, listConnectExitWithdrawalApprovals, decideConnectExitWithdrawal } from "../../../../src/lib/connect-manager-approvals";
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
 import { loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
-import { decideConnectWfhApproval, listConnectWfhApprovals } from "../../../../src/lib/connect-wfh-data";
+import { decideConnectWfhApproval, decideConnectWfhHrApproval, listConnectWfhApprovals, listConnectWfhHrApprovals } from "../../../../src/lib/connect-wfh-data";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
@@ -77,7 +77,7 @@ export async function GET(request: Request) {
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     const reportees = await loadConnectReporteeAccess(account, scope);
     const approverUserIds = await resolveConnectActorUserIds(account);
-    const [leaveApprovals, wfhApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals] = await Promise.all([
+    const [leaveApprovals, wfhApprovals, wfhHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals] = await Promise.all([
       listLeaveApprovals(account),
       approverUserIds.length
         ? listConnectWfhApprovals({
@@ -87,6 +87,7 @@ export async function GET(request: Request) {
             matchesReportee: () => true
           })
         : Promise.resolve([]),
+      listConnectWfhHrApprovals(account),
       listConnectLocationSupportPackages(account, reportees),
       listConnectAttendanceApprovals(account, reportees),
       listConnectAttendanceHrApprovals(account, reportees),
@@ -96,7 +97,7 @@ export async function GET(request: Request) {
       listConnectExitApprovals(account),
       listConnectExitWithdrawalApprovals(account)
     ]);
-    return NextResponse.json({ scope, leaveApprovals, wfhApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({ scope, leaveApprovals, wfhApprovals, wfhHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load approvals." }, { status: 400 });
   }
@@ -145,9 +146,24 @@ export async function PATCH(request: Request) {
     }
     const wfhRequestId = clean(body.wfhRequestId);
     if (wfhRequestId) {
-      const approverUserId = await requireActorUserId(account, "approve work from home");
       const decision = clean(body.decision);
       const note = clean(body.note);
+      const queue = clean(body.wfhQueue);
+      if (queue === "hr") {
+        if (decision !== "approved" && decision !== "returned" && decision !== "rejected") {
+          throw new Error("Choose Apply WFH, Return, or Reject.");
+        }
+        const result = await decideConnectWfhHrApproval({
+          account,
+          requestId: wfhRequestId,
+          decision: decision as "approved" | "returned" | "rejected",
+          note,
+          defaultIn: clean(body.defaultIn) || "09:00",
+          defaultOut: clean(body.defaultOut) || "18:00"
+        });
+        return NextResponse.json({ ok: true, notice: result.notice });
+      }
+      const approverUserId = await requireActorUserId(account, "approve work from home");
       if (decision !== "approved" && decision !== "rejected") throw new Error("Choose Approve or Reject.");
       const result = await decideConnectWfhApproval({
         companyId: account.companyId,

@@ -2,6 +2,12 @@ import "server-only";
 
 import { isWfhHardBlockedDesignation } from "./approval-designation-labels";
 import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
+import type { ConnectAccount } from "./connect-auth";
+import {
+  connectWorkforceMatches,
+  loadConnectAccessibleWorkforceIds,
+  loadConnectAttendanceApproveScope
+} from "./connect-people-attendance-access";
 import { connectWfhEligible, loadConnectWfhPolicies, type ConnectWfhPolicy } from "./connect-wfh-access";
 import { supabaseAdmin } from "./supabase-admin";
 
@@ -381,4 +387,101 @@ export async function decideConnectWfhApproval(input: {
           ? "WFH request rejected."
           : "WFH decision saved."
   };
+}
+
+export async function listConnectWfhHrApprovals(account: ConnectAccount) {
+  const scope = await loadConnectAttendanceApproveScope(account);
+  if (!scope.canFinalize) return [];
+  const access = await loadConnectAccessibleWorkforceIds(account, scope);
+  if (!access.allowAll && !(access.employeeIds?.size || access.contractorIds?.size)) return [];
+
+  const result = await db().from("hr_wfh_requests")
+    .select("id,request_no,profile_type,profile_id,worker_code,worker_name,start_date,end_date,reason,manager_name,manager_note,manager_decided_at,requested_at,status")
+    .eq("company_id", account.companyId)
+    .eq("status", "pending_hr")
+    .order("manager_decided_at");
+  if (result.error) {
+    if (/does not exist|schema cache/i.test(result.error.message)) return [];
+    throw new Error(result.error.message);
+  }
+
+  return (result.data ?? []).flatMap((request) => {
+    if (!connectWorkforceMatches(access, String(request.profile_type), String(request.profile_id))) return [];
+    return [{
+      id: request.id,
+      requestId: request.id,
+      requestNo: request.request_no,
+      stepName: "HR finalization",
+      stepOrder: 0,
+      startDate: request.start_date,
+      endDate: request.end_date,
+      days: daysBetween(String(request.start_date), String(request.end_date)),
+      reason: request.reason,
+      requesterName: request.worker_name,
+      requesterCode: request.worker_code ?? "",
+      profileType: request.profile_type,
+      managerName: request.manager_name,
+      managerNote: request.manager_note,
+      queue: "hr" as const
+    }];
+  });
+}
+
+export async function decideConnectWfhHrApproval(input: {
+  account: ConnectAccount;
+  requestId: string;
+  decision: "approved" | "returned" | "rejected";
+  note?: string;
+  defaultIn?: string;
+  defaultOut?: string;
+}) {
+  const scope = await loadConnectAttendanceApproveScope(input.account);
+  const actorUserId = scope.actorUserIds[0] ?? null;
+  if (!actorUserId || !scope.canFinalize) {
+    throw new Error("WFH finalization is not enabled for this account.");
+  }
+  if (!/^[0-9a-f-]{36}$/i.test(input.requestId) || !["approved", "returned", "rejected"].includes(input.decision)) {
+    throw new Error("Choose Apply WFH, Return, or Reject.");
+  }
+  if (input.decision !== "approved" && String(input.note ?? "").trim().length < 3) {
+    throw new Error("Add a note when returning or rejecting WFH.");
+  }
+  const defaultIn = input.defaultIn ?? "09:00";
+  const defaultOut = input.defaultOut ?? "18:00";
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(defaultIn) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(defaultOut)) {
+    throw new Error("Choose valid fallback IN and OUT times.");
+  }
+
+  const access = await loadConnectAccessibleWorkforceIds(input.account, scope);
+  const existing = await db().from("hr_wfh_requests")
+    .select("id,profile_type,profile_id,status")
+    .eq("company_id", input.account.companyId)
+    .eq("id", input.requestId)
+    .maybeSingle();
+  if (existing.error || !existing.data) throw new Error(existing.error?.message ?? "WFH request was not found.");
+  if (String(existing.data.status) !== "pending_hr") {
+    throw new Error("This WFH request is no longer awaiting HR finalization.");
+  }
+  if (!connectWorkforceMatches(access, String(existing.data.profile_type), String(existing.data.profile_id))) {
+    throw new Error("This WFH request is outside your attendance scope.");
+  }
+
+  const result = await db().rpc("hr_finalize_wfh_request", {
+    p_company_id: input.account.companyId,
+    p_request_id: input.requestId,
+    p_actor_user_id: actorUserId,
+    p_decision: input.decision,
+    p_note: input.note ?? null,
+    p_reviewer_name: input.account.name ?? input.account.reference ?? "HR reviewer",
+    p_default_in: defaultIn,
+    p_default_out: defaultOut
+  });
+  if (result.error) throw new Error(result.error.message);
+  const payload = result.data as { appliedDates?: string[]; skippedDates?: unknown[] } | null;
+  if (input.decision === "approved") {
+    return {
+      notice: `WFH approved: ${payload?.appliedDates?.length ?? 0} working day(s) marked Present · WFH; ${payload?.skippedDates?.length ?? 0} date(s) skipped.`
+    };
+  }
+  return { notice: `WFH request ${input.decision}.` };
 }
