@@ -159,63 +159,11 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount, _r
 }
 
 export async function listConnectAttendanceHrApprovals(account: ConnectAccount, _reportees: ConnectReporteeAccess) {
-  const actorUserId = await approverUserId(account);
-  if (!actorUserId) return [];
-  if (!(await canConnectFinalizeAttendance(account.companyId, actorUserId))) return [];
-  const requestsResult = await db().from("attendance_regularization_requests")
-    .select("id,profile_type,profile_id,dropx_id,full_name,attendance_date,current_in_time,current_out_time,requested_in_time,requested_out_time,reason_code,remarks,attachment_path,status,created_at")
-    .eq("company_id", account.companyId).is("request_kind", null)
-    .in("status", ["pending_hr", "pending"])
-    .order("created_at");
-  if (requestsResult.error) throw new Error(requestsResult.error.message);
-  const rows = (requestsResult.data ?? []) as Array<{
-    id: string;
-    profile_type: string;
-    profile_id: string;
-    dropx_id: string | null;
-    full_name: string | null;
-    attendance_date: string;
-    current_in_time: string | null;
-    current_out_time: string | null;
-    requested_in_time: string | null;
-    requested_out_time: string | null;
-    reason_code: string;
-    remarks: string | null;
-    attachment_path: string | null;
-    status: string;
-    created_at: string;
-  }>;
-  // Company-wide pending_hr is People HR work — only Owner / HR role codes above.
-  const filtered = [];
-  for (const request of rows) {
-    if (request.status === "pending_hr") {
-      filtered.push(request);
-      continue;
-    }
-    const stepsResult = await db().from("attendance_regularization_approval_steps")
-      .select("id").eq("company_id", account.companyId).eq("request_id", request.id).limit(1);
-    if (stepsResult.error) throw new Error(stepsResult.error.message);
-    if (!(stepsResult.data ?? []).length) filtered.push(request);
-  }
-  return Promise.all(filtered.map(async (request) => ({
-    id: request.id,
-    requestId: request.id,
-    stepName: "HR finalization",
-    stepOrder: 0,
-    workerName: request.full_name || "Team member",
-    workerCode: request.dropx_id || "",
-    profileType: request.profile_type === "contractor" ? "contractor" as const : "employee" as const,
-    attendanceDate: request.attendance_date,
-    currentInTime: request.current_in_time,
-    currentOutTime: request.current_out_time,
-    requestedInTime: request.requested_in_time,
-    requestedOutTime: request.requested_out_time,
-    reasonCode: request.reason_code,
-    remarks: request.remarks,
-    evidenceUrl: await signedEvidence(request.attachment_path),
-    createdAt: request.created_at,
-    queue: "hr" as const
-  })));
+  // Do not revoke People HR / Owner roles. Those still finalize attendance in People HRMS.
+  // DropX One Approval Inbox is assignee-only — never list company-wide pending_hr here.
+  void account;
+  void _reportees;
+  return [];
 }
 
 export async function decideConnectAttendanceHrApproval(
@@ -224,36 +172,11 @@ export async function decideConnectAttendanceHrApproval(
   decisionValue: unknown,
   noteValue: unknown
 ) {
-  const actorUserId = await approverUserId(account);
-  if (!actorUserId) throw new Error("A linked People login is required to finalize attendance.");
-  if (!(await canConnectFinalizeAttendance(account.companyId, actorUserId))) {
-    throw new Error("Attendance finalization is only available to People HR / Owner roles.");
-  }
-  const requestId = clean(requestIdValue);
-  const decision = clean(decisionValue);
-  const note = clean(noteValue);
-  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !["approved", "returned", "rejected"].includes(decision)) {
-    throw new Error("Choose Apply correction, Return, or Reject.");
-  }
-  if (decision !== "approved" && note.length < 3) throw new Error("Add a note when returning or rejecting.");
-  const request = await db().from("attendance_regularization_requests").select("attachment_path")
-    .eq("company_id", account.companyId).eq("id", requestId).is("request_kind", null).maybeSingle();
-  if (request.error || !request.data) throw new Error(request.error?.message ?? "Attendance request was not found.");
-  if (decision === "approved" && !(await signedEvidence(request.data.attachment_path))) {
-    throw new Error("Correction cannot be applied. Workplace CCTV proof is missing or unavailable.");
-  }
-  const result = await db().rpc("hr_review_attendance_regularization", {
-    p_company_id: account.companyId,
-    p_request_id: requestId,
-    p_decision: decision,
-    p_review_remarks: note,
-    p_reviewer_id: actorUserId,
-    p_reviewer_name: account.name ?? account.reference ?? "HR reviewer"
-  });
-  if (result.error) throw new Error(result.error.message);
-  if (decision === "approved") return "Attendance correction applied to the register.";
-  if (decision === "returned") return "Attendance correction returned to the worker.";
-  return "Attendance correction rejected.";
+  void account;
+  void requestIdValue;
+  void decisionValue;
+  void noteValue;
+  throw new Error("Attendance HR finalization is done in People Approval Inbox, not DropX One.");
 }
 
 export async function decideConnectAttendanceApproval(account: ConnectAccount, requestIdValue: unknown, decisionValue: unknown, noteValue: unknown) {

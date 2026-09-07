@@ -23,9 +23,9 @@ const checks = [
   [
     attendance.includes('.in("approver_user_id", actorUserIds)')
       && attendance.includes("Explicit step assignment")
-      && attendance.includes("CONNECT_ATTENDANCE_HR_ROLE_CODES")
+      && attendance.includes("never list company-wide pending_hr")
       && !attendance.includes("connectReporteeMatches(reportees"),
-    "manager attendance is assignee-scoped; HR finalization is Owner/HR-role gated"
+    "manager attendance is assignee-scoped; One inbox never lists company HR finalization"
   ],
   [
     approvals.includes("Steps are assigned explicitly")

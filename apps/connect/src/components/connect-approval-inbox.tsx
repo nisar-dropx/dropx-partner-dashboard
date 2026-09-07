@@ -1105,7 +1105,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
         </div>
       ) : null}
 
-      <p className="dx-approval-footnote"><ClipboardCheck /> Assigned steps appear here for your One account. Location checks still follow the reporting-tree toggle above.</p>
+      <p className="dx-approval-footnote"><ClipboardCheck /> Assigned steps for your One account only. Attendance HR finalization stays in People. Location checks still follow the reporting-tree toggle above.</p>
     </section>
   );
 }
