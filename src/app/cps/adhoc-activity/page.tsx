@@ -4,13 +4,15 @@ import { CpsAdHocTable } from "@/components/cps-adhoc-table";
 import { PageHead } from "@/components/page-head";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { adHocMonthRange, loadAdHocActivity, validAdHocMonth } from "@/lib/ops-pulse/adhoc-activity";
+import { adHocClusterLabel, adHocDateRange, loadAdHocActivity } from "@/lib/ops-pulse/adhoc-activity";
 import { loadCodLocations, todayKolkata } from "@/lib/ops-pulse/cod";
 import "./adhoc-activity.css";
 
 export const dynamic = "force-dynamic";
 
 type SearchParams = {
+  from?: string;
+  to?: string;
   month?: string;
   clusters?: string;
   stations?: string;
@@ -28,6 +30,17 @@ function monthLabel(month: string) {
     .format(new Date(`${month}-01T12:00:00+05:30`));
 }
 
+function dateLabel(date: string) {
+  return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" })
+    .format(new Date(`${date}T12:00:00+05:30`));
+}
+
+function periodLabel(from: string, to: string, today: string) {
+  if (from === to) return from === today ? `Today · ${dateLabel(from)}` : dateLabel(from);
+  if (from === `${today.slice(0, 7)}-01` && to === today) return `${monthLabel(today.slice(0, 7))} MTD`;
+  return `${dateLabel(from)} – ${dateLabel(to)}`;
+}
+
 function money(value: number) {
   return `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 }
@@ -36,12 +49,11 @@ export default async function CpsAdHocActivityPage({ searchParams }: { searchPar
   const authorization = await requirePagePermission("cps_overview", "access");
   const companyId = requireCompanyId(authorization);
   const today = todayKolkata();
-  const currentMonth = today.slice(0, 7);
-  const month = validAdHocMonth(searchParams?.month, today);
-  const range = adHocMonthRange(month, today);
+  const defaultFrom = `${today.slice(0, 7)}-01`;
+  const range = adHocDateRange({ from: searchParams?.from, to: searchParams?.to, month: searchParams?.month }, today);
   const locationsResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
   const allLocations = locationsResult.locations;
-  const clusterFor = (location: typeof allLocations[number]) => String(location.cluster || location.cluster_manager || "Unassigned").trim() || "Unassigned";
+  const clusterFor = (location: typeof allLocations[number]) => adHocClusterLabel(location);
   const clusters = [...new Set(allLocations.map(clusterFor))].sort((left, right) => left.localeCompare(right));
   const selectedClusters = listParam(searchParams?.clusters, clusters);
   const clusterSet = new Set(selectedClusters);
@@ -51,7 +63,7 @@ export default async function CpsAdHocActivityPage({ searchParams }: { searchPar
   const selectedCodeSet = new Set(selectedCodes);
   const selectedLocations = clusterLocations.filter((location) => selectedCodeSet.has(location.station_code));
   const activity = await loadAdHocActivity(companyId, selectedLocations, range.from, range.to);
-  const periodName = range.state === "mtd" ? `${monthLabel(month)} MTD` : monthLabel(month);
+  const periodName = periodLabel(range.from, range.to, today);
   const filterStations = allLocations.map((location) => ({
     code: location.station_code,
     name: location.station_name || location.city || location.station_code,
@@ -63,23 +75,25 @@ export default async function CpsAdHocActivityPage({ searchParams }: { searchPar
     <AppShell active="Adhoc Van & DA" pageCode="cps_overview">
       <div className="ops-command-center cps-adhoc-workspace">
         <PageHead
-          eyebrow={`CPS · ${range.state === "mtd" ? "Month to date" : "Monthly"}`}
+          eyebrow={`CPS · ${range.state === "today" ? "Today" : range.state === "single" ? "Day view" : range.state === "mtd" ? "Month to date" : "Date range"}`}
           title="Adhoc Van & DA"
-          subtitle="Station-wise jobs and cost, with day-level detail from approved payment requests."
+          subtitle="Station-wise jobs and cost from approved payment requests and Adhoc Van Cashbook payments."
           action={<span className="cps-adhoc-period-pill">{periodName}</span>}
         />
         <CpsAdHocFilters
-          currentMonth={currentMonth}
-          key={`${month}:${selectedClusters.join("|")}:${selectedCodes.join("|")}`}
-          month={month}
+          defaultFrom={defaultFrom}
+          from={range.from}
+          key={`${range.from}:${range.to}:${selectedClusters.join("|")}:${selectedCodes.join("|")}`}
           selectedClusters={selectedClusters}
           selectedStations={selectedCodes}
           stations={filterStations}
+          to={range.to}
+          today={today}
         />
         {locationsResult.error || activity.error ? <section className="panel message-panel error"><div className="panel-body"><strong>Adhoc activity is unavailable</strong><p className="subtle">{locationsResult.error ?? activity.error}</p></div></section> : null}
 
         <section className="cps-adhoc-kpis" aria-label="Adhoc activity summary">
-          <article className="van"><span>Adhoc Van</span><strong>{activity.totals.vanCount}</strong><small>{money(activity.totals.vanAmount)}</small></article>
+          <article className="van"><span>Adhoc Van</span><strong>{activity.totals.vanCount}</strong><small>{money(activity.totals.vanAmount)}{activity.totals.cashbookVanCount ? ` · Cashbook paid ${money(activity.totals.cashbookVanAmount)}` : ""}</small></article>
           <article className="da"><span>Adhoc DA</span><strong>{activity.totals.daCount}</strong><small>{money(activity.totals.daAmount)} · includes Adhoc Driver</small></article>
           <article><span>Total jobs</span><strong>{activity.totals.totalCount}</strong><small>{activity.totals.activeStations} of {selectedLocations.length} stations</small></article>
           <article className="total"><span>Total amount</span><strong>{money(activity.totals.totalAmount)}</strong><small>{periodName}</small></article>
@@ -88,7 +102,7 @@ export default async function CpsAdHocActivityPage({ searchParams }: { searchPar
         <section className="panel cps-adhoc-stations">
           <div className="panel-head"><div><h2>Station summary</h2><p className="subtle">Every selected station is shown. Click a station with activity to open its daily breakup.</p></div><span>{selectedLocations.length} stations</span></div>
           <CpsAdHocTable stations={activity.stations} />
-          <footer className="cps-adhoc-source-note">Counts include approved, processing and processed requests. Pending, returned and rejected requests are excluded.</footer>
+          <footer className="cps-adhoc-source-note">Includes approved, processing and processed requests plus Cashbook rows classified as Van Adhoc. Linked Cashbook payments are shown but never double-counted. Pending, returned and rejected requests are excluded.</footer>
         </section>
       </div>
     </AppShell>

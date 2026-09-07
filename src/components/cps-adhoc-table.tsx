@@ -23,11 +23,12 @@ export function CpsAdHocTable({ stations }: { stations: AdHocActivityStation[] }
         <tbody>
           {stations.map((station) => {
             const open = expanded === station.id;
+            const hasActivity = Boolean(station.totalCount || station.cashbookVanCount);
             return <Fragment key={station.id}>
-              <tr className={`${station.totalCount ? "has-activity" : "no-activity"} ${open ? "expanded" : ""}`.trim()}>
-                <td><button className="cps-adhoc-station-button" disabled={!station.totalCount} onClick={() => setExpanded(open ? null : station.id)} type="button"><span><strong>{station.code}</strong><small>{station.name} · {station.cluster}</small></span>{station.totalCount ? <ChevronDown aria-hidden="true" size={16} /> : null}</button></td>
+              <tr className={`${hasActivity ? "has-activity" : "no-activity"} ${open ? "expanded" : ""}`.trim()}>
+                <td><button className="cps-adhoc-station-button" disabled={!hasActivity} onClick={() => setExpanded(open ? null : station.id)} type="button"><span><strong>{station.code}</strong><small>{station.name} · {station.cluster}</small></span>{hasActivity ? <ChevronDown aria-hidden="true" size={16} /> : null}</button></td>
                 <td><strong>{station.vanCount}</strong></td>
-                <td>{money(station.vanAmount)}</td>
+                <td><span className="cps-adhoc-amount-source">{money(station.vanAmount)}{station.cashbookVanCount ? <small>Cashbook {money(station.cashbookVanAmount)}</small> : null}</span></td>
                 <td><strong>{station.daCount}</strong></td>
                 <td>{money(station.daAmount)}</td>
                 <td><strong>{station.totalCount}</strong></td>
@@ -36,9 +37,9 @@ export function CpsAdHocTable({ stations }: { stations: AdHocActivityStation[] }
               {open ? <tr className="cps-adhoc-day-row"><td colSpan={7}>
                 <div className="cps-adhoc-day-panel">
                   <header><strong>{station.code} · day-level activity</strong><span>{station.days.length} active day{station.days.length === 1 ? "" : "s"}</span></header>
-                  <div className="cps-adhoc-day-grid cps-adhoc-day-grid-head"><span>Date</span><span>Van</span><span>Van amount</span><span>DA</span><span>DA amount</span><span>Total</span></div>
+                  <div className="cps-adhoc-day-grid cps-adhoc-day-grid-head"><span>Date</span><span>Van</span><span>Van amount</span><span>Cashbook paid</span><span>DA</span><span>DA amount</span><span>Total</span></div>
                   {station.days.map((day) => <div className="cps-adhoc-day-grid" key={day.date}>
-                    <strong>{dateLabel(day.date)}</strong><span>{day.vanCount}</span><span>{money(day.vanAmount)}</span><span>{day.daCount}</span><span>{money(day.daAmount)}</span><strong>{day.totalCount} · {money(day.totalAmount)}</strong>
+                    <strong>{dateLabel(day.date)}</strong><span>{day.vanCount}</span><span>{money(day.vanAmount)}</span><span>{day.cashbookVanCount ? `${day.cashbookVanCount} · ${money(day.cashbookVanAmount)}` : "—"}</span><span>{day.daCount}</span><span>{money(day.daAmount)}</span><strong>{day.totalCount} · {money(day.totalAmount)}</strong>
                   </div>)}
                 </div>
               </td></tr> : null}

@@ -21,7 +21,7 @@
   position: relative;
   z-index: 18;
   display: grid;
-  grid-template-columns: minmax(150px, .55fr) minmax(190px, .8fr) minmax(240px, 1.25fr) auto auto;
+  grid-template-columns: minmax(285px, 1fr) minmax(190px, .7fr) minmax(240px, 1fr) auto auto;
   align-items: end;
   gap: 9px;
   margin: 12px 0;
@@ -32,12 +32,19 @@
   box-shadow: 0 7px 20px rgba(16, 24, 40, .04);
 }
 
-.cps-adhoc-month {
+.cps-adhoc-date-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(105px, 1fr)) auto;
+  align-items: end;
+  gap: 6px;
+}
+
+.cps-adhoc-date {
   display: grid;
   gap: 5px;
 }
 
-.cps-adhoc-month > span,
+.cps-adhoc-date > span,
 .cps-adhoc-filter-menu > summary > span {
   color: #64748b;
   font-size: 9px;
@@ -46,7 +53,7 @@
   text-transform: uppercase;
 }
 
-.cps-adhoc-month input {
+.cps-adhoc-date input {
   width: 100%;
   min-height: 39px;
   border: 1px solid #dfe5ec;
@@ -58,6 +65,9 @@
   font-size: 12px;
   font-weight: 750;
 }
+
+.cps-adhoc-date-presets { display: flex; align-items: center; gap: 4px; min-height: 39px; }
+.cps-adhoc-date-presets button { min-height: 28px; border: 1px solid #fed7aa; border-radius: 7px; color: #c2410c; background: #fff7ed; cursor: pointer; padding: 0 7px; font-size: 9px; font-weight: 850; }
 
 .cps-adhoc-filter-menu {
   position: relative;
@@ -166,6 +176,8 @@
 .cps-adhoc-table tr.has-activity:hover > td { background: #fffaf5; }
 .cps-adhoc-table tr.expanded > td { border-bottom-color: #fed7aa; background: #fffaf5; }
 .cps-adhoc-table tr.no-activity td { color: #94a3b8; }
+.cps-adhoc-amount-source { display: inline-grid; justify-items: end; gap: 1px; }
+.cps-adhoc-amount-source small { color: #c2410c; font-size: 8px; font-weight: 750; white-space: nowrap; }
 .cps-adhoc-station-button { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; border: 0; color: inherit; background: transparent; cursor: pointer; padding: 0; text-align: left; }
 .cps-adhoc-station-button:disabled { cursor: default; }
 .cps-adhoc-station-button > span { display: grid; gap: 1px; }
@@ -178,7 +190,7 @@
 .cps-adhoc-day-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 11px; border-bottom: 1px solid #ffedd5; color: #9a3412; background: #fff7ed; }
 .cps-adhoc-day-panel > header strong { font-size: 10px; }
 .cps-adhoc-day-panel > header span { font-size: 9px; }
-.cps-adhoc-day-grid { display: grid; grid-template-columns: 1.2fr repeat(4, .75fr) 1.2fr; align-items: center; gap: 8px; padding: 7px 11px; border-bottom: 1px solid #f1f4f7; color: #475569; font-size: 10px; }
+.cps-adhoc-day-grid { display: grid; grid-template-columns: 1.2fr .55fr .8fr .95fr .55fr .8fr 1.2fr; align-items: center; gap: 8px; padding: 7px 11px; border-bottom: 1px solid #f1f4f7; color: #475569; font-size: 10px; }
 .cps-adhoc-day-grid:last-child { border-bottom: 0; }
 .cps-adhoc-day-grid > span,
 .cps-adhoc-day-grid > strong:not(:first-child) { text-align: right; }
@@ -197,4 +209,6 @@
   .cps-adhoc-filters,
   .cps-adhoc-kpis { grid-template-columns: 1fr; }
   .cps-adhoc-filter-popover { position: fixed; top: 18%; left: 16px; right: 16px; width: auto; }
+  .cps-adhoc-date-range { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cps-adhoc-date-presets { grid-column: 1 / -1; }
 }

@@ -13,11 +13,13 @@ const table = read("src/components/cps-adhoc-table.tsx");
 const checks = [
   [navigation.includes('label: "Adhoc Van & DA", href: "/cps/adhoc-activity"'), "CPS navigation must expose the Adhoc Van & DA submenu."],
   [page.includes('requirePagePermission("cps_overview", "access")') && page.includes("authorization.locationScopeIds"), "The page must enforce CPS access and the signed-in user's location scope."],
-  [data.includes('.in("location_id", locationIds)') && data.includes('.gte("work_date", from)') && data.includes('.lte("work_date", to)'), "The source query must be restricted to permitted locations and the selected month."],
+  [data.includes('requestPage("location_id"') && data.includes('requestPage("station_code"') && data.includes('requestPage("location_code"') && data.includes('.gte("work_date", from)') && data.includes('.lte("work_date", to)'), "The source query must cover every permitted location identifier for the selected range."],
   [data.includes("isApprovedPayment(request)") && data.includes('["Van", "DA"]'), "Only carried-out Van and DA requests may be counted."],
-  [filters.includes('label="Clusters"') && filters.includes('label="Stations"') && filters.includes('type="month"'), "The filter bar must support month, cluster and multi-station selection."],
+  [filters.includes('label="Clusters"') && filters.includes('label="Stations"') && filters.includes('type="date"') && filters.includes(">Today</button>") && filters.includes(">MTD</button>"), "The filter bar must support day/range presets, cluster and multi-station selection."],
+  [data.includes('from("cps_cashbook_daily")') && data.includes("isCashbookAdHocVan") && data.includes("approvedRequestNumbers"), "Cashbook Adhoc Van payments must be included without double-counting linked requests."],
+  [data.includes("location.aom") && page.includes("adHocClusterLabel"), "AOM must be the cluster-filter fallback when no Cluster Manager is mapped."],
   [table.includes("day-level activity") && table.includes("setExpanded"), "Station totals must expand into day-level detail without leaving the table."],
-  [page.includes("Pending, returned and rejected requests are excluded"), "The counting rule must remain visible to users."]
+  [page.includes("Linked Cashbook payments are shown but never double-counted") && page.includes("Pending, returned and rejected requests are excluded"), "The counting rule must remain visible to users."]
 ];
 
 const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);

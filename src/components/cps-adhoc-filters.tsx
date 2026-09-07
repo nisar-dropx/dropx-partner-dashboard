@@ -67,22 +67,27 @@ function SelectionMenu({
 }
 
 export function CpsAdHocFilters({
-  currentMonth,
-  month,
+  defaultFrom,
+  from,
   selectedClusters,
   selectedStations,
-  stations
+  stations,
+  to,
+  today
 }: {
-  currentMonth: string;
-  month: string;
+  defaultFrom: string;
+  from: string;
   selectedClusters: string[];
   selectedStations: string[];
   stations: AdHocFilterStation[];
+  to: string;
+  today: string;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const clusters = useMemo(() => [...new Set(stations.map((station) => station.cluster))].sort((left, right) => left.localeCompare(right)), [stations]);
-  const [draftMonth, setDraftMonth] = useState(month);
+  const [draftFrom, setDraftFrom] = useState(from);
+  const [draftTo, setDraftTo] = useState(to);
   const [draftClusters, setDraftClusters] = useState(selectedClusters);
   const [draftStations, setDraftStations] = useState(selectedStations);
   const clusterSet = useMemo(() => new Set(draftClusters), [draftClusters]);
@@ -102,7 +107,12 @@ export function CpsAdHocFilters({
 
   function apply() {
     const params = new URLSearchParams();
-    if (draftMonth !== currentMonth) params.set("month", draftMonth);
+    const first = draftFrom <= draftTo ? draftFrom : draftTo;
+    const last = draftFrom <= draftTo ? draftTo : draftFrom;
+    if (first !== defaultFrom || last !== today) {
+      params.set("from", first);
+      params.set("to", last);
+    }
     if (draftClusters.length !== clusters.length) params.set("clusters", draftClusters.length ? draftClusters.join(",") : "_none");
     const availableCodes = availableStations.map((station) => station.code);
     const selectedCodes = draftStations.filter((code) => availableCodes.includes(code));
@@ -111,7 +121,8 @@ export function CpsAdHocFilters({
   }
 
   function reset() {
-    setDraftMonth(currentMonth);
+    setDraftFrom(defaultFrom);
+    setDraftTo(today);
     setDraftClusters(clusters);
     setDraftStations(stations.map((station) => station.code));
     router.push(pathname);
@@ -119,7 +130,14 @@ export function CpsAdHocFilters({
 
   return (
     <section className="cps-adhoc-filters" aria-label="Adhoc activity filters">
-      <label className="cps-adhoc-month"><span>Month</span><input max={currentMonth} onChange={(event) => setDraftMonth(event.target.value)} type="month" value={draftMonth} /></label>
+      <div className="cps-adhoc-date-range">
+        <label className="cps-adhoc-date"><span>From</span><input max={today} onChange={(event) => setDraftFrom(event.target.value)} type="date" value={draftFrom} /></label>
+        <label className="cps-adhoc-date"><span>To</span><input max={today} min={draftFrom} onChange={(event) => setDraftTo(event.target.value)} type="date" value={draftTo} /></label>
+        <div className="cps-adhoc-date-presets" aria-label="Quick date ranges">
+          <button onClick={() => { setDraftFrom(today); setDraftTo(today); }} type="button">Today</button>
+          <button onClick={() => { setDraftFrom(defaultFrom); setDraftTo(today); }} type="button">MTD</button>
+        </div>
+      </div>
       <SelectionMenu
         allLabel="All clusters"
         label="Clusters"
