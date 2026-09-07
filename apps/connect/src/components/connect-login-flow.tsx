@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
 import { AttendanceLocationMonitor } from "./attendance-location-monitor";
 import { ConnectNativeBridge } from "./connect-native-bridge";
+import { ConnectAppInstallCard } from "./connect-app-install-card";
 import { ConnectDashboard } from "./connect-dashboard";
 import { ConnectDocuments } from "./connect-documents";
 import { ConnectLeave } from "./connect-leave";
@@ -577,6 +578,7 @@ export function ConnectLoginFlow() {
         {step === "createPin" ? <form onSubmit={savePin}><label>Create app PIN<input inputMode="numeric" maxLength={6} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} type="password" value={pin} /></label><label>Re-enter app PIN<input inputMode="numeric" maxLength={6} onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ""))} type="password" value={confirmPin} /></label><button disabled={pending || pin.length !== 6}>Save PIN</button></form> : null}
         {step === "unlock" ? <form onSubmit={(e) => { e.preventDefault(); unlock(); }}><div className="dx-unlock"><Fingerprint /><strong>Unlock DropX One</strong><small>Use Face ID or your device security to continue.</small></div><button disabled={pending}>{pending ? "Unlocking..." : "Unlock"}</button><button className="text" onClick={() => { setPin(""); setStep("pin"); }} type="button">Use PIN</button></form> : null}
         <footer><ShieldCheck /><span>Protected workspace access</span></footer>
+        <ConnectAppInstallCard />
       </section>
     </div> : <main className="dx-content" data-screen={step}>
       {notice ? <div className="dx-alert success">{notice}<button onClick={() => setNotice("")}><X /></button></div> : null}

@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
+import { ConnectAppBootstrap } from "@/components/connect-app-bootstrap";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -14,13 +15,23 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: "DropX One",
-    statusBarStyle: "default"
+    statusBarStyle: "black-translucent"
   },
   icons: {
-    icon: "/favicon.png",
+    icon: [
+      { url: "/app-icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/app-icons/icon-512.png", sizes: "512x512", type: "image/png" }
+    ],
     shortcut: "/favicon.png",
-    apple: "/favicon.png"
+    apple: "/app-icons/apple-touch-icon.png"
   }
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#15152f"
 };
 
 export default function RootLayout({
@@ -30,10 +41,10 @@ export default function RootLayout({
 }>) {
   return (
     <html className={`${GeistSans.variable} ${GeistMono.variable}`} lang="en">
-      <head>
-        <meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport" />
-      </head>
-      <body className={GeistSans.className}>{children}</body>
+      <body className={GeistSans.className}>
+        <ConnectAppBootstrap />
+        {children}
+      </body>
     </html>
   );
 }

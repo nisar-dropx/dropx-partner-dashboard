@@ -1,18 +1,12 @@
 {
-  "id": "/",
   "name": "DropX One",
   "short_name": "DropX One",
   "description": "The secure DropX workspace for attendance, pay, leave, documents and profile services.",
   "start_url": "/?source=android-app",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui"],
-  "orientation": "any",
   "background_color": "#f8f9fd",
   "theme_color": "#15152f",
-  "lang": "en",
-  "dir": "ltr",
-  "categories": ["business", "productivity"],
   "icons": [
     {
       "src": "/app-icons/icon-192.png",

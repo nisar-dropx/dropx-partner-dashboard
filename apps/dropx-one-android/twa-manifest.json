@@ -1,0 +1,54 @@
+{
+  "packageId": "com.dropxlogistics.one",
+  "host": "one.dropxlogistics.com",
+  "name": "DropX One",
+  "launcherName": "DropX One",
+  "display": "standalone",
+  "themeColor": "#15152F",
+  "themeColorDark": "#0D1426",
+  "navigationColor": "#F8F9FD",
+  "navigationColorDark": "#0D1426",
+  "navigationDividerColor": "#F8F9FD",
+  "navigationDividerColorDark": "#0D1426",
+  "backgroundColor": "#F8F9FD",
+  "enableNotifications": true,
+  "startUrl": "/?source=android-app",
+  "iconUrl": "https://one.dropxlogistics.com/app-icons/icon-512.png",
+  "maskableIconUrl": "https://one.dropxlogistics.com/app-icons/icon-maskable-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "../../../../private/dropx-one-android/dropx-one-release.keystore",
+    "alias": "dropx-one-release"
+  },
+  "appVersionName": "2.0.0",
+  "appVersionCode": 20000,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://one.dropxlogistics.com/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": true
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://one.dropxlogistics.com/",
+  "minSdkVersion": 21,
+  "orientation": "any",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "displayOverride": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "appVersion": "2.0.0"
+}
