@@ -65,6 +65,7 @@ type ExecutiveRow = {
   date_of_join: string;
   is_active: boolean;
   onboarding_status?: string | null;
+  people_lifecycle_status?: string | null;
   profile_return_remarks?: string | null;
   statutory_applicability?: string[] | null;
   location_id: string;
@@ -197,9 +198,13 @@ const statusOptions = [
 ];
 
 function fieldExecutiveStatus(
-  executive: Pick<ExecutiveRow, "is_active" | "onboarding_status">,
+  executive: Pick<ExecutiveRow, "is_active" | "onboarding_status" | "people_lifecycle_status">,
   canonicalWorkforce = false
 ) {
+  const lifecycleStatus = String(executive.people_lifecycle_status ?? "").trim().toLowerCase();
+  if (lifecycleStatus === "offboarding") return "Offboarding";
+  if (lifecycleStatus === "offboarded") return "Offboarded";
+  if (lifecycleStatus === "suspended") return "Suspended";
   const onboardingStatus = String(executive.onboarding_status ?? "").trim().toLowerCase();
   if (canonicalWorkforce) {
     if (onboardingStatus === "pending") return "Pending";
@@ -700,6 +705,7 @@ async function loadFieldExecutiveData(
         date_of_join,
         is_active,
         onboarding_status,
+        people_lifecycle_status,
         profile_return_remarks,
         statutory_applicability,
         location_id,
@@ -739,7 +745,9 @@ async function loadFieldExecutiveData(
         profile_photo_path,
         stations (station_code, station_name, providers (name), location_models (code, name))
       `;
-  const legacyExecutiveSelect = executiveSelect.replace("mobile_country_code,", "");
+  const legacyExecutiveSelect = executiveSelect
+    .replace("mobile_country_code,", "")
+    .replace("people_lifecycle_status,", "");
   let executivesResult: { data: unknown[] | null; error: { message?: string } | null } = await supabaseAdmin
     .from(table)
     .select(executiveSelect)
