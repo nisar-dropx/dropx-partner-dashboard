@@ -681,7 +681,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       <header className="dx-page-intro">
         <small>Manager workspace</small>
         <h1>Approval inbox</h1>
-        <p>Review workflow steps from your reporting hierarchy.</p>
+        <p>Shows steps assigned to your One login. Attendance HR finalization stays in People.</p>
       </header>
       <div className="dx-approval-scope">
         <div aria-label="Choose reportee view" className="dx-approval-scope-switch" role="group">
@@ -703,8 +703,8 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
           </button>
         </div>
         <p>{reporteeScope === "immediate"
-          ? "Showing only people who report directly to you."
-          : "Showing everyone below you in the active Org Chart tree."}</p>
+          ? "Location checks: direct reportees only. Time off, reimbursements, attendance, rosters, WFH and exits always use steps assigned to you."
+          : "Location checks: full reporting tree. Other tabs still only show steps assigned to you — switching team scope does not invent new assignments."}</p>
       </div>
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
