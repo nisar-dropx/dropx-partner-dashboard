@@ -30,3 +30,25 @@ export function isWfhHardBlockedDesignation(designation: DesignationLabel | null
   return isTeamLeadDesignation(designation) || isStationOrStoreManagerDesignation(designation);
 }
 
+/** National / Business Head — final reimbursement manager; Managing Partner L2 is skipped. */
+export function isBusinessOrNationalHeadDesignation(designation: DesignationLabel | null | undefined) {
+  if (!designation) return false;
+  const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
+  const name = designation.name.toLowerCase();
+  return code === "NH"
+    || code === "BH"
+    || code === "BUSINESS_HEAD"
+    || code === "NATIONAL_HEAD"
+    || name.includes("national head")
+    || name.includes("business head");
+}
+
+export function isManagingPartnerDesignation(designation: DesignationLabel | null | undefined) {
+  if (!designation) return false;
+  const code = (designation.code ?? "").toUpperCase().replace(/[\s-]+/g, "_");
+  const name = designation.name.toLowerCase();
+  return code === "MP"
+    || code === "MANAGING_PARTNER"
+    || name.includes("managing partner");
+}
+

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isBusinessOrNationalHeadDesignation, isManagingPartnerDesignation } from "./approval-designation-labels";
 import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
 import { supabaseAdmin } from "./supabase-admin";
 import type { ConnectAccount } from "./connect-auth";
@@ -103,6 +104,53 @@ export async function resolveExpensePolicy(account: ConnectAccount, amount: numb
   return { identity, policy };
 }
 
+type ExpenseApprovalStepDraft = {
+  step_order: number;
+  step_name: string;
+  approver_user_id: string;
+  approver_person_id: string;
+};
+
+async function designationForPerson(companyId: string, personId: string, asOf: string) {
+  const engagement = await db().from("hr_engagements").select("id,status")
+    .eq("company_id", companyId).eq("person_id", personId).eq("status", "active")
+    .limit(1).maybeSingle();
+  if (engagement.error || !engagement.data) return null;
+  const assignment = await db().from("hr_work_assignments").select("designation_id")
+    .eq("company_id", companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true)
+    .lte("effective_from", asOf).or(`effective_to.is.null,effective_to.gte.${asOf}`)
+    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+  if (assignment.error || !assignment.data?.designation_id) return null;
+  const designation = await db().from("designations").select("code,name")
+    .eq("company_id", companyId).eq("id", assignment.data.designation_id).maybeSingle();
+  if (designation.error || !designation.data) return null;
+  return { code: designation.data.code as string | null, name: String(designation.data.name ?? "") };
+}
+
+/**
+ * When L1 is National Head / Business Head (e.g. Abdul), Managing Partner L2
+ * (e.g. Jamsheer) is not required — NH/BH approval is final before Payments.
+ */
+async function trimReimbursementStepsAfterBusinessHead(
+  companyId: string,
+  asOf: string,
+  steps: ExpenseApprovalStepDraft[]
+): Promise<ExpenseApprovalStepDraft[]> {
+  if (steps.length < 2) return steps;
+  const l1Designation = await designationForPerson(companyId, steps[0].approver_person_id, asOf);
+  if (!isBusinessOrNationalHeadDesignation(l1Designation)) return steps;
+
+  const kept: ExpenseApprovalStepDraft[] = [steps[0]];
+  for (const step of steps.slice(1)) {
+    const designation = await designationForPerson(companyId, step.approver_person_id, asOf);
+    const looksLikeManagingPartner = isManagingPartnerDesignation(designation)
+      || step.step_name.toLowerCase().includes("managing partner");
+    if (looksLikeManagingPartner) continue;
+    kept.push(step);
+  }
+  return kept.map((step, index) => ({ ...step, step_order: index + 1 }));
+}
+
 export async function resolveExpenseApprovers(account: ConnectAccount, amount: number) {
   const { identity, policy } = await resolveExpensePolicy(account, amount);
   const configured = await resolveConfiguredApprovalWorkflow({
@@ -113,21 +161,22 @@ export async function resolveExpenseApprovers(account: ConnectAccount, amount: n
     asOf: identity.today
   });
   if (configured) {
+    const configuredSteps = configured.steps.map((step, index) => ({
+      step_order: index + 1,
+      step_name: step.step_name,
+      approver_user_id: step.approver_user_id,
+      approver_person_id: step.approver_person_id
+    }));
     return {
       identity,
       policy,
-      steps: configured.steps.map((step, index) => ({
-        step_order: index + 1,
-        step_name: step.step_name,
-        approver_user_id: step.approver_user_id,
-        approver_person_id: step.approver_person_id
-      }))
+      steps: await trimReimbursementStepsAfterBusinessHead(account.companyId, identity.today, configuredSteps)
     };
   }
 
   // Default claim chain: walk the reporting line for policy.manager_levels
   // (typically RM then Managing Partner). Finance owners stay on the pre-request only.
-  const steps: Array<{ step_order: number; step_name: string; approver_user_id: string; approver_person_id: string }> = [];
+  const steps: ExpenseApprovalStepDraft[] = [];
   const seen = new Set<string>([identity.personId]);
   let subjectAssignmentId = identity.assignment.id;
   for (let level = 1; level <= policy.manager_levels; level += 1) {
@@ -161,7 +210,11 @@ export async function resolveExpenseApprovers(account: ConnectAccount, amount: n
     subjectAssignmentId = assignment.data.id;
   }
   if (!steps.length) throw new Error("No reporting manager is configured. Configure a reporting line or policy fallback before submission.");
-  return { identity, policy, steps };
+  return {
+    identity,
+    policy,
+    steps: await trimReimbursementStepsAfterBusinessHead(account.companyId, identity.today, steps)
+  };
 }
 
 export async function activeExpenseCategories(account: ConnectAccount) {
