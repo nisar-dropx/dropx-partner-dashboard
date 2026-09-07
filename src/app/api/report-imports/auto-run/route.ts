@@ -121,15 +121,19 @@ export async function POST(request: Request) {
     );
   }
 
-  // IOCL/BPCL portals only ever have the PRIOR day's transactions ready —
-  // whatever date the uploader sends is what the user is trying to look at,
-  // and the portal's actual data for that calendar day always lands one day
-  // later. So always shift back one day from whatever was sent, not only
-  // when "today" was picked — picking a past date for backfill must shift
-  // too, or it silently fetches the wrong (one-day-late) data.
-  const isFuelPortalSource = sourceType === "iocl_fuel" || sourceType === "bpcl_fuel";
+  // Every source on this shared reportDate path (IOCL/BPCL fuel portals,
+  // delivered shipment detail, Cashbook) only ever has the PRIOR day's data
+  // ready — whatever calendar date the checklist/uploader is looking at,
+  // the source's real data for that day lands one day later. So always
+  // shift back one day from whatever was sent, not only when "today" was
+  // picked — picking a past date for backfill must shift too, or it
+  // silently fetches the wrong (one-day-late) data. The 5 workforce-supp
+  // sources (amazon_shipments, daily_edsp_metrics, da_inapp_onboarding,
+  // edsp_outstanding_cash, edsp_sls_scorecard) and amazon_hawkeye_daily
+  // don't take this path at all — they resolve their own date/isoWeek
+  // separately below and must NOT be shifted here.
   const requestedDate = ymdOrNull(body.report_date) || yesterdayIst();
-  const reportDate = isFuelPortalSource ? addDaysYmd(requestedDate, -1) : requestedDate;
+  const reportDate = addDaysYmd(requestedDate, -1);
 
   try {
     if (isWorkforceAutoSource(sourceType)) {
