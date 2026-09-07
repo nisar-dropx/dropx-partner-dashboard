@@ -52,6 +52,93 @@ function projectedSelection(value: string) {
   return match ? { sourceEntryId: match[1], date: match[2] } : null;
 }
 
+/** HO / corporate office locations keep cross-designation swaps; stations do not. */
+function isHeadOfficeLocation(station: {
+  station_code?: string | null;
+  station_name?: string | null;
+  location_models?: { code?: string | null; name?: string | null } | { code?: string | null; name?: string | null }[] | null;
+}) {
+  const model = relation(station.location_models);
+  const value = `${model?.name ?? ""} ${model?.code ?? ""} ${station.station_code ?? ""} ${station.station_name ?? ""}`.toLowerCase();
+  return /\bho\b|head office|corporate office/.test(value);
+}
+
+async function stationSameDesignationFlags(companyId: string, locationIds: string[]) {
+  const unique = [...new Set(locationIds.filter(Boolean))];
+  const flags = new Map<string, boolean>();
+  if (!unique.length) return flags;
+  for (const id of unique) flags.set(id, true);
+  const stations = await db().from("stations")
+    .select("id,station_code,station_name,location_models(code,name)")
+    .eq("company_id", companyId)
+    .in("id", unique);
+  if (stations.error) throw new Error(stations.error.message);
+  for (const row of stations.data ?? []) {
+    flags.set(String(row.id), !isHeadOfficeLocation(row as {
+      station_code?: string | null;
+      station_name?: string | null;
+      location_models?: { code?: string | null; name?: string | null } | { code?: string | null; name?: string | null }[] | null;
+    }));
+  }
+  return flags;
+}
+
+async function resolveWorkerDesignationIds(companyId: string, workers: Array<{ workerType: WorkerType; workerId: string }>) {
+  const unique = [...new Map(workers.map((worker) => [identityKey(worker), worker])).values()];
+  const designations = new Map<string, string | null>();
+  for (const worker of unique) designations.set(identityKey(worker), null);
+  if (!unique.length) return designations;
+
+  const today = todayIndia();
+  const employeeIds = unique.filter((worker) => worker.workerType === "employee").map((worker) => worker.workerId);
+  const contractorIds = unique.filter((worker) => worker.workerType === "contractor").map((worker) => worker.workerId);
+  const engagementResults = await Promise.all([
+    employeeIds.length
+      ? db().from("hr_engagements").select("id,worker_type,employee_id,contractor_id").eq("company_id", companyId).eq("worker_type", "employee").eq("status", "active").in("employee_id", employeeIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; worker_type: string; employee_id: string | null; contractor_id: string | null }>, error: null }),
+    contractorIds.length
+      ? db().from("hr_engagements").select("id,worker_type,employee_id,contractor_id").eq("company_id", companyId).eq("worker_type", "contractor").eq("status", "active").in("contractor_id", contractorIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; worker_type: string; employee_id: string | null; contractor_id: string | null }>, error: null })
+  ]);
+  const engagementError = engagementResults.find((result) => result.error)?.error;
+  if (engagementError) throw new Error(engagementError.message);
+
+  const engagementToWorker = new Map<string, string>();
+  for (const engagement of engagementResults.flatMap((result) => result.data ?? [])) {
+    if (engagement.worker_type === "employee" && engagement.employee_id) {
+      engagementToWorker.set(String(engagement.id), `employee:${engagement.employee_id}`);
+    } else if (engagement.worker_type === "contractor" && engagement.contractor_id) {
+      engagementToWorker.set(String(engagement.id), `contractor:${engagement.contractor_id}`);
+    }
+  }
+  const engagementIds = [...engagementToWorker.keys()];
+  if (!engagementIds.length) return designations;
+
+  const assignments = await db().from("hr_work_assignments")
+    .select("engagement_id,designation_id,effective_from")
+    .eq("company_id", companyId)
+    .in("engagement_id", engagementIds)
+    .eq("is_primary", true)
+    .lte("effective_from", today)
+    .or(`effective_to.is.null,effective_to.gte.${today}`)
+    .order("effective_from", { ascending: false });
+  if (assignments.error) throw new Error(assignments.error.message);
+
+  const seenEngagements = new Set<string>();
+  for (const assignment of assignments.data ?? []) {
+    const engagementId = String(assignment.engagement_id);
+    if (seenEngagements.has(engagementId)) continue;
+    seenEngagements.add(engagementId);
+    const workerKey = engagementToWorker.get(engagementId);
+    if (workerKey) designations.set(workerKey, assignment.designation_id ? String(assignment.designation_id) : null);
+  }
+  return designations;
+}
+
+function sameStationDesignation(requesterDesignationId: string | null | undefined, partnerDesignationId: string | null | undefined) {
+  return Boolean(requesterDesignationId) && requesterDesignationId === partnerDesignationId;
+}
+
 async function resolveWorkerIdentities(account: ConnectAccount, workerType: WorkerType) {
   const canonical = { workerType, workerId: account.id } satisfies WorkerIdentity;
   const workerColumn = workerType === "employee" ? "employee_id" : "contractor_id";
@@ -285,12 +372,25 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   for (const item of storedShifts.data ?? []) shifts.set(item.id, item as Shift);
   const leadHours = await swapCutoff(account.companyId);
   const entriesById = new Map([...own, ...colleagueEntries].map((entry) => [entry.id, entry]));
+  const colleagueWorkers = colleagueEntries.map((item) => ({ workerType: item.worker_type, workerId: item.worker_id }));
+  const [designationByWorker, stationDesignationRequired] = await Promise.all([
+    resolveWorkerDesignationIds(account.companyId, [...identities, ...colleagueWorkers]),
+    stationSameDesignationFlags(account.companyId, locations)
+  ]);
+  const requesterDesignationId = identities
+    .map((identity) => designationByWorker.get(identityKey(identity)) ?? null)
+    .find((value) => Boolean(value)) ?? null;
   const days = own.map((entry) => {
+    const requireSameDesignation = Boolean(entry.location_id && stationDesignationRequired.get(entry.location_id));
     const meaningfulPartners = colleagueEntries.filter((candidate) => candidate.id !== entry.id
       && candidate.roster_date === entry.roster_date
       && candidate.location_id === entry.location_id
       && !isOwnIdentity(candidate.worker_type, candidate.worker_id, identities)
-      && isMeaningfulRosterSwap(entry, candidate));
+      && isMeaningfulRosterSwap(entry, candidate)
+      && (!requireSameDesignation || sameStationDesignation(
+        requesterDesignationId,
+        designationByWorker.get(`${candidate.worker_type}:${candidate.worker_id}`) ?? null
+      )));
     const partners = meaningfulPartners.filter((candidate) => {
       try { assertSwapBeforeCutoff(entry, candidate, entry.roster_date, leadHours); return true; }
       catch { return false; }
@@ -353,6 +453,20 @@ export async function POST(request: Request) {
     if (requesterSelection?.date !== partnerSelection?.date && requesterSelection && partnerSelection) throw new Error("Choose a colleague from the same date.");
     if (requester.location_id !== partner.location_id) throw new Error("Choose a colleague from the same location.");
     if (!isMeaningfulRosterSwap(requester, partner)) throw new Error("Choose a colleague whose roster is different for this date.");
+    if (requester.location_id) {
+      const stationDesignationRequired = await stationSameDesignationFlags(account.companyId, [requester.location_id]);
+      if (stationDesignationRequired.get(requester.location_id)) {
+        const designations = await resolveWorkerDesignationIds(account.companyId, [
+          { workerType: requester.worker_type, workerId: requester.worker_id },
+          { workerType: partner.worker_type, workerId: partner.worker_id }
+        ]);
+        const requesterDesignationId = designations.get(`${requester.worker_type}:${requester.worker_id}`) ?? null;
+        const partnerDesignationId = designations.get(`${partner.worker_type}:${partner.worker_id}`) ?? null;
+        if (!sameStationDesignation(requesterDesignationId, partnerDesignationId)) {
+          throw new Error("Choose a colleague with the same designation.");
+        }
+      }
+    }
     const leadHours = await swapCutoff(account.companyId); assertSwapBeforeCutoff(requester, partner, rosterDate, leadHours);
     const configuredRoute = await resolveConfiguredApprovalWorkflow({
       companyId: account.companyId,
