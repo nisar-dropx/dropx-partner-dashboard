@@ -284,13 +284,24 @@ async function taskOwnerUser(context: WorkerContext, role: string) {
 }
 
 function caseQuery(context: WorkerContext) {
-  const query = db().from("hr_exit_cases")
+  // Match either FK so corrected employee cases and legacy mis-typed contractor rows both resolve.
+  return db().from("hr_exit_cases")
     .select("*, hr_exit_reasons(name)")
     .eq("company_id", context.account.companyId)
-    .eq("worker_type", context.workerType);
-  return context.workerType === "contractor"
-    ? query.eq("contractor_id", context.workerId)
-    : query.eq("employee_id", context.workerId);
+    .or(`employee_id.eq.${context.workerId},contractor_id.eq.${context.workerId}`);
+}
+
+async function loadLatestExitCase(context: WorkerContext) {
+  const open = await caseQuery(context)
+    .not("status", "in", '("closed","rejected","withdrawn","cancelled","settled")')
+    .order("submitted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (open.error) throw new Error(open.error.message);
+  if (open.data) return open.data;
+  const latest = await caseQuery(context).order("submitted_at", { ascending: false }).limit(1).maybeSingle();
+  if (latest.error) throw new Error(latest.error.message);
+  return latest.data;
 }
 
 async function serializeCase(row: Record<string, any>) {
@@ -354,13 +365,12 @@ export async function GET(request: Request) {
   try {
     const params = new URL(request.url).searchParams;
     const context = await resolveWorker(params.get("profileType") ?? "", params.get("accountId") ?? "");
-    const [policyResult, reasonsResult, caseResult] = await Promise.all([
+    const [policyResult, reasonsResult, latestCase] = await Promise.all([
       db().from("hr_exit_policies").select("resignation_notice_days, withdrawal_allowed").eq("company_id", context.account.companyId).maybeSingle(),
       db().from("hr_exit_reasons").select("id, name, comment_required").eq("company_id", context.account.companyId).eq("scenario", "resignation").eq("employee_selectable", true).eq("is_active", true).order("display_order"),
-      caseQuery(context).order("submitted_at", { ascending: false }).limit(1).maybeSingle()
+      loadLatestExitCase(context)
     ]);
-    if (policyResult.error || reasonsResult.error || caseResult.error) throw new Error(policyResult.error?.message ?? reasonsResult.error?.message ?? caseResult.error?.message ?? "Unable to load exit request.");
-    const latestCase = caseResult.data;
+    if (policyResult.error || reasonsResult.error) throw new Error(policyResult.error?.message ?? reasonsResult.error?.message ?? "Unable to load exit request.");
     // After a rejected/withdrawn/cancelled case the form is shown again — still resolve the route.
     const canStartNew = !latestCase || isTerminalExitStatus(latestCase.status);
     let approvalRoute: ApprovalRoutePreview[] = [];
@@ -514,6 +524,17 @@ export async function POST(request: Request) {
     if (reasonResult.data.comment_required && comments.length < 3) throw new Error("Comments are required for this resignation reason.");
     if (existingResult.data?.length) throw new Error("An active exit request already exists.");
 
+    // Prefer storing Athul-style people profiles as employees when the worker id is an employee row.
+    let workerType = context.workerType;
+    let workerId = context.workerId;
+    if (workerType === "contractor") {
+      const employeeMatch = await db().from("employees").select("id").eq("company_id", context.account.companyId).eq("id", context.workerId).maybeSingle();
+      if (employeeMatch.data?.id) {
+        workerType = "employee";
+        workerId = employeeMatch.data.id;
+      }
+    }
+
     const approvalRoute = await configuredApprovalRoute(context, "resignation");
     const approvalRows = approvalRoute.rows;
 
@@ -523,9 +544,9 @@ export async function POST(request: Request) {
     const insert = {
       company_id: context.account.companyId,
       case_number: caseNumber,
-      employee_id: context.workerType === "employee" ? context.workerId : null,
-      contractor_id: context.workerType === "contractor" ? context.workerId : null,
-      worker_type: context.workerType,
+      employee_id: workerType === "employee" ? workerId : null,
+      contractor_id: workerType === "contractor" ? workerId : null,
+      worker_type: workerType,
       source: "employee",
       scenario: "resignation",
       reason_id: reasonResult.data.id,
