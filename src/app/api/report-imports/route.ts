@@ -343,9 +343,21 @@ function readHawkeyeDailyRows(buffer: ArrayBuffer, fileName?: string) {
     metricColumns.forEach((column) => {
       const rawValue = clean(row[column.index]);
       const normalized = rawValue.replace(/,/g, "").replace(/%$/, "");
-      const parsed = rawValue && !/^n\/?a$/i.test(rawValue) && Number.isFinite(Number(normalized))
-        ? Number(normalized) / (rawValue.endsWith("%") ? 100 : 1)
+      // Confirmed live 2026-09-08: neither the old nor the new Hawkeye
+      // export ever puts a literal "%" character in these cells — both
+      // store Excel's underlying percentage-formatted fraction directly
+      // (e.g. 0.8865 for a cell DISPLAYING 88.65% in Excel), so the
+      // endsWith("%") check this used to gate on was dead code that never
+      // actually fired for real files. Every metric column here is a
+      // percent by definition (every header ends in "%"), and none of
+      // these metrics is realistically ever above 100% or, in practice,
+      // at or below 1% — so treat any parsed value <= 1 as still being
+      // the raw fraction and scale it up; a value already > 1 (however it
+      // got there) is left as-is rather than mis-scaled a second time.
+      const numeric = rawValue && !/^n\/?a$/i.test(rawValue) && Number.isFinite(Number(normalized))
+        ? Number(normalized)
         : null;
+      const parsed = numeric == null ? null : numeric <= 1 ? numeric * 100 : numeric;
       metrics[column.label] = parsed;
     });
     return {

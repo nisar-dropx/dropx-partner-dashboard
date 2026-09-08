@@ -362,7 +362,13 @@ export function formatTrendValue(
       minutes = Math.round(value) % 1440;
     return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}${day > 0 ? ` (+${day}d)` : ""}`;
   }
-  return `${unit === "money" ? "₹" : ""}${value.toLocaleString("en-IN", { maximumFractionDigits: unit === "percent" ? 4 : 2 })}${unit === "percent" ? "%" : ""}`;
+  // 2 decimals matches the real precision Hawkeye's own metrics carry
+  // (e.g. 88.65%) now that readHawkeyeDailyRows always scales the stored
+  // value to a proper 0-100 percent — the earlier bump to 4 decimals here
+  // was compensating for a raw, unscaled fraction (0.9301 displayed as
+  // "0.9301%") that was actually a real data-scaling bug, not a display
+  // precision issue; see readHawkeyeDailyRows's percent-scaling fix.
+  return `${unit === "money" ? "₹" : ""}${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}${unit === "percent" ? "%" : ""}`;
 }
 export function trendGeometry(points: TrendPoint[], target?: number | null) {
   const values = points.flatMap((p) => (p.value == null ? [] : [p.value]));
