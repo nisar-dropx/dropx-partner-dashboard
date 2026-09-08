@@ -1023,7 +1023,7 @@ export async function FieldExecutivePageContent({
         </div>
       ) : null}
 
-      {permission.canEdit && editExecutive && editDesignationOptions.some((option) => option.value === editExecutive.designation) ? (
+      {permission.canEdit && editExecutive ? (
         <div className="modal-backdrop">
           <section className="modal-panel wide" aria-label="Edit field executive">
             <div className="panel-head">
