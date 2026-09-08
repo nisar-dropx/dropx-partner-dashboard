@@ -337,27 +337,36 @@ function readHawkeyeDailyRows(buffer: ArrayBuffer, fileName?: string) {
     throw new Error("The Hawkeye station table does not contain the expected metric columns.");
   }
 
+  // Confirmed live 2026-09-08: some Hawkeye exports store these percent
+  // cells as a raw 0-1 fraction (0.8865 for a cell Excel would show as
+  // "88.65%") with no literal "%" text — but NOT every file does this,
+  // and per-cell scaling is unreliable (a genuinely small real percent
+  // like 0.8% and an unscaled fraction meaning 80% both look like the
+  // bare number 0.8, indistinguishable cell by cell — a per-value <=1
+  // check corrupted an already-correct 88.65 into 8865 on a file where
+  // some OTHER, unrelated cell happened to look small).
+  //
+  // The reliable signal is per-FILE, not per-cell: check one reference
+  // cell (the first data row's first metric column, "D2" in the original
+  // sheet) once. If that single cell is <=1, the whole file uses the raw-
+  // fraction convention and every metric cell gets scaled the same way;
+  // otherwise the file already carries real percent numbers and nothing
+  // is touched.
+  const firstDataRow = rows[headerIndex + 1];
+  const referenceCell = firstDataRow?.[metricColumns[0]!.index];
+  const referenceNumeric = Number(clean(referenceCell).replace(/,/g, "").replace(/%$/, ""));
+  const fileUsesRawFraction = Number.isFinite(referenceNumeric) && referenceNumeric <= 1;
+
   const metricRows: HawkeyeMetricRow[] = rows.slice(headerIndex + 1).map((row, offset) => {
     const stationCode = normalizeStation(row[stationIndex]);
     const metrics: Record<string, number | null> = {};
     metricColumns.forEach((column) => {
       const rawValue = clean(row[column.index]);
       const normalized = rawValue.replace(/,/g, "").replace(/%$/, "");
-      // Confirmed live 2026-09-08: neither the old nor the new Hawkeye
-      // export ever puts a literal "%" character in these cells — both
-      // store Excel's underlying percentage-formatted fraction directly
-      // (e.g. 0.8865 for a cell DISPLAYING 88.65% in Excel), so the
-      // endsWith("%") check this used to gate on was dead code that never
-      // actually fired for real files. Every metric column here is a
-      // percent by definition (every header ends in "%"), and none of
-      // these metrics is realistically ever above 100% or, in practice,
-      // at or below 1% — so treat any parsed value <= 1 as still being
-      // the raw fraction and scale it up; a value already > 1 (however it
-      // got there) is left as-is rather than mis-scaled a second time.
       const numeric = rawValue && !/^n\/?a$/i.test(rawValue) && Number.isFinite(Number(normalized))
         ? Number(normalized)
         : null;
-      const parsed = numeric == null ? null : numeric <= 1 ? numeric * 100 : numeric;
+      const parsed = numeric == null ? null : fileUsesRawFraction ? numeric * 100 : numeric;
       metrics[column.label] = parsed;
     });
     return {
