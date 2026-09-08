@@ -110,12 +110,15 @@ export async function GET(request: Request) {
   const db = supabaseAdmin;
   let companyId: string;
   if (integrationAccess) {
-    const companies = await db.from("companies").select("id").order("created_at").limit(2);
-    if (companies.error) return Response.json({ error: "Unable to determine the export company." }, { status: 500 });
-    if ((companies.data?.length ?? 0) !== 1) {
-      return Response.json({ error: "People export integration needs a company scope configuration." }, { status: 503 });
+    const company = await db
+      .from("companies")
+      .select("id")
+      .eq("name", "DROPX LOGISTICS")
+      .maybeSingle();
+    if (company.error || !company.data) {
+      return Response.json({ error: "DropX Logistics export company is unavailable." }, { status: 503 });
     }
-    companyId = companies.data![0].id;
+    companyId = company.data.id;
   } else {
     companyId = requireCompanyId(authorization!);
   }
