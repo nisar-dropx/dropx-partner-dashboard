@@ -362,7 +362,7 @@ export function formatTrendValue(
       minutes = Math.round(value) % 1440;
     return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}${day > 0 ? ` (+${day}d)` : ""}`;
   }
-  return `${unit === "money" ? "₹" : ""}${value.toLocaleString("en-IN", { maximumFractionDigits: unit === "percent" ? 1 : 2 })}${unit === "percent" ? "%" : ""}`;
+  return `${unit === "money" ? "₹" : ""}${value.toLocaleString("en-IN", { maximumFractionDigits: unit === "percent" ? 4 : 2 })}${unit === "percent" ? "%" : ""}`;
 }
 export function trendGeometry(points: TrendPoint[], target?: number | null) {
   const values = points.flatMap((p) => (p.value == null ? [] : [p.value]));
