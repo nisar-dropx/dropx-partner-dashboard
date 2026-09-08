@@ -337,25 +337,33 @@ function readHawkeyeDailyRows(buffer: ArrayBuffer, fileName?: string) {
     throw new Error("The Hawkeye station table does not contain the expected metric columns.");
   }
 
-  // Confirmed live 2026-09-08: some Hawkeye exports store these percent
-  // cells as a raw 0-1 fraction (0.8865 for a cell Excel would show as
-  // "88.65%") with no literal "%" text — but NOT every file does this,
-  // and per-cell scaling is unreliable (a genuinely small real percent
-  // like 0.8% and an unscaled fraction meaning 80% both look like the
-  // bare number 0.8, indistinguishable cell by cell — a per-value <=1
-  // check corrupted an already-correct 88.65 into 8865 on a file where
-  // some OTHER, unrelated cell happened to look small).
+  // Confirmed live 2026-09-08, verified against real Sep-6 vs Sep-7 files
+  // pasted directly by the user: some Hawkeye exports are broken in a way
+  // that makes their percent cells read TWO ZEROS too small — e.g. AWEZ's
+  // "AFN Prem DEA%" is 80.00% on a normal day (Sep-6 raw cell: 0.8) but
+  // reads as "1.0%" on a broken day (Sep-7 raw cell: 0.01) for a metric
+  // that cannot realistically swing from 80% to 1% overnight — the true
+  // value is still ~100%, just exported with 2 extra factors of 10 lost
+  // (0.01 needs x10000 to become the real 100, not the usual x100 a
+  // normal raw-fraction file needs). Not every file has this, and a
+  // simple "reference cell <=1" check can't tell the two cases apart on
+  // its own — Sep-6's OWN reference cell (0.8) is also <=1, since that's
+  // just the normal fraction-for-80% convention, not the broken one.
   //
-  // The reliable signal is per-FILE, not per-cell: check one reference
-  // cell (the first data row's first metric column, "D2" in the original
-  // sheet) once. If that single cell is <=1, the whole file uses the raw-
-  // fraction convention and every metric cell gets scaled the same way;
-  // otherwise the file already carries real percent numbers and nothing
-  // is touched.
-  const firstDataRow = rows[headerIndex + 1];
-  const referenceCell = firstDataRow?.[metricColumns[0]!.index];
-  const referenceNumeric = Number(clean(referenceCell).replace(/,/g, "").replace(/%$/, ""));
-  const fileUsesRawFraction = Number.isFinite(referenceNumeric) && referenceNumeric <= 1;
+  // The distinguishing signal: on a broken file, "AFN Prem DEA%" itself
+  // reads as <=1% (i.e. the raw fraction is <=0.01) even though this
+  // metric is realistically always in the 70-100% range in practice —
+  // check the first 5 data rows' values for this one column; if ALL of
+  // them are <=0.01, the whole file needs x10000. Otherwise the file
+  // either already carries real percent numbers, or just needs the
+  // normal x100 fraction conversion (handled below) — left alone here.
+  const first5Rows = rows.slice(headerIndex + 1, headerIndex + 6);
+  const first5Numeric = first5Rows
+    .map((row) => Number(clean(row?.[metricColumns[0]!.index]).replace(/,/g, "").replace(/%$/, "")))
+    .filter((value) => Number.isFinite(value));
+  const fileNeedsBigScale = first5Numeric.length > 0 && first5Numeric.every((value) => value <= 0.01);
+  const referenceNumeric = first5Numeric[0];
+  const fileUsesRawFraction = !fileNeedsBigScale && Number.isFinite(referenceNumeric) && referenceNumeric <= 1;
 
   const metricRows: HawkeyeMetricRow[] = rows.slice(headerIndex + 1).map((row, offset) => {
     const stationCode = normalizeStation(row[stationIndex]);
@@ -366,7 +374,13 @@ function readHawkeyeDailyRows(buffer: ArrayBuffer, fileName?: string) {
       const numeric = rawValue && !/^n\/?a$/i.test(rawValue) && Number.isFinite(Number(normalized))
         ? Number(normalized)
         : null;
-      const parsed = numeric == null ? null : fileUsesRawFraction ? numeric * 100 : numeric;
+      const parsed = numeric == null
+        ? null
+        : fileNeedsBigScale
+          ? numeric * 10000
+          : fileUsesRawFraction
+            ? numeric * 100
+            : numeric;
       metrics[column.label] = parsed;
     });
     return {
