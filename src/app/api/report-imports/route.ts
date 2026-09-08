@@ -294,17 +294,36 @@ function readWorkbookRows(buffer: ArrayBuffer, includeAllSheets = false) {
   return combined;
 }
 
-function readHawkeyeDailyRows(buffer: ArrayBuffer) {
+function readHawkeyeDailyRows(buffer: ArrayBuffer, fileName?: string) {
   const workbook = XLSX.read(buffer, { type: "array", raw: true, cellDates: true });
   const sheetName = workbook.SheetNames.find((name) => key(name).includes("stationlevelview")) ?? workbook.SheetNames[0];
   if (!sheetName) throw new Error("The Hawkeye workbook has no station-level sheet.");
   const rows = XLSX.utils.sheet_to_json<SheetRow>(workbook.Sheets[sheetName], { header: 1, raw: true, defval: "" });
   if (!rows.length) throw new Error("The Hawkeye station-level sheet is empty.");
 
+  // Two known workbook layouts: the older one has a title banner in the
+  // first few rows with the report date embedded in it ("... D-1: 2026-09-01
+  // (Tue)"); a newer layout (seen starting 2026-09-08) drops that banner
+  // entirely and puts the "Station Code" header directly in row 0, with no
+  // date anywhere in the sheet content. Amazon's own download filename
+  // (Hawkeye_Daily_Report_YYYY-MM-DD.xlsx, the same pattern the confirming
+  // email and worker's content-disposition header both use) is the only
+  // remaining source of truth for the date on that layout, so fall back to
+  // it instead of failing the whole import.
   const titleText = rows.slice(0, 4).flat().map(clean).filter(Boolean).join(" ");
   const titleDate = titleText.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
-  const reportDate = titleDate ? `${titleDate[1]}-${titleDate[2]}-${titleDate[3]}` : null;
-  if (!reportDate) throw new Error("Hawkeye report date was not found in the workbook title.");
+  // No \b before the year: filenames like "Hawkeye_Daily_Report_2026-09-07
+  // .xlsx" have "_" directly before the digits, and "_" counts as a word
+  // character in regex — \b never matches between "_" and "2", so a \b-
+  // anchored pattern here silently never matches a real Hawkeye filename.
+  const fileNameDate = fileName?.match(/(20\d{2})-(\d{2})-(\d{2})/);
+  const dateMatch = titleDate ?? fileNameDate;
+  const reportDate = dateMatch ? `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}` : null;
+  if (!reportDate) {
+    throw new Error(
+      "Hawkeye report date was not found in the workbook title or the file name — expected a YYYY-MM-DD date in one of them."
+    );
+  }
 
   const headerIndex = locateHeader(rows, ["Station Code"]);
   const headers = rows[headerIndex].map(clean);
@@ -1473,7 +1492,7 @@ export async function POST(request: Request) {
       return buffer;
     });
     if (masterData.parser_type === "hawkeye_daily_metrics") {
-      const hawkeye = await importStep("Read Hawkeye station metrics", () => Promise.resolve(readHawkeyeDailyRows(fileBuffer)));
+      const hawkeye = await importStep("Read Hawkeye station metrics", () => Promise.resolve(readHawkeyeDailyRows(fileBuffer, fileName)));
       const locationResult = await importStep("Validate Hawkeye stations", () => loadCodLocations(companyId, [], true));
       if (locationResult.error) throw new Error(locationResult.error);
       const allowedStationCodes = new Set(locationResult.locations.map((location) => normalizeStation(location.station_code)));
