@@ -128,7 +128,7 @@ export async function GET(request: Request) {
     allRows<PersonRecord>((from, to) => db.from("workforce").select("id, dropx_id, full_name, bank_account_no, ifsc_code, email, onboarding_status, lifecycle_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to)),
     allRows<PersonRecord>((from, to) => db.from("contractors").select("id, dropx_id, full_name, bank_account_no, ifsc_code, email, onboarding_status, lifecycle_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to)),
     allRows<PersonRecord>((from, to) => db.from("vendors").select("id, dropx_id, full_name, bank_account_no, ifsc_code, email, onboarding_status, lifecycle_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to)),
-    allRows<PersonRecord>((from, to) => db.from("helpers").select("id, dropx_id, full_name, bank_account_no, ifsc_code, email, onboarding_status, lifecycle_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to))
+    allRows<PersonRecord>((from, to) => db.from("helpers").select("id, dropx_id, full_name, bank_account_no, ifsc_code, email, onboarding_status, is_active, location_id").eq("company_id", companyId).order("full_name").range(from, to))
   ]);
 
   const failed = [stations, employees, workforce, contractors, vendors, helpers].find((result) => result.error);
