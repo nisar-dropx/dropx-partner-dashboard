@@ -56,7 +56,17 @@ export function hawkeyeMetrics(valuesJson: unknown) {
 }
 
 export function hawkeyeValue(valuesJson: unknown, label: string) {
-  return hawkeyeMetrics(valuesJson)?.get(normalized(label)) ?? null;
+  // readHawkeyeDailyRows stores a proper 0-100 percent in values_json (see
+  // its per-file scaling fix), but every consumer of this function across
+  // review-trends.ts and performance/page.tsx (percent(), ragStatus(),
+  // target.target comparisons, trend series math) works in the 0-1
+  // fraction convention this whole app uses for percent metrics elsewhere
+  // (see performance-targets.ts's hardcoded .955/.935/etc targets).
+  // Divide back down here, once, centrally — rather than at every call
+  // site — so the stored value's real 0-100 scale never leaks into code
+  // that still expects 0-1.
+  const stored = hawkeyeMetrics(valuesJson)?.get(normalized(label)) ?? null;
+  return stored == null ? null : stored / 100;
 }
 
 export const hawkeyeTargetKey = (definition:HawkeyeMetricDefinition) => definition.targetKey || definition.label.toLowerCase().replace(/[^a-z0-9]+/g, "_");

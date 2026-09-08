@@ -109,6 +109,9 @@ export function performanceTrendSeries(
           value = hawkeyeValue(row?.values_json, definition.label);
         return {
           date,
+          // hawkeyeValue() already converts back to the 0-1 fraction this
+          // file's math expects (see its own comment) — this *100 turns
+          // that back into the 0-100 percent formatTrendValue displays.
           value: value == null ? null : value * 100,
           note: row
             ? value == null
