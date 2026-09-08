@@ -195,6 +195,17 @@ function verifiedResponse(result: Record<string, unknown>) {
   return ok(result);
 }
 
+async function saveVerifiedIfsc(profileType: string, accountId: string, ifscCode: string) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const table = workforceTable(profileType as Parameters<typeof workforceTable>[0]);
+  const values = profileType === "employee" ? { ifsc: ifscCode } : { ifsc_code: ifscCode };
+  const { error } = await supabaseAdmin
+    .from(table)
+    .update(values as never)
+    .eq("id", accountId);
+  if (error) throw new Error(`Bank verification succeeded but IFSC could not be saved: ${error.message}`);
+}
+
 export async function GET(request: NextRequest) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
@@ -415,6 +426,7 @@ export async function POST(request: NextRequest) {
         accountName: compact(resource?.creditorName),
         message: verified ? text(body?.message) || "Bank account checked." : "Bank verification failed."
       };
+      if (verified) await saveVerifiedIfsc(profileType, accountId, ifscCode);
       return verifiedResponse(result);
     }
 
