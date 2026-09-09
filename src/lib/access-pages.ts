@@ -46,6 +46,7 @@ export const accessPages = [
   { code: "cod_portal_checks", name: "COD Portal Checks", sort_order: 91 },
   { code: "cod_cash_in_associate", name: "Cash In Associate", sort_order: 94 },
   { code: "edd_dashboard", name: "Delivery Performance", sort_order: 95 },
+  { code: "station_edd", name: "EDD", sort_order: 96 },
   { code: "cps", name: "CPS", sort_order: 73 },
   { code: "cps_overview", name: "CPS Overview", sort_order: 74 },
   { code: "cps_daily", name: "Daily CPS", sort_order: 75 },
@@ -500,6 +501,7 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_reports"], "performance");
     await seedTargetPermissionsFromSources(supabase, companyId, ["performance"], "performance_review");
     await seedTargetPermissionsFromSources(supabase, companyId, ["performance_review"], "performance_review_status");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["edd_dashboard"], "station_edd");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity_overview");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity_associates");
