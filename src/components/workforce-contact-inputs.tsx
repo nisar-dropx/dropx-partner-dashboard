@@ -26,10 +26,10 @@ export function WorkforceMobileInput({
   required,
   ...props
 }: SharedInputProps) {
-  const [value, setValue] = useState(() => digitsOnly(String(defaultValue ?? "")).slice(0, 15));
+  const [value, setValue] = useState(() => digitsOnly(String(defaultValue ?? "")).slice(0, 10));
 
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
-    setValue(digitsOnly(event.target.value).slice(0, 15));
+    setValue(digitsOnly(event.target.value).slice(0, 10));
   }
 
   return (
@@ -38,13 +38,13 @@ export function WorkforceMobileInput({
       autoComplete="tel-national"
       className={className}
       inputMode="numeric"
-      maxLength={15}
+      maxLength={10}
       name={name}
       onChange={handleChange}
-      pattern="[0-9]{6,15}"
+      pattern="[0-9]{10}"
       placeholder={placeholder}
       required={required}
-      title="Enter 6 to 15 digits"
+      title="Enter a 10-digit mobile number"
       type="text"
       value={value}
     />

@@ -61,8 +61,8 @@ function normalizeEmail(value: FormDataEntryValue | null) {
 
 function normalizeMobileNumber(value: FormDataEntryValue | null) {
   const mobile = required(value, "Mobile number").replace(/\D/g, "");
-  if (!/^\d{6,15}$/.test(mobile)) {
-    throw new Error("Mobile number must contain 6 to 15 digits.");
+  if (!/^\d{10}$/.test(mobile)) {
+    throw new Error("Mobile number must be exactly 10 digits.");
   }
   return mobile;
 }
