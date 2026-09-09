@@ -107,7 +107,9 @@ export async function verifyEddBatch(codes?: string[]) {
     if(codes)missingQuery=missingQuery.in("station_code",codes);
     const {data:missing}=rows.length ? await missingQuery : {data:[]};
     const idsByCode=new Map<string,string[]>();
-    for(const row of [...rows,...(missing??[])]) {
+    // Missing-date batches must lead: otherwise the first fifteen station groups
+    // can repeatedly consume the bulk budget and starve later locations.
+    for(const row of [...(missing??[]),...rows]) {
       const ids=idsByCode.get(row.station_code)??[];
       ids.push(row.tracking_id);idsByCode.set(row.station_code,ids);
     }
