@@ -1,92 +1,60 @@
-"use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { emptyUnplannedFilters, filterUnplannedRows, unplannedQuery, type UnplannedFilters, type UnplannedWorkspace } from "@/lib/ops-pulse/unplanned-leaves";
-import "./ops-unplanned-leaves.css";
-
-const dateLabel=(value:string)=>new Date(value+"T12:00:00Z").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"Asia/Kolkata"});
-const checkedLabel=(value:string)=>new Date(value).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",timeZone:"Asia/Kolkata"});
-const distinct=(values:(string|null)[])=>[...new Set(values.filter((s):s is string=>Boolean(s)))].sort();
-export function OpsUnplannedLeaves({initial,initialFilters}: {initial:UnplannedWorkspace;initialFilters:UnplannedFilters}) {
-  const [data,setData]=useState(initial), [filters,setFilters]=useState(initialFilters), [date,setDate]=useState(initial.date);
-  const [busy,setBusy]=useState(false), [error,setError]=useState(""), [page,setPage]=useState(0);
-  const requestId=useRef(0);
-  const badManager=Boolean(filters.manager && !data.managers.some(m=>m.id===filters.manager));
-  const rows=useMemo(()=>badManager?[]:filterUnplannedRows(data,filters),[data,filters,badManager]);
-  const selectedManager=data.managers.find(m=>m.id===filters.manager);
-  const baseManager=filters.manager||data.viewerPersonId;
-  const branches=data.managers.filter(m=>m.id!==baseManager && m.managerPersonIds[0]===baseManager)
-    .map(m=>({...m,count:data.rows.filter(r=>r.manager_person_ids.includes(m.id)).length}))
-    .filter(m=>m.count).sort((a,b)=>b.count-a.count||a.name.localeCompare(b.name));
-  function change(next:Partial<UnplannedFilters>) {
-    const updated={...filters,...next};setFilters(updated);setPage(0);
-    window.history.replaceState(null,"","?"+unplannedQuery(data.date,updated));
-  }
-  const refresh=useCallback(async (event?:React.FormEvent) => {
-    event?.preventDefault();const id=++requestId.current;setBusy(true);setError("");
-    try {
-      const response=await fetch("/api/ops-pulse/unplanned-leaves?"+new URLSearchParams({date}),{cache:"no-store"});
-      const result=await response.json();if(!response.ok)throw Error(result.error||"Attendance could not be checked.");
-      if(id!==requestId.current)return;
-      setData(result);setPage(0);
-      window.history.replaceState(null,"","?"+unplannedQuery(result.date,filters));
-    } catch(e) {if(id===requestId.current)setError(e instanceof Error?e.message:"Attendance could not be checked.");}
-    finally {if(id===requestId.current)setBusy(false);}
-  },[date,filters]);
-  useEffect(()=>{
-    const timer=window.setInterval(()=>{if(document.visibilityState==="visible" && navigator.onLine && !busy && date===data.date) void refresh();},120000);
-    return ()=>window.clearInterval(timer);
-  },[refresh,busy,date,data.date]);
-  const pageCount=Math.max(1,Math.ceil(rows.length/25));
-  const exportUrl="/api/ops-pulse/unplanned-leaves?"+unplannedQuery(data.date,filters)+"&format=xlsx";
+import { Download } from 'lucide-react';
+import { OpsLeaveRefresh } from './ops-leave-refresh';
+import { employmentLabel, hasLeavePunch, leaveOutcome, leaveReport, punchTime, unplannedQuery, type UnplannedFilters, type UnplannedWorkspace } from '@/lib/ops-pulse/unplanned-leaves';
+import './ops-unplanned-leaves.css';
+const dateLabel = (date: string) => new Date(date + 'T12:00:00Z').toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata' });
+const distinct = (values: (string | null)[]) => [...new Set(values.filter((s): s is string => Boolean(s)))].sort();
+const toneClass = (tone: string) => ['neutral', 'amber', 'blue', 'purple', 'green', 'red'].includes(tone) ? tone : 'neutral';
+export function OpsUnplannedLeaves({ initial: data, initialFilters: filters }: { initial: UnplannedWorkspace; initialFilters: UnplannedFilters }) {
+  const report = leaveReport(data, filters);
+  const updated = filters.view === 'updated';
+  const href = (changes: Partial<UnplannedFilters> = {}) => '/attendance/unplanned-leaves?' + unplannedQuery(filters, changes);
+  const selectedLocationMissing = filters.location && filters.location !== 'unassigned' && !data.locations.some(l => l.id === filters.location);
   return <div className="oul">
-    <section className="panel oul-intro">
-      <div><span className="oul-eyebrow">OPS PULSE · ATTENDANCE</span><h1>Unplanned Leaves</h1>
-        <p>People with no recorded punch after their scheduled grace period. Confirm with the person or responsible manager.</p></div>
-      <span className="status-pill">Read-only</span>
+    <header className="oul-intro"><span className="oul-eyebrow">TIME & ATTENDANCE</span><h1>Unplanned Leaves</h1>
+      <p>People who have not punched. When a punch arrives, their record moves to Updated.</p></header>
+    <section className="oul-summary" aria-label="Unplanned leave summary">
+      <article><span>Not punched today</span><strong>{report.summary.today}</strong><small>Past shift start + {data.graceMinutes} min</small></article>
+      <article><span>Earlier open cases</span><strong>{report.summary.earlier}</strong><small>Still awaiting follow-up</small></article>
+      <article><span>Punched since flagged</span><strong>{report.summary.punched}</strong><small>Moved to Updated in this date range</small></article>
     </section>
-      <div className="oul-notice">Reasons, attendance corrections and HR follow-up stay in People. Approved leave, roster off, recorded punches and closed cases are excluded. A missing punch is not proof of uninformed leave. Refreshes every two minutes while visible and online.</div>
-    <section className="panel">
-      <div className="oul-toolbar">
-        <form onSubmit={refresh}><label>Attendance day<input className="field" type="date" value={date} max={new Date(Date.now()+330*60000).toISOString().slice(0,10)} onChange={e=>setDate(e.target.value)} required/></label><button className="button" disabled={busy}>{busy?"Checking…":"Check attendance"}</button></form>
-        <div className="oul-checked" aria-live="polite">Showing {dateLabel(data.date)}<br/>{error?"Refresh failed · previous result shown":`Checked at ${checkedLabel(data.checkedAt)} IST`}</div>
-        {!badManager&&<a className="button secondary" href={exportUrl}>Download Excel</a>}
-      </div>
-      {error&&<p className="oul-error" role="alert">{error}</p>}
-      {!data.enabled&&<p className="oul-notice">Unplanned leave detection is disabled in People’s attendance policy.</p>}
-      <div className="oul-metrics">
-        <div><strong>{rows.length}</strong><span>People to confirm</span></div>
-        <div><strong>{distinct(rows.map(r=>r.location_id)).length}</strong><span>Locations in this view</span></div>
-        <div><strong>{data.graceMinutes} min</strong><span>Configured reporting grace</span></div>
-      </div>
-      <div className="oul-filters">
-        <label>Reporting manager<select className="field" value={filters.manager} onChange={e=>change({manager:e.target.value,direct:false})}>
-          <option value="">{data.scope==="company"?"Entire organisation":data.scope==="location"?"Your location team":"Your reporting team"}</option>
-          {badManager&&<option value={filters.manager}>Manager not available</option>}
-          {[...data.managers].sort((a,b)=>a.name.localeCompare(b.name)).map(m=><option key={m.id} value={m.id}>{m.name}{m.id===data.viewerPersonId?" · your team":""}</option>)}
-        </select></label>
-        <label>Location<select className="field" value={filters.location} onChange={e=>change({location:e.target.value})}><option value="">All in scope</option>{distinct(data.rows.map(r=>r.location_id)).map(id=><option key={id} value={id}>{data.rows.find(r=>r.location_id===id)?.station_code}</option>)}</select></label>
-        <label>Cluster<select className="field" value={filters.cluster} onChange={e=>change({cluster:e.target.value})}><option value="">All clusters</option>{distinct(data.rows.map(r=>r.cluster)).map(s=><option key={s}>{s}</option>)}</select></label>
-        <label>Region<select className="field" value={filters.region} onChange={e=>change({region:e.target.value})}><option value="">All regions</option>{distinct(data.rows.map(r=>r.region)).map(s=><option key={s}>{s}</option>)}</select></label>
-        <label>Search<input className="field" placeholder="Name, ID, role or contact" value={filters.search} onChange={e=>change({search:e.target.value})}/></label>
-      </div>
-      <div className="oul-scope">
-        <span>{selectedManager?`${selectedManager.name} · reporting team`:data.scope==="company"?"Company-wide access":data.scope==="location"?"Only your authorised location team":"Only your current reporting hierarchy"}</span>
-        {data.scope!=="location"&&<label><input type="checkbox" checked={filters.direct} onChange={e=>change({direct:e.target.checked})}/> Direct reportees only</label>}
-        <button className="button secondary" onClick={()=>change({...emptyUnplannedFilters})}>Clear filters</button>
-      </div>
-      {badManager?<div className="oul-error" role="alert">This manager is not available in your reporting scope for this date. No other team’s list has been substituted. Clear the manager filter to see your own scope.</div>:null}
-      {!badManager&&branches.length>0&&<details className="oul-branches" open><summary>Drill into a manager’s team</summary><div>{branches.map(m=><button key={m.id} onClick={()=>change({manager:m.id,direct:false,location:"",cluster:"",region:"",search:""})}><span>{m.name}<small>{m.role}</small></span><b>{m.count} →</b></button>)}</div></details>}
-      <div className="table-wrap"><table><thead><tr><th>Person / contact</th><th>Location</th><th>Scheduled shift · IST</th><th>Reports to</th><th>Attendance</th></tr></thead>
-        <tbody>{rows.slice(page*25,page*25+25).map(r=><tr key={r.person_id}>
-          <td><strong>{r.full_name}</strong><small>{r.worker_code} · {r.role_name}</small>{r.mobile&&<a href={"tel:"+r.mobile.replace(/[^+\d]/g,"")}>{r.mobile}</a>}</td>
-          <td><strong>{r.station_code||"Unassigned"}</strong><small>{r.station_name}</small></td>
-          <td>{r.shift_code}<small>{r.shift_start.slice(0,5)} – {r.shift_end.slice(0,5)}{r.shift_end<=r.shift_start?" (+1 day)":""}</small></td>
-          <td>{data.managers.find(m=>m.id===r.manager_person_ids[0])?.name||(r.manager_person_ids[0]?"Reporting manager":"Not linked")}</td>
-          <td><span className="status-pill warn">No punch · confirm</span><small>In — · Out —</small></td>
-        </tr>)}</tbody></table>
-        {!rows.length&&!badManager&&<div className="oul-empty">No people to follow up in this view. Change the filters or attendance day if needed.</div>}
-      </div>
-      <div className="oul-pagination"><span>{rows.length} people · page {Math.min(page+1,pageCount)} of {pageCount}</span><button className="button secondary" disabled={page===0} onClick={()=>setPage(p=>p-1)}>Previous</button><button className="button secondary" disabled={page+1>=pageCount} onClick={()=>setPage(p=>p+1)}>Next</button></div>
+    <section className="panel oul-panel">
+      <div className="oul-queue-head"><nav aria-label="Unplanned leave views" className="oul-tabs">
+        <a href={href({ view: 'open', page: 1 })} aria-current={!updated ? 'page' : undefined}>Not punched <span>{report.summary.open}</span></a>
+        <a href={href({ view: 'updated', page: 1 })} aria-current={updated ? 'page' : undefined}>Updated <span>{report.summary.updated}</span></a>
+      </nav><OpsLeaveRefresh checkedAt={data.checkedAt} /></div>
+      {!data.enabled && <p className="oul-notice">New-case detection is disabled in People. Existing cases remain visible.</p>}
+      <form className="oul-filters" method="get" action="/attendance/unplanned-leaves">
+        <input type="hidden" name="view" value={filters.view}/>
+        <label>From<input className="field" name="from" type="date" defaultValue={filters.from} max={data.today} required/></label>
+        <label>To<input className="field" name="to" type="date" defaultValue={filters.to} max={data.today} required/></label>
+        <label className="oul-search">Search<input className="field" name="search" placeholder="Name, People ID or phone" defaultValue={filters.search}/></label>
+        <label>Region<select className="field" name="region" defaultValue={filters.region}><option value="">All regions</option>{distinct(data.locations.map(l => l.region)).map(x => <option key={x}>{x}</option>)}<option value="unassigned">Unassigned</option></select></label>
+        <label>Cluster<select className="field" name="cluster" defaultValue={filters.cluster}><option value="">All clusters</option>{distinct(data.locations.map(l => l.cluster)).map(x => <option key={x}>{x}</option>)}<option value="unassigned">Unassigned</option></select></label>
+        <label>Location<select className="field" name="location" defaultValue={filters.location}><option value="">All accessible locations</option>{selectedLocationMissing && <option value={filters.location}>Location unavailable</option>}{data.locations.map(l => <option key={l.id} value={l.id}>{l.code}{l.name ? ` · ${l.name}` : ''}</option>)}{data.rows.some(r => !r.location_id) && <option value="unassigned">Unassigned</option>}</select></label>
+        <label>Status<select className="field" name="status" defaultValue={filters.status}><option value="">All statuses</option>{data.statuses.filter(s => s.is_active || s.id === filters.status || data.rows.some(r => r.status.id === s.id)).map(s => <option key={s.id} value={s.id}>{s.label}</option>)}<option value="punched">Punched in</option><option value="punch_pending">Punch pending approval</option><option value="excluded">Approved leave / excluded</option></select></label>
+        <label>Employment<select className="field" name="employment" defaultValue={filters.employment}><option value="">All employment states</option><option value="active">Active</option><option value="inactive">Inactive profiles</option><option value="suspended">Suspended</option><option value="offboarding">Offboarding</option><option value="offboarded">Offboarded / left</option></select></label>
+        <div className="oul-filter-actions"><input type="hidden" name="backlog" value="0"/><label className="oul-toggle"><input type="checkbox" name="backlog" value="1" defaultChecked={filters.backlog}/>Include earlier open cases</label><div><button className="button">Apply filters</button><a className="button secondary" href="/attendance/unplanned-leaves">Reset</a></div></div>
+      </form>
+      <div className="oul-results-head"><p>{report.rows.length.toLocaleString('en-IN')} records · {updated ? 'Punches, approved leave and closed follow-ups' : 'Approved leave and scheduled days off are excluded'}</p>
+        <a className="button secondary" href={'/api/ops-pulse/unplanned-leaves?' + unplannedQuery(filters, { page: 1 }) + '&format=xlsx'}><Download size={14}/>Download Excel</a></div>
+      <div className="table-wrap"><table><thead><tr><th>Person</th><th>Location</th><th>Day & shift</th><th>Attendance</th><th>Follow-up</th></tr></thead>
+        <tbody>{report.pageRows.map(row => {
+          const punched = hasLeavePunch(row), outcome = leaveOutcome(row), automatic = punched || Boolean(row.excluded_at);
+          return <tr key={row.id}>
+            <td><strong>{row.worker_name}</strong><small>{row.worker_code || '—'} · {row.worker_type === 'employee' ? 'Employee' : 'IC'}</small><small>{row.designation_name || 'Unassigned'} · {row.department_name || 'Unassigned'}</small>
+              {row.contact_number && <a className="oul-contact" href={'tel:' + row.contact_number.replace(/[^+\d]/g, '')}>{row.contact_number}</a>}
+              <div className="oul-employment"><span className="oul-status tone-neutral">{employmentLabel(row)}</span>{row.last_working_date && <small>Last day {dateLabel(row.last_working_date)}</small>}</div></td>
+            <td><strong>{row.location_code || 'Unassigned'}</strong><small>{row.location_name}</small><small>{[row.cluster, row.region].filter(Boolean).join(' · ')}</small></td>
+            <td><strong>{dateLabel(row.attendance_date)}</strong><small>{row.shift_label || 'Shift not available'}</small></td>
+            <td>{punched ? <><span className={'oul-status tone-' + toneClass(outcome.tone)}>{outcome.label}</span><small>First punch <b>{punchTime(row.first_punch_at, row.attendance_date)}</b></small><small>Latest punch <b>{punchTime(row.last_punch_at, row.attendance_date)}</b></small><small>{row.check_out_at ? `Check-out ${punchTime(row.check_out_at, row.attendance_date)}` : 'Check-out not recorded'}</small></>
+              : automatic ? <span className="oul-status tone-neutral">{outcome.label}</span> : <><span className="oul-status tone-amber">Not punched</span><small>No punch recorded for this day</small></>}</td>
+            <td>{automatic ? <small>Moved automatically</small> : <span className={'oul-status tone-' + toneClass(outcome.tone)}>{outcome.label}</span>}{row.reason && <p className="oul-reason">{row.reason}</p>}{row.last_hr_update_at && <small>Saved {punchTime(row.last_hr_update_at, row.attendance_date)}</small>}</td>
+          </tr>;
+        })}{!report.rows.length && <tr><td colSpan={5} className="oul-empty"><strong>{updated ? 'No updated cases in this view.' : 'No pending cases match these filters.'}</strong><small>Check the date range or reset your filters.</small></td></tr>}</tbody></table></div>
+      <div className="oul-pagination"><span>Showing {report.rows.length ? (report.page - 1) * 50 + 1 : 0}–{Math.min(report.page * 50, report.rows.length)} of {report.rows.length}</span><nav aria-label="Result pages">
+        {report.page > 1 ? <a href={href({ page: report.page - 1 })}>Previous</a> : <span aria-disabled="true">Previous</span>}<span>Page {report.page} of {report.pageCount}</span>{report.page < report.pageCount ? <a href={href({ page: report.page + 1 })}>Next</a> : <span aria-disabled="true">Next</span>}
+      </nav></div>
     </section>
   </div>;
 }
