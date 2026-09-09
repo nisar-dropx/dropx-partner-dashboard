@@ -1,6 +1,7 @@
 {
   "regions": ["sin1"],
   "crons": [
+    { "path": "/api/cron/edd-review-history", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/edd-verification", "schedule": "* * * * *" },
     {
       "path": "/api/cron/business-document-expiry",

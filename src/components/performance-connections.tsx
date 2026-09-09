@@ -27,7 +27,7 @@ export function PerformanceConnections({connections,date,stationCode,canEdit,cle
     <label>Vehicle / connection<input name="label" maxLength={100} required defaultValue={connection?.label||`Vehicle ${index+1}`}/></label>
     <label>Vehicle arrival<input name="arrival" type="time" required defaultValue={clockValue(connection?.arrival_at??null)}/></label>
     <label>Unloading complete<input name="unloading" type="time" defaultValue={clockValue(connection?.unloading_at??null)}/></label>
-    <label>Station clear<input name="clearance" type="time" defaultValue={clockValue(connection?.clearance_at??null)}/></label>
+    <label>Vehicle cleared (manual)<input name="clearance" type="time" defaultValue={clockValue(connection?.clearance_at??null)}/></label>
     <button className="button secondary">Save vehicle timings</button>
   </ReviewActionForm>;
   return <section className="review-vehicles" aria-label="Station vehicles">
@@ -41,7 +41,7 @@ export function PerformanceConnections({connections,date,stationCode,canEdit,cle
           {variance!==null?<span className={variance>0?"review-target-missed":"review-target-met"}>{variance>0?`${variance} min late`:"Within cutoff"}</span>:null}
         </summary>
         {canEdit?timingForm(connection,index):<div className="performance-operations-form review-station-times">
-          <label>Vehicle arrival<strong>{clockValue(connection.arrival_at)||"—"}</strong></label><label>Unloading complete<strong>{clockValue(connection.unloading_at)||"—"}</strong></label><label>Station clear<strong>{clockValue(connection.clearance_at)||"—"}</strong></label>
+          <label>Vehicle arrival<strong>{clockValue(connection.arrival_at)||"—"}</strong></label><label>Unloading complete<strong>{clockValue(connection.unloading_at)||"—"}</strong></label><label>Vehicle cleared (manual)<strong>{clockValue(connection.clearance_at)||"—"}</strong></label>
         </div>}
         <small className="review-cod-source">Updated by {connection.updated_by_name || "Station team"}</small>
       </details>;

@@ -13,6 +13,8 @@ import { PerformanceFollowups } from "@/components/performance-followups";
 import type { PerformanceReviewBacklog, PerformanceFollowup, PerformanceNoonEmd } from "@/lib/ops-pulse/performance-review";
 import { reviewLink } from "@/lib/ops-pulse/review-periods";
 import { PerformanceOpeningCard } from "@/components/performance-opening-card";
+import { PerformanceEddClearanceCard, PerformanceUtrDisciplineCard } from "@/components/performance-review-operations";
+import type { loadReviewEddHistory, loadReviewUtrDiscipline } from "@/lib/ops-pulse/review-operations-data";
 import { formatDashboardDate } from "@/lib/date-format";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import type { PerformanceAssociateDelivery, PerformanceOperationalSnapshot, PerformanceReview, PerformanceReviewCarryover, PerformanceReviewItem, PerformanceReviewStep, PerformanceConnection, PerformanceReviewUpdate, PerformanceReviewChainStep } from "@/lib/ops-pulse/performance-review";
@@ -35,6 +37,8 @@ export type ReviewMetric = {
 };
 
 type Props = {
+  eddClearance: Awaited<ReturnType<typeof loadReviewEddHistory>>;
+  utrDiscipline: Awaited<ReturnType<typeof loadReviewUtrDiscipline>>;
   codSnapshot: ReviewCodSnapshot;
   canBypass: boolean;
   canProxy: boolean;
@@ -245,6 +249,8 @@ export function PerformanceReviewDesk(props: Props) {
           <details className="performance-fact-card" name="performance-review-fact"><summary><span>Delivered · view split</span><strong>{snapshot.deliveredCount.toLocaleString("en-IN")}</strong><small>{snapshot.associateDeliveries.length} delivering associate{snapshot.associateDeliveries.length === 1 ? "" : "s"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></details>
           <details className="performance-fact-card" name="performance-review-fact"><summary><span>Average allocation · view split</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / {snapshot.activeFeCount} active FEs</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></details>
           <PerformanceOpeningCard snapshot={snapshot}/>
+          <PerformanceEddClearanceCard data={props.eddClearance}/>
+          <PerformanceUtrDisciplineCard data={props.utrDiscipline} date={date}/>
           <article><span>Metric health</span><strong>{metrics.length - misses.length}/{metrics.length}</strong><small>Within configured range</small></article>
         </div>
         {previousReview?.review_summary ? (

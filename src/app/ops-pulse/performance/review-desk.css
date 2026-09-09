@@ -1,5 +1,31 @@
 /* Scoped to Review Desk: readable controls at browser zoom without widening the page. */
 .performance-review-desk { min-width: 0; max-width: 100%; }
+.performance-review-desk .performance-review-facts { grid-template-columns: repeat(3,minmax(0,1fr)); }
+.performance-review-desk .review-operation-card > summary { min-height: 86px; }
+.performance-review-desk .review-operation-card > summary strong { font-size: 15px; line-height: 1.45; }
+.performance-review-desk .review-operation-card > summary small { font-size: 10px; white-space: normal; line-height: 1.5; }
+.review-operation-popover { position: absolute; top: calc(100% + 6px); left: 10px; right: 10px; padding: 14px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 15px 40px #0f172a24; z-index: 30; }
+.review-operation-popover > header { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+.review-operation-popover > header b { font-size: 14px; }
+.review-operation-popover > header p { margin: 4px 0 10px; font-size: 11px; color: #64748b; }
+.review-operation-tag { flex-shrink: 0; border-radius: 999px; padding: 5px 8px; font-size: 10px; background: #fff1e5; color: #9a3412; }
+.review-operation-summary { display: flex; flex-wrap: wrap; gap: 10px 22px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; font-size: 11px; color: #64748b; }
+.review-operation-summary b { color: #172033; margin-left: 5px; font-size: 13px; }
+.review-operation-popover .review-operation-note { font-size: 11px; color: #64748b; line-height: 1.55; margin: 10px 0 0; }
+.review-operation-table { max-height: 300px; overflow: auto; overscroll-behavior: contain; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 10px; scrollbar-gutter: stable; }
+.review-operation-table:focus-visible { outline: 2px solid #f97316; outline-offset: 2px; }
+.review-operation-table table { border-collapse: separate; border-spacing: 0; min-width: 850px; width: 100%; font-size: 11px; }
+.review-operation-table :is(th,td) { padding: 9px 10px; text-align: right; border-bottom: 1px solid #edf0f4; white-space: nowrap; }
+.review-operation-table th:first-child { text-align: left; }
+.review-operation-table thead th { position: sticky; top: 0; background: #f1f5f9; z-index: 2; color: #475569; font-size: 10px; }
+.performance-review-desk .review-operation-table small { display: block; font-size: 10px; color: #64748b; white-space: normal; max-width: 250px; margin-top: 3px; }
+.review-operation-pending { color: #b42318; font-weight: 750; }
+.review-operation-muted { color: #94a3b8; }
+.review-utr-table :is(th,td) { text-align: left; white-space: normal; }
+.review-utr-table table { min-width: 720px; }
+.review-utr-table th:first-child { min-width: 160px; }
+.review-utr-table td:nth-child(2) { min-width: 160px; }
+@media(max-width: 700px) { .performance-review-desk .performance-review-facts { grid-template-columns: repeat(2,minmax(0,1fr)); } .review-operation-popover { left: 0; right: 0; padding: 10px; } }
 /* The facts row is an isolated stacking context. Raise the whole row while
    a drill-down is open so later EMD headings/buttons cannot paint through it. */
 .performance-review-desk .performance-review-facts:has(> details[open]) { z-index: 20; }

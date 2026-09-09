@@ -4,6 +4,7 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 const component = read("src/components/performance-review-desk.tsx");
 const carriedActions = read("src/components/performance-carried-actions.tsx");
 const opening = read("src/components/performance-opening-card.tsx");
+const operations = read("src/components/performance-review-operations.tsx");
 const picker = read("src/components/performance-review-picker.tsx");
 const styles = read("src/app/globals.css");
 const reviewStyles = read("src/app/ops-pulse/performance/review-desk.css");
@@ -22,7 +23,7 @@ const checks = [
   [styles.includes(".performance-associate-popover-scroll { max-width: 100%; max-height: 290px; overflow: auto;"), "large associate lists scroll within their drill-down"],
   [styles.includes(".performance-associate-popover-head { position: sticky;"), "associate headers remain visible while scrolling"],
   [component.includes('className="performance-associate-popover-scroll"'), "associate table uses the contained scroll region"],
-  [((component + opening).match(/name="performance-review-fact"/g) ?? []).length === 3, "top drill-downs form one exclusive accordion group"],
+  [((component + opening + operations).match(/name="performance-review-fact"/g) ?? []).length === 5, "top drill-downs form one exclusive accordion group"],
   [!styles.includes("details:nth-child(2) .performance-associate-popover"), "drill-down position does not depend on the selected card index"],
   [component.includes("<PerformanceReviewPicker"), "review desk uses the synchronized date and station picker"],
   [picker.includes('value={selectedDate}') && picker.includes('value={selectedStation}'), "picker controls remain synchronized with the loaded review"],
@@ -48,3 +49,5 @@ if (failures.length) {
   console.error(`Performance review layout verification failed:\n${failures.map((failure) => `- ${failure}`).join("\n")}`);
   process.exit(1);
 }
+
+await import("./verify-review-operations.mjs");

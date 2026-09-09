@@ -9,6 +9,7 @@ import { PerformanceReviewDesk, type ReviewMetric } from "@/components/performan
 import "./review-desk.css";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { loadReviewEddHistory, loadReviewUtrDiscipline } from "@/lib/ops-pulse/review-operations-data";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
@@ -468,6 +469,10 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const canViewReviewStatus = hasPermission(authorization, "performance_review_status", "access");
   // Prefer the selected station row — review.station_id can diverge and hide saved timings.
   const connectionStationId = selectedReviewLocation?.id || selectedReview?.station_id || null;
+  const reviewOperationsPromise = selectedReviewLocation && view === "reviews" ? Promise.all([
+    loadReviewEddHistory(companyId, selectedReviewLocation.id, selectedDate),
+    loadReviewUtrDiscipline(companyId, selectedReviewLocation, selectedDate)
+  ]) : Promise.resolve(null);
   const [connectionResult, reviewChain, backlog, followups, noonEmd, stationLeads, codData, stationTargets] = selectedReviewLocation && connectionStationId && view === "reviews" ? await Promise.all([
     loadPerformanceConnections(companyId, connectionStationId, selectedDate),
     // Always resolve the People route so Proxy/Skip and Start stay available before a review row exists.
@@ -485,6 +490,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const reviewAccess = selectedReviewLocation && view === "reviews" ? await getReviewAccess(authorization,selectedReviewLocation.id,selectedReview,
     selectedReview ? reviewWorkspace.steps.filter(step=>step.review_id===selectedReview.id) : reviewChain.map((step,index)=>({step_order:index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,status:"pending"})),
     { inScope: true }) : null;
+  const reviewOperations = await reviewOperationsPromise;
 
   return (
     <AppShell active={view === "reviews" ? "Review Desk" : "Performance"} pageCode={view === "reviews" ? "performance_review" : "performance"}>
@@ -499,6 +505,8 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
 
         {view === "reviews" ? (
           selectedReviewLocation ? <PerformanceReviewDesk
+            eddClearance={reviewOperations![0]}
+            utrDiscipline={reviewOperations![1]}
             codSnapshot={codData.snapshot}
             canAdd={Boolean(reviewAccess?.canStart)}
             canCompleteStep={Boolean(reviewAccess?.canComplete)}
