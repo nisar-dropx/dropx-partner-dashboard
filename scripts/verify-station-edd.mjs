@@ -36,6 +36,14 @@ assert.equal(edd.stationEddPackageMatches(packages[0], "atStation", "today", tod
 assert.equal(edd.stationEddPackageMatches(packages[6], "atStation", "today", today), false);
 assert.equal(edd.stationEddPackageMatches(packages[6], "atStation", "overdue", today), true);
 assert.equal(edd.stationEddPackageMatches(packages[8], "all", "all", today), false);
+assert.equal(edd.stationEddPackageMatches(packages[0], "atStation", "pending", today), true);
+assert.equal(edd.stationEddPackageMatches(packages[6], "atStation", "pending", today), true);
+assert.equal(edd.stationEddPackageMatches(packages[7], "atStation", "pending", today), false, "future EDD excluded from pending");
+assert.equal(edd.stationEddPackageMatches(packages[11], "atStation", "pending", today), false, "unknown EDD excluded from pending");
+assert.equal(edd.stationEddSearchMatches(packages[1], "INDUCTED", " RETAINED-ID "), true);
+assert.equal(edd.stationEddSearchMatches(packages[1], "RECEIVED", ""), false);
+assert.deepEqual(edd.stationEddSelection(["overdue"], ["all"]), { day: "today", position: "atStation" });
+assert.deepEqual(edd.stationEddSelection("overdue", "onRoad"), { day: "overdue", position: "onRoad" });
 assert.equal(edd.stationEddDate(pkg("x", "INDUCTED", { ead: "2026-02-30", internalEAD: today })), today);
 assert.equal(edd.stationEddToday(new Date("2026-09-08T18:29:59Z")), "2026-09-08");
 assert.equal(edd.stationEddToday(new Date("2026-09-08T18:30:00Z")), today);
@@ -72,4 +80,37 @@ assert.ok(largeBytes.length < 4_000_000, "8000-TID detailed workbook must fit th
 const largeBook = XLSX.read(largeBytes, { type: "buffer" });
 assert.equal(XLSX.utils.sheet_to_json(largeBook.Sheets["All Snapshot TIDs"]).length, 8000);
 console.log(`PASS Large report: 8000 TIDs, ${largeBytes.length} bytes, all rows preserved.`);
+const networkRows = Array.from({ length: 30000 }, (_, i) => edd.stationEddPackageRow(
+  { ...largePackages[i % 8000], trackingId: String(370000000000 + i), ead: i % 2 ? today : "2026-09-08" },
+  "ST" + i % 38, "Station " + i % 38, "2026-09-09T11:13:12Z", today
+));
+const networkResponse = await workbookModule.compressedWorkbookResponse([{ name: "Pending TIDs", rows: networkRows }], "pending-edd-all-locations.xlsx");
+const networkBytes = Buffer.from(await networkResponse.arrayBuffer());
+assert.ok(networkBytes.length < 4_000_000, "30000-TID network pending export fits response budget");
+const networkBook = XLSX.read(networkBytes, { type: "buffer" });
+const networkParsed = XLSX.utils.sheet_to_json(networkBook.Sheets["Pending TIDs"]);
+assert.equal(networkParsed.length, 30000);
+assert.equal(new Set(networkParsed.map(r => r["Station Code"])).size, 38);
+assert.equal(networkParsed.filter(r => r["EDD Period"] === "Overdue").length, 15000);
+// Verify the server loader never queries unscoped stations and preserves missing rows.
+const loaderSource = readFileSync(new URL("../src/lib/ops-pulse/station-edd-data.ts", import.meta.url), "utf8");
+const loaderJs = ts.transpileModule(loaderSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+const requests = [];
+const snapshots = [{ station_code: "ERSE", packages, fetched_at: "2026-09-09T11:13:12Z" }, { station_code: "AWEZ", packages, fetched_at: "2026-09-09T11:13:12Z" }];
+const mockDb = { from: table => {
+  assert.equal(table, "edd_station_snapshots");
+  return { select: () => ({ in: async (field, codes) => {
+    assert.equal(field, "station_code"); requests.push(codes);
+    return { data: snapshots.filter(s => codes.includes(s.station_code)), error: null };
+  } }) };
+} };
+const loader = {};
+new Function("require", "exports", loaderJs)(name => name === "server-only" ? {} : name.includes("supabase-admin") ? { supabaseAdmin: mockDb } : edd, loader);
+const seen = [];
+const scoped = await loader.loadStationEddNetwork(["AWEZ", "MISSING", "AWEZ"], code => seen.push(code));
+assert.deepEqual(requests, [["AWEZ", "MISSING"]]);
+assert.deepEqual(scoped.map(s => s.stationCode), ["AWEZ", "MISSING"]);
+assert.deepEqual(seen, ["AWEZ"], "export callback must not see ERSE outside requested scope");
+assert.equal(scoped[1].hasSnapshot, false);
+console.log(`PASS All-location pending export: 30000 TIDs across 38 stations, ${networkBytes.length} bytes; scope and missing snapshots verified.`);
 console.log("PASS Station EDD behavioral tests: statuses, dates, retained IDs, reverse shipments, duplicates, missing/stale data, and XLSX round-trip.");

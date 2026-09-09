@@ -1,7 +1,7 @@
 import type { EddPackage, EddStationPayload } from "@/lib/ops-pulse/edd-worker";
 
 export type StationEddFilter = "atStation" | "onRoad" | "other" | "all";
-export type StationEddDay = "today" | "overdue" | "all";
+export type StationEddDay = "today" | "overdue" | "pending" | "all";
 export const STATION_EDD_RULE = "At station = INDUCTED or RECEIVED in the latest backlog snapshot. A retained driver ID does not override the current status. Reverse shipments are excluded. EDD uses the source's resolved EAD date; promised and internal dates remain visible for audit.";
 
 export function stationEddToday(now = new Date()) {
@@ -32,7 +32,21 @@ export function stationEddPackageMatches(pkg: EddPackage, filter: StationEddFilt
   const date = stationEddDate(pkg);
   if (day === "today" && date !== today) return false;
   if (day === "overdue" && (!date || date >= today)) return false;
+  if (day === "pending" && (!date || date > today)) return false;
   return filter === "all" || stationEddPosition(pkg) === filter;
+}
+
+export function stationEddSearchMatches(pkg: EddPackage, state = "", query = "") {
+  if (state && pkg.state !== state) return false;
+  const term = query.toLowerCase().trim();
+  return !term || [pkg.trackingId, pkg.state, pkg.driverId, pkg.lastScanBy, pkg.city, pkg.orderingOrderId, pkg.lockerName].some(v => v?.toLowerCase().includes(term));
+}
+
+export function stationEddSelection(day: unknown, position: unknown) {
+  return {
+    day: (typeof day === "string" && ["today", "overdue", "pending", "all"].includes(day) ? day : "today") as StationEddDay,
+    position: (typeof position === "string" && ["atStation", "onRoad", "other", "all"].includes(position) ? position : "atStation") as StationEddFilter
+  };
 }
 
 export type StationEddSummary = {
@@ -86,11 +100,9 @@ export function stationEddFreshness(fetchedAt: string | null, now = new Date()) 
   return now.getTime() - Date.parse(fetchedAt) > 2 * 60 * 60 * 1000 ? "Snapshot over 2h old" : "Recent snapshot";
 }
 
-export function stationEddReportSheets(payload: EddStationPayload, stationName: string, today = stationEddToday()) {
-  const packages = [...new Map(payload.packages.filter(p => p.trackingId).map(p => [p.trackingId, p])).values()];
-  const summary = summarizeStationEdd(payload.stationCode, packages, payload.fetchedAt, today);
-  const packageRow = (pkg: EddPackage) => ({
-    "Station Code": payload.stationCode, "Station Name": stationName, "Tracking ID": pkg.trackingId,
+export function stationEddPackageRow(pkg: EddPackage, stationCode: string, stationName: string, fetchedAt: string, today: string) {
+  return {
+    "Station Code": stationCode, "Station Name": stationName, "Tracking ID": pkg.trackingId,
     "EDD / EAD": stationEddDate(pkg) ?? "", "Promised Delivery Date": pkg.promisedDeliveryDate ?? "",
     "Internal EAD": pkg.internalEAD ?? "", "Estimated Arrival UTC": pkg.estimatedArrivalTimeUTC ?? "",
     "Raw Status": pkg.state ?? "", Position: stationEddPosition(pkg),
@@ -101,8 +113,15 @@ export function stationEddReportSheets(payload: EddStationPayload, stationName: 
     "Store / Locker": pkg.lockerName ?? "", "Payment Method": pkg.paymentMethod ?? "",
     City: pkg.city ?? "", "Postal Code": pkg.postalCode ?? "", State: pkg.stateProvinceCode ?? "",
     "Order ID": pkg.orderingOrderId ?? "", "Minutes In State": pkg.minutesInState,
-    "Snapshot Refreshed UTC": payload.fetchedAt, "Report EDD Day (IST)": today
-  });
+    "Snapshot Refreshed UTC": fetchedAt, "Report EDD Day (IST)": today,
+    "EDD Period": !stationEddDate(pkg) ? "Missing" : stationEddDate(pkg)! < today ? "Overdue" : stationEddDate(pkg) === today ? "Today" : "Future"
+  };
+}
+
+export function stationEddReportSheets(payload: EddStationPayload, stationName: string, today = stationEddToday()) {
+  const packages = [...new Map(payload.packages.filter(p => p.trackingId).map(p => [p.trackingId, p])).values()];
+  const summary = summarizeStationEdd(payload.stationCode, packages, payload.fetchedAt, today);
+  const packageRow = (pkg: EddPackage) => stationEddPackageRow(pkg, payload.stationCode, stationName, payload.fetchedAt, today);
   return [
     { name: "Summary", rows: [{
       "Station Code": payload.stationCode, "Station Name": stationName, "EDD Day (IST)": today,

@@ -22,8 +22,8 @@ export default async function StationEddPage() {
   return (
     <AppShell active="Delivery Performance" pageCode="edd_dashboard">
       <div className="ops-command-center">
-        <PageHead eyebrow="Ops Pulse · Delivery Performance" title="EDDs"
-          subtitle="Expected deliveries still at station, with station-level counts and auditable tracking-ID details."
+        <PageHead eyebrow="Ops Pulse · Delivery Performance" title="EDDs · All locations"
+          subtitle="Station-wise pending expected deliveries. Open any location for tracking IDs, live history and detailed downloads."
           action={<TrackingIdSearch />} />
         <EddSectionTabs active="edds" />
         <StationEddNetworkClient stations={stations} initialNetwork={network} initialError={error} />

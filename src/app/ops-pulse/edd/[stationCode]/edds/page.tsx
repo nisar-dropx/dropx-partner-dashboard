@@ -7,11 +7,12 @@ import { requireStationEddAccess } from "@/lib/ops-pulse/station-edd-access";
 import { fetchEddAllowedStations, isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
 import { StationEddDetailClient } from "../../../station-edd/[stationCode]/station-edd-detail-client";
 import { EddStationSectionTabs } from "../edd-station-section-tabs";
+import { stationEddSelection } from "@/lib/ops-pulse/station-edd";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
-export default async function StationEddDetailPage({ params }: { params: { stationCode: string } }) {
+export default async function StationEddDetailPage({ params, searchParams }: { params: { stationCode: string }; searchParams: Record<string, string | string[] | undefined> }) {
   const authorization = await requireStationEddAccess();
   const companyId = requireCompanyId(authorization);
   const stationCode = decodeURIComponent(String(params.stationCode ?? "")).trim().toUpperCase();
@@ -41,6 +42,7 @@ export default async function StationEddDetailPage({ params }: { params: { stati
   const authorized = Boolean(stationCode && scopeCodes.has(stationCode) && workerAllowed);
   const stationName = String(location?.station_name ?? "").trim();
   const place = [location?.city, location?.state].filter(Boolean).join(", ");
+  const selection = stationEddSelection(searchParams.day, searchParams.position);
 
   return (
     <AppShell active="Delivery Performance" pageCode="edd_dashboard">
@@ -62,7 +64,7 @@ export default async function StationEddDetailPage({ params }: { params: { stati
             </div>
           </section>
         ) : (
-          <StationEddDetailClient stationCode={stationCode} />
+          <StationEddDetailClient key={`${stationCode}-${selection.day}-${selection.position}`} stationCode={stationCode} initialDay={selection.day} initialPosition={selection.position} />
         )}
       </div>
     </AppShell>
