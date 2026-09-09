@@ -772,11 +772,16 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
   const dateField = (field: string, label: string, options?: { readOnly?: boolean; warning?: string }) => {
     if (!enabled.has(field)) return null;
     const valueKey = fieldValueKeys[field] ?? field;
+    const verificationToClear = field === "date_of_birth" || field === "driving_license_exp_date"
+      ? ["dl"]
+      : ["vehicle_reg_exp_date", "vehicle_insurance_exp_date", "vehicle_pollution_exp_date"].includes(field)
+        ? ["vehicle"]
+        : [];
     return <ManualDateField
       key={field}
       label={label}
       name={field}
-      onChange={(value) => set(valueKey, value, field === "date_of_birth" ? ["dl"] : [])}
+      onChange={(value) => set(valueKey, value, verificationToClear)}
       readOnly={options?.readOnly}
       required={required.has(field)}
       value={values[valueKey] ?? ""}
@@ -814,7 +819,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       {dateField("date_of_birth","Date of birth",{ warning: minimumAgeError(values.dateOfBirth) ?? "" })}
       {enabled.has("pan_number") ? <>
         <VerifyField label={`PAN${required.has("pan_number") ? " *" : ""}`} name="pan_number" onChange={(value) => set("panNumber", value, ["pan","pan_aadhaar"])} onVerify={() => verify("pan")} running={running === "pan"} value={values.panNumber || ""} checked={attempted("pan")} verified={verified("pan")} error={verificationErrors.pan || verificationInputError("pan", values)} required={required.has("pan_number")} />
-        <VerificationText checks={[currentCheck("pan")]} />
+        <VerificationText checks={[currentCheck("pan")]} running={running === "pan" ? "pan" : undefined} />
       </> : null}
       {enabled.has("aadhaar_number") ? <>
         <VerifyField
@@ -831,7 +836,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
           error={verificationErrors.pan_aadhaar || verificationInputError("pan_aadhaar", values)}
           required={required.has("aadhaar_number")}
         />
-        <VerificationText checks={[currentCheck("pan_aadhaar")]} />
+        <VerificationText checks={[currentCheck("pan_aadhaar")]} running={running === "pan_aadhaar" ? "pan_aadhaar" : undefined} />
       </> : null}
       {input("father_name","Father name")}
       {input("blood_group","Blood group",{ choices: bloodGroups })}
@@ -844,7 +849,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       {enabled.has("bank_account_no") ? <label className="dx-field"><span>Bank account no{required.has("bank_account_no") ? " *" : ""}</span><input maxLength={30} name="bank_account_no" onChange={(event) => set("bankAccountNo", sanitizeProfileInput("bank_account_no", event.target.value), ["bank"])} required={required.has("bank_account_no")} value={values.bankAccountNo || ""} /></label> : null}
       {enabled.has("ifsc") ? <>
         <VerifyField label={`IFSC${required.has("ifsc") ? " *" : ""}`} name="ifsc" onChange={(value) => set("ifsc", value, ["bank"])} onVerify={() => verify("bank")} running={running === "bank"} value={values.ifsc || ""} verified={verified("bank")} error={verificationErrors.bank || verificationInputError("bank", values)} required={required.has("ifsc")} />
-        <VerificationText checks={[currentCheck("bank")]} />
+        <VerificationText checks={[currentCheck("bank")]} running={running === "bank" ? "bank" : undefined} />
       </> : null}
     </ProfileSection>
     {["eshram_uan","pf_uan","pf_account_no","esi_no"].some((field) => enabled.has(field)) ? <ProfileSection title="Statutory details">
@@ -862,7 +867,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
         </label>
         {pfAnswer === "yes" ? <>
           <VerifyField label="PF UAN *" name="pf_uan" onChange={(value) => set("pfUan", value, ["pf_uan"])} onVerify={() => verify("pf_uan")} running={running === "pf_uan"} value={values.pfUan || ""} checked={attempted("pf_uan")} verified={verified("pf_uan")} error={verificationErrors.pf_uan || verificationInputError("pf_uan", values)} required />
-          <VerificationText checks={[currentCheck("pf_uan")]} />
+          <VerificationText checks={[currentCheck("pf_uan")]} running={running === "pf_uan" ? "pf_uan" : undefined} />
         </> : null}
       </> : null}
       {executive || profile.statutoryApplicability?.includes("pf") ? input("pf_account_no","PF Account No") : null}
@@ -883,16 +888,16 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     {drivingEnabled ? <ProfileSection title="Driving and vehicle">
       {enabled.has("driving_license_no") ? <>
         <VerifyField label={`Driving license no${required.has("driving_license_no") ? " *" : ""}`} name="driving_license_no" onChange={(value) => set("drivingLicenseNo", value, ["dl"])} onVerify={() => verify("dl")} running={running === "dl"} value={values.drivingLicenseNo || ""} checked={attempted("dl")} verified={verified("dl")} error={verificationErrors.dl || verificationInputError("dl", values)} required={required.has("driving_license_no")} />
-        <VerificationText checks={[dlCheck]} />
+        <VerificationText checks={[dlCheck]} running={running === "dl" ? "dl" : undefined} />
       </> : null}
-      {dateField("driving_license_exp_date","DL expiry date",{ readOnly: Boolean(dlCheck?.expiryDate), warning: expired(values.drivingLicenseExpiry) ? "Driving licence has expired." : "" })}
+      {dateField("driving_license_exp_date","DL expiry date",{ readOnly: Boolean(dlCheck), warning: expired(values.drivingLicenseExpiry) ? "Driving licence has expired." : "" })}
       {enabled.has("vehicle_reg_no") ? <>
         <VerifyField label={`Vehicle reg no${required.has("vehicle_reg_no") ? " *" : ""}`} name="vehicle_reg_no" onChange={(value) => set("vehicleRegistrationNo", value, ["vehicle"])} onVerify={() => verify("vehicle")} running={running === "vehicle"} value={values.vehicleRegistrationNo || ""} verified={verified("vehicle")} error={verificationErrors.vehicle || verificationInputError("vehicle", values)} required={required.has("vehicle_reg_no")} />
-        <VerificationText checks={[vehicleCheck]} />
+        <VerificationText checks={[vehicleCheck]} running={running === "vehicle" ? "vehicle" : undefined} />
       </> : null}
-      {dateField("vehicle_reg_exp_date","Reg expiry date",{ readOnly: Boolean(vehicleCheck?.registrationExpiryDate), warning: expired(values.registrationExpiry) ? "Vehicle registration has expired." : "" })}
-      {dateField("vehicle_insurance_exp_date","Vehicle Insurance expiry",{ readOnly: Boolean(vehicleCheck?.insuranceExpiryDate), warning: expired(values.insuranceExpiry) ? "Vehicle insurance has expired." : "" })}
-      {!vehicleCheck?.fuelType?.toLowerCase().includes("electric") ? dateField("vehicle_pollution_exp_date","Pollution expiry date",{ readOnly: Boolean(vehicleCheck?.pollutionExpiryDate), warning: expired(values.pollutionExpiry) ? "Pollution certificate has expired." : "" }) : null}
+      {dateField("vehicle_reg_exp_date","Reg expiry date",{ readOnly: Boolean(vehicleCheck), warning: expired(values.registrationExpiry) ? "Vehicle registration has expired." : "" })}
+      {dateField("vehicle_insurance_exp_date","Vehicle Insurance expiry",{ readOnly: Boolean(vehicleCheck), warning: expired(values.insuranceExpiry) ? "Vehicle insurance has expired." : "" })}
+      {!vehicleCheck?.fuelType?.toLowerCase().includes("electric") ? dateField("vehicle_pollution_exp_date","Pollution expiry date",{ readOnly: Boolean(vehicleCheck), warning: expired(values.pollutionExpiry) ? "Pollution certificate has expired." : "" }) : null}
     </ProfileSection> : null}
     <ProfileSection title="Emergency contact">
       {input("emergency_contact_number","Emergency contact number")}{input("emergency_contact_name","Contact person name")}{input("emergency_contact_relation","Relation",{ choices: relations })}
@@ -940,23 +945,46 @@ function ProfileSection({ title: heading, children }: { title: string; children:
   return <section className="dx-form-section"><h2>{heading}</h2><div>{items}</div></section>;
 }
 
-function VerificationText({ checks }: { checks: Array<Verification | undefined> }) {
-  return <>{checks.filter(Boolean).map((check) => {
-    const holder = check!.name || check!.accountName || check!.ownerName;
-    const status = check!.message || (check!.verified ? "Verified." : "Verification failed.");
-    const tone = check!.verified ? "ok" : check!.manualReview ? "review" : "fail";
-    const Icon = check!.verified ? ShieldCheck : check!.manualReview ? TriangleAlert : CircleX;
-    const identityCheck = ["pan", "dl", "pf_uan"].includes(check!.kind);
-    if (identityCheck) {
-      const label = holder || status;
-      return <div className={`dx-verification ${tone}`} key={check!.kind}>
-        <Icon />
-        <span><strong>{label}</strong>{holder ? <small>{status}</small> : null}</span>
-      </div>;
-    }
-    const message = holder
-      ? `${holder}${check!.fuelType ? ` | Fuel type: ${check!.fuelType}` : ""}${check!.verified ? "" : ` | ${status}`}`
-      : status;
-    return <p className={`dx-verification ${tone}`} key={check!.kind}><Icon />{message}</p>;
-  })}</>;
+function verificationLabel(kind: string) {
+  return ({
+    pan: "PAN",
+    pan_aadhaar: "PAN Aadhaar link",
+    bank: "Bank",
+    pf_uan: "PF UAN",
+    dl: "DL",
+    vehicle: "vehicle details"
+  } as Record<string, string>)[kind] ?? "verification";
+}
+
+function VerificationText({ checks, running }: { checks: Array<Verification | undefined>; running?: string }) {
+  const check = checks.find(Boolean);
+  if (running) {
+    return <div className="dx-verification pending">
+      <i className="mini-spin" aria-hidden="true" />
+      <span><strong>Verifying {verificationLabel(running)}</strong></span>
+    </div>;
+  }
+  if (!check) return null;
+
+  const holder = check.name || check.accountName || check.ownerName;
+  const status = check.message || (check.verified ? "Verified." : "Verification failed.");
+  const tone = check.verified ? "ok" : check.manualReview ? "review" : "fail";
+  const Icon = check.verified ? ShieldCheck : check.manualReview ? TriangleAlert : CircleX;
+  const identityMismatch = ["pan", "dl", "pf_uan"].includes(check.kind) && !check.verified && Boolean(holder);
+  const fallbackLabel = check.kind === "vehicle"
+    ? "Vehicle details checked"
+    : `${verificationLabel(check.kind)} verification failed`;
+  const label = check.kind === "bank"
+    ? `Beneficiary: ${check.accountName || check.name || "Name not returned"}`
+    : check.kind === "vehicle" && holder
+      ? `RC owner: ${holder}`
+      : holder || fallbackLabel;
+  const detail = check.kind === "vehicle" && check.fuelType
+    ? `${check.fuelType}${status ? ` · ${status}` : ""}`
+    : holder ? status : undefined;
+
+  return <div className={`dx-verification ${tone}${identityMismatch ? " mismatch" : ""}`}>
+    <Icon />
+    <span><strong>{label}</strong>{detail && detail !== label ? <small>{detail}</small> : null}</span>
+  </div>;
 }
