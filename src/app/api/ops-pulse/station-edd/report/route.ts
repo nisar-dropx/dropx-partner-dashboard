@@ -3,7 +3,7 @@ import { isStationEddApiDenied, stationEddApiContext } from "@/lib/ops-pulse/sta
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { stationEddReportSheets, stationEddToday } from "@/lib/ops-pulse/station-edd";
 import { fetchEddStation } from "@/lib/ops-pulse/edd-worker";
-import { workbookResponse } from "@/lib/report-workbook";
+import { compressedWorkbookResponse } from "@/lib/report-workbook";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     const result = await fetchEddStation({ stationCode });
     if (result.status === "no_snapshot") return NextResponse.json({ error: "No EDD snapshot is available." }, { status: 404 });
     const today = stationEddToday();
-    return workbookResponse(stationEddReportSheets(result.payload, station.name, today), `station-edd-${stationCode}-${today}.xlsx`);
+    return await compressedWorkbookResponse(stationEddReportSheets(result.payload, station.name, today), `station-edd-${stationCode}-${today}.xlsx`);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to build station report." }, { status: 500 });
   }

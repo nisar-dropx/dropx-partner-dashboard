@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import ts from "typescript";
 import * as XLSX from "xlsx";
 
@@ -42,9 +43,13 @@ assert.equal(edd.stationEddFreshness("2026-09-07T03:00:00Z", new Date("2026-09-0
 assert.equal(edd.summarizeStationEdd("X", null, null, today).hasSnapshot, false);
 assert.equal(edd.summarizeStationEdd("X", [], "2026-09-09T11:00:00Z", today).hasSnapshot, true);
 const sheets = edd.stationEddReportSheets({ stationCode: "AWEZ", fetchedAt: "2026-09-09T11:13:12Z", packages }, "Kalady", today);
-const book = XLSX.utils.book_new();
-for (const sheet of sheets) XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(sheet.rows), sheet.name);
-const bytes = XLSX.write(book, { type: "buffer", bookType: "xlsx" });
+const workbookSource = readFileSync(new URL("../src/lib/report-workbook.ts", import.meta.url), "utf8");
+const workbookJs = ts.transpileModule(workbookSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
+const workbookModule = {};
+new Function("require", "exports", workbookJs)(createRequire(import.meta.url), workbookModule);
+const response = await workbookModule.compressedWorkbookResponse(sheets, "station-edd-AWEZ.xlsx");
+assert.match(response.headers.get("Content-Disposition"), /station-edd-AWEZ.xlsx/);
+const bytes = Buffer.from(await response.arrayBuffer());
 const parsed = XLSX.read(bytes, { type: "buffer" });
 assert.deepEqual(parsed.SheetNames, ["Summary", "Source Statuses", "At Station EDD Today", "Overdue At Station", "All Snapshot TIDs"]);
 const atStation = XLSX.utils.sheet_to_json(parsed.Sheets["At Station EDD Today"]);
@@ -54,4 +59,17 @@ assert.equal(atStation[1]["Driver ID (source)"], "retained-id");
 assert.equal(atStation[0]["EDD / EAD"], today);
 assert.equal(atStation[0]["Snapshot Refreshed UTC"], "2026-09-09T11:13:12Z");
 assert.equal(XLSX.utils.sheet_to_json(parsed.Sheets.Summary)[0]["At Station EDD Today"], atStation.length);
+const largePackages = Array.from({ length: 8000 }, (_, i) => pkg(String(370000000000 + i), i % 2 ? "INDUCTED" : "RECEIVED", {
+  city: "ERNAKULAM", postalCode: "683574", lastScanBy: "station-operator", driverId: "driver-" + i,
+  orderingOrderId: "407-" + (1000000 + i) + "-1234567", promisedDeliveryDate: today, internalEAD: today,
+  estimatedArrivalTimeUTC: "2026-09-09 14:30:00", packageType: "Delivery", shipOption: "Std IN National",
+  lockerName: "Customer-" + i, paymentMethod: "PREPAY", minutesInState: i
+}));
+const largeSheets = edd.stationEddReportSheets({ stationCode: "ERSE", fetchedAt: "2026-09-09T11:13:12Z", packages: largePackages }, "Perumbavoor", today);
+const largeResponse = await workbookModule.compressedWorkbookResponse(largeSheets, "station-edd-ERSE.xlsx");
+const largeBytes = Buffer.from(await largeResponse.arrayBuffer());
+assert.ok(largeBytes.length < 4_000_000, "8000-TID detailed workbook must fit the response budget");
+const largeBook = XLSX.read(largeBytes, { type: "buffer" });
+assert.equal(XLSX.utils.sheet_to_json(largeBook.Sheets["All Snapshot TIDs"]).length, 8000);
+console.log(`PASS Large report: 8000 TIDs, ${largeBytes.length} bytes, all rows preserved.`);
 console.log("PASS Station EDD behavioral tests: statuses, dates, retained IDs, reverse shipments, duplicates, missing/stale data, and XLSX round-trip.");
