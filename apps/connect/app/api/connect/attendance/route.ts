@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveConnectAttendanceWorker } from "@/lib/connect-attendance-worker";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { resolveAttendancePayDayType } from "@/lib/attendance-pay-day";
 import { loadAttendanceReportRows } from "../../../../../../src/lib/biometric/attendance";
 import { resolveAttendanceRegularizationApprovers } from "../../../../../../src/lib/attendance-regularization-workflow";
 import { notifyAttendanceApprovalRequired } from "../../../../../../src/lib/connect-attendance-notifications";
@@ -124,23 +125,48 @@ export async function GET(request: NextRequest) {
 
     const leaveTypes = await supabaseAdmin
       .from("hr_leave_types")
-      .select("attendance_code,attendance_label,is_paid")
+      .select("attendance_code,attendance_label,is_paid,balance_mode")
       .eq("company_id", worker.companyId);
     if (leaveTypes.error) throw new Error(leaveTypes.error.message);
     const labels = new Map((leaveTypes.data ?? []).map((type) => [type.attendance_code, type]));
 
     const responseRows = rows.map((row) => {
       const configured = labels.get(String(row.status ?? ""));
-      const isPaidLeave = configured?.is_paid ?? null;
-      const unpaidLeave = Boolean(configured) && isPaidLeave === false;
+      const unpaidLeave = Boolean(configured) && (
+        configured?.is_paid === false
+        || String(configured?.balance_mode ?? "") === "unlimited_unpaid"
+      );
+      const paidLeave = Boolean(configured) && !unpaidLeave;
+      const isPaidLeave = configured ? paidLeave : null;
+      const statusLabel = unpaidLeave
+        ? (configured?.attendance_label || "Unpaid leave")
+        : (configured?.attendance_label ?? null);
+      const statusKind = unpaidLeave
+        ? "leave" as const
+        : paidLeave
+          ? "paid_leave" as const
+          : "attendance" as const;
+      const payDayType = resolveAttendancePayDayType({
+        status: row.status,
+        statusLabel: statusLabel ?? row.attendanceStatus,
+        attendanceStatus: row.attendanceStatus,
+        workMode: row.workMode ?? "onsite",
+        leaveType: configured
+          ? {
+            attendance_code: configured.attendance_code,
+            attendance_label: configured.attendance_label,
+            is_paid: unpaidLeave ? false : paidLeave ? true : null
+          }
+          : null,
+        isPaidLeave
+      });
       return {
         date: row.punchDate,
         status: row.status,
-        statusLabel: unpaidLeave
-          ? (configured?.attendance_label ? `Absent (${configured.attendance_label})` : "Absent (LOP)")
-          : (configured?.attendance_label ?? null),
-        statusKind: configured && !unpaidLeave ? "leave" as const : "attendance" as const,
+        statusLabel,
+        statusKind,
         isPaidLeave,
+        payDayType,
         attendanceStatus: row.attendanceStatus,
         inTime: row.inTime,
         outTime: row.outTime,
@@ -168,8 +194,9 @@ export async function GET(request: NextRequest) {
           date,
           status: "",
           statusLabel: null,
-          statusKind: "attendance",
+          statusKind: "attendance" as const,
           isPaidLeave: null,
+          payDayType: "needs_review" as const,
           attendanceStatus: "Needs Review",
           inTime: "",
           outTime: "",

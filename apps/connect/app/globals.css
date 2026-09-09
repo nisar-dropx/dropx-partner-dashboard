@@ -11181,19 +11181,91 @@ img.dx-selfie-live {
   }
 }
 
-/* Approved leave must be visually distinct from absence, presence and missing punches. */
+/* Calendar day colors: unpaid leave only under Leave; paid leave / WFH / week off / holiday are distinct. */
 .dx-days button.leave {
   color: #fff;
-  background: #5b65c8;
+  background: #7c3aed;
 }
 
 .dx-days button.leave.selected {
-  color: #5b65c8;
+  color: #6d28d9;
+  background: #fff;
+}
+
+.dx-days button.paid-leave {
+  color: #fff;
+  background: #0d9488;
+}
+
+.dx-days button.paid-leave.selected {
+  color: #0f766e;
+  background: #fff;
+}
+
+.dx-days button.wfh {
+  color: #fff;
+  background: #2563eb;
+}
+
+.dx-days button.wfh.selected {
+  color: #1d4ed8;
+  background: #fff;
+}
+
+.dx-days button.week-off {
+  color: #334155;
+  background: #e2e8f0;
+}
+
+.dx-days button.week-off.selected {
+  color: #1e293b;
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #94a3b8;
+}
+
+.dx-days button.holiday {
+  color: #92400e;
+  background: #fbbf24;
+}
+
+.dx-days button.holiday.selected {
+  color: #b45309;
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #f59e0b;
+}
+
+.dx-days button.absent {
+  color: #fff;
+  background: #dc2626;
+}
+
+.dx-days button.absent.selected {
+  color: #b91c1c;
   background: #fff;
 }
 
 .dx-legend .leave::before {
-  background: #5b65c8;
+  background: #7c3aed;
+}
+
+.dx-legend .paid-leave::before {
+  background: #0d9488;
+}
+
+.dx-legend .wfh::before {
+  background: #2563eb;
+}
+
+.dx-legend .week-off::before {
+  background: #94a3b8;
+}
+
+.dx-legend .holiday::before {
+  background: #fbbf24;
+}
+
+.dx-legend .absent::before {
+  background: #dc2626;
 }
 
 .dx-legend .on-shift::before {
@@ -11203,8 +11275,32 @@ img.dx-selfie-live {
 
 .dx-attendance-list em.leave,
 .dx-selected-day em.leave {
-  color: #454ca8;
-  background: #eef0ff;
+  color: #6d28d9;
+  background: #f3e8ff;
+}
+
+.dx-attendance-list em.paid-leave,
+.dx-selected-day em.paid-leave {
+  color: #0f766e;
+  background: #ccfbf1;
+}
+
+.dx-attendance-list em.wfh,
+.dx-selected-day em.wfh {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.dx-attendance-list em.week-off,
+.dx-selected-day em.week-off {
+  color: #334155;
+  background: #e2e8f0;
+}
+
+.dx-attendance-list em.holiday,
+.dx-selected-day em.holiday {
+  color: #92400e;
+  background: #fef3c7;
 }
 
 .dx-attendance-day-note {

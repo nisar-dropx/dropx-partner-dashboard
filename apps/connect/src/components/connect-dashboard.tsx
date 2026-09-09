@@ -54,7 +54,7 @@ type AttendanceRow = AttendanceInsightRow & {
   date: string;
   status: string;
   statusLabel?: string | null;
-  statusKind?: "attendance" | "leave";
+  statusKind?: "attendance" | "leave" | "paid_leave";
   attendanceStatus?: string | null;
   inTime: string;
   outTime: string;

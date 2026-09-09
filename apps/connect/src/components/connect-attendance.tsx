@@ -46,7 +46,9 @@ type Row = AttendanceInsightRow & {
   date: string;
   status: string;
   statusLabel?: string | null;
-  statusKind?: "attendance" | "leave";
+  statusKind?: "attendance" | "leave" | "paid_leave";
+  isPaidLeave?: boolean | null;
+  payDayType?: string | null;
   attendanceStatus?: string | null;
   inTime: string;
   outTime: string;
@@ -288,7 +290,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
   }), [punchStatus?.shift.open, punchStatus?.shift.punchDate, todayDate]);
   const selectedInsight = selected ? insightFor(selected) : null;
   const selectedTimingIssues = selectedInsight?.issues.filter((issue) => issue.code === "late" || issue.code === "early_out") ?? [];
-  const showSelectedOutcome = Boolean(selectedInsight && !["full", "off"].includes(selectedInsight.calendarClass));
+  const showSelectedOutcome = Boolean(selectedInsight && !["full", "off", "week-off"].includes(selectedInsight.calendarClass));
   const attentionRow = useMemo(() => {
     if (!data?.rows.length) return null;
     const ordered = [...data.rows].sort((left, right) => right.date.localeCompare(left.date));
@@ -456,7 +458,20 @@ export function ConnectAttendance({ account }: { account: Account }) {
                 return <button aria-label={`${date}: ${future ? "Future" : insight.label}`} className={`${future ? "off" : insight.calendarClass} ${insight.issues.length ? "has-issue" : ""} ${selected?.date === date ? "selected" : ""}`} disabled={future} key={day} onClick={() => !future && setSelected(row ?? emptyAttendanceRow(date))}><span>{day}</span></button>;
               })}
             </div>
-            <div className="dx-legend"><span className="full">Full day</span><span className="half">Half day</span><span className="leave">Leave</span><span className="on-shift">On shift</span><span className="absent">Absent</span><span className="review">Review</span><span className="off">Off</span><span className="issue">Late / early</span></div>
+            <div className="dx-legend">
+              <span className="full">Full day</span>
+              <span className="half">Half day</span>
+              <span className="wfh">WFH</span>
+              <span className="paid-leave">Paid leave</span>
+              <span className="leave">Leave</span>
+              <span className="week-off">Week off</span>
+              <span className="holiday">Holiday</span>
+              <span className="on-shift">On shift</span>
+              <span className="absent">Absent</span>
+              <span className="review">Review</span>
+              <span className="off">Off</span>
+              <span className="issue">Late / early</span>
+            </div>
           </div> : null}
           {tab === "list" ? <div className="dx-attendance-list">
             {[...data.rows].sort((left, right) => right.date.localeCompare(left.date)).map((row) => {
@@ -490,7 +505,14 @@ export function ConnectAttendance({ account }: { account: Account }) {
           {selected.remark ? <p className="dx-attendance-day-note">{selected.remark}</p> : null}
           <footer>
             {selected.regularization ? <span className={`dx-request-status ${selected.regularization.status}`}>Regularization {selected.regularization.status}</span> : null}
-            {selected.regularization?.status !== "pending" && selected.statusKind !== "leave" && selected.workMode !== "wfh" && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0) ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.needsRegularization ? "Regularize missing punch" : "Request regularization"}</button> : null}
+            {selected.regularization?.status !== "pending"
+              && selected.statusKind !== "leave"
+              && selected.statusKind !== "paid_leave"
+              && selected.workMode !== "wfh"
+              && !["week-off", "holiday", "paid-leave", "leave"].includes(selectedInsight.calendarClass)
+              && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0)
+              ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.needsRegularization ? "Regularize missing punch" : "Request regularization"}</button>
+              : null}
           </footer>
         </div> : null}
       </> : null}

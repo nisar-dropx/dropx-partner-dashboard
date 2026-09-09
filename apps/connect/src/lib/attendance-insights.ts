@@ -1,10 +1,15 @@
+import type { AttendanceCalendarClass, AttendancePayDayType } from "@/lib/attendance-pay-day";
+import { calendarClassForPayDayType, resolveAttendancePayDayType } from "@/lib/attendance-pay-day";
+
 export type AttendanceInsightTone = "green" | "amber" | "red" | "blue" | "neutral";
 
 export type AttendanceInsightRow = {
   date: string;
   status: string;
   statusLabel?: string | null;
-  statusKind?: "attendance" | "leave";
+  statusKind?: "attendance" | "leave" | "paid_leave";
+  isPaidLeave?: boolean | null;
+  payDayType?: AttendancePayDayType | null;
   attendanceStatus?: string | null;
   inTime: string;
   outTime: string;
@@ -36,12 +41,13 @@ export type AttendanceIssue = {
 };
 
 export type AttendanceDayInsight = {
-  calendarClass: "full" | "half" | "absent" | "review" | "leave" | "off" | "on-shift";
+  calendarClass: AttendanceCalendarClass;
   detail: string;
   headline: string;
   issues: AttendanceIssue[];
   label: string;
   needsRegularization: boolean;
+  payDayType: AttendancePayDayType;
   tone: AttendanceInsightTone;
 };
 
@@ -122,11 +128,23 @@ function fallbackLabel(row: AttendanceInsightRow) {
   if (status === "A") return "Absent";
   if (status === "HD") return "Half day";
   if (status === "WO") return "Weekly off";
+  if (status === "H") return "Holiday";
   return row.status || "No record";
 }
 
 function outcomeLabel(row: AttendanceInsightRow) {
   return row.statusLabel || row.attendanceStatus || fallbackLabel(row);
+}
+
+function resolvePayDayType(row: AttendanceInsightRow): AttendancePayDayType {
+  return row.payDayType
+    ?? resolveAttendancePayDayType({
+      status: row.status,
+      statusLabel: row.statusLabel,
+      attendanceStatus: row.attendanceStatus,
+      workMode: row.workMode,
+      isPaidLeave: row.isPaidLeave
+    });
 }
 
 export function attendanceDayInsight(
@@ -141,6 +159,7 @@ export function attendanceDayInsight(
       issues: [],
       label: "No record",
       needsRegularization: false,
+      payDayType: "no_record",
       tone: "neutral"
     };
   }
@@ -154,6 +173,7 @@ export function attendanceDayInsight(
     && row.punchCount > 0
     && (row.punchCount < 2 || !row.outTime || /single|missing/.test(remark));
   const needsPolicyReview = state.includes("needs review");
+  const payDayType = resolvePayDayType(row);
 
   const issues: AttendanceIssue[] = [];
   if (lateMinutes > 0) {
@@ -173,39 +193,68 @@ export function attendanceDayInsight(
     });
   }
 
-  if (row.statusKind === "leave") {
+  if (payDayType === "unpaid_leave" || row.statusKind === "leave") {
     return {
       calendarClass: "leave",
-      detail: "Approved leave is applied for this day.",
+      detail: "Unpaid leave / LOP is recorded for this day (used by HRMS payroll).",
       headline: label,
       issues: [],
       label,
       needsRegularization: false,
+      payDayType: "unpaid_leave",
+      tone: "red"
+    };
+  }
+
+  if (payDayType === "paid_leave" || row.statusKind === "paid_leave" || row.isPaidLeave === true) {
+    return {
+      calendarClass: "paid-leave",
+      detail: "Paid leave is applied for this day (counts as paid time in HRMS payroll).",
+      headline: label,
+      issues: [],
+      label,
+      needsRegularization: false,
+      payDayType: "paid_leave",
       tone: "blue"
     };
   }
 
-  if (row.workMode === "wfh" || /work from home|\bwfh\b/.test(state) || /work from home|\bwfh\b/.test(remark)) {
+  if (payDayType === "present_wfh" || row.workMode === "wfh" || /work from home|\bwfh\b/.test(state) || /work from home|\bwfh\b/.test(remark)) {
     return {
-      calendarClass: "full",
-      detail: "Approved work from home. Present · WFH is recorded for this working day.",
+      calendarClass: "wfh",
+      detail: "Approved work from home. Present · WFH is recorded as paid working time.",
       headline: "Present · WFH",
       issues: [],
       label: "Present · WFH",
       needsRegularization: false,
-      tone: "green"
+      payDayType: "present_wfh",
+      tone: "blue"
     };
   }
 
-  if (/weekly off|week off|rest day|holiday|no record/.test(state) || ["WO", "H"].includes(row.status.toUpperCase())) {
+  if (payDayType === "week_off" || statusIsWeekOff(row, state)) {
     return {
-      calendarClass: "off",
-      detail: label,
-      headline: label,
+      calendarClass: "week-off",
+      detail: "Weekly off is recorded for this day.",
+      headline: /present/.test(state) ? label : "Weekly off",
       issues: [],
-      label,
+      label: /present/.test(state) ? label : "Weekly off",
       needsRegularization: false,
+      payDayType: "week_off",
       tone: "neutral"
+    };
+  }
+
+  if (payDayType === "paid_holiday" || statusIsHoliday(row, state)) {
+    return {
+      calendarClass: "holiday",
+      detail: "Paid holiday is recorded for this day.",
+      headline: /present/.test(state) ? label : "Holiday",
+      issues: [],
+      label: /present/.test(state) ? label : "Holiday",
+      needsRegularization: false,
+      payDayType: "paid_holiday",
+      tone: "amber"
     };
   }
 
@@ -218,6 +267,7 @@ export function attendanceDayInsight(
       issues,
       label: late ? "On shift · Late" : "On shift",
       needsRegularization: false,
+      payDayType: "present",
       tone: late ? "amber" : "green"
     };
   }
@@ -236,11 +286,12 @@ export function attendanceDayInsight(
       issues,
       label: "Needs review",
       needsRegularization: true,
+      payDayType: "needs_review",
       tone: "red"
     };
   }
 
-  if (needsPolicyReview) {
+  if (needsPolicyReview || payDayType === "needs_review") {
     issues.push({
       code: "policy_review",
       label: "Needs review",
@@ -254,11 +305,12 @@ export function attendanceDayInsight(
       issues,
       label: "Needs review",
       needsRegularization: true,
+      payDayType: "needs_review",
       tone: "red"
     };
   }
 
-  if (state.includes("absent") || row.status.toUpperCase() === "A") {
+  if (payDayType === "absent" || state.includes("absent") || row.status.toUpperCase() === "A") {
     issues.push({
       code: "absent",
       label: "Absent",
@@ -272,11 +324,12 @@ export function attendanceDayInsight(
       issues,
       label: "Absent",
       needsRegularization: false,
+      payDayType: "absent",
       tone: "red"
     };
   }
 
-  if (state.includes("half day") || row.status.toUpperCase() === "HD") {
+  if (payDayType === "half_day" || state.includes("half day") || row.status.toUpperCase() === "HD") {
     issues.push({
       code: "half_day",
       label: "Half day",
@@ -290,6 +343,7 @@ export function attendanceDayInsight(
       issues,
       label: "Half day",
       needsRegularization: false,
+      payDayType: "half_day",
       tone: "amber"
     };
   }
@@ -299,7 +353,7 @@ export function attendanceDayInsight(
   const early = issues.some((issue) => issue.code === "early_out");
   const timingLabel = late ? `${baseLabel} · Late` : early ? `${baseLabel} · Early out` : baseLabel;
   return {
-    calendarClass: "full",
+    calendarClass: calendarClassForPayDayType("present", options),
     detail: late
       ? `Reported ${pluralMinutes(lateMinutes)} late. Late penalty applies under company HR policy.`
       : early
@@ -313,8 +367,17 @@ export function attendanceDayInsight(
     issues,
     label: timingLabel,
     needsRegularization: false,
+    payDayType: "present",
     tone: issues.length ? "amber" : "green"
   };
+}
+
+function statusIsWeekOff(row: AttendanceInsightRow, state: string) {
+  return row.status.toUpperCase() === "WO" || /weekly off|week off|rest day/.test(state);
+}
+
+function statusIsHoliday(row: AttendanceInsightRow, state: string) {
+  return row.status.toUpperCase() === "H" || /\bholiday\b/.test(state);
 }
 
 export function attendanceCompactNudge(

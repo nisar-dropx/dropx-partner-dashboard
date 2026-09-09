@@ -146,14 +146,14 @@ export function dashboardMotivationContext({
   date?: Date;
   dateOfBirth?: string;
   status?: string;
-  statusKind?: "attendance" | "leave";
+  statusKind?: "attendance" | "leave" | "paid_leave";
   statusLabel?: string | null;
 }): DashboardMotivationContext {
   const birthday = dateParts(dateOfBirth);
   if (birthday && birthday.month === date.getMonth() + 1 && birthday.day === date.getDate()) return "birthday";
 
   const attendanceState = `${status} ${statusLabel ?? ""}`.toLowerCase().replaceAll("_", " ");
-  if (statusKind === "leave") {
+  if (statusKind === "leave" || statusKind === "paid_leave") {
     return /\b(?:sick|medical|illness|sl)\b/.test(attendanceState) ? "sick_leave" : "leave";
   }
   if (/\b(?:weekly off|week off|rest day|scheduled off|wo|off)\b/.test(attendanceState)) return "weekly_off";
