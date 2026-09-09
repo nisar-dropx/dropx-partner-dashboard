@@ -12737,6 +12737,55 @@ tbody tr:hover td {
   gap: 6px;
 }
 
+/* "Will submit later" exception control — a small pill trigger in its own table column
+   that expands into a compact, clearly-scoped card instead of a bare textarea and two
+   buttons stacked under the associate's name. */
+.exception-trigger {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  padding: 5px 11px;
+  border: 1px solid #fbdfad;
+  border-radius: 999px;
+  background: #fffaf1;
+  color: #9a6700;
+  font-size: 11px;
+  font-weight: 800;
+  transition: background-color .15s ease, border-color .15s ease;
+}
+
+.exception-trigger:hover {
+  background: #fdf1d8;
+  border-color: #f7d493;
+}
+
+.exception-inline-form {
+  display: grid;
+  gap: 8px;
+  min-width: 230px;
+  padding: 10px;
+  border: 1px solid #fbdfad;
+  border-radius: 10px;
+  background: #fffaf1;
+}
+
+.exception-inline-form-label {
+  color: #9a6700;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.exception-inline-form .form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0;
+}
+
+.exception-inline-form .field-error {
+  margin: 0;
+}
+
 /*
  * Chip layout uses explicit flexbox + a dedicated label span (not a bare text node)
  * so it never depends on grid auto-placement or on beating the pre-existing generic

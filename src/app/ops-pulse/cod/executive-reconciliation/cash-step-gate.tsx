@@ -49,7 +49,11 @@ function currency(value: number) {
   return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-/** Inline "will submit later" form for one row in the incomplete-drivers modal. */
+/**
+ * "Will submit later" control for one row in the incomplete-drivers modal — a small
+ * pill trigger that expands into a compact card in place, instead of a bare textarea
+ * and two buttons stacked under the associate's name.
+ */
 function ExceptionRowForm({
   row,
   businessDate,
@@ -73,18 +77,19 @@ function ExceptionRowForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!isToday) return null;
+  if (!isToday) return <span className="subtle">—</span>;
 
   if (!open) {
     return (
-      <button className="button ghost" type="button" onClick={() => setOpen(true)} style={{ marginTop: 6 }}>
-        Add exception — will submit later
+      <button className="exception-trigger" type="button" onClick={() => setOpen(true)}>
+        Will submit later
       </button>
     );
   }
 
   return (
-    <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+    <div className="exception-inline-form">
+      <span className="exception-inline-form-label">Why is this associate&apos;s cash pending?</span>
       <textarea
         className="field"
         rows={2}
@@ -92,10 +97,13 @@ function ExceptionRowForm({
         onChange={(event) => setReason(event.target.value)}
         placeholder="e.g. Store will submit cash tomorrow"
         disabled={submitting}
+        autoFocus
       />
-      <div style={{ display: "flex", gap: 8 }}>
+      {error ? <p className="field-error">{error}</p> : null}
+      <div className="form-actions">
+        <button className="button ghost" type="button" disabled={submitting} onClick={() => setOpen(false)}>Cancel</button>
         <button
-          className="button"
+          className="button secondary"
           type="button"
           disabled={submitting || !reason.trim()}
           onClick={() => {
@@ -129,11 +137,9 @@ function ExceptionRowForm({
             })();
           }}
         >
-          {submitting ? "Saving…" : "Save exception & continue"}
+          {submitting ? "Saving…" : "Confirm & continue"}
         </button>
-        <button className="button ghost" type="button" disabled={submitting} onClick={() => setOpen(false)}>Cancel</button>
       </div>
-      {error ? <p className="field-error">{error}</p> : null}
     </div>
   );
 }
@@ -184,7 +190,7 @@ function IncompleteDriversModal({
           <p className="subtle" style={{ marginBottom: 12 }}>
             Select each driver in <strong>Collect cash</strong> or <strong>Add associate missing from DER</strong>,
             count denominations, and save. Drivers without a resolved name still show a Driver ID — type the employee name when entering cash.
-            Continue unlocks only when all are entered{isToday ? ", or excepted below for a store/associate that will submit cash later" : ""}.
+            {isToday ? " Continue unlocks once every row is entered or marked “will submit later.”" : " Continue unlocks only when all are entered."}
           </p>
           <div className="table-wrap">
             <table>
@@ -193,6 +199,7 @@ function IncompleteDriversModal({
                   <th>Associate</th>
                   <th>Driver / Employee ID</th>
                   <th>Expected</th>
+                  <th>{isToday ? "Not ready today?" : ""}</th>
                 </tr>
               </thead>
               <tbody>
@@ -213,6 +220,10 @@ function IncompleteDriversModal({
                             Type employee name when entering cash (Missing DER).
                           </div>
                         ) : null}
+                      </td>
+                      <td>{row.providerEmployeeId}</td>
+                      <td>₹{currency(row.expected)}</td>
+                      <td>
                         <ExceptionRowForm
                           row={row}
                           businessDate={businessDate}
@@ -223,13 +234,11 @@ function IncompleteDriversModal({
                           onAdded={onException}
                         />
                       </td>
-                      <td>{row.providerEmployeeId}</td>
-                      <td>₹{currency(row.expected)}</td>
                     </tr>
                   );
                 }) : (
                   <tr>
-                    <td className="empty-cell" colSpan={3}>
+                    <td className="empty-cell" colSpan={4}>
                       {!loaded
                         ? "Cash-recon drivers are still loading. Wait for the driver list, then enter denominations."
                         : requiredCount === 0
