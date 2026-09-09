@@ -12,6 +12,17 @@ const reimbursements = read("apps/connect/app/api/connect/reimbursements/route.t
 const attendance = read("apps/connect/src/lib/connect-manager-approvals.ts");
 const location = read("apps/connect/src/lib/connect-location-integrity.ts");
 
+function extractExport(source, name) {
+  const start = source.indexOf(`export async function ${name}`);
+  if (start < 0) return "";
+  const next = source.indexOf("\nexport async function ", start + 1);
+  return next < 0 ? source.slice(start) : source.slice(start, next);
+}
+
+const attendanceManagerList = extractExport(attendance, "listConnectAttendanceApprovals");
+const attendanceHrList = extractExport(attendance, "listConnectAttendanceHrApprovals");
+const rosterSwapList = extractExport(attendance, "listConnectRosterSwapApprovals");
+
 const checks = [
   [component.includes('useState<ReporteeScope>("immediate")'), "Approval Inbox always opens with immediate reportees"],
   [component.includes("Immediate reportees") && component.includes("Entire team"), "the user-controlled scope switch is present"],
@@ -21,11 +32,13 @@ const checks = [
   [reportingTree.includes("while (queue.length)"), "Entire team recursively traverses the reporting tree"],
   [approvals.includes("loadConnectReporteeAccess(account, scope)"), "leave, attendance and location APIs load one shared reportee scope"],
   [
-    attendance.includes('.in("approver_user_id", actorUserIds)')
-      && attendance.includes("Explicit step assignment")
-      && attendance.includes("loadConnectAttendanceApproveScope")
-      && attendance.includes("connectWorkforceMatches")
-      && !attendance.includes("connectReporteeMatches(reportees"),
+    attendanceManagerList.includes('.in("approver_user_id", actorUserIds)')
+      && attendanceManagerList.includes("Explicit step assignment")
+      && attendanceHrList.includes("loadConnectAttendanceApproveScope")
+      && attendanceHrList.includes("connectWorkforceMatches")
+      && !attendanceManagerList.includes("connectReporteeMatches")
+      && !attendanceHrList.includes("connectReporteeMatches")
+      && rosterSwapList.includes("connectReporteeMatches(reportees"),
     "manager attendance is assignee-scoped; HR finalization uses People attendance.approve location/company scope"
   ],
   [
