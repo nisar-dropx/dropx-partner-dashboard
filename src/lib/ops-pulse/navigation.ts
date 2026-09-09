@@ -74,6 +74,7 @@ const cps: NavItem = {
 };
 
 const administration: NavItem[] = [
+  {code:'ops_notification_settings',label:'Settings',icon:'*',children:[{code:'ops_notification_settings',label:'Notifications',href:'/settings/notifications'}]},
   {
     code: "master_data",
     label: "Ops Masters",

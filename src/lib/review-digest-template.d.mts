@@ -1,0 +1,1 @@
+export function buildReviewMessages(snapshot: unknown, config: Record<string, unknown>, subjectTemplate: string): Array<{email: string;name: string;subject: string;text: string;html: string;scope: Record<string, unknown>}>;
