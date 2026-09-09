@@ -441,6 +441,31 @@ test("Filtered CSV exports reuse the authorized loader and include estimate cave
   assert.match(body, /623776.32/);
   assert.match(body, /Management estimate only/);
   assert.match(body, /"KOZA"/);
+  const [headers, record] = pricing.parseCsv(body);
+  assert.equal(record.length, headers.length);
+  const values = Object.fromEntries(headers.map((h, i) => [h, record[i]]));
+  assert.equal(values["Station"], "KOZA");
+  assert.equal(values["Pricing model"], "mg");
+  assert.equal(values["Parent station"], "");
+  assert.equal(values["Location"], "Kozhikode");
+  assert.equal(values["Monthly MG"], "747233.1009887976");
+  assert.equal(values["MTD revenue estimate INR"], "747233.10");
+  assert.equal(values["Recorded costs INR"], "123456.78");
+  assert.equal(values["Estimated P&L INR"], "623776.32");
+  const revenueResponse = await route.GET(
+    new Request(
+      "https://fin.dropxlogistics.com/finance/business/export?month=2026-08&location=KOZA",
+    ),
+  );
+  const [revenueHeaders, revenueRecord] = pricing.parseCsv(
+    await revenueResponse.text(),
+  );
+  assert.equal(revenueRecord.length, revenueHeaders.length);
+  assert.equal(
+    revenueRecord[revenueHeaders.indexOf("MTD revenue estimate INR")],
+    "747233.10",
+  );
+  assert.ok(!revenueHeaders.includes("Recorded costs INR"));
 });
 
 function dailyFixture(month = "2026-08", throughDay = 2, overrides = {}) {
