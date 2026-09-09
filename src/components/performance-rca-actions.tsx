@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment, type ReactNode } from "react";
 import { formatDashboardDate } from "@/lib/date-format";
 import type { PerformanceReviewItem } from "@/lib/ops-pulse/performance-review";
 import { savePerformanceDisciplineReason, savePerformanceReviewItem } from "@/app/ops-pulse/performance/actions";
@@ -28,6 +29,9 @@ type Props = {
   reviewId: string;
   reviewVersion: string;
   stationCode: string;
+  reviewStarted?: boolean;
+  startControl?: ReactNode;
+  editHint?: string;
 };
 
 function valueText(value: number | null) {
@@ -43,18 +47,26 @@ export function PerformanceRcaActions({
   rows,
   reviewId,
   reviewVersion,
-  stationCode
+  stationCode,
+  reviewStarted = true,
+  startControl,
+  editHint
 }: Props) {
   if (!rows.length) return null;
+  const orderedRows = [...rows.filter(row=>!row.reasonOnly), ...rows.filter(row=>row.reasonOnly)];
+  const canSaveMetric = reviewStarted && canEdit;
+  const canSaveReason = reviewStarted && canEditDiscipline;
 
   return (
     <div className="performance-review-actions" id="review-rca">
-      <h3>RCA and next-day actions</h3>
-      {rows.some(row => row.reasonOnly) ? <p className="review-rca-hint">Opening and UTR delays need just one short reason each. No long write-up.</p> : null}
-      {rows.map((metric) => {
+      <div className="review-rca-heading"><div><h3>RCA & reporting reasons</h3><p className="review-rca-hint">Performance misses: RCA and action plan. Opening / UTR delays: one short reason only.</p></div>{startControl}</div>
+      {!reviewStarted ? <p className="review-rca-locked">The review has not started. The misses are listed below; start the review to save RCA and delay reasons.</p> : editHint ? <p className="review-rca-locked">{editHint}</p> : null}
+      {orderedRows.map((metric,index) => {
         const item = itemsByMetric.get(metric.key);
         return (
-          <details className="performance-action-item" key={`action-${metric.key}`}>
+          <Fragment key={`action-${metric.key}`}>
+          {index===0 || Boolean(orderedRows[index-1].reasonOnly)!==Boolean(metric.reasonOnly) ? <h4 className="review-rca-group">{metric.reasonOnly ? "Opening & UTR delays · reason only" : "Performance misses · RCA & action plan"}</h4> : null}
+          <details className="performance-action-item">
             <summary>
               <span className={`metric-dot ${metric.severity}`} />
               <strong>{metric.label}</strong>
@@ -62,20 +74,20 @@ export function PerformanceRcaActions({
                 Actual {valueText(metric.actual)}
                 {metric.target == null ? "" : ` · Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}
               </small>}
-              <b>{metric.reasonOnly ? item?.root_cause?.trim() ? "Reason saved" : "Reason required" : item?.status?.replaceAll("_", " ") || "Needs RCA"}</b>
+              <b>{metric.reasonOnly ? item?.root_cause?.trim() ? "Reason saved" : "Reason required" : item?.status?.replaceAll("_", " ") || "Needs RCA"}<span className="review-rca-edit-label">{!reviewStarted ? "View miss ›" : metric.reasonOnly ? canSaveReason && activeDisciplineKeys.includes(metric.key) ? item?.root_cause?.trim() ? "Edit reason ›" : "Add reason ›" : "View reason ›" : canSaveMetric ? "Edit RCA & plan ›" : "View RCA ›"}</span></b>
             </summary>
             {metric.reasonOnly ? <div className="review-delay-detail">
               <p className="review-delay-evidence">{metric.evidence}</p>
               {metric.key.startsWith("utr_late_") ? <ReviewPersonHistoryLink personId={metric.key.replace(/^utr_late_(employee|contractor)_/, "$1:")}/> : null}
-              {canEditDiscipline && activeDisciplineKeys.includes(metric.key) ? <ReviewActionForm action={savePerformanceDisciplineReason} className="review-delay-form">
+              {canSaveReason && activeDisciplineKeys.includes(metric.key) ? <ReviewActionForm action={savePerformanceDisciplineReason} className="review-delay-form">
                 <input type="hidden" name="review_id" value={reviewId} />
                 <input type="hidden" name="source_date" value={date} />
                 <input type="hidden" name="station_code" value={stationCode} />
                 <input type="hidden" name="metric_key" value={metric.key} />
                 <label>Reason for delay<input required name="root_cause" maxLength={DISCIPLINE_REASON_MAX} defaultValue={item?.root_cause ?? ""} placeholder="Brief reason, e.g. transport delay" /></label>
                 <button className="button secondary">Save reason</button>
-              </ReviewActionForm> : <p className="review-delay-saved"><b>Reason</b> {item?.root_cause || "Awaiting a short reason from the reviewer."}</p>}
-            </div> : canEdit ? (
+              </ReviewActionForm> : <p className="review-delay-saved"><b>Reason</b> {item?.root_cause || (!reviewStarted ? "Start the review to add a short reason. No action plan is needed for this delay." : "Awaiting a short reason from the reviewer.")}</p>}
+            </div> : canSaveMetric ? (
               <ReviewActionForm action={savePerformanceReviewItem} className="performance-rca-form">
                 <input type="hidden" name="review_id" value={reviewId} />
                 <input type="hidden" name="source_date" value={date} />
@@ -116,12 +128,13 @@ export function PerformanceRcaActions({
               </ReviewActionForm>
             ) : (
               <div className="performance-action-readonly">
-                <p><b>RCA</b>{item?.root_cause || "Awaiting update"}</p>
+                <p><b>RCA</b>{item?.root_cause || (!reviewStarted ? "Start the review to add RCA and an action plan." : "Awaiting update")}</p>
                 <p><b>Action</b>{item?.corrective_action || "Awaiting update"}</p>
                 <p><b>Owner / due</b>{item?.action_owner || "—"}{item?.due_date ? ` · ${formatDashboardDate(item.due_date)}` : ""}</p>
               </div>
             )}
           </details>
+          </Fragment>
         );
       })}
     </div>

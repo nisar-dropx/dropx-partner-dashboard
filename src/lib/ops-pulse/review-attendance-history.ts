@@ -32,7 +32,7 @@ export function summarizeAttendance(days: AttendanceHistoryDay[]) {
 export type HistoryDayInput = {
   date: string; inScope: boolean; dayType: string | null; shift: string | null; start: string | null; end: string | null;
   grace: number; inTime: string | null; outTime: string | null; workMinutes: number | null; punchCount: number;
-  attendanceStatus: string | null; approvedLeave: boolean; requestedLeave: boolean; ambiguousPunch?: boolean; rawActivityOnly?: boolean;
+  attendanceStatus: string | null; approvedLeave: boolean; requestedLeave: boolean; ambiguousPunch?: boolean; rawActivityOnly?: boolean; overnightCarryoverOnly?: boolean;
 };
 export function classifyAttendanceDay(input: HistoryDayInput, now = new Date()): AttendanceHistoryDay {
   const row: AttendanceHistoryDay = { date: input.date, shift: input.shift, inTime: input.inTime, outTime: input.outTime,
@@ -40,6 +40,7 @@ export function classifyAttendanceDay(input: HistoryDayInput, now = new Date()):
   if (!input.inScope) return { ...row, shift: null, inTime: null, outTime: null, workMinutes: null, status: "outside_station", note: "Only this station’s service dates are shown." };
   const punched = Boolean(input.inTime || input.outTime || input.punchCount);
   if (input.ambiguousPunch) return { ...row, status: "attendance_conflict", note: "Punch identifier matches multiple staff profiles; confirm ownership before classifying attendance." };
+  if (input.overnightCarryoverOnly) return { ...row, status: "attendance_conflict", note: "These punches fall within the previous overnight shift; check the workday before counting week-off work." };
   if (input.rawActivityOnly && !input.inTime && !input.outTime) return { ...row, status: "attendance_conflict", note: "Raw punches are present but not reconciled to this person’s daily attendance; not classified absent or as confirmed week-off work." };
   if (input.dayType === "weekly_off") return { ...row, status: punched ? "week_off_worked" : "week_off", note: punched ? "Punch recorded on an approved weekly off; not an overtime or pay approval." : "Approved weekly off." };
   if (input.approvedLeave) return { ...row, status: "leave", note: punched ? "Punch recorded during approved leave; check attendance." : "Approved leave application." };
@@ -47,9 +48,11 @@ export function classifyAttendanceDay(input: HistoryDayInput, now = new Date()):
   if (input.dayType !== "working" || !input.start || !input.end) return { ...row, note: "No approved working shift; lateness / absence is not assumed." };
   const start = Date.parse(`${input.date}T${input.start}+05:30`);
   let end = Date.parse(`${input.date}T${input.end}+05:30`);
-  if (end <= start) end += 86400000;
+  const overnight = end <= start;
+  if (overnight) end += 86400000;
   if (!Number.isFinite(start) || !Number.isFinite(end)) return { ...row, note: "Invalid shift times; check the roster." };
   if (input.inTime && Number.isFinite(Date.parse(input.inTime))) {
+    if (overnight && Date.parse(input.inTime)<end-86400000) return {...row,status:"attendance_conflict",note:"Post-midnight in-punch may belong to the previous night shift; verify its attendance workday before classifying reporting."};
     const lateMinutes = Math.max(0, Math.floor((Date.parse(input.inTime)-start)/60000) - Math.max(0,input.grace));
     return { ...row, lateMinutes, status: lateMinutes > 0 ? "late" : "on_time", note: `${input.grace} min approved reporting grace${!input.outTime ? " · missing out punch" : ""}.` };
   }

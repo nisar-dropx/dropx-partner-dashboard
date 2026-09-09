@@ -26,6 +26,8 @@ const checks = [
   [component.includes('className="performance-associate-popover-scroll"'), "associate table uses the contained scroll region"],
   [((component + opening + operations + attendanceHistory).match(/name="performance-review-fact"/g) ?? []).length === 6, "top drill-downs form one exclusive accordion group"],
   [component.includes("metrics.length - metricMisses.length"), "attendance exceptions do not reduce Amazon metric health"],
+  [component.includes("{rcaRows.length ? (") && !component.includes("{review && rcaRows.length"), "unstarted reviews still show their performance misses and reporting reasons"],
+  [component.includes("Start review & add RCA") && component.indexOf("<PerformanceRcaActions") < component.indexOf("<PerformanceConnections"), "RCA has a nearby start action directly below the scorecard, above vehicle timings"],
   [!styles.includes("details:nth-child(2) .performance-associate-popover"), "drill-down position does not depend on the selected card index"],
   [component.includes("<PerformanceReviewPicker"), "review desk uses the synchronized date and station picker"],
   [picker.includes('value={selectedDate}') && picker.includes('value={selectedStation}'), "picker controls remain synchronized with the loaded review"],
