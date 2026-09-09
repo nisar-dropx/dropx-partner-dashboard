@@ -129,7 +129,7 @@ export async function loadBusiness(context: FinanceContext, query: Query) {
     ? selected.map((l) => l.station_code)
     : null;
   const [response, history] = await Promise.all([
-    context.db.rpc("finance_business_snapshot", {
+    context.db.rpc("finance_business_daily_snapshot", {
       p_company: context.companyId,
       p_from: `${filters.month}-01`,
       p_through: filters.through,

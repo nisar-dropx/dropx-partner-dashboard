@@ -295,9 +295,10 @@ export function PricingManager({
         <span className="subtle">{cards.length} rate cards</span>
       </div>
       <div className="fin-notice">
-        Amazon MG amounts support a calendar-day revenue estimate. Variable
-        billing, MG eligibility, shortfall recovery, fees and tax need confirmed
-        rules before final invoicing. Blank source fields remain unspecified.
+        Amazon MG payout and volume are divided by calendar days. Daily excess
+        deliveries use the variable slab rate; MFN uses its own rate. IHS/SMD
+        settlement rules, shortfall recovery, fees and tax need confirmed rules
+        before final invoicing. Blank source fields remain unspecified.
       </div>
       <section className="panel">
         <div className="fin-table-wrap">

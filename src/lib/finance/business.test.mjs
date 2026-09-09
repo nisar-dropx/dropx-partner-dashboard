@@ -179,7 +179,7 @@ test("Revenue is estimated from month-specific pricing and observed costs are co
   assert.equal(r.revenue, "747233.10");
   assert.equal(r.cost, "123456.78");
   assert.equal(r.profit, "623776.32");
-  assert.match(r.basis, /MG calendar-day estimate/);
+  assert.match(r.basis, /Daily MG/);
   assert.ok(r.issues.some((x) => x.includes("not included")));
 });
 test("Missing rates and missing costs stay null, never creating artificial profit", () => {
@@ -307,7 +307,7 @@ test("Pricing and business loaders enforce company, location scope and Finance h
   calls = [];
   const context = await data.financeContext("finance_revenue");
   await data.loadBusiness(context, { month: "2026-08" });
-  const rpc = calls.find((c) => c[0] === "finance_business_snapshot")[1];
+  const rpc = calls.find((c) => c[0] === "finance_business_daily_snapshot")[1];
   assert.equal(rpc.p_company, "company-1");
   assert.deepEqual(rpc.p_station_codes, ["KOZA"]);
   assert.ok(
@@ -331,7 +331,8 @@ test("Empty authorized location scope produces an empty database filter, never a
     { month: "2026-08" },
   );
   assert.deepEqual(
-    calls.find((c) => c[0] === "finance_business_snapshot")[1].p_station_codes,
+    calls.find((c) => c[0] === "finance_business_daily_snapshot")[1]
+      .p_station_codes,
     [],
   );
 });
@@ -439,4 +440,216 @@ test("Filtered CSV exports reuse the authorized loader and include estimate cave
   assert.match(body, /623776.32/);
   assert.match(body, /Management estimate only/);
   assert.match(body, /"KOZA"/);
+});
+
+function dailyFixture(month = "2026-08", throughDay = 2, overrides = {}) {
+  const pc = {
+    ...card,
+    effective_month: `${month}-01`,
+    rates: {
+      mg_amount_including_mhe: "31000",
+      delivery_mg_volume: "3100",
+      variable_slab: "20",
+      mfn_rate: "8",
+      smd_rate: "27",
+      ihs_rate_below_15_percent: "6.5",
+      ihs_rate_above_15_percent: "7.5",
+      ...overrides,
+    },
+  };
+  const facts = [50, 150].map((n, i) => ({
+    station_code: "KOZA",
+    client: "Amazon",
+    work_date: `${month}-${String(i + 1).padStart(2, "0")}`,
+    deliveries: String(n),
+    mfn: "10",
+    smd: "0",
+    ihs: "0",
+  }));
+  const snap = { ...snapshot, daily_shipments: facts, daily_costs: [] };
+  return {
+    pc,
+    snap,
+    rows: performance.buildDailyRows(
+      snap,
+      "KOZA",
+      "Amazon",
+      pc,
+      month,
+      `${month}-${String(throughDay).padStart(2, "0")}`,
+      false,
+    ),
+  };
+}
+test("Daily MG uses actual calendar days for 28, 29, 30 and 31 day months", () => {
+  for (const [month, days] of [
+    ["2026-02", 28],
+    ["2024-02", 29],
+    ["2026-09", 30],
+    ["2026-08", 31],
+  ]) {
+    const { rows } = dailyFixture(month, days, {
+      mg_amount_including_mhe: String(days * 1000),
+      delivery_mg_volume: String(days * 100),
+    });
+    assert.equal(rows.length, days);
+    assert.ok(rows.every((d) => d.base === "1000.00" && d.mgVolume === "100"));
+    assert.equal(
+      pricing.addAmounts(rows.map((d) => d.base)),
+      `${days * 1000}.00`,
+    );
+  }
+});
+test("Daily excess never carries a shortfall forward; MFN adds earnings independently", () => {
+  const { rows } = dailyFixture();
+  assert.equal(rows[0].variable, "0.00");
+  assert.equal(rows[1].excessVolume, "50");
+  assert.equal(rows[1].variable, "1000.00");
+  assert.equal(rows[1].mfnRevenue, "80.00");
+  assert.equal(pricing.addAmounts(rows.map((d) => d.revenue)), "3160.00");
+  // A pooled MTD threshold would incorrectly remove this day's 50 excess shipments.
+});
+test("Fractional daily MG is not rounded to whole packages or money before applying the slab", () => {
+  const { rows } = dailyFixture("2026-08", 2, {
+    delivery_mg_volume: "3100.31",
+  });
+  assert.equal(rows[0].mgVolume, "100.01");
+  assert.equal(rows[1].excessVolume, "49.99");
+  assert.equal(rows[1].variable, "999.80");
+  const zero = dailyFixture("2026-08", 2, { delivery_mg_volume: "4650" })
+    .rows[1];
+  assert.equal(zero.excessVolume, "0");
+  assert.equal(zero.variable, "0.00");
+});
+test("Cumulative paise rounding reconciles daily base, variable and MFN with MTD", () => {
+  const { pc, snap } = dailyFixture("2026-08", 31, {
+    mg_amount_including_mhe: "100.005",
+    delivery_mg_volume: "100.1",
+    mfn_rate: "0.333333333333333333333333",
+  });
+  snap.daily_shipments = Array.from({ length: 31 }, (_, i) => ({
+    ...snap.daily_shipments[0],
+    work_date: `2026-08-${String(i + 1).padStart(2, "0")}`,
+    deliveries: "100",
+    mfn: "1",
+  }));
+  const [r] = performance.buildBusinessRows(snap, [pc], [location], filters);
+  assert.equal(pricing.addAmounts(r.daily.map((d) => d.base)), "100.01");
+  assert.equal(pricing.addAmounts(r.daily.map((d) => d.variable)), "59998.00");
+  assert.equal(pricing.addAmounts(r.daily.map((d) => d.mfnRevenue)), "10.33");
+  assert.equal(r.revenue, "60108.34");
+  assert.equal(pricing.addAmounts(r.daily.map((d) => d.revenue)), r.revenue);
+});
+test("Missing shipment days accrue MG but keep unavailable variable earnings and costs pending", () => {
+  const { rows } = dailyFixture("2026-08", 3);
+  assert.equal(rows[2].base, "1000.00");
+  assert.equal(rows[2].variable, null);
+  assert.equal(rows[2].mfnRevenue, null);
+  assert.equal(rows[2].revenue, "1000.00");
+  assert.equal(rows[2].cost, null);
+  assert.equal(rows[2].profit, null);
+  assert.equal(rows[2].shipmentReported, false);
+  assert.match(rows[2].issues.join(), /Shipment report pending/);
+});
+test("Unknown positive-volume rates are not silently zero; zero-volume reports are valid", () => {
+  const { rows } = dailyFixture("2026-08", 2, {
+    variable_slab: null,
+    mfn_rate: null,
+  });
+  assert.equal(rows[0].variable, "0.00");
+  assert.equal(rows[1].variable, null);
+  assert.equal(rows[1].mfnRevenue, null);
+  assert.match(rows[1].issues.join(), /rate missing/);
+  const { pc, snap } = dailyFixture();
+  snap.daily_shipments[0] = {
+    ...snap.daily_shipments[0],
+    deliveries: "0",
+    mfn: "0",
+  };
+  const d = performance.buildDailyRows(
+    snap,
+    "KOZA",
+    "Amazon",
+    pc,
+    "2026-08",
+    "2026-08-01",
+    false,
+  )[0];
+  assert.equal(d.shipmentReported, true);
+  assert.equal(d.variable, "0.00");
+  assert.equal(d.mfnRevenue, "0.00");
+});
+test("SMD does not get charged twice and IHS is not guessed from the MFN/return counts", () => {
+  const { pc, snap } = dailyFixture();
+  snap.daily_shipments[1] = { ...snap.daily_shipments[1], smd: "5", ihs: "20" };
+  const d = performance.buildDailyRows(
+    snap,
+    "KOZA",
+    "Amazon",
+    pc,
+    "2026-08",
+    "2026-08-02",
+    false,
+  )[1];
+  assert.equal(d.revenue, "2080.00");
+  assert.equal(d.smd, "5");
+  assert.equal(d.ihs, "20");
+  assert.match(d.issues.join(), /separate SMD billing rule pending/);
+  assert.match(d.issues.join(), /IHS earnings pending/);
+});
+test("Current-month defaults do not reuse prior-month rate cards", async () => {
+  const f = data.businessFilters({});
+  assert.equal(f.month, pricing.todayIndia().slice(0, 7));
+  assert.equal(f.through, pricing.todayIndia());
+  calls = [];
+  const context = await data.financeContext("finance_revenue");
+  await data.loadBusiness(context, {});
+  assert.ok(
+    calls.some(
+      (c) =>
+        c[0] === "eq" && c[1] === "effective_month" && c[2] === `${f.month}-01`,
+    ),
+  );
+});
+test("Daily costs preserve nulls and cannot allocate another client's station expenses", () => {
+  const { pc, snap } = dailyFixture();
+  snap.daily_costs = [
+    { station_code: "KOZA", work_date: "2026-08-01", total: "500" },
+  ];
+  let days = performance.buildDailyRows(
+    snap,
+    "KOZA",
+    "Amazon",
+    pc,
+    "2026-08",
+    "2026-08-02",
+    false,
+  );
+  assert.equal(days[0].profit, "580.00");
+  assert.equal(days[1].profit, null);
+  days = performance.buildDailyRows(
+    snap,
+    "KOZA",
+    "Amazon",
+    pc,
+    "2026-08",
+    "2026-08-02",
+    true,
+  );
+  assert.ok(days.every((d) => d.cost === null && d.profit === null));
+});
+test("Corrected source counts change live estimates without adding a second copy", () => {
+  const { pc, snap } = dailyFixture();
+  snap.daily_shipments[1].deliveries = "200";
+  const days = performance.buildDailyRows(
+    snap,
+    "KOZA",
+    "Amazon",
+    pc,
+    "2026-08",
+    "2026-08-02",
+    false,
+  );
+  assert.equal(days[1].variable, "2000.00");
+  assert.equal(days.length, 2);
 });

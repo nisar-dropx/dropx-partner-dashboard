@@ -54,7 +54,7 @@ export function monthEnd(month: string) {
     .toISOString()
     .slice(0, 10);
 }
-const scale = BigInt(10) ** BigInt(24);
+export const scale = BigInt(10) ** BigInt(24);
 // Exact decimal arithmetic until the final paise rounding; source values remain strings.
 export function decimal(value: string): bigint {
   if (!/^-?\d{1,16}(\.\d{1,24})?$/.test(value))
@@ -69,6 +69,17 @@ export function amount(value: bigint) {
   const absolute = negative ? -value : value;
   const cents = (absolute * BigInt(100) + scale / BigInt(2)) / scale;
   return `${negative && cents ? "-" : ""}${cents / BigInt(100)}.${String(cents % BigInt(100)).padStart(2, "0")}`;
+}
+export function addQuantities(values: Array<string | null>) {
+  const present = values.filter((v): v is string => v !== null);
+  if (!present.length) return null;
+  const total = present.reduce((sum, v) => sum + decimal(v), BigInt(0));
+  return (
+    `${total / scale}.${String(total % scale).padStart(24, "0")}`.replace(
+      /\.?0+$/,
+      "",
+    ) || "0"
+  );
 }
 export function addAmounts(values: Array<string | null>) {
   const present = values.filter((v): v is string => v !== null);

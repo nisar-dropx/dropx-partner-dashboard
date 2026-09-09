@@ -307,3 +307,32 @@
     flex-direction: column;
   }
 }
+
+.fin-metric-link,
+.fin-revenue-link {
+  color: #c2410c;
+  text-decoration: none;
+}
+.fin-metric-link:hover,
+.fin-revenue-link:hover {
+  text-decoration: underline;
+}
+.fin-daily {
+  margin-top: 24px;
+  scroll-margin-top: 90px;
+}
+.fin-daily-rates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding: 16px 20px;
+  font-size: 13px;
+  background: #fff7ed;
+}
+.fin-daily-table {
+  min-width: 1500px;
+}
+.fin-daily-table tfoot th {
+  background: #fff7ed;
+  border-top: 2px solid #fed7aa;
+}

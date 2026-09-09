@@ -4,6 +4,7 @@ import { PageHead } from "@/components/page-head";
 import { hasPermission } from "@/lib/authorization";
 import { financeContext, loadBusiness, type Query } from "@/lib/finance/data";
 import { addAmounts, monthEnd } from "@/lib/finance/pricing";
+import { DailyBreakup } from "./daily-breakup";
 import { LiveRefresh } from "./refresh";
 import { BusinessFilters } from "./filters";
 import "../finance.css";
@@ -66,6 +67,27 @@ export default async function BusinessPage({
     q.set("tab", next);
     return `/finance/business?${q}`;
   };
+  const dailySelection =
+    typeof searchParams.daily === "string" ? searchParams.daily : "";
+  const dailyRows =
+    dailySelection === "all"
+      ? rows
+      : rows.filter(
+          (r) =>
+            r.station === dailySelection &&
+            r.provider === searchParams.dailyClient,
+        );
+  const dailyHref = (station = "all", client = "") => {
+    const q = new URLSearchParams(params);
+    q.set("daily", station);
+    if (client) q.set("dailyClient", client);
+    return `/finance/business?${q}#daily-breakup`;
+  };
+  const dailyExport = new URLSearchParams(params);
+  dailyExport.set("detail", "daily");
+  dailyExport.set("daily", dailySelection);
+  if (typeof searchParams.dailyClient === "string")
+    dailyExport.set("dailyClient", searchParams.dailyClient);
   const comparable = rows.filter((r) => r.profit !== null);
   const revenue = addAmounts(rows.map((r) => r.revenue)),
     costs = addAmounts(rows.map((r) => r.cost)),
@@ -155,8 +177,11 @@ export default async function BusinessPage({
       </div>
       <section className="summary-grid">
         <div className="metric-card">
-          <span>Covered revenue · estimate</span>
-          <strong>{money(revenue)}</strong>
+          <span>MTD revenue · estimate</span>
+          <Link className="fin-metric-link" href={dailyHref()}>
+            <strong>{money(revenue)}</strong>
+            <small>View daily breakup →</small>
+          </Link>
           <small>
             {revenueCovered} of {rows.length} allocations priced
           </small>
@@ -170,7 +195,7 @@ export default async function BusinessPage({
           </small>
         </div>
         <div className="metric-card">
-          <span>Comparable P&L · estimate</span>
+          <span>MTD P&L · estimate</span>
           <strong
             className={
               profit !== null && Number(profit) < 0 ? "fin-negative" : ""
@@ -191,10 +216,12 @@ export default async function BusinessPage({
       <div className="fin-notice">
         <strong>Management estimate, before final billing.</strong> Amazon uses
         monthly MG × {elapsed}/{monthEnd(filters.month).slice(8)} calendar days.
-        This assumes MG eligibility and excludes variable earnings, recoveries,
-        fees and tax. Flipkart uses configured monthly delivery slabs. P&L
-        subtracts recorded operating costs only; missing expense days and
-        unallocated overhead can overstate profit.
+        Each day adds max(0, deliveries − monthly MG volume ÷ calendar days) ×
+        variable slab rate, plus MFN count × MFN rate. IHS/SMD settlement rules,
+        recoveries, fees and tax remain outside this estimate. Flipkart uses
+        configured monthly delivery slabs. P&L subtracts recorded operating
+        costs only; missing expense days and unallocated overhead can overstate
+        profit.
       </div>
       <div className="fin-freshness">
         <span>Live refresh every 60 seconds · Read {stamp(readAt)}</span>
@@ -208,13 +235,12 @@ export default async function BusinessPage({
           <div>
             <h2>
               {tab === "pnl"
-                ? "Allocation profitability"
-                : "Allocation billing estimates"}
+                ? "MTD allocation profitability"
+                : "MTD allocation revenue"}
             </h2>
             <p className="subtle">
               Allocation = location + client. {rows.length} matching
-              allocations. Expand a row for source coverage and{" "}
-              {tab === "pnl" ? "cost details" : "billing basis"}.
+              allocations. Click an MTD revenue amount for the daily breakup.
             </p>
           </div>
         </div>
@@ -226,7 +252,7 @@ export default async function BusinessPage({
                 <th>Region / cluster</th>
                 <th>Deliveries</th>
                 {tab === "revenue" && <th>Monthly MG</th>}
-                <th>Revenue estimate</th>
+                <th>MTD revenue</th>
                 {tab === "pnl" && (
                   <>
                     <th>Recorded costs</th>
@@ -268,7 +294,13 @@ export default async function BusinessPage({
                     </td>
                   )}
                   <td>
-                    {money(row.revenue)}
+                    <Link
+                      className="fin-revenue-link"
+                      href={dailyHref(row.station, row.provider)}
+                    >
+                      {money(row.revenue)}
+                      <small>View daily breakup →</small>
+                    </Link>
                     <small>
                       {row.revision
                         ? `Rate revision ${row.revision}`
@@ -366,6 +398,20 @@ export default async function BusinessPage({
           </div>
         )}
       </section>
+      {dailySelection &&
+        (dailyRows.length ? (
+          <DailyBreakup
+            rows={dailyRows}
+            pnl={tab === "pnl"}
+            download={`/finance/business/export?${dailyExport}`}
+            close={`/finance/business?${params}`}
+          />
+        ) : (
+          <div className="fin-notice">
+            No permitted allocation matches this daily breakup. Choose an
+            allocation from the MTD table.
+          </div>
+        ))}
       <p className="fin-footnote">
         Revenue follows the latest revision for the selected month. Recorded
         costs come from station cost reports; payment requests and bank payments

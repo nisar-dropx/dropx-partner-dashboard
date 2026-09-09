@@ -1,5 +1,9 @@
 import {
   mgEstimate,
+  decimal,
+  amount,
+  scale,
+  addAmounts,
   slabEstimate,
   monthEnd,
   subtractAmounts,
@@ -38,6 +42,8 @@ export type Snapshot = {
   shipments: Shipment[];
   costs: Cost[];
   read_at: string;
+  daily_shipments?: DailyShipment[];
+  daily_costs?: DailyCost[];
 };
 export type BusinessRow = {
   station: string;
@@ -59,6 +65,12 @@ export type BusinessRow = {
   basis: string;
   issues: string[];
   components: Cost | null;
+  daily: BusinessDay[];
+  variableRate: string | null;
+  mfnRate: string | null;
+  smdRate: string | null;
+  ihsLowRate: string | null;
+  ihsHighRate: string | null;
 };
 type Location = {
   station_code: string;
@@ -76,6 +88,189 @@ const providerName = (s: string) =>
     : s.toLowerCase() === "flipkart"
       ? "Flipkart"
       : s;
+export type DailyShipment = {
+  station_code: string;
+  client: string;
+  work_date: string;
+  deliveries: string | null;
+  mfn: string | null;
+  smd: string | null;
+  ihs: string | null;
+  updated_at: string;
+};
+export type DailyCost = {
+  station_code: string;
+  work_date: string;
+  total: string | null;
+  updated_at: string;
+};
+export type BusinessDay = {
+  date: string;
+  deliveries: string | null;
+  mgVolume: string | null;
+  excessVolume: string | null;
+  base: string | null;
+  variable: string | null;
+  mfn: string | null;
+  mfnRevenue: string | null;
+  smd: string | null;
+  ihs: string | null;
+  revenue: string | null;
+  cost: string | null;
+  profit: string | null;
+  shipmentReported: boolean;
+  issues: string[];
+};
+const zero = BigInt(0);
+const units = (v: bigint) =>
+  `${v / scale}.${String(v % scale).padStart(24, "0")}`.replace(/\.?0+$/, "") ||
+  "0";
+// Cumulative component rounding reconciles every displayed day to the displayed MTD.
+function accrual() {
+  let total = zero,
+    rounded = "0.00";
+  return (value: bigint | null) => {
+    if (value === null) return null;
+    total += value;
+    const next = amount(total),
+      day = subtractAmounts(next, rounded);
+    rounded = next;
+    return day;
+  };
+}
+export function buildDailyRows(
+  snapshots: Snapshot,
+  station: string,
+  provider: string,
+  pricing: PricingCard | undefined,
+  month: string,
+  through: string,
+  sharedCost: boolean,
+): BusinessDay[] {
+  const monthDays = BigInt(Number(monthEnd(month).slice(8)));
+  const elapsed = Number(through.slice(8));
+  const shipments = new Map(
+    (snapshots.daily_shipments ?? [])
+      .filter(
+        (s) =>
+          s.station_code === station && providerName(s.client) === provider,
+      )
+      .map((s) => [s.work_date, s]),
+  );
+  const costs = new Map(
+    (snapshots.daily_costs ?? [])
+      .filter((c) => c.station_code === station)
+      .map((c) => [c.work_date, c]),
+  );
+  const variableAccrual = accrual(),
+    mfnAccrual = accrual(),
+    costAccrual = accrual();
+  const rates = pricing?.rates ?? {};
+  let flipkartQuantity = zero,
+    flipkartPrevious = "0.00";
+  return Array.from({ length: elapsed }, (_, index) => {
+    const date = `${month}-${String(index + 1).padStart(2, "0")}`;
+    const s = shipments.get(date),
+      c = costs.get(date),
+      issues: string[] = [];
+    let base: string | null = null,
+      variable: string | null = null,
+      mfnRevenue: string | null = null,
+      mgVolume: string | null = null,
+      excessVolume: string | null = null,
+      revenue: string | null = null;
+    if (!s)
+      issues.push("Shipment report pending; variable earnings incomplete");
+    if (!pricing) issues.push("Rate card missing for this month");
+    else if (provider === "Amazon") {
+      if (rates.mg_amount_including_mhe != null) {
+        base = subtractAmounts(
+          mgEstimate(
+            rates.mg_amount_including_mhe,
+            index + 1,
+            Number(monthDays),
+          ),
+          mgEstimate(rates.mg_amount_including_mhe, index, Number(monthDays)),
+        );
+      }
+      if (rates.delivery_mg_volume != null) {
+        const monthlyVolume = decimal(rates.delivery_mg_volume);
+        mgVolume = units(monthlyVolume / monthDays);
+        if (s?.deliveries != null) {
+          const excessNumerator =
+            decimal(s.deliveries) * monthDays - monthlyVolume;
+          const positive = excessNumerator > zero ? excessNumerator : zero;
+          excessVolume = units(positive / monthDays);
+          if (positive === zero) variable = variableAccrual(zero);
+          else if (rates.variable_slab != null)
+            variable = variableAccrual(
+              (positive * decimal(rates.variable_slab)) / (monthDays * scale),
+            );
+          else issues.push("Excess-delivery rate missing");
+        } else if (s) issues.push("Delivery count incomplete");
+      } else issues.push("MG volume missing");
+      if (s?.mfn != null) {
+        if (decimal(s.mfn) === zero) mfnRevenue = mfnAccrual(zero);
+        else if (rates.mfn_rate != null)
+          mfnRevenue = mfnAccrual(
+            (decimal(s.mfn) * decimal(rates.mfn_rate)) / scale,
+          );
+        else issues.push("MFN rate missing");
+      } else if (s) issues.push("MFN count incomplete");
+      if (s?.ihs == null && s) issues.push("IHS breakdown unavailable");
+      else if (s?.ihs && decimal(s.ihs) > zero)
+        issues.push("IHS earnings pending confirmation of the 15% rate rule");
+      if (s?.smd == null && s) issues.push("SMD breakdown unavailable");
+      else if (s?.smd && decimal(s.smd) > zero)
+        issues.push(
+          "SMD included in deliveries; separate SMD billing rule pending",
+        );
+      // The confirmed model uses the imported delivery total. Do not bill SMD twice,
+      // or guess the IHS denominator/boundary. Their quantities and rates stay visible.
+      revenue = base === null ? null : addAmounts([base, variable, mfnRevenue]);
+    } else if (provider === "Flipkart") {
+      if (s?.deliveries != null) {
+        flipkartQuantity += decimal(s.deliveries);
+        const cumulative = slabEstimate(
+          units(flipkartQuantity),
+          pricing.slabs,
+          pricing.slab_mode,
+        );
+        if (cumulative !== null) {
+          variable = subtractAmounts(cumulative, flipkartPrevious);
+          flipkartPrevious = cumulative;
+          revenue = variable;
+        }
+      }
+    }
+    const cost =
+      !sharedCost && c?.total != null ? costAccrual(decimal(c.total)) : null;
+    if (sharedCost)
+      issues.push("Shared station cost requires client allocation");
+    else if (cost === null) issues.push("Cost report pending");
+    return {
+      date,
+      deliveries: s?.deliveries ?? null,
+      mgVolume,
+      excessVolume,
+      base,
+      variable,
+      mfn: s?.mfn ?? null,
+      mfnRevenue,
+      smd: s?.smd ?? null,
+      ihs: s?.ihs ?? null,
+      revenue,
+      cost,
+      profit:
+        revenue !== null && cost !== null
+          ? subtractAmounts(revenue, cost)
+          : null,
+      shipmentReported: Boolean(s),
+      issues,
+    };
+  });
+}
+
 export function buildBusinessRows(
   snapshot: Snapshot,
   cards: PricingCard[],
@@ -110,8 +305,7 @@ export function buildBusinessRows(
     const station = key.split("/")[0];
     clientCounts.set(station, (clientCounts.get(station) ?? 0) + 1);
   }
-  const elapsed = Number(filters.through.slice(8, 10)),
-    days = Number(monthEnd(filters.month).slice(8, 10));
+  const elapsed = Number(filters.through.slice(8, 10));
   return [...keys].sort().flatMap((key) => {
     const [station, provider] = key.split("/");
     if (filters.provider && provider !== filters.provider) return [];
@@ -125,15 +319,10 @@ export function buildBusinessRows(
     if (!place) issues.push("Location mapping missing");
     if (!pricing) issues.push("No rate card for this month");
     else if (provider === "Amazon") {
-      if (pricing.rates.mg_amount_including_mhe != null)
-        revenue = mgEstimate(
-          pricing.rates.mg_amount_including_mhe,
-          elapsed,
-          days,
-        );
-      basis = "MG calendar-day estimate";
+      basis =
+        "Daily MG + daily excess deliveries × variable slab + MFN × MFN rate";
       issues.push(
-        "Variable revenue, eligibility, recovery, fees and tax not included",
+        "IHS/SMD settlement rules, shortfall recovery, fees and tax are not included",
       );
     } else if (provider === "Flipkart") {
       basis = `Monthly ${pricing.slab_mode === "all_units" ? "all-units" : "progressive"} delivery slabs`;
@@ -162,8 +351,33 @@ export function buildBusinessRows(
     if (!costRow) issues.push("No cost report");
     else if (costRow.days < elapsed)
       issues.push(`Cost coverage ${costRow.days}/${elapsed} days`);
+    const daily = buildDailyRows(
+      snapshot,
+      station,
+      provider,
+      pricing,
+      filters.month,
+      filters.through,
+      (clientCounts.get(station) ?? 0) > 1,
+    );
+    if (provider === "Amazon")
+      revenue = addAmounts(daily.map((d) => d.revenue));
+    const pending = [
+      ...new Set(
+        daily
+          .flatMap((d) => d.issues)
+          .filter((i) => !i.startsWith("Cost") && !i.startsWith("Shared")),
+      ),
+    ];
+    issues.push(...pending);
     return [
       {
+        daily,
+        variableRate: pricing?.rates.variable_slab ?? null,
+        mfnRate: pricing?.rates.mfn_rate ?? null,
+        smdRate: pricing?.rates.smd_rate ?? null,
+        ihsLowRate: pricing?.rates.ihs_rate_below_15_percent ?? null,
+        ihsHighRate: pricing?.rates.ihs_rate_above_15_percent ?? null,
         station,
         name: place?.station_name || station,
         provider,

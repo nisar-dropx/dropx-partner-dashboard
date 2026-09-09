@@ -50,12 +50,26 @@ files or database credentials. Re-importing an existing month/station is rejecte
 Use Edit for corrections and Copy to month for a new effective month. Prior
 revisions remain available, and stale concurrent edits fail atomically.
 
-Amazon revenue is explicitly a management estimate: monthly MG prorated by
-calendar days through the selected date. Eligibility, variable earnings, shortfall
-recovery, IHS boundary rules, fees and tax remain unconfirmed and excluded. It is
-not final billable revenue. Flipkart cards explicitly select progressive or
-all-units monthly delivery slabs, with contiguous exclusive-lower/inclusive-upper
-bounds and an unlimited final slab. No Flipkart rates are invented or seeded.
+Amazon MTD revenue is the sum of daily MG accrual, daily positive excess delivery
+volume × variable_slab, and MFN count × mfn_rate. Both MG payout and volume use
+the actual calendar month (including leap years). Excess is computed independently
+per day, with no shortfall carry-forward, and fractional thresholds are preserved.
+Component totals use cumulative paise rounding, so displayed daily revenue sums
+exactly to MTD. Missing shipment days still accrue MG but variable earnings remain
+pending; a missing report never proves zero shipments.
+
+The confirmed delivery basis is cps_shipment_daily.total_delivery. SMD already sits
+inside that count and is not charged a second time. The IHS 15% denominator/boundary
+and separate SMD settlement rule were requested from the user and remain pending.
+Daily reports expose their actual quantities and pricing for review, but do not guess
+additional earnings. Shortfall recovery, fees and tax are not included. Flipkart
+retains configured cumulative monthly slabs; daily amounts are changes in that total.
+
+Apply scripts/finance/business_daily_v2.sql and business_daily_v3.sql for the service-only daily reader and its batched audit lookup.
+Raw IHS/SMD audit data matches the current CPS source batch, station, date and
+associate. Shipment-type duplicates use the first row, matching the existing capacity
+reader; superseded imports are not added again. The monthly overview is the default.
+Click its MTD total or an allocation revenue to open daily detail and a scoped CSV.
 
 Reports aggregate existing cps_shipment_daily and cps_station_daily in SQL,
 without row-limit truncation. The default is current month through today in
