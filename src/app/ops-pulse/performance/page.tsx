@@ -533,7 +533,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             reviewChain={reviewChain}
             routingIssue={reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "A review manager needs to be assigned in People for this station. Contact HR so Proxy / Skip and RCA can run." : null)}
             date={selectedDate}
-            error={searchParams?.error || reviewWorkspace.error || operationalResult.error || connectionResult.error || (!selectedReviewRow ? "No Amazon performance metrics are loaded for this station on this date. RCA exceptions appear after Hawkeye/EDSP data is imported." : null)}
+            error={searchParams?.error || reviewWorkspace.error || operationalResult.error || connectionResult.error || (!selectedReviewRow ? "No Amazon performance metrics are loaded for this date. Opening and UTR delay reasons are still available below." : null)}
             items={reviewWorkspace.items}
             locations={deskLocations}
             reviewClusters={canFilterClusters ? clusterOptions : []}

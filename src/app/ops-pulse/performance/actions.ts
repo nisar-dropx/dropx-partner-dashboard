@@ -7,6 +7,8 @@ import { resolvePerformanceReviewChain } from "@/lib/ops-pulse/performance-revie
 import { getReviewAccess } from "@/lib/ops-pulse/review-access";
 import { reviewBypassReason, visibleReviewStep, noonEmdValue, stationTimingClocks } from "@/lib/ops-pulse/review-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { disciplineReason, isDisciplineRcaKey, missingDisciplineReasons } from "@/lib/ops-pulse/review-discipline-rca";
+import { loadDisciplineRca } from "@/lib/ops-pulse/review-discipline-rca-data";
 
 export type ReviewActionResult = { error?: string; notice?: string };
 const text = (data: FormData, key: string) => String(data.get(key) ?? "").trim();
@@ -54,7 +56,7 @@ async function context(authorization: AuthorizationContext, data: FormData) {
     .eq("company_id", companyId).eq("review_id", result.data.id).order("step_order");
   if (steps.error) throw new Error("Unable to check the current review stage.");
   const access = await getReviewAccess(authorization, station.id, result.data, steps.data ?? [], { inScope: true });
-  return { companyId, review: result.data, access, steps: steps.data ?? [] };
+  return { companyId, station: { ...station, station_name: null }, review: result.data, access, steps: steps.data ?? [] };
 }
 function author(authorization: AuthorizationContext, role: string) {
   return { author_name: authorization.fullName || "Reviewer", author_role: role };
@@ -97,6 +99,7 @@ export async function savePerformanceReviewItem(data: FormData): Promise<ReviewA
     const { companyId,review,access }=await context(authorization,data);
     if (!access.canEditRca) throw new Error("RCA and actions are editable by the first review manager during their stage, or Program Manager.");
     const metricKey=limited(data,"metric_key",150,true);
+    if (isDisciplineRcaKey(metricKey)) throw new Error("Use the delay reason form for opening / UTR exceptions.");
     if (!/^[a-zA-Z0-9_ -]+$/.test(metricKey)) throw new Error("Select a valid review metric.");
     const status=text(data,"status");
     if (!["open","in_progress","blocked","done"].includes(status)) throw new Error("Select a valid action status.");
@@ -112,17 +115,52 @@ export async function savePerformanceReviewItem(data: FormData): Promise<ReviewA
   } catch(error) {return failure(error);}
 }
 
+/** Short attendance reasons belong to the current reviewer; metric RCA permissions stay unchanged. */
+export async function savePerformanceDisciplineReason(data: FormData): Promise<ReviewActionResult> {
+  const authorization = await requirePagePermission("performance_review", "access");
+  try {
+    const { companyId, station, review, access } = await context(authorization, data);
+    if (!access.canEditRca && !access.canComplete) throw Error("Only the current reviewer or Program Manager can record delay reasons.");
+    const key = limited(data, "metric_key", 150, true);
+    if (!isDisciplineRcaKey(key)) throw Error("Select a valid opening / UTR delay.");
+    const reason = disciplineReason(text(data, "root_cause"));
+    // Never trust client-provided staff names, lateness or station/date evidence.
+    const rows = await loadDisciplineRca(companyId, station, review.source_date);
+    const row = rows.find(entry => entry.key === key);
+    if (!row) throw Error("This delay is no longer present in the source data. Refresh to review the latest position.");
+    const result = await supabaseAdmin!.rpc("ops_mutate_manager_review", {
+      p_company: companyId, p_actor: authorization.userId, p_review: review.id, p_action: "item",
+      p_data: { metric_key: row.key, metric_label: row.label, root_cause: reason,
+        corrective_action: "", action_owner: authorization.fullName || "Reviewer", due_date: review.source_date,
+        status: "done", severity: row.severity, actual_value: row.actual, target_value: row.target, target_direction: row.direction,
+        expected_review_version: review.updated_at, ...author(authorization, access.actor.label) }
+    });
+    rpcError(result.error);
+    return finish("Delay reason saved.");
+  } catch (error) { return failure(error); }
+}
+
 /** One common comment box: save a note, or complete the assigned stage with that note. */
 export async function savePerformanceReviewComment(data:FormData):Promise<ReviewActionResult> {
   const authorization=await requirePagePermission("performance_review","access");
   try {
-    const { companyId,review,access,steps }=await context(authorization,data);
+    const { companyId,station,review,access,steps }=await context(authorization,data);
     const complete=text(data,"intent")==="complete";
     if (complete && access.routingIssue) throw new Error(access.routingIssue);
     if (complete ? !access.canComplete : !access.canComment) throw new Error(complete ? "Only the assigned manager can complete this review stage." : "You can add comments when the review reaches your stage. Program Managers can comment at any stage.");
     const note=limited(data,"feedback",4000,!complete);
     const step=steps.find((entry)=>entry.step_order===review.current_step_order && entry.status==="pending");
     if (complete && text(data,"step_id")!==step?.id) throw new Error("The review has moved to another stage. Refresh to continue.");
+    if (complete) {
+      const [delays, saved] = await Promise.all([
+        loadDisciplineRca(companyId, station, review.source_date),
+        supabaseAdmin!.from("ops_performance_review_items").select("metric_key,root_cause")
+          .eq("company_id", companyId).eq("review_id", review.id)
+      ]);
+      if (saved.error) throw Error("Unable to check saved delay reasons. Please retry.");
+      const missing = missingDisciplineReasons(delays, saved.data ?? []);
+      if (missing.length) throw Error(`Add ${missing.length} short delay reason${missing.length === 1 ? "" : "s"} in RCA before completing: ${missing.slice(0, 3).map(row => row.label).join("; ")}${missing.length > 3 ? "; …" : ""}.`);
+    }
     const result=await supabaseAdmin!.rpc("ops_mutate_manager_review",{p_company:companyId,p_actor:authorization.userId,p_review:review.id,p_action:complete?"complete":"comment",p_data:{note,step_id:step?.id,expected_review_version:review.updated_at,...author(authorization,access.actor.label)}});
     rpcError(result.error);
     return finish(complete?"Your review is complete. The next manager can now review.":"Comment added.");

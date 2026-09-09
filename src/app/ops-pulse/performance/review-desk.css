@@ -155,11 +155,21 @@
 .performance-review-desk .performance-action-item :is(input,select,textarea) { width: 100%; min-height: 38px; border: 1px solid #dfe4ec; border-radius: 7px; padding: 8px; background: white; }
 .performance-review-desk .performance-action-item textarea { min-height: 70px; }
 .performance-review-desk .performance-action-readonly p { font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.review-rca-hint,.review-delay-evidence { color: #64748b; font-size: 12px; line-height: 1.5; }
+.review-delay-evidence { margin: 10px 12px 0; }
+.performance-review-desk .performance-action-item .review-delay-form { grid-template-columns: minmax(0,1fr) auto; align-items: end; }
+.review-delay-form .review-save-result { grid-column: 1/-1; }
+.review-delay-saved { margin: 12px; font-size: 13px; overflow-wrap: anywhere; }
+.review-delay-saved b { margin-right: 8px; }
+.review-delay-required { padding: 10px 12px; background: #fff7ed; color: #9a3412; border-radius: 8px; font-size: 12px; }
+.review-delay-required a { color: inherit; text-decoration: underline; font-weight: 700; }
+#review-rca { scroll-margin-top: 90px; }
 @media (max-width:1200px) {
   .performance-review-desk .performance-review-columns { grid-template-columns: minmax(0,1fr); }
   .performance-review-desk .review-station-updates { grid-template-columns: minmax(0,1fr); }
 }
 @media (max-width:650px) {
+  .performance-review-desk .performance-action-item .review-delay-form { grid-template-columns: minmax(0,1fr); }
   .performance-review-desk .performance-action-item form,.performance-review-desk .performance-action-readonly { grid-template-columns: minmax(0,1fr); }
   .performance-review-desk .review-connection-form,.review-followup-form { grid-template-columns: minmax(0,1fr); }
   .performance-review-desk :is(input,select,textarea) { font-size: 16px; }

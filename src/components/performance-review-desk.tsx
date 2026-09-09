@@ -25,6 +25,7 @@ import { PerformanceRcaActions } from "@/components/performance-rca-actions";
 import { ReviewActionForm } from "@/components/review-action-form";
 import { discussionFeedUpdates, visibleReviewStep } from "@/lib/ops-pulse/review-policy";
 import type { ReactNode } from "react";
+import { buildDisciplineRca, isDisciplineRcaKey, missingDisciplineReasons } from "@/lib/ops-pulse/review-discipline-rca";
 
 export type ReviewMetric = {
   actual: number | null;
@@ -34,6 +35,8 @@ export type ReviewMetric = {
   severity: "green" | "amber" | "red" | "neutral";
   short: string;
   target: number | null;
+  reasonOnly?: boolean;
+  evidence?: string;
 };
 
 type Props = {
@@ -141,13 +144,15 @@ export function PerformanceReviewDesk(props: Props) {
     const labelKey = stationKey(item.metric_label);
     if (labelKey && !itemByMetric.has(labelKey)) itemByMetric.set(labelKey, item);
   }
-  const resolveItem = (metric: ReviewMetric) => itemByMetric.get(metric.key) ?? itemByMetric.get(stationKey(metric.label)) ?? itemByMetric.get(metric.label);
+  const resolveItem = (metric: ReviewMetric) => isDisciplineRcaKey(metric.key) ? itemByMetric.get(metric.key) : itemByMetric.get(metric.key) ?? itemByMetric.get(stationKey(metric.label)) ?? itemByMetric.get(metric.label);
   const carriedActions = selectedItems.filter((item) => item.review_id !== review?.id);
-  const misses = metrics.filter((metric) => metric.severity === "red" || metric.severity === "amber");
+  const disciplineRows = buildDisciplineRca(snapshot, props.utrDiscipline.discipline);
+  const missingReasons = missingDisciplineReasons(disciplineRows, currentItems);
+  const misses = [...metrics.filter((metric) => metric.severity === "red" || metric.severity === "amber"), ...disciplineRows];
   // Saved RCA must remain visible even when a later source refresh makes its metric green or unavailable.
   const savedOnlyRows: ReviewMetric[] = currentItems
     .filter((item) => {
-      const linkedToMiss = misses.some((metric) => metric.key === item.metric_key || stationKey(metric.label) === stationKey(item.metric_label));
+      const linkedToMiss = misses.some((metric) => metric.key === item.metric_key || (!isDisciplineRcaKey(item.metric_key) && stationKey(metric.label) === stationKey(item.metric_label)));
       return !linkedToMiss && Boolean(item.root_cause || item.corrective_action);
     })
     .map((item) => {
@@ -159,7 +164,9 @@ export function PerformanceReviewDesk(props: Props) {
         label: item.metric_label,
         severity: (item.severity === "amber" ? "amber" : "red") as ReviewMetric["severity"],
         short: item.metric_label,
-        target: item.target_value == null ? null : Number(item.target_value)
+        target: item.target_value == null ? null : Number(item.target_value),
+        reasonOnly: isDisciplineRcaKey(item.metric_key),
+        evidence: isDisciplineRcaKey(item.metric_key) ? "Saved delay reason · no longer flagged in current source data" : undefined
       };
     });
   const rcaRows = [...misses, ...savedOnlyRows];
@@ -232,7 +239,7 @@ export function PerformanceReviewDesk(props: Props) {
 
     {props.readOnlyPreview && !review ? <div className="alert warning" role="status">Read-only user preview hides Start review. Exit preview and open Review Desk as this user, or have them sign in, to start the review.</div> : null}
     {!review && !canAdd && !props.readOnlyPreview && reviewChain.length ? <div className="alert warning" role="status">Only the first review manager on this route ({reviewChain[0]?.reviewerRole} · {reviewChain[0]?.reviewerName}) or Program Manager can start this review.</div> : null}
-    {!review && misses.length ? <div className="performance-review-start-guide"><strong>{misses.length} metrics need RCA and action</strong><span>{canAdd ? "Use Start review above, then record RCA and action items below." : "Start review becomes available once the assigned manager opens this station."}</span></div> : null}
+    {!review && misses.length ? <div className="performance-review-start-guide"><strong>{misses.length} exceptions need RCA</strong><span>{canAdd ? "Use Start review above, then record RCA and short delay reasons below." : "Start review becomes available once the assigned manager opens this station."}</span></div> : null}
     {review && !reviewUpdates.length && !currentItems.length ? <div className="performance-review-start-guide"><strong>Review started · no inputs saved yet</strong><span>This station is in review, but no RCA, takeaway or discussion has been saved. Add them below, or use Proxy / Skip if you are covering the assigned manager.</span></div> : null}
     {props.routingIssue ? <div className="alert warning" role="status">{props.routingIssue}</div> : null}
 
@@ -276,6 +283,8 @@ export function PerformanceReviewDesk(props: Props) {
           <PerformanceRcaActions
             key={review.id}
             canEdit={canEdit}
+            canEditDiscipline={canEdit || canCompleteStep}
+            activeDisciplineKeys={disciplineRows.map(row => row.key)}
             date={date}
             itemsByMetric={itemsByMetricForRca}
             rows={rcaRows}
@@ -326,6 +335,7 @@ export function PerformanceReviewDesk(props: Props) {
     <PerformanceFollowups key={`${selectedCode}-${date}`} review={review} date={date} rows={props.followups.rows} count={props.followups.count} error={props.followups.error} canAdd={canEdit} canUpdate={props.canManageActions}/>
     {review ? <section className="review-discussion" id="review-discussion">
       <header><div><h3>Review discussion</h3><p>{review.status === "closed" ? "Review completed · all inputs remain visible" : activeStep ? `${activeStep.proxy_reviewer_name||activeStep.reviewer_name} reviews with ${selectedSteps.findIndex(step=>step.id===activeStep.id)>0?selectedSteps[selectedSteps.findIndex(step=>step.id===activeStep.id)-1].reviewer_name:props.stationLeads}` : "Review manager not assigned"}</p></div><span>{reviewUpdates.length} updates</span></header>
+      {review.status !== "closed" && missingReasons.length ? <p className="review-delay-required"><a href="#review-rca">{missingReasons.length} delay reason{missingReasons.length === 1 ? "" : "s"} required in RCA</a> before completing this review.</p> : null}
       {canComment || canCompleteStep ? <ReviewActionForm key={review.id} action={savePerformanceReviewComment} className="review-comment-form" resetOnSuccess>
         <input type="hidden" name="review_id" value={review.id}/><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="step_id" value={activeStep?.id ?? ""}/>
         <label>Your review input<textarea name="feedback" maxLength={4000} placeholder="Add context, feedback or the next follow-up…" rows={2}/></label>

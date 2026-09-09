@@ -51,3 +51,4 @@ if (failures.length) {
 }
 
 await import("./verify-review-operations.mjs");
+await import("./verify-review-discipline-rca.mjs");
