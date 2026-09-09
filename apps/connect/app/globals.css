@@ -8654,6 +8654,18 @@ tr:last-child td {
   color: #9a6700;
 }
 
+.dx-verification.pending {
+  color: #65615b;
+}
+
+.dx-verification.pending .mini-spin {
+  margin-top: 0;
+}
+
+.dx-verification.mismatch > span strong {
+  color: #9a6700;
+}
+
 .dx-verification > span {
   display: grid;
   gap: 2px;
