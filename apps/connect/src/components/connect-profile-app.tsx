@@ -976,6 +976,8 @@ function VerificationText({ checks, running }: { checks: Array<Verification | un
     : `${verificationLabel(check.kind)} verification failed`;
   const label = check.kind === "bank"
     ? `Beneficiary: ${check.accountName || check.name || "Name not returned"}`
+    : check.kind === "pan_aadhaar"
+      ? status
     : check.kind === "vehicle" && holder
       ? `RC owner: ${holder}`
       : holder || fallbackLabel;
