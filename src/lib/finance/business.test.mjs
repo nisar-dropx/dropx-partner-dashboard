@@ -653,3 +653,90 @@ test("Corrected source counts change live estimates without adding a second copy
   assert.equal(days[1].variable, "2000.00");
   assert.equal(days.length, 2);
 });
+
+test("Daily CSV contains only the selected authorized allocation and reconciles to MTD", async () => {
+  const { pc, snap } = dailyFixture();
+  const f = { ...filters, through: "2026-08-02" };
+  const rows = performance.buildBusinessRows(snap, [pc], [location], f);
+  const route = compile("../../app/finance/business/export/route.ts", {
+    "next/server": {
+      NextResponse: { json: (v, o) => new Response(JSON.stringify(v), o) },
+    },
+    "@/lib/finance/data": {
+      financeContext: async (code) => {
+        assert.equal(code, "finance_revenue");
+        return {};
+      },
+      loadBusiness: async () => ({
+        rows,
+        filters: f,
+        readAt: "2026-09-09T00:00:00Z",
+      }),
+    },
+    "@/lib/finance/pricing": pricing,
+  });
+  const response = await route.GET(
+    new Request(
+      "https://fin.dropxlogistics.com/finance/business/export?detail=daily&daily=KOZA&dailyClient=Amazon&month=2026-08",
+    ),
+  );
+  const csv = pricing.parseCsv(await response.text());
+  assert.equal(csv.length, 3);
+  assert.ok(csv.slice(1).every((row) => row[0] === "KOZA"));
+  const revenueIndex = csv[0].indexOf("Day revenue INR");
+  assert.equal(
+    pricing.addAmounts(csv.slice(1).map((row) => row[revenueIndex])),
+    rows[0].revenue,
+  );
+  assert.match(
+    response.headers.get("Content-Disposition"),
+    /2026-08-daily.csv/,
+  );
+  assert.ok(!csv[0].includes("Recorded costs INR"));
+  const denied = await route.GET(
+    new Request(
+      "https://fin.dropxlogistics.com/finance/business/export?detail=daily&daily=OUTSIDE&dailyClient=Amazon",
+    ),
+  );
+  assert.equal(denied.status, 400);
+  assert.match(await denied.text(), /No permitted allocation/);
+});
+test("Quantity display aggregation preserves fractional MG precision", () => {
+  assert.equal(
+    pricing.addQuantities([
+      "100.1234567890123456789",
+      "0.0000000000000000001",
+      null,
+    ]),
+    "100.123456789012345679",
+  );
+  assert.equal(pricing.addQuantities([null]), null);
+});
+test("Flipkart daily changes reconcile through a monthly slab boundary", () => {
+  const fc = { ...slabInput, id: "f1", revision: 1 };
+  const snap = {
+    ...snapshot,
+    shipments: [{ ...shipment, client: "Flipkart", deliveries: "1001" }],
+    daily_shipments: [
+      {
+        station_code: "KOZA",
+        client: "Flipkart",
+        work_date: "2026-08-01",
+        deliveries: "1000",
+      },
+      {
+        station_code: "KOZA",
+        client: "Flipkart",
+        work_date: "2026-08-02",
+        deliveries: "1",
+      },
+    ],
+  };
+  const [r] = performance.buildBusinessRows(snap, [fc], [location], {
+    ...filters,
+    through: "2026-08-02",
+  });
+  assert.equal(r.daily[0].revenue, "10000.00");
+  assert.equal(r.daily[1].revenue, "12.00");
+  assert.equal(pricing.addAmounts(r.daily.map((d) => d.revenue)), r.revenue);
+});
