@@ -6,6 +6,7 @@ const accessPages = read("src/lib/access-pages.ts");
 const authorization = read("src/lib/authorization.ts");
 const accessSurface = read("src/lib/access-surface.ts");
 const permissions = read("src/components/permission-matrix.tsx");
+const middleware = read("src/middleware.ts");
 const networkPage = read("src/app/ops-pulse/station-edd/page.tsx");
 const networkClient = read("src/app/ops-pulse/station-edd/station-edd-network-client.tsx");
 const detailClient = read("src/app/ops-pulse/station-edd/[stationCode]/station-edd-detail-client.tsx");
@@ -19,6 +20,7 @@ const checks = [
   [accessPages.includes('["edd_dashboard"], "station_edd"'), "existing Delivery Performance grants seed initial EDD access"],
   [authorization.includes('"edd_dashboard",\n    "station_edd"'), "EDD participates in OpsPulse permission inheritance"],
   [accessSurface.includes('"station_edd"') && permissions.includes('label: "EDD", codes: ["station_edd"]'), "EDD is independently configurable in Users & Access"],
+  [middleware.includes('"/station-edd"'), "EDD is allowed on the clean OpsPulse production surface"],
   [networkPage.includes('title="EDD"') && networkClient.includes("At station EDD") && networkClient.includes("Delivered"), "station dashboard exposes the requested current-at-station and delivered counts"],
   [detailClient.includes("TrackingDetailModal") && detailClient.includes("Tracking-ID details"), "station drill-down exposes clickable tracking-ID details"],
   [stationReport.includes('{ name: "At Station EDD", rows: atStationRows }') && stationReport.includes('{ name: "All EDD TIDs", rows: allRows }'), "station download contains focused and complete tracking-ID sheets"],
