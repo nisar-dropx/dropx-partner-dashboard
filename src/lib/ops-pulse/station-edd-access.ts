@@ -10,14 +10,14 @@ export type StationEddApiContext = {
 };
 
 export function hasStationEddAccess(authorization: AuthorizationContext | null) {
-  return Boolean(authorization && hasPermission(authorization, "station_edd", "access"));
+  return Boolean(authorization && hasPermission(authorization, "edd_dashboard", "access"));
 }
 
 export async function requireStationEddAccess() {
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
   if (!hasStationEddAccess(authorization)) {
-    redirect("/unauthorized?page=station_edd&action=access");
+    redirect("/unauthorized?page=edd_dashboard&action=access");
   }
   return authorization;
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isStationEddApiDenied, stationEddApiContext } from "@/lib/ops-pulse/station-edd-access";
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
-import { fetchEddPerformanceStation } from "@/lib/ops-pulse/edd-worker";
+import { fetchEddStation } from "@/lib/ops-pulse/edd-worker";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     if (!stations.some((station) => station.code === stationCode)) {
       return NextResponse.json({ error: "Station is outside your assigned location scope." }, { status: 403 });
     }
-    return NextResponse.json(await fetchEddPerformanceStation({ stationCode }));
+    return NextResponse.json(await fetchEddStation({ stationCode }));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load station EDD." }, { status: 500 });
   }

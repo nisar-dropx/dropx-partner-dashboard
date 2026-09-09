@@ -1,35 +1,57 @@
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import ts from "typescript";
+import * as XLSX from "xlsx";
 
-const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
-const navigation = read("src/lib/ops-pulse/navigation.ts");
-const accessPages = read("src/lib/access-pages.ts");
-const authorization = read("src/lib/authorization.ts");
-const accessSurface = read("src/lib/access-surface.ts");
-const permissions = read("src/components/permission-matrix.tsx");
-const middleware = read("src/middleware.ts");
-const networkPage = read("src/app/ops-pulse/station-edd/page.tsx");
-const networkClient = read("src/app/ops-pulse/station-edd/station-edd-network-client.tsx");
-const detailClient = read("src/app/ops-pulse/station-edd/[stationCode]/station-edd-detail-client.tsx");
-const stationReport = read("src/app/api/ops-pulse/station-edd/report/route.ts");
-const stationApi = read("src/app/api/ops-pulse/station-edd/route.ts");
-
-const checks = [
-  [navigation.includes('code: "station_edd", label: "EDD", href: "/station-edd"'), "EDD is a new top-level navigation section"],
-  [navigation.includes("eddDashboard, stationEdd"), "Delivery Performance remains present beside the new EDD section"],
-  [accessPages.includes('{ code: "station_edd", name: "EDD"'), "EDD has its own access page"],
-  [accessPages.includes('["edd_dashboard"], "station_edd"'), "existing Delivery Performance grants seed initial EDD access"],
-  [authorization.includes('"edd_dashboard",\n    "station_edd"'), "EDD participates in OpsPulse permission inheritance"],
-  [accessSurface.includes('"station_edd"') && permissions.includes('label: "EDD", codes: ["station_edd"]'), "EDD is independently configurable in Users & Access"],
-  [middleware.includes('"/station-edd"'), "EDD is allowed on the clean OpsPulse production surface"],
-  [networkPage.includes('title="EDD"') && networkClient.includes("At station EDD") && networkClient.includes("Delivered"), "station dashboard exposes the requested current-at-station and delivered counts"],
-  [detailClient.includes("TrackingDetailModal") && detailClient.includes("Tracking-ID details"), "station drill-down exposes clickable tracking-ID details"],
-  [stationReport.includes('{ name: "At Station EDD", rows: atStationRows }') && stationReport.includes('{ name: "All EDD TIDs", rows: allRows }'), "station download contains focused and complete tracking-ID sheets"],
-  [stationApi.includes("locationScopeIds") && stationApi.includes("outside your assigned location scope"), "EDD detail API enforces location scope"]
+const source = readFileSync(new URL("../src/lib/ops-pulse/station-edd.ts", import.meta.url), "utf8");
+const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
+const edd = await import("data:text/javascript;base64," + Buffer.from(compiled).toString("base64"));
+const today = "2026-09-09";
+const pkg = (trackingId, state, values = {}) => ({ trackingId, state, ead: today, bucket: "future", packageType: "Delivery", driverId: "", ...values });
+const packages = [
+  pkg("1", "INDUCTED"),
+  pkg("2", "INDUCTED", { driverId: "retained-id" }),
+  pkg("3", "RECEIVED", { driverId: "retained-id" }),
+  pkg("4", "IN_TRANSIT_TO_CUSTOMER"),
+  pkg("5", "DELIVERY_FAILED"),
+  pkg("6", "DELIVERED"),
+  pkg("7", "INDUCTED", { ead: "2026-09-08" }),
+  pkg("8", "INDUCTED", { ead: "2026-09-10" }),
+  pkg("9", "INDUCTED", { packageType: "CReturns" }),
+  pkg("10", "INDUCTED", { shipOption: "in-ez-rto" }),
+  pkg("11", "MANIFESTED"),
+  pkg("12", "INDUCTED", { ead: null }),
+  pkg("1", "INDUCTED")
 ];
-
-const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);
-for (const [passed, message] of checks) console.log(`${passed ? "PASS" : "FAIL"} ${message}`);
-if (failures.length) {
-  console.error(`Station EDD verification failed:\n${failures.map((failure) => `- ${failure}`).join("\n")}`);
-  process.exit(1);
-}
+const summary = edd.summarizeStationEdd("AWEZ", packages, "2026-09-09T11:13:12Z", today);
+assert.equal(summary.todayAtStation, 3, "INDUCTED/RECEIVED count even with retained driver IDs");
+assert.equal(summary.todayOnRoad, 1, "on-road status stays separate even without a driver ID");
+assert.equal(summary.todayOther, 3, "failed/delivered/manifested must not masquerade as station stock");
+assert.equal(summary.todayTotal, 7, "same EDD cohort with reverse shipments excluded and TIDs deduplicated");
+assert.equal(summary.overdueAtStation, 1);
+assert.equal(summary.missingDate, 1);
+assert.equal(summary.excludedReverse, 2);
+assert.equal(edd.stationEddPackageMatches(packages[0], "atStation", "today", today), true, "old upstream future bucket must not override today's actual date");
+assert.equal(edd.stationEddPackageMatches(packages[6], "atStation", "today", today), false);
+assert.equal(edd.stationEddPackageMatches(packages[6], "atStation", "overdue", today), true);
+assert.equal(edd.stationEddPackageMatches(packages[8], "all", "all", today), false);
+assert.equal(edd.stationEddDate(pkg("x", "INDUCTED", { ead: "2026-02-30", internalEAD: today })), today);
+assert.equal(edd.stationEddToday(new Date("2026-09-08T18:29:59Z")), "2026-09-08");
+assert.equal(edd.stationEddToday(new Date("2026-09-08T18:30:00Z")), today);
+assert.equal(edd.stationEddFreshness("2026-09-07T03:00:00Z", new Date("2026-09-09T11:00:00Z")), "Stale — previous day");
+assert.equal(edd.summarizeStationEdd("X", null, null, today).hasSnapshot, false);
+assert.equal(edd.summarizeStationEdd("X", [], "2026-09-09T11:00:00Z", today).hasSnapshot, true);
+const sheets = edd.stationEddReportSheets({ stationCode: "AWEZ", fetchedAt: "2026-09-09T11:13:12Z", packages }, "Kalady", today);
+const book = XLSX.utils.book_new();
+for (const sheet of sheets) XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(sheet.rows), sheet.name);
+const bytes = XLSX.write(book, { type: "buffer", bookType: "xlsx" });
+const parsed = XLSX.read(bytes, { type: "buffer" });
+assert.deepEqual(parsed.SheetNames, ["Summary", "Source Statuses", "At Station EDD Today", "Overdue At Station", "All Snapshot TIDs"]);
+const atStation = XLSX.utils.sheet_to_json(parsed.Sheets["At Station EDD Today"]);
+assert.equal(atStation.length, 3);
+assert.deepEqual(atStation.map(r => r["Tracking ID"]), ["1", "2", "3"]);
+assert.equal(atStation[1]["Driver ID (source)"], "retained-id");
+assert.equal(atStation[0]["EDD / EAD"], today);
+assert.equal(atStation[0]["Snapshot Refreshed UTC"], "2026-09-09T11:13:12Z");
+assert.equal(XLSX.utils.sheet_to_json(parsed.Sheets.Summary)[0]["At Station EDD Today"], atStation.length);
+console.log("PASS Station EDD behavioral tests: statuses, dates, retained IDs, reverse shipments, duplicates, missing/stale data, and XLSX round-trip.");

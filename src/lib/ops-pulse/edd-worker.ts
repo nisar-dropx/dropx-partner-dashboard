@@ -292,7 +292,7 @@ export async function refreshAllEddNetwork(): Promise<EddNetworkRunStatus | null
  * and saves it as the new cached snapshot — what the dashboard's manual
  * "Refresh live" button calls.
  */
-export async function refreshEddStation(params: { stationCode: string }): Promise<EddStationPayload> {
+export async function refreshEddStation(params: { stationCode: string; timeoutMs?: number }): Promise<EddStationPayload> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
     throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
@@ -306,12 +306,17 @@ export async function refreshEddStation(params: { stationCode: string }): Promis
     method: "POST",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
     cache: "no-store",
-    signal: AbortSignal.timeout(170000)
+    signal: AbortSignal.timeout(params.timeoutMs ?? 170000)
   });
   const raw = await readJson(response);
 
   if (!response.ok || raw.status !== "ok") {
-    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+    const error = raw.error;
+    const message = typeof error === "string" ? error
+      : error && typeof error === "object" && typeof (error as Record<string, unknown>).message === "string"
+        ? String((error as Record<string, unknown>).message)
+        : `EDD refresh failed (HTTP ${response.status}). The previous snapshot has been retained.`;
+    throw new EddWorkerError(message, {
       code: raw.code == null ? null : String(raw.code)
     });
   }
