@@ -144,7 +144,11 @@
 
 .dx-days button.full { color: #fff; background: #15915f; }
 .dx-days button.half { color: #fff; background: #ea580c; }
-.dx-days button.review { color: #fff; background: #d7434e; }
+.dx-days button.review {
+  color: #7a3b00;
+  background: #fbbf24;
+  box-shadow: inset 0 0 0 1px #d97706;
+}
 .dx-days button.on-shift {
   color: #0b4f8a;
   background: #e8f3fc;
@@ -211,7 +215,11 @@
 
 .dx-days button.full.selected { color: #15915f; background: #fff; }
 .dx-days button.half.selected { color: #b66a00; background: #fff; }
-.dx-days button.review.selected { color: #c3313d; background: #fff; }
+.dx-days button.review.selected {
+  color: #92400e;
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #f59e0b;
+}
 .dx-days button.on-shift.selected {
   color: #0b4f8a;
   background: #fff;
@@ -224,7 +232,7 @@
 
 .dx-legend .full::before { background: #15915f; }
 .dx-legend .half::before { background: #ea580c; }
-.dx-legend .review::before { background: #d7434e; }
+.dx-legend .review::before { background: #fbbf24; }
 
 .dx-attendance-list em.full,
 .dx-selected-day em.full {
@@ -245,11 +253,15 @@
 }
 
 .dx-attendance-list em.absent,
-.dx-selected-day em.absent,
-.dx-attendance-list em.review,
-.dx-selected-day em.review {
+.dx-selected-day em.absent {
   color: #b4232b;
   background: #fde9ea;
+}
+
+.dx-attendance-list em.review,
+.dx-selected-day em.review {
+  color: #92400e;
+  background: #fef3c7;
 }
 
 .dx-attendance-list-issue {
@@ -8044,6 +8056,533 @@ tr:last-child td {
 .dx-roster-history{overflow:hidden;background:#fff;border:1px solid var(--one-line,#e5e7eb);border-radius:15px}.dx-roster-history>summary{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;cursor:pointer;list-style:none}.dx-roster-history>summary::-webkit-details-marker{display:none}.dx-roster-history>summary span{display:grid;gap:2px}.dx-roster-history>summary small{color:#dd4b25;font-size:9px;font-weight:800;text-transform:uppercase}.dx-roster-history>summary strong{font-size:14px}.dx-roster-history>summary em{display:grid;place-items:center;min-width:24px;height:24px;padding:0 7px;color:#697386;background:#eef1f5;border-radius:99px;font-size:10px;font-style:normal;font-weight:800}.dx-roster-history>.dx-roster-requests{padding:0 10px 10px}.dx-roster-history>.dx-roster-requests>article{background:#fafbfc;box-shadow:none}
 @media(max-width:1050px){.dx-roster-week{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(max-width:680px){.dx-roster-week{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:4px}.dx-roster-week>article{flex:0 0 min(78vw,260px);min-height:190px;scroll-snap-align:start}.dx-roster-exchange{grid-template-columns:1fr}.dx-roster-exchange>svg{transform:rotate(90deg);justify-self:center}.dx-roster-requests article>div{grid-template-columns:34px minmax(0,1fr)}.dx-roster-requests em{grid-column:2;justify-self:start}.dx-roster-requests footer{justify-content:stretch}.dx-roster-requests footer button{justify-content:center;flex:1}}
 
+/* Connect roster — vertical day list for phone app (replaces horizontal cards) */
+.dx-app .dx-roster {
+  display: grid;
+  gap: 14px;
+  max-width: none;
+  margin: 0;
+}
+
+.dx-app .dx-roster .dx-page-intro {
+  display: grid;
+  gap: 4px;
+}
+
+.dx-app .dx-roster .dx-page-intro small {
+  color: #e16f14;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dx-app .dx-roster .dx-page-intro h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.dx-app .dx-roster .dx-page-intro p {
+  margin: 0;
+  color: #716d67;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.dx-app .dx-roster-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dx-app .dx-roster-summary > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px 10px;
+  background: #fff;
+  border: 1px solid #e4dfd7;
+  border-radius: 8px;
+}
+
+.dx-app .dx-roster-summary small {
+  color: #77736d;
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dx-app .dx-roster-summary strong {
+  overflow: hidden;
+  color: #202124;
+  font-size: 15px;
+  font-weight: 650;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dx-app .dx-roster-summary em {
+  overflow: hidden;
+  color: #8a857e;
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dx-app .dx-roster-panel {
+  display: grid;
+  gap: 12px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e4dfd7;
+  border-radius: 8px;
+  box-shadow: 0 5px 16px #0000000a;
+}
+
+.dx-app .dx-roster-week-block {
+  display: grid;
+  gap: 0;
+}
+
+.dx-app .dx-roster-week-block + .dx-roster-week-block {
+  border-top: 1px solid #eee9e2;
+}
+
+.dx-app .dx-roster-week-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 8px;
+  color: #716d67;
+}
+
+.dx-app .dx-roster-week-label svg {
+  width: 16px;
+  height: 16px;
+  color: #e87816;
+}
+
+.dx-app .dx-roster-week-label strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.dx-app .dx-roster .dx-roster-week {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 0 !important;
+  overflow: visible !important;
+  padding: 0 !important;
+  scroll-snap-type: none !important;
+}
+
+.dx-app .dx-roster .dx-roster-week > article {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 0 !important;
+  flex: none !important;
+  padding: 12px 14px;
+  background: #fff !important;
+  border: 0;
+  border-bottom: 1px solid #eee9e2;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  scroll-snap-align: none !important;
+}
+
+.dx-app .dx-roster .dx-roster-week > article:last-child {
+  border-bottom: 0;
+}
+
+.dx-app .dx-roster .dx-roster-week > article.today {
+  background: #fff8f1 !important;
+}
+
+.dx-app .dx-roster .dx-roster-week > article.selected {
+  background: #fff4ec !important;
+}
+
+.dx-app .dx-roster .dx-roster-week > article.off {
+  background: #f7f8fa !important;
+}
+
+.dx-app .dx-roster .dx-roster-week > article.off.today {
+  background: #f3f4f6 !important;
+}
+
+.dx-app .dx-roster-date {
+  display: grid;
+  place-items: center;
+  gap: 0;
+  width: 44px;
+  height: 44px;
+  color: #202124;
+  background: #f4f1ec;
+  border-radius: 10px;
+}
+
+.dx-app .dx-roster-date strong {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.dx-app .dx-roster-date small {
+  color: #716d67;
+  font-size: 9px;
+  font-weight: 650;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.dx-app .dx-roster .dx-roster-week > article.today .dx-roster-date {
+  color: #fff;
+  background: #e7660c;
+}
+
+.dx-app .dx-roster .dx-roster-week > article.today .dx-roster-date small {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.dx-app .dx-roster .dx-roster-week > article.off .dx-roster-date {
+  color: #334155;
+  background: #e2e8f0;
+}
+
+.dx-app .dx-roster-shift {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: inherit;
+}
+
+.dx-app .dx-roster-shift > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dx-app .dx-roster-shift strong {
+  overflow: hidden;
+  color: #202124;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dx-app .dx-roster-shift small {
+  overflow: hidden;
+  color: #8a857e;
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dx-app .dx-roster-shift > em {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 650;
+}
+
+.dx-app .dx-roster-shift > em svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.dx-app .dx-roster-shift > em.shift {
+  color: #0f766e;
+  background: #ccfbf1;
+}
+
+.dx-app .dx-roster-shift > em.off {
+  color: #334155;
+  background: #e2e8f0;
+}
+
+.dx-app .dx-roster .dx-roster-week > article > button {
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  width: 58px;
+  min-height: 44px;
+  padding: 6px 4px;
+  color: #cf3f23;
+  background: #fff4ef;
+  border: 1px solid #ffd8cb;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.dx-app .dx-roster .dx-roster-week > article > button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.dx-app .dx-roster .dx-roster-week > article > button.muted,
+.dx-app .dx-roster .dx-roster-week > article > button:disabled {
+  color: #98a0b3;
+  background: #f4f5f7;
+  border-color: #e6e8ed;
+}
+
+.dx-app .dx-roster-empty {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  padding: 42px 18px;
+  color: #77736d;
+  text-align: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.dx-app .dx-roster-empty svg {
+  width: 30px;
+  height: 30px;
+}
+
+.dx-app .dx-roster-empty strong {
+  color: #202124;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.dx-app .dx-roster-swap-card {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 81;
+  display: grid;
+  gap: 12px;
+  max-width: 520px;
+  max-height: min(88dvh, 640px);
+  margin: auto;
+  overflow: auto;
+  padding: 18px 18px calc(18px + env(safe-area-inset-bottom));
+  background: #fff;
+  border: 0;
+  border-radius: 8px 8px 0 0;
+  box-shadow: 0 -12px 40px #11182728;
+}
+
+.dx-app .dx-roster-swap-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dx-app .dx-roster-swap-card > header > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dx-app .dx-roster-swap-card > header small {
+  color: #e16f14;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.dx-app .dx-roster-swap-card > header strong {
+  font-size: 17px;
+}
+
+.dx-app .dx-roster-swap-card > header em {
+  color: #716d67;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.dx-app .dx-roster-swap-card > header button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  background: #fff;
+  border: 1px solid #e2ddd5;
+  border-radius: 6px;
+}
+
+.dx-app .dx-roster-swap-card label {
+  display: grid;
+  gap: 5px;
+  color: #5f5b56;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.dx-app .dx-roster-swap-card label > span {
+  font-weight: 500;
+  text-transform: none;
+}
+
+.dx-app .dx-roster-swap-card select,
+.dx-app .dx-roster-swap-card textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  color: #24211e;
+  background: #fff;
+  border: 1px solid #ddd8d0;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  text-transform: none;
+}
+
+.dx-app .dx-roster-swap-card select {
+  height: 44px;
+  padding-block: 0;
+}
+
+.dx-app .dx-roster-exchange {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 12px;
+  background: #f7f8fb;
+  border-radius: 8px;
+}
+
+.dx-app .dx-roster-exchange > svg {
+  width: 18px;
+  color: #e65322;
+  justify-self: center;
+  transform: rotate(90deg);
+}
+
+.dx-app .dx-roster-exchange > span {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  column-gap: 8px;
+  align-items: center;
+}
+
+.dx-app .dx-roster-exchange > span svg {
+  grid-row: 1 / 3;
+  width: 18px;
+  color: #8a93a8;
+}
+
+.dx-app .dx-roster-exchange small {
+  color: #716d67;
+  font-size: 10px;
+}
+
+.dx-app .dx-roster-exchange strong {
+  font-size: 13px;
+}
+
+.dx-app .dx-roster-swap-card .dx-sheet-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 10px;
+}
+
+.dx-app .dx-roster-swap-card .dx-sheet-actions .secondary {
+  height: 44px;
+  color: #544f49;
+  background: #fff;
+  border: 1px solid #ddd8d0;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.dx-app .dx-roster-primary {
+  height: 44px;
+  color: #fff;
+  background: #e72f36;
+  border: 1px solid #e72f36;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.dx-app .dx-roster-rule {
+  color: #8a857e;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.dx-app .dx-roster-requests {
+  display: grid;
+  gap: 8px;
+}
+
+.dx-app .dx-roster-requests > header h2 {
+  margin: 3px 0 0;
+  font-size: 18px;
+}
+
+.dx-app .dx-roster-requests > article {
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #e4dfd7;
+  border-radius: 8px;
+}
+
+.dx-app .dx-roster-history {
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e4dfd7;
+  border-radius: 8px;
+}
+
+@media (max-width: 420px) {
+  .dx-app .dx-roster-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .dx-app .dx-roster-summary > div {
+    grid-template-columns: auto 1fr auto;
+    align-items: baseline;
+    column-gap: 8px;
+  }
+
+  .dx-app .dx-roster-summary small {
+    grid-column: 1;
+  }
+
+  .dx-app .dx-roster-summary strong {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .dx-app .dx-roster-summary em {
+    grid-column: 3;
+    justify-self: end;
+  }
+}
+
+@media (min-width: 900px) {
+  .dx-app .dx-roster-exchange {
+    grid-template-columns: 1fr 34px 1fr;
+  }
+
+  .dx-app .dx-roster-exchange > svg {
+    transform: none;
+  }
+}
+
 @media (min-width: 768px) {
   .connect-shell {
     display: none;
@@ -11181,7 +11720,7 @@ img.dx-selfie-live {
   }
 }
 
-/* Calendar day colors: unpaid leave only under Leave; paid leave / WFH / week off / holiday are distinct. */
+/* Calendar day colors — high contrast; WFH uses paid-leave; holiday uses week-off. */
 .dx-days button.leave {
   color: #fff;
   background: #7c3aed;
@@ -11194,54 +11733,47 @@ img.dx-selfie-live {
 
 .dx-days button.paid-leave {
   color: #fff;
-  background: #0d9488;
+  background: #4f46e5;
 }
 
 .dx-days button.paid-leave.selected {
-  color: #0f766e;
+  color: #4338ca;
   background: #fff;
-}
-
-.dx-days button.wfh {
-  color: #fff;
-  background: #2563eb;
-}
-
-.dx-days button.wfh.selected {
-  color: #1d4ed8;
-  background: #fff;
+  box-shadow: inset 0 0 0 2px #6366f1;
 }
 
 .dx-days button.week-off {
-  color: #334155;
-  background: #e2e8f0;
+  color: #fff;
+  background: #475569;
 }
 
 .dx-days button.week-off.selected {
-  color: #1e293b;
+  color: #334155;
   background: #fff;
-  box-shadow: inset 0 0 0 2px #94a3b8;
+  box-shadow: inset 0 0 0 2px #64748b;
 }
 
-.dx-days button.holiday {
-  color: #92400e;
-  background: #fbbf24;
+.dx-days button.off {
+  color: #c4c0b8;
+  background: transparent;
+  box-shadow: none;
 }
 
-.dx-days button.holiday.selected {
-  color: #b45309;
+.dx-days button.off.selected {
+  color: #716d67;
   background: #fff;
-  box-shadow: inset 0 0 0 2px #f59e0b;
+  box-shadow: inset 0 0 0 1px #ddd8d0;
 }
 
 .dx-days button.absent {
   color: #fff;
-  background: #dc2626;
+  background: #b91c1c;
 }
 
 .dx-days button.absent.selected {
-  color: #b91c1c;
+  color: #991b1b;
   background: #fff;
+  box-shadow: inset 0 0 0 2px #dc2626;
 }
 
 .dx-legend .leave::before {
@@ -11249,23 +11781,20 @@ img.dx-selfie-live {
 }
 
 .dx-legend .paid-leave::before {
-  background: #0d9488;
-}
-
-.dx-legend .wfh::before {
-  background: #2563eb;
+  background: #4f46e5;
 }
 
 .dx-legend .week-off::before {
-  background: #94a3b8;
-}
-
-.dx-legend .holiday::before {
-  background: #fbbf24;
+  background: #475569;
 }
 
 .dx-legend .absent::before {
-  background: #dc2626;
+  background: #b91c1c;
+}
+
+.dx-legend .off::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px #c4c0b8;
 }
 
 .dx-legend .on-shift::before {
@@ -11281,26 +11810,14 @@ img.dx-selfie-live {
 
 .dx-attendance-list em.paid-leave,
 .dx-selected-day em.paid-leave {
-  color: #0f766e;
-  background: #ccfbf1;
-}
-
-.dx-attendance-list em.wfh,
-.dx-selected-day em.wfh {
-  color: #1d4ed8;
-  background: #dbeafe;
+  color: #3730a3;
+  background: #e0e7ff;
 }
 
 .dx-attendance-list em.week-off,
 .dx-selected-day em.week-off {
   color: #334155;
   background: #e2e8f0;
-}
-
-.dx-attendance-list em.holiday,
-.dx-selected-day em.holiday {
-  color: #92400e;
-  background: #fef3c7;
 }
 
 .dx-attendance-day-note {
@@ -17068,7 +17585,11 @@ img.dx-selfie-live {
 
 .dx-days button.full { color: #fff; background: #15915f; }
 .dx-days button.half { color: #fff; background: #ea580c; }
-.dx-days button.review { color: #fff; background: #d7434e; }
+.dx-days button.review {
+  color: #7a3b00;
+  background: #fbbf24;
+  box-shadow: inset 0 0 0 1px #d97706;
+}
 .dx-days button.on-shift {
   color: #0b4f8a;
   background: #e8f3fc;
@@ -17076,7 +17597,11 @@ img.dx-selfie-live {
 }
 .dx-days button.full.selected { color: #15915f; background: #fff; }
 .dx-days button.half.selected { color: #b66a00; background: #fff; }
-.dx-days button.review.selected { color: #c3313d; background: #fff; }
+.dx-days button.review.selected {
+  color: #92400e;
+  background: #fff;
+  box-shadow: inset 0 0 0 2px #f59e0b;
+}
 .dx-days button.on-shift.selected {
   color: #0b4f8a;
   background: #fff;

@@ -80,17 +80,17 @@ export function calendarClassForPayDayType(
     case "present":
       return "full";
     case "present_wfh":
-      return "wfh";
+    case "paid_leave":
+      // WFH shares paid-leave color on the calendar; detail panel still says WFH.
+      return "paid-leave";
     case "half_day":
       return "half";
-    case "paid_leave":
-      return "paid-leave";
     case "unpaid_leave":
       return "leave";
     case "week_off":
-      return "week-off";
     case "paid_holiday":
-      return "holiday";
+      // Week off and paid holiday share one rest-day color; labels differ on click.
+      return "week-off";
     case "absent":
       return "absent";
     case "needs_review":

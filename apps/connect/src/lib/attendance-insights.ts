@@ -221,7 +221,7 @@ export function attendanceDayInsight(
 
   if (payDayType === "present_wfh" || row.workMode === "wfh" || /work from home|\bwfh\b/.test(state) || /work from home|\bwfh\b/.test(remark)) {
     return {
-      calendarClass: "wfh",
+      calendarClass: "paid-leave",
       detail: "Approved work from home. Present · WFH is recorded as paid working time.",
       headline: "Present · WFH",
       issues: [],
@@ -247,7 +247,7 @@ export function attendanceDayInsight(
 
   if (payDayType === "paid_holiday" || statusIsHoliday(row, state)) {
     return {
-      calendarClass: "holiday",
+      calendarClass: "week-off",
       detail: "Paid holiday is recorded for this day.",
       headline: /present/.test(state) ? label : "Holiday",
       issues: [],

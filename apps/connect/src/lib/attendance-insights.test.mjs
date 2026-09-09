@@ -138,7 +138,7 @@ test("carries an attendance nudge for one day only", () => {
   assert.equal(isCurrentAttendanceAttentionDate("2026-08-31", "2026-09-01"), true);
 });
 
-test("colors unpaid leave, paid leave, WFH, week off, and holiday distinctly", () => {
+test("maps WFH to paid-leave color and holiday to week-off color", () => {
   assert.equal(attendanceDayInsight(row({
     status: "V",
     statusLabel: "LOP",
@@ -153,17 +153,21 @@ test("colors unpaid leave, paid leave, WFH, week off, and holiday distinctly", (
     isPaidLeave: true,
     attendanceStatus: "Casual Leave"
   })).calendarClass, "paid-leave");
-  assert.equal(attendanceDayInsight(row({
+  const wfh = attendanceDayInsight(row({
     status: "P",
     workMode: "wfh",
     attendanceStatus: "Full Day"
-  })).calendarClass, "wfh");
+  }));
+  assert.equal(wfh.calendarClass, "paid-leave");
+  assert.equal(wfh.label, "Present · WFH");
   assert.equal(attendanceDayInsight(row({
     status: "WO",
     attendanceStatus: "Weekly Off"
   })).calendarClass, "week-off");
-  assert.equal(attendanceDayInsight(row({
+  const holiday = attendanceDayInsight(row({
     status: "H",
     attendanceStatus: "Holiday"
-  })).calendarClass, "holiday");
+  }));
+  assert.equal(holiday.calendarClass, "week-off");
+  assert.equal(holiday.label, "Holiday");
 });
