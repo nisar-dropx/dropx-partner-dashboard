@@ -76,6 +76,11 @@ assert.ok(queries.every(q=>q.filters.some(f=>f[0]==="eq"&&f[1]==="company_id"&&f
 assert.equal(queries.filter(q=>q.table==="attendance_daily").length,1,"one monthly batch, not one query per day");
 tables.attendance_daily[0].in_time=time("06:10");tables.attendance_daily[0].out_time=time("15:00");tables.attendance_daily[0].punch_count=2;tables.attendance_daily[0].work_minutes=530;
 assert.equal((await loader.loadReviewAttendanceHistory("company1",{id:"station1",station_code:"GDRD"},date)).people[0].days.at(-1).lateMinutes,5);
+tables.hr_engagements=[{id:"engagement",worker_type:"employee",employee_id:"a",start_date:"2026-09-05",end_date:null}];
+tables.hr_work_assignments=[{engagement_id:"engagement",location_id:"station1",effective_from:"2026-09-05",effective_to:null}];
+const serviceHistory=await loader.loadReviewAttendanceHistory("company1",{id:"station1",station_code:"GDRD"},date);
+assert.equal(serviceHistory.people[0].days[0].status,"outside_station","profile location cannot invent service before a known engagement/assignment");
+assert.equal(serviceHistory.people[0].days.at(-1).status,"late");
 
 const ui=read("src/components/review-attendance-history.tsx");
 assert.ok(ui.includes("AbortController")&&ui.includes('cache: "no-store"'),"cancel stale navigation requests and do not cache private attendance");
@@ -95,5 +100,6 @@ assert.equal((historyHtml.match(/scope="row"/g)??[]).length,8);
 assert.ok(historyHtml.includes("8h 55m")&&historyHtml.includes("2026-09-01"));
 const utrHtml=renderToStaticMarkup(React.createElement(historyUi.UtrAttendanceDrilldown,{discipline:{rows:[{...person,inTime:input.inTime,outTime:input.outTime,workMinutes:535,status:"On time",lateMinutes:0}],scheduled:1,onTime:1}}));
 assert.ok(utrHtml.includes("Late 2/8 reported")&&utrHtml.includes("Search UTR staff")&&utrHtml.includes("Sort UTR staff"));
+assert.ok(utrHtml.includes('aria-label="Arjun: 2 of 8 reported shifts late — view history"')&&utrHtml.includes("Refresh history"));
 assert.ok(renderToStaticMarkup(React.createElement(historyUi.UtrRepeatSummary)).includes("1 repeated-late staff"));
 console.log("PASS Review attendance: 7D/MTD, grace/night shifts, repeat patterns, leave and week-off safeguards, raw punch gaps, batched scoped reads, private API guards and reusable inline person history.");

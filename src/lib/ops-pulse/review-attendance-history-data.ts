@@ -77,9 +77,13 @@ export async function loadReviewAttendanceHistory(companyId: string, station: Co
   return { station: station.station_code, date, people: staff.discipline.rows.map(person=>({ id:person.id,name:person.name,code:person.code,role:person.role,
     days: dates.map(day=>{
       const [type,id] = person.id.split(":"), profile=profiles.get(person.id);
-      const activeEngagements = engagements.filter(e=>(type==="employee"?e.employee_id:e.contractor_id)===id && e.worker_type===type && e.start_date<=day && (!e.end_date||e.end_date>=day));
-      const assignment = assignments.find(a=>activeEngagements.some(e=>e.id===a.engagement_id) && a.effective_from<=day && (!a.effective_to||a.effective_to>=day));
-      const inScope = Boolean(profile && (!profile.date_of_join||profile.date_of_join<=day) && (!profile.last_working_date||profile.last_working_date>=day) && (assignment?.location_id??profile.location_id)===station.id);
+      const personEngagements = engagements.filter(e=>(type==="employee"?e.employee_id:e.contractor_id)===id && e.worker_type===type);
+      const activeEngagements = personEngagements.filter(e=>e.start_date<=day && (!e.end_date||e.end_date>=day));
+      const personAssignments = assignments.filter(a=>personEngagements.some(e=>e.id===a.engagement_id));
+      const assignment = personAssignments.find(a=>activeEngagements.some(e=>e.id===a.engagement_id) && a.effective_from<=day && (!a.effective_to||a.effective_to>=day));
+      const inScope = Boolean(profile && (!profile.date_of_join||profile.date_of_join<=day) && (!profile.last_working_date||profile.last_working_date>=day)
+        && (!personEngagements.length||activeEngagements.length) && (!personAssignments.length||assignment)
+        && (assignment?.location_id??profile.location_id)===station.id);
       const candidates = roster.filter(r=>{
         const p=one(r.hr_roster_plans); return r.worker_type===type && r.worker_id===id && p && (!p.effective_from||p.effective_from<=day) && (!p.superseded_at||day<p.superseded_at)
           && (p.roster_kind==="dated" ? r.roster_date===day : weekday(r.roster_date)===weekday(day));
