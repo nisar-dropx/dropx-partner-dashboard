@@ -96,7 +96,7 @@ export default async function BusinessPage({
     profit = addAmounts(comparable.map((r) => r.profit));
   const revenueCovered = rows.filter((r) => r.revenue !== null).length;
   const missing = rows.filter(
-    (r) => r.revenue === null || r.cost === null,
+    (r) => r.revenue === null || r.cost === null || r.pendingFixed,
   ).length;
   const sourceShipment =
     snapshot.shipments
@@ -180,12 +180,12 @@ export default async function BusinessPage({
       <section className="summary-grid">
         <div className="metric-card">
           <span>MTD revenue · estimate</span>
-          <Link className="fin-metric-link" href={dailyHref()}>
+          <a className="fin-metric-link" href={dailyHref()}>
             <strong>{money(revenue)}</strong>
             <small>View daily breakup →</small>
-          </Link>
+          </a>
           <small>
-            {revenueCovered} of {rows.length} allocations priced
+            {revenueCovered} of {rows.length} allocations with known revenue
           </small>
         </div>
         <div className="metric-card">
@@ -269,10 +269,10 @@ export default async function BusinessPage({
                       </small>
                     </td>
                     <td>
-                      <Link href={dailyHref(`group:${g.parent}`)}>
+                      <a href={dailyHref(`group:${g.parent}`)}>
                         {money(g.revenue)}
                         <small>Combined daily breakup →</small>
-                      </Link>
+                      </a>
                       {g.pending && (
                         <small>Partial · missing payout or cost values</small>
                       )}
@@ -288,12 +288,12 @@ export default async function BusinessPage({
                         <summary>Station / XPT breakup</summary>
                         {g.members.map((r) => (
                           <p key={r.station}>
-                            <Link href={dailyHref(r.station, r.provider)}>
+                            <a href={dailyHref(r.station, r.provider)}>
                               <strong>
                                 {r.station} ·{" "}
                                 {r.model === "xpt" ? "XPT" : "Parent"}
                               </strong>
-                            </Link>
+                            </a>
                             <br />
                             Revenue {money(r.revenue)}
                             {tab === "pnl"
@@ -389,13 +389,13 @@ export default async function BusinessPage({
                     </td>
                   )}
                   <td>
-                    <Link
+                    <a
                       className="fin-revenue-link"
                       href={dailyHref(row.station, row.provider)}
                     >
                       {money(row.revenue)}
                       <small>View daily breakup →</small>
-                    </Link>
+                    </a>
                     {row.pendingFixed && (
                       <small className="fin-negative">
                         XPT fixed payout pending
