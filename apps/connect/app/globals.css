@@ -8168,14 +8168,6 @@ tr:last-child td {
   font-weight: 650;
 }
 
-.dx-app .dx-roster-week-note {
-  margin: 0;
-  padding: 0 14px 12px;
-  color: #8a857e;
-  font-size: 11px;
-  line-height: 1.4;
-}
-
 .dx-app .dx-roster .dx-roster-week {
   display: grid !important;
   grid-template-columns: 1fr !important;
