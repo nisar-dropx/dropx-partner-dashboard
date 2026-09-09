@@ -19,16 +19,21 @@ export const financeNavItems: NavItem[] = [
     ]
   },
   {
-    code: "payments",
+    code: "finance_pricing",
     label: "Master",
     icon: "*",
     children: [
+      { code: "finance_pricing", label: "Pricing Master", href: "/master/pricing" },
       { code: "payment_methods", label: "Payment Methods", href: "/master/payment-methods" },
       { code: "master_payment_banks", label: "Payment Banks", href: "/master/payment-banks" },
       { code: "master_payment_heads", label: "Payment Heads", href: "/master/payment-heads" },
       { code: "master_contacts", label: "Contacts", href: "/master/contacts" }
     ]
   },
+  { code: "finance_revenue", label: "Business Performance", icon: "↗", children: [
+    { code: "finance_revenue", label: "Revenue & Billing", href: "/finance/business?tab=revenue" },
+    { code: "finance_pnl", label: "Profit & Loss", href: "/finance/business?tab=pnl" }
+  ] },
   { code: "payment_settings", label: "Finance Settings", href: "/settings/payments", icon: "S" },
   {
     code: "users",

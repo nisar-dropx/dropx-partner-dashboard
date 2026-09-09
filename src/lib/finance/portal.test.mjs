@@ -133,3 +133,13 @@ test("The dedicated Finance release does not run other products' scheduled jobs"
   const config = JSON.parse(readFileSync(new URL("../../../vercel.json", import.meta.url), "utf8"));
   assert.deepEqual(config.crons, []);
 });
+
+test('Finance groups Pricing Master under Master and both business sections under one menu',()=>{
+  const master=navigation.financeNavItems.find(i=>i.label==='Master');
+  assert.equal(master.children.find(i=>i.code==='finance_pricing').href,'/master/pricing');
+  const group=navigation.financeNavItems.find(i=>i.label==='Business Performance');
+  assert.deepEqual(group.children.map(i=>i.label),['Revenue & Billing','Profit & Loss']);
+  assert.equal(surface.isFinancePortalPath('/master/pricing'),true);
+  assert.equal(surface.isFinancePortalPath('/finance/business/export'),true);
+  for(const code of ['finance_pricing','finance_revenue','finance_pnl'])assert.ok(surface.financeAccessPageCodes.includes(code));
+});

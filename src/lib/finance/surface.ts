@@ -5,6 +5,7 @@ const financePortalRoots = [
   "/master/payment-banks",
   "/master/payment-heads",
   "/master/contacts",
+  "/master/pricing",
   "/settings/payments",
   "/settings/notification-templates/payments",
   "/users",
@@ -25,6 +26,9 @@ export const financeAccessPageCodes = [
   "master_payment_heads",
   "master_contacts",
   "payment_settings",
+  "finance_pricing",
+  "finance_revenue",
+  "finance_pnl",
   "users"
 ] as const;
 

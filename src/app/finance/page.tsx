@@ -99,6 +99,9 @@ export default async function FinanceDashboardPage() {
     { code: "workforce_payouts", label: "Workforce payouts", count: null, detail: "Review production-backed payout rows", href: "/payments/workforce-payouts", tone: "neutral" }
   ].filter((item) => hasPermission(authorization, item.code, "access"));
   const adminLinks = [
+    { code: "finance_pricing", label: "Pricing Master", href: "/master/pricing" },
+    { code: "finance_revenue", label: "Business Performance", href: "/finance/business?tab=revenue" },
+    { code: "finance_pnl", label: "Profit & Loss", href: "/finance/business?tab=pnl" },
     { code: "master_payment_heads", label: "Payment heads", href: "/master/payment-heads" },
     { code: "payment_methods", label: "Payment methods", href: "/master/payment-methods" },
     { code: "master_payment_banks", label: "Payment banks", href: "/master/payment-banks" },

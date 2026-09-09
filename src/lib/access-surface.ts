@@ -143,6 +143,9 @@ const peoplePageCodes = new Set([
 ]);
 
 const financePageCodes = new Set([
+  "finance_pricing",
+  "finance_revenue",
+  "finance_pnl",
   "users",
   "payments",
   "advance_requests",
@@ -182,6 +185,7 @@ export function currentAdminAccessSurface(): AdminAccessSurface {
 export function pageBelongsToSurface(code: string, surface: AdminAccessSurface) {
   if (surface === "people") return peoplePageCodes.has(code) || code.startsWith("workforce_category_");
   if (surface === "finance") return financePageCodes.has(code);
+  if (["finance_pricing", "finance_revenue", "finance_pnl"].includes(code)) return false;
   if (sharedPageCodes.has(code)) return true;
   return surface === "ops" ? opsPageCodes.has(code) : !opsPageCodes.has(code);
 }
