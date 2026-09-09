@@ -50,6 +50,20 @@ export async function loadEddLedger(codes: string[]) {
     }
     if (!data || data.length < 1000) break;
   }
+  // Names can live on a delivered row whose EDD is not enriched yet. Resolve by
+  // exact driver ID across this station's retained records, not just today's cohort.
+  for(const entry of result.values()) {
+    const names=new Map<string,string>();
+    for(const pkg of entry.packages) {
+      const id=pkg.driverId?.trim().toUpperCase();
+      const name=pkg.driverName?.trim() || pkg.verification?.driverName?.trim();
+      if(id && name && name.toUpperCase()!==id)names.set(id,name);
+    }
+    for(const pkg of entry.packages) {
+      const id=pkg.driverId?.trim().toUpperCase();
+      if(id && (!pkg.driverName || pkg.driverName.toUpperCase()===id))pkg.driverName=names.get(id)||pkg.driverName;
+    }
+  }
   return result;
 }
 export async function loadVerifiedEddStation(stationCode: string): Promise<EddStationResult> {
