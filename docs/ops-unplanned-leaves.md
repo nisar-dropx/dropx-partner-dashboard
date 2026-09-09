@@ -8,4 +8,6 @@ Access is determined by the verified OpsPulse authorization context: company plu
 
 The page defaults to today with earlier open cases included. Date ranges are limited to 31 days. Updated cases are shown only inside the selected range. Refresh runs every minute while the tab is visible and online. Legacy `date` links remain valid.
 
+The screen shows concise counts, filters and leave details. Grace-period configuration, refresh intervals and repetitive process explanations are omitted from the display; attendance detection rules are unchanged.
+
 Validation: `node scripts/verify-ops-unplanned-leaves.mjs`, repository prebuild checks, TypeScript and production build. Live database checks cover all locations, one location, empty scope, a non-owner location account, omission of private HR notes, and denial of direct anon/authenticated function execution.

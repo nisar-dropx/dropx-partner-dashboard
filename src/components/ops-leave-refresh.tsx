@@ -11,6 +11,6 @@ export function OpsLeaveRefresh({ checkedAt }: { checkedAt: string }) {
     }, 60000);
     return () => window.clearInterval(timer);
   }, [pending, router]);
-  return <div className="oul-refresh"><span>Checked {new Date(checkedAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })} · updates every minute</span>
+  return <div className="oul-refresh"><span>Updated {new Date(checkedAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })}</span>
     <button className="button secondary" disabled={pending} onClick={() => startTransition(() => router.refresh())}><RefreshCw size={14} />{pending ? 'Refreshing…' : 'Refresh'}</button></div>;
 }

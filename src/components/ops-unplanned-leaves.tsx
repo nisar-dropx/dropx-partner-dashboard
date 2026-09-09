@@ -11,12 +11,11 @@ export function OpsUnplannedLeaves({ initial: data, initialFilters: filters }: {
   const href = (changes: Partial<UnplannedFilters> = {}) => '/attendance/unplanned-leaves?' + unplannedQuery(filters, changes);
   const selectedLocationMissing = filters.location && filters.location !== 'unassigned' && !data.locations.some(l => l.id === filters.location);
   return <div className="oul">
-    <header className="oul-intro"><span className="oul-eyebrow">TIME & ATTENDANCE</span><h1>Unplanned Leaves</h1>
-      <p>People who have not punched. When a punch arrives, their record moves to Updated.</p></header>
+    <header className="oul-intro"><h1>Unplanned Leaves</h1></header>
     <section className="oul-summary" aria-label="Unplanned leave summary">
-      <article><span>Not punched today</span><strong>{report.summary.today}</strong><small>Past shift start + {data.graceMinutes} min</small></article>
-      <article><span>Earlier open cases</span><strong>{report.summary.earlier}</strong><small>Still awaiting follow-up</small></article>
-      <article><span>Punched since flagged</span><strong>{report.summary.punched}</strong><small>Moved to Updated in this date range</small></article>
+      <article><span>Not punched today</span><strong>{report.summary.today}</strong></article>
+      <article><span>Earlier open cases</span><strong>{report.summary.earlier}</strong></article>
+      <article><span>Punched since flagged</span><strong>{report.summary.punched}</strong></article>
     </section>
     <section className="panel oul-panel">
       <div className="oul-queue-head"><nav aria-label="Unplanned leave views" className="oul-tabs">
@@ -35,7 +34,7 @@ export function OpsUnplannedLeaves({ initial: data, initialFilters: filters }: {
         <label>Status<select className="field" name="status" defaultValue={filters.status}><option value="">All statuses</option>{data.statuses.filter(s => s.is_active || s.id === filters.status || data.rows.some(r => r.status.id === s.id)).map(s => <option key={s.id} value={s.id}>{s.label}</option>)}<option value="punched">Punched in</option><option value="punch_pending">Punch pending approval</option><option value="excluded">Approved leave / excluded</option></select></label>
         <div className="oul-filter-actions"><label className="oul-employment-filter">Employment<select className="field" name="employment" defaultValue={filters.employment}><option value="">All employment states</option><option value="active">Active</option><option value="inactive">Inactive profiles</option><option value="suspended">Suspended</option><option value="offboarding">Offboarding</option><option value="offboarded">Offboarded / left</option></select></label><input type="hidden" name="backlog" value="0"/><label className="oul-toggle"><input type="checkbox" name="backlog" value="1" defaultChecked={filters.backlog}/>Include earlier open cases</label><div><button className="button">Apply filters</button><a className="button secondary" href="/attendance/unplanned-leaves">Reset</a></div></div>
       </form>
-      <div className="oul-results-head"><p>{report.rows.length.toLocaleString('en-IN')} records · {updated ? 'Punches, approved leave and closed follow-ups' : 'Approved leave and scheduled days off are excluded'}</p>
+      <div className="oul-results-head"><p>{report.rows.length.toLocaleString('en-IN')} records</p>
         <a className="button secondary" href={'/api/ops-pulse/unplanned-leaves?' + unplannedQuery(filters, { page: 1 }) + '&format=xlsx'}><Download size={14}/>Download Excel</a></div>
       <div className="table-wrap"><table><thead><tr><th>Person</th><th>Location</th><th>Day & shift</th><th>Attendance</th><th>Follow-up</th></tr></thead>
         <tbody>{report.pageRows.map(row => {
@@ -47,7 +46,7 @@ export function OpsUnplannedLeaves({ initial: data, initialFilters: filters }: {
             <td><strong>{row.location_code || 'Unassigned'}</strong><small>{row.location_name}</small><small>{[row.cluster, row.region].filter(Boolean).join(' · ')}</small></td>
             <td><strong>{dateLabel(row.attendance_date)}</strong><small>{row.shift_label || 'Shift not available'}</small></td>
             <td>{punched ? <><span className={'oul-status tone-' + toneClass(outcome.tone)}>{outcome.label}</span><small>First punch <b>{punchTime(row.first_punch_at, row.attendance_date)}</b></small><small>Latest punch <b>{punchTime(row.last_punch_at, row.attendance_date)}</b></small><small>{row.check_out_at ? `Check-out ${punchTime(row.check_out_at, row.attendance_date)}` : 'Check-out not recorded'}</small></>
-              : automatic ? <span className="oul-status tone-neutral">{outcome.label}</span> : <><span className="oul-status tone-amber">Not punched</span><small>No punch recorded for this day</small></>}</td>
+              : automatic ? <span className="oul-status tone-neutral">{outcome.label}</span> : <span className="oul-status tone-amber">Not punched</span>}</td>
             <td>{automatic ? <small>Moved automatically</small> : <span className={'oul-status tone-' + toneClass(outcome.tone)}>{outcome.label}</span>}{row.reason && <p className="oul-reason">{row.reason}</p>}{row.last_hr_update_at && <small>Saved {punchTime(row.last_hr_update_at, row.attendance_date)}</small>}</td>
           </tr>;
         })}{!report.rows.length && <tr><td colSpan={5} className="oul-empty"><strong>{updated ? 'No updated cases in this view.' : 'No pending cases match these filters.'}</strong><small>Check the date range or reset your filters.</small></td></tr>}</tbody></table></div>
