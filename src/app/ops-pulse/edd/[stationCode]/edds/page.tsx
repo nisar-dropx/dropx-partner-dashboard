@@ -7,7 +7,7 @@ import { requireStationEddAccess } from "@/lib/ops-pulse/station-edd-access";
 import { fetchEddAllowedStations, isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
 import { StationEddDetailClient } from "../../../station-edd/[stationCode]/station-edd-detail-client";
 import { EddStationSectionTabs } from "../edd-station-section-tabs";
-import { stationEddSelection } from "@/lib/ops-pulse/station-edd";
+import { eddQueryFromRecord } from "@/lib/ops-pulse/edd-table-controls";
 import styles from "../../../station-edd/station-edd.module.css";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +43,6 @@ export default async function StationEddDetailPage({ params, searchParams }: { p
   const authorized = Boolean(stationCode && scopeCodes.has(stationCode) && workerAllowed);
   const stationName = String(location?.station_name ?? "").trim();
   const place = [location?.city, location?.state].filter(Boolean).join(", ");
-  const selection = stationEddSelection(searchParams.day, searchParams.position);
 
   return (
     <AppShell active="Delivery Performance" pageCode="edd_dashboard">
@@ -65,7 +64,7 @@ export default async function StationEddDetailPage({ params, searchParams }: { p
             </div>
           </section>
         ) : (
-          <StationEddDetailClient key={`${stationCode}-${selection.day}-${selection.position}`} stationCode={stationCode} initialDay={selection.day} initialPosition={selection.position} />
+          <StationEddDetailClient key={stationCode} stationCode={stationCode} initialQuery={eddQueryFromRecord(searchParams)} />
         )}
       </div>
     </AppShell>

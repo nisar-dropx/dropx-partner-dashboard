@@ -9,11 +9,12 @@ import { type StationEddSummary } from "@/lib/ops-pulse/station-edd";
 import { StationEddNetworkClient } from "../../station-edd/station-edd-network-client";
 import { EddSectionTabs } from "../edd-section-tabs";
 import styles from "../../station-edd/station-edd.module.css";
+import { eddQueryFromRecord } from "@/lib/ops-pulse/edd-table-controls";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export default async function StationEddPage() {
+export default async function StationEddPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   const authorization = await requireStationEddAccess();
   const stations = await loadEddStations(requireCompanyId(authorization), authorization.locationScopeIds, authorization.hasAllLocationAccess);
   let network: StationEddSummary[] = [];
@@ -27,7 +28,7 @@ export default async function StationEddPage() {
           subtitle="First-dispatch pending, delivery outcomes and HFR—across every location you manage."
           action={<TrackingIdSearch />} />
         <div className={styles.sectionNav}><EddSectionTabs active="edds" /></div>
-        <StationEddNetworkClient stations={stations} initialNetwork={network} initialError={error} />
+        <StationEddNetworkClient stations={stations} initialNetwork={network} initialError={error} initialQuery={eddQueryFromRecord(searchParams)} />
       </div>
     </AppShell>
   );

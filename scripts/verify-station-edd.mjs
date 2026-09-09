@@ -165,3 +165,88 @@ assert.equal(cronScope.isEddCronHost("dropx-partner-dashboard.vercel.app"),false
 assert.equal(cronScope.isEddCronHost("ops.dropxlogistics.com.example.org"),false);
 assert.equal(cronScope.isEddCronHost("people.dropxlogistics.com"),false);
 console.log("PASS Product isolation: EDD cron runs only on OpsPulse hosts.");
+
+const tableControls = {};
+new Function("require", "exports", transpile(readFileSync(new URL("../src/lib/ops-pulse/edd-table-controls.ts", import.meta.url), "utf8")))(name => name.includes("edd-verification") ? verification : edd, tableControls);
+const selectionFor = values => tableControls.readEddControls(new URLSearchParams(values));
+assert.equal(selectionFor({ sort: "bad", view: "unknown", day: "bad", size: "999" }).sort, "trackingId");
+assert.equal(selectionFor({ size: "999" }).size, "50");
+const controlPackages = [
+  pkg("100", "DELIVERED", { driverId: "A", driverName: "Alpha", postalCode: "686691" }),
+  pkg("9", "IN_TRANSIT_TO_CUSTOMER", { driverId: "A", driverName: "Alpha" }),
+  pkg("8", "INDUCTED", { driverId: "A", driverName: "Alpha" }),
+  pkg("7", "DELIVERY_FAILED", { driverId: "B", driverName: "Beta" }),
+  pkg("6", "DELIVERED", { driverId: "B", driverName: "Beta", ead: "2026-09-08" }),
+  pkg("5", "RECEIVED", { verification: { historyComplete: false } }),
+  pkg("4", "INDUCTED", { ead: null }),
+  pkg("3", "DELIVERED", { driverId: "C", driverName: "Gamma" }),
+  pkg("2", "RECEIVED", { driverId: "B", driverName: "Beta", verification: { ...facts, state: "RECEIVED" } })
+];
+assert.deepEqual(tableControls.selectEddTids(controlPackages, selectionFor({ position: "all", query: "686691" }), today).map(p => p.trackingId), ["100"], "PIN search matches the displayed field");
+assert.deepEqual(tableControls.selectEddTids(controlPackages, selectionFor({ position: "all", associate: "A", sentOnly: "true", direction: "desc" }), today).map(p => p.trackingId), ["100", "9"], "associate drill-down is unique sent cohort, numeric sort");
+assert.equal(tableControls.selectEddTids(controlPackages, selectionFor({ position: "all", associate: "A" }), today).length, 3, "ordinary associate filter can include retained assignment at station");
+assert.deepEqual(tableControls.selectEddTids(controlPackages, selectionFor({ position: "all", state: "RECEIVED", history: "incomplete" }), today).map(p => p.trackingId), ["5"]);
+for (const direction of ["asc", "desc"]) assert.equal(tableControls.selectEddTids(controlPackages, selectionFor({ day: "all", position: "all", sort: "edd", direction }), today).at(-1).trackingId, "4", "undated rows sort last in both directions");
+assert.deepEqual(tableControls.selectEddAssociates(controlPackages, selectionFor({ focus: "outstanding", associateSort: "name", associateDirection: "asc" }), today).map(a => a.id), ["A", "B"]);
+assert.deepEqual(tableControls.selectEddAssociates(controlPackages, selectionFor({ focus: "complete" }), today).map(a => a.id), ["C"]);
+assert.deepEqual(tableControls.selectEddAssociates(controlPackages, selectionFor({ day: "overdue", associateQuery: "beta" }), today).map(a => [a.id, a.sent, a.delivered]), [["B", 1, 1]]);
+assert.equal(tableControls.selectEddAssociates(controlPackages, selectionFor({ day: "pending", associateQuery: "Beta" }), today)[0].sent, 2, "previous-day HFR excluded even from broader associate periods");
+const testSummary = edd.summarizeStationEdd("KTUO", controlPackages, today + "T10:00:00Z", today);
+assert.deepEqual(tableControls.selectEddStatuses(testSummary.statuses, selectionFor({ day: "pending", statusQuery: "DELIVERED" })).map(s => [s.state, s.count]), [["DELIVERED", 3]]);
+const sampleStations = [testSummary, { ...testSummary, stationCode: "AWEZ", todayAtStation: 0, fetchedAt: "2026-09-08T10:00:00Z" }];
+const stationNames = new Map([["KTUO", "Kothamangalam"], ["AWEZ", "Kalady"]]);
+assert.deepEqual(tableControls.selectEddStations(sampleStations, stationNames, tableControls.readNetworkControls(new URLSearchParams({ query: "Kotham", focus: "pending" })), new Date(today + "T11:00:00Z")).map(r => r.stationCode), ["KTUO"]);
+assert.deepEqual(tableControls.selectEddStations(sampleStations, stationNames, tableControls.readNetworkControls(new URLSearchParams({ freshness: "older" })), new Date(today + "T11:00:00Z")).map(r => r.stationCode), ["AWEZ"]);
+const beforeOrder = controlPackages.map(p => p.trackingId);
+tableControls.selectEddTids(controlPackages, selectionFor({ position: "all", sort: "associate" }), today);
+assert.deepEqual(controlPackages.map(p => p.trackingId), beforeOrder, "sorting never mutates input");
+console.log("PASS EDD table controls: combined filters, all periods, numeric sorting, missing values, HFR exclusion, station workload/freshness and immutable inputs.");
+
+const routeRequire = createRequire(import.meta.url);
+const reportModule = {};
+let denied = false;
+const reportMocks = {
+  "@/lib/ops-pulse/station-edd-access": { stationEddApiContext: async () => denied ? new Response("Forbidden", { status: 403 }) : { companyId: "test", authorization: { locationScopeIds: ["KTUO"], hasAllLocationAccess: false } }, isStationEddApiDenied: context => context instanceof Response },
+  "@/lib/ops-pulse/edd-stations": { loadEddStations: async () => [{ code: "KTUO", name: "Kothamangalam" }] },
+  "@/lib/ops-pulse/station-edd": { ...edd, stationEddToday: () => today },
+  "@/lib/ops-pulse/edd-table-controls": tableControls,
+  "@/lib/ops-pulse/edd-ledger": { loadVerifiedEddStation: async () => ({ status: "ok", payload: { stationCode: "KTUO", fetchedAt: today + "T10:00:00Z", packages: controlPackages } }) },
+  "@/lib/report-workbook": workbookModule
+};
+new Function("require", "exports", transpile(readFileSync(new URL("../src/app/api/ops-pulse/station-edd/report/route.ts", import.meta.url), "utf8")))(name => reportMocks[name] || routeRequire(name), reportModule);
+async function readReport(query) {
+  const response = await reportModule.GET(new Request("https://example.test/api?stationCode=KTUO&" + new URLSearchParams(query)));
+  assert.equal(response.status, 200);
+  return XLSX.read(Buffer.from(await response.arrayBuffer()), { type: "buffer" });
+}
+const filteredBook = await readReport({ report: "filtered", position: "all", associate: "A", sentOnly: "true", direction: "desc" });
+assert.deepEqual(XLSX.utils.sheet_to_json(filteredBook.Sheets["Tracking IDs"]).map(row => row["Tracking ID"]), ["100", "9"]);
+const associateBook = await readReport({ report: "associates", day: "pending", associateQuery: "Beta" });
+assert.deepEqual(XLSX.utils.sheet_to_json(associateBook.Sheets.Associates).map(row => [row.Associate, row.Sent]), [["Beta", 2]]);
+const statusBook = await readReport({ report: "statuses", day: "pending", statusQuery: "DELIVERED" });
+assert.deepEqual(XLSX.utils.sheet_to_json(statusBook.Sheets["Source Statuses"]).map(row => [row["Source Status"], row["Selected Period"]]), [["DELIVERED", 3]]);
+assert.equal((await reportModule.GET(new Request("https://example.test/api?stationCode=OUTSIDE&report=associates"))).status, 403);
+denied = true;
+assert.equal((await reportModule.GET(new Request("https://example.test/api?stationCode=KTUO&report=filtered"))).status, 403);
+console.log("PASS EDD report endpoints: same filtered/sorted rows as UI, all matching rows exported, associate/status workbooks, authorization preserved.");
+denied = false;
+const networkReportModule = {};
+const networkReportMocks = {
+  ...reportMocks,
+  "@/lib/ops-pulse/edd-stations": { loadEddStations: async () => [{ code: "KTUO", name: "Kothamangalam" }, { code: "AWEZ", name: "Kalady" }] },
+  "@/lib/ops-pulse/station-edd-data": { loadStationEddNetwork: async (codes, callback) => {
+    assert.deepEqual(codes, ["KTUO", "AWEZ"], "report loader gets only authorized station codes");
+    for (const code of codes) callback?.(code, controlPackages, today + "T10:00:00Z", today);
+    return sampleStations;
+  } }
+};
+new Function("require", "exports", transpile(readFileSync(new URL("../src/app/api/ops-pulse/station-edd/network/report/route.ts", import.meta.url), "utf8")))(name => networkReportMocks[name] || routeRequire(name), networkReportModule);
+const networkFilteredResponse = await networkReportModule.GET(new Request("https://example.test/api?report=pending&day=today&query=Kotham&focus=pending"));
+assert.equal(networkFilteredResponse.status, 200);
+const networkFilteredBook = XLSX.read(Buffer.from(await networkFilteredResponse.arrayBuffer()), { type: "buffer" });
+assert.deepEqual(XLSX.utils.sheet_to_json(networkFilteredBook.Sheets["Station EDD"]).map(r => r["Station Code"]), ["KTUO"]);
+assert.ok(XLSX.utils.sheet_to_json(networkFilteredBook.Sheets["Pending TIDs"]).every(r => r["Station Code"] === "KTUO"));
+assert.equal(XLSX.utils.sheet_to_json(networkFilteredBook.Sheets["Pending TIDs"]).length, testSummary.todayAtStation);
+denied = true;
+assert.equal((await networkReportModule.GET(new Request("https://example.test/api?report=pending"))).status, 403);
+console.log("PASS Network export: station search/workload filters apply to summaries and TID sheets without expanding access.");

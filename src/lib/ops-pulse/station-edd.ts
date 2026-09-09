@@ -50,7 +50,7 @@ export function stationEddPackageMatches(pkg: EddPackage, filter: StationEddFilt
 export function stationEddSearchMatches(pkg: EddPackage, state = "", query = "") {
   if (state && eddCurrentState(pkg) !== state) return false;
   const term = query.toLowerCase().trim();
-  return !term || [pkg.trackingId, eddCurrentState(pkg), pkg.driverId, pkg.driverName, pkg.lastScanBy, pkg.city, pkg.orderingOrderId, pkg.lockerName].some(v => v?.toLowerCase().includes(term));
+  return !term || [pkg.trackingId, eddCurrentState(pkg), pkg.driverId, pkg.driverName, pkg.verification?.driverName, pkg.lastScanBy, pkg.city, pkg.postalCode, pkg.orderingOrderId, pkg.lockerName].some(v => v?.toLowerCase().includes(term));
 }
 
 export function stationEddSelection(day: unknown, position: unknown) {
@@ -168,10 +168,10 @@ export function stationEddReportSheets(payload: EddStationPayload, stationName: 
 export function stationEddAssociateKey(pkg: EddPackage) {
   return pkg.isAccessPoint ? "access-point" : pkg.driverId || pkg.driverName || pkg.verification?.driverName || "unattributed";
 }
-export function stationEddAssociates(packages: EddPackage[], today = stationEddToday()) {
+export function stationEddAssociates(packages: EddPackage[], today = stationEddToday(), day: StationEddDay = "today") {
   const rows = new Map<string, { id: string; name: string; sent: number; delivered: number; onRoad: number; attempted: number; other: number }>();
   for (const pkg of new Map(packages.map(p => [p.trackingId,p])).values()) {
-    if (!isForwardEdd(pkg) || stationEddDate(pkg) !== today) continue;
+    if (!stationEddDate(pkg) || !stationEddPackageMatches(pkg, "all", day, today)) continue;
     const position = stationEddPosition(pkg, today);
     if (!["onRoad","delivered","attempted"].includes(position)) continue;
     const id = stationEddAssociateKey(pkg);
