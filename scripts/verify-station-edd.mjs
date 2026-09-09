@@ -120,9 +120,34 @@ assert.equal(edd.stationEddPosition(pkg("hfr","INDUCTED",{verification:{...facts
 assert.equal(edd.stationEddPosition(pkg("same","INDUCTED",{verification:{...facts,state:"INDUCTED",firstAttemptAt:today+"T08:00:00Z"}}),today),"attempted","same-day attempt is never fresh EDD pending");
 assert.equal(edd.stationEddPosition(pkg("unknown","INDUCTED",{verification:null}),today),"unverified");
 assert.equal(edd.stationEddPosition(pkg("partial","RECEIVED",{verification:{historyComplete:false}}),today),"unverified");
+assert.equal(edd.stationEddPosition(pkg("newer","INDUCTED",{sourceAt:today+"T11:00:00Z"}),today),"unverified","a newer source scan invalidates older no-dispatch evidence");
 assert.equal(edd.stationEddPosition(pkg("372163051022","INDUCTED",{verification:{state:"DELIVERED"}}),today),"delivered","delivered lookup cannot remain in pending");
 const sent = [pkg("a","DELIVERED",{driverId:"A",driverName:"Associate A"}),pkg("b","IN_TRANSIT_TO_CUSTOMER",{driverId:"A"}),pkg("c","INDUCTED",{driverId:"A"}),pkg("a","DELIVERED",{driverId:"A",driverName:"Associate A"})];
 assert.deepEqual(edd.stationEddAssociates(sent,today),[{id:"A",name:"Associate A",sent:2,delivered:1,onRoad:1,attempted:0,other:0}],"unique dispatched cohort, never retained station driver IDs");
 assert.equal(verification.eddHistoryFacts([]).historyComplete,false);
 assert.equal(verification.eddHistoryFacts([{state:"INDUCTED",time:null}]).historyComplete,false);
 console.log("PASS Verified ledger rules: delivered override, HFR, same-day attempts, incomplete history, deduplicated associate counts.");
+const sourceApi={};
+new Function("require","exports",transpile(readFileSync(new URL("../src/lib/ops-pulse/edd-source.ts",import.meta.url),"utf8")))(()=>({}),sourceApi);
+const realFetch=globalThis.fetch;
+const fakeAuth={cookie:"test-session",x_api_usage_key:"test-key"};
+try {
+  let page=0;
+  globalThis.fetch=async(url,options)=>{
+    assert.equal(url,"https://www.amazonlogistics.eu/station/proxyapigateway/data");
+    assert.equal(options.redirect,"manual","never forward the session through redirects");
+    const body=JSON.parse(options.body);
+    assert.equal(body.resourcePath,"/os/getPackageHistoryData");
+    assert.equal(body.requestBody.pageToken,page===0?null:"continuation");
+    return Response.json(page++===0?{packageHistory:Array.from({length:20},()=>({packageState:"INDUCTED",stateTime:1788950000000})),nextPageToken:"continuation"}:{packageHistory:[{packageState:"DELIVERY_ATTEMPTED",stateTime:1788850000000}]});
+  };
+  const paged=await sourceApi.eddSourceHistory("sample",fakeAuth);
+  assert.equal(paged.history.length,21);
+  assert.equal(paged.historyComplete,true);
+  assert.ok(verification.eddHistoryFacts(paged.history).firstAttemptAt);
+  globalThis.fetch=async()=>Response.json({packageHistory:Array.from({length:20},()=>({packageState:"INDUCTED",stateTime:1788950000000}))});
+  assert.equal((await sourceApi.eddSourceHistory("sample",fakeAuth)).historyComplete,false,"full page without token cannot prove full history");
+  globalThis.fetch=async()=>Response.json({packageSummaryList:[{trackingId:"allowed",currentPackageState:"DELIVERED"},{trackingId:"outside"}]});
+  assert.deepEqual((await sourceApi.eddSourceSummaries("KTUO",["allowed"],fakeAuth)).map(r=>r.trackingId),["allowed"]);
+} finally {globalThis.fetch=realFetch;}
+console.log("PASS Source integration contracts: fixed origin, no redirects, paginated history, conservative completeness and requested-TID filtering.");

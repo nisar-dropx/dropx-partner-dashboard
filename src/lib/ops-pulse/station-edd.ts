@@ -25,7 +25,8 @@ export function stationEddPosition(pkg: EddPackage, today = stationEddToday()): 
   if (["IN_TRANSIT_TO_CUSTOMER", "IN_TRANSIT", "OUT_FOR_DELIVERY"].includes(state)) return "onRoad";
   if (["DELIVERY_ATTEMPTED", "DELIVERY_FAILED", "DELIVERY_REJECTED", "REJECTED"].includes(state) || history?.firstAttemptAt || history?.firstDispatchAt) return "attempted";
   if (["INDUCTED", "RECEIVED"].includes(state)) {
-    if (!history?.historyComplete || eddIstDate(pkg.verifiedAt) !== today) return "unverified";
+    if (!history?.historyComplete || eddIstDate(pkg.verifiedAt) !== today ||
+      (pkg.sourceAt && Date.parse(pkg.verifiedAt || "") < Date.parse(pkg.sourceAt))) return "unverified";
     return "atStation";
   }
   return "other";

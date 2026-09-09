@@ -5,6 +5,7 @@ import type { EddPackage, EddStationResult } from "./edd-worker";
 import { eddCurrentState, eddHistoryFacts, eddIstDate, type EddVerification } from "./edd-verification";
 import type { PackageHistoryEvent } from "./tracking-lookup";
 import { stationEddToday } from "./station-edd";
+import { eddSourceSession, eddSourceSummaries, eddSourceHistory } from "./edd-source";
 
 type LedgerRow = { station_code: string; tracking_id: string; source: EddPackage; source_at: string; verification: EddVerification | null; verified_at: string | null };
 type LookupObservation = { packageStatus?: string|null; estimatedArrivalTime?: string|null; promisedDeliveryTime?: string|null; driverName?: string|null; driverId?: string|null; lastUpdatedTime?: string|null; history?: PackageHistoryEvent[]; historyComplete?: boolean };
@@ -60,7 +61,7 @@ export async function loadVerifiedEddStation(stationCode: string): Promise<EddSt
     packages: ledger.packages, sessionSource: null, accountKey: null } };
 }
 
-/** Shared lease, max two upstream lookups at once, max thirty per batch.
+/** Shared lease, max two upstream histories at once, time-bounded batches.
  * Partial/error history NEVER proves the absence of an earlier attempt. */
 export async function verifyEddBatch(codes?: string[]) {
   if (!supabaseAdmin) throw new Error("EDD database is not configured.");
@@ -69,16 +70,64 @@ export async function verifyEddBatch(codes?: string[]) {
   if (!base || !key) throw new Error("Tracking connection is not configured.");
   await ingestEddObservations(codes);
   const token = randomUUID();
-  const { data, error } = await supabaseAdmin.rpc("edd_claim_verification", { p_token: token, p_codes: codes ?? null, p_limit: 30 });
+  const { data, error } = await supabaseAdmin.rpc("edd_claim_verification", { p_token: token, p_codes: codes ?? null, p_limit: 180 });
   if (error) throw new Error(error.message);
   const rows = (data ?? []) as LedgerRow[];
-  let verified = 0, failed = 0, cursor = 0;
-  const deadline = Date.now()+65000;
+  let verified = 0, failed = 0, cursor = 0, enriched = 0, enrichmentFailed = 0;
+  const deadline = Date.now()+80000;
+  const sessions = new Map<string, Awaited<ReturnType<typeof eddSourceSession>> | null>();
+  const freshSummaries = new Set<string>();
+  const paginationKeys = new Set<string>();
   try {
+    // Recover the EDD dates missing from Performance's delivered rows in bulk.
+    // The same private source session and read API used by the worker; no passwords.
+    for (const code of [...new Set(rows.map(row => row.station_code))]) {
+      if (Date.now() > deadline-20000) break;
+      const auth = await eddSourceSession(code).catch(() => null);
+      sessions.set(code, auth);
+      if (!auth) continue;
+      const { data: missing } = await supabaseAdmin.from("edd_package_ledger")
+        .select("tracking_id").eq("station_code",code)
+        .is("source->>summaryCheckedAt",null)
+        .gte("last_seen_at",new Date(Date.now()-7*86400000).toISOString())
+        .order("tracking_id").limit(300);
+      const ids = [...new Set([...rows.filter(r=>r.station_code===code).map(r=>r.tracking_id),...(missing??[]).map(r=>r.tracking_id)])].slice(0,300);
+      if (!ids.length) continue;
+      try {
+        const observations = await eddSourceSummaries(code,ids,auth);
+        const observedAt=new Date().toISOString();
+        const values=observations.map(value=>({trackingId:String(value.trackingId),state:value.currentPackageState||null,
+          ead: typeof value.estimatedArrivalDate==="number" ? eddIstDate(new Date(value.estimatedArrivalDate).toISOString()) : null,
+          promisedDeliveryDate:typeof value.promisedDeliveryDate==="number" ? eddIstDate(new Date(value.promisedDeliveryDate).toISOString()) : null,
+          shipOption:value.shipOption||null,summaryCheckedAt:observedAt}));
+        const {error:summaryError}=await supabaseAdmin.rpc("edd_apply_summaries",{p_station:code,p_rows:values,p_observed_at:observedAt});
+        if(summaryError)throw new Error(summaryError.message);
+        enriched+=values.length;
+        for(const row of rows.filter(r=>r.station_code===code)) {
+          const value=values.find(v=>v.trackingId===row.tracking_id);
+          if(value) { row.source={...row.source,...Object.fromEntries(Object.entries(value).filter(([,v])=>v!=null)),ead:row.source.internalEAD||value.ead||row.source.ead};row.source_at=observedAt;freshSummaries.add(`${code}:${row.tracking_id}`); }
+        }
+      } catch { enrichmentFailed++; }
+    }
     await Promise.all([0,1].map(async () => {
       while (cursor < rows.length && Date.now() < deadline) {
         const row = rows[cursor++];
         try {
+          const auth=sessions.get(row.station_code);
+          if(auth && freshSummaries.has(`${row.station_code}:${row.tracking_id}`)) {
+            const result=await eddSourceHistory(row.tracking_id,auth);
+            result.paginationKeys.forEach(value=>paginationKeys.add(value));
+            const facts=eddHistoryFacts(result.history);
+            const verification:EddVerification={state:row.source.state,edd:row.source.ead||null,
+              driverName:row.source.driverName||null,driverId:row.source.driverId||null,lastUpdatedAt:row.source_at,
+              ...facts,historyComplete:facts.historyComplete&&result.historyComplete};
+            const now=new Date();
+            const {error:writeError}=await supabaseAdmin!.from("edd_package_ledger").update({verification,verified_at:now.toISOString(),
+              next_check_at:new Date(now.getTime()+(verification.state==="DELIVERED"?7*86400000:2*3600000)).toISOString()})
+              .eq("station_code",row.station_code).eq("tracking_id",row.tracking_id);
+            if(writeError)throw new Error(writeError.message);
+            verified++;continue;
+          }
           const url = new URL(`${base}/api/admin/executive/edd/lookup`);
           url.searchParams.set("stationCode",row.station_code); url.searchParams.set("trackingId",row.tracking_id);
           const response = await fetch(url,{ headers: { "x-admin-key": key, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(12000) });
@@ -102,7 +151,7 @@ export async function verifyEddBatch(codes?: string[]) {
         } catch { failed++; }
       }
     }));
-    return { verified, failed, checked: verified+failed, busy: rows.length === 0 };
+    return { verified, failed, enriched, enrichmentFailed, paginationKeys:[...paginationKeys], checked: verified+failed, busy: rows.length === 0 };
   } finally {
     await supabaseAdmin.from("edd_verification_lease").update({ expires_at: new Date().toISOString(), token: null }).eq("id",1).eq("token",token);
   }

@@ -30,5 +30,5 @@ export function eddCurrentState(pkg: VerifiedEddPackage) {
   const verified = pkg.verification;
   // Delivery is terminal. Never resurrect a delivered TID from an older backlog row.
   if (verified?.state === "DELIVERED" || pkg.state === "DELIVERED") return "DELIVERED";
-  return ((verified?.state && pkg.verifiedAt && (!pkg.sourceAt || pkg.verifiedAt >= pkg.sourceAt) ? verified.state : pkg.state) || "UNKNOWN").trim().toUpperCase();
+  return ((verified?.state && pkg.verifiedAt && (!pkg.sourceAt || Date.parse(pkg.verifiedAt) >= Date.parse(pkg.sourceAt)) ? verified.state : pkg.state) || "UNKNOWN").trim().toUpperCase();
 }

@@ -26,6 +26,7 @@ export type EddPackage = {
   verifiedAt?: string | null;
   verification?: import("./edd-verification").EddVerification | null;
   isAccessPoint?: boolean;
+  summaryCheckedAt?: string;
 };
 
 export type EddStationPayload = {
