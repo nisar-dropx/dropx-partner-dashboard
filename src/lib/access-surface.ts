@@ -17,6 +17,7 @@ export const opsAccessPageCodes = [
   "capacity_hiring",
   "ops_reports",
   "ops_attendance_reports",
+  "ops_unplanned_leaves",
   "ops_rostering",
   "daily_submission",
   "cod",

@@ -32,7 +32,10 @@ const commonStart: NavItem[] = [
 ];
 
 const reports: NavItem = { code: "ops_reports", label: "Reports", href: "/reports", icon: "R" };
-const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Attendance", href: "/attendance", icon: "T" };
+const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Attendance", icon: "T", children: [
+  { code: "ops_attendance_reports", label: "Attendance Reports", href: "/attendance" },
+  { code: "ops_unplanned_leaves", label: "Unplanned Leaves", href: "/attendance/unplanned-leaves" }
+] };
 
 const businessDocuments: NavItem = {
   code: "business_documents",

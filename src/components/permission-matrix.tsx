@@ -51,6 +51,7 @@ const dashboardGroups: PermissionGroup[] = [
 ];
 
 const opsGroups: PermissionGroup[] = [
+  { key: "ops_attendance", label: "Attendance", codes: ["ops_attendance_reports", "ops_unplanned_leaves"] },
   { key: "ops_pulse", label: "Command Center", codes: ["ops_pulse"] },
   { key: "performance", label: "Performance", codes: ["performance", "performance_review", "performance_review_cluster_filter", "performance_review_status"] },
   { key: "capacity", label: "Capacity", codes: ["capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring"], hiddenCodes: ["capacity"] },
