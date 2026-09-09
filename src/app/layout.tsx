@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { OpsPwaRegister } from "@/components/ops-pwa-register";
 import { isPeopleHostName } from "@/lib/people/surface";
+import { isFinanceHostName } from "@/lib/finance/surface";
 import "./globals.css";
 
 function isOpsHost() {
@@ -16,6 +17,15 @@ function isPeopleHost() {
 }
 
 export function generateMetadata(): Metadata {
+  const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
+  if (isFinanceHostName(host)) {
+    return {
+      title: { default: "DropX Finance", template: "%s · DropX Finance" },
+      description: "DropX Finance for payment approvals, reporting and financial administration.",
+      applicationName: "DropX Finance",
+      icons: { icon: "/favicon.png", shortcut: "/favicon.png", apple: "/favicon.png" }
+    };
+  }
   if (isOpsHost()) {
     return {
       title: { default: "DropX OpsPulse", template: "%s · DropX OpsPulse" },

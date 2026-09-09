@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isPeopleHostName, isPeoplePortalPath } from "@/lib/people/surface";
+import { isFinanceHostName, isFinancePortalPath } from "@/lib/finance/surface";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -113,6 +114,7 @@ export async function middleware(request: NextRequest) {
   const isPlatformAdminHost = host === "admin-panel.dropxlogistics.com";
   const isOpsHost = host === "ops.dropxlogistics.com";
   const isPeopleHost = isPeopleHostName(host);
+  const isFinanceHost = isFinanceHostName(host);
   const isDashboardHost = host === "dashboard.dropxlogistics.com";
   const isSharedOpsPath = path === "/fleet" || path.startsWith("/fleet/") ||
     path === "/business-documents" || path.startsWith("/business-documents/");
@@ -178,6 +180,10 @@ export async function middleware(request: NextRequest) {
     peopleHomeUrl.pathname = "/";
     peopleHomeUrl.search = "";
     return NextResponse.redirect(peopleHomeUrl);
+  }
+
+  if (isFinanceHost && !isPublicAppPath(path) && !isFinancePortalPath(path)) {
+    return NextResponse.redirect(surfaceDeniedUrl(request, "finance_portal", path));
   }
 
   if (

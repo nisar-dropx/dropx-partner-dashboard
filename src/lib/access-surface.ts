@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { isPeopleHostName } from "@/lib/people/surface";
+import { isFinanceHostName } from "@/lib/finance/surface";
 
 export type AccessSurface = "dashboard" | "ops";
 export type AdminAccessSurface = AccessSurface | "people" | "finance";
@@ -174,7 +175,7 @@ export function currentAdminAccessSurface(): AdminAccessSurface {
     ""
   ).split(":")[0].toLowerCase();
   if (isPeopleHostName(host)) return "people";
-  if (host === "fin.dropxlogistics.com" || host === "finance.dropxlogistics.com" || host.startsWith("fin-")) return "finance";
+  if (isFinanceHostName(host)) return "finance";
   return host === "ops.dropxlogistics.com" || host.startsWith("ops-") ? "ops" : "dashboard";
 }
 

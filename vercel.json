@@ -1,38 +1,4 @@
 {
   "regions": ["sin1"],
-  "crons": [
-    { "path": "/api/cron/edd-verification", "schedule": "* * * * *" },
-    {
-      "path": "/api/cron/business-document-expiry",
-      "schedule": "30 5 * * *"
-    },
-    {
-      "path": "/api/cron/fleet-document-expiry",
-      "schedule": "30 5 * * *"
-    },
-    {
-      "path": "/api/cron/trash-cleanup",
-      "schedule": "30 5 * * *"
-    },
-    {
-      "path": "/api/cron/verification-api-retention",
-      "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/cron/ops-pulse-portal-checks",
-      "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/whatsapp/process-campaigns",
-      "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/cron/google-workspace",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/attendance-insights",
-      "schedule": "*/15 * * * *"
-    }
-  ]
+  "crons": []
 }
