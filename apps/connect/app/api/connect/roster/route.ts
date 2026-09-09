@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
+import { userFacingError } from "../../../../src/lib/user-facing-error";
 import { resolveConfiguredApprovalWorkflow } from "../../../../src/lib/approval-workflow-routing";
 import { formatShiftClock, preferActiveRosterRowsByKey } from "@/lib/roster-plan-preference";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
@@ -429,7 +430,7 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
 
 export async function GET(request: Request) {
   try { const { account, workerType, identities } = await accountFrom(new URL(request.url)); return NextResponse.json(await rosterPayload(account, workerType, identities), { headers: { "Cache-Control": "private, no-store" } }); }
-  catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load roster." }, { status: 400 }); }
+  catch (error) { return NextResponse.json({ error: userFacingError(error, "Unable to load roster.") }, { status: 400 }); }
 }
 
 export async function POST(request: Request) {
@@ -500,7 +501,7 @@ export async function POST(request: Request) {
     const requestId = String(created.data);
     await notifyWorker({ companyId: account.companyId, workerType: partner.worker_type, workerId: partner.worker_id, event: "roster_swap_requested", sourceKey: requestId, title: "Shift swap request", body: `${account.name ?? account.reference ?? "A colleague"} wants to swap the ${rosterDate} shift with you.`, data: { requestId, rosterDate } });
     return NextResponse.json({ ok: true, notice: "Swap request sent to your colleague." });
-  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to request the shift swap." }, { status: 400 }); }
+  } catch (error) { return NextResponse.json({ error: userFacingError(error, "Unable to request the shift swap.") }, { status: 400 }); }
 }
 
 export async function PATCH(request: Request) {
@@ -525,5 +526,5 @@ export async function PATCH(request: Request) {
     await notifyWorker({ companyId: account.companyId, workerType: decided.requester_worker_type, workerId: decided.requester_worker_id, event: action === "accept" ? "roster_swap_partner_accepted" : "roster_swap_rejected", sourceKey: requestId, title: action === "accept" ? "Swap partner accepted" : "Shift swap declined", body: action === "accept" ? `Your colleague accepted. Manager approval is now pending for ${decided.roster_date}.` : `Your colleague declined the swap for ${decided.roster_date}.` });
     if (action === "accept") await db().from("people_web_notifications").upsert({ company_id: account.companyId, recipient_user_id: decided.approver_user_id, event_code: "roster_swap_approval_required", title: "Shift swap awaiting approval", body: `Both people accepted a shift swap for ${decided.roster_date}.`, href: "/approvals", source_key: requestId, data: { requestId, rosterDate: decided.roster_date } }, { onConflict: "company_id,event_code,source_key,recipient_user_id", ignoreDuplicates: true });
     return NextResponse.json({ ok: true, notice: action === "accept" ? "Accepted. Sent to the reporting manager." : "Swap request declined." });
-  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to update the shift swap." }, { status: 400 }); }
+  } catch (error) { return NextResponse.json({ error: userFacingError(error, "Unable to update the shift swap.") }, { status: 400 }); }
 }

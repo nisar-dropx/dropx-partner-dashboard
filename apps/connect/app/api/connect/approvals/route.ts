@@ -6,6 +6,7 @@ import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage
 import { loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
 import { decideConnectWfhApproval, decideConnectWfhHrApproval, listConnectWfhApprovals, listConnectWfhHrApprovals } from "../../../../src/lib/connect-wfh-data";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
+import { userFacingError } from "../../../../src/lib/user-facing-error";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -211,6 +212,6 @@ export async function PATCH(request: Request) {
           : "Approved and routed to the next approver."
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to update time-off approval." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to update this approval. Please try again.") }, { status: 400 });
   }
 }

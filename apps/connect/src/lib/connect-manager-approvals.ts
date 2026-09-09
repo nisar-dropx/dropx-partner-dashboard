@@ -14,6 +14,7 @@ import { todayInIndia } from "./india-date";
 import { supabaseAdmin } from "./supabase-admin";
 import type { ConnectAccount } from "./connect-auth";
 import { connectApproverIdentity } from "./connect-expense-data";
+import { userFacingError } from "./user-facing-error";
 
 type Decision = "approved" | "returned" | "rejected";
 
@@ -785,6 +786,38 @@ async function notifyRosterSwapWorkers(input: {
   ]);
 }
 
+type RosterSwapDecisionRow = {
+  status: string;
+  approver_user_id: string | null;
+  roster_date: string;
+  requester_worker_type: string;
+  requester_worker_id: string;
+  partner_worker_type: string;
+  partner_worker_id: string;
+};
+
+function normalizeRosterSwapDecision(value: unknown): RosterSwapDecisionRow | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const status = clean(row.status);
+  const rosterDate = clean(row.roster_date);
+  const requesterWorkerType = clean(row.requester_worker_type);
+  const requesterWorkerId = clean(row.requester_worker_id);
+  const partnerWorkerType = clean(row.partner_worker_type);
+  const partnerWorkerId = clean(row.partner_worker_id);
+  if (!status || !rosterDate || !requesterWorkerType || !requesterWorkerId || !partnerWorkerType || !partnerWorkerId) return null;
+  const approverUserId = clean(row.approver_user_id);
+  return {
+    status,
+    approver_user_id: /^[0-9a-f-]{36}$/i.test(approverUserId) ? approverUserId : null,
+    roster_date: rosterDate,
+    requester_worker_type: requesterWorkerType,
+    requester_worker_id: requesterWorkerId,
+    partner_worker_type: partnerWorkerType,
+    partner_worker_id: partnerWorkerId
+  };
+}
+
 export async function decideConnectRosterSwapApproval(account: ConnectAccount, requestIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
   const actorUserId = await approverUserId(account);
   if (!actorUserId) throw new Error("A linked People login is required to approve a shift swap.");
@@ -795,23 +828,19 @@ export async function decideConnectRosterSwapApproval(account: ConnectAccount, r
   if (decision !== "approved" && decision !== "rejected") throw new Error("Choose Approve or Reject.");
   const accept = decision === "approved";
 
-  const rpc = await db().rpc("hr_manager_decide_roster_swap", {
+  // Call the review function directly. The legacy hr_manager_decide_roster_swap
+  // wrapper incorrectly selected a composite row INTO a record and raised:
+  // "invalid input syntax for type uuid: “(…entire swap row…)”".
+  const rpc = await db().rpc("hr_review_roster_swap", {
     p_company_id: account.companyId,
     p_request_id: requestId,
-    p_actor_user_id: actorUserId,
-    p_accept: accept,
+    p_approver_user_id: actorUserId,
+    p_approve: accept,
     p_note: note || null
   });
   if (!rpc.error) {
-    const decided = rpc.data as {
-      status: string;
-      approver_user_id: string | null;
-      roster_date: string;
-      requester_worker_type: string;
-      requester_worker_id: string;
-      partner_worker_type: string;
-      partner_worker_id: string;
-    };
+    const decided = normalizeRosterSwapDecision(rpc.data);
+    if (!decided) throw new Error("Shift swap was updated, but the response could not be read. Refresh and confirm the status.");
     if (accept && decided.status === "pending_manager" && decided.approver_user_id) {
       await db().from("people_web_notifications").upsert({
         company_id: account.companyId,
@@ -848,7 +877,9 @@ export async function decideConnectRosterSwapApproval(account: ConnectAccount, r
     return accept ? "Shift swap approved." : "Shift swap rejected.";
   }
   const missingRpc = /Could not find the function|schema cache|does not exist/i.test(rpc.error.message);
-  if (!missingRpc) throw new Error(rpc.error.message);
+  if (!missingRpc) {
+    throw new Error(userFacingError(rpc.error.message, "Unable to update this shift swap. Please try again."));
+  }
 
   const current = await db().from("hr_roster_swap_requests")
     .select("id,status,approver_user_id,roster_date,requester_entry_id,partner_entry_id,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,requester_shift_id,partner_shift_id,requester_day_type,partner_day_type")

@@ -4,6 +4,7 @@ import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
+import { userFacingError } from "@/lib/user-facing-error";
 
 type ExpenseItem = {
   id: string;
@@ -375,7 +376,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
         }
         return current;
       });
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load approvals."); }
+    } catch (reason) { setError(userFacingError(reason, "Unable to load approvals.")); }
     finally { setLoading(false); }
   }, [account.id, account.profileType, reporteeScope]);
 
@@ -396,7 +397,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update reimbursement.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [claimId]: "" })); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update reimbursement."); }
+    } catch (reason) { setError(userFacingError(reason, "Unable to update reimbursement.")); }
     finally { setSaving(false); }
   }
 
@@ -418,7 +419,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update reimbursement request.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [`pre:${requestId}`]: "" })); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update reimbursement request."); }
+    } catch (reason) { setError(userFacingError(reason, "Unable to update reimbursement request.")); }
     finally { setSaving(false); }
   }
 
@@ -433,7 +434,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update time-off approval.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [requestId]: "" })); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update time-off approval."); }
+    } catch (reason) { setError(userFacingError(reason, "Unable to update time-off approval.")); }
     finally { setSaving(false); }
   }
 
@@ -456,7 +457,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update WFH approval.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [`wfh:${requestId}`]: "" })); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update WFH approval."); }
+    } catch (reason) { setError(userFacingError(reason, "Unable to update WFH approval.")); }
     finally { setSaving(false); }
   }
 
@@ -478,7 +479,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update attendance approval.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [requestId]: "" })); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update attendance approval."); }
+    } catch (reason) { setError(userFacingError(reason, "Unable to update attendance approval.")); }
     finally { setSaving(false); }
   }
 
@@ -493,7 +494,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update support package.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [reviewId]: "" })); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update support package."); }
+    } catch (reason) { setError(userFacingError(reason, "Unable to update support package.")); }
     finally { setSaving(false); }
   }
 
@@ -515,7 +516,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update roster approval.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [approval.id]: "" })); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update roster approval."); }
+    } catch (reason) { setError(userFacingError(reason, "Unable to update roster approval.")); }
     finally { setSaving(false); }
   }
 
@@ -530,7 +531,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to resubmit roster.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [planId]: "" })); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to resubmit roster."); }
+    } catch (reason) { setError(userFacingError(reason, "Unable to resubmit roster.")); }
     finally { setSaving(false); }
   }
 
@@ -551,7 +552,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update shift swap.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [requestId]: "" })); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update shift swap."); }
+    } catch (reason) { setError(userFacingError(reason, "Unable to update shift swap.")); }
     finally { setSaving(false); }
   }
 
@@ -572,7 +573,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update exit approval.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [`exit:${approvalId}`]: "" })); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update exit approval."); }
+    } catch (reason) { setError(userFacingError(reason, "Unable to update exit approval.")); }
     finally { setSaving(false); }
   }
 
@@ -593,7 +594,7 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to update exit withdrawal.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [`exit-withdraw:${caseId}`]: "" })); await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to update exit withdrawal."); }
+    } catch (reason) { setError(userFacingError(reason, "Unable to update exit withdrawal.")); }
     finally { setSaving(false); }
   }
 
