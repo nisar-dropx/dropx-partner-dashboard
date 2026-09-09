@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { todayInIndia } from "../../../../src/lib/india-date";
 import { loadConnectOperationalPerformance } from "../../../../src/lib/connect-operational-performance";
+import { hasConnectCompanyOwnerAccess } from "../../../../src/lib/connect-company-owner";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
 
@@ -65,10 +66,14 @@ async function ownPerformanceContext(url: URL, body?: Record<string, unknown>) {
     .limit(1)
     .maybeSingle();
   if (engagement.error) throw new Error(engagement.error.message);
-  const operationsEligible = engagement.data
-    ? await hasOperationsAssignment(account.companyId, engagement.data.id)
-    : false;
-  return { account, workerType, engagement: engagement.data, operationsEligible };
+  const [operationsAssignment, companyOwner] = engagement.data
+    ? await Promise.all([
+      hasOperationsAssignment(account.companyId, engagement.data.id),
+      hasConnectCompanyOwnerAccess(db(), account.companyId, engagement.data.person_id)
+    ])
+    : [false, false];
+  const operationsEligible = operationsAssignment || companyOwner;
+  return { account, workerType, engagement: engagement.data, operationsEligible, companyOwner };
 }
 
 async function ownReview(companyId: string, personId: string, reviewId: string) {
@@ -143,6 +148,7 @@ export async function GET(request: Request) {
           account: context.account,
           personId: context.engagement.person_id,
           engagementId: context.engagement.id,
+          companyOwner: context.companyOwner,
           requestedWeek: Number.isInteger(requestedWeek) && requestedWeek > 0 && requestedWeek < 54 ? requestedWeek : null,
           requestedWeekKey: Number.isInteger(requestedWeekKey) && requestedWeekKey > 200000 ? requestedWeekKey : null,
           requestedCpsMonth

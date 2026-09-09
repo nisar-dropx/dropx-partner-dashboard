@@ -194,10 +194,10 @@ function parseTarget(row: { description: string | null }) {
   }
 }
 
-async function performanceLocationScope(account: ConnectAccount, personId: string, engagementId: string) {
+async function performanceLocationScope(account: ConnectAccount, personId: string, engagementId: string, companyOwner: boolean) {
   const day = today();
   const locationIds = new Set<string>();
-  let allLocations = false;
+  let allLocations = companyOwner;
 
   const ownAssignments = await db().from("hr_work_assignments")
     .select("id,location_id")
@@ -230,7 +230,7 @@ async function performanceLocationScope(account: ConnectAccount, personId: strin
     ]);
     const setupError = profile.error ?? access.error ?? memberships.error ?? positionAssignments.error;
     if (setupError) throw new Error(setupError.message);
-    allLocations = Boolean(profile.data?.is_master_owner || access.data?.all_locations || (memberships.data ?? []).some((row) => row.has_all_location_access));
+    allLocations ||= Boolean(profile.data?.is_master_owner || access.data?.all_locations || (memberships.data ?? []).some((row) => row.has_all_location_access));
     for (const id of profile.data?.location_scope_ids ?? []) locationIds.add(String(id));
     for (const id of access.data?.location_ids ?? []) locationIds.add(String(id));
     for (const row of memberships.data ?? []) for (const id of row.location_scope_ids ?? []) locationIds.add(String(id));
@@ -283,13 +283,15 @@ export async function loadConnectOperationalPerformance(input: {
   account: ConnectAccount;
   personId: string;
   engagementId: string;
+  /** Derived by the server from a verified People/account link, never from request input. */
+  companyOwner?: boolean;
   requestedWeek?: number | null;
   requestedWeekKey?: number | null;
   requestedCpsMonth?: string | null;
 }): Promise<ConnectOperationalPerformance> {
   const selectedCpsMonth = validMonth(input.requestedCpsMonth);
   const cpsPeriodState = selectedCpsMonth === monthKey() ? "mtd" : "closed";
-  const scope = await performanceLocationScope(input.account, input.personId, input.engagementId);
+  const scope = await performanceLocationScope(input.account, input.personId, input.engagementId, input.companyOwner === true);
   let stationQuery = db().from("stations")
     .select("id,station_code,station_name,region,location_models(code,name)")
     .eq("company_id", input.account.companyId)
