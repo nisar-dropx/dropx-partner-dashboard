@@ -35,4 +35,4 @@ begin
     and l.verified_at<s.fetched_at
     and l.verification->>'historyComplete'='true'
     and coalesce(l.verification->>'state',l.source->>'state') in ('INDUCTED','RECEIVED');
-end $;
+end $$;
