@@ -36,7 +36,7 @@ workers as (
 base_graph as (
  select distinct on (hp.id) a.id assignment_id,hp.id person_id,hp.display_name,he.worker_type,coalesce(he.employee_id,he.contractor_id) worker_id,he.worker_code,
  a.location_id,s.station_code,s.station_name,d.code designation_code,coalesce(d.name,a.position_title) designation_name,dep.name department_name,
- 
+
  rel.manager_assignment_id,hp.status person_status,dc.people_module
  from params p
  join public.hr_people hp on hp.company_id=p.company_id and hp.status='active'

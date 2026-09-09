@@ -66,4 +66,4 @@ insert into public.role_page_permissions(company_id,role_id,page_id,can_view,can
 select r.company_id,r.id,p.id,true,false,false from public.user_roles r
 join public.app_pages p on p.company_id=r.company_id and p.code='ops_unplanned_leaves'
 where r.product_code='operations' and r.is_active
-on conflict(role_id,page_id) do nothing;
+on conflict(company_id,role_id,page_id) do nothing;
