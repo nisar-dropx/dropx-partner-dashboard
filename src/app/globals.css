@@ -2303,6 +2303,10 @@ h3 {
   color: #047857;
 }
 
+.field-hint.error {
+  color: #b91c1c;
+}
+
 .toggle-field {
   display: inline-flex;
   align-items: center;

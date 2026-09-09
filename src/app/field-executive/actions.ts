@@ -21,6 +21,7 @@ import { saveProfileVerifications } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
 import { assertOnboardingIdentityAllowed, evaluateOnboardingIdentity, identityExceptionEventMetadata } from "@/lib/onboarding-identity";
+import { assertWorkforceContactsAvailable } from "@/lib/workforce-contact-availability";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
 import { sendFieldExecutiveOnboardingWhatsApp } from "@/lib/whatsapp";
 import {
@@ -336,6 +337,12 @@ export async function createFieldExecutive(formData: FormData) {
       .maybeSingle();
     if (locationError) throw new Error(locationError.message);
     if (!location) throw new Error("Selected location is not available for this company.");
+    await assertWorkforceContactsAvailable({
+      companyId,
+      mobile,
+      email,
+      excludeRegister: table
+    });
     const identityEvaluation = await evaluateOnboardingIdentity({
       client: supabaseAdmin,
       companyId,
@@ -601,6 +608,13 @@ export async function updateFieldExecutive(formData: FormData) {
         .filter((key): key is keyof typeof payload => Boolean(key))
         .map((key) => [key, payload[key]])
     );
+    await assertWorkforceContactsAvailable({
+      companyId,
+      mobile: payload.mobile,
+      email: payload.email,
+      excludeId: executiveId,
+      excludeRegister: table
+    });
     const corePayload = {
       full_name: payload.full_name,
       mobile_country_code: payload.mobile_country_code,
