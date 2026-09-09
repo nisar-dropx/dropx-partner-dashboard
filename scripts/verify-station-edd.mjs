@@ -157,3 +157,11 @@ assert.equal(edd.stationEddPosition(pkg("pickup","INDUCTED",{verification:{...pi
 const actualDispatch=verification.eddHistoryFacts([{state:"IN_TRANSIT",time:"2026-08-31T12:00:00Z"},{state:"INDUCTED",time:"2026-09-04T05:00:00Z"},{state:"IN_TRANSIT",time:"2026-09-09T06:02:00Z"},{state:"DELIVERED",time:"2026-09-09T10:23:00Z"}]);
 assert.equal(actualDispatch.firstDispatchAt,"2026-09-09T06:02:00.000Z","customer dispatch starts after station induction, not merchant pickup");
 console.log("PASS Real-source regression: inbound transit vs customer dispatch.");
+const cronScope={};
+new Function("exports",transpile(readFileSync(new URL("../src/lib/ops-pulse/edd-cron-scope.ts",import.meta.url),"utf8")))(cronScope);
+assert.equal(cronScope.isEddCronHost("ops.dropxlogistics.com"),true);
+assert.equal(cronScope.isEddCronHost("dropx-ops-pulse-abc-dropx1.vercel.app"),true);
+assert.equal(cronScope.isEddCronHost("dropx-partner-dashboard.vercel.app"),false);
+assert.equal(cronScope.isEddCronHost("ops.dropxlogistics.com.example.org"),false);
+assert.equal(cronScope.isEddCronHost("people.dropxlogistics.com"),false);
+console.log("PASS Product isolation: EDD cron runs only on OpsPulse hosts.");
