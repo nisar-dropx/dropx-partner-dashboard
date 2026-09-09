@@ -8,6 +8,7 @@ import { loadStationEddNetwork } from "@/lib/ops-pulse/station-edd-data";
 import { type StationEddSummary } from "@/lib/ops-pulse/station-edd";
 import { StationEddNetworkClient } from "../../station-edd/station-edd-network-client";
 import { EddSectionTabs } from "../edd-section-tabs";
+import styles from "../../station-edd/station-edd.module.css";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -23,9 +24,9 @@ export default async function StationEddPage() {
     <AppShell active="Delivery Performance" pageCode="edd_dashboard">
       <div className="ops-command-center">
         <PageHead eyebrow="Ops Pulse · Delivery Performance" title="EDDs · All locations"
-          subtitle="Station-wise pending expected deliveries. Open any location for tracking IDs, live history and detailed downloads."
+          subtitle="First-dispatch pending, delivery outcomes and HFR—across every location you manage."
           action={<TrackingIdSearch />} />
-        <EddSectionTabs active="edds" />
+        <div className={styles.sectionNav}><EddSectionTabs active="edds" /></div>
         <StationEddNetworkClient stations={stations} initialNetwork={network} initialError={error} />
       </div>
     </AppShell>

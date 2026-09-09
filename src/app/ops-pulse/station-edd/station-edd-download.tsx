@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Download } from "lucide-react";
+import styles from "./station-edd.module.css";
 
 export function StationEddDownload({ href, label = "Download report" }: { href: string; label?: string }) {
   const [busy, setBusy] = useState(false);
@@ -23,5 +24,5 @@ export function StationEddDownload({ href, label = "Download report" }: { href: 
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Download failed."); }
     finally { setBusy(false); }
   }
-  return <div><button className="button secondary" type="button" onClick={download} disabled={busy}><Download size={15} /> {busy ? "Preparing report…" : label}</button>{error ? <p role="alert">{error}</p> : null}</div>;
+  return <div><button className={styles.button} type="button" onClick={download} disabled={busy}><Download size={15} /> {busy ? "Preparing report…" : label}</button>{error ? <p role="alert">{error}</p> : null}</div>;
 }

@@ -20,6 +20,12 @@ export type EddPackage = {
   shipOption: string | null;
   packageType: string | null;
   lockerName: string | null;
+  /** EDD-only ledger enrichment; never used by legacy Ageing/Performance. */
+  driverName?: string | null;
+  sourceAt?: string;
+  verifiedAt?: string | null;
+  verification?: import("./edd-verification").EddVerification | null;
+  isAccessPoint?: boolean;
 };
 
 export type EddStationPayload = {

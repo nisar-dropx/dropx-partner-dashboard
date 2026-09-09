@@ -8,6 +8,7 @@ import { fetchEddAllowedStations, isEddWorkerConfigured } from "@/lib/ops-pulse/
 import { StationEddDetailClient } from "../../../station-edd/[stationCode]/station-edd-detail-client";
 import { EddStationSectionTabs } from "../edd-station-section-tabs";
 import { stationEddSelection } from "@/lib/ops-pulse/station-edd";
+import styles from "../../../station-edd/station-edd.module.css";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -53,7 +54,7 @@ export default async function StationEddDetailPage({ params, searchParams }: { p
           subtitle={stationName ? `${stationName}${place ? ` · ${place}` : ""} · today's expected-delivery position` : "Today's expected-delivery position and tracking-ID detail."}
         />
 
-        <EddStationSectionTabs stationCode={stationCode} active="edds" />
+        <div className={styles.sectionNav}><EddStationSectionTabs stationCode={stationCode} active="edds" /></div>
         {!workerConfigured ? (
           <section className="panel message-panel error"><div className="panel-body"><strong>EDD worker is not configured.</strong></div></section>
         ) : !authorized ? (

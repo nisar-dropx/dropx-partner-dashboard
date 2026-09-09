@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { isStationEddApiDenied, stationEddApiContext } from "@/lib/ops-pulse/station-edd-access";
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { refreshEddStation } from "@/lib/ops-pulse/edd-worker";
+import { ingestEddObservations, loadVerifiedEddStation } from "@/lib/ops-pulse/edd-ledger";
+import { eddJsonResponse } from "@/lib/ops-pulse/edd-json-response";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -16,7 +18,11 @@ export async function POST(request: Request) {
     if (!stations.some((station) => station.code === stationCode)) {
       return NextResponse.json({ error: "Station is outside your assigned location scope." }, { status: 403 });
     }
-    return NextResponse.json(await refreshEddStation({ stationCode, timeoutMs: 280000 }));
+    await refreshEddStation({ stationCode, timeoutMs: 260000 });
+    await ingestEddObservations([stationCode]);
+    const result = await loadVerifiedEddStation(stationCode);
+    if (result.status !== "ok") throw new Error("No station records returned after refresh.");
+    return eddJsonResponse(result.payload);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to refresh station EDD." }, { status: 500 });
   }

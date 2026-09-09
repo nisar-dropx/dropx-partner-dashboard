@@ -1,108 +1,69 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ArrowLeft, RefreshCw, Search, ShieldCheck, Users, PackageSearch, X } from "lucide-react";
 import { TrackingDetailModal } from "@/components/tracking-detail-modal";
 import type { EddStationPayload, EddStationResult } from "@/lib/ops-pulse/edd-worker";
-import { STATION_EDD_RULE, stationEddDate, stationEddFreshness, stationEddPackageMatches, stationEddSearchMatches, stationEddPosition, stationEddToday, summarizeStationEdd, type StationEddDay, type StationEddFilter } from "@/lib/ops-pulse/station-edd";
+import { eddCurrentState } from "@/lib/ops-pulse/edd-verification";
+import { STATION_EDD_RULE, stationEddDate, stationEddPackageMatches, stationEddSearchMatches, stationEddPosition, stationEddToday, summarizeStationEdd, stationEddAssociates, stationEddAssociateKey, type StationEddDay, type StationEddFilter } from "@/lib/ops-pulse/station-edd";
 import { StationEddDownload } from "../station-edd-download";
-import styles from "../station-edd.module.css";
+import s from "../station-edd.module.css";
 
-const filters: Array<[StationEddFilter, string]> = [["atStation", "At station"], ["onRoad", "On road"], ["other", "Other statuses"], ["all", "All statuses"]];
-const days: Array<[StationEddDay, string]> = [["today", "EDD today"], ["overdue", "Overdue EDD"], ["pending", "Today + overdue"], ["all", "All EDD dates"]];
-
-async function json<T>(url: string, method = "GET"): Promise<T> {
-  const response = await fetch(url, { method, cache: "no-store" });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || "Unable to load station EDD.");
-  return body;
-}
-
-export function StationEddDetailClient({ stationCode, initialDay = "today", initialPosition = "atStation" }: { stationCode: string; initialDay?: StationEddDay; initialPosition?: StationEddFilter }) {
-  const [payload, setPayload] = useState<EddStationPayload | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<StationEddFilter>(initialPosition);
-  const [day, setDay] = useState<StationEddDay>(initialDay);
-  const [state, setState] = useState("");
-  const [query, setQuery] = useState("");
-  const [page, setPage] = useState(1);
-  const [openTrackingId, setOpenTrackingId] = useState<string | null>(null);
-  const [today, setToday] = useState(stationEddToday());
-  useEffect(() => {
-    const timer = setInterval(() => setToday(stationEddToday()), 60000);
-    return () => clearInterval(timer);
-  }, []);
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true); setPayload(null); setError(null);
-    void json<EddStationResult>(`/api/ops-pulse/station-edd?stationCode=${encodeURIComponent(stationCode)}`)
-      .then(result => { if (!cancelled) setPayload(result.status === "ok" ? result.payload : null); })
-      .catch(cause => { if (!cancelled) setError(String(cause.message)); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [stationCode]);
-  async function refresh() {
-    setRefreshing(true); setError(null);
-    try { setPayload(await json<EddStationPayload>(`/api/ops-pulse/station-edd/refresh?stationCode=${encodeURIComponent(stationCode)}`, "POST")); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to refresh station."); }
-    finally { setRefreshing(false); }
+const filters: Array<[StationEddFilter,string]> = [["atStation","Pending first dispatch"],["onRoad","On road"],["delivered","Delivered"],["hfr","HFR · previous attempt"],["attempted","Attempted / returned"],["unverified","History to verify"],["other","Other statuses"],["all","All statuses"]];
+const days: Array<[StationEddDay,string]> = [["today","EDD today"],["overdue","Overdue EDD"],["pending","Today + overdue"],["all","All observed EDD dates"]];
+const n=(v:number)=>v.toLocaleString("en-IN");
+async function json<T>(url:string,method="GET"):Promise<T>{const response=await fetch(url,{method,cache:"no-store"});const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||"Unable to load EDD.");return body;}
+export function StationEddDetailClient({stationCode,initialDay="today",initialPosition="atStation"}:{stationCode:string;initialDay?:StationEddDay;initialPosition?:StationEddFilter}){
+  const [payload,setPayload]=useState<EddStationPayload|null>(null);const [loading,setLoading]=useState(true);const [busy,setBusy]=useState("");const [error,setError]=useState<string|null>(null);const [message,setMessage]=useState("");
+  const [day,setDay]=useState(initialDay);const [filter,setFilter]=useState(initialPosition);const [query,setQuery]=useState("");const [associate,setAssociate]=useState("");const [view,setView]=useState<"tids"|"associates">("tids");const [page,setPage]=useState(1);const [openTid,setOpenTid]=useState<string|null>(null);const [today,setToday]=useState(stationEddToday());
+  const reload=useCallback(async()=>{const r=await json<EddStationResult>(`/api/ops-pulse/station-edd?stationCode=${encodeURIComponent(stationCode)}`);setPayload(r.status==="ok"?r.payload:null);},[stationCode]);
+  useEffect(()=>{let cancelled=false;void json<EddStationResult>(`/api/ops-pulse/station-edd?stationCode=${encodeURIComponent(stationCode)}`).then(r=>{if(!cancelled)setPayload(r.status==="ok"?r.payload:null);}).catch(e=>{if(!cancelled)setError(e.message);}).finally(()=>{if(!cancelled)setLoading(false);});const timer=setInterval(()=>setToday(stationEddToday()),60000);return()=>{cancelled=true;clearInterval(timer);};},[stationCode]);
+  async function refresh(kind:"source"|"verify"|"reload"){
+    setBusy(kind);setError(null);setMessage("");
+    try{
+      if(kind==="source")setPayload(await json<EddStationPayload>(`/api/ops-pulse/station-edd/refresh?stationCode=${encodeURIComponent(stationCode)}`,"POST"));
+      else if(kind==="verify") {const r=await json<{verified:number;failed:number;busy:boolean}>(`/api/ops-pulse/station-edd/verify?stationCode=${encodeURIComponent(stationCode)}`,"POST");setMessage(r.busy?"A background check is running, or no histories are due for a check. Reload to see the latest results.":`${r.verified} histories verified. ${r.failed} could not be verified and remain unconfirmed.`);await reload();}
+      else await reload();
+    }catch(e){setError(e instanceof Error?e.message:"Unable to refresh.");}finally{setBusy("");}
   }
-  const packages = useMemo(() => [...new Map((payload?.packages ?? []).filter(p => p.trackingId).map(p => [p.trackingId, p])).values()], [payload]);
-  const summary = useMemo(() => summarizeStationEdd(stationCode, payload ? packages : null, payload?.fetchedAt ?? null, today), [stationCode, payload, packages, today]);
-  const filtered = useMemo(() => packages.filter(pkg => {
-    return stationEddPackageMatches(pkg, filter, day, today) && stationEddSearchMatches(pkg, state, query);
-  }), [packages, filter, day, today, state, query]);
-  const statuses = useMemo(() => [...new Set(packages.map(p => p.state).filter((s): s is string => !!s))].sort(), [packages]);
-  const pages = Math.max(1, Math.ceil(filtered.length / 50));
-  const current = Math.min(page, pages);
-  const reportParams = new URLSearchParams({ stationCode, report: "filtered", day, position: filter, state, query });
-  function selectMetric(nextDay: StationEddDay, nextPosition: StationEddFilter) {
-    setDay(nextDay); setFilter(nextPosition); setState(""); setQuery(""); setPage(1);
-    document.getElementById("edd-tid-details")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-  return <div className={styles.workspace}>
-    <section className="panel"><div className="panel-body">
-      <nav className={styles.breadcrumb} aria-label="EDD location navigation"><a className="button secondary" href="/edd/edds">← All locations · EDD table</a><strong>Station details / {stationCode}</strong><span className="subtle">EDD today: {today} · IST</span></nav>
-      <div className="edd-toolbar">
-        {payload ? <><StationEddDownload href={`/api/ops-pulse/station-edd/report?stationCode=${encodeURIComponent(stationCode)}&report=filtered&day=pending&position=atStation`} label="Download pending EDDs" /><StationEddDownload href={`/api/ops-pulse/station-edd/report?stationCode=${encodeURIComponent(stationCode)}`} label="Download full audit report" /></> : null}
-        <button className="button secondary" type="button" onClick={() => void refresh()} disabled={loading || refreshing}>{refreshing ? "Refreshing…" : "Refresh live"}</button>
-      </div>
-      {payload ? <p role="status" className="subtle"><strong>{stationEddFreshness(payload.fetchedAt)}</strong> · fetched {new Date(payload.fetchedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST. Click a TID for its latest tracking history.</p> : null}
-      <details className={styles.definitions}><summary>Counting rules, snapshot freshness and delivered totals</summary><p>{STATION_EDD_RULE}</p><p>Pending EDDs = at station, EDD today or earlier. Snapshots are not a continuous live status. Delivered totals remain in <a href={`/edd/${encodeURIComponent(stationCode)}/performance`}>Performance</a>; the backlog feed excludes completed deliveries.</p></details>
-      {refreshing ? <p role="status">Pulling fresh backlog from Amazon — allow up to five minutes for large stations. Previous snapshot stays visible.</p> : null}
-      {error ? <p role="alert" style={{ color: "var(--red)" }}>{error}</p> : null}
-      {loading ? <p>Loading station EDD…</p> : !payload ? <p>No snapshot available. Use Refresh live to load the station; missing data is not a zero count.</p> : null}
-    </div></section>
-    {payload ? <>
-      <section className="edd-bucket-grid">
-        <button type="button" className={`edd-bucket-card overdue ${day === "today" && filter === "atStation" ? "active" : ""}`} onClick={() => selectMetric("today", "atStation")}><span>At station · EDD today</span><strong>{summary.todayAtStation.toLocaleString("en-IN")}</strong><small>INDUCTED + RECEIVED · View TIDs</small></button>
-        <button type="button" className={`edd-bucket-card dueToday ${day === "overdue" && filter === "atStation" ? "active" : ""}`} onClick={() => selectMetric("overdue", "atStation")}><span>Overdue at station</span><strong>{summary.overdueAtStation.toLocaleString("en-IN")}</strong><small>EDD before today · View TIDs</small></button>
-        <button type="button" className={`edd-bucket-card ${day === "pending" && filter === "atStation" ? "active" : ""}`} onClick={() => selectMetric("pending", "atStation")}><span>Total pending at station</span><strong>{(summary.todayAtStation + summary.overdueAtStation).toLocaleString("en-IN")}</strong><small>Today + overdue · View TIDs</small></button>
-        <button type="button" className={`edd-bucket-card ${day === "today" && filter === "onRoad" ? "active" : ""}`} onClick={() => selectMetric("today", "onRoad")}><span>On road · EDD today</span><strong>{summary.todayOnRoad.toLocaleString("en-IN")}</strong><small>Not counted at station · View TIDs</small></button>
-        <button type="button" className={`edd-bucket-card ${day === "today" && filter === "other" ? "active" : ""}`} onClick={() => selectMetric("today", "other")}><span>Other status · EDD today</span><strong>{summary.todayOther.toLocaleString("en-IN")}</strong><small>Failed, rejected, other · View TIDs</small></button>
+  const packages=useMemo(()=>[...new Map((payload?.packages??[]).map(p=>[p.trackingId,p])).values()],[payload]);
+  const summary=useMemo(()=>summarizeStationEdd(stationCode,payload?packages:null,payload?.fetchedAt??null,today),[stationCode,payload,packages,today]);
+  const associates=useMemo(()=>stationEddAssociates(packages,today),[packages,today]);
+  const filtered=useMemo(()=>packages.filter(p=>stationEddPackageMatches(p,filter,day,today)&&stationEddSearchMatches(p,"",query)&&(!associate||(stationEddAssociateKey(p)===associate&&["onRoad","delivered","attempted"].includes(stationEddPosition(p,today))))),[packages,filter,day,today,query,associate]);
+  const pages=Math.max(1,Math.ceil(filtered.length/50));const current=Math.min(page,pages);
+  const report=new URLSearchParams({stationCode,report:"filtered",day,position:filter,query,associate});
+  function select(position:StationEddFilter,nextDay:StationEddDay="today",nextAssociate=""){setFilter(position);setDay(nextDay);setAssociate(nextAssociate);setQuery("");setPage(1);setView("tids");}
+  const badge=(position:StationEddFilter)=>`${s.badge} ${position==="delivered"?s.badgeGreen:position==="hfr"?s.badgePurple:position==="atStation"?s.badgeOrange:""}`;
+  return <div className={s.workspace}>
+    <div className={s.breadcrumb}><a className={s.backLink} href="/edd/edds"><ArrowLeft size={16}/> All locations</a><div className={s.actions}><span className={s.muted}>{today} · IST</span><button className={s.button} disabled={loading||!!busy} onClick={()=>void refresh("reload")}><RefreshCw size={14}/> Reload</button><StationEddDownload href={`/api/ops-pulse/station-edd/report?stationCode=${stationCode}`} label="Full station report"/><button className={`${s.button} ${s.primary}`} disabled={loading||!!busy} onClick={()=>void refresh("source")}><RefreshCw size={14} className={busy==="source"?s.spin:""}/>{busy==="source"?"Refreshing source…":"Refresh source"}</button></div></div>
+    {error?<p role="alert" className={s.error}>{error}</p>:null}{message?<p role="status" className={s.notice}>{message}</p>:null}{busy==="source"?<p className={s.notice} role="status">Pulling the station’s latest backlog. Large stations can take up to five minutes. Existing records remain visible.</p>:null}
+    {loading?<div className={`${s.panel} ${s.empty}`}>Loading station delivery position…</div>:!payload?<div className={`${s.panel} ${s.empty}`}>No observed EDD records yet. Refresh source to load this station. Missing data is not a zero count.</div>:<>
+      <section className={s.metrics} aria-label="Today's station EDD position">{([
+        ["atStation","Pending first dispatch",summary.todayAtStation,"No dispatch or attempt history","orange"],
+        ["onRoad","On the road",summary.todayOnRoad,"Dispatched · still outstanding","blue"],
+        ["delivered","Delivered",summary.todayDelivered,"Confirmed delivery outcome","green"],
+        ["hfr","HFR",summary.todayHfr,"Attempted before today","purple"],
+        ["unverified","History to verify",summary.todayUnverified,"Never counted as confirmed pending","neutral"]
+      ] as const).map(([key,label,count,hint,tone])=><button key={key} className={`${s.metric} ${s[tone]} ${filter===key&&day==="today"?s.selectedMetric:""}`} onClick={()=>select(key)}><span>{label}</span><strong>{n(count)}</strong><small>{hint}</small></button>)}</section>
+      <section className={s.panel}>
+        <div className={s.panelHead}><div><span className={s.eyebrow}>STATION DELIVERY POSITION</span><h2>{stationCode} · Today’s EDDs</h2><p>{n(summary.todayTotal)} known EDDs today · {n(associates.reduce((v,a)=>v+a.sent,0))} sent · {associates.filter(a=>!["unattributed","access-point"].includes(a.id)).length} identified associates</p></div><span className={s.muted}>Latest observation {new Date(payload.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})} IST</span></div>
+        <div className={s.coverage}><ShieldCheck size={20}/><div><strong>{n(summary.historyVerified)} of {n(summary.todayTotal)} known EDDs have verified history</strong><p>{n(summary.todayUnverified)} station TIDs await checks. {n(summary.missingDate)} recent records have an unconfirmed EDD date and are not assumed due today. Prior-day attempts go to HFR; delivered packages remain in the known cohort. Totals can change as verification completes.</p><div className={s.progress} role="progressbar" aria-label="EDD history coverage" aria-valuenow={summary.historyVerified} aria-valuemin={0} aria-valuemax={Math.max(1,summary.todayTotal)}><span style={{width:`${summary.todayTotal?summary.historyVerified/summary.todayTotal*100:0}%`}}/></div></div><button className={s.button} disabled={!!busy} onClick={()=>void refresh("verify")}>{busy==="verify"?"Checking histories…":"Verify next batch"}</button></div>
+        <div className={s.tabs} role="tablist" aria-label="Station EDD view"><button role="tab" aria-selected={view==="tids"} className={`${s.tab} ${view==="tids"?s.activeTab:""}`} onClick={()=>setView("tids")}><PackageSearch size={14}/> Tracking IDs</button><button role="tab" aria-selected={view==="associates"} className={`${s.tab} ${view==="associates"?s.activeTab:""}`} onClick={()=>setView("associates")}><Users size={14}/> Associates</button></div>
+        {view==="associates"?<>
+          <div className={s.sectionBody}><strong>Today’s EDDs, by delivery associate</strong><p className={s.muted}>Sent counts unique TIDs with dispatch/outcome evidence—not retained driver IDs. Prior-day HFR is excluded. Select any count for matching TIDs; the full station report includes this table.</p></div>
+          <div className={s.tableWrap}><table className={s.table}><thead><tr><th>Associate</th><th className={s.numeric}>Sent</th><th className={s.numeric}>Delivered</th><th className={s.numeric}>Still on road</th><th className={s.numeric}>Attempted / returned</th><th className={s.numeric}>Delivery rate</th></tr></thead><tbody>{associates.map(a=><tr key={a.id}><td className={s.associateName}><strong>{a.name}</strong>{a.id!==a.name?<small className={s.cellSub}>{a.id}</small>:null}</td>{([ ["all",a.sent],["delivered",a.delivered],["onRoad",a.onRoad],["attempted",a.attempted] ] as const).map(([position,count])=><td key={position} className={s.numeric}><button className={s.numberLink} aria-label={`${a.name} ${position}: ${count} TIDs`} onClick={()=>select(position,"today",a.id)}>{n(count)}</button></td>)}<td className={s.numeric}>{Math.round(a.delivered/a.sent*100)}%<span className={s.miniProgress}><span style={{width:`${a.delivered/a.sent*100}%`}}/></span></td></tr>)}</tbody></table></div>{!associates.length?<div className={s.empty}>No dispatched packages with a confirmed EDD date in the observed cohort yet. Verify histories to resolve missing dates and assignments.</div>:null}
+        </>:<div>
+          <div className={s.sectionBody}>
+            {associate?<div className={s.filterChip}>Associate: {associates.find(a=>a.id===associate)?.name||associate}<button aria-label="Clear associate filter" onClick={()=>setAssociate("")}><X size={14}/></button></div>:null}
+            <div className={s.toolbar}><label className={s.srOnly} htmlFor="edd-period">EDD period</label><select id="edd-period" value={day} onChange={e=>{setDay(e.target.value as StationEddDay);setPage(1);}}>{days.map(([key,label])=><option key={key} value={key}>{label}</option>)}</select><label className={s.srOnly} htmlFor="edd-position">Delivery position</label><select id="edd-position" value={filter} onChange={e=>{setFilter(e.target.value as StationEddFilter);setPage(1);}}>{filters.map(([key,label])=><option key={key} value={key}>{label}</option>)}</select><div className={s.search}><Search size={16}/><input type="search" aria-label="Search tracking IDs" placeholder="TID, associate, city or order" value={query} onChange={e=>{setQuery(e.target.value);setPage(1);}}/></div><StationEddDownload href={`/api/ops-pulse/station-edd/report?${report}`} label={`Download ${n(filtered.length)} TIDs`}/></div>
+            <span className={s.muted}>{n(filtered.length)} matching TIDs · click a tracking ID for latest live history</span>
+          </div>
+          <div className={s.tableWrap}><table className={s.table}><thead><tr><th>Tracking ID</th><th>EDD</th><th>Delivery position</th><th>Latest status</th><th>Associate</th><th>First attempt · IST</th><th>City / PIN</th><th>History checked · IST</th></tr></thead><tbody>{filtered.slice((current-1)*50,current*50).map(p=>{const position=stationEddPosition(p,today);return <tr key={p.trackingId}><td><button className={s.tidButton} onClick={()=>setOpenTid(p.trackingId)}>{p.trackingId}</button><small className={s.cellSub}>{p.orderingOrderId||"No order reference"}</small></td><td>{stationEddDate(p)||"Unconfirmed"}<small className={s.cellSub}>Promised {p.promisedDeliveryDate||"—"}</small></td><td><span className={badge(position)}>{filters.find(f=>f[0]===position)?.[1]}</span></td><td>{eddCurrentState(p)}</td><td>{p.driverName||p.verification?.driverName||"—"}<small className={s.cellSub}>{p.driverId||"No driver ID"}</small></td><td>{p.verification?.firstAttemptAt?new Date(p.verification.firstAttemptAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):p.verification?.historyComplete?"No attempt recorded":"Not verified"}</td><td>{p.city||"—"}<small className={s.cellSub}>{p.postalCode}</small></td><td>{p.verifiedAt?new Date(p.verifiedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"Awaiting check"}</td></tr>;})}</tbody></table></div>
+          {!filtered.length?<div className={s.empty}>{filter==="atStation"&&summary.todayUnverified?`No confirmed pending TIDs yet. ${n(summary.todayUnverified)} station records are awaiting history verification.`:"No tracking IDs match these filters."}</div>:null}
+          <div className={s.pagination}><span>{n(filtered.length)} tracking IDs</span><div><button className={s.button} disabled={current<=1} onClick={()=>setPage(current-1)}>Previous</button><span>{current} / {pages}</span><button className={s.button} disabled={current>=pages} onClick={()=>setPage(current+1)}>Next</button></div></div>
+        </div>}
       </section>
-      <details className="panel"><summary className={styles.detailsSummary}>Source status breakdown · {summary.statuses.length} statuses · {summary.todayTotal.toLocaleString("en-IN")} active EDDs today</summary><div className="panel-body">
-        <div className="edd-table-wrap"><table className="edd-table compact"><thead><tr><th>Raw status</th><th>EDD today</th><th>Overdue</th><th>All dates</th></tr></thead><tbody>
-          {summary.statuses.map(s => <tr key={s.state}><td>{s.state}</td><td>{s.today}</td><td>{s.overdue}</td><td>{s.total}</td></tr>)}
-        </tbody></table></div><p className="subtle">{summary.excludedReverse} reverse shipments excluded · {summary.missingDate} forward shipments with missing EDD (visible under All EDD dates).</p>
-      </div></details>
-      <section className="panel" id="edd-tid-details"><div className="panel-head"><div><h3>Tracking-ID details · {stationCode}</h3><p className="subtle">{days.find(d => d[0] === day)?.[1]} · {filters.find(f => f[0] === filter)?.[1]} · {filtered.length.toLocaleString("en-IN")} TIDs. Select a TID for its full history.</p></div><StationEddDownload href={`/api/ops-pulse/station-edd/report?${reportParams}`} label="Download filtered TIDs" /></div>
-        <div className="panel-body"><div className={styles.toolbar}>
-          <label>EDD period <select value={day} onChange={e => { setDay(e.target.value as StationEddDay); setPage(1); }}>{days.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-          <label>Position <select value={filter} onChange={e => { setFilter(e.target.value as StationEddFilter); setPage(1); }}>{filters.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-          <label>Raw status <select value={state} onChange={e => { setState(e.target.value); setPage(1); }}><option value="">All raw statuses</option>{statuses.map(s => <option key={s}>{s}</option>)}</select></label>
-          <input type="search" aria-label="Search tracking IDs" placeholder="Search TID, driver, city, order…" value={query} onChange={e => { setQuery(e.target.value); setPage(1); }} />
-        </div><div className="edd-table-wrap"><table className="edd-table compact"><thead><tr><th>TID</th><th>EDD / EAD</th><th>Promised date</th><th>Raw status</th><th>Position</th><th>Driver ID (source)</th><th>Last scan by</th><th>City / PIN</th><th>Order ID</th></tr></thead><tbody>
-          {filtered.slice((current - 1) * 50, current * 50).map(pkg => <tr key={pkg.trackingId}>
-            <td><button type="button" className="edd-table-tid-btn" onClick={() => setOpenTrackingId(pkg.trackingId)}>{pkg.trackingId}</button></td>
-            <td>{stationEddDate(pkg) || "Missing"}</td><td>{pkg.promisedDeliveryDate || "—"}</td><td>{pkg.state || "UNKNOWN"}</td><td>{filters.find(f => f[0] === stationEddPosition(pkg))?.[1]}</td>
-            <td>{pkg.driverId || "Not present"}</td><td>{pkg.lastScanBy || "—"}</td><td>{pkg.city || "—"} {pkg.postalCode}</td><td>{pkg.orderingOrderId || "—"}</td>
-          </tr>)}
-        </tbody></table></div>{!filtered.length ? <p>No TIDs match these filters.</p> : null}
-          <div className="edd-pagination"><span>{filtered.length} tracking IDs</span><div><button className="button secondary" disabled={current <= 1} onClick={() => setPage(current - 1)}>Previous</button> Page {current} of {pages} <button className="button secondary" disabled={current >= pages} onClick={() => setPage(current + 1)}>Next</button></div></div>
-        </div>
-      </section>
-    </> : null}
-    <TrackingDetailModal trackingId={openTrackingId} stationHint={stationCode} onClose={() => setOpenTrackingId(null)} />
+      <details className={s.definitions}><summary>Source statuses & counting rules</summary><p>{STATION_EDD_RULE}</p><p>{summary.excludedReverse} reverse records excluded. Records last observed within seven days are retained; older unobserved records are not current station stock.</p><div className={s.tableWrap}><table className={s.table}><thead><tr><th>Source status</th><th>EDD today</th><th>Overdue</th><th>All dates</th></tr></thead><tbody>{summary.statuses.map(v=><tr key={v.state}><td>{v.state}</td><td>{v.today}</td><td>{v.overdue}</td><td>{v.total}</td></tr>)}</tbody></table></div></details>
+    </>}
+    <TrackingDetailModal trackingId={openTid} stationHint={stationCode} onClose={()=>{setOpenTid(null);void reload().catch(()=>{});}}/>
   </div>;
 }

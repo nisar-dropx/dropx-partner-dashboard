@@ -5,10 +5,13 @@ import ts from "typescript";
 import * as XLSX from "xlsx";
 
 const source = readFileSync(new URL("../src/lib/ops-pulse/station-edd.ts", import.meta.url), "utf8");
-const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
-const edd = await import("data:text/javascript;base64," + Buffer.from(compiled).toString("base64"));
+const transpile = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+const verification = {};
+new Function("require","exports",transpile(readFileSync(new URL("../src/lib/ops-pulse/edd-verification.ts",import.meta.url),"utf8")))(()=>({}),verification);
+const edd = {};
+new Function("require","exports",transpile(source))(()=>verification,edd);
 const today = "2026-09-09";
-const pkg = (trackingId, state, values = {}) => ({ trackingId, state, ead: today, bucket: "future", packageType: "Delivery", driverId: "", ...values });
+const pkg = (trackingId, state, values = {}) => ({ trackingId, state, ead: today, bucket: "future", packageType: "Delivery", driverId: "", verifiedAt:today+"T10:00:00Z", verification:{ state, historyComplete:true, firstAttemptAt:null, firstDispatchAt:null }, ...values });
 const packages = [
   pkg("1", "INDUCTED"),
   pkg("2", "INDUCTED", { driverId: "retained-id" }),
@@ -27,7 +30,9 @@ const packages = [
 const summary = edd.summarizeStationEdd("AWEZ", packages, "2026-09-09T11:13:12Z", today);
 assert.equal(summary.todayAtStation, 3, "INDUCTED/RECEIVED count even with retained driver IDs");
 assert.equal(summary.todayOnRoad, 1, "on-road status stays separate even without a driver ID");
-assert.equal(summary.todayOther, 3, "failed/delivered/manifested must not masquerade as station stock");
+assert.equal(summary.todayOther, 1, "only manifested remains other");
+assert.equal(summary.todayDelivered, 1);
+assert.equal(summary.todayAttempted, 1);
 assert.equal(summary.todayTotal, 7, "same EDD cohort with reverse shipments excluded and TIDs deduplicated");
 assert.equal(summary.overdueAtStation, 1);
 assert.equal(summary.missingDate, 1);
@@ -59,7 +64,7 @@ const response = await workbookModule.compressedWorkbookResponse(sheets, "statio
 assert.match(response.headers.get("Content-Disposition"), /station-edd-AWEZ.xlsx/);
 const bytes = Buffer.from(await response.arrayBuffer());
 const parsed = XLSX.read(bytes, { type: "buffer" });
-assert.deepEqual(parsed.SheetNames, ["Summary", "Source Statuses", "At Station EDD Today", "Overdue At Station", "All Snapshot TIDs"]);
+assert.deepEqual(parsed.SheetNames, ["Summary", "Source Statuses", "At Station EDD Today", "Overdue At Station", "Associates EDD Today", "HFR", "All Snapshot TIDs"]);
 const atStation = XLSX.utils.sheet_to_json(parsed.Sheets["At Station EDD Today"]);
 assert.equal(atStation.length, 3);
 assert.deepEqual(atStation.map(r => r["Tracking ID"]), ["1", "2", "3"]);
@@ -97,15 +102,9 @@ const loaderSource = readFileSync(new URL("../src/lib/ops-pulse/station-edd-data
 const loaderJs = ts.transpileModule(loaderSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 const requests = [];
 const snapshots = [{ station_code: "ERSE", packages, fetched_at: "2026-09-09T11:13:12Z" }, { station_code: "AWEZ", packages, fetched_at: "2026-09-09T11:13:12Z" }];
-const mockDb = { from: table => {
-  assert.equal(table, "edd_station_snapshots");
-  return { select: () => ({ in: async (field, codes) => {
-    assert.equal(field, "station_code"); requests.push(codes);
-    return { data: snapshots.filter(s => codes.includes(s.station_code)), error: null };
-  } }) };
-} };
+const mockLedger = { loadEddLedger: async codes => { requests.push(codes); return new Map(snapshots.filter(s=>codes.includes(s.station_code)).map(s=>[s.station_code,{packages:s.packages,fetchedAt:s.fetched_at}])); } };
 const loader = {};
-new Function("require", "exports", loaderJs)(name => name === "server-only" ? {} : name.includes("supabase-admin") ? { supabaseAdmin: mockDb } : edd, loader);
+new Function("require", "exports", loaderJs)(name => name === "server-only" ? {} : name.includes("edd-ledger") ? mockLedger : edd, loader);
 const seen = [];
 const scoped = await loader.loadStationEddNetwork(["AWEZ", "MISSING", "AWEZ"], code => seen.push(code));
 assert.deepEqual(requests, [["AWEZ", "MISSING"]]);
@@ -114,3 +113,16 @@ assert.deepEqual(seen, ["AWEZ"], "export callback must not see ERSE outside requ
 assert.equal(scoped[1].hasSnapshot, false);
 console.log(`PASS All-location pending export: 30000 TIDs across 38 stations, ${networkBytes.length} bytes; scope and missing snapshots verified.`);
 console.log("PASS Station EDD behavioral tests: statuses, dates, retained IDs, reverse shipments, duplicates, missing/stale data, and XLSX round-trip.");
+const history = [{state:"INDUCTED",time:"2026-09-09T05:50:00Z"},{state:"DELIVERY_ATTEMPTED",time:"2026-09-08T11:00:00Z"},{state:"IN_TRANSIT",time:"2026-09-08T06:00:00Z"}];
+const facts = verification.eddHistoryFacts(history);
+assert.equal(facts.firstAttemptAt,"2026-09-08T11:00:00.000Z");
+assert.equal(edd.stationEddPosition(pkg("hfr","INDUCTED",{verification:{...facts,state:"INDUCTED"}}),today),"hfr","previous-day attempt remains HFR after re-induction");
+assert.equal(edd.stationEddPosition(pkg("same","INDUCTED",{verification:{...facts,state:"INDUCTED",firstAttemptAt:today+"T08:00:00Z"}}),today),"attempted","same-day attempt is never fresh EDD pending");
+assert.equal(edd.stationEddPosition(pkg("unknown","INDUCTED",{verification:null}),today),"unverified");
+assert.equal(edd.stationEddPosition(pkg("partial","RECEIVED",{verification:{historyComplete:false}}),today),"unverified");
+assert.equal(edd.stationEddPosition(pkg("372163051022","INDUCTED",{verification:{state:"DELIVERED"}}),today),"delivered","delivered lookup cannot remain in pending");
+const sent = [pkg("a","DELIVERED",{driverId:"A",driverName:"Associate A"}),pkg("b","IN_TRANSIT_TO_CUSTOMER",{driverId:"A"}),pkg("c","INDUCTED",{driverId:"A"}),pkg("a","DELIVERED",{driverId:"A",driverName:"Associate A"})];
+assert.deepEqual(edd.stationEddAssociates(sent,today),[{id:"A",name:"Associate A",sent:2,delivered:1,onRoad:1,attempted:0,other:0}],"unique dispatched cohort, never retained station driver IDs");
+assert.equal(verification.eddHistoryFacts([]).historyComplete,false);
+assert.equal(verification.eddHistoryFacts([{state:"INDUCTED",time:null}]).historyComplete,false);
+console.log("PASS Verified ledger rules: delivered override, HFR, same-day attempts, incomplete history, deduplicated associate counts.");

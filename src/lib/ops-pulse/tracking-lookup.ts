@@ -45,6 +45,8 @@ type WorkerLookupResponse = {
   packageStatus?: string | null;
   reasonCode?: string | null;
   driverName?: string | null;
+  driverId?: string | null;
+  historyComplete?: boolean;
   provider?: string | null;
   shipDate?: string | null;
   promisedDeliveryTime?: string | null;
@@ -147,6 +149,15 @@ export async function lookupTrackingId(params: {
   const location = byStationCode.get(actualStationCode);
   const authorized = params.hasAllLocationAccess || Boolean(location);
   if (!authorized) return { status: "not_found" };
+
+  // Preserve a successful live lookup in the new EDD-only ledger. Only update
+  // an existing TID in a location resolved within this caller's company scope.
+  if (location) {
+    try {
+      const { rememberEddLookup } = await import("./edd-ledger");
+      await rememberEddLookup(actualStationCode, trackingId, found);
+    } catch { /* A cache write must not hide a valid live tracking response. */ }
+  }
 
   return {
     status: "found",

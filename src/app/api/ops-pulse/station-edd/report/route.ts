@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { isStationEddApiDenied, stationEddApiContext } from "@/lib/ops-pulse/station-edd-access";
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { STATION_EDD_RULE, stationEddReportSheets, stationEddToday, stationEddSelection, stationEddPackageMatches, stationEddSearchMatches, stationEddPackageRow } from "@/lib/ops-pulse/station-edd";
-import { fetchEddStation } from "@/lib/ops-pulse/edd-worker";
+import { loadVerifiedEddStation } from "@/lib/ops-pulse/edd-ledger";
+import { stationEddAssociateKey, stationEddPosition } from "@/lib/ops-pulse/station-edd";
 import { compressedWorkbookResponse } from "@/lib/report-workbook";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
     const stations = await loadEddStations(context.companyId, context.authorization.locationScopeIds, context.authorization.hasAllLocationAccess);
     const station = stations.find(entry => entry.code === stationCode);
     if (!station) return NextResponse.json({ error: "Station is outside your assigned location scope." }, { status: 403 });
-    const result = await fetchEddStation({ stationCode });
+    const result = await loadVerifiedEddStation(stationCode);
     if (result.status === "no_snapshot") return NextResponse.json({ error: "No EDD snapshot is available." }, { status: 404 });
     const today = stationEddToday();
     const params = new URL(request.url).searchParams;
@@ -24,8 +25,9 @@ export async function GET(request: Request) {
       const { day, position } = stationEddSelection(params.get("day"), params.get("position"));
       const state = params.get("state") || "";
       const query = params.get("query") || "";
+      const associate = params.get("associate") || "";
       const packages = [...new Map(result.payload.packages.filter(p => p.trackingId).map(p => [p.trackingId, p])).values()];
-      const rows = packages.filter(p => stationEddPackageMatches(p, position, day, today) && stationEddSearchMatches(p, state, query))
+      const rows = packages.filter(p => stationEddPackageMatches(p, position, day, today) && stationEddSearchMatches(p, state, query) && (!associate || (stationEddAssociateKey(p) === associate && ["onRoad","delivered","attempted"].includes(stationEddPosition(p,today)))))
         .map(p => stationEddPackageRow(p, stationCode, station.name, result.payload.fetchedAt, today));
       return await compressedWorkbookResponse([
         { name: "Tracking IDs", rows },

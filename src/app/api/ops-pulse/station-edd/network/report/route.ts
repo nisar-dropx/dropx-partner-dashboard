@@ -31,13 +31,18 @@ export async function GET(request: Request) {
       "Total Pending At Station": row.hasSnapshot ? row.todayAtStation + row.overdueAtStation : "",
       "On Road EDD Today": row.hasSnapshot ? row.todayOnRoad : "",
       "Other Status EDD Today": row.hasSnapshot ? row.todayOther : "",
-      "All Active EDD Today": row.hasSnapshot ? row.todayTotal : "",
+      "Known EDD Today": row.hasSnapshot ? row.todayTotal : "",
+      "Delivered EDD Today": row.hasSnapshot ? row.todayDelivered : "",
+      "HFR EDD Today": row.hasSnapshot ? row.todayHfr : "",
+      "Attempted EDD Today": row.hasSnapshot ? row.todayAttempted : "",
+      "History To Verify EDD Today": row.hasSnapshot ? row.todayUnverified : "",
+      "Unconfirmed EDD Date": row.hasSnapshot ? row.missingDate : "",
       "Snapshot Refreshed UTC": row.fetchedAt ?? "", Freshness: stationEddFreshness(row.fetchedAt)
     }));
     return await compressedWorkbookResponse([
       { name: "Station EDD", rows },
       ...(pending ? [{ name: "Pending TIDs", rows: pendingRows }] : []),
-      { name: "Definitions", rows: [{ Definition: STATION_EDD_RULE, Selection: pending ? `At station; EDD period: ${day}. All authorized locations, independent of table search.` : "All authorized station summaries", "Pending definition": "At station with EDD today or earlier; excludes future and unknown dates, on-road, other statuses and reverse shipments.", Freshness: "Counts include available stale snapshots. Missing data is blank, not zero.", Delivered: "See Performance for completed deliveries; this is the active backlog." }] },
+      { name: "Definitions", rows: [{ Definition: STATION_EDD_RULE, Selection: pending ? `Confirmed pending first dispatch; EDD period: ${day}. All authorized locations, independent of table search.` : "All authorized station summaries", Coverage: "Known EDD cohort from retained observations seen within seven days. Missing dates and unverified histories are explicit and excluded from confirmed pending. Totals are not full-source coverage until verification is complete.", Freshness: "Recorded observations, not continuous live tracking. Missing data is blank, not zero.", Delivered: "Retained delivery outcomes with a known EDD; prior-day attempts stay in HFR." }] },
       { name: "Source Statuses", rows: data.flatMap(row => row.statuses.map(s => ({ Station: row.stationCode, Status: s.state, "EDD Today": s.today, Overdue: s.overdue, "All Dates": s.total, "Snapshot Refreshed UTC": row.fetchedAt }))) }
     ], `${pending ? `pending-edd-all-locations-${day}` : "station-edd"}-${stationEddToday()}.xlsx`);
   } catch (error) {
