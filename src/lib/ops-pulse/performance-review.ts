@@ -182,6 +182,7 @@ export type PerformanceOperationalSnapshot = {
   deliveredCount: number;
   firstPunchAt: string | null;
   firstPunchBy: string | null;
+  firstPunchPersonId?: string | null;
   openingFirstOtherPunch: { time: string; name: string; profileLabel: string; workerCode: string } | null;
   openingLateMinutes: number | null;
   openingShiftName: string | null;
@@ -634,6 +635,9 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       if (!punch) continue;
       current.firstPunchAt = punch.time;
       current.firstPunchBy = punch.name || punch.workerCode || `Biometric ID ${punch.enrolmentId}`;
+      const personType = punch.profileType === "contractor" ? "contractor" : "employee";
+      const personId = punch.accountId ?? (personType === "employee" ? punch.employeeId : punch.fieldExecutiveId);
+      current.firstPunchPersonId = personId ? `${personType}:${personId}` : null;
       current.openingLateMinutes = stationOpeningLateMinutes(
         istClockMinutes(punch.time), current.scheduledOpeningTime, current.openingWindowStart
       );

@@ -82,6 +82,7 @@ const React = require("react"), { renderToStaticMarkup } = require("react-dom/se
 const ui = compile("src/components/performance-rca-actions.tsx", {
   "@/lib/date-format": { formatDashboardDate: v => v }, "@/app/ops-pulse/performance/actions": actions,
   "@/lib/ops-pulse/review-discipline-rca": logic,
+  "@/components/review-attendance-history": { ReviewPersonHistoryLink: () => null },
   "@/components/review-action-form": { ReviewActionForm: ({ children, className }) => React.createElement("form", { className }, children) }
 });
 const props = { canEdit: false, canEditDiscipline: true, activeDisciplineKeys: rows.map(r => r.key), rows, date: review.source_date, itemsByMetric: new Map(), reviewId: review.id, reviewVersion: review.updated_at, stationCode: "QLDA" };

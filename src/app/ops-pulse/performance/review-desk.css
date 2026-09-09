@@ -21,6 +21,33 @@
 .performance-review-desk .review-operation-table small { display: block; font-size: 10px; color: #64748b; white-space: normal; max-width: 250px; margin-top: 3px; }
 .review-operation-pending { color: #b42318; font-weight: 750; }
 .review-operation-muted { color: #94a3b8; }
+.performance-review-desk .review-attendance-exceptions { grid-column: 1/-1; border-top: 1px solid #e2e8f0; }
+.performance-review-desk .review-attendance-exceptions > summary { min-height: 74px; }
+.review-attendance-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin: 12px 0; font-size: 12px; }
+.review-attendance-toolbar small { display: block; color: #64748b; font-size: 10px; margin-top: 4px; }
+.review-attendance-period { display: inline-flex; padding: 3px; border-radius: 8px; background: #f1f5f9; gap: 3px; }
+.review-attendance-period button,.review-attendance-button { border: 1px solid transparent; border-radius: 6px; padding: 7px 10px; background: transparent; color: #475569; font: inherit; font-size: 11px; cursor: pointer; }
+.review-attendance-period button[aria-pressed="true"] { background: #fff; color: #c2410c; box-shadow: 0 1px 3px #0f172a1a; }
+.review-attendance-button { border-color: #dfe4ec; background: #fff; }
+.review-attendance-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; align-items: center; }
+.review-attendance-filters :is(input,select) { background: #fff; border: 1px solid #dfe4ec; border-radius: 7px; padding: 8px 9px; font-size: 11px; color: #334155; min-height: 34px; }
+.review-attendance-filters input { flex: 1 1 170px; }
+.review-attendance-filters label { font-size: 11px; color: #64748b; }
+.review-person-link { border: 0; padding: 0; text-align: left; background: transparent; color: #c2410c; font: inherit; font-weight: 650; cursor: pointer; overflow-wrap: anywhere; }
+.review-person-link:hover { text-decoration: underline; }
+:is(.review-person-link,.review-attendance-button,.review-attendance-period button):focus-visible { outline: 2px solid #f97316; outline-offset: 3px; }
+.review-person-inline { margin: 10px 12px; font-size: 12px; }
+.review-person-history { min-width: 0; max-width: 100%; }
+.review-person-history-table table { min-width: 760px; }
+.review-person-history-table :is(td,th) { text-align: left; }
+.review-person-history-table td:last-child { min-width: 210px; white-space: normal; }
+.review-person-history-table td:nth-child(2) { max-width: 170px; white-space: normal; }
+.review-repeat-badge { display: inline-block; padding: 4px 7px; border-radius: 6px; background: #fff1f2; color: #9f1239; white-space: nowrap; font-weight: 650; }
+.review-repeat-note { font-size: 11px; color: #9f1239; margin: 8px 0; }
+.performance-review-desk .review-operation-card > summary .review-repeat-summary { color: #9f1239; font-weight: 650; }
+.review-attendance-state { font-size: 12px; color: #64748b; padding: 8px 0; }
+.review-person-history .review-operation-note { font-size: 11px; color: #64748b; line-height: 1.5; }
+.performance-opening-popover:has(.review-person-history) { width: min(850px,100%); max-width: 100%; }
 .review-utr-table :is(th,td) { text-align: left; white-space: normal; }
 .review-utr-table table { min-width: 720px; }
 .review-utr-table th:first-child { min-width: 160px; }

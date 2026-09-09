@@ -1,8 +1,8 @@
 import { reviewClock, type ReviewEddTimeline, type UtrDiscipline } from "@/lib/ops-pulse/review-operations";
 import { formatDashboardDate } from "@/lib/date-format";
+import { UtrAttendanceDrilldown, UtrRepeatSummary } from "@/components/review-attendance-history";
 
 const count = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("en-IN");
-const hours = (value: number | null) => value == null ? "—" : `${Math.floor(value / 60)}h ${value % 60}m`;
 
 export function PerformanceEddClearanceCard({ data }: { data: { timeline: ReviewEddTimeline; error: string | null } }) {
   const { timeline: t, error } = data;
@@ -37,17 +37,13 @@ export function PerformanceUtrDisciplineCard({ data, date }: { data: { disciplin
     <summary aria-label="UTR reporting discipline — view staff attendance">
       <span>UTR reporting discipline</span><strong>{error ? "Data unavailable" : d.scheduled ? `${d.onTime}/${d.scheduled} on time` : "No scheduled shifts"}</strong>
       <small>{d.late} late · {d.notReported} not reported{d.noShift ? ` · ${d.noShift} shift missing` : ""}</small>
+      <UtrRepeatSummary/>
     </summary>
     <div className="review-operation-popover">
       <header><div><b>UTR reporting · {formatDashboardDate(date)}</b><p>Station People staff · approved shifts and attendance</p></div><span className="review-operation-tag">{d.onTime}/{d.scheduled} on time</span></header>
       {error ? <p role="alert">{error}</p> : null}
       <div className="review-operation-summary"><span>Scheduled <b>{d.scheduled}</b></span><span>On time <b>{d.onTime}</b></span><span>Late <b>{d.late}</b></span><span>Not reported <b>{d.notReported}</b></span></div>
-      <div className="review-operation-table review-utr-table" role="region" aria-label="UTR staff attendance, scroll for all people and columns" tabIndex={0}>
-        <table><thead><tr><th>Person / role</th><th>Shift</th><th>Reported</th><th>Left</th><th>Worked</th><th>Reporting</th></tr></thead><tbody>
-          {d.rows.map(row => <tr key={row.id}><th scope="row">{row.name}<small>{row.role} · {row.code}</small></th><td>{row.shift || "Not linked"}</td><td>{reviewClock(row.inTime)}</td><td>{row.outTime ? reviewClock(row.outTime) : row.inTime ? "Missing out" : "—"}</td><td>{hours(row.workMinutes)}</td><td>{row.status}{row.locationNote ? <small>{row.locationNote}</small> : null}</td></tr>)}
-          {!d.rows.length ? <tr><td colSpan={6}>{error ? "Attendance could not be loaded." : "No station People staff found for this date."}</td></tr> : null}
-        </tbody></table>
-      </div>
+      <UtrAttendanceDrilldown discipline={d}/>
       <p className="review-operation-note">On time uses the approved shift’s reporting grace. {d.excluded} leave/off-duty staff are excluded; {d.noShift} without a linked shift are shown separately, never counted as on time. Worked hours come from attendance; an incomplete in/out pair is not shown as zero hours. Physical-location exceptions remain visible.</p>
     </div>
   </details>;

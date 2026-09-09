@@ -5,6 +5,7 @@ import type { PerformanceReviewItem } from "@/lib/ops-pulse/performance-review";
 import { savePerformanceDisciplineReason, savePerformanceReviewItem } from "@/app/ops-pulse/performance/actions";
 import { ReviewActionForm } from "@/components/review-action-form";
 import { DISCIPLINE_REASON_MAX } from "@/lib/ops-pulse/review-discipline-rca";
+import { ReviewPersonHistoryLink } from "@/components/review-attendance-history";
 
 type ReviewMetric = {
   actual: number | null;
@@ -65,6 +66,7 @@ export function PerformanceRcaActions({
             </summary>
             {metric.reasonOnly ? <div className="review-delay-detail">
               <p className="review-delay-evidence">{metric.evidence}</p>
+              {metric.key.startsWith("utr_late_") ? <ReviewPersonHistoryLink personId={metric.key.replace(/^utr_late_(employee|contractor)_/, "$1:")}/> : null}
               {canEditDiscipline && activeDisciplineKeys.includes(metric.key) ? <ReviewActionForm action={savePerformanceDisciplineReason} className="review-delay-form">
                 <input type="hidden" name="review_id" value={reviewId} />
                 <input type="hidden" name="source_date" value={date} />

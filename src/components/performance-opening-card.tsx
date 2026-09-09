@@ -1,5 +1,6 @@
 import type { PerformanceOperationalSnapshot } from "@/lib/ops-pulse/performance-review";
 import {TrendButton} from "@/components/performance-trends";
+import { ReviewPersonHistoryLink } from "@/components/review-attendance-history";
 
 function timeText(value: string | null) {
   if (!value) return "—";
@@ -17,7 +18,7 @@ function durationText(minutes: number | null) {
   return `${hours} hr${hours === 1 ? "" : "s"}${remainder ? ` ${remainder} min` : ""} late`;
 }
 
-type OpeningSnapshot = Pick<PerformanceOperationalSnapshot, "firstPunchAt" | "firstPunchBy" | "openingFirstOtherPunch" | "openingLateMinutes" | "scheduledOpeningTime" | "openingShiftName" | "openingShiftSource" | "openingWindowStart" | "openingWindowEnd">;
+type OpeningSnapshot = Pick<PerformanceOperationalSnapshot, "firstPunchAt" | "firstPunchBy" | "firstPunchPersonId" | "openingFirstOtherPunch" | "openingLateMinutes" | "scheduledOpeningTime" | "openingShiftName" | "openingShiftSource" | "openingWindowStart" | "openingWindowEnd">;
 
 export function PerformanceOpeningCard({ snapshot }: { snapshot: OpeningSnapshot }) {
   const earlier = snapshot.openingFirstOtherPunch;
@@ -33,6 +34,7 @@ export function PerformanceOpeningCard({ snapshot }: { snapshot: OpeningSnapshot
       <p><span>Station opening shift</span><b>{timeText(snapshot.scheduledOpeningTime)}</b></p>
       <p><span>First People opening punch</span><b>{timeText(snapshot.firstPunchAt)}</b></p>
       <p><span>People profile</span><b>{snapshot.firstPunchBy || "No People opening punch"}</b></p>
+      {snapshot.firstPunchPersonId ? <ReviewPersonHistoryLink personId={snapshot.firstPunchPersonId} label={`${snapshot.firstPunchBy || "Person"} · attendance history`}/> : null}
       <p><span>Variance</span><b className={isLate ? "late" : ""}>{variance}</b></p>
       {earlier ? <div className="performance-opening-exception" role="note">
         <p className="performance-opening-explanation">The first station punch was by a non-People profile. It does not count as the station opening.</p>

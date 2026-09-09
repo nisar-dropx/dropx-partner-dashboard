@@ -5,6 +5,7 @@ const component = read("src/components/performance-review-desk.tsx");
 const carriedActions = read("src/components/performance-carried-actions.tsx");
 const opening = read("src/components/performance-opening-card.tsx");
 const operations = read("src/components/performance-review-operations.tsx");
+const attendanceHistory = read("src/components/review-attendance-history.tsx");
 const picker = read("src/components/performance-review-picker.tsx");
 const styles = read("src/app/globals.css");
 const reviewStyles = read("src/app/ops-pulse/performance/review-desk.css");
@@ -23,7 +24,8 @@ const checks = [
   [styles.includes(".performance-associate-popover-scroll { max-width: 100%; max-height: 290px; overflow: auto;"), "large associate lists scroll within their drill-down"],
   [styles.includes(".performance-associate-popover-head { position: sticky;"), "associate headers remain visible while scrolling"],
   [component.includes('className="performance-associate-popover-scroll"'), "associate table uses the contained scroll region"],
-  [((component + opening + operations).match(/name="performance-review-fact"/g) ?? []).length === 5, "top drill-downs form one exclusive accordion group"],
+  [((component + opening + operations + attendanceHistory).match(/name="performance-review-fact"/g) ?? []).length === 6, "top drill-downs form one exclusive accordion group"],
+  [component.includes("metrics.length - metricMisses.length"), "attendance exceptions do not reduce Amazon metric health"],
   [!styles.includes("details:nth-child(2) .performance-associate-popover"), "drill-down position does not depend on the selected card index"],
   [component.includes("<PerformanceReviewPicker"), "review desk uses the synchronized date and station picker"],
   [picker.includes('value={selectedDate}') && picker.includes('value={selectedStation}'), "picker controls remain synchronized with the loaded review"],
@@ -52,3 +54,4 @@ if (failures.length) {
 
 await import("./verify-review-operations.mjs");
 await import("./verify-review-discipline-rca.mjs");
+await import("./verify-review-attendance-history.mjs");

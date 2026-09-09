@@ -14,6 +14,7 @@ import type { PerformanceReviewBacklog, PerformanceFollowup, PerformanceNoonEmd 
 import { reviewLink } from "@/lib/ops-pulse/review-periods";
 import { PerformanceOpeningCard } from "@/components/performance-opening-card";
 import { PerformanceEddClearanceCard, PerformanceUtrDisciplineCard } from "@/components/performance-review-operations";
+import { ReviewAttendanceProvider, ReviewAttendanceExceptionsCard } from "@/components/review-attendance-history";
 import type { loadReviewEddHistory, loadReviewUtrDiscipline } from "@/lib/ops-pulse/review-operations-data";
 import { formatDashboardDate } from "@/lib/date-format";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
@@ -148,7 +149,8 @@ export function PerformanceReviewDesk(props: Props) {
   const carriedActions = selectedItems.filter((item) => item.review_id !== review?.id);
   const disciplineRows = buildDisciplineRca(snapshot, props.utrDiscipline.discipline);
   const missingReasons = missingDisciplineReasons(disciplineRows, currentItems);
-  const misses = [...metrics.filter((metric) => metric.severity === "red" || metric.severity === "amber"), ...disciplineRows];
+  const metricMisses = metrics.filter((metric) => metric.severity === "red" || metric.severity === "amber");
+  const misses = [...metricMisses, ...disciplineRows];
   // Saved RCA must remain visible even when a later source refresh makes its metric green or unavailable.
   const savedOnlyRows: ReviewMetric[] = currentItems
     .filter((item) => {
@@ -202,7 +204,7 @@ export function PerformanceReviewDesk(props: Props) {
     }))
   ).sort((a,b)=>a.step_order-b.step_order);
   const reviewUpdates = discussionFeedUpdates(updates.filter((update) => update.review_id === review?.id));
-  return <PerformanceTrendProvider key={`${selectedCode}-${date}`} station={selectedCode} date={date}><div className="performance-review-desk">
+  return <PerformanceTrendProvider key={`${selectedCode}-${date}`} station={selectedCode} date={date}><ReviewAttendanceProvider station={selectedCode} date={date}><div className="performance-review-desk">
     {notice ? <div className="performance-review-message success">{notice}</div> : null}
     {error ? <div className="performance-review-message error">{error}</div> : null}
     <section className="ops-control-strip performance-review-control">
@@ -258,7 +260,8 @@ export function PerformanceReviewDesk(props: Props) {
           <PerformanceOpeningCard snapshot={snapshot}/>
           <PerformanceEddClearanceCard data={props.eddClearance}/>
           <PerformanceUtrDisciplineCard data={props.utrDiscipline} date={date}/>
-          <article><span>Metric health</span><strong>{metrics.length - misses.length}/{metrics.length}</strong><small>Within configured range</small></article>
+          <article><span>Metric health</span><strong>{metrics.length - metricMisses.length}/{metrics.length}</strong><small>Within configured range</small></article>
+          <ReviewAttendanceExceptionsCard/>
         </div>
         {previousReview?.review_summary ? (
           <div className="performance-previous-takeaway">
@@ -346,5 +349,5 @@ export function PerformanceReviewDesk(props: Props) {
         <p>{update.note}</p>
       </article>) : <p className="review-empty">No comments yet.</p>}</div>
     </section> : null}
-  </div></PerformanceTrendProvider>;
+  </div></ReviewAttendanceProvider></PerformanceTrendProvider>;
 }
