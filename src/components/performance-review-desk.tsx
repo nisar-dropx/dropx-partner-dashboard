@@ -276,26 +276,29 @@ export function PerformanceReviewDesk(props: Props) {
           <summary><span>Performance scorecard · today&apos;s uploaded metrics</span><b>{metrics.length} metrics</b></summary>
           <p className="review-history-hint">This is where today&apos;s Hawkeye upload lands. Click any metric for daily values · 7 or 14 days</p><div className="performance-review-metrics">{metrics.map((metric) => <article className={metric.severity} key={metric.key}><span title={metric.label}>{metric.short}</span><strong>{valueText(metric.actual)}</strong><small>{metric.target == null ? "Reference metric" : `Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}</small><TrendButton group="performance" metric={metric.key} label={metric.short} variant="card"/></article>)}</div>
         </details>
-        <PerformanceCarriedActions items={carriedActions} previous={previousStationReviews} review={review} canUpdate={props.canManageActions} selectedDate={date}/>
-        {props.stationTargetsError ? <p role="alert">{props.stationTargetsError}</p> : null}
-        <div className="review-station-updates">
-          <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections} clearanceCutoff={props.stationTargets.clearanceCutoff}/>
-          <PerformanceNoonEmdEntry target={props.stationTargets.emdNoonTarget} entry={props.noonEmd.row} error={props.noonEmd.error} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
-        </div>
-        {review && rcaRows.length ? (
+        {rcaRows.length ? (
           <PerformanceRcaActions
-            key={review.id}
+            key={review?.id ?? `${selectedCode}-${date}-not-started`}
             canEdit={canEdit}
             canEditDiscipline={canEdit || canCompleteStep}
             activeDisciplineKeys={disciplineRows.map(row => row.key)}
             date={date}
             itemsByMetric={itemsByMetricForRca}
             rows={rcaRows}
-            reviewId={review.id}
-            reviewVersion={review.updated_at}
+            reviewId={review?.id ?? ""}
+            reviewVersion={review?.updated_at ?? ""}
             stationCode={selectedCode}
+            reviewStarted={Boolean(review)}
+            startControl={!review && canAdd && !props.readOnlyPreview ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button className="button">Start review & add RCA</button></ReviewActionForm> : undefined}
+            editHint={!canEdit ? canCompleteStep ? "You can add short delay reasons. Performance RCA is editable by the first-stage reviewer or authorised oversight." : "View only at this stage. The assigned reviewer or authorised oversight can update these entries." : undefined}
           />
         ) : null}
+        <PerformanceCarriedActions items={carriedActions} previous={previousStationReviews} review={review} canUpdate={props.canManageActions} selectedDate={date}/>
+        {props.stationTargetsError ? <p role="alert">{props.stationTargetsError}</p> : null}
+        <div className="review-station-updates">
+          <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections} clearanceCutoff={props.stationTargets.clearanceCutoff}/>
+          <PerformanceNoonEmdEntry target={props.stationTargets.emdNoonTarget} entry={props.noonEmd.row} error={props.noonEmd.error} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
+        </div>
         {review && canEdit ? (
           <ReviewActionForm key={`takeaway-${review.id}`} action={savePerformanceReviewOperations} className="performance-operations-form">
             <input type="hidden" name="review_id" value={review.id}/>

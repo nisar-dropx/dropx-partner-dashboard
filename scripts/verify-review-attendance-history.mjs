@@ -33,6 +33,8 @@ assert.equal(classify(absent,time("05:00")).status,"upcoming");
 assert.equal(classify(absent,time("08:00")).status,"not_reported");
 assert.equal(classify({...absent,start:"22:00:00",end:"06:00:00"},"2026-09-09T04:00:00+05:30").status,"not_reported","night shift is not absent at midnight");
 assert.equal(classify({...absent,start:"22:00:00",end:"06:00:00"},"2026-09-09T07:00:00+05:30").status,"unplanned_absence");
+assert.equal(classify({start:"23:00:00",end:"08:00:00",inTime:time("03:00")}).status,"attendance_conflict","early-morning punch must not be marked on time for that evening's night shift");
+assert.equal(classify({dayType:"weekly_off",overnightCarryoverOnly:true}).status,"attendance_conflict","previous night's carryover is not new week-off work");
 const outside=classify({inScope:false});
 assert.equal(outside.inTime,null); assert.equal(outside.shift,null); assert.equal(outside.workMinutes,null);
 assert.throws(()=>logic.attendanceHistoryDates("2026-02-30"));
@@ -81,6 +83,18 @@ tables.hr_work_assignments=[{engagement_id:"engagement",location_id:"station1",e
 const serviceHistory=await loader.loadReviewAttendanceHistory("company1",{id:"station1",station_code:"GDRD"},date);
 assert.equal(serviceHistory.people[0].days[0].status,"outside_station","profile location cannot invent service before a known engagement/assignment");
 assert.equal(serviceHistory.people[0].days.at(-1).status,"late");
+tables.attendance_daily[0]={...tables.attendance_daily[0],worker_type:null,employee_id:null,in_time:null,out_time:null,punch_count:0,status:"A"};
+tables.attendance_punches=[];
+tables.biometric_enrolments=[{enrolment_id:"123",profile_type:"employee",account_id:"a",effective_from:"2026-09-01",effective_to:null}];
+assert.equal((await loader.loadReviewAttendanceHistory("company1",{id:"station1",station_code:"GDRD"},date)).people[0].days.at(-1).status,"unplanned_absence","unlinked no-punch absent aggregates use the dated registration");
+tables.biometric_enrolments.push({enrolment_id:"123",profile_type:"workforce",account_id:"other",effective_from:"2026-09-01",effective_to:null});
+assert.equal((await loader.loadReviewAttendanceHistory("company1",{id:"station1",station_code:"GDRD"},date)).people[0].days.at(-1).status,"absence_unconfirmed","conflicting Workforce mapping cannot become a People absence");
+tables.biometric_enrolments=[{enrolment_id:"123",profile_type:"employee",account_id:"a",effective_from:"2026-09-09",effective_to:null}];
+assert.equal((await loader.loadReviewAttendanceHistory("company1",{id:"station1",station_code:"GDRD"},date)).people[0].days.at(-1).status,"absence_unconfirmed","a future registration cannot attribute earlier absence");
+tables.biometric_enrolments[0].effective_from="2026-09-01";
+tables.hr_roster_entries[0].hr_shifts={name:"Night",start_time:"23:00:00",end_time:"08:00:00",grace_in_minutes:0};
+tables.attendance_punches=[{enrolment_id:"123",punch_date:"2026-09-09",punch_time:"2026-09-09T03:00:00+05:30"}];
+assert.equal((await loader.loadReviewAttendanceHistory("company1",{id:"station1",station_code:"GDRD"},date)).people[0].days.at(-1).status,"attendance_conflict","next-calendar-day punches protect an overnight shift from false absence");
 
 const ui=read("src/components/review-attendance-history.tsx");
 assert.ok(ui.includes("AbortController")&&ui.includes('cache: "no-store"'),"cancel stale navigation requests and do not cache private attendance");
