@@ -37,6 +37,7 @@ function Modal({
   return (
     <dialog
       ref={ref}
+      aria-label={title}
       className="fin-dialog"
       onCancel={(event) => {
         event.preventDefault();
@@ -85,6 +86,7 @@ export function PricingManager({
   const [historyKey, setHistoryKey] = useState<string | null>(null);
   const [upload, setUpload] = useState(false);
   const [preview, setPreview] = useState<PricingInput[] | null>(null);
+  const importReadVersion = useRef(0);
   const [importMonth, setImportMonth] = useState(todayIndia().slice(0, 7));
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -169,6 +171,7 @@ export function PricingManager({
   };
   async function readFile(file: File | undefined) {
     if (!file) return;
+    const readVersion = ++importReadVersion.current;
     setError("");
     setPreview(null);
     try {
@@ -180,6 +183,7 @@ export function PricingManager({
       ]
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("");
+      if (readVersion !== importReadVersion.current) return;
       setPreview(
         amazonCsv(
           new TextDecoder().decode(bytes),
@@ -189,7 +193,8 @@ export function PricingManager({
         ),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to read CSV.");
+      if (readVersion === importReadVersion.current)
+        setError(e instanceof Error ? e.message : "Unable to read CSV.");
     }
   }
   return (
@@ -658,6 +663,7 @@ export function PricingManager({
               type="month"
               value={importMonth}
               onChange={(e) => {
+                importReadVersion.current++;
                 setImportMonth(e.target.value);
                 setPreview(null);
               }}
@@ -667,6 +673,7 @@ export function PricingManager({
           <label className="fin-label">
             Amazon MG CSV
             <input
+              key={importMonth}
               type="file"
               accept=".csv,text/csv"
               onChange={(e) => void readFile(e.target.files?.[0])}
