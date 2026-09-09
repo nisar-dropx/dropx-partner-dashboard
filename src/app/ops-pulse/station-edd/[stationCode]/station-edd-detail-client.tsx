@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { TrackingDetailModal } from "@/components/tracking-detail-modal";
 import type { EddStationPayload, EddStationResult } from "@/lib/ops-pulse/edd-worker";
 import { STATION_EDD_RULE, stationEddDate, stationEddFreshness, stationEddPackageMatches, stationEddPosition, stationEddToday, summarizeStationEdd, type StationEddDay, type StationEddFilter } from "@/lib/ops-pulse/station-edd";
@@ -59,13 +58,13 @@ export function StationEddDetailClient({ stationCode }: { stationCode: string })
   const current = Math.min(page, pages);
   return <>
     <section className="panel"><div className="panel-body">
-      <div className="edd-toolbar"><Link href="/edd/edds">← All stations</Link><span className="subtle" style={{ flex: 1 }}>EDD today: {today} · IST</span>
+      <div className="edd-toolbar"><a href="/edd/edds">← All stations</a><span className="subtle" style={{ flex: 1 }}>EDD today: {today} · IST</span>
         {payload ? <StationEddDownload href={`/api/ops-pulse/station-edd/report?stationCode=${encodeURIComponent(stationCode)}`} label="Download detailed report" /> : null}
         <button className="button secondary" type="button" onClick={() => void refresh()} disabled={loading || refreshing}>{refreshing ? "Refreshing…" : "Refresh live"}</button>
       </div>
       <p>{STATION_EDD_RULE}</p>
       {payload ? <p role="status"><strong>{stationEddFreshness(payload.fetchedAt)}</strong> · fetched {new Date(payload.fetchedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST. This snapshot is not a continuous live status; click a TID for its latest tracking history.</p> : null}
-      <p className="subtle">Delivered totals remain in <Link href={`/edd/${encodeURIComponent(stationCode)}/performance`}>Performance</Link>. The active-backlog feed excludes completed deliveries.</p>
+      <p className="subtle">Delivered totals remain in <a href={`/edd/${encodeURIComponent(stationCode)}/performance`}>Performance</a>. The active-backlog feed excludes completed deliveries.</p>
       {refreshing ? <p role="status">Pulling fresh backlog from Amazon — allow up to five minutes for large stations. Previous snapshot stays visible.</p> : null}
       {error ? <p role="alert" style={{ color: "var(--red)" }}>{error}</p> : null}
       {loading ? <p>Loading station EDD…</p> : !payload ? <p>No snapshot available. Use Refresh live to load the station; missing data is not a zero count.</p> : null}

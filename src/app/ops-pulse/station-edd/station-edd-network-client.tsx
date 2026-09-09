@@ -1,6 +1,5 @@
 "use client";
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import type { EddStationPayload } from "@/lib/ops-pulse/edd-worker";
 import type { EddStationOption } from "@/lib/ops-pulse/edd-stations";
 import { STATION_EDD_RULE, stationEddFreshness, summarizeStationEdd, type StationEddSummary } from "@/lib/ops-pulse/station-edd";
@@ -59,7 +58,7 @@ export function StationEddNetworkClient({ stations, initialNetwork, initialError
   return <>
     <section className="panel"><div className="panel-body">
       <p>{STATION_EDD_RULE}</p>
-      <p className="subtle">EDD date: {rows[0]?.today || "today"} · IST. Counts are as of each station's refresh time. Completed deliveries are reported separately in the <Link href="/edd/performance">Performance tab</Link>; they are not included in this active-backlog feed.</p>
+      <p className="subtle">EDD date: {rows[0]?.today || "today"} · IST. Counts are as of each station's refresh time. Completed deliveries are reported separately in the <a href="/edd/performance">Performance tab</a>; they are not included in this active-backlog feed.</p>
       {stale ? <p role="status" className="status-pill warn">{stale} stations have old or missing snapshots. Totals below include available old snapshots; refresh affected stations for the current position.</p> : null}
     </div></section>
     <section className="edd-bucket-grid">
@@ -80,7 +79,7 @@ export function StationEddNetworkClient({ stations, initialNetwork, initialError
           <th>Snapshot · IST</th><th>Actions</th>
         </tr></thead><tbody>
           {filtered.slice((current - 1) * 15, current * 15).map(row => <tr key={row.stationCode}>
-            <td><Link href={`/edd/${encodeURIComponent(row.stationCode)}/edds`}>{row.stationCode}<small style={{ display: "block" }}>{names.get(row.stationCode)}</small></Link></td>
+            <td><a href={`/edd/${encodeURIComponent(row.stationCode)}/edds`}>{row.stationCode}<small style={{ display: "block" }}>{names.get(row.stationCode)}</small></a></td>
             {columns.slice(1).map(([key]) => <td key={key}>{row.hasSnapshot ? Number(row[key]).toLocaleString("en-IN") : "—"}</td>)}
             <td>{formatted(row.fetchedAt)}<small style={{ display: "block" }}>{stationEddFreshness(row.fetchedAt)}</small></td>
             <td><button className="button secondary" type="button" disabled={!!busy} onClick={() => void refresh(row.stationCode)}>{busy === row.stationCode ? "Refreshing…" : "Refresh live"}</button></td>
