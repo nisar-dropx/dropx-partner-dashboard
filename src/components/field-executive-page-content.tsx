@@ -9,6 +9,7 @@ import { ProfileVerificationPanel } from "@/components/profile-verification-pane
 import { ScopedDesignationFields, type ScopedDesignationOption, type ScopedLocationOption } from "@/components/scoped-designation-fields";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
+import { WorkforceEmailInput, WorkforceMobileInput } from "@/components/workforce-contact-inputs";
 import { WorkforceFullNameInput } from "@/components/workforce-full-name-input";
 import { isCompanyOwner, type AuthorizationContext, requirePagePermission } from "@/lib/authorization";
 import { currentAccessSurface, type AccessSurface } from "@/lib/access-surface";
@@ -413,7 +414,7 @@ function FieldExecutiveForm({
       {executive ? <input type="hidden" name="id" value={executive.id} /> : null}
 
       <label>Full name<WorkforceFullNameInput required={!optionalEditFields} defaultValue={textValue(executive?.full_name)} /></label>
-      <label>Email<input className="field" name="email" placeholder="Enter email" required={!optionalEditFields} type="email" inputMode="email" autoComplete="email" title="Enter a valid email address" defaultValue={textValue(executive?.email)} /></label>
+      <label>Email<WorkforceEmailInput required={!optionalEditFields} defaultValue={textValue(executive?.email)} /></label>
 
       <label>Country code
         <select className="select" name="mobile_country_code" defaultValue={executive?.mobile_country_code ?? "91"}>
@@ -422,7 +423,7 @@ function FieldExecutiveForm({
           ))}
         </select>
       </label>
-      <label>Mobile number<input className="field" inputMode="numeric" maxLength={15} name="mobile" pattern="[0-9]{6,15}" placeholder="Enter mobile number" required={!optionalEditFields} title="Enter 6 to 15 digits" defaultValue={textValue(executive?.mobile)} /></label>
+      <label>Mobile number<WorkforceMobileInput required={!optionalEditFields} defaultValue={textValue(executive?.mobile)} /></label>
       <label>Date of join<input className="field" name="date_of_join" required={!optionalEditFields} type="date" defaultValue={textValue(executive?.date_of_join)} /></label>
       <ScopedDesignationFields
         designationName="designation"
@@ -547,10 +548,10 @@ function AddFieldExecutiveForm({
           <div className="field-executive-country-code">
             <SearchableSelect name="mobile_country_code" options={countryCodeSelectOptions} defaultValue={values?.mobileCountryCode ?? "91"} placeholder="+91" required />
           </div>
-          <input className="field" inputMode="numeric" maxLength={15} name="mobile" pattern="[0-9]{6,15}" placeholder="Enter mobile number" required title="Enter 6 to 15 digits" defaultValue={values?.mobile ?? ""} />
+          <WorkforceMobileInput required defaultValue={values?.mobile ?? ""} />
         </div>
       </label>
-      <label>Email<input className="field" name="email" placeholder="Enter email" required type="email" inputMode="email" autoComplete="email" title="Enter a valid email address" defaultValue={values?.email ?? ""} /></label>
+      <label>Email<WorkforceEmailInput required defaultValue={values?.email ?? ""} /></label>
       <label>Date of join<input className="field" name="date_of_join" required type="date" defaultValue={values?.dateOfJoin ?? ""} /></label>
       <ScopedDesignationFields
         designationName="designation"
