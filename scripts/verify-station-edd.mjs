@@ -151,3 +151,9 @@ try {
   assert.deepEqual((await sourceApi.eddSourceSummaries("KTUO",["allowed"],fakeAuth)).map(r=>r.trackingId),["allowed"]);
 } finally {globalThis.fetch=realFetch;}
 console.log("PASS Source integration contracts: fixed origin, no redirects, paginated history, conservative completeness and requested-TID filtering.");
+const pickupOnly=verification.eddHistoryFacts([{state:"IN_TRANSIT",time:"2026-09-01T12:00:00Z"},{state:"INDUCTED",time:"2026-09-09T05:00:00Z"}]);
+assert.equal(pickupOnly.firstDispatchAt,null,"pickup/inbound transit before induction is not customer dispatch");
+assert.equal(edd.stationEddPosition(pkg("pickup","INDUCTED",{verification:{...pickupOnly,state:"INDUCTED"}}),today),"atStation");
+const actualDispatch=verification.eddHistoryFacts([{state:"IN_TRANSIT",time:"2026-08-31T12:00:00Z"},{state:"INDUCTED",time:"2026-09-04T05:00:00Z"},{state:"IN_TRANSIT",time:"2026-09-09T06:02:00Z"},{state:"DELIVERED",time:"2026-09-09T10:23:00Z"}]);
+assert.equal(actualDispatch.firstDispatchAt,"2026-09-09T06:02:00.000Z","customer dispatch starts after station induction, not merchant pickup");
+console.log("PASS Real-source regression: inbound transit vs customer dispatch.");

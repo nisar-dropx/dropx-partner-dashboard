@@ -73,6 +73,12 @@ export async function verifyEddBatch(codes?: string[]) {
   const { data, error } = await supabaseAdmin.rpc("edd_claim_verification", { p_token: token, p_codes: codes ?? null, p_limit: 180 });
   if (error) throw new Error(error.message);
   const rows = (data ?? []) as LedgerRow[];
+  const byStation=new Map<string,LedgerRow[]>();
+  for(const row of rows){const group=byStation.get(row.station_code)??[];group.push(row);byStation.set(row.station_code,group);}
+  const groups=[...byStation.values()];
+  for(const group of groups)group.sort((a,b)=>Number(!["INDUCTED","RECEIVED"].includes(a.source.state||""))-Number(!["INDUCTED","RECEIVED"].includes(b.source.state||"")));
+  const fairRows=Array.from({length:Math.max(0,...groups.map(g=>g.length))},(_,i)=>groups.flatMap(group=>group[i]?[group[i]]:[])).flat();
+  rows.splice(0,rows.length,...fairRows);
   let verified = 0, failed = 0, cursor = 0, enriched = 0, enrichmentFailed = 0;
   const deadline = Date.now()+80000;
   const sessions = new Map<string, Awaited<ReturnType<typeof eddSourceSession>> | null>();
@@ -81,17 +87,24 @@ export async function verifyEddBatch(codes?: string[]) {
   try {
     // Recover the EDD dates missing from Performance's delivered rows in bulk.
     // The same private source session and read API used by the worker; no passwords.
-    for (const code of [...new Set(rows.map(row => row.station_code))]) {
-      if (Date.now() > deadline-20000) break;
-      const auth = await eddSourceSession(code).catch(() => null);
-      sessions.set(code, auth);
+    let missingQuery=supabaseAdmin.from("edd_package_ledger").select("station_code,tracking_id")
+      .is("source->>ead",null).is("verification->>edd",null).is("source->>summaryCheckedAt",null)
+      .gte("last_seen_at",new Date(Date.now()-7*86400000).toISOString()).order("station_code").order("tracking_id").limit(4500);
+    if(codes)missingQuery=missingQuery.in("station_code",codes);
+    const {data:missing}=rows.length ? await missingQuery : {data:[]};
+    const idsByCode=new Map<string,string[]>();
+    for(const row of [...rows,...(missing??[])]) {
+      const ids=idsByCode.get(row.station_code)??[];
+      ids.push(row.tracking_id);idsByCode.set(row.station_code,ids);
+    }
+    const batches=[...idsByCode].flatMap(([code,values])=>{
+      const unique=[...new Set(values)];return Array.from({length:Math.ceil(unique.length/300)},(_,i)=>({code,ids:unique.slice(i*300,(i+1)*300)}));
+    });
+    for (const {code,ids} of batches.slice(0,15)) {
+      if (Date.now() > deadline-50000) break;
+      const auth = sessions.has(code) ? sessions.get(code) : await eddSourceSession(code).catch(() => null);
+      sessions.set(code, auth??null);
       if (!auth) continue;
-      const { data: missing } = await supabaseAdmin.from("edd_package_ledger")
-        .select("tracking_id").eq("station_code",code)
-        .is("source->>summaryCheckedAt",null)
-        .gte("last_seen_at",new Date(Date.now()-7*86400000).toISOString())
-        .order("tracking_id").limit(300);
-      const ids = [...new Set([...rows.filter(r=>r.station_code===code).map(r=>r.tracking_id),...(missing??[]).map(r=>r.tracking_id)])].slice(0,300);
       if (!ids.length) continue;
       try {
         const observations = await eddSourceSummaries(code,ids,auth);

@@ -22,7 +22,9 @@ export function stationEddPosition(pkg: EddPackage, today = stationEddToday()): 
   const attemptDay = eddIstDate(history?.firstAttemptAt);
   if (attemptDay && attemptDay < today) return "hfr";
   if (state === "DELIVERED") return "delivered";
-  if (["IN_TRANSIT_TO_CUSTOMER", "IN_TRANSIT", "OUT_FOR_DELIVERY"].includes(state)) return "onRoad";
+  if (["INDUCTED","RECEIVED"].includes(state) && history?.firstDispatchAt && history.rulesVersion !== 2 && !history.firstAttemptAt) return "unverified";
+  if (["IN_TRANSIT_TO_CUSTOMER", "OUT_FOR_DELIVERY"].includes(state) || (state === "IN_TRANSIT" && history?.firstDispatchAt)) return "onRoad";
+  if (state === "IN_TRANSIT" && !history?.historyComplete) return "unverified";
   if (["DELIVERY_ATTEMPTED", "DELIVERY_FAILED", "DELIVERY_REJECTED", "REJECTED"].includes(state) || history?.firstAttemptAt || history?.firstDispatchAt) return "attempted";
   if (["INDUCTED", "RECEIVED"].includes(state)) {
     if (!history?.historyComplete || eddIstDate(pkg.verifiedAt) !== today ||
