@@ -39,6 +39,34 @@ function optional(value: FormDataEntryValue | null) {
   return text || null;
 }
 
+function normalizeFullName(value: FormDataEntryValue | null) {
+  const text = required(value, "Full name")
+    .replace(/[^A-Za-z ]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+  if (!text || !/^[A-Z]+(?: [A-Z]+)*$/.test(text)) {
+    throw new Error("Full name can contain only letters and spaces.");
+  }
+  return text;
+}
+
+function normalizeEmail(value: FormDataEntryValue | null) {
+  const email = required(value, "Email").toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Enter a valid email address.");
+  }
+  return email;
+}
+
+function normalizeMobileNumber(value: FormDataEntryValue | null) {
+  const mobile = required(value, "Mobile number").replace(/\D/g, "");
+  if (!/^\d{6,15}$/.test(mobile)) {
+    throw new Error("Mobile number must contain 6 to 15 digits.");
+  }
+  return mobile;
+}
+
 type FieldExecutiveReturnPath = NonEmployeeRoute;
 
 function safeReturnPath(formData?: FormData): FieldExecutiveReturnPath {
@@ -64,7 +92,7 @@ function fieldExecutiveRedirect(params?: Record<string, string>, returnPath: Fie
 
 function addFormParams(formData: FormData) {
   return {
-    full_name: String(formData.get("full_name") ?? ""),
+    full_name: String(formData.get("full_name") ?? "").replace(/[^A-Za-z ]+/g, "").replace(/\s+/g, " ").trim().toUpperCase(),
     mobile_country_code: cleanCountryCode(formData.get("mobile_country_code")),
     mobile: String(formData.get("mobile") ?? "").replace(/\D/g, ""),
     email: String(formData.get("email") ?? "").trim().toLowerCase(),
@@ -122,10 +150,10 @@ const fieldExecutiveDocumentFields = [
 
 function normalizeFieldExecutivePayload(formData: FormData, requireId = false) {
   const id = requireId ? required(formData.get("id"), "Field executive") : null;
-  const fullName = required(formData.get("full_name"), "Full name");
+  const fullName = normalizeFullName(formData.get("full_name"));
   const mobileCountryCode = cleanCountryCode(formData.get("mobile_country_code"));
-  const mobile = required(formData.get("mobile"), "Mobile number").replace(/\D/g, "");
-  const email = required(formData.get("email"), "Email").toLowerCase();
+  const mobile = normalizeMobileNumber(formData.get("mobile"));
+  const email = normalizeEmail(formData.get("email"));
   const dateOfJoin = required(formData.get("date_of_join"), "Date of join");
   const locationId = required(formData.get("location_id"), "Location");
   const designation = required(formData.get("designation"), "Designation");
@@ -160,7 +188,6 @@ function normalizeFieldExecutivePayload(formData: FormData, requireId = false) {
   const isActive = optional(formData.get("is_active")) !== "false";
   const statutoryApplicability = formData.getAll("statutory_applicability").map(String).filter(Boolean);
 
-  if (!/^\d{6,15}$/.test(mobile)) throw new Error("Mobile number must contain 6 to 15 digits.");
   if (biometricId && !/^\d{1,20}$/.test(biometricId)) throw new Error("Biometric enrolment ID must be numeric.");
   if (emergencyContactNumber && !/^\d{10}$/.test(emergencyContactNumber)) throw new Error("Emergency contact number must contain exactly 10 digits.");
   if (aadhaarNumber && !/^\d{12}$/.test(aadhaarNumber)) throw new Error("Aadhaar number must contain exactly 12 digits.");
@@ -237,10 +264,10 @@ export async function createFieldExecutive(formData: FormData) {
   if (!supabaseAdmin) fieldExecutiveRedirect({ error: "Supabase service role key is not configured." }, returnPath);
 
   try {
-    const fullName = required(formData.get("full_name"), "Full name");
+    const fullName = normalizeFullName(formData.get("full_name"));
     const mobileCountryCode = cleanCountryCode(formData.get("mobile_country_code"));
-    const mobile = required(formData.get("mobile"), "Mobile number").replace(/\D/g, "");
-    const email = required(formData.get("email"), "Email").toLowerCase();
+    const mobile = normalizeMobileNumber(formData.get("mobile"));
+    const email = normalizeEmail(formData.get("email"));
     const dateOfJoin = required(formData.get("date_of_join"), "Date of join");
     const locationId = required(formData.get("location_id"), "Location");
     const designation = required(formData.get("designation"), "Designation");
@@ -297,7 +324,6 @@ export async function createFieldExecutive(formData: FormData) {
       }
     }
 
-    if (!/^\d{6,15}$/.test(mobile)) throw new Error("Mobile number must contain 6 to 15 digits.");
     if (Number.isNaN(Date.parse(dateOfJoin))) throw new Error("Enter a valid date of join.");
     if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) {
       throw new Error("You do not have access to the selected location.");
