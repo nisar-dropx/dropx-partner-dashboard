@@ -5,6 +5,7 @@ export type AccessSurface = "dashboard" | "ops";
 export type AdminAccessSurface = AccessSurface | "people" | "finance";
 
 export const opsAccessPageCodes = [
+  'ops_notification_settings',
   "ops_pulse",
   "performance",
   "performance_review",
