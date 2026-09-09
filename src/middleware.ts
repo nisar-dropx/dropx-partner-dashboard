@@ -155,6 +155,24 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "ops_portal", path));
   }
 
+  // Legacy Manage-in-People deep links used /people/employees|contractors/:id.
+  const legacyPeopleEmployee = path.match(/^\/people\/employees\/([^/]+)\/?$/);
+  if (isPeopleHost && legacyPeopleEmployee) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = "/employees";
+    redirectUrl.search = "";
+    redirectUrl.searchParams.set("edit", legacyPeopleEmployee[1]);
+    return NextResponse.redirect(redirectUrl);
+  }
+  const legacyPeopleContractor = path.match(/^\/people\/contractors\/([^/]+)\/?$/);
+  if (isPeopleHost && legacyPeopleContractor) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = "/contractors";
+    redirectUrl.search = "";
+    redirectUrl.searchParams.set("edit", legacyPeopleContractor[1]);
+    return NextResponse.redirect(redirectUrl);
+  }
+
   if (isPeopleHost && !isPublicAppPath(path) && !isPeoplePortalPath(path)) {
     const peopleHomeUrl = request.nextUrl.clone();
     peopleHomeUrl.pathname = "/";
