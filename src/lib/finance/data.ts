@@ -27,7 +27,45 @@ export async function financeContext(code: string) {
   );
   if (error)
     throw new Error("Unable to load your permitted locations. Please retry.");
-  return { authorization, companyId, locations, db: supabaseAdmin };
+  const topology: {
+    id: string;
+    station_code: string;
+    parent_station_id: string | null;
+  }[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const result = await supabaseAdmin
+      .from("stations")
+      .select("id,station_code,parent_station_id")
+      .eq("company_id", companyId)
+      .order("id")
+      .range(offset, offset + 999);
+    if (result.error)
+      throw new Error("Unable to load Finance station relationships.");
+    topology.push(...(result.data ?? []));
+    if ((result.data ?? []).length < 1000) break;
+  }
+  const byId = new Map(topology.map((l) => [l.id, l]));
+  const byCode = new Map(topology.map((l) => [l.station_code, l]));
+  const financeLocations = locations.map((l) => {
+    const model = Array.isArray(l.location_models)
+      ? l.location_models[0]
+      : l.location_models;
+    const parentId = byCode.get(l.station_code)?.parent_station_id;
+    return {
+      ...l,
+      pricing_model:
+        String(model?.code ?? "").toUpperCase() === "XPT" ? "xpt" : "mg",
+      parent_station_code: parentId
+        ? (byId.get(parentId)?.station_code ?? null)
+        : null,
+    };
+  });
+  return {
+    authorization,
+    companyId,
+    locations: financeLocations,
+    db: supabaseAdmin,
+  };
 }
 export type FinanceContext = Awaited<ReturnType<typeof financeContext>>;
 export function canWritePricing(auth: AuthorizationContext, revision: number) {
@@ -106,15 +144,24 @@ export function businessFilters(query: Query) {
     region: value(query, "region"),
     cluster: value(query, "cluster"),
     location: value(query, "location"),
+    includeXpts: value(query, "includeXpts") === "0" ? "0" : "1",
   };
 }
 export function filterLocations(
-  locations: CodLocationRow[],
+  locations: Array<
+    CodLocationRow & {
+      parent_station_code?: string | null;
+      pricing_model?: string;
+    }
+  >,
   filters: ReturnType<typeof businessFilters>,
 ) {
   return locations.filter(
     (l) =>
-      (!filters.location || l.station_code === filters.location) &&
+      (!filters.location ||
+        l.station_code === filters.location ||
+        (filters.includeXpts !== "0" &&
+          l.parent_station_code === filters.location)) &&
       (!filters.region || (l.region || "Unassigned") === filters.region) &&
       (!filters.cluster || (l.cluster || "Unassigned") === filters.cluster),
   );
@@ -145,6 +192,49 @@ export async function loadBusiness(context: FinanceContext, query: Query) {
     (c) => stationCodes === null || stationCodes.includes(c.station_code),
   );
   const snapshot = response.data as Snapshot;
-  const rows = buildBusinessRows(snapshot, cards, selected, filters);
+  const parents = [
+    ...new Set(
+      selected
+        .filter((l) => l.pricing_model === "xpt" && l.parent_station_code)
+        .map((l) => l.parent_station_code!),
+    ),
+  ];
+  const parentRates: Record<string, { rate: string | null; revision: number }> =
+    {};
+  if (parents.length) {
+    // Only unit rates for parents of authorized XPTs; no parent shipment, cost or P&L data is exposed.
+    for (let offset = 0; ; offset += 1000) {
+      const { data, error } = await context.db
+        .from("finance_pricing_revisions")
+        .select("id,station_code,revision,rates")
+        .eq("company_id", context.companyId)
+        .eq("provider", "Amazon")
+        .eq("effective_month", `${filters.month}-01`)
+        .in("station_code", parents)
+        .order("revision", { ascending: false })
+        .order("id")
+        .range(offset, offset + 999);
+      if (error)
+        throw new Error("Unable to load the parent station variable rates.");
+      for (const p of data ?? [])
+        if (!parentRates[p.station_code])
+          parentRates[p.station_code] = {
+            rate: p.rates?.variable_slab ?? null,
+            revision: p.revision,
+          };
+      if (
+        (data ?? []).length < 1000 ||
+        parents.every((parent) => parentRates[parent])
+      )
+        break;
+    }
+  }
+  const rows = buildBusinessRows(
+    snapshot,
+    cards,
+    selected,
+    filters,
+    parentRates,
+  );
   return { filters, rows, snapshot, readAt: snapshot.read_at };
 }

@@ -4,6 +4,8 @@ import { PageHead } from "@/components/page-head";
 import { hasPermission } from "@/lib/authorization";
 import { financeContext, loadBusiness, type Query } from "@/lib/finance/data";
 import { addAmounts, monthEnd } from "@/lib/finance/pricing";
+import { parentGroups, selectDailyRows } from "@/lib/finance/performance";
+import { BillingCoverage } from "./billing-coverage";
 import { DailyBreakup } from "./daily-breakup";
 import { LiveRefresh } from "./refresh";
 import { BusinessFilters } from "./filters";
@@ -69,14 +71,14 @@ export default async function BusinessPage({
   };
   const dailySelection =
     typeof searchParams.daily === "string" ? searchParams.daily : "";
-  const dailyRows =
-    dailySelection === "all"
-      ? rows
-      : rows.filter(
-          (r) =>
-            r.station === dailySelection &&
-            r.provider === searchParams.dailyClient,
-        );
+  const dailyRows = selectDailyRows(
+    rows,
+    dailySelection,
+    typeof searchParams.dailyClient === "string"
+      ? searchParams.dailyClient
+      : undefined,
+  );
+  const groups = parentGroups(rows);
   const dailyHref = (station = "all", client = "") => {
     const q = new URLSearchParams(params);
     q.set("daily", station);
@@ -216,12 +218,12 @@ export default async function BusinessPage({
       <div className="fin-notice">
         <strong>Management estimate, before final billing.</strong> Amazon uses
         monthly MG × {elapsed}/{monthEnd(filters.month).slice(8)} calendar days.
-        Each day adds max(0, deliveries − monthly MG volume ÷ calendar days) ×
-        variable slab rate, plus MFN count × MFN rate. IHS/SMD settlement rules,
-        recoveries, fees and tax remain outside this estimate. Flipkart uses
-        configured monthly delivery slabs. P&L subtracts recorded operating
-        costs only; missing expense days and unallocated overhead can overstate
-        profit.
+        Each day adds max(0, Amazon deliveries − monthly MG volume ÷ calendar
+        days) × variable slab rate, plus MFN count × MFN rate. SWA is excluded
+        pending its separate rates. IHS/SMD settlement rules, recoveries, fees
+        and tax remain outside this estimate. Flipkart uses configured monthly
+        delivery slabs. P&L subtracts recorded operating costs only; missing
+        expense days and unallocated overhead can overstate profit.
       </div>
       <div className="fin-freshness">
         <span>Live refresh every 60 seconds · Read {stamp(readAt)}</span>
@@ -230,6 +232,87 @@ export default async function BusinessPage({
           {stamp(sourceCost)}
         </span>
       </div>
+      {groups.length > 0 && (
+        <section className="panel fin-daily">
+          <div className="panel-head">
+            <div>
+              <h2>Parent + XPT totals</h2>
+              <p className="subtle">
+                Combined view of the filtered allocations. The MTD cards count
+                every station once. Expand for the individual station and XPT
+                results.
+              </p>
+            </div>
+          </div>
+          <div className="fin-table-wrap">
+            <table className="fin-table">
+              <thead>
+                <tr>
+                  <th>Billing group</th>
+                  <th>MTD revenue</th>
+                  {tab === "pnl" && (
+                    <>
+                      <th>Recorded costs</th>
+                      <th>Estimated P&L</th>
+                    </>
+                  )}
+                  <th>Breakup</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((g) => (
+                  <tr key={g.parent}>
+                    <td>
+                      <strong>{g.parent} + XPTs</strong>
+                      <small>
+                        {g.members.map((r) => r.station).join(" · ")}
+                      </small>
+                    </td>
+                    <td>
+                      <Link href={dailyHref(`group:${g.parent}`)}>
+                        {money(g.revenue)}
+                        <small>Combined daily breakup →</small>
+                      </Link>
+                      {g.pending && (
+                        <small>Partial · missing payout or cost values</small>
+                      )}
+                    </td>
+                    {tab === "pnl" && (
+                      <>
+                        <td>{money(g.cost)}</td>
+                        <td>{money(g.profit)}</td>
+                      </>
+                    )}
+                    <td>
+                      <details className="fin-row-details">
+                        <summary>Station / XPT breakup</summary>
+                        {g.members.map((r) => (
+                          <p key={r.station}>
+                            <Link href={dailyHref(r.station, r.provider)}>
+                              <strong>
+                                {r.station} ·{" "}
+                                {r.model === "xpt" ? "XPT" : "Parent"}
+                              </strong>
+                            </Link>
+                            <br />
+                            Revenue {money(r.revenue)}
+                            {tab === "pnl"
+                              ? ` · Costs ${money(r.cost)} · P&L ${money(r.profit)}`
+                              : ""}
+                            {r.pendingFixed && (
+                              <small>Fixed payout not supplied</small>
+                            )}
+                          </p>
+                        ))}
+                      </details>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
       <section className="panel">
         <div className="panel-head">
           <div>
@@ -251,7 +334,7 @@ export default async function BusinessPage({
                 <th>Allocation</th>
                 <th>Region / cluster</th>
                 <th>Deliveries</th>
-                {tab === "revenue" && <th>Monthly MG</th>}
+                {tab === "revenue" && <th>Monthly MG / XPT fixed</th>}
                 <th>MTD revenue</th>
                 {tab === "pnl" && (
                   <>
@@ -270,6 +353,12 @@ export default async function BusinessPage({
                       {row.station} · {row.provider}
                     </strong>
                     <small>{row.name}</small>
+                    {row.model === "xpt" && (
+                      <small>
+                        XPT of {row.parentStation} · All deliveries at parent
+                        rate
+                      </small>
+                    )}
                   </td>
                   <td>
                     {row.region}
@@ -277,6 +366,12 @@ export default async function BusinessPage({
                   </td>
                   <td>
                     {quantity(row.deliveries)}
+                    {row.provider === "Amazon" && (
+                      <small>
+                        Amazon {quantity(row.eligibleDeliveries)} · SWA{" "}
+                        {quantity(row.swaDeliveries)} (unpriced)
+                      </small>
+                    )}
                     <small>
                       {row.shipmentThrough
                         ? `Through ${row.shipmentThrough}`
@@ -301,6 +396,11 @@ export default async function BusinessPage({
                       {money(row.revenue)}
                       <small>View daily breakup →</small>
                     </Link>
+                    {row.pendingFixed && (
+                      <small className="fin-negative">
+                        XPT fixed payout pending
+                      </small>
+                    )}
                     <small>
                       {row.revision
                         ? `Rate revision ${row.revision}`
@@ -398,6 +498,7 @@ export default async function BusinessPage({
           </div>
         )}
       </section>
+      <BillingCoverage rows={rows} />
       {dailySelection &&
         (dailyRows.length ? (
           <DailyBreakup

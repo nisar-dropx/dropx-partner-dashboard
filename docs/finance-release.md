@@ -58,18 +58,43 @@ Component totals use cumulative paise rounding, so displayed daily revenue sums
 exactly to MTD. Missing shipment days still accrue MG but variable earnings remain
 pending; a missing report never proves zero shipments.
 
-The confirmed delivery basis is cps_shipment_daily.total_delivery. SMD already sits
-inside that count and is not charged a second time. The IHS 15% denominator/boundary
+Amazon MG/variable delivery quantity uses cps_shipment_daily.amazon_delivery;
+SWA has separate pricing and is excluded. The total-delivery count remains visible
+alongside Amazon and SWA quantities. SMD already sits inside the Amazon count and
+is not charged a second time. The IHS 15% denominator/boundary
 and separate SMD settlement rule were requested from the user and remain pending.
 Daily reports expose their actual quantities and pricing for review, but do not guess
 additional earnings. Shortfall recovery, fees and tax are not included. Flipkart
 retains configured cumulative monthly slabs; daily amounts are changes in that total.
 
-Apply scripts/finance/business_daily_v2.sql and business_daily_v3.sql for the service-only daily reader and its batched audit lookup.
+Apply scripts/finance/business_daily_v2.sql, business_daily_v3.sql and
+business_daily_v4.sql for the service-only daily reader, batched audit lookup and
+separate Amazon/SWA quantities.
 Raw IHS/SMD audit data matches the current CPS source batch, station, date and
 associate. Shipment-type duplicates use the first row, matching the existing capacity
 reader; superseded imports are not added again. The monthly overview is the default.
 Click its MTD total or an allocation revenue to open daily detail and a scoped CSV.
+
+Amazon XPTs use their own monthly fixed payout, prorated by calendar days, plus
+every Amazon delivery at their parent's latest Variable_Slab rate for that month.
+They do not have an MG volume threshold. Apply scripts/finance/xpt_pricing_v1.sql
+to seed blank August fixed payouts using existing active XPT-parent relationships.
+KGQC inherits KGQA. A blank fixed payout is pending, never assumed zero; known
+variable earnings remain visible. Pricing edits validate the canonical parent
+again on the server. No operational station relationships are modified.
+
+Selecting a parent includes its authorized XPT allocations by default; allocation
+scope can limit it to the station only. Parent/XPT subtotals, daily detail and CSV
+use the same leaf records; MTD does not count the subtotal again. Each XPT keeps its
+own recorded expenses and P&L. An XPT-only user can load the linked parent's unit
+rate for calculation, but not the parent's shipments, costs or business rows.
+
+The invoice-coverage panel lists outstanding settlement inputs: SWA payment-type
+counts and confirmed rates, rejects, surcharges, OBD/buyback incentives, deductions,
+IHS/SMD rules and tax. Standard SWA and SWA consumables are different raw fields;
+consumables must not be mistaken for COD. Inferred rates from invoice totals are
+not activated as contract pricing. Missing DA expenses are flagged when recorded
+deliveries are positive and DA cost is zero.
 
 Reports aggregate existing cps_shipment_daily and cps_station_daily in SQL,
 without row-limit truncation. The default is current month through today in
@@ -83,3 +108,5 @@ every 60 seconds while visible and offer filtered CSV downloads.
 Validation: finance portal and business tests cover precision, date limits, slab
 boundaries, nulls, coverage, shared costs, company/location access, write rights,
 preview denial, atomic-batch inputs, export filters and navigation isolation.
+XPT tests cover blank/fixed payouts, parent-rate inheritance and revisions,
+separate SWA quantities, combined totals, scoped daily detail and forged parents.

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   amazonCsv,
+  isXptPricing,
   amazonFields,
   csvText,
   todayIndia,
@@ -70,7 +71,12 @@ export function PricingManager({
   canEdit,
 }: {
   history: PricingCard[];
-  locations: { code: string; name: string }[];
+  locations: {
+    code: string;
+    name: string;
+    model: string;
+    parent: string | null;
+  }[];
   canAdd: boolean;
   canEdit: boolean;
 }) {
@@ -202,6 +208,7 @@ export function PricingManager({
       <div className="fin-toolbar">
         <div>
           <span className="fin-chip">Amazon · MG</span>{" "}
+          <span className="fin-chip">Amazon · XPT fixed + variable</span>{" "}
           <span className="fin-chip">Flipkart · Delivery slabs</span>
         </div>
         <div className="fin-actions">
@@ -231,6 +238,8 @@ export function PricingManager({
                   [
                     "Client",
                     "Station",
+                    "Pricing model",
+                    "Parent station",
                     "Month",
                     "Revision",
                     ...amazonFields.map((f) => f[1]),
@@ -242,6 +251,12 @@ export function PricingManager({
                   ...cards.map((c) => [
                     c.provider,
                     c.station_code,
+                    isXptPricing(c)
+                      ? "XPT fixed + parent variable"
+                      : c.provider === "Amazon"
+                        ? "MG"
+                        : "Slabs",
+                    c.rates.parent_station_code,
                     c.effective_month.slice(0, 7),
                     c.revision,
                     ...amazonFields.map(([key]) => c.rates[key]),
@@ -308,7 +323,7 @@ export function PricingManager({
                 <th>Allocation / location</th>
                 <th>Client & model</th>
                 <th>Effective month</th>
-                <th>Monthly MG / slabs</th>
+                <th>Monthly MG / XPT fixed / slabs</th>
                 <th>MG delivery volume</th>
                 <th>Revision</th>
                 <th>Actions</th>
@@ -334,7 +349,9 @@ export function PricingManager({
                     {c.provider}
                     <small>
                       {c.provider === "Amazon"
-                        ? "Minimum guarantee"
+                        ? isXptPricing(c)
+                          ? `XPT · Parent ${c.rates.parent_station_code}`
+                          : "Minimum guarantee"
                         : `${c.slab_mode === "all_units" ? "All-units" : "Progressive"} slabs`}
                     </small>
                   </td>
@@ -440,6 +457,18 @@ export function PricingManager({
                     setEditing({
                       ...editing,
                       provider: e.target.value as PricingInput["provider"],
+                      rates:
+                        e.target.value === "Amazon" &&
+                        locations.find((l) => l.code === editing.station_code)
+                          ?.model === "xpt"
+                          ? {
+                              pricing_model: "xpt",
+                              parent_station_code:
+                                locations.find(
+                                  (l) => l.code === editing.station_code,
+                                )?.parent ?? null,
+                            }
+                          : {},
                       slabs: [{ above: "0", upto: null, rate: "" }],
                     })
                   }
@@ -455,12 +484,27 @@ export function PricingManager({
                   list="fin-locations"
                   disabled={!!editing.expected_revision}
                   value={editing.station_code}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const code = e.target.value.toUpperCase().trim();
+                    const place = locations.find((l) => l.code === code);
                     setEditing({
                       ...editing,
-                      station_code: e.target.value.toUpperCase().trim(),
-                    })
-                  }
+                      station_code: code,
+                      rates: {
+                        ...editing.rates,
+                        pricing_model:
+                          editing.provider === "Amazon" &&
+                          place?.model === "xpt"
+                            ? "xpt"
+                            : "mg",
+                        parent_station_code:
+                          editing.provider === "Amazon" &&
+                          place?.model === "xpt"
+                            ? place.parent
+                            : null,
+                      },
+                    });
+                  }}
                 />
                 <datalist id="fin-locations">
                   {locations.map((l) => (
@@ -491,7 +535,39 @@ export function PricingManager({
               new period. Editing this month creates a new revision and
               recalculates its estimates.
             </p>
-            {editing.provider === "Amazon" ? (
+            {editing.provider === "Amazon" && isXptPricing(editing) ? (
+              <>
+                <div className="fin-notice">
+                  <strong>XPT of {editing.rates.parent_station_code}</strong>.
+                  Every delivered Amazon package (excluding SWA) earns the
+                  parent station’s Variable_Slab rate for this month, with no MG
+                  volume threshold. Editing the parent rate updates the XPT
+                  calculation automatically.
+                </div>
+                <label className="fin-label">
+                  XPT fixed payout per month (₹)
+                  <input
+                    inputMode="decimal"
+                    value={editing.rates.mg_amount_including_mhe ?? ""}
+                    placeholder="Not supplied — fill when confirmed"
+                    onChange={(e) =>
+                      setEditing({
+                        ...editing,
+                        rates: {
+                          ...editing.rates,
+                          mg_amount_including_mhe: e.target.value || null,
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <p className="subtle">
+                  You can save this blank. It remains pending, not zero. Once
+                  supplied, the fixed payout accrues by calendar day and is
+                  added to XPT variable earnings.
+                </p>
+              </>
+            ) : editing.provider === "Amazon" ? (
               <div className="fin-form-grid">
                 {amazonFields.map(([key, label]) => (
                   <label key={key}>
@@ -759,7 +835,33 @@ export function PricingManager({
                   })}{" "}
                   IST · {c.source_file || "Manual entry"}
                 </p>
-                {c.provider === "Amazon" ? (
+                {isXptPricing(c) ? (
+                  <dl className="fin-detail-grid">
+                    <div>
+                      <dt>Model</dt>
+                      <dd>
+                        XPT fixed + Amazon deliveries at parent variable rate
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Parent station</dt>
+                      <dd>{c.rates.parent_station_code}</dd>
+                    </div>
+                    <div>
+                      <dt>Monthly fixed payout</dt>
+                      <dd>
+                        {c.rates.mg_amount_including_mhe ?? "Not supplied"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Variable rate</dt>
+                      <dd>
+                        Inherited from the parent’s latest revision for this
+                        month
+                      </dd>
+                    </div>
+                  </dl>
+                ) : c.provider === "Amazon" ? (
                   <dl className="fin-detail-grid">
                     {amazonFields.map(([key, label]) => (
                       <div key={key}>

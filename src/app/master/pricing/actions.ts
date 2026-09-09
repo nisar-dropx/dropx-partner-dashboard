@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { financeContext, canWritePricing } from "@/lib/finance/data";
-import { validatePricing } from "@/lib/finance/pricing";
+import { validatePricing, isXptPricing } from "@/lib/finance/pricing";
 export async function savePricing(input: unknown) {
   try {
     const context = await financeContext("finance_pricing");
@@ -18,6 +18,23 @@ export async function savePricing(input: unknown) {
         !allowedCodes.has(item.station_code)
       )
         throw new Error("This station is outside your permitted locations.");
+      const place = context.locations.find(
+        (l) => l.station_code === item.station_code,
+      );
+      if (
+        item.provider === "Amazon" &&
+        (isXptPricing(item) || place?.pricing_model === "xpt")
+      ) {
+        if (
+          !place ||
+          place.pricing_model !== "xpt" ||
+          !isXptPricing(item) ||
+          item.rates.parent_station_code !== place.parent_station_code
+        )
+          throw new Error(
+            "XPT pricing must use its configured parent station.",
+          );
+      }
       const key = `${item.provider}/${item.station_code}/${item.effective_month}`;
       if (keys.has(key))
         throw new Error(`Duplicate rate card: ${item.station_code}.`);

@@ -28,6 +28,8 @@ export function DailyBreakup({
     const sum = (
       key:
         | "deliveries"
+        | "eligibleDeliveries"
+        | "swa"
         | "mgVolume"
         | "excessVolume"
         | "base"
@@ -40,9 +42,16 @@ export function DailyBreakup({
         | "cost"
         | "profit",
     ) =>
-      ["deliveries", "mgVolume", "excessVolume", "mfn", "smd", "ihs"].includes(
-        key,
-      )
+      [
+        "deliveries",
+        "eligibleDeliveries",
+        "swa",
+        "mgVolume",
+        "excessVolume",
+        "mfn",
+        "smd",
+        "ihs",
+      ].includes(key)
         ? addQuantities(days.map((d) => d[key]))
         : addAmounts(days.map((d) => d[key]));
     return {
@@ -59,8 +68,10 @@ export function DailyBreakup({
           <h2>
             Daily breakup ·{" "}
             {one
-              ? `${one.station} · ${one.provider}`
-              : "All filtered allocations"}
+              ? `${one.station} · ${one.model === "xpt" ? "XPT" : one.provider}`
+              : rows.length <= 4
+                ? rows.map((r) => r.station).join(" + ")
+                : "Selected allocations"}
           </h2>
           <p className="subtle">
             MTD revenue {money(addAmounts(rows.map((r) => r.revenue)))} ·{" "}
@@ -81,13 +92,17 @@ export function DailyBreakup({
       {one?.provider === "Amazon" && (
         <div className="fin-daily-rates">
           <span>
-            Monthly MG: <strong>{money(one.mg)}</strong>
+            {one.model === "xpt" ? "Monthly XPT fixed payout:" : "Monthly MG:"}{" "}
+            <strong>{money(one.mg)}</strong>
           </span>
           <span>
             Monthly MG volume: <strong>{quantity(one.mgVolume)}</strong>
           </span>
           <span>
-            Excess-delivery rate: <strong>{money(one.variableRate)}</strong>
+            {one.model === "xpt"
+              ? "Parent delivery rate:"
+              : "Excess-delivery rate:"}{" "}
+            <strong>{money(one.variableRate)}</strong>
           </span>
           <span>
             MFN rate: <strong>{money(one.mfnRate)}</strong>
@@ -103,8 +118,20 @@ export function DailyBreakup({
           </span>
         </div>
       )}
+      {one?.model === "xpt" && (
+        <p className="fin-notice">
+          Parent {one.parentStation} · Variable rate {money(one.variableRate)} ·
+          Parent rate revision {one.parentRateRevision ?? "Not supplied"}.
+          {one.pendingFixed
+            ? " Fixed payout is blank; MTD shows known variable earnings only."
+            : " Fixed payout included."}
+        </p>
+      )}
       <div className="fin-notice">
-        Excess delivery earnings are calculated separately for each day, with no
+        SWA has separate pricing and is excluded from the calculation until its
+        rates are supplied. XPT revenue is fixed payout divided by calendar days
+        plus all XPT Amazon deliveries at the parent’s variable rate. Parent MG
+        excess delivery earnings are calculated separately for each day, with no
         negative excess or carry-forward between days. MG volume keeps its full
         precision. MFN is a separate pickup count. IHS quantities and SMD rates
         are shown for review; IHS earnings and any separate SMD adjustment await
@@ -116,11 +143,13 @@ export function DailyBreakup({
           <thead>
             <tr>
               <th>Date</th>
-              <th>Deliveries</th>
+              <th>All deliveries</th>
+              <th>SWA (unpriced)</th>
+              <th>Amazon billable deliveries</th>
               <th>Daily MG volume</th>
-              <th>Excess volume</th>
-              <th>MG revenue</th>
-              <th>Excess / slab earnings</th>
+              <th>Variable billable volume</th>
+              <th>MG / XPT fixed revenue</th>
+              <th>Variable / slab earnings</th>
               <th>MFN count</th>
               <th>MFN earnings</th>
               <th>SMD / IHS counts</th>
@@ -141,6 +170,8 @@ export function DailyBreakup({
                   <strong>{date}</strong>
                 </td>
                 <td>{quantity(sum("deliveries"))}</td>
+                <td>{quantity(sum("swa"))}</td>
+                <td>{quantity(sum("eligibleDeliveries"))}</td>
                 <td>
                   {one
                     ? quantity(days[0]?.mgVolume ?? null)
@@ -188,7 +219,7 @@ export function DailyBreakup({
           </tbody>
           <tfoot>
             <tr>
-              <th colSpan={4}>MTD total</th>
+              <th colSpan={6}>MTD total</th>
               <th>
                 {money(
                   addAmounts(rows.flatMap((r) => r.daily.map((d) => d.base))),

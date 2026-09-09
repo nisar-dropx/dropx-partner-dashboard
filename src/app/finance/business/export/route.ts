@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { financeContext, loadBusiness } from "@/lib/finance/data";
+import { selectDailyRows } from "@/lib/finance/performance";
 import { csvText } from "@/lib/finance/pricing";
 export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
@@ -11,17 +12,15 @@ export async function GET(request: Request) {
   try {
     const { rows, filters, readAt } = await loadBusiness(context, query);
     const daily = query.detail === "daily";
-    const selected =
-      query.daily && query.daily !== "all"
-        ? rows.filter(
-            (r) =>
-              r.station === query.daily && r.provider === query.dailyClient,
-          )
-        : rows;
+    const selected = selectDailyRows(
+      rows,
+      query.daily || "all",
+      query.dailyClient,
+    );
     if (daily && query.daily && query.daily !== "all" && !selected.length)
       throw new Error("No permitted allocation matches this daily breakup.");
     const caveat =
-      "Management estimate only. Daily MG plus positive daily excess deliveries at the variable slab rate, plus MFN. IHS/SMD settlement rules, recoveries, fees and tax are excluded. Costs are imported operating costs only. Blank values are unavailable; pending earnings are excluded.";
+      "Management estimate only. Daily MG plus positive daily excess deliveries at the variable slab rate, plus MFN. XPT uses its fixed payout plus all its Amazon deliveries at the parent variable rate. SWA is excluded pending separate pricing. IHS/SMD settlement rules, recoveries, fees and tax are excluded. Costs are imported operating costs only. Blank values are unavailable; pending earnings are excluded.";
     const dailyBody = daily
       ? csvText([
           [
@@ -32,6 +31,12 @@ export async function GET(request: Request) {
             "Cluster",
             "Date",
             "Deliveries",
+            "SWA deliveries (unpriced)",
+            "Amazon billable deliveries",
+            "Pricing model",
+            "Parent station",
+            "Parent rate revision",
+            "Fixed payout pending",
             "Daily MG volume",
             "Excess volume",
             "MG revenue INR",
@@ -62,6 +67,12 @@ export async function GET(request: Request) {
               r.cluster,
               d.date,
               d.deliveries,
+              d.swa,
+              d.eligibleDeliveries,
+              r.model,
+              r.parentStation,
+              r.parentRateRevision,
+              r.pendingFixed ? "Yes" : "No",
               d.mgVolume,
               d.excessVolume,
               d.base,
@@ -88,6 +99,11 @@ export async function GET(request: Request) {
       : null;
     const headings = [
       "Station",
+      "Pricing model",
+      "Parent station",
+      "Parent variable rate",
+      "Parent rate revision",
+      "Fixed payout pending",
       "Location",
       "Client",
       "Region",
@@ -95,6 +111,8 @@ export async function GET(request: Request) {
       "Month",
       "Through",
       "Deliveries",
+      "SWA deliveries (unpriced)",
+      "Amazon billable deliveries",
       "Monthly MG",
       "MG delivery volume",
       "Rate revision",

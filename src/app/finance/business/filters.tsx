@@ -9,6 +9,7 @@ type Filters = {
   region: string;
   cluster: string;
   location: string;
+  includeXpts: string;
 };
 type Place = { code: string; name: string; region: string; cluster: string };
 export function BusinessFilters({
@@ -135,6 +136,19 @@ export function BusinessFilters({
               {l.code} · {l.name}
             </option>
           ))}
+        </select>
+      </label>
+      <label>
+        Allocation scope
+        <select
+          name="includeXpts"
+          value={filters.includeXpts}
+          onChange={(e) =>
+            setFilters({ ...filters, includeXpts: e.target.value })
+          }
+        >
+          <option value="1">Selected station + its XPTs</option>
+          <option value="0">Selected station only</option>
         </select>
       </label>
       <button className="button" type="submit">

@@ -425,6 +425,7 @@ test("Filtered CSV exports reuse the authorized loader and include estimate cave
       },
     },
     "@/lib/finance/pricing": pricing,
+    "@/lib/finance/performance": performance,
   });
   const response = await route.GET(
     new Request(
@@ -674,6 +675,7 @@ test("Daily CSV contains only the selected authorized allocation and reconciles 
       }),
     },
     "@/lib/finance/pricing": pricing,
+    "@/lib/finance/performance": performance,
   });
   const response = await route.GET(
     new Request(
@@ -739,4 +741,330 @@ test("Flipkart daily changes reconcile through a monthly slab boundary", () => {
   assert.equal(r.daily[0].revenue, "10000.00");
   assert.equal(r.daily[1].revenue, "12.00");
   assert.equal(pricing.addAmounts(r.daily.map((d) => d.revenue)), r.revenue);
+});
+
+const xptLocation = {
+  ...location,
+  station_code: "KGQC",
+  pricing_model: "xpt",
+  parent_station_code: "KGQA",
+};
+const xptCard = {
+  ...card,
+  station_code: "KGQC",
+  rates: {
+    pricing_model: "xpt",
+    parent_station_code: "KGQA",
+    mg_amount_including_mhe: null,
+    delivery_mg_volume: null,
+    variable_slab: null,
+  },
+};
+function xptFixture(fixed = null) {
+  const parent = {
+    ...card,
+    station_code: "KGQA",
+    rates: {
+      ...base.rates,
+      mg_amount_including_mhe: "3100",
+      delivery_mg_volume: "310",
+      variable_slab: "21",
+      mfn_rate: "8",
+    },
+  };
+  const child = {
+    ...xptCard,
+    rates: { ...xptCard.rates, mg_amount_including_mhe: fixed },
+  };
+  const snap = {
+    shipments: [
+      { ...shipment, station_code: "KGQA", deliveries: "40", days: 2 },
+      { ...shipment, station_code: "KGQC", deliveries: "300", days: 2 },
+    ],
+    costs: [
+      { ...cost, station_code: "KGQA", total: "100", days: 2 },
+      { ...cost, station_code: "KGQC", total: "50", days: 2 },
+    ],
+    daily_shipments: [
+      ...[1, 2].map((i) => ({
+        ...shipment,
+        station_code: "KGQA",
+        work_date: `2026-08-0${i}`,
+        deliveries: "20",
+        mg_deliveries: "20",
+        swa: "0",
+        mfn: "0",
+        smd: "0",
+        ihs: "0",
+      })),
+      ...[1, 2].map((i) => ({
+        ...shipment,
+        station_code: "KGQC",
+        work_date: `2026-08-0${i}`,
+        deliveries: String(i * 100),
+        mg_deliveries: String(i * 100),
+        swa: "0",
+        mfn: "0",
+        smd: "0",
+        ihs: "0",
+      })),
+    ],
+    daily_costs: [],
+  };
+  const places = [
+    { ...location, station_code: "KGQA", pricing_model: "mg" },
+    xptLocation,
+  ];
+  return {
+    parent,
+    child,
+    snap,
+    places,
+    f: { ...filters, through: "2026-08-02" },
+  };
+}
+test("XPT fixed payout may be blank and its variable rate cannot override the parent", () => {
+  const result = pricing.validatePricing({
+    ...base,
+    station_code: "KGQC",
+    rates: {
+      ...xptCard.rates,
+      variable_slab: "999",
+      delivery_mg_volume: "500",
+    },
+  });
+  assert.equal(result.rates.mg_amount_including_mhe, null);
+  assert.equal(result.rates.variable_slab, null);
+  assert.equal(result.rates.delivery_mg_volume, null);
+  assert.throws(() =>
+    pricing.validatePricing({
+      ...base,
+      station_code: "KGQC",
+      rates: { ...xptCard.rates, parent_station_code: "KGQC" },
+    }),
+  );
+});
+test("XPT pays on every eligible delivery, with blank fixed payout explicitly pending", () => {
+  const { parent, child, snap, places, f } = xptFixture();
+  const rows = performance.buildBusinessRows(snap, [parent, child], places, f);
+  const xpt = rows.find((r) => r.station === "KGQC");
+  assert.equal(xpt.revenue, "6300.00");
+  assert.equal(xpt.variableRate, "21");
+  assert.equal(xpt.pendingFixed, true);
+  assert.ok(xpt.daily.every((d) => d.base === null));
+  assert.match(xpt.issues.join(), /XPT fixed payout missing/);
+  const group = performance.parentGroups(rows)[0];
+  assert.equal(group.revenue, "6920.00");
+  assert.equal(group.cost, "150.00");
+  assert.equal(group.members.length, 2);
+  assert.equal(pricing.addAmounts(rows.map((r) => r.revenue)), group.revenue);
+});
+test("Entering XPT fixed payout adds calendar accrual; parent rate edits flow through automatically", () => {
+  const { parent, child, snap, places, f } = xptFixture("3100");
+  const [xpt] = performance
+    .buildBusinessRows(snap, [parent, child], places, f)
+    .filter((r) => r.model === "xpt");
+  assert.equal(xpt.revenue, "6500.00");
+  assert.equal(xpt.pendingFixed, false);
+  assert.equal(pricing.addAmounts(xpt.daily.map((d) => d.base)), "200.00");
+  const [updated] = performance
+    .buildBusinessRows(snap, [parent, child], places, f, {
+      KGQA: { rate: "22", revision: 2 },
+    })
+    .filter((r) => r.model === "xpt");
+  assert.equal(updated.revenue, "6800.00");
+  assert.equal(updated.parentRateRevision, 2);
+});
+test("SWA is excluded from both parent MG excess and XPT variable earnings", () => {
+  const { parent, child, snap, places, f } = xptFixture();
+  snap.daily_shipments.forEach((d) => {
+    d.swa = "5";
+    d.mg_deliveries = String(Number(d.deliveries) - 5);
+  });
+  const rows = performance.buildBusinessRows(snap, [parent, child], places, f);
+  assert.equal(rows.find((r) => r.station === "KGQA").revenue, "410.00");
+  const xpt = rows.find((r) => r.station === "KGQC");
+  assert.equal(xpt.revenue, "6090.00");
+  assert.equal(xpt.swaDeliveries, "10");
+  assert.equal(xpt.eligibleDeliveries, "290");
+  assert.match(xpt.issues.join(), /SWA revenue pending/);
+});
+test("Missing Amazon count does not fall back to the total containing SWA", () => {
+  const { parent, child, snap, places, f } = xptFixture();
+  snap.daily_shipments.forEach((d) => {
+    d.mg_deliveries = null;
+    d.swa = "5";
+  });
+  const rows = performance.buildBusinessRows(snap, [parent, child], places, f);
+  assert.equal(rows.find((r) => r.station === "KGQA").revenue, "200.00");
+  assert.equal(rows.find((r) => r.station === "KGQC").revenue, null);
+});
+test("Parent selection can include XPTs, while standalone XPT and group exports remain scoped", () => {
+  const { parent, child, snap, places, f } = xptFixture();
+  assert.deepEqual(
+    data
+      .filterLocations(places, {
+        ...f,
+        region: "",
+        cluster: "",
+        location: "KGQA",
+        includeXpts: "1",
+      })
+      .map((l) => l.station_code),
+    ["KGQA", "KGQC"],
+  );
+  assert.deepEqual(
+    data
+      .filterLocations(places, {
+        ...f,
+        region: "",
+        cluster: "",
+        location: "KGQA",
+        includeXpts: "0",
+      })
+      .map((l) => l.station_code),
+    ["KGQA"],
+  );
+  const rows = performance.buildBusinessRows(snap, [parent, child], places, f);
+  const scoped = rows.filter((r) => r.station === "KGQC");
+  assert.deepEqual(
+    performance.selectDailyRows(scoped, "group:KGQA").map((r) => r.station),
+    ["KGQC"],
+  );
+  assert.equal(performance.selectDailyRows(scoped, "KGQA", "Amazon").length, 0);
+});
+test("XPT pricing writes reject a forged parent and allow a blank fixed payout for its real parent", async () => {
+  const previous = writeContext;
+  writeContext = { ...writeContext, locations: [xptLocation] };
+  let r = await actions.savePricing([
+    {
+      ...base,
+      station_code: "KGQC",
+      rates: { ...xptCard.rates, parent_station_code: "OUTSIDE" },
+    },
+  ]);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /configured parent/);
+  r = await actions.savePricing([
+    { ...base, station_code: "KGQC", rates: xptCard.rates },
+  ]);
+  assert.equal(r.ok, true);
+  writeContext = previous;
+});
+
+test("An XPT-only reader inherits the company/month-scoped parent rate without parent business data", async () => {
+  const { child, snap } = xptFixture();
+  const queries = [];
+  const scopedDb = {
+    from(table) {
+      const steps = [["from", table]];
+      queries.push(steps);
+      const builder = new Proxy(
+        {},
+        {
+          get(_target, key) {
+            if (key === "then")
+              return (resolve) => {
+                const parentQuery = steps.some(
+                  (s) =>
+                    s[0] === "select" &&
+                    s[1] === "id,station_code,revision,rates",
+                );
+                resolve({
+                  data: parentQuery
+                    ? [
+                        {
+                          id: "p2",
+                          station_code: "KGQA",
+                          revision: 2,
+                          rates: {
+                            variable_slab: "22",
+                            mg_amount_including_mhe: "999999",
+                          },
+                        },
+                        {
+                          id: "p1",
+                          station_code: "KGQA",
+                          revision: 1,
+                          rates: { variable_slab: "21" },
+                        },
+                      ]
+                    : [child],
+                  error: null,
+                });
+              };
+            return (...args) => {
+              steps.push([key, ...args]);
+              return builder;
+            };
+          },
+        },
+      );
+      return builder;
+    },
+    async rpc(name, args) {
+      assert.equal(name, "finance_business_daily_snapshot");
+      assert.equal(args.p_company, "company-1");
+      assert.deepEqual(args.p_station_codes, ["KGQC"]);
+      return {
+        data: {
+          ...snap,
+          shipments: snap.shipments.filter((r) => r.station_code === "KGQC"),
+          costs: snap.costs.filter((r) => r.station_code === "KGQC"),
+          daily_shipments: snap.daily_shipments.filter(
+            (r) => r.station_code === "KGQC",
+          ),
+        },
+        error: null,
+      };
+    },
+  };
+  const result = await data.loadBusiness(
+    {
+      authorization: auth,
+      companyId: "company-1",
+      locations: [xptLocation],
+      db: scopedDb,
+    },
+    { month: "2026-08", through: "2026-08-02", location: "KGQC" },
+  );
+  assert.deepEqual(
+    result.rows.map((r) => r.station),
+    ["KGQC"],
+  );
+  assert.equal(result.rows[0].variableRate, "22");
+  assert.equal(result.rows[0].parentRateRevision, 2);
+  assert.equal(result.rows[0].mg, null);
+  assert.equal(result.rows[0].revenue, "6600.00");
+  for (const steps of queries) {
+    assert.ok(
+      steps.some(
+        (s) => s[0] === "eq" && s[1] === "company_id" && s[2] === "company-1",
+      ),
+    );
+    assert.ok(
+      steps.some(
+        (s) =>
+          s[0] === "eq" && s[1] === "effective_month" && s[2] === "2026-08-01",
+      ),
+    );
+  }
+  const parentQuery = queries.find((steps) =>
+    steps.some(
+      (s) => s[0] === "select" && s[1] === "id,station_code,revision,rates",
+    ),
+  );
+  assert.ok(
+    parentQuery.some(
+      (s) =>
+        s[0] === "in" &&
+        s[1] === "station_code" &&
+        JSON.stringify(s[2]) === '["KGQA"]',
+    ),
+  );
+  assert.ok(
+    parentQuery.some(
+      (s) => s[0] === "eq" && s[1] === "provider" && s[2] === "Amazon",
+    ),
+  );
 });

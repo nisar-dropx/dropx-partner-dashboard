@@ -35,6 +35,8 @@ export default async function PricingPage() {
           locations={context.locations.map((l) => ({
             code: l.station_code,
             name: l.station_name || l.station_code,
+            model: l.pricing_model,
+            parent: l.parent_station_code,
           }))}
           canAdd={canWritePricing(context.authorization, 0)}
           canEdit={canWritePricing(context.authorization, 1)}

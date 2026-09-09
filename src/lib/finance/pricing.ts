@@ -17,6 +17,9 @@ export const amazonFields = [
   ["variable_slab", "Variable_Slab"],
   ["smd_rate", "SMD rate"],
 ] as const;
+export const isXptPricing = (
+  card: { rates: Record<string, string | null> } | undefined,
+) => card?.rates?.pricing_model === "xpt";
 export type Slab = { above: string; upto: string | null; rate: string };
 export type PricingInput = {
   provider: "Amazon" | "Flipkart";
@@ -169,12 +172,34 @@ export function validatePricing(value: unknown): PricingInput {
     throw new Error("Choose a slab calculation method.");
   const rates: Record<string, string | null> = {};
   if (v.provider === "Amazon") {
+    const xpt = isXptPricing(v);
+    if (
+      v.rates?.pricing_model &&
+      !["mg", "xpt"].includes(v.rates.pricing_model)
+    )
+      throw new Error("Unknown Amazon pricing model.");
+    if (xpt) {
+      const parent = v.rates.parent_station_code;
+      if (
+        !parent ||
+        !/^[A-Z0-9_-]{1,40}$/.test(parent) ||
+        parent === v.station_code
+      )
+        throw new Error("An XPT needs a different parent station.");
+      rates.pricing_model = "xpt";
+      rates.parent_station_code = parent;
+    }
     for (const [key, label] of amazonFields)
       rates[key] = numeric(
         v.rates?.[key],
         label,
-        key === "mg_amount_including_mhe" || key === "delivery_mg_volume",
+        !xpt &&
+          (key === "mg_amount_including_mhe" || key === "delivery_mg_volume"),
       );
+    if (xpt) {
+      rates.delivery_mg_volume = null;
+      rates.variable_slab = null; // Always inherited from the parent's current monthly revision.
+    }
     for (const key of ["city", "state", "partner", "sp_name"]) {
       const text = v.rates?.[key];
       if (text != null && (typeof text !== "string" || text.length > 250))
