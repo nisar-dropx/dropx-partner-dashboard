@@ -125,9 +125,12 @@ export function CiaNetworkClient({
 
   const busy = refreshingAll || refreshingStation !== null || pending;
   const progress = liveProgress;
+  // Progress banner + auto-continue only for manual Refresh all (worker hides cron runs).
   const refreshActive = Boolean(progress && progress.status === "running")
+    || refreshingAll
     || String(runStatus ?? "").trim() === "running";
   const effectiveRunStatus = refreshActive ? "running" : (runStatus ?? null);
+  const showRefreshBanner = Boolean(progress && progress.status === "running");
 
   const advanceNextStation = useCallback(async (source: "auto" | "manual") => {
     if (advancingRef.current) return true;
@@ -357,7 +360,7 @@ export function CiaNetworkClient({
 
   return (
     <div className="cia-network">
-      {refreshActive && progress ? (
+      {showRefreshBanner && progress ? (
         <section className="panel message-panel info">
           <div className="panel-body">
             <strong>
@@ -367,8 +370,8 @@ export function CiaNetworkClient({
               {progress.stationsOk} of {progress.stationsTotal} stations attempted so far
               {refreshProgressDetail(progress)}.
               {" "}
-              Fastest path: keep this tab open — it chains stations automatically.
-              If you close it, the worker cron still advances about one station every minute.
+              Keep this tab open — it chains stations automatically.
+              Background cron refreshes silently every 2 hours (06:00–20:00 IST) without showing this banner.
               Row Refresh updates only that station.
             </p>
             {formatBackgroundCron(backgroundCron) ? (
