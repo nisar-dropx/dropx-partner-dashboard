@@ -281,9 +281,9 @@ async function loadCanonicalUserAccess(companyId: string, users: UserRow[], loca
         access_source: isLocation ? "location" as const : designation ? "people" as const : "manual" as const,
         portal_codes: [...new Set(memberships.map((membership) => membership.product_code))].sort(),
         people_profile_url: !candidate ? null : candidate.worker_type === "employee" && candidate.employee_id
-          ? `https://people.dropxlogistics.com/people/employees/${candidate.employee_id}`
+          ? `https://people.dropxlogistics.com/employees?edit=${candidate.employee_id}`
           : candidate.worker_type === "contractor" && candidate.contractor_id
-            ? `https://people.dropxlogistics.com/people/contractors/${candidate.contractor_id}`
+            ? `https://people.dropxlogistics.com/contractors?edit=${candidate.contractor_id}`
             : null,
         has_all_location_access: Boolean(candidate?.has_all_location_access || memberships.some((membership) => membership.has_all_location_access)),
         location_scope_ids: canonicalLocationIds
@@ -325,7 +325,7 @@ async function loadSurfaceDesignationAccess(companyId: string, surface: ReturnTy
 }
 
 const businessProducts = [
-  { code: "people", label: "People", href: "https://people.dropxlogistics.com/settings/roles" },
+  { code: "people", label: "People", href: "https://people.dropxlogistics.com/users?section=roles" },
   { code: "operations", label: "OpsPulse", href: "https://ops.dropxlogistics.com/users?section=roles" },
   { code: "workforce", label: "Workforce", href: "https://workforce.dropxlogistics.com/users?section=roles" },
   { code: "recruit", label: "Recruit", href: "https://recruit.dropxlogistics.com/settings/access" },
@@ -798,7 +798,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
             <p className="subtle">Cross-portal eligibility remains visible here. Open a portal to configure that portal&apos;s menus; use the Dashboard capability section above for Dashboard permissions.</p>
           </div>
           <div className="stacked-actions">
-            <a className="button" href="https://people.dropxlogistics.com/settings/designations">People Designation Master</a>
+            <a className="button" href="https://people.dropxlogistics.com/master/designations">People Designation Master</a>
             {isCompanyOwner(authorization) && pagePermission.canEdit ? <form action={reconcilePeopleAccessArchitecture}><SubmitButton className="button secondary" pendingText="Applying defaults…">Apply previous defaults</SubmitButton></form> : null}
           </div>
         </div>
@@ -828,7 +828,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
         canEdit={pagePermission.canEdit}
         configureAction={configureSurfaceDesignationRole}
         configureLocationAction={configureSurfaceLocationRole}
-        masterHref="https://people.dropxlogistics.com/settings/designations"
+        masterHref="https://people.dropxlogistics.com/master/designations"
         productCode={membershipProductCode(accessSurface) ?? ""}
         locationAccount={{
           roleId: surfaceDesignationAccess.locationRoleId,
