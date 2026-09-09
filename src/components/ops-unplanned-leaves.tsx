@@ -62,7 +62,7 @@ export function OpsUnplannedLeaves({initial,initialFilters}: {initial:UnplannedW
         <label>Reporting manager<select className="field" value={filters.manager} onChange={e=>change({manager:e.target.value,direct:false})}>
           <option value="">{data.scope==="company"?"Entire organisation":data.scope==="location"?"Your location team":"Your reporting team"}</option>
           {badManager&&<option value={filters.manager}>Manager not available</option>}
-          {data.managers.filter(m=>m.id!==data.viewerPersonId).sort((a,b)=>a.name.localeCompare(b.name)).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+          {[...data.managers].sort((a,b)=>a.name.localeCompare(b.name)).map(m=><option key={m.id} value={m.id}>{m.name}{m.id===data.viewerPersonId?" · your team":""}</option>)}
         </select></label>
         <label>Location<select className="field" value={filters.location} onChange={e=>change({location:e.target.value})}><option value="">All in scope</option>{distinct(data.rows.map(r=>r.location_id)).map(id=><option key={id} value={id}>{data.rows.find(r=>r.location_id===id)?.station_code}</option>)}</select></label>
         <label>Cluster<select className="field" value={filters.cluster} onChange={e=>change({cluster:e.target.value})}><option value="">All clusters</option>{distinct(data.rows.map(r=>r.cluster)).map(s=><option key={s}>{s}</option>)}</select></label>
@@ -81,7 +81,7 @@ export function OpsUnplannedLeaves({initial,initialFilters}: {initial:UnplannedW
           <td><strong>{r.full_name}</strong><small>{r.worker_code} · {r.role_name}</small>{r.mobile&&<a href={"tel:"+r.mobile.replace(/[^+\d]/g,"")}>{r.mobile}</a>}</td>
           <td><strong>{r.station_code||"Unassigned"}</strong><small>{r.station_name}</small></td>
           <td>{r.shift_code}<small>{r.shift_start.slice(0,5)} – {r.shift_end.slice(0,5)}{r.shift_end<=r.shift_start?" (+1 day)":""}</small></td>
-          <td>{data.managers.find(m=>m.id===r.manager_person_ids[0])?.name||"Location reporting team"}</td>
+          <td>{data.managers.find(m=>m.id===r.manager_person_ids[0])?.name||(r.manager_person_ids[0]?"Reporting manager":"Not linked")}</td>
           <td><span className="status-pill warn">No punch · confirm</span><small>In — · Out —</small></td>
         </tr>)}</tbody></table>
         {!rows.length&&!badManager&&<div className="oul-empty">No people to follow up in this view. Change the filters or attendance day if needed.</div>}
