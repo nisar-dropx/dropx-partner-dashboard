@@ -16,10 +16,11 @@ export function PerformanceCarriedActions({
   canUpdate:boolean;
   selectedDate:string;
 }) {
-  if(!items.length)return null;
-  const openCount=items.filter(item=>item.status!=="done").length;
+  const openItems=items.filter(item=>item.status!=="done");
+  if(!openItems.length)return null;
+  const openCount=openItems.length;
   const asOf=review?.source_date||selectedDate;
-  return <details className="review-followups" open>
+  return <details className="review-followups">
     <summary>
       <span>
         <strong>Open actions from earlier review days · {openCount} still open</strong>
@@ -31,16 +32,16 @@ export function PerformanceCarriedActions({
       New misses for this date get new RCA rows after you start today’s review.
       Update status here when an older action is finished.
     </p>
-    {items.map(item=>{
+    {openItems.map(item=>{
       const fromDate=previous.find(row=>row.id===item.review_id)?.source_date??"";
-      const overdue=Boolean(item.due_date&&item.due_date<asOf&&item.status!=="done");
-      return <details key={item.id} className={item.status==="done"?"done":undefined}>
+      const overdue=Boolean(item.due_date&&item.due_date<asOf);
+      return <details key={item.id}>
         <summary>
           <span>
             <strong>{item.metric_label} · {item.corrective_action||"Action pending"}</strong>
             <small>From review {formatDashboardDate(fromDate)} · {item.action_owner||"Owner pending"} · ETA {item.due_date?formatDashboardDate(item.due_date):"Not set"}</small>
           </span>
-          <b>{item.status==="done"?"Done":overdue?"Overdue":item.status.replace("_"," ")}</b>
+          <b>{overdue?"Overdue":item.status.replace("_"," ")}</b>
         </summary>
         <p>{item.root_cause}</p>
         {review&&canUpdate?<ReviewActionForm action={updateCarriedReviewAction} className="review-followup-form" key={item.updated_at}>
