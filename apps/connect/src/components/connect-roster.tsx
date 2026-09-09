@@ -7,7 +7,17 @@ import type { AppAccount } from "./connect-profile-app";
 
 type Shift = { id: string; name: string; code: string; start_time: string; end_time: string };
 type Partner = { id: string; workerType: string; workerId: string; name?: string; code?: string; dayType: "working" | "weekly_off"; shift: Shift | null };
-type RosterDay = { id: string; date: string; dayType: "working" | "weekly_off"; locationId: string | null; shift: Shift | null; isProjected: boolean; canSwap: boolean; partners: Partner[] };
+type RosterDay = {
+  id: string;
+  date: string;
+  dayType: "working" | "weekly_off";
+  locationId: string | null;
+  shift: Shift | null;
+  isProjected: boolean;
+  canSwap: boolean;
+  partners: Partner[];
+  swapUnavailableReason?: "cutoff" | "no_working_colleagues" | "no_different_roster" | null;
+};
 type SwapRequest = {
   id: string;
   date: string;
@@ -233,6 +243,10 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
 
   function swapActionLabel(day: RosterDay) {
     if (day.canSwap && day.partners.length) return "Request swap";
+    if (day.swapUnavailableReason === "cutoff" || !day.canSwap) return `Closed ${data?.leadHours ?? 24}h before`;
+    if (day.dayType === "weekly_off" && day.swapUnavailableReason === "no_working_colleagues") {
+      return "No colleague is rostered to work this day";
+    }
     if (day.canSwap) return "No valid swap";
     return `Closed ${data?.leadHours ?? 24}h before`;
   }
@@ -342,6 +356,11 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
                   );
                 })}
               </div>
+              {group.days.some((day) => day.dayType === "weekly_off" && !day.partners.length && day.swapUnavailableReason === "no_working_colleagues") ? (
+                <p className="dx-roster-week-note">
+                  Week-off swap needs a colleague who is working that same day. If your whole location is off, no swap is available.
+                </p>
+              ) : null}
             </section>
           )) : (
             <div className="dx-roster-empty">

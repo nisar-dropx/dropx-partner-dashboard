@@ -68,7 +68,7 @@ function isHeadOfficeLocation(station: {
 }) {
   const model = relation(station.location_models);
   const value = `${model?.name ?? ""} ${model?.code ?? ""} ${station.station_code ?? ""} ${station.station_name ?? ""}`.toLowerCase();
-  return /\bho\b|head office|corporate office/.test(value);
+  return /\bho\b|head office|corporate office|headquarters|\bhq\b|corp office/.test(value);
 }
 
 async function stationSameDesignationFlags(companyId: string, locationIds: string[]) {
@@ -407,12 +407,15 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   const fallbackLocationId = locations[0] ?? null;
   const days = own.map((entry) => {
     const entryLocationId = entry.location_id ?? fallbackLocationId;
-    const requireSameDesignation = Boolean(entryLocationId && stationDesignationRequired.get(entryLocationId));
-    const meaningfulPartners = colleagueEntries.filter((candidate) => candidate.id !== entry.id
+    const involvesWeekOff = entry.day_type === "weekly_off";
+    // Week-off ↔ working exchanges are coverage swaps; keep station designation limits on working ↔ working only.
+    const requireSameDesignation = !involvesWeekOff
+      && Boolean(entryLocationId && stationDesignationRequired.get(entryLocationId));
+    const sameLocationCandidates = colleagueEntries.filter((candidate) => candidate.id !== entry.id
       && candidate.roster_date === entry.roster_date
       && sameRosterLocation(entry.location_id, candidate.location_id, fallbackLocationId)
-      && !isOwnIdentity(candidate.worker_type, candidate.worker_id, identities)
-      && isMeaningfulRosterSwap(entry, candidate)
+      && !isOwnIdentity(candidate.worker_type, candidate.worker_id, identities));
+    const meaningfulPartners = sameLocationCandidates.filter((candidate) => isMeaningfulRosterSwap(entry, candidate)
       && (!requireSameDesignation || sameStationDesignation(
         requesterDesignationId,
         designationByWorker.get(`${candidate.worker_type}:${candidate.worker_id}`) ?? null
@@ -422,10 +425,19 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
       catch { return false; }
     }).map((candidate) => ({ id: candidate.id, workerType: candidate.worker_type, workerId: candidate.worker_id, ...names.get(`${candidate.worker_type}:${candidate.worker_id}`), dayType: candidate.day_type, shift: candidate.day_type === "weekly_off" ? null : shiftOf(candidate) }));
     const canSwap = !meaningfulPartners.length || Boolean(partners.length);
+    const workingColleagueCount = sameLocationCandidates.filter((candidate) => candidate.day_type === "working" && Boolean(candidate.shift_id)).length;
+    const swapUnavailableReason = partners.length
+      ? null
+      : meaningfulPartners.length
+        ? "cutoff"
+        : involvesWeekOff && workingColleagueCount === 0
+          ? "no_working_colleagues"
+          : "no_different_roster";
     return {
       id: entry.id, date: entry.roster_date, dayType: entry.day_type, locationId: entryLocationId,
       shift: entry.day_type === "weekly_off" ? null : shiftOf(entry),
-      isProjected: entry.id.startsWith("preview:"), canSwap, partners
+      isProjected: entry.id.startsWith("preview:"), canSwap, partners,
+      swapUnavailableReason
     };
   });
   const requests = swaps.map((request) => {
@@ -477,9 +489,12 @@ export async function POST(request: Request) {
     if (planOf(requester)?.status !== "approved" || planOf(partner)?.status !== "approved") throw new Error("Only approved roster shifts can be swapped.");
     const rosterDate = requestedDate || requester.roster_date;
     if (requesterSelection?.date !== partnerSelection?.date && requesterSelection && partnerSelection) throw new Error("Choose a colleague from the same date.");
-    if (requester.location_id !== partner.location_id) throw new Error("Choose a colleague from the same location.");
+    if (!sameRosterLocation(requester.location_id, partner.location_id, requester.location_id ?? partner.location_id)) {
+      throw new Error("Choose a colleague from the same location.");
+    }
     if (!isMeaningfulRosterSwap(requester, partner)) throw new Error("Choose a colleague whose roster is different for this date.");
-    if (requester.location_id) {
+    const involvesWeekOff = requester.day_type === "weekly_off" || partner.day_type === "weekly_off";
+    if (!involvesWeekOff && requester.location_id) {
       const stationDesignationRequired = await stationSameDesignationFlags(account.companyId, [requester.location_id]);
       if (stationDesignationRequired.get(requester.location_id)) {
         const designations = await resolveWorkerDesignationIds(account.companyId, [
