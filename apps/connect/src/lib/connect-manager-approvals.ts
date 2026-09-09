@@ -8,7 +8,7 @@ import {
   loadConnectAccessibleWorkforceIds,
   loadConnectAttendanceApproveScope
 } from "./connect-people-attendance-access";
-import { type ConnectReporteeAccess } from "./connect-reportee-scope";
+import { connectReporteeMatches, type ConnectReporteeAccess } from "./connect-reportee-scope";
 import { notifyConnectExitOutcome, notifyExitApprovalRequired } from "./connect-exit-notifications";
 import { todayInIndia } from "./india-date";
 import { supabaseAdmin } from "./supabase-admin";
@@ -702,7 +702,7 @@ async function workerDisplay(companyId: string, workerType: string, workerId: st
   return { name: result.data?.full_name ?? "Team member", code: result.data?.dropx_id ?? "" };
 }
 
-export async function listConnectRosterSwapApprovals(account: ConnectAccount) {
+export async function listConnectRosterSwapApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
   const actorUserIds = await approverUserIds(account);
   if (!actorUserIds.length) return [];
   const result = await db().from("hr_roster_swap_requests")
@@ -712,13 +712,16 @@ export async function listConnectRosterSwapApprovals(account: ConnectAccount) {
     .eq("status", "pending_manager")
     .order("requested_at", { ascending: false });
   if (result.error) throw new Error(result.error.message);
-  const shiftIds = [...new Set((result.data ?? []).flatMap((row) => [row.requester_shift_id, row.partner_shift_id]).filter(Boolean))] as string[];
+  // Shift swaps route only to the requester's immediate manager. Show only when the
+  // requester is inside the selected Immediate reportees / Entire team scope.
+  const scoped = (result.data ?? []).filter((row) => connectReporteeMatches(reportees, row.requester_worker_type, row.requester_worker_id));
+  const shiftIds = [...new Set(scoped.flatMap((row) => [row.requester_shift_id, row.partner_shift_id]).filter(Boolean))] as string[];
   const shiftsResult = shiftIds.length
     ? await db().from("hr_shifts").select("id,name,code,start_time,end_time").in("id", shiftIds)
     : { data: [], error: null };
   if (shiftsResult.error) throw new Error(shiftsResult.error.message);
   const shifts = new Map((shiftsResult.data ?? []).map((shift) => [shift.id, shift]));
-  return Promise.all((result.data ?? []).map(async (row) => {
+  return Promise.all(scoped.map(async (row) => {
     const [requester, partner] = await Promise.all([
       workerDisplay(account.companyId, row.requester_worker_type, row.requester_worker_id),
       workerDisplay(account.companyId, row.partner_worker_type, row.partner_worker_id)
@@ -828,42 +831,19 @@ export async function decideConnectRosterSwapApproval(account: ConnectAccount, r
   if (decision !== "approved" && decision !== "rejected") throw new Error("Choose Approve or Reject.");
   const accept = decision === "approved";
 
-  // Call the review function directly. The legacy hr_manager_decide_roster_swap
-  // wrapper incorrectly selected a composite row INTO a record and raised:
-  // "invalid input syntax for type uuid: “(…entire swap row…)”".
-  const rpc = await db().rpc("hr_review_roster_swap", {
+  // Keep the dedicated manager wrapper (fixed in People migration). Do not call
+  // hr_review_roster_swap from Connect — People owns that path.
+  const rpc = await db().rpc("hr_manager_decide_roster_swap", {
     p_company_id: account.companyId,
     p_request_id: requestId,
-    p_approver_user_id: actorUserId,
-    p_approve: accept,
+    p_actor_user_id: actorUserId,
+    p_accept: accept,
     p_note: note || null
   });
   if (!rpc.error) {
     const decided = normalizeRosterSwapDecision(rpc.data);
     if (!decided) throw new Error("Shift swap was updated, but the response could not be read. Refresh and confirm the status.");
-    if (accept && decided.status === "pending_manager" && decided.approver_user_id) {
-      await db().from("people_web_notifications").upsert({
-        company_id: account.companyId,
-        recipient_user_id: decided.approver_user_id,
-        event_code: "roster_swap_approval_required",
-        title: "Shift swap awaiting approval",
-        body: `A shift swap for ${decided.roster_date} is ready for your approval.`,
-        href: "/approvals",
-        source_key: requestId,
-        data: { requestId, rosterDate: decided.roster_date }
-      }, { onConflict: "company_id,event_code,source_key,recipient_user_id", ignoreDuplicates: true });
-      await notifyApproverMobile({
-        companyId: account.companyId,
-        recipientUserId: decided.approver_user_id,
-        eventCode: "roster_swap_approval_required",
-        title: "Shift swap awaiting approval",
-        body: `A shift swap for ${decided.roster_date} is ready for your approval in DropX One.`,
-        route: "approvals",
-        sourceKey: requestId,
-        data: { requestId, rosterDate: decided.roster_date }
-      });
-      return "Approval recorded and sent to the next approver.";
-    }
+    // Single-step immediate-manager route: never escalate to a next approver from Connect.
     await notifyRosterSwapWorkers({
       companyId: account.companyId,
       requesterWorkerType: decided.requester_worker_type,

@@ -93,7 +93,7 @@ export async function GET(request: Request) {
       listConnectAttendanceApprovals(account, reportees),
       listConnectAttendanceHrApprovals(account, reportees),
       listConnectRosterApprovals(account),
-      listConnectRosterSwapApprovals(account),
+      listConnectRosterSwapApprovals(account, reportees),
       listConnectReturnedRosters(account),
       listConnectExitApprovals(account),
       listConnectExitWithdrawalApprovals(account)

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
-import { resolveConfiguredApprovalWorkflow } from "../../../../src/lib/approval-workflow-routing";
 import { formatShiftClock, preferActiveRosterRowsByKey } from "@/lib/roster-plan-preference";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
@@ -469,15 +468,12 @@ export async function POST(request: Request) {
       }
     }
     const leadHours = await swapCutoff(account.companyId); assertSwapBeforeCutoff(requester, partner, rosterDate, leadHours);
-    const configuredRoute = await resolveConfiguredApprovalWorkflow({
-      companyId: account.companyId,
-      workerType: requester.worker_type,
-      workerId: requester.worker_id,
-      workflowCode: "roster_swap"
-    });
-    const approvalSteps = configuredRoute?.steps ?? [{
+    // People policy: roster_swap = immediate reporting manager only (no L2 / HR).
+    const managerUserId = await immediateManager(account.companyId, requester.worker_type, requester.worker_id);
+    if (!managerUserId) throw new Error("No reporting manager is set for this person, so the swap cannot be sent for approval.");
+    const approvalSteps = [{
       step_name: "Immediate reporting manager approval",
-      approver_user_id: await immediateManager(account.companyId, requester.worker_type, requester.worker_id),
+      approver_user_id: managerUserId,
       approver_person_id: null,
       route_id: null,
       resolved_via: "reporting_chain",
@@ -495,7 +491,7 @@ export async function POST(request: Request) {
       p_requester_note: note || null
     });
     if (created.error && /Could not find the function|schema cache|does not exist/i.test(created.error.message)) {
-      created = await db().rpc("hr_create_roster_swap_request", { p_company_id: account.companyId, p_requester_source_entry_id: requester.id, p_partner_source_entry_id: partner.id, p_roster_date: rosterDate, p_requester_worker_type: requester.worker_type, p_requester_worker_id: requester.worker_id, p_approver_user_id: approvalSteps[0].approver_user_id, p_requester_note: note || null });
+      created = await db().rpc("hr_create_roster_swap_request", { p_company_id: account.companyId, p_requester_source_entry_id: requester.id, p_partner_source_entry_id: partner.id, p_roster_date: rosterDate, p_requester_worker_type: requester.worker_type, p_requester_worker_id: requester.worker_id, p_approver_user_id: managerUserId, p_requester_note: note || null });
     }
     if (created.error) throw new Error(created.error.message);
     const requestId = String(created.data);
