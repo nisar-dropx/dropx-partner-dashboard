@@ -29,26 +29,18 @@ function identityKey(identity: WorkerIdentity) { return `${identity.workerType}:
 function isOwnIdentity(workerType: WorkerType, workerId: string, identities: WorkerIdentity[]) { return identities.some((identity) => identity.workerType === workerType && identity.workerId === workerId); }
 function shiftOf(entry: Entry) { return relation(entry.hr_shifts); }
 function planOf(entry: Entry) { return relation(entry.hr_roster_plans); }
-function hasAssignedWorkingShift(entry: Entry) {
-  // Week offs are swappable; working days need a shift id (join embed is optional).
-  return entry.day_type === "weekly_off" || Boolean(entry.shift_id);
-}
+function hasAssignedWorkingShift(entry: Entry) { return entry.day_type === "weekly_off" || Boolean(entry.shift_id && shiftOf(entry)); }
 function rosterAssignmentKey(entry: Entry) {
   if (entry.day_type === "weekly_off") return "weekly_off";
   const shift = shiftOf(entry);
-  if (shift) return `working:${formatShiftClock(shift.start_time)}:${formatShiftClock(shift.end_time)}`;
-  if (entry.shift_id) return `working:id:${entry.shift_id}`;
-  return "working:unassigned";
+  return shift
+    ? `working:${formatShiftClock(shift.start_time)}:${formatShiftClock(shift.end_time)}`
+    : "working:unassigned";
 }
 function isMeaningfulRosterSwap(requester: Entry, partner: Entry) {
   return hasAssignedWorkingShift(requester)
     && hasAssignedWorkingShift(partner)
     && rosterAssignmentKey(requester) !== rosterAssignmentKey(partner);
-}
-function sameRosterLocation(leftLocationId: string | null | undefined, rightLocationId: string | null | undefined, fallbackLocationId: string | null) {
-  const left = leftLocationId || fallbackLocationId;
-  const right = rightLocationId || left || fallbackLocationId;
-  return Boolean(left) && left === right;
 }
 function isoWeekday(date: string) {
   const day = new Date(`${date}T00:00:00Z`).getUTCDay();
@@ -291,26 +283,10 @@ async function swapCutoff(companyId: string) {
 function assertBeforeCutoff(entry: Entry, leadHours: number) {
   const start = shiftOf(entry)?.start_time?.slice(0, 8) ?? "00:00:00";
   const beginsAt = Date.parse(`${entry.roster_date}T${start}+05:30`);
-  if (!Number.isFinite(beginsAt) || Date.now() > beginsAt - leadHours * 3_600_000) {
-    throw new Error(`Shift swaps close ${leadHours} hours before the shift.`);
-  }
-}
-
-function assertWeekOffSwapBeforeCutoff(rosterDate: string, leadHours: number) {
-  // Future week-off dates stay open; only the roster date itself uses the lead-hour window.
-  if (rosterDate > todayIndia()) return;
-  const dayEndsAt = Date.parse(`${rosterDate}T23:59:59+05:30`);
-  if (!Number.isFinite(dayEndsAt) || Date.now() > dayEndsAt - leadHours * 3_600_000) {
-    throw new Error(`Shift swaps close ${leadHours} hours before the day ends.`);
-  }
+  if (!Number.isFinite(beginsAt) || Date.now() > beginsAt - leadHours * 3_600_000) throw new Error(`Shift swaps close ${leadHours} hours before the shift.`);
 }
 
 function assertSwapBeforeCutoff(requester: Entry, partner: Entry, rosterDate: string, leadHours: number) {
-  const involvesWeekOff = requester.day_type === "weekly_off" || partner.day_type === "weekly_off";
-  if (involvesWeekOff) {
-    assertWeekOffSwapBeforeCutoff(rosterDate, leadHours);
-    return;
-  }
   const workingEntries = [requester, partner].filter((entry) => entry.day_type === "working");
   for (const entry of workingEntries) assertBeforeCutoff({ ...entry, roster_date: rosterDate }, leadHours);
 }
@@ -404,13 +380,11 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   const requesterDesignationId = identities
     .map((identity) => designationByWorker.get(identityKey(identity)) ?? null)
     .find((value) => Boolean(value)) ?? null;
-  const fallbackLocationId = locations[0] ?? null;
   const days = own.map((entry) => {
-    const entryLocationId = entry.location_id ?? fallbackLocationId;
-    const requireSameDesignation = Boolean(entryLocationId && stationDesignationRequired.get(entryLocationId));
+    const requireSameDesignation = Boolean(entry.location_id && stationDesignationRequired.get(entry.location_id));
     const meaningfulPartners = colleagueEntries.filter((candidate) => candidate.id !== entry.id
       && candidate.roster_date === entry.roster_date
-      && sameRosterLocation(entry.location_id, candidate.location_id, fallbackLocationId)
+      && candidate.location_id === entry.location_id
       && !isOwnIdentity(candidate.worker_type, candidate.worker_id, identities)
       && isMeaningfulRosterSwap(entry, candidate)
       && (!requireSameDesignation || sameStationDesignation(
@@ -423,7 +397,7 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
     }).map((candidate) => ({ id: candidate.id, workerType: candidate.worker_type, workerId: candidate.worker_id, ...names.get(`${candidate.worker_type}:${candidate.worker_id}`), dayType: candidate.day_type, shift: candidate.day_type === "weekly_off" ? null : shiftOf(candidate) }));
     const canSwap = !meaningfulPartners.length || Boolean(partners.length);
     return {
-      id: entry.id, date: entry.roster_date, dayType: entry.day_type, locationId: entryLocationId,
+      id: entry.id, date: entry.roster_date, dayType: entry.day_type, locationId: entry.location_id,
       shift: entry.day_type === "weekly_off" ? null : shiftOf(entry),
       isProjected: entry.id.startsWith("preview:"), canSwap, partners
     };
