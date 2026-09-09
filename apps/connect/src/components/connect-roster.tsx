@@ -293,38 +293,50 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
                   const isToday = day.date === today;
                   const isOff = day.dayType === "weekly_off";
                   const canRequest = day.canSwap && day.partners.length > 0;
+                  const actionLabel = swapActionLabel(day);
                   return (
                     <article
                       className={[
                         isOff ? "off" : "working",
                         isToday ? "today" : "",
-                        selectedDay?.id === day.id ? "selected" : ""
+                        selectedDay?.id === day.id ? "selected" : "",
+                        canRequest ? "can-swap" : ""
                       ].filter(Boolean).join(" ")}
                       key={day.id}
                     >
-                      <div className="dx-roster-date" aria-hidden="true">
-                        <strong>{dayNumber(day.date)}</strong>
-                        <small>{weekdayLabel(day.date)}</small>
-                      </div>
-                      <div className="dx-roster-shift">
-                        <span>
-                          <strong>{isOff ? "Weekly off" : day.shift?.name || "Working day"}</strong>
-                          <small>{monthLabel(day.date)}{isToday ? " · Today" : ""}{day.isProjected ? " · Planned" : ""}</small>
-                        </span>
-                        <em className={isOff ? "off" : "shift"}>
-                          <Clock3 />
-                          {shiftLabel(day.shift, day.dayType)}
-                        </em>
-                      </div>
                       <button
-                        aria-label={`${swapActionLabel(day)} for ${displayDate(day.date)}`}
-                        className={canRequest ? "swap" : "muted"}
+                        aria-label={canRequest ? `${actionLabel} for ${displayDate(day.date)}` : `${displayDate(day.date)}: ${actionLabel}`}
+                        className="dx-roster-day-hit"
                         disabled={!canRequest}
                         onClick={() => openSwap(day)}
                         type="button"
                       >
+                        <div className="dx-roster-date" aria-hidden="true">
+                          <strong>{dayNumber(day.date)}</strong>
+                          <small>{weekdayLabel(day.date)}</small>
+                        </div>
+                        <div className="dx-roster-shift">
+                          <span>
+                            <strong>{isOff ? "Weekly off" : day.shift?.name || "Working day"}</strong>
+                            <small>{monthLabel(day.date)}{isToday ? " · Today" : ""}{day.isProjected ? " · Planned" : ""}</small>
+                          </span>
+                          <em className={isOff ? "off" : "shift"}>
+                            <Clock3 />
+                            {shiftLabel(day.shift, day.dayType)}
+                          </em>
+                        </div>
+                      </button>
+                      <button
+                        aria-hidden={!canRequest}
+                        className={canRequest ? "swap" : "muted"}
+                        disabled={!canRequest}
+                        onClick={() => openSwap(day)}
+                        tabIndex={canRequest ? 0 : -1}
+                        title={actionLabel}
+                        type="button"
+                      >
                         <ArrowLeftRight />
-                        <span>{canRequest ? "Swap" : "Locked"}</span>
+                        <span>{canRequest ? (isOff ? "Swap off" : "Swap") : day.canSwap ? "No swap" : "Closed"}</span>
                       </button>
                     </article>
                   );

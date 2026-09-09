@@ -8179,12 +8179,12 @@ tr:last-child td {
 
 .dx-app .dx-roster .dx-roster-week > article {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) auto;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
   align-items: center;
   min-height: 0 !important;
   flex: none !important;
-  padding: 12px 14px;
+  padding: 8px 10px;
   background: #fff !important;
   border: 0;
   border-bottom: 1px solid #eee9e2;
@@ -8211,6 +8211,36 @@ tr:last-child td {
 
 .dx-app .dx-roster .dx-roster-week > article.off.today {
   background: #f3f4f6 !important;
+}
+
+.dx-app .dx-roster .dx-roster-week > article.can-swap {
+  background: #fff !important;
+}
+
+.dx-app .dx-roster .dx-roster-week > article.can-swap.off {
+  background: #f8fafc !important;
+}
+
+.dx-app .dx-roster-day-hit {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 4px 2px;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+}
+
+.dx-app .dx-roster-day-hit:disabled {
+  opacity: 1;
+}
+
+.dx-app .dx-roster-day-hit:not(:disabled):active {
+  background: #fff4ec;
 }
 
 .dx-app .dx-roster-date {
@@ -8313,12 +8343,13 @@ tr:last-child td {
   background: #e2e8f0;
 }
 
-.dx-app .dx-roster .dx-roster-week > article > button {
+.dx-app .dx-roster .dx-roster-week > article > button.swap,
+.dx-app .dx-roster .dx-roster-week > article > button.muted {
   display: grid;
   place-items: center;
   gap: 2px;
-  width: 58px;
-  min-height: 44px;
+  width: 64px;
+  min-height: 48px;
   padding: 6px 4px;
   color: #cf3f23;
   background: #fff4ef;
@@ -8326,18 +8357,34 @@ tr:last-child td {
   border-radius: 10px;
   font-size: 10px;
   font-weight: 700;
+  z-index: 1;
 }
 
-.dx-app .dx-roster .dx-roster-week > article > button svg {
+.dx-app .dx-roster .dx-roster-week > article > button.swap svg,
+.dx-app .dx-roster .dx-roster-week > article > button.muted svg {
   width: 15px;
   height: 15px;
 }
 
+.dx-app .dx-roster .dx-roster-week > article.off > button.swap {
+  color: #1e3a5f;
+  background: #e8eef7;
+  border-color: #c5d4e8;
+}
+
 .dx-app .dx-roster .dx-roster-week > article > button.muted,
-.dx-app .dx-roster .dx-roster-week > article > button:disabled {
+.dx-app .dx-roster .dx-roster-week > article > button.swap:disabled,
+.dx-app .dx-roster .dx-roster-week > article > button.muted:disabled {
   color: #98a0b3;
   background: #f4f5f7;
   border-color: #e6e8ed;
+}
+
+.dx-app .dx-roster-day-hit:disabled {
+  color: inherit;
+  background: transparent;
+  border: 0;
+  opacity: 1;
 }
 
 .dx-app .dx-roster-empty {
@@ -8368,7 +8415,7 @@ tr:last-child td {
   right: 0;
   bottom: 0;
   left: 0;
-  z-index: 81;
+  z-index: 120;
   display: grid;
   gap: 12px;
   max-width: 520px;
