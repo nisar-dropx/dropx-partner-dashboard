@@ -43,4 +43,7 @@ assert.ok(text.includes('END OF LONG COMMENT'),'Full multi-page discussion retai
 if(process.argv.includes('--artifacts')){mkdirSync('/tmp/opspulse-review-report-qa',{recursive:true});writeFileSync('/tmp/opspulse-review-report-qa/report.xlsx',xlsx);writeFileSync('/tmp/opspulse-review-report-qa/report.pdf',pdf);}
 const route=readFileSync('src/app/api/ops-pulse/reports/reviews/route.ts','utf8');
 assert.ok(route.includes('hasPermission(auth, "ops_reports", "access")')&&route.includes('hasPermission(auth, "performance_review", "access")'));assert.ok(route.includes('outside your permitted scope'));assert.ok(route.includes('private, no-store'));
+const css=readFileSync('src/app/ops-pulse/reports/review-report.css','utf8');
+assert.match(css,/\.ops-reports-workspace\s*\{\s*grid-template-columns:minmax\(0,1fr\)/,'Parent grid must not expand to intrinsic table/input width');
+assert.match(css,/@media\(max-width:450px\)[\s\S]*\.review-report-controls\s*\{\s*grid-template-columns:minmax\(0,1fr\)/,'Narrow phones need full-width date and filter controls');
 console.log(`PASS review report: scoped read-only route, paginated sources, missing/zero distinctions, RCA, unicode Excel, ${doc.numPages}-page PDF, complete long text.`);
