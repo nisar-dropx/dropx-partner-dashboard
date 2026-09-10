@@ -256,7 +256,7 @@ export function PerformanceReviewDesk(props: Props) {
     <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update vehicle timings and noon EMD; view the full review":canEdit?"Your review · update RCA, actions, takeaway and station timings":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
     <PerformanceReviewExceptions key={`${selectedCode}-${date}-${review?.updated_at??"not-started"}`} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy} canAccessBypass={props.canAccessBypass} canAccessProxy={props.canAccessProxy} canUndoBypass={props.canUndoBypass} canStart={canAdd} hasRoute={Boolean(review||reviewChain.length)} routeLabel={reviewChain.map((step)=>`${step.reviewerRole} · ${step.reviewerName}`).join(" → ") || selectedSteps.map((step)=>`${step.reviewer_role} · ${step.reviewer_name}`).join(" → ")}/>
 
-    <nav className="review-section-nav" aria-label="Jump to review section"><a href="#review-performance">Overview</a>{rcaRows.length?<a href="#review-rca">RCA & reasons <b>{rcaRows.length}</b></a>:null}<a href="#review-station-updates">Vehicle & EMD</a><a href="#review-cost">Cost & COD</a><a href="#review-followups">Actions</a>{review?<a href="#review-discussion">Discussion</a>:null}</nav>
+    <nav className="review-section-nav" aria-label="Jump to review section"><a href="#review-performance">Overview</a><a href="#review-station-updates">Vehicle & EMD</a>{rcaRows.length?<a href="#review-rca">RCA & reasons <b>{rcaRows.length}</b></a>:null}<a href="#review-cost">Cost & COD</a><a href="#review-followups">Actions</a>{review?<a href="#review-discussion">Discussion</a>:null}</nav>
 
     <div className="performance-review-columns">
       <section className="panel performance-review-section" id="review-performance">
@@ -280,6 +280,11 @@ export function PerformanceReviewDesk(props: Props) {
           </div>
         ) : null}
         <ReviewScorecard key={`${selectedCode}-${date}`} metrics={metrics}/>
+        {props.stationTargetsError ? <p role="alert">{props.stationTargetsError}</p> : null}
+        <div className="review-station-updates" id="review-station-updates">
+          <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
+          <PerformanceNoonEmdEntry target={props.stationTargets.emdNoonTarget} entry={props.noonEmd.row} error={props.noonEmd.error} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
+        </div>
         {rcaRows.length ? (
           <PerformanceRcaActions
             key={review?.id ?? `${selectedCode}-${date}-not-started`}
@@ -298,11 +303,6 @@ export function PerformanceReviewDesk(props: Props) {
           />
         ) : null}
         <PerformanceCarriedActions items={carriedActions} previous={previousStationReviews} review={review} canUpdate={props.canManageActions} selectedDate={date}/>
-        {props.stationTargetsError ? <p role="alert">{props.stationTargetsError}</p> : null}
-        <div className="review-station-updates" id="review-station-updates">
-          <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
-          <PerformanceNoonEmdEntry target={props.stationTargets.emdNoonTarget} entry={props.noonEmd.row} error={props.noonEmd.error} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
-        </div>
         {review && canEdit ? (
           <ReviewActionForm key={`takeaway-${review.id}`} action={savePerformanceReviewOperations} className="performance-operations-form">
             <input type="hidden" name="review_id" value={review.id}/>
