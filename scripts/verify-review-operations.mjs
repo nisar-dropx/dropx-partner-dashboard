@@ -14,7 +14,8 @@ const logic = moduleFrom("src/lib/ops-pulse/review-operations.ts");
 const day = "2026-09-09", time = clock => `${day}T${clock}:00+05:30`;
 const point = (clock, counts = {}, fields = {}) => ({ observedAt: time(clock), sourceAt: time(clock), backlogAt: time(clock), performanceAt: time(clock), counts: {
   todayTotal: 100, todayAtStation: 0, todayOnRoad: 40, todayDelivered: 60, todayHfr: 0, todayAttempted: 0,
-  todayUnverified: 0, todayOther: 0, missingDate: 0, hasSnapshot: true, ...counts
+  todayUnverified: 0, todayOther: 0, missingDate: 0, hasSnapshot: true,
+  routeDispatched: 100, routeAtStation: 10, routeOutOnRoad: 40, routeDelivered: 55, routeReturned: 5, routeHasSnapshot: true, ...counts
 }, ...fields });
 let timeline = logic.buildReviewEddTimeline(day, [], new Date(time("22:00")));
 assert.equal(timeline.summary, "History not recorded");
@@ -41,11 +42,24 @@ for (const counts of [{ todayUnverified: 3 }, { missingDate: 1 }, { todayOther: 
   assert.equal(logic.buildReviewEddTimeline(day, [point("10:00", counts)], new Date(time("10:01"))).clearedAt, null);
 }
 assert.equal(logic.buildReviewEddTimeline(day, [point("10:00", {}, { backlogAt: time("06:00") })], new Date(time("10:01"))).clearedAt, null, "fresh one-TID lookup cannot make stale stock clear");
+assert.equal(logic.buildReviewEddTimeline(day, [point("10:00", {}, { backlogAt: time("06:00") })], new Date(time("10:01"))).summary, "Source stale", "stale source numbers are not presented as current EDD");
 assert.equal(logic.buildReviewEddTimeline(day, [point("10:00")], new Date(time("11:00"))).clearedAt, null);
 assert.equal(logic.buildReviewEddTimeline(day, [point("23:55")], new Date("2026-09-10T12:00:00+05:30")).clearedAt, time("23:55"), "past reviews evaluate against their own EOD, not now");
 assert.equal(logic.buildReviewEddTimeline(day, [point("15:00")], new Date("2026-09-10T12:00:00+05:30")).clearedAt, null, "afternoon sample cannot certify EOD");
 assert.equal(logic.buildReviewEddTimeline(day, [morning], new Date(time("10:00"))).rows[2].point, null, "do not carry forward across missing checkpoints");
 assert.equal(logic.buildReviewEddTimeline(day, [point("12:00")], new Date(time("11:00"))).latest, null, "future observations are excluded");
+assert.deepEqual(logic.normalizeReviewRouteCounts({workDate:day,assigned:100,delivered:55,returned:5,held:40,yetToDispatch:10},day), {
+  routeDispatched:100,routeAtStation:10,routeOutOnRoad:40,routeDelivered:55,routeReturned:5,routeHasSnapshot:true
+});
+assert.equal(logic.normalizeReviewRouteCounts({workDate:day,assigned:101,delivered:55,returned:5,held:40,yetToDispatch:10},day).routeHasSnapshot,false,"non-reconciling route totals are rejected");
+assert.equal(logic.normalizeReviewRouteCounts({workDate:"2026-09-08",assigned:100,delivered:55,returned:5,held:40,yetToDispatch:10},day).routeHasSnapshot,false,"another day's route total is rejected");
+timeline = logic.buildReviewEddTimeline(day,[point("10:00")],new Date(time("10:02")));
+assert.equal(timeline.rows[8].routeState,"Recorded");
+assert.equal(timeline.routeLatest.routeDispatched,100);
+const finalRoute={...logic.normalizeReviewRouteCounts({workDate:day,assigned:120,delivered:110,returned:5,held:5,yetToDispatch:0},day),observedAt:time("23:55"),source:"daily"};
+timeline=logic.buildReviewEddTimeline(day,[],new Date("2026-09-10T12:00:00+05:30"),finalRoute);
+assert.equal(timeline.routeLatest.routeDelivered,110,"past reviews expose the authoritative final route snapshot without inventing half-hour values");
+assert.equal(timeline.routeFinal.source,"daily");
 
 const person = (id, values = {}, fields = {}) => ({ id, workerType: "employee", name: `Person ${id}`, code: id, designation: "Team Lead", availability: "Completed",
   today: { rosterDayType: "working", shiftStartTime: "06:00", shiftEndTime: "15:00", shiftName: "Morning", reported: true,
@@ -60,13 +74,17 @@ assert.equal(logic.buildUtrDiscipline([person("1", { workMinutesRecorded: false 
 
 // Server reads bind both company and station/date. A failed read stays a gap.
 let requests = [], fail = false;
-const db = { from(table) { const query = { select() { return query; }, eq(key,value) { requests.push([table,key,value]); return query; }, order() { return query; }, limit() { return Promise.resolve({data: [], error: fail ? {message:"failure"} : null}); } }; return query; } };
+const db = { from(table) { const query = { select() { return query; }, eq(key,value) { requests.push([table,key,value]); return query; }, order() { return query; },
+  limit() { return Promise.resolve({data: [], error: fail ? {message:"failure"} : null}); },
+  maybeSingle() { return Promise.resolve({data: table === "edd_performance_daily" ? {date:day,assigned:100,delivered:55,returned:5,held:40,yet_to_dispatch:10,updated_at:time("23:55")} : null,error:fail?{message:"failure"}:null}); }
+}; return query; } };
 const data = moduleFrom("src/lib/ops-pulse/review-operations-data.ts", { "server-only": {}, "@/lib/supabase-admin": {supabaseAdmin: db},
   "./edd-ledger": {}, "./station-edd": {}, "./station-manpower": {}, "./station-opening-punches": {}, "./review-operations": logic });
-await data.loadReviewEddHistory("company-one", "station-one", day);
-assert.deepEqual(requests.map(r => r.slice(1)), [["company_id","company-one"],["station_id","station-one"],["work_date",day]]);
+const loaded = await data.loadReviewEddHistory("company-one", "station-one", "GNTF", day);
+assert.deepEqual(requests, [["ops_review_edd_observations","company_id","company-one"],["ops_review_edd_observations","station_id","station-one"],["ops_review_edd_observations","work_date",day],["edd_performance_daily","station_code","GNTF"],["edd_performance_daily","date",day]]);
+assert.equal(loaded.timeline.routeLatest.routeDispatched,100);
 fail = true;
-assert.ok((await data.loadReviewEddHistory("company-one","station-one",day)).error);
+assert.ok((await data.loadReviewEddHistory("company-one","station-one","GNTF",day)).error);
 
 let captures = 0;
 const route = moduleFrom("src/app/api/cron/edd-review-history/route.ts", {
@@ -80,9 +98,20 @@ await route.GET(new Request("https://people.dropxlogistics.com/api/cron/edd-revi
 assert.equal(captures, 0);
 assert.equal((await route.GET(new Request("https://ops.dropxlogistics.com/api/cron/edd-review-history", {headers:{authorization:"Bearer test-only-secret"}}))).status, 200);
 assert.equal(captures, 1);
+
+let refreshes = 0;
+const stockRoute = moduleFrom("src/app/api/cron/edd-stock-refresh/route.ts", {
+  "@/lib/ops-pulse/edd-worker": { refreshAllEddNetwork: async () => { refreshes++; return { status: "running" }; } },
+  "@/lib/ops-pulse/edd-cron-scope": moduleFrom("src/lib/ops-pulse/edd-cron-scope.ts")
+});
+assert.equal((await stockRoute.GET(new Request("https://ops.dropxlogistics.com/api/cron/edd-stock-refresh"))).status, 401);
+await stockRoute.GET(new Request("https://people.dropxlogistics.com/api/cron/edd-stock-refresh", {headers:{authorization:"Bearer test-only-secret"}}));
+assert.equal(refreshes, 0, "other products cannot start the EDD stock sweep");
+assert.equal((await stockRoute.GET(new Request("https://ops.dropxlogistics.com/api/cron/edd-stock-refresh", {headers:{authorization:"Bearer test-only-secret"}}))).status, 200);
+assert.equal(refreshes, 1, "OpsPulse cron starts or observes the idempotent EDD stock sweep");
 if (savedSecret == null) delete process.env.CRON_SECRET; else process.env.CRON_SECRET = savedSecret;
 const ui = read("src/components/performance-review-operations.tsx"), css = read("src/app/ops-pulse/performance/review-desk.css");
 assert.equal((ui.match(/name="performance-review-fact"/g) ?? []).length, 2);
 assert.ok(!ui.includes('role="dialog"') && !ui.includes("window.open"), "inline cards, no new window");
 assert.ok(css.includes("max-height: 300px; overflow: auto") && css.includes("position: sticky"));
-console.log("PASS Review operations: clearance/reopening, IST EOD, fixed baseline, gaps, UTR ratios, private station/date reads, cron authorization and compact panels.");
+console.log("PASS Review operations: clearance/reopening, IST EOD, fixed baseline, route reconciliation, gaps, UTR ratios, private station/date reads, EDD cron authorization and compact panels.");

@@ -470,7 +470,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   // Prefer the selected station row — review.station_id can diverge and hide saved timings.
   const connectionStationId = selectedReviewLocation?.id || selectedReview?.station_id || null;
   const reviewOperationsPromise = selectedReviewLocation && view === "reviews" ? Promise.all([
-    loadReviewEddHistory(companyId, selectedReviewLocation.id, selectedDate),
+    loadReviewEddHistory(companyId, selectedReviewLocation.id, selectedReviewLocation.station_code, selectedDate),
     loadReviewUtrDiscipline(companyId, selectedReviewLocation, selectedDate)
   ]) : Promise.resolve(null);
   const [connectionResult, reviewChain, backlog, followups, noonEmd, stationLeads, codData, stationTargets] = selectedReviewLocation && connectionStationId && view === "reviews" ? await Promise.all([

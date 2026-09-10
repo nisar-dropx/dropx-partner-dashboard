@@ -12,6 +12,10 @@
 .review-operation-tag { flex-shrink: 0; border-radius: 999px; padding: 5px 8px; font-size: 10px; background: #fff1e5; color: #9a3412; }
 .review-operation-summary { display: flex; flex-wrap: wrap; gap: 10px 22px; padding: 10px 12px; background: #f8fafc; border-radius: 8px; font-size: 11px; color: #64748b; }
 .review-operation-summary b { color: #172033; margin-left: 5px; font-size: 13px; }
+.review-edd-view-switch { display: inline-flex; gap: 3px; padding: 3px; margin: 2px 0 10px; border-radius: 9px; background: #f1f5f9; }
+.review-edd-view-switch button { border: 1px solid transparent; border-radius: 7px; padding: 7px 11px; background: transparent; color: #475569; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+.review-edd-view-switch button[aria-selected="true"] { border-color: #fed7aa; background: #fff; color: #c2410c; box-shadow: 0 1px 3px #0f172a1a; }
+.review-edd-view-switch button:focus-visible { outline: 2px solid #f97316; outline-offset: 2px; }
 .review-operation-popover .review-operation-note { font-size: 11px; color: #64748b; line-height: 1.55; margin: 10px 0 0; }
 .review-operation-table { max-height: 300px; overflow: auto; overscroll-behavior: contain; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 10px; scrollbar-gutter: stable; }
 .review-operation-table:focus-visible { outline: 2px solid #f97316; outline-offset: 2px; }

@@ -2,7 +2,17 @@ import type { StationEddSummary } from "./station-edd";
 import type { OpsStationManpowerPerson } from "./station-manpower";
 
 export type ReviewEddCounts = Pick<StationEddSummary, "todayTotal" | "todayAtStation" | "todayOnRoad" | "todayDelivered" | "todayHfr" | "todayAttempted" | "todayUnverified" | "todayOther" | "missingDate" | "hasSnapshot">;
-export type ReviewEddPoint = { observedAt: string; sourceAt: string | null; backlogAt: string | null; performanceAt: string | null; counts: ReviewEddCounts };
+export type ReviewRouteCounts = {
+  routeDispatched: number;
+  routeAtStation: number;
+  routeOutOnRoad: number;
+  routeDelivered: number;
+  routeReturned: number;
+  routeHasSnapshot: boolean;
+};
+export type ReviewRouteSnapshot = ReviewRouteCounts & { observedAt: string; source: "checkpoint" | "daily" };
+export type ReviewEddCountsWithRoute = ReviewEddCounts & Partial<ReviewRouteCounts>;
+export type ReviewEddPoint = { observedAt: string; sourceAt: string | null; backlogAt: string | null; performanceAt: string | null; counts: ReviewEddCountsWithRoute };
 export type ReviewEddTimeline = ReturnType<typeof buildReviewEddTimeline>;
 const minute = 60_000;
 const stamp = (value: string | null) => value ? Date.parse(value) : NaN;
@@ -18,7 +28,42 @@ export function reviewEddSourceFresh(point: ReviewEddPoint, day: string) {
     return time >= start && time <= at && at - time <= 90 * minute;
   });
 }
-export function buildReviewEddTimeline(day: string, input: ReviewEddPoint[], now = new Date()) {
+export function normalizeReviewRouteCounts(input: {
+  workDate?: string | null;
+  assigned?: number | null;
+  delivered?: number | null;
+  returned?: number | null;
+  held?: number | null;
+  yetToDispatch?: number | null;
+} | null | undefined, day: string): ReviewRouteCounts {
+  const values = [input?.assigned, input?.delivered, input?.returned, input?.held, input?.yetToDispatch];
+  const validNumbers = values.every(value => typeof value === "number" && Number.isInteger(value) && value >= 0);
+  const reconciles = validNumbers && input!.assigned === input!.delivered! + input!.returned! + input!.held!;
+  const valid = input?.workDate === day && reconciles;
+  return {
+    routeDispatched: valid ? input!.assigned! : 0,
+    routeAtStation: valid ? input!.yetToDispatch! : 0,
+    routeOutOnRoad: valid ? input!.held! : 0,
+    routeDelivered: valid ? input!.delivered! : 0,
+    routeReturned: valid ? input!.returned! : 0,
+    routeHasSnapshot: Boolean(valid)
+  };
+}
+export function reviewRouteSourceFresh(point: ReviewEddPoint, day: string) {
+  const at = stamp(point.observedAt), source = stamp(point.performanceAt);
+  const c = point.counts;
+  const reconciles = c.routeHasSnapshot === true && [c.routeDispatched, c.routeAtStation, c.routeOutOnRoad, c.routeDelivered, c.routeReturned]
+    .every(value => typeof value === "number" && Number.isInteger(value) && value >= 0)
+    && c.routeDispatched === c.routeDelivered! + c.routeReturned! + c.routeOutOnRoad!;
+  return reconciles && source >= stamp(`${day}T00:00:00+05:30`) && source <= at && at - source <= 90 * minute;
+}
+function routeSnapshotFromPoint(point: ReviewEddPoint): ReviewRouteSnapshot {
+  return { observedAt: point.performanceAt ?? point.observedAt, source: "checkpoint",
+    routeDispatched: point.counts.routeDispatched!, routeAtStation: point.counts.routeAtStation!,
+    routeOutOnRoad: point.counts.routeOutOnRoad!, routeDelivered: point.counts.routeDelivered!,
+    routeReturned: point.counts.routeReturned!, routeHasSnapshot: true };
+}
+export function buildReviewEddTimeline(day: string, input: ReviewEddPoint[], now = new Date(), routeFinal: ReviewRouteSnapshot | null = null) {
   const start = stamp(`${day}T06:00:00+05:30`), end = stamp(`${day}T23:59:59.999+05:30`);
   const until = Math.min(now.getTime(), end);
   const points = input.filter(p => stamp(p.observedAt) >= start && stamp(p.observedAt) <= until)
@@ -39,7 +84,8 @@ export function buildReviewEddTimeline(day: string, input: ReviewEddPoint[], now
       clearedAt = points[i].observedAt;
     }
   }
-  const summary = !latest ? "History not recorded" : !latest.counts.hasSnapshot ? "Source unavailable" : latest.counts.todayAtStation > 0
+  const latestFresh = latest ? reviewEddSourceFresh(latest, day) : false;
+  const summary = !latest ? "History not recorded" : !latest.counts.hasSnapshot ? "Source unavailable" : !latestFresh ? "Source stale" : latest.counts.todayAtStation > 0
     ? `Not cleared · ${latest.counts.todayAtStation.toLocaleString("en-IN")} pending`
     : clearedAt ? `Cleared by ${reviewClock(clearedAt)}`
     : latest.counts.todayUnverified > 0 ? `Not confirmed · ${latest.counts.todayUnverified.toLocaleString("en-IN")} unchecked`
@@ -52,9 +98,16 @@ export function buildReviewEddTimeline(day: string, input: ReviewEddPoint[], now
     const cutoff = Math.min(target + (index === 36 ? 0 : 5 * minute), until);
     const point = future ? null : points.filter(p => stamp(p.observedAt) <= cutoff && stamp(p.observedAt) >= target - 5 * minute).at(-1) ?? null;
     return { label: index === 36 ? "EOD" : new Date(target + 330 * minute).toISOString().slice(11, 16),
-      dayStart, point, state: future ? "Upcoming" : !point ? "Not recorded" : !reviewEddSourceFresh(point, day) ? "Source stale" : "Recorded" };
+      dayStart, point,
+      state: future ? "Upcoming" : !point ? "Not recorded" : !reviewEddSourceFresh(point, day) ? "Source stale" : "Recorded",
+      routeState: future ? "Upcoming" : !point || point.counts.routeHasSnapshot !== true ? "Not recorded" : !reviewRouteSourceFresh(point, day) ? "Source stale" : "Recorded" };
   });
-  return { day, summary, clearedAt, dayStart, baselineAt: baseline?.observedAt ?? null, latest, current: Boolean(current), rows };
+  const latestRoutePoint = [...points].reverse().find(point => reviewRouteSourceFresh(point, day)) ?? null;
+  const dayEndPassed = now.getTime() > end;
+  const finalUsable = routeFinal?.routeHasSnapshot === true && (dayEndPassed || now.getTime() - stamp(routeFinal.observedAt) <= 90 * minute);
+  const routeLatest = latestRoutePoint ? routeSnapshotFromPoint(latestRoutePoint) : finalUsable ? routeFinal : null;
+  return { day, summary, clearedAt, dayStart, baselineAt: baseline?.observedAt ?? null, latest, latestFresh, current: Boolean(current), rows,
+    routeLatest, routeFinal: dayEndPassed ? routeFinal : null, dayEndPassed };
 }
 
 export type UtrDisciplineRow = { id: string; name: string; code: string; role: string; shift: string | null; inTime: string | null; outTime: string | null; workMinutes: number | null; status: string; lateMinutes: number; locationNote: string | null };

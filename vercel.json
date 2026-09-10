@@ -3,6 +3,7 @@
   "crons": [
     {"path":"/api/cron/portal-notifications","schedule":"* * * * *"},
     { "path": "/api/cron/edd-review-history", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/edd-stock-refresh", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/edd-verification", "schedule": "* * * * *" },
     {
       "path": "/api/cron/business-document-expiry",
