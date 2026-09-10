@@ -52,7 +52,9 @@ export function buildReviewReport(from: string, to: string, stations: ReportStat
     const key = `${date}|${station.station_code}`, idKey = `${date}|${station.id}`;
     const review = (reviews.get(key) ?? []).sort((a, b) => text(b.updated_at).localeCompare(text(a.updated_at)))[0];
     const fact = (facts.get(key) ?? []).sort((a, b) => text(b.created_at).localeCompare(text(a.created_at)) || text(b.id).localeCompare(text(a.id)))[0];
-    const items = children.items.get(review?.id) ?? [], stepRows = children.steps.get(review?.id) ?? [], followups = children.followups.get(review?.id) ?? [];
+    const items = children.items.get(review?.id) ?? [];
+    const stepRows = [...(children.steps.get(review?.id) ?? [])].sort((a, b) => Number(a.step_order) - Number(b.step_order));
+    const followups = [...(children.followups.get(review?.id) ?? [])].sort((a, b) => Number(a.action_number) - Number(b.action_number));
     let misses = 0, missing = 0;
     if (fact) for (const definition of hawkeyeMetricDefinitions) {
       const target = targets.find(t => t.metricKey === hawkeyeTargetKey(definition));
@@ -71,7 +73,7 @@ export function buildReviewReport(from: string, to: string, stations: ReportStat
     }
     for (const item of followups) add(actions, { "Action number": number(item.action_number), Title: text(item.title), Owner: text(item.owner_label), "Due date": text(item.due_date), Status: text(item.status), "Progress note": text(item.progress_note), "Completed IST": reportIst(item.completed_at), "Updated by": text(item.updated_by_name), "Updated IST": reportIst(item.updated_at) });
     for (const item of stepRows) add(stages, { Stage: number(item.step_order), Reviewer: text(item.reviewer_name), Role: text(item.reviewer_role), Status: text(item.status), Feedback: text(item.feedback), "Completed IST": reportIst(item.completed_at), "Proxy reviewer": text(item.proxy_reviewer_name), "Proxy reason": text(item.proxy_reason), "Bypassed by": text(item.bypassed_by_name), "Bypass reason": text(item.bypass_reason), "Bypassed IST": reportIst(item.bypassed_at) });
-    for (const item of children.updates.get(review?.id) ?? []) add(discussion, { Type: text(item.update_type), Note: text(item.note), Author: text(item.author_name), Role: text(item.author_role), Stage: text(item.stage_label), "Created IST": reportIst(item.created_at) });
+    for (const item of [...(children.updates.get(review?.id) ?? [])].sort((a, b) => text(a.created_at).localeCompare(text(b.created_at)) || text(a.id).localeCompare(text(b.id)))) add(discussion, { Type: text(item.update_type), Note: text(item.note), Author: text(item.author_name), Role: text(item.author_role), Stage: text(item.stage_label), "Created IST": reportIst(item.created_at) });
     const emd = (stationSources.emd.get(idKey) ?? [])[0];
     for (const item of stationSources.connections.get(idKey) ?? []) add(vehicles, { Vehicle: text(item.label), "Arrival IST": reportIst(item.arrival_at), "Unloading complete IST": reportIst(item.unloading_at), "Updated by": text(item.updated_by_name), "Updated IST": reportIst(item.updated_at), "EMD at noon %": number(emd?.emd_noon_pct) });
     if (emd && !(stationSources.connections.get(idKey) ?? []).length) add(vehicles, { Vehicle: "No vehicle timings entered", "Arrival IST": "", "Unloading complete IST": "", "Updated by": text(emd.updated_by_name), "Updated IST": reportIst(emd.updated_at), "EMD at noon %": number(emd.emd_noon_pct) });

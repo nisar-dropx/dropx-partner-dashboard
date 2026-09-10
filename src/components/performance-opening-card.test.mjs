@@ -12,7 +12,11 @@ const source = ts.transpileModule(readFileSync(new URL("./performance-opening-ca
 }).outputText;
 const exported = {};
 const localRequire = createRequire(import.meta.url);
-vm.runInNewContext(source, { exports: exported, require: (name) => name === "@/components/performance-trends" ? { TrendButton: () => null } : localRequire(name), Date, Intl });
+const detailExports = {};
+vm.runInNewContext(ts.transpileModule(readFileSync(new URL("./review-details.tsx", import.meta.url), "utf8"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX }
+}).outputText, { exports: detailExports, require: localRequire });
+vm.runInNewContext(source, { exports: exported, require: (name) => name === "@/components/review-attendance-history" ? { ReviewPersonHistoryLink: () => null } : name === "@/components/review-details" ? detailExports : name === "@/components/performance-trends" ? { TrendButton: () => null } : localRequire(name), Date, Intl });
 const snapshot = { firstPunchAt: "2026-09-03T02:30:00Z", firstPunchBy: "People Employee", openingLateMinutes: 0,
   scheduledOpeningTime: "08:00", openingShiftName: "Morning", openingShiftSource: "Approved roster",
   openingWindowStart: "02:00", openingWindowEnd: "10:00",
