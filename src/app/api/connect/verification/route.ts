@@ -313,25 +313,25 @@ export async function POST(request: NextRequest) {
         endpoint: "/srv2/validation/pan-aadhaar-link",
         payload: { ...credentials, pan, aadhar, aadhaar: aadhar }
       });
-      const code = Number(body?.result_code);
       const resultCode = text(
         body?.data?.code || body?.result?.code || body?.code
       ).toUpperCase();
-      const resultMessage = text(body?.result?.message).toLowerCase();
-      const responseText = deepText(body).toLowerCase();
-      const verified = code === 101 ||
-        resultCode === "LINK-001" ||
-        resultMessage.includes("already linked") ||
-        responseText.includes("already linked to given aadhaar") ||
-        responseText.includes("is already linked");
+      const verified = resultCode === "LINK-001";
+      const reviewRequired = resultCode === "LINK-002";
+      const providerMessage = text(body?.data?.message) ||
+        text(body?.result?.message) ||
+        text(body?.message) ||
+        "PAN Aadhaar link verification failed.";
       const result = {
         verified,
         manualReview: !verified,
+        blockSubmit: !verified && !reviewRequired,
         inputKey: inputKey([pan, aadhar]),
-        message: text(body?.data?.message) ||
-          text(body?.result?.message) ||
-          text(body?.message) ||
-          (verified ? "PAN Aadhaar link verified." : "PAN Aadhaar link verification failed.")
+        message: verified
+          ? providerMessage
+          : reviewRequired
+            ? `${providerMessage} Profile will be sent for review.`
+            : `${providerMessage} Registration cannot be submitted.`
       };
       return verifiedResponse(result);
     }
