@@ -58,3 +58,4 @@ await import("./verify-review-operations.mjs");
 await import("./verify-review-discipline-rca.mjs");
 await import("./verify-review-attendance-history.mjs");
 await import("./verify-review-compact-ux.mjs");
+await import("./verify-review-report.mjs");
