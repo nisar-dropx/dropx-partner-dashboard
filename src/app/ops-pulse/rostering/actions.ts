@@ -213,6 +213,7 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
       .eq("company_id", companyId)
       .eq("location_id", locationId)
       .eq("roster_kind", "recurring_weekly")
+      .eq("planning_channel", "ops")
       .in("status", ["draft", "returned", "pending_approval"])
       .order("created_at", { ascending: false })
       .limit(1)
@@ -266,8 +267,9 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
       };
     }
 
+    // No Ops draft yet — reuse the approved pattern in-memory. A draft is created only on first save.
     const previous = await db().from("hr_roster_plans")
-      .select("id,period_start,revision_no,hr_roster_entries(worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes)")
+      .select("id,period_start,hr_roster_entries(worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes)")
       .eq("company_id", companyId)
       .eq("location_id", locationId)
       .eq("roster_kind", "recurring_weekly")
@@ -277,61 +279,27 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
       .limit(1)
       .maybeSingle();
     if (previous.error) throw new Error(previous.error.message);
-    const revision = Number(previous.data?.revision_no ?? 0) + 1;
-    const created = await db().from("hr_roster_plans").insert({
-      company_id: companyId,
-      name: `${station.station_code} weekly roster · v${revision}`,
-      location_id: locationId,
-      period_start: start,
-      period_end: addRosterDays(start, 6),
-      roster_kind: "recurring_weekly",
-      effective_from: start,
-      supersedes_plan_id: previous.data?.id ?? null,
-      revision_no: revision,
-      created_by: authorization.userId,
-      updated_by: authorization.userId
-    }).select("id").single();
-    if (created.error || !created.data) throw new Error(created.error?.message ?? "The roster change could not be prepared.");
-
-    const linked = await db().from("hr_roster_plan_locations").insert({ company_id: companyId, plan_id: created.data.id, location_id: locationId });
-    if (linked.error) {
-      await db().from("hr_roster_plans").delete().eq("company_id", companyId).eq("id", created.data.id);
-      throw new Error(linked.error.message);
+    if (!previous.data) {
+      return { ok: false, message: "No approved roster exists for this station yet. Create one in People first, or save a new Ops draft after adding assignments." };
     }
-
     const currentPeople = await loadOpsStationManpower(companyId, [station], indiaToday());
     const allowedPeople = new Set(currentPeople.people.map((person) => `${person.workerType}:${person.id}`));
-    const copied = (previous.data?.hr_roster_entries ?? [])
+    const projected = (previous.data.hr_roster_entries ?? [])
       .filter((entry) => allowedPeople.has(`${entry.worker_type}:${entry.worker_id}`))
       .map((entry) => ({
-        company_id: companyId,
-        plan_id: created.data.id,
-        worker_type: entry.worker_type,
-        worker_id: entry.worker_id,
-        location_id: locationId,
-        roster_date: addRosterDays(start, isoWeekday(entry.roster_date) - 1),
-        day_type: entry.day_type,
-        shift_id: entry.shift_id,
-        notes: entry.notes
-      }));
-    if (copied.length) {
-      const copy = await db().from("hr_roster_entries").insert(copied);
-      if (copy.error) throw new Error(`The roster was created, but its current pattern could not be copied: ${copy.error.message}`);
-    }
-    refreshRosterViews();
-    return {
-      ok: true,
-      planId: created.data.id,
-      periodStart: start,
-      entries: copied.map((entry) => ({
         workerType: entry.worker_type as "employee" | "contractor",
         workerId: entry.worker_id,
-        rosterDate: entry.roster_date,
+        rosterDate: addRosterDays(start, isoWeekday(entry.roster_date) - 1),
         dayType: entry.day_type as "working" | "weekly_off",
         shiftId: entry.shift_id,
         notes: entry.notes
-      })),
-      message: "Roster change prepared. Update only what needs to change."
+      }));
+    return {
+      ok: true,
+      planId: previous.data.id,
+      periodStart: start,
+      entries: projected,
+      message: "Showing the current approved roster. Save a change to start an Ops draft for approval."
     };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "The roster change could not be prepared." };
@@ -346,8 +314,12 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
     if (!input?.planId || !Array.isArray(input.changes) || !input.changes.length || input.changes.length > 3000) {
       return { ok: false, message: "Save between 1 and 3,000 roster changes at a time." };
     }
-    const plan = await loadPlan(companyId, authorization, input.planId);
+    let plan = await loadPlan(companyId, authorization, input.planId);
+    if (plan.status === "approved") {
+      plan = await materializeOpsDraftFromApproved(companyId, authorization, plan);
+    }
     if (!["draft", "returned"].includes(plan.status) || !plan.location_id) return { ok: false, message: "This roster is no longer editable." };
+    const planId = plan.id;
     const station = await authorisedStation(companyId, authorization, plan.location_id);
     const [manpower, shifts, policy] = await Promise.all([
       loadOpsStationManpower(companyId, [station], indiaToday()),
@@ -382,7 +354,7 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
     const touched = await db().from("hr_roster_plans")
       .update({ updated_by: authorization.userId, updated_at: new Date().toISOString() })
       .eq("company_id", companyId)
-      .eq("id", input.planId)
+      .eq("id", planId)
       .in("status", ["draft", "returned"])
       .select("id")
       .maybeSingle();
@@ -390,7 +362,7 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
 
     const upserts = [...unique.values()].filter((change) => !change.remove).map((change) => ({
       company_id: companyId,
-      plan_id: input.planId,
+      plan_id: planId,
       worker_type: change.workerType,
       worker_id: change.workerId,
       location_id: plan.location_id,
@@ -406,17 +378,88 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
     for (const change of [...unique.values()].filter((item) => item.remove)) {
       const removed = await db().from("hr_roster_entries").delete()
         .eq("company_id", companyId)
-        .eq("plan_id", input.planId)
+        .eq("plan_id", planId)
         .eq("worker_type", change.workerType)
         .eq("worker_id", change.workerId)
         .eq("roster_date", change.date);
       if (removed.error) throw new Error(removed.error.message);
     }
     refreshRosterViews();
-    return { ok: true, message: `${unique.size} roster ${unique.size === 1 ? "change" : "changes"} saved.` };
+    return { ok: true, planId, message: `${unique.size} roster ${unique.size === 1 ? "change" : "changes"} saved.` };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Roster changes could not be saved." };
   }
+}
+
+async function materializeOpsDraftFromApproved(
+  companyId: string,
+  authorization: AuthorizationContext,
+  approved: Awaited<ReturnType<typeof loadPlan>>
+) {
+  if (!approved.location_id) throw new Error("This roster has no station.");
+  const existingOps = await db().from("hr_roster_plans")
+    .select("id,name,period_start,period_end,status,location_id,created_by,roster_kind,effective_from,revision_no,supersedes_plan_id,hr_roster_plan_locations(location_id)")
+    .eq("company_id", companyId)
+    .eq("location_id", approved.location_id)
+    .eq("roster_kind", "recurring_weekly")
+    .eq("planning_channel", "ops")
+    .in("status", ["draft", "returned"])
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existingOps.error) throw new Error(existingOps.error.message);
+  if (existingOps.data) return existingOps.data;
+
+  const station = await authorisedStation(companyId, authorization, approved.location_id);
+  const start = rosterMonday(indiaToday());
+  const revision = Number(approved.revision_no ?? 0) + 1;
+  const created = await db().from("hr_roster_plans").insert({
+    company_id: companyId,
+    name: `${station.station_code} weekly roster · v${revision}`,
+    location_id: approved.location_id,
+    period_start: start,
+    period_end: addRosterDays(start, 6),
+    roster_kind: "recurring_weekly",
+    effective_from: start,
+    supersedes_plan_id: approved.id,
+    revision_no: revision,
+    created_by: authorization.userId,
+    updated_by: authorization.userId,
+    planning_channel: "ops"
+  }).select("id,name,period_start,period_end,status,location_id,created_by,roster_kind,effective_from,revision_no,supersedes_plan_id").single();
+  if (created.error || !created.data) throw new Error(created.error?.message ?? "The Ops roster draft could not be created.");
+
+  const linked = await db().from("hr_roster_plan_locations").insert({ company_id: companyId, plan_id: created.data.id, location_id: approved.location_id });
+  if (linked.error) {
+    await db().from("hr_roster_plans").delete().eq("company_id", companyId).eq("id", created.data.id);
+    throw new Error(linked.error.message);
+  }
+
+  const sourceEntries = await db().from("hr_roster_entries")
+    .select("worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes")
+    .eq("company_id", companyId)
+    .eq("plan_id", approved.id);
+  if (sourceEntries.error) throw new Error(sourceEntries.error.message);
+  const currentPeople = await loadOpsStationManpower(companyId, [station], indiaToday());
+  const allowedPeople = new Set(currentPeople.people.map((person) => `${person.workerType}:${person.id}`));
+  const copied = (sourceEntries.data ?? [])
+    .filter((entry) => allowedPeople.has(`${entry.worker_type}:${entry.worker_id}`))
+    .map((entry) => ({
+      company_id: companyId,
+      plan_id: created.data.id,
+      worker_type: entry.worker_type,
+      worker_id: entry.worker_id,
+      location_id: approved.location_id,
+      roster_date: addRosterDays(start, isoWeekday(entry.roster_date) - 1),
+      day_type: entry.day_type,
+      shift_id: entry.shift_id,
+      notes: entry.notes
+    }));
+  if (copied.length) {
+    const copy = await db().from("hr_roster_entries").insert(copied);
+    if (copy.error) throw new Error(`The roster draft was created, but its pattern could not be copied: ${copy.error.message}`);
+  }
+  return { ...created.data, hr_roster_plan_locations: [{ location_id: approved.location_id }] };
 }
 
 async function publishPlan(companyId: string, authorization: AuthorizationContext, plan: Awaited<ReturnType<typeof loadPlan>>, note: string, preserveSubmission = false) {
@@ -460,6 +503,11 @@ export async function submitOpsRoster(planId: string): Promise<ActionResult> {
     const plan = await loadPlan(companyId, authorization, planId);
     if (!["draft", "returned"].includes(plan.status) || plan.roster_kind !== "recurring_weekly" || !plan.location_id || !plan.effective_from) {
       return { ok: false, message: "This roster is not available for submission." };
+    }
+    const channel = await db().from("hr_roster_plans").select("planning_channel").eq("company_id", companyId).eq("id", planId).maybeSingle();
+    if (channel.error) throw new Error(channel.error.message);
+    if (channel.data?.planning_channel === "people") {
+      return { ok: false, message: "This draft belongs to People rostering. Submit it from People instead." };
     }
     const station = await authorisedStation(companyId, authorization, plan.location_id);
     const people = await loadOpsStationManpower(companyId, [station], indiaToday());

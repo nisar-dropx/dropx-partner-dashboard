@@ -465,6 +465,11 @@ export function OpsRosterPlanner({
       setMessage({ tone: result.ok ? "success" : "error", text: result.message });
       if (result.ok) {
         setDirtyKeys(new Set());
+        if (result.planId && result.planId !== planId) {
+          activePlanIdRef.current = result.planId;
+          setActivePlanId(result.planId);
+          preparedPlanIdRef.current = result.planId;
+        }
         if (preparedPlanIdRef.current) {
           router.replace(`/rostering?station=${encodeURIComponent(stationCode)}`);
           router.refresh();
