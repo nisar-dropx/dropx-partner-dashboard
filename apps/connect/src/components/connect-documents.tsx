@@ -118,7 +118,7 @@ export function ConnectDocuments({ account }: { account: AppAccount }) {
       <div><i><WalletCards /></i><span><small>{account.profileType === "employee" ? "Payslips" : "Pay statements"}</small><strong>{loading ? "—" : summary.pay}</strong></span></div>
       <div><i><FileClock /></i><span><small>Open requests</small><strong>{loading ? "—" : summary.requests}</strong></span></div>
     </div>
-    {notice ? <div className="dx-alert success">{notice}<button onClick={() => setNotice("")}><X /></button></div> : null}
+    {notice ? <div className="dx-alert success">{notice}<button aria-label="Dismiss" onClick={() => setNotice("")}><X /></button></div> : null}
     {error ? <div className="dx-alert error">{error}<button onClick={() => void load()}>Retry</button></div> : null}
     <nav aria-label="Document categories" className="dx-document-tabs">{tabs.map((tab) => { const Icon = tab.icon; return <button aria-current={section === tab.key ? "page" : undefined} className={section === tab.key ? "active" : ""} key={tab.key} onClick={() => setSection(tab.key)}><Icon /><span>{tab.label}</span><b>{tab.count}</b></button>; })}</nav>
     {loading ? <div className="dx-loader"><span /><small>Loading secure documents…</small></div> : null}

@@ -23,6 +23,11 @@ import { countryCodeOptions } from "@/lib/country-codes";
 import { requiredDropxOnePageCodes, type DropxOnePageCode } from "@/lib/dropx-one-pages";
 import { userFacingError } from "@/lib/user-facing-error";
 
+// TODO(connect-ui-overhaul): This Step-switch is a single-page client state
+// machine, not routed Next.js pages. That makes per-screen code-splitting,
+// browser back/forward, and deep-linking harder than they'd be as real
+// routes. Converting to routes is a deliberate follow-up, out of scope for
+// the styling/consistency pass that touched this file.
 type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "approvals" | "requests" | "payments" | "advances" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "performance" | "connect" | "settings";
 type ConnectNotification = {
   id: string;
@@ -110,7 +115,12 @@ export function ConnectLoginFlow() {
   const [leaveSection, setLeaveSection] = useState<"leave" | "wfh">("leave");
   const [lockedAccounts, setLockedAccounts] = useState<AppAccount[]>([]);
   const [hasReportees, setHasReportees] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
   const lastLoggedScreen = useRef("");
+
+  useEffect(() => {
+    setBiometricEnabled(localStorage.getItem(biometricKey) === "true");
+  }, []);
 
   function route(rows: AppAccount[]) {
     const serverDefault = rows.find((row) => row.isDefault);
@@ -378,6 +388,7 @@ export function ConnectLoginFlow() {
     if (!enabled) {
       localStorage.removeItem(biometricKey);
       localStorage.removeItem(credentialKey);
+      setBiometricEnabled(false);
       setNotice("Biometric login disabled.");
       return;
     }
@@ -394,9 +405,11 @@ export function ConnectLoginFlow() {
       if (!credential) throw new Error("Biometric setup was cancelled.");
       localStorage.setItem(credentialKey, encoded(credential.rawId));
       localStorage.setItem(biometricKey, "true");
+      setBiometricEnabled(true);
       setNotice("Biometric login enabled.");
     } catch (reason) {
       localStorage.removeItem(biometricKey);
+      setBiometricEnabled(false);
       setError(userFacingError(reason, "Unable to enable biometric login. Please try again."));
     }
   }
@@ -596,8 +609,8 @@ export function ConnectLoginFlow() {
         <ConnectAppInstallCard />
       </section>
     </div> : <main className="dx-content" data-screen={step}>
-      {notice ? <div className="dx-alert success">{notice}<button onClick={() => setNotice("")}><X /></button></div> : null}
-      {error ? <div className="dx-alert error">{error}<button onClick={() => setError("")}><X /></button></div> : null}
+      {notice ? <div className="dx-alert success">{notice}<button aria-label="Dismiss" onClick={() => setNotice("")}><X /></button></div> : null}
+      {error ? <div className="dx-alert error">{error}<button aria-label="Dismiss" onClick={() => setError("")}><X /></button></div> : null}
       {step === "accounts" ? <section className="dx-accounts"><header className="dx-page-intro"><small>Account switcher</small><h1>Choose workspace</h1><p>Use the role you need now. Each workspace keeps its own access and tools.</p></header>{accounts.map((row) => <button className={isWorkforceWorkspace(row) ? "workforce" : "people"} key={accountKey(row)} onClick={() => choose(row)}><i>{row.profilePhotoUrl ? <img alt="" src={row.profilePhotoUrl} /> : <UsersRound />}</i><span><b>{row.workspaceLabel || (isWorkforceWorkspace(row) ? "Workforce workspace" : "People workspace")}</b><strong>{row.name || row.reference}</strong><em>{row.role || row.companyName}</em><small>{row.companyName}{row.reference ? ` · ${row.reference}` : ""}</small></span><ChevronRight /></button>)}</section> : null}
       {account && active(account) && allowed(account, "attendance") ? (
         <AttendanceLocationMonitor account={account} />
@@ -621,7 +634,7 @@ export function ConnectLoginFlow() {
         <header className="dx-page-intro"><small>Personalisation</small><h1>Settings</h1><p>Control sign-in and the account you open first.</p></header>
         <div className="dx-settings-grid">
           <section className="dx-setting-card"><i><SwitchCamera /></i><span><strong>Default account</strong><small>Choose the workspace shown after sign in.</small></span><label><span className="sr-only">Default account</span><select disabled={pending} value={defaultKey} onChange={(e) => saveDefaultAccount(e.target.value)}><option value="">Ask me every time</option>{accounts.map((row) => <option key={accountKey(row)} value={accountKey(row)}>{row.companyName} - {row.reference || row.name}</option>)}</select></label></section>
-          <section className="dx-setting-card"><i><Fingerprint /></i><span><strong>Biometric login</strong><small>Use Face ID or device security on this device.</small></span><label className="toggle"><span>Enable biometric login</span><input aria-label="Enable biometric login" defaultChecked={localStorage.getItem(biometricKey) === "true"} onChange={(e) => enrollBiometric(e.target.checked)} type="checkbox" /></label></section>
+          <section className="dx-setting-card"><i><Fingerprint /></i><span><strong>Biometric login</strong><small>Use Face ID or device security on this device.</small></span><label className="toggle"><span>Enable biometric login</span><input aria-label="Enable biometric login" checked={biometricEnabled} onChange={(e) => enrollBiometric(e.target.checked)} type="checkbox" /></label></section>
           <section className="dx-setting-card security"><i><LockKeyhole /></i><span><strong>App PIN</strong><small>Change your six-digit sign-in PIN securely.</small></span><button onClick={resetPin}>Change PIN <ChevronRight /></button></section>
         </div>
       </section> : null}

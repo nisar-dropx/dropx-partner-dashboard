@@ -351,7 +351,6 @@ export async function POST(request: Request) {
       eshram_uan: normalizeDigitsLength(formData.get("eshram_uan"), "eShram UAN", 12, 12),
       is_handicapped: cleanText(formData.get("is_handicapped")) === null ? null : cleanText(formData.get("is_handicapped")) === "true",
       address: cleanText(formData.get("address")),
-      state: null,
       pincode: normalizeDigitsLength(formData.get("pincode"), "Pincode", 6, 6),
       landmark: cleanText(formData.get("landmark")),
       state_code: cleanText(formData.get("state_code"))?.toUpperCase() ?? null,

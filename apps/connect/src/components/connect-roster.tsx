@@ -281,6 +281,10 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
         </div>
       ) : null}
 
+      {!loading && !days.length ? (
+        <div className="dx-empty"><CalendarDays /><strong>No roster published yet</strong><small>Your upcoming shifts will appear here once the roster is published.</small></div>
+      ) : null}
+
       {!loading ? (
         <div className="dx-roster-panel">
           {days.length ? weekGroups.map((group) => (

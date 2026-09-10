@@ -516,7 +516,16 @@ export async function PATCH(request: Request) {
     if (response.error) throw new Error(response.error.message);
     const decided = response.data as typeof current.data;
     await notifyWorker({ companyId: account.companyId, workerType: decided.requester_worker_type, workerId: decided.requester_worker_id, event: action === "accept" ? "roster_swap_partner_accepted" : "roster_swap_rejected", sourceKey: requestId, title: action === "accept" ? "Swap partner accepted" : "Shift swap declined", body: action === "accept" ? `Your colleague accepted. Manager approval is now pending for ${decided.roster_date}.` : `Your colleague declined the swap for ${decided.roster_date}.` });
-    if (action === "accept") await db().from("people_web_notifications").upsert({ company_id: account.companyId, recipient_user_id: decided.approver_user_id, event_code: "roster_swap_approval_required", title: "Shift swap awaiting approval", body: `Both people accepted a shift swap for ${decided.roster_date}.`, href: "/approvals", source_key: requestId, data: { requestId, rosterDate: decided.roster_date } }, { onConflict: "company_id,event_code,source_key,recipient_user_id", ignoreDuplicates: true });
+    if (action === "accept") {
+      // hr_partner_decide_roster_swap's return isn't formally typed against
+      // hr_roster_swap_requests's own columns, so read approver_user_id
+      // defensively - if the RPC's shape ever changes, skip the manager
+      // notification instead of writing a bad/undefined recipient_user_id.
+      const approverUserId = (response.data as Record<string, unknown> | null)?.approver_user_id;
+      if (typeof approverUserId === "string" && approverUserId) {
+        await db().from("people_web_notifications").upsert({ company_id: account.companyId, recipient_user_id: approverUserId, event_code: "roster_swap_approval_required", title: "Shift swap awaiting approval", body: `Both people accepted a shift swap for ${decided.roster_date}.`, href: "/approvals", source_key: requestId, data: { requestId, rosterDate: decided.roster_date } }, { onConflict: "company_id,event_code,source_key,recipient_user_id", ignoreDuplicates: true });
+      }
+    }
     return NextResponse.json({ ok: true, notice: action === "accept" ? "Accepted. Sent to the reporting manager." : "Swap request declined." });
   } catch (error) { return NextResponse.json({ error: userFacingError(error, "Unable to update the shift swap.") }, { status: 400 }); }
 }

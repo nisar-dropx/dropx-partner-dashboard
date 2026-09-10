@@ -472,7 +472,7 @@ export function ConnectAttendance({ account }: { account: Account }) {
             </div>
           </div> : null}
           {tab === "list" ? <div className="dx-attendance-list">
-            {[...data.rows].sort((left, right) => right.date.localeCompare(left.date)).map((row) => {
+            {data.rows.length ? [...data.rows].sort((left, right) => right.date.localeCompare(left.date)).map((row) => {
               const insight = insightFor(row);
               const nudge = attendanceCompactNudge(row, {
                 today: row.date === todayDate,
@@ -483,13 +483,13 @@ export function ConnectAttendance({ account }: { account: Account }) {
                 <span><small>IN</small>{row.inTime || "--:--"}</span><span><small>OUT</small>{row.outTime || "--:--"}</span><span><small>HRS</small>{row.workHours || "00:00"}</span>
                 {nudge ? <p className={`dx-attendance-list-issue ${nudge.tone}`}>{nudge.headline} · {nudge.detail}</p> : null}
               </button>;
-            })}
+            }) : <div className="dx-empty"><CalendarDays /><strong>No records this month</strong><small>Attendance days will appear here once you punch in.</small></div>}
           </div> : null}
           {tab === "punches" ? <div className="dx-punches">
-            {[...data.rows].sort((left, right) => right.date.localeCompare(left.date)).flatMap((row) => {
+            {data.rows.some((row) => (row.punches?.length ?? 0) > 0 || row.inTime || row.outTime) ? [...data.rows].sort((left, right) => right.date.localeCompare(left.date)).flatMap((row) => {
               const punches = row.punches?.length ? row.punches : [row.inTime, row.outTime].filter(Boolean);
               return [...punches].sort((left, right) => right.localeCompare(left)).map((time, index) => <div key={`${row.date}-${index}-${time}`}><Fingerprint /><span>{row.date.split("-").reverse().join("/")}</span><strong>{time}</strong></div>);
-            })}
+            }) : <div className="dx-empty"><Fingerprint /><strong>No punches this month</strong><small>Your check-in and check-out times will appear here.</small></div>}
           </div> : null}
         </div>
         {tab === "calendar" && selected && selectedInsight ? <div className="dx-selected-day" id="attendance-day-details" ref={selectedDayRef} tabIndex={-1}>

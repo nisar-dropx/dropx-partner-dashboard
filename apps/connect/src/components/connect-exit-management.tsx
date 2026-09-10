@@ -184,7 +184,8 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
 
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
-    {pending && !data ? <div className="connect-exit-card"><p className="connect-help">Loading exit details...</p></div> : null}
+    {pending && !data ? <div className="dx-loader"><span /><small>Loading exit details…</small></div> : null}
+    {!pending && !data && !error ? <div className="dx-empty"><FileText /><strong>Exit details unavailable</strong><small>We couldn't load your exit workflow. Try again in a moment.</small></div> : null}
 
     {canStart && data ? <form className="connect-exit-card dx-exit-form" onSubmit={submit}>
       <div className="dx-exit-card-heading"><span className="connect-exit-eyebrow">New request</span><h2>Plan your last working day</h2><p>This request will enter the configured {data.flow === "people" ? "People approval" : "Workforce lifecycle"} workflow.</p></div>

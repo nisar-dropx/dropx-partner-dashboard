@@ -10,6 +10,12 @@ function setupMessage(error: unknown) {
     : message || "Unable to load notifications.";
 }
 
+function errorResponse(error: unknown) {
+  const message = setupMessage(error);
+  const status = /login|expired/i.test(message) ? 401 : 500;
+  return NextResponse.json({ error: message }, { status });
+}
+
 async function selectedAccount(request: Request, body?: Record<string, unknown>) {
   const url = new URL(request.url);
   const profileType = String(body?.profileType ?? url.searchParams.get("profileType") ?? "") as ConnectAccount["profileType"];
@@ -92,7 +98,7 @@ export async function GET(request: Request) {
       unreadCount: notifications.filter((row) => !row.read_at).length
     });
   } catch (error) {
-    return NextResponse.json({ error: setupMessage(error) }, { status: 500 });
+    return errorResponse(error);
   }
 }
 
@@ -119,7 +125,7 @@ export async function PATCH(request: Request) {
     if (result.error) throw result.error;
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: setupMessage(error) }, { status: 500 });
+    return errorResponse(error);
   }
 }
 
@@ -161,7 +167,7 @@ export async function POST(request: Request) {
     if (result.error) throw result.error;
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: setupMessage(error) }, { status: 500 });
+    return errorResponse(error);
   }
 }
 
@@ -188,6 +194,6 @@ export async function DELETE(request: Request) {
     if (result.error) throw result.error;
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: setupMessage(error) }, { status: 500 });
+    return errorResponse(error);
   }
 }
