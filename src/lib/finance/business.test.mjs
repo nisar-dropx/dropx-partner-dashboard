@@ -96,6 +96,10 @@ test("Rent validates editable effective-dated records and reconciles across cale
   });
   assert.equal(record.site_code, "SBPD-BURLA");
   assert.equal(record.allocation_station_code, "SBPD");
+  assert.equal(
+    rent.monthlyRentTotal({ monthly_rent: 15000, monthly_maintenance: 600 }),
+    "15600.00",
+  );
   for (const days of [28, 29, 30, 31])
     assert.equal(
       pricing.addAmounts(

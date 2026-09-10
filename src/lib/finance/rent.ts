@@ -93,7 +93,10 @@ export function validateRent(value: unknown): RentInput {
 }
 
 export function monthlyRentTotal(record: Pick<RentInput, "monthly_rent" | "monthly_maintenance">) {
-  return addAmounts([record.monthly_rent, record.monthly_maintenance])!;
+  return addAmounts([
+    String(record.monthly_rent ?? "0"),
+    String(record.monthly_maintenance ?? "0"),
+  ])!;
 }
 
 export function dailyRentAmount(monthly: string, day: number, daysInMonth: number) {

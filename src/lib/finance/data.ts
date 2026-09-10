@@ -99,7 +99,16 @@ export async function loadRent(context: FinanceContext) {
       );
     const { data, error } = await query;
     if (error) throw new Error("Unable to load rent records. Please retry.");
-    rows.push(...((data ?? []) as RentRecord[]));
+    rows.push(
+      ...(data ?? []).map((record) => ({
+        ...record,
+        // PostgREST serializes NUMERIC columns as JSON numbers in this query.
+        // Finance arithmetic deliberately uses decimal text, so normalize at
+        // the data boundary before the records reach the UI or calculators.
+        monthly_rent: String(record.monthly_rent ?? "0"),
+        monthly_maintenance: String(record.monthly_maintenance ?? "0"),
+      })) as RentRecord[],
+    );
     if ((data ?? []).length < 1000) break;
   }
   return rows;
