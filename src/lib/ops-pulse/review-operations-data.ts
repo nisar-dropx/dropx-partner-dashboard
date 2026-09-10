@@ -1,7 +1,7 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { CodLocationRow } from "./cod";
-import { loadEddLedger } from "./edd-ledger";
+import { ingestEddObservations, loadEddLedger } from "./edd-ledger";
 import { summarizeStationEdd, stationEddToday } from "./station-edd";
 import { loadOpsStationManpower } from "./station-manpower";
 import { isPeopleDesignation } from "./station-opening-punches";
@@ -81,7 +81,13 @@ export async function captureReviewEddHistory() {
   const performance = new Map((outcomes.data ?? []).map(s => [s.station_code, s]));
   let captured = 0;
   for (let offset = 0; offset < mapped.length; offset += 6) {
-    const batch = mapped.slice(offset, offset + 6), ledger = await loadEddLedger(batch.map(s => s.station_code));
+    const batch = mapped.slice(offset, offset + 6), batchCodes = batch.map(s => s.station_code);
+    // A successful worker refresh lands in edd_station_snapshots first. Import
+    // that exact snapshot before reading the package ledger, otherwise the
+    // five-minute review can keep recording yesterday's package cohort even
+    // while the live EDD network page already shows today's source totals.
+    await ingestEddObservations(batchCodes);
+    const ledger = await loadEddLedger(batchCodes);
     const observedAt = new Date();
     if (stationEddToday(observedAt) !== date) break; // Do not cross EOD with a mixed-day sample.
     const rows = batch.map(station => {
