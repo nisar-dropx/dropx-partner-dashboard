@@ -235,7 +235,7 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
   function swapActionLabel(day: RosterDay) {
     if (day.canSwap && day.partners.length) return "Request swap";
     if (day.canSwap) return "No valid swap";
-    return rosterChangeDeadlineShortLabel();
+    return rosterChangeDeadlineShortLabel(data?.leadHours);
   }
 
   return (

@@ -4,6 +4,7 @@ import { isOpsRosterPlannerRole, isRosterDirectPublishDesignation, isStationFloo
 import { isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
+import { normalizeRosterChangeDeadlineHour } from "@/lib/roster-change-deadline";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type WorkerType = "employee" | "contractor";
@@ -61,6 +62,7 @@ export type OpsRosterPlan = {
 export type OpsRosterPolicy = {
   submissionLeadDays: number;
   changeCutoffHours: number;
+  changeDeadlineHour: number;
   approvalRequired: boolean;
   approvalLevels: 1 | 2;
   hrApprovalRequired: boolean;
@@ -180,7 +182,7 @@ export async function loadOpsRosteringPolicy(companyId: string, locationId?: str
   // Location overrides were removed from Rostering Policy; ignore stale rows.
   void locationId;
   const company = await db().from("hr_company_settings")
-    .select("roster_submission_lead_days,roster_change_cutoff_hours,roster_approval_manager_levels,roster_approval_required,roster_approval_levels,roster_hr_approval_required")
+    .select("roster_submission_lead_days,roster_change_cutoff_hours,roster_change_deadline_hour,roster_approval_manager_levels,roster_approval_required,roster_approval_levels,roster_hr_approval_required")
     .eq("company_id", companyId)
     .maybeSingle();
   if (company.error) throw new Error(company.error.message);
@@ -188,6 +190,7 @@ export async function loadOpsRosteringPolicy(companyId: string, locationId?: str
   return {
     submissionLeadDays: Number(company.data?.roster_submission_lead_days ?? 3),
     changeCutoffHours: Number(company.data?.roster_change_cutoff_hours ?? 24),
+    changeDeadlineHour: normalizeRosterChangeDeadlineHour(company.data?.roster_change_deadline_hour),
     approvalRequired: true,
     approvalLevels: 2,
     hrApprovalRequired: true

@@ -64,21 +64,22 @@ function validDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
 }
 
-function rosterCutoffMessage() {
-  return `${rosterChangeDeadlineMessage()} Past and locked dates cannot be edited.`;
+function rosterCutoffMessage(hour: number) {
+  return `${rosterChangeDeadlineMessage(hour)} Past and locked dates cannot be edited.`;
 }
 
-/** Same lock window as grid save — import must not bypass it. Tomorrow stays editable until 2:00 PM today. */
+/** Same lock window as grid save — import must not bypass it. Tomorrow stays editable until today's configured deadline hour. */
 function isOpsRosterChangePastCutoff(input: {
   rosterKind: string | null | undefined;
   templateOrDate: string;
   cutoffAsOf: string;
+  changeDeadlineHour: number;
   nowMs?: number;
 }) {
   const cutoffDate = input.rosterKind === "recurring_weekly"
     ? nextRosterOccurrenceOnOrAfter(input.templateOrDate, input.cutoffAsOf)
     : input.templateOrDate;
-  return isRosterChangePastDeadline(cutoffDate, input.nowMs ?? Date.now());
+  return isRosterChangePastDeadline(cutoffDate, input.changeDeadlineHour, input.nowMs ?? Date.now());
 }
 
 function isoWeekday(value: string) {
@@ -348,9 +349,10 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
     const plan = await loadPlan(companyId, authorization, input.planId);
     if (!["draft", "returned"].includes(plan.status) || !plan.location_id) return { ok: false, message: "This roster is no longer editable." };
     const station = await authorisedStation(companyId, authorization, plan.location_id);
-    const [manpower, shifts] = await Promise.all([
+    const [manpower, shifts, policy] = await Promise.all([
       loadOpsStationManpower(companyId, [station], indiaToday()),
-      db().from("hr_shifts").select("id").eq("company_id", companyId).eq("is_active", true)
+      db().from("hr_shifts").select("id").eq("company_id", companyId).eq("is_active", true),
+      loadOpsRosteringPolicy(companyId, plan.location_id)
     ]);
     if (shifts.error) throw new Error(shifts.error.message);
     const people = new Set(manpower.people.map((person) => `${person.workerType}:${person.id}`));
@@ -370,9 +372,10 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
       if (isOpsRosterChangePastCutoff({
         rosterKind: plan.roster_kind,
         templateOrDate: change.date,
-        cutoffAsOf
+        cutoffAsOf,
+        changeDeadlineHour: policy.changeDeadlineHour
       })) {
-        return { ok: false, message: rosterCutoffMessage() };
+        return { ok: false, message: rosterCutoffMessage(policy.changeDeadlineHour) };
       }
     }
 
@@ -545,9 +548,10 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
     }
 
     const station = await authorisedStation(companyId, authorization, plan.location_id);
-    const [manpower, shifts] = await Promise.all([
+    const [manpower, shifts, policy] = await Promise.all([
       loadOpsStationManpower(companyId, [station], indiaToday()),
-      db().from("hr_shifts").select("id,code").eq("company_id", companyId).eq("is_active", true)
+      db().from("hr_shifts").select("id,code").eq("company_id", companyId).eq("is_active", true),
+      loadOpsRosteringPolicy(companyId, plan.location_id)
     ]);
     if (shifts.error) throw new Error(shifts.error.message);
 
@@ -680,9 +684,10 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
       if (isOpsRosterChangePastCutoff({
         rosterKind: plan.roster_kind,
         templateOrDate: row.roster_date,
-        cutoffAsOf
+        cutoffAsOf,
+        changeDeadlineHour: policy.changeDeadlineHour
       })) {
-        return { ok: false, message: rosterCutoffMessage() };
+        return { ok: false, message: rosterCutoffMessage(policy.changeDeadlineHour) };
       }
     }
     for (const removal of removals) {
@@ -692,9 +697,10 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
       if (isOpsRosterChangePastCutoff({
         rosterKind: plan.roster_kind,
         templateOrDate: removal.date,
-        cutoffAsOf
+        cutoffAsOf,
+        changeDeadlineHour: policy.changeDeadlineHour
       })) {
-        return { ok: false, message: rosterCutoffMessage() };
+        return { ok: false, message: rosterCutoffMessage(policy.changeDeadlineHour) };
       }
     }
 

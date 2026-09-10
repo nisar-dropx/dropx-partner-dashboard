@@ -106,6 +106,7 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
           routeReady={!route?.error}
           today={workspace.today}
           nowIso={new Date().toISOString()}
+          changeDeadlineHour={policy.changeDeadlineHour}
         />
       </> : <section className="panel"><div className="empty-cell">No station is available in your OpsPulse location scope.</div></section>}
     </div>

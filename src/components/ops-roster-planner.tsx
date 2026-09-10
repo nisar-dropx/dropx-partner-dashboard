@@ -109,7 +109,8 @@ export function OpsRosterPlanner({
   approvalRequired,
   routeReady,
   today,
-  nowIso
+  nowIso,
+  changeDeadlineHour
 }: {
   stationId: string;
   stationCode: string;
@@ -127,6 +128,7 @@ export function OpsRosterPlanner({
   routeReady: boolean;
   today: string;
   nowIso: string;
+  changeDeadlineHour: number;
 }) {
   const router = useRouter();
   const initial = useMemo(() => initialAssignments(plan?.entries ?? []), [plan?.entries]);
@@ -193,7 +195,7 @@ export function OpsRosterPlanner({
   }, [assignments, people, templateStart]);
   const activeShift = activeTool?.kind === "shift" ? shiftById.get(activeTool.shiftId) : null;
   const interactionAllowed = (editingEnabled || canStart) && !isPreparing;
-  const cutoffMessage = rosterChangeDeadlineMessage();
+  const cutoffMessage = rosterChangeDeadlineMessage(changeDeadlineHour);
 
   const lockReason = useCallback((date: string, _payload?: RosterDragPayload | null, _fallback?: RosterAssignmentValue) => {
     if (date < today) return "Past roster dates cannot be edited.";
@@ -202,8 +204,8 @@ export function OpsRosterPlanner({
     // not an earlier same weekday in the template week (e.g. 5–6 Sep).
     const templateDate = recurringTemplateDate(templateStartRef.current, date);
     const cutoffDate = nextRosterOccurrenceOnOrAfter(templateDate, date > today ? date : today);
-    return isRosterChangePastDeadline(cutoffDate, new Date(nowIso).getTime()) ? cutoffMessage : null;
-  }, [cutoffMessage, nowIso, today]);
+    return isRosterChangePastDeadline(cutoffDate, changeDeadlineHour, new Date(nowIso).getTime()) ? cutoffMessage : null;
+  }, [changeDeadlineHour, cutoffMessage, nowIso, today]);
 
   useEffect(() => {
     editingEnabledRef.current = editable;
@@ -431,7 +433,7 @@ export function OpsRosterPlanner({
       const shiftId = defaultShifts[personKey(person)];
       if (!shiftId || !shiftById.has(shiftId)) continue;
       for (const date of templateDates) {
-        if (isRosterChangePastDeadline(nextRosterOccurrenceOnOrAfter(date, today), new Date(nowIso).getTime())) continue;
+        if (isRosterChangePastDeadline(nextRosterOccurrenceOnOrAfter(date, today), changeDeadlineHour, new Date(nowIso).getTime())) continue;
         const key = cellKey(person, date);
         if (next.has(key)) continue;
         next.set(key, { dayType: "working", shiftId, notes: null });
