@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     if (daily && query.daily && query.daily !== "all" && !selected.length)
       throw new Error("No permitted allocation matches this daily breakup.");
     const caveat =
-      "Management estimate only. Monthly MG and configured monthly fee are divided by the selected month's actual calendar days. Positive daily excess uses Amazon deliveries plus C-returns above the prorated MG volume, at the variable slab rate, plus MFN. The latest rate card effective on or before the selected month remains active until replaced. XPT uses its fixed payout plus all its Amazon deliveries and C-returns at the parent variable rate. SWA is excluded pending separate pricing. IHS/SMD settlement rules, recoveries, other fees and tax are excluded. Costs are imported operating costs only. Blank values are unavailable; pending earnings are excluded.";
+      "Management estimate only. Monthly MG and configured monthly fee are divided by the selected month's actual calendar days. Positive daily excess uses Amazon deliveries plus C-returns above the prorated MG volume, at the variable slab rate, plus MFN. The latest rate card effective on or before the selected month remains active until replaced. XPT uses its fixed payout plus all its Amazon deliveries and C-returns at the parent variable rate. SWA is excluded pending separate pricing. IHS/SMD settlement rules, recoveries, other fees and tax are excluded. Rent and maintenance come from effective Rent Master agreements and accrue by actual calendar days; remaining costs come from station reports. Blank or incomplete values do not produce P&L.";
     const dailyBody = daily
       ? csvText([
           [
@@ -52,7 +52,14 @@ export async function GET(request: Request) {
             "IHS <15% rate INR (pending)",
             "IHS >15% rate INR (pending)",
             "Day revenue INR",
-            ...(tab === "pnl" ? ["Recorded costs INR", "Day P&L INR"] : []),
+            ...(tab === "pnl"
+              ? [
+                  "Rent Master INR",
+                  "Known operating costs INR",
+                  "Cost complete",
+                  "Day P&L INR",
+                ]
+              : []),
             "Shipment reported",
             "Rate revision",
             "Issues",
@@ -89,7 +96,14 @@ export async function GET(request: Request) {
               r.ihsLowRate,
               r.ihsHighRate,
               d.revenue,
-              ...(tab === "pnl" ? [d.cost, d.profit] : []),
+              ...(tab === "pnl"
+                ? [
+                    d.rentCost,
+                    d.cost,
+                    d.costComplete ? "Yes" : "No",
+                    d.profit,
+                  ]
+                : []),
               d.shipmentReported ? "Yes" : "No",
               r.revision,
               d.issues.join("; "),
@@ -124,7 +138,8 @@ export async function GET(request: Request) {
       "MTD revenue estimate INR",
       ...(tab === "pnl"
         ? [
-            "Recorded costs INR",
+            "Known operating costs INR",
+            "Cost complete",
             "Estimated P&L INR",
             "DA pay",
             "Staff",
@@ -175,6 +190,7 @@ export async function GET(request: Request) {
           ...(tab === "pnl"
             ? [
                 r.cost,
+                r.costComplete ? "Yes" : "No",
                 r.profit,
                 ...(
                   [

@@ -24,6 +24,7 @@ function compile(path, mocks = {}) {
 }
 const pricing = compile("./pricing.ts");
 const performance = compile("./performance.ts", { "./pricing": pricing });
+const rent = compile("./rent.ts", { "./pricing": pricing });
 const base = {
   provider: "Amazon",
   station_code: "KOZA",
@@ -79,6 +80,33 @@ test("Money rounding, daily proration and negative profit are deterministic", ()
   assert.equal(pricing.subtractAmounts("10", "20.555"), "-10.56");
   assert.equal(pricing.addAmounts([null, null]), null);
   assert.equal(pricing.addAmounts(["0", null]), "0.00");
+});
+test("Rent validates editable effective-dated records and reconciles across calendar months", () => {
+  const record = rent.validateRent({
+    site_code: "SBPD-BURLA",
+    allocation_station_code: "SBPD",
+    parent_station_code: "SBPD",
+    region: "Odisha",
+    payee_name: "ANSHUMAN BEHERA",
+    monthly_rent: "15000",
+    monthly_maintenance: "0",
+    effective_from: "2026-09-01",
+    effective_to: null,
+    change_reason: "Initial import",
+  });
+  assert.equal(record.site_code, "SBPD-BURLA");
+  assert.equal(record.allocation_station_code, "SBPD");
+  for (const days of [28, 29, 30, 31])
+    assert.equal(
+      pricing.addAmounts(
+        Array.from({ length: days }, (_, index) =>
+          rent.dailyRentAmount("30000", index + 1, days),
+        ),
+      ),
+      "30000.00",
+    );
+  assert.throws(() => rent.validateRent({ ...record, effective_to: "2026-08-31" }));
+  assert.throws(() => rent.validateRent({ ...record, allocation_station_code: "../SBPD" }));
 });
 test("Invalid dates, numeric coercion and required MG fields fail validation", () => {
   for (const overrides of [
@@ -202,7 +230,8 @@ test("Partial source coverage and incomplete cost values are visible", () => {
     [location],
     filters,
   );
-  assert.equal(r.cost, null);
+  assert.equal(r.cost, "123456.78");
+  assert.equal(r.costComplete, false);
   assert.equal(r.profit, null);
   assert.ok(r.issues.includes("Cost coverage 10/31 days"));
 });
@@ -351,7 +380,15 @@ let writeContext = {
   db: {
     rpc: async (name, args) => {
       calls.push([name, args]);
-      return { data: args.p_items.length, error: null };
+      return {
+        data:
+          name === "finance_save_pricing"
+            ? args.p_items.length
+            : name === "finance_save_rent"
+              ? "11111111-1111-4111-8111-111111111111"
+              : true,
+        error: null,
+      };
     },
   },
 };
@@ -398,6 +435,46 @@ test("Pricing writes validate a whole batch before one company-scoped atomic RPC
   assert.equal(calls[0][1].p_company, "company-1");
   assert.equal(calls[0][1].p_actor, "user-1");
   assert.equal(calls[0][1].p_items[0].expected_revision, 0);
+});
+const rentActions = compile("../../app/master/rent/actions.ts", {
+  "next/cache": { revalidatePath: () => {} },
+  "@/lib/finance/data": {
+    financeContext: async () => writeContext,
+    canWriteRent: data.canWriteRent,
+  },
+  "@/lib/finance/rent": rent,
+});
+const rentInput = {
+  site_code: "SBPD-BURLA",
+  allocation_station_code: "KOZA",
+  parent_station_code: "KOZA",
+  region: "Kerala",
+  payee_name: "Test Payee",
+  monthly_rent: "30000",
+  monthly_maintenance: "500",
+  effective_from: "2026-09-01",
+  effective_to: null,
+  change_reason: "New agreement",
+};
+test("Rent add, edit and delete use company-scoped atomic RPCs and active allocations", async () => {
+  calls = [];
+  let result = await rentActions.saveRent(rentInput);
+  assert.equal(result.ok, true);
+  assert.equal(calls[0][0], "finance_save_rent");
+  assert.equal(calls[0][1].p_company, "company-1");
+  assert.equal(calls[0][1].p_actor, "user-1");
+
+  result = await rentActions.saveRent({ ...rentInput, allocation_station_code: "OUTSIDE" });
+  assert.equal(result.ok, false);
+  assert.equal(calls.length, 1);
+
+  const deleted = await rentActions.deleteRent({
+    id: "11111111-1111-4111-8111-111111111111",
+    expected_updated_at: "2026-09-10T00:00:00Z",
+  });
+  assert.equal(deleted.ok, true);
+  assert.equal(calls[1][0], "finance_delete_rent");
+  assert.equal(calls[1][1].p_company, "company-1");
 });
 test("Filtered CSV exports reuse the authorized loader and include estimate caveats", async () => {
   let seen;
@@ -450,7 +527,8 @@ test("Filtered CSV exports reuse the authorized loader and include estimate cave
   assert.equal(values["Location"], "Kozhikode");
   assert.equal(values["Monthly MG"], "747233.1009887976");
   assert.equal(values["MTD revenue estimate INR"], "747233.10");
-  assert.equal(values["Recorded costs INR"], "123456.78");
+  assert.equal(values["Known operating costs INR"], "123456.78");
+  assert.equal(values["Cost complete"], "Yes");
   assert.equal(values["Estimated P&L INR"], "623776.32");
   const revenueResponse = await route.GET(
     new Request(
@@ -465,7 +543,7 @@ test("Filtered CSV exports reuse the authorized loader and include estimate cave
     revenueRecord[revenueHeaders.indexOf("MTD revenue estimate INR")],
     "747233.10",
   );
-  assert.ok(!revenueHeaders.includes("Recorded costs INR"));
+  assert.ok(!revenueHeaders.includes("Known operating costs INR"));
 });
 
 function dailyFixture(month = "2026-08", throughDay = 2, overrides = {}) {

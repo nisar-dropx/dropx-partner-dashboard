@@ -12,6 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadCodLocations, type CodLocationRow } from "@/lib/ops-pulse/cod";
 import { monthEnd, todayIndia, validMonth, type PricingCard } from "./pricing";
 import { buildBusinessRows, type Snapshot } from "./performance";
+import type { RentRecord } from "./rent";
 
 export async function financeContext(code: string) {
   const host = headers().get("x-forwarded-host") ?? headers().get("host") ?? "";
@@ -70,6 +71,38 @@ export async function financeContext(code: string) {
 export type FinanceContext = Awaited<ReturnType<typeof financeContext>>;
 export function canWritePricing(auth: AuthorizationContext, revision: number) {
   return hasPermission(auth, "finance_pricing", revision ? "edit" : "add");
+}
+export function canWriteRent(auth: AuthorizationContext, existing: boolean) {
+  return hasPermission(auth, "finance_rent", existing ? "edit" : "add");
+}
+export async function loadRent(context: FinanceContext) {
+  const rows: RentRecord[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    let query = context.db
+      .from("finance_rent_master")
+      .select(
+        "id,site_code,allocation_station_code,parent_station_code,region,payee_name,monthly_rent,monthly_maintenance,effective_from,effective_to,change_reason,source_file,source_sheet,source_row,created_at,updated_at",
+      )
+      .eq("company_id", context.companyId)
+      .is("deleted_at", null)
+      .order("site_code")
+      .order("payee_name")
+      .order("effective_from", { ascending: false })
+      .order("id")
+      .range(offset, offset + 999);
+    if (!context.authorization.hasAllLocationAccess)
+      query = query.in(
+        "allocation_station_code",
+        context.locations.length
+          ? context.locations.map((l) => l.station_code)
+          : ["__no_access__"],
+      );
+    const { data, error } = await query;
+    if (error) throw new Error("Unable to load rent records. Please retry.");
+    rows.push(...((data ?? []) as RentRecord[]));
+    if ((data ?? []).length < 1000) break;
+  }
+  return rows;
 }
 export async function loadPricing(
   context: FinanceContext,

@@ -40,6 +40,7 @@ export function DailyBreakup({
         | "smd"
         | "ihs"
         | "revenue"
+        | "rentCost"
         | "cost"
         | "profit",
     ) =>
@@ -61,6 +62,7 @@ export function DailyBreakup({
       days,
       sum,
       issues: [...new Set(days.flatMap((d) => d.issues))],
+      costComplete: days.every((day) => day.costComplete),
     };
   });
   return (
@@ -170,7 +172,8 @@ export function DailyBreakup({
               <th>Day revenue</th>
               {pnl && (
                 <>
-                  <th>Recorded costs</th>
+                  <th>Rent Master</th>
+                  <th>Known operating costs</th>
                   <th>Day P&L</th>
                 </>
               )}
@@ -178,7 +181,7 @@ export function DailyBreakup({
             </tr>
           </thead>
           <tbody>
-            {entries.map(({ date, days, sum, issues }) => (
+            {entries.map(({ date, days, sum, issues, costComplete }) => (
               <tr key={date}>
                 <td>
                   <strong>{date}</strong>
@@ -205,8 +208,9 @@ export function DailyBreakup({
                 </td>
                 {pnl && (
                   <>
+                    <td>{money(sum("rentCost"))}</td>
                     <td>{money(sum("cost"))}</td>
-                    <td>{money(sum("profit"))}</td>
+                    <td>{money(costComplete ? sum("profit") : null)}</td>
                   </>
                 )}
                 <td>
@@ -259,8 +263,21 @@ export function DailyBreakup({
               <th>{money(addAmounts(rows.map((r) => r.revenue)))}</th>
               {pnl && (
                 <>
+                  <th>
+                    {money(
+                      addAmounts(
+                        rows.flatMap((r) => r.daily.map((d) => d.rentCost)),
+                      ),
+                    )}
+                  </th>
                   <th>{money(addAmounts(rows.map((r) => r.cost)))}</th>
-                  <th>{money(addAmounts(rows.map((r) => r.profit)))}</th>
+                  <th>
+                    {money(
+                      rows.every((r) => r.profit !== null)
+                        ? addAmounts(rows.map((r) => r.profit))
+                        : null,
+                    )}
+                  </th>
                 </>
               )}
               <th></th>

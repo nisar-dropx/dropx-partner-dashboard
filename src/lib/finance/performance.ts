@@ -66,6 +66,7 @@ export type BusinessRow = {
   costThrough: string | null;
   revenue: string | null;
   cost: string | null;
+  costComplete: boolean;
   profit: string | null;
   mg: string | null;
   mgVolume: string | null;
@@ -118,6 +119,8 @@ export type DailyCost = {
   station_code: string;
   work_date: string;
   total: string | null;
+  rent: string | null;
+  missing_cost_rows: number;
   updated_at: string;
 };
 export type BusinessDay = {
@@ -136,6 +139,8 @@ export type BusinessDay = {
   ihs: string | null;
   revenue: string | null;
   cost: string | null;
+  rentCost: string | null;
+  costComplete: boolean;
   profit: string | null;
   shipmentReported: boolean;
   issues: string[];
@@ -184,7 +189,8 @@ export function buildDailyRows(
   );
   const variableAccrual = accrual(),
     mfnAccrual = accrual(),
-    costAccrual = accrual();
+    costAccrual = accrual(),
+    rentAccrual = accrual();
   const rates = pricing?.rates ?? {};
   let flipkartQuantity = zero,
     flipkartPrevious = "0.00";
@@ -317,9 +323,15 @@ export function buildDailyRows(
     }
     const cost =
       !sharedCost && c?.total != null ? costAccrual(decimal(c.total)) : null;
+    const rentCost =
+      !sharedCost && c?.rent != null ? rentAccrual(decimal(c.rent)) : null;
+    const costComplete =
+      !sharedCost && cost !== null && Number(c?.missing_cost_rows ?? 0) === 0;
     if (sharedCost)
       issues.push("Shared station cost requires client allocation");
     else if (cost === null) issues.push("Cost report pending");
+    else if (!costComplete)
+      issues.push("Operating cost report pending; known rent is included");
     return {
       date,
       deliveries: s?.deliveries ?? null,
@@ -336,8 +348,10 @@ export function buildDailyRows(
       ihs: s?.ihs ?? null,
       revenue,
       cost,
+      rentCost,
+      costComplete,
       profit:
-        revenue !== null && cost !== null
+        revenue !== null && cost !== null && costComplete
           ? subtractAmounts(revenue, cost)
           : null,
       shipmentReported: Boolean(s),
@@ -441,16 +455,22 @@ export function buildBusinessRows(
     else if (shipmentsRow.days < elapsed || shipmentsRow.missing_delivery_rows)
       issues.push(`Shipment coverage ${shipmentsRow.days}/${elapsed} days`);
     let cost: string | null = costRow?.total ?? null;
+    let costComplete = cost !== null;
     if ((clientCounts.get(station) ?? 0) > 1) {
       cost = null;
+      costComplete = false;
       issues.push("Shared station cost needs client allocation");
     } else if (costRow?.missing_cost_rows) {
-      cost = null;
-      issues.push("Incomplete cost values");
+      costComplete = false;
+      issues.push("Operating costs incomplete; known rent and reported costs are shown");
     }
-    if (!costRow) issues.push("No cost report");
-    else if (costRow.days < elapsed)
+    if (!costRow) {
+      costComplete = false;
+      issues.push("No cost report or active rent agreement");
+    } else if (costRow.days < elapsed) {
+      costComplete = false;
       issues.push(`Cost coverage ${costRow.days}/${elapsed} days`);
+    }
     if (
       costRow?.da != null &&
       decimal(costRow.da) === zero &&
@@ -510,8 +530,9 @@ export function buildBusinessRows(
         costThrough: costRow?.last_date ?? null,
         revenue,
         cost,
+        costComplete,
         profit:
-          revenue !== null && cost !== null
+          revenue !== null && cost !== null && costComplete
             ? subtractAmounts(revenue, cost)
             : null,
         mg: pricing?.rates.mg_amount_including_mhe ?? null,

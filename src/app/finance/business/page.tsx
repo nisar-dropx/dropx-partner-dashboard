@@ -96,7 +96,7 @@ export default async function BusinessPage({
     profit = addAmounts(comparable.map((r) => r.profit));
   const revenueCovered = rows.filter((r) => r.revenue !== null).length;
   const missing = rows.filter(
-    (r) => r.revenue === null || r.cost === null || r.pendingFixed,
+    (r) => r.revenue === null || !r.costComplete || r.pendingFixed,
   ).length;
   const sourceShipment =
     snapshot.shipments
@@ -176,6 +176,9 @@ export default async function BusinessPage({
         {hasPermission(context.authorization, "finance_pricing", "access") && (
           <Link href="/master/pricing">Open Pricing Master →</Link>
         )}
+        {hasPermission(context.authorization, "finance_rent", "access") && (
+          <Link href="/master/rent">Open Rent Master →</Link>
+        )}
       </div>
       <section className="summary-grid">
         <div className="metric-card">
@@ -189,11 +192,11 @@ export default async function BusinessPage({
           </small>
         </div>
         <div className="metric-card">
-          <span>Recorded operating costs</span>
+          <span>Known operating costs</span>
           <strong>{money(costs)}</strong>
           <small>
-            {rows.filter((r) => r.cost !== null).length} allocations with
-            attributable costs
+            {rows.filter((r) => r.cost !== null).length} allocations · Rent
+            Master included
           </small>
         </div>
         <div className="metric-card">
@@ -221,11 +224,13 @@ export default async function BusinessPage({
         {monthEnd(filters.month).slice(8)} calendar days. Each day adds max(0,
         Amazon deliveries + C-returns − monthly MG volume ÷ calendar days) ×
         variable slab rate, plus MFN count × MFN rate. A rate card remains
-        effective until a newer month replaces it. SWA is excluded pending its
+        effective until a newer month replaces it. Rent and maintenance come
+        from Rent Master and accrue over the selected month&apos;s actual calendar
+        days. SWA is excluded pending its
         separate rates. IHS/SMD settlement rules, recoveries, other fees and tax
         remain outside this estimate. Flipkart uses configured monthly
-        delivery slabs. P&L subtracts recorded operating costs only; missing
-        expense days and unallocated overhead can overstate profit.
+        delivery slabs. P&amp;L is shown only when operating costs are complete;
+        known rent remains visible while other cost reports are pending.
       </div>
       <div className="fin-freshness">
         <span>Live refresh every 60 seconds · Read {stamp(readAt)}</span>
@@ -254,7 +259,7 @@ export default async function BusinessPage({
                   <th>MTD revenue</th>
                   {tab === "pnl" && (
                     <>
-                      <th>Recorded costs</th>
+                      <th>Known costs</th>
                       <th>Estimated P&L</th>
                     </>
                   )}
@@ -340,7 +345,7 @@ export default async function BusinessPage({
                 <th>MTD revenue</th>
                 {tab === "pnl" && (
                   <>
-                    <th>Recorded costs</th>
+                    <th>Known costs</th>
                     <th>Estimated P&L</th>
                   </>
                 )}
@@ -422,6 +427,17 @@ export default async function BusinessPage({
                             ? `Through ${row.costThrough}`
                             : "No cost report"}
                         </small>
+                        {row.components?.rent !== null &&
+                          row.components?.rent !== undefined && (
+                            <small>
+                              Rent Master: {money(row.components.rent)}
+                            </small>
+                          )}
+                        {!row.costComplete && (
+                          <small className="fin-negative">
+                            Other operating costs incomplete
+                          </small>
+                        )}
                       </td>
                       <td
                         className={
@@ -438,12 +454,12 @@ export default async function BusinessPage({
                     <details className="fin-row-details">
                       <summary>
                         <span
-                          className={`fin-chip ${row.revenue === null || row.cost === null ? "warning" : ""}`}
+                          className={`fin-chip ${row.revenue === null || !row.costComplete ? "warning" : ""}`}
                         >
                           {row.revenue === null
                             ? "Pricing / data needed"
-                            : row.cost === null
-                              ? "Costs unavailable"
+                            : !row.costComplete
+                              ? "Costs incomplete"
                               : "Estimate"}
                         </span>
                         <small>
@@ -481,9 +497,9 @@ export default async function BusinessPage({
                             </div>
                           ))}
                           <p>
-                            Source total: {money(row.cost)}. Components are
-                            informational; they are not added again to the
-                            source total.
+                            Known total: {money(row.cost)}. Rent is supplied by
+                            Rent Master; remaining components come from station
+                            cost reports and are not added twice.
                           </p>
                         </dl>
                       )}
@@ -520,9 +536,10 @@ export default async function BusinessPage({
           </div>
         ))}
       <p className="fin-footnote">
-        Revenue follows the latest revision for the selected month. Recorded
-        costs come from station cost reports; payment requests and bank payments
-        are not added again. Shared station costs are excluded from client P&L
+        Revenue follows the latest revision for the selected month. Rent comes
+        from the effective Rent Master agreement; remaining costs come from
+        station cost reports. Payment requests and bank payments are not added
+        again. Shared station costs are excluded from client P&amp;L
         until an allocation basis is available. These estimates are not tax
         invoices or a closed accounting P&L.
       </p>
