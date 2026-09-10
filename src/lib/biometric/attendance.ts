@@ -1083,6 +1083,104 @@ function reportMatchesType(row: AttendanceReportRow, type: AttendanceReportType)
   return true;
 }
 
+/**
+ * Fills the gaps in a single worker's day-by-day calendar for a date range.
+ *
+ * `loadAttendanceReportRows` (below) only returns a row per `attendance_daily`
+ * entry, i.e. per real attendance event. A day with no punch and no other
+ * attendance activity - most commonly a scheduled weekly off or holiday -
+ * never gets a row at all, so a calendar view built purely from those rows
+ * cannot tell "week off" apart from "we have no data for this day". This
+ * helper is additive and opt-in: it reuses the same roster lookup already
+ * used to label existing rows (`loadAttendanceScheduleContext`), and returns
+ * one synthetic row per date in range that has no existing row, so a
+ * per-worker calendar (e.g. the DropX Connect attendance screen) can render
+ * every day of the month correctly. It does not change what
+ * `loadAttendanceReportRows` returns for its other, list/export/notification
+ * consumers - those keep seeing only real attendance events.
+ */
+export async function fillAttendanceCalendarGaps({
+  companyId,
+  existingDates,
+  fromDate,
+  profileId,
+  profileType,
+  toDate
+}: {
+  companyId: string;
+  existingDates: Iterable<string>;
+  fromDate: string;
+  profileId: string;
+  // Only the employee/contractor split matters here - loadAttendanceScheduleContext's
+  // roster lookup (rosterWorkerType) treats every non-employee profile type the
+  // same way, so callers with a wider profile-type enum (e.g. Connect's
+  // WorkforceProfileType) should pass "employee" or "contractor" accordingly.
+  profileType: "employee" | "contractor";
+  toDate: string;
+}): Promise<AttendanceReportRow[]> {
+  if (!profileId) return [];
+  const present = new Set(existingDates);
+  const missingDates: string[] = [];
+  for (let cursor = fromDate; cursor <= toDate; cursor = addIsoDateDays(cursor, 1)) {
+    if (!present.has(cursor)) missingDates.push(cursor);
+  }
+  if (!missingDates.length) return [];
+
+  const scheduleContext = await loadAttendanceScheduleContext({
+    companyId,
+    fromDate,
+    toDate,
+    workers: [{ profileId, profileType }]
+  });
+
+  const rows: AttendanceReportRow[] = [];
+  for (const punchDate of missingDates) {
+    const schedule = scheduleContext.scheduleFor(profileId, punchDate);
+    // Only backfill days with a known non-working roster day type (weekly
+    // off, holiday, etc). A day with no roster entry at all is genuinely
+    // "no record" - synthesizing a status for it would be a guess.
+    if (schedule.dayType === "working" || schedule.dayType === "unassigned") continue;
+    const attendanceStatus = attendanceDayStatus({
+      dayType: schedule.dayType,
+      punchCount: 0,
+      rules: scheduleContext.rules,
+      scheduledMinutes: 0,
+      status: "",
+      workMinutes: 0
+    });
+    rows.push({
+      enrolmentId: "",
+      workerCode: "",
+      workerName: "",
+      workerType: "",
+      locationId: null,
+      location: "-",
+      designation: "-",
+      shiftName: schedule.dayType.replaceAll("_", " "),
+      shiftCode: "",
+      shiftSource: schedule.source,
+      scheduledStart: "",
+      scheduledEnd: "",
+      scheduledMinutes: 0,
+      punchDate,
+      inTime: "",
+      outTime: "",
+      punchTimes: [],
+      workHours: "",
+      punchCount: 0,
+      status: schedule.dayType,
+      attendanceStatus,
+      lateMinutes: 0,
+      earlyOutMinutes: 0,
+      remark: "",
+      workMode: "onsite",
+      deviceSerial: "",
+      labels: {}
+    });
+  }
+  return rows;
+}
+
 export async function loadAttendanceReportRows({
   companyId,
   date,

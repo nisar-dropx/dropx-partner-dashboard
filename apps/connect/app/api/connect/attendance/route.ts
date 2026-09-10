@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveConnectAttendanceWorker } from "@/lib/connect-attendance-worker";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveAttendancePayDayType } from "@/lib/attendance-pay-day";
-import { loadAttendanceReportRows } from "../../../../../../src/lib/biometric/attendance";
+import { fillAttendanceCalendarGaps, loadAttendanceReportRows } from "../../../../../../src/lib/biometric/attendance";
 import { resolveAttendanceRegularizationApprovers } from "../../../../../../src/lib/attendance-regularization-workflow";
 import { notifyAttendanceApprovalRequired } from "../../../../../../src/lib/connect-attendance-notifications";
 
@@ -190,6 +190,7 @@ export async function GET(request: NextRequest) {
     const attendanceDates = new Set(responseRows.map((row) => row.date));
     for (const [date, regularization] of requestByDate) {
       if (!attendanceDates.has(date)) {
+        attendanceDates.add(date);
         responseRows.push({
           date,
           status: "",
@@ -217,6 +218,54 @@ export async function GET(request: NextRequest) {
         });
       }
     }
+
+    // Neither attendance_daily nor the regularization backfill above covers a
+    // day with no punch and no request - most commonly a scheduled weekly
+    // off or holiday. Without this, the calendar can't tell "week off" apart
+    // from "no data for this day" (see fillAttendanceCalendarGaps).
+    if (worker.profileType === "employee" || worker.profileType === "contractor") {
+      const calendarGapRows = await fillAttendanceCalendarGaps({
+        companyId: worker.companyId,
+        existingDates: attendanceDates,
+        fromDate: range.fromDate,
+        profileId: worker.profileId,
+        profileType: worker.profileType,
+        toDate: range.toDate
+      });
+      for (const row of calendarGapRows) {
+        responseRows.push({
+          date: row.punchDate,
+          status: row.status,
+          statusLabel: null,
+          statusKind: "attendance" as const,
+          isPaidLeave: null,
+          // row.status carries the raw roster day type (e.g. "weekly_off",
+          // "holiday"); row.attendanceStatus is the human label
+          // attendanceDayStatus() derived from it (e.g. "Weekly Off"). Reuse
+          // the same label-matching resolver the real rows use below,
+          // instead of assuming every backfilled day is a week off.
+          payDayType: resolveAttendancePayDayType({ status: "", statusLabel: row.attendanceStatus, attendanceStatus: row.attendanceStatus, workMode: "onsite" }),
+          attendanceStatus: row.attendanceStatus,
+          inTime: "",
+          outTime: "",
+          punches: [],
+          workHours: "",
+          punchCount: 0,
+          lateMinutes: 0,
+          earlyOutMinutes: 0,
+          scheduledStart: "--:--",
+          scheduledEnd: "--:--",
+          scheduledMinutes: 0,
+          shiftName: row.shiftName,
+          shiftCode: "",
+          shiftSource: row.shiftSource,
+          remark: "",
+          workMode: "onsite" as const,
+          regularization: null
+        });
+      }
+    }
+
     responseRows.sort((left, right) => left.date.localeCompare(right.date));
 
     return NextResponse.json({

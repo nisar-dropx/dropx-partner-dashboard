@@ -147,6 +147,7 @@ export function ConnectLoginFlow() {
   useEffect(() => {
     const onPop = (event: PopStateEvent) => {
       const destination = event.state?.dropxStep as Step | undefined;
+      setError(""); setNotice("");
       if (destination && ["dashboard", "profile", "documents", "approvals", "requests", "advances", "reimbursements", "attendance", "roster", "leave", "performance", "connect", "settings"].includes(destination)) {
         setStep(destination);
       } else if (account && step !== landingPage(account)) {
@@ -436,7 +437,7 @@ export function ConnectLoginFlow() {
     setAccount(next); setAvatar(next.profilePhotoUrl || ""); setDrawer(false); setStep(landingPage(next));
   }
   function open(next: Step) {
-    setDrawer(false); setProfileMenu(false);
+    setDrawer(false); setProfileMenu(false); setError(""); setNotice("");
     if (next === "lop") next = "leave";
     if (next === "wfh") {
       if (!account || !showWfhInLeave(account)) return;

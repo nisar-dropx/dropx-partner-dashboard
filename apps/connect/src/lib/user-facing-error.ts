@@ -10,6 +10,11 @@ function rawMessage(error: unknown) {
 }
 
 export function userFacingError(error: unknown, fallback = GENERIC_TECHNICAL_ERROR) {
+  // Browser-native WebAuthn/credentials failures throw DOMException with a
+  // spec-quoting message (e.g. "...See: https://www.w3.org/TR/webauthn-2/
+  // #sctn-..."). That reads as an ordinary sentence, so it slips past every
+  // TECHNICAL_ERROR pattern below and must never reach the UI as-is.
+  if (typeof DOMException !== "undefined" && error instanceof DOMException) return fallback;
   const message = rawMessage(error).replace(/\s+/g, " ").trim();
   if (!message) return fallback;
   if (message.startsWith("{") || message.startsWith("[") || TECHNICAL_ERROR.test(message)) return fallback;
