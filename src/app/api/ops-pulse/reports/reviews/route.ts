@@ -1,6 +1,7 @@
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
+import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
 import { reviewReportDates } from "@/lib/ops-pulse/review-report";
 import { loadReviewReport } from "@/lib/ops-pulse/review-report-data";
 
@@ -19,9 +20,10 @@ export async function GET(request: Request) {
   const companyId = requireCompanyId(auth);
   const scope = await loadCodLocations(companyId, auth.locationScopeIds, auth.hasAllLocationAccess);
   if (scope.error) return Response.json({ error: "Station scope could not be verified. Please retry." }, { status: 503, headers: noStore });
-  if (requested.some(code => !scope.locations.some(s => s.station_code === code))) return Response.json({ error: "One or more selected stations are outside your permitted scope." }, { status: 403, headers: noStore });
+  const reviewLocations = resolveOperatingContext(scope.locations).modeLocations;
+  if (requested.some(code => !reviewLocations.some(s => s.station_code === code))) return Response.json({ error: "One or more selected stations are outside your permitted scope or active operating model." }, { status: 403, headers: noStore });
   try {
-    const report = await loadReviewReport(companyId, scope.locations.filter(s => requested.includes(s.station_code)), from, to);
+    const report = await loadReviewReport(companyId, reviewLocations.filter(s => requested.includes(s.station_code)), from, to);
     if (format === "json") return Response.json({ generatedAt: report.generatedAt, rows: report.tables[0].rows, notes: report.notes, sections: report.tables.map(t => ({ name: t.name, count: t.rows.length })) }, { headers: noStore });
     const { reviewReportPdf, reviewReportXlsx } = await import("@/lib/ops-pulse/review-report-export");
     const bytes = format === "pdf" ? await reviewReportPdf(report) : await reviewReportXlsx(report);
