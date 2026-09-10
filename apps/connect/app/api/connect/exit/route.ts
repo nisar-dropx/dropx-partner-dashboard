@@ -762,7 +762,13 @@ export async function POST(request: Request) {
       sourceKey: String(exitCase.id)
     });
     const firstApproval = approvalRows.slice().sort((left, right) => left.step_order - right.step_order)[0];
-    if (firstApproval) await notifyExitApprovalRequired({ companyId: context.account.companyId, caseId: exitCase.id, approvalStepId: firstApproval.workflow_step_id });
+    if (firstApproval?.workflow_step_id) {
+      await notifyExitApprovalRequired({
+        companyId: context.account.companyId,
+        caseId: exitCase.id,
+        approvalStepId: firstApproval.workflow_step_id
+      });
+    }
     return NextResponse.json({ ok: true, notice: `Resignation submitted successfully. Case ${caseNumber} has been sent for review.` });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to submit exit request." }, { status: 400 });
