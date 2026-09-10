@@ -5,7 +5,7 @@ export function PerformanceDataUpdateSettings({control,action,canEdit,receipts}:
  return <section id="performance-data-updated" className="panel" style={{padding:24,marginBottom:20}}>
   <h2>Performance data updated</h2>
   <p>One compact notice when completed performance data becomes available. Relevant Ops managers and location mailboxes only; one notice per recipient per performance day, with daily replies in a monthly thread.</p>
-  <form action={action}><fieldset disabled={!canEdit} style={{border:0,padding:0,display:'grid',gap:16,gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))'}}>
+  <form action={action} style={{width:'100%',marginTop:18}}><fieldset className="form-grid" disabled={!canEdit} style={{border:0,padding:0,minWidth:0,width:'100%',gap:16,gridTemplateColumns:'repeat(auto-fit,minmax(min(100%,280px),1fr))'}}>
    <label>Delivery status<select className="field" name="state" defaultValue={control.state}><option value="enabled">Enabled</option><option value="paused">Paused</option><option value="disabled">Disabled</option></select></label>
    <label>Resume after pause · IST (optional)<input className="field" name="paused_until" type="datetime-local" defaultValue={paused}/></label>
    <label style={{gridColumn:'1 / -1'}}>Monthly subject<input className="field" name="subject" required maxLength={250} defaultValue={control.subject_template||''}/><small>Keep {'{{month}}'} and {'{{year}}'}. The subject stays the same for replies in that month.</small></label>
