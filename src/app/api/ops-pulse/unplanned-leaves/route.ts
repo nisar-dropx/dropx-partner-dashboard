@@ -20,7 +20,8 @@ export async function GET(request: Request) {
       const sheet=XLSX.utils.json_to_sheet(rows.map(r=>({
         Date:r.attendance_date,Name:r.full_name,"People ID":r.worker_code,Role:r.role_name,Department:r.department_name,
         "Reporting manager":r.manager_name||data.managers.find(m=>m.id===r.manager_person_ids[0])?.name||"",
-        Location:r.station_code,"Location name":r.station_name,Cluster:r.cluster,Region:r.region,Contact:r.mobile,
+        "Next-level manager":r.next_manager_name||data.managers.find(m=>m.id===r.manager_person_ids[1])?.name||"",
+        Location:r.station_code,"Location name":r.station_name,Cluster:r.cluster||"",Region:r.region,Contact:r.mobile,
         Shift:r.shift_code,"Shift start (IST)":r.shift_start,"Shift end (IST)":r.shift_end,
         "Next-day shift end":r.shift_end<=r.shift_start?"Yes":"No",
         Status:"No punch · confirm","Checked at":data.checkedAt
