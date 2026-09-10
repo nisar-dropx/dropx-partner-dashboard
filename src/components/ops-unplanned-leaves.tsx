@@ -81,7 +81,7 @@ export function OpsUnplannedLeaves({initial,initialFilters}: {initial:UnplannedW
           <td><strong>{r.full_name}</strong><small>{r.worker_code} · {r.role_name}</small>{r.mobile&&<a href={"tel:"+r.mobile.replace(/[^+\d]/g,"")}>{r.mobile}</a>}</td>
           <td><strong>{r.station_code||"Unassigned"}</strong><small>{r.station_name}</small></td>
           <td>{r.shift_code}<small>{r.shift_start.slice(0,5)} – {r.shift_end.slice(0,5)}{r.shift_end<=r.shift_start?" (+1 day)":""}</small></td>
-          <td>{data.managers.find(m=>m.id===r.manager_person_ids[0])?.name||(r.manager_person_ids[0]?"Reporting manager":"Not linked")}</td>
+          <td>{r.manager_name||data.managers.find(m=>m.id===r.manager_person_ids[0])?.name||(r.manager_person_ids[0]?"Reporting manager":"Not linked")}</td>
           <td><span className="status-pill warn">No punch · confirm</span><small>In — · Out —</small></td>
         </tr>)}</tbody></table>
         {!rows.length&&!badManager&&<div className="oul-empty">No people to follow up in this view. Change the filters or attendance day if needed.</div>}

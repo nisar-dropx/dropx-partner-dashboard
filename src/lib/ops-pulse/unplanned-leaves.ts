@@ -1,7 +1,8 @@
 export type UnplannedPerson = {
   person_id: string; assignment_id: string; worker_type: string; worker_id: string;
   worker_code: string; full_name: string; mobile: string | null; role_name: string | null;
-  department_name: string | null; manager_person_ids: string[]; manager_assignment_id: string | null;
+  department_name: string | null; manager_name: string | null;
+  manager_person_ids: string[]; manager_assignment_id: string | null;
   location_id: string | null; station_code: string | null; station_name: string | null;
   cluster: string | null; region: string | null; attendance_date: string;
   shift_code: string | null; shift_start: string; shift_end: string;
@@ -28,7 +29,7 @@ export function filterUnplannedRows(data: UnplannedWorkspace, filters: Unplanned
     && (!filters.location || row.location_id===filters.location)
     && (!filters.cluster || row.cluster===filters.cluster)
     && (!filters.region || row.region===filters.region)
-    && (!search || [row.full_name,row.worker_code,row.mobile,row.station_code,row.role_name].some(s=>s?.toLowerCase().includes(search))));
+    && (!search || [row.full_name,row.worker_code,row.mobile,row.station_code,row.role_name,row.manager_name].some(s=>s?.toLowerCase().includes(search))));
 }
 export function unplannedFilters(params: URLSearchParams): UnplannedFilters {
   for (const key of ["date","manager","location","cluster","region","search","direct"]) if(params.getAll(key).length>1) throw Error("Choose one value per filter.");
