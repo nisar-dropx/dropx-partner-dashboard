@@ -9,7 +9,10 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;',
 // This digest is for the existing last-mile review workflow. Q-commerce has
 // its own forthcoming workflow, and must not create false pending stages here.
 const excludedModels = new Set(['NOW', 'AMAZONNOW', 'QC', 'QCOMMERCE', 'QUICKCOMMERCE', 'ODH', 'MDH']);
-const stations = snapshot.stations.filter(s => config.included_models.includes(String(s.model).toUpperCase()));
+const stations = snapshot.stations.filter(s => {
+  const model = String(s.model).toUpperCase();
+  return config.included_models.includes(model) && !excludedModels.has(model);
+});
 const includedCodes = new Set(stations.map(s => s.station_code));
 const recipients = snapshot.recipients.filter(r=>config.recipient_role_codes.includes(r.designation_code)&&String(r.email).endsWith('@'+config.email_domain)).map(r => ({...r, station_codes:r.station_codes.filter(code => includedCodes.has(code))})).filter(r => r.station_codes.length);
 const hierarchy = resolvePeopleOperationalHierarchy(stations.map(s => s.id), snapshot.assignments, snapshot.relationships);
