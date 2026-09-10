@@ -9,7 +9,7 @@ const money = (value:number) => `₹${value.toLocaleString("en-IN", {maximumFrac
 const pageSize = 30;
 type DetailView = "days" | "associates" | "tids";
 
-export function PerformanceCodPending({snapshot}:{snapshot:ReviewCodSnapshot}) {
+export function PerformanceCodPending({snapshot,remarkSaved=false}:{snapshot:ReviewCodSnapshot;remarkSaved?:boolean}) {
   const [view, setView] = useState<DetailView>("days");
   const [lines, setLines] = useState<ReviewCodLine[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -56,6 +56,10 @@ export function PerformanceCodPending({snapshot}:{snapshot:ReviewCodSnapshot}) {
   }
 
   return <section className={`review-cod-pending ${summary?.tone || "neutral"}`} aria-label="COD pending">
+    {summary && summary.overdueAmount > 0 ? <p className="review-cod-remark-link"><a href="#review-cod-remark" onClick={() => {
+      const details = document.getElementById("review-cod-remark");
+      if (details instanceof HTMLDetailsElement) { details.open = true; details.querySelector<HTMLElement>(":scope > summary")?.focus({ preventScroll: true }); }
+    }}>{remarkSaved ? "COD 2+ days · Remark saved — view / edit" : "COD 2+ days · Add required reason / remark"}</a></p> : null}
     <ReviewDetails onToggle={event => {if (event.currentTarget.open) void loadDetails();}}>
       <summary><span><strong>COD pending</strong><small>{summary ? summary.total ? `${summary.tidCount} TIDs · ${summary.overdueAmount ? `${money(summary.overdueAmount)} aged 2+ days` : "No balance aged 2+ days"}` : "No COD pending in this report" : snapshot.error}</small></span><b>{summary ? money(summary.total) : "—"}</b><span className="review-cod-info" aria-label="Show COD ageing and details">i</span></summary><ReviewDetailsClose/>
       {summary ? <div className="review-cod-body">

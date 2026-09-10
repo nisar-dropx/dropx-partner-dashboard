@@ -21,6 +21,10 @@ const note='=HYPERLINK("https://invalid.example", "test") · ₹500 · മലയ
 const data={reviews:[{id:'r1',source_date:'2026-09-08',station_id:'s1',station_code:'TESTA',status:'closed',current_step_order:1,review_summary:note,started_at:'2026-09-09T05:30:00Z',updated_at:'2026-09-09T07:30:00Z'}],facts:[{id:'f1',report_date:'2026-09-08',station_code:'TESTA',created_at:'2026-09-09T00:00:00Z',values_json:{metrics:{'AFN Prem DOT%':99}}},{id:'f2',report_date:'2026-09-08',station_code:'TESTA',created_at:'2026-09-09T01:00:00Z',values_json:{metrics:{'AFN Prem DOT%':88,'AFN Std DOT%':0}}}],items:[{review_id:'r1',metric_key:'station_opening_late',metric_label:'Station opening · Late',actual_value:15,target_value:0,root_cause:'Transport delay',corrective_action:'Should not appear',status:'open'},{review_id:'r1',metric_key:'afn_standard_dot',metric_label:'AFN Std DOT%',actual_value:0,target_value:.935,root_cause:'Source check',corrective_action:'Verify with station',action_owner:'Test owner',status:'open'}],steps:[{review_id:'r1',step_order:1,reviewer_name:'Test reviewer',reviewer_role:'AOM',status:'completed',feedback:'Reviewed'}],updates:[{review_id:'r1',note:'Long discussion '.repeat(250)+'END OF LONG COMMENT',author_name:'Test reviewer',created_at:'2026-09-09T06:00:00Z'}],followups:[{review_id:'r1',action_number:1,title:'Verify uploaded data',status:'open',owner_label:'Test owner'}],connections:[{station_id:'s1',service_date:'2026-09-08',label:'Vehicle 1',arrival_at:'2026-09-08T01:30:00Z',unloading_at:'2026-09-08T02:00:00Z',clearance_at:'MUST NOT APPEAR'}],emd:[{station_id:'s1',source_date:'2026-09-08',emd_noon_pct:0}],costs:[{station_code:'TESTA',work_date:'2026-09-08',total_delivery:0,total_cost:0}],edd:[{station_id:'s1',work_date:'2026-09-08',observed_at:'2026-09-08T08:00:00Z',source_at:'2026-09-08T07:59:00Z',backlog_at:'2026-09-08T07:59:00Z',performance_at:'2026-09-08T07:59:00Z',counts:{hasSnapshot:true,todayTotal:20,todayAtStation:3,todayOnRoad:10,todayDelivered:7,todayHfr:0,todayAttempted:0,todayUnverified:0,todayOther:0,missingDate:0}}]};
 const report=buildReviewReport('2026-09-08','2026-09-09',[{id:'s1',station_code:'TESTA',station_name:'Test station A'},{id:'s2',station_code:'TESTB',station_name:'Test station B'}],data,[{metricKey:'afn_premium_dot',target:.955,direction:'higher'},{metricKey:'afn_standard_dot',target:.935,direction:'higher'}],new Date('2026-09-10T12:00:00Z'));
 const table=name=>report.tables.find(t=>t.name===name);
+const codData={...data,items:[...data.items,{review_id:'r1',metric_key:'cod_pending_2plus',metric_label:'COD pending · 2+ days',actual_value:123.45,target_value:0,root_cause:'Bank reconciliation pending',corrective_action:'Must not require a plan',status:'done'}]};
+const codReport=buildReviewReport('2026-09-08','2026-09-09',[{id:'s1',station_code:'TESTA',station_name:'Test station A'}],codData,[],new Date('2026-09-10T12:00:00Z'));
+const codRow=codReport.tables.find(t=>t.name==='RCA and reasons').rows.find(r=>r.Type==='COD remark only');
+assert.equal(codRow.Actual,'₹123.45');assert.equal(codRow.Target,'₹0 aged 2+ days');assert.equal(codRow['Corrective action'],'Not required');
 assert.equal(table('Review summary').rows.length,4);
 const summary=table('Review summary').rows.find(r=>r.Station==='TESTA'&&r.Date==='2026-09-08');
 assert.equal(summary['Performance misses'],2);assert.equal(summary['Missing performance RCA'],1);assert.equal(summary['EMD at noon %'],0);assert.equal(summary['Latest EDD pending'],3);
@@ -30,6 +34,8 @@ assert.equal(table('RCA and reasons').rows.find(r=>r.Type==='Delay reason only')
 assert.equal(table('EDD checkpoints').rows.length,37);assert.equal(table('EDD checkpoints').rows[0]['Day start EDD'],null);assert.equal(table('EDD checkpoints').rows[0]['At station pending'],null);
 assert.ok(!JSON.stringify(report).includes('MUST NOT APPEAR'));
 const {reviewReportXlsx,reviewReportPdf}=load('src/lib/ops-pulse/review-report-export.ts');
+const codWorkbook=require('xlsx').read(await reviewReportXlsx(codReport),{type:'buffer'});
+assert.ok(require('xlsx').utils.sheet_to_json(codWorkbook.Sheets['RCA and reasons']).some(r=>r.Reason==='Bank reconciliation pending'&&r.Actual==='₹123.45'));
 const xlsx=await reviewReportXlsx(report),XLSX=require('xlsx'),wb=XLSX.read(xlsx,{type:'buffer'});
 assert.equal(wb.SheetNames.length,10);
 const actual=XLSX.utils.sheet_to_json(wb.Sheets['Review summary']);assert.ok(actual.some(r=>r['Review takeaway']===note));
@@ -37,6 +43,9 @@ for(const s of Object.values(wb.Sheets))for(const [address,cell]of Object.entrie
 const zip=await require('jszip').loadAsync(xlsx);assert.match(await zip.file('xl/worksheets/sheet2.xml').async('string'),/state="frozen"/);
 const pdf=await reviewReportPdf(report);
 const pdfjs=await import('pdfjs-dist/legacy/build/pdf.mjs');
+const codPdf=await pdfjs.getDocument({data:new Uint8Array(await reviewReportPdf(codReport)),useSystemFonts:true}).promise;
+let codText='';for(let i=1;i<=codPdf.numPages;i++)codText+=(await(await codPdf.getPage(i)).getTextContent()).items.map(i=>i.str).join(' ');
+assert.ok(codText.includes('Bank reconciliation pending')&&codText.includes('123.45')&&!codText.includes('Must not require a plan'));
 const doc=await pdfjs.getDocument({data:new Uint8Array(pdf),useSystemFonts:true}).promise;
 let text='';for(let i=1;i<=doc.numPages;i++)text+=(await(await doc.getPage(i)).getTextContent()).items.map(i=>i.str).join(' ');
 assert.ok(text.includes('END OF LONG COMMENT'),'Full multi-page discussion retained');assert.ok(text.includes('Transport delay'));assert.ok(text.includes('TESTB'));assert.ok(doc.numPages>3);

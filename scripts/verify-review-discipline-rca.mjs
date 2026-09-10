@@ -13,6 +13,7 @@ function compile(path, dependencies = {}) {
 }
 const operations = compile("src/lib/ops-pulse/review-operations.ts");
 const logic = compile("src/lib/ops-pulse/review-discipline-rca.ts", { "./review-operations": operations });
+const codLogic = compile("src/lib/ops-pulse/review-cod-rca.ts");
 const opening = { firstPunchAt: "2026-09-08T06:12:00+05:30", firstPunchBy: "Arjun", scheduledOpeningTime: "06:00:00", openingLateMinutes: 12 };
 const staff = { id: "employee:a", name: "Arjun", code: "D1", role: "Team Lead", shift: "06:00–15:00", inTime: opening.firstPunchAt, status: "12 min late", lateMinutes: 12 };
 const utr = { rows: [staff, { ...staff, id: "contractor:a", name: "Arjun" }, { ...staff, id: "employee:b", status: "Roster off" }, { ...staff, id: "employee:c", status: "Shift not linked" }, { ...staff, id: "employee:d", status: "On time", lateMinutes: 0 }] };
@@ -47,6 +48,8 @@ const dependencies = {
   "@/lib/ops-pulse/performance-review": {}, "@/lib/ops-pulse/review-policy": {},
   "@/lib/ops-pulse/review-access": { getReviewAccess: async () => ({ canEditRca: allowRca, canComplete: allowComplete, canComment: allowComplete, actor: { label: "AOM" } }) },
   "@/lib/ops-pulse/review-discipline-rca": logic,
+  "@/lib/ops-pulse/review-cod-rca": codLogic,
+  "@/lib/ops-pulse/review-cod-rca-data": { loadCodRca: async () => [] },
   "@/lib/ops-pulse/review-discipline-rca-data": { loadDisciplineRca: async (company, station, date) => {
     assert.equal(company, "company1"); assert.equal(station.id, "station1"); assert.equal(date, "2026-09-08");
     if (sourceError) throw Error("Source unavailable"); return rows;
@@ -81,6 +84,7 @@ assert.match((await actions.savePerformanceReviewItem(form())).error, /delay rea
 const React = require("react"), { renderToStaticMarkup } = require("react-dom/server");
 const ui = compile("src/components/performance-rca-actions.tsx", {
   "@/components/review-details": compile("src/components/review-details.tsx"),
+  "@/lib/ops-pulse/review-cod-rca": codLogic,
   "@/lib/date-format": { formatDashboardDate: v => v }, "@/app/ops-pulse/performance/actions": actions,
   "@/lib/ops-pulse/review-discipline-rca": logic,
   "@/components/review-attendance-history": { ReviewPersonHistoryLink: () => null },

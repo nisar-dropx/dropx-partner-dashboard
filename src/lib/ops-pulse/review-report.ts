@@ -1,6 +1,7 @@
 import { hawkeyeMetricDefinitions, hawkeyeTargetKey, hawkeyeValue } from "./hawkeye";
 import { buildReviewEddTimeline, type ReviewEddPoint } from "./review-operations";
 import { isDisciplineRcaKey } from "./review-discipline-rca";
+import { isCodRemarkKey, codRemarkMoney } from "./review-cod-rca";
 import type { PerformanceTarget } from "./performance-targets";
 
 export type ReportCell = string | number | null;
@@ -68,8 +69,10 @@ export function buildReviewReport(from: string, to: string, stations: ReportStat
       if (missed && !items.some(i => i.metric_key === hawkeyeTargetKey(definition))) add(rca, { Issue: definition.label, Type: "Performance", Actual: pct(actual), Target: pct(goal), Reason: "Not entered", "Corrective action": "Not entered", Owner: "", "Due date": "", Status: "RCA needed", "Saved IST": "", "Carried from item": "" });
     }
     for (const item of items) {
-      const reasonOnly = isDisciplineRcaKey(item.metric_key);
-      add(rca, { Issue: text(item.metric_label), Type: reasonOnly ? "Delay reason only" : "Performance", Actual: reasonOnly ? `${item.actual_value} min late` : pct(number(item.actual_value)), Target: reasonOnly ? "On time" : pct(number(item.target_value)), Reason: text(item.root_cause) || "Not entered", "Corrective action": reasonOnly ? "Not required" : text(item.corrective_action) || "Not entered", Owner: text(item.action_owner), "Due date": text(item.due_date), Status: text(item.status), "Saved IST": reportIst(item.updated_at), "Carried from item": text(item.carried_from_item_id) });
+      const cod = isCodRemarkKey(item.metric_key), delay = isDisciplineRcaKey(item.metric_key);
+      const reasonOnly = cod || delay;
+      const actual = number(item.actual_value);
+      add(rca, { Issue: text(item.metric_label), Type: cod ? "COD remark only" : delay ? "Delay reason only" : "Performance", Actual: cod ? actual == null ? "Not recorded" : codRemarkMoney(actual) : delay ? `${item.actual_value} min late` : pct(actual), Target: cod ? "₹0 aged 2+ days" : delay ? "On time" : pct(number(item.target_value)), Reason: text(item.root_cause) || "Not entered", "Corrective action": reasonOnly ? "Not required" : text(item.corrective_action) || "Not entered", Owner: text(item.action_owner), "Due date": text(item.due_date), Status: text(item.status), "Saved IST": reportIst(item.updated_at), "Carried from item": text(item.carried_from_item_id) });
     }
     for (const item of followups) add(actions, { "Action number": number(item.action_number), Title: text(item.title), Owner: text(item.owner_label), "Due date": text(item.due_date), Status: text(item.status), "Progress note": text(item.progress_note), "Completed IST": reportIst(item.completed_at), "Updated by": text(item.updated_by_name), "Updated IST": reportIst(item.updated_at) });
     for (const item of stepRows) add(stages, { Stage: number(item.step_order), Reviewer: text(item.reviewer_name), Role: text(item.reviewer_role), Status: text(item.status), Feedback: text(item.feedback), "Completed IST": reportIst(item.completed_at), "Proxy reviewer": text(item.proxy_reviewer_name), "Proxy reason": text(item.proxy_reason), "Bypassed by": text(item.bypassed_by_name), "Bypass reason": text(item.bypass_reason), "Bypassed IST": reportIst(item.bypassed_at) });
@@ -91,6 +94,7 @@ export function buildReviewReport(from: string, to: string, stations: ReportStat
     "Saved RCA, reasons, action plans, review stages and comments are reproduced in full. Late opening / UTR entries need a reason only, not a corrective-action plan.",
     "Performance uses the latest Hawkeye upload for each station/date and current review targets. Saved RCA actual/target values remain as recorded; they may differ after a source correction.",
     "Attendance delay reasons are saved review evidence, not a recalculation of historical punch or leave records. Detailed attendance history remains available from each person's review drill-down.",
+    "COD remarks apply to positive balances aged 2+ days, not 0–1 days. Saved COD amounts remain as originally recorded from the latest imported position when the exception was first saved, not a historical review-day balance. No action plan is required.",
     "EDD uses recorded observations only, with the same clearance rules as Review Desk. Missing intervals are not backfilled. A missing baseline or source is not zero pendency.",
     "Not started station-days and missing sources remain visible. Review completion does not close open action items. Export reads data only and does not start or update reviews.",
     "Cost values are the selected day's recorded CPS source, not a claim of complete cost mapping. No historical manual vehicle-clearance field is included."

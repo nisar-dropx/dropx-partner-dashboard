@@ -9,6 +9,8 @@ import { reviewBypassReason, visibleReviewStep, noonEmdValue, stationTimingClock
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { disciplineReason, isDisciplineRcaKey, missingDisciplineReasons } from "@/lib/ops-pulse/review-discipline-rca";
 import { loadDisciplineRca } from "@/lib/ops-pulse/review-discipline-rca-data";
+import { codRemark, isCodRemarkKey, missingCodRemark } from "@/lib/ops-pulse/review-cod-rca";
+import { loadCodRca } from "@/lib/ops-pulse/review-cod-rca-data";
 
 export type ReviewActionResult = { error?: string; notice?: string };
 const text = (data: FormData, key: string) => String(data.get(key) ?? "").trim();
@@ -100,6 +102,7 @@ export async function savePerformanceReviewItem(data: FormData): Promise<ReviewA
     if (!access.canEditRca) throw new Error("RCA and actions are editable by the first review manager during their stage, or Program Manager.");
     const metricKey=limited(data,"metric_key",150,true);
     if (isDisciplineRcaKey(metricKey)) throw new Error("Use the delay reason form for opening / UTR exceptions.");
+    if (isCodRemarkKey(metricKey)) throw new Error("Use the COD remark form for balances aged 2+ days.");
     if (!/^[a-zA-Z0-9_ -]+$/.test(metricKey)) throw new Error("Select a valid review metric.");
     const status=text(data,"status");
     if (!["open","in_progress","blocked","done"].includes(status)) throw new Error("Select a valid action status.");
@@ -140,6 +143,37 @@ export async function savePerformanceDisciplineReason(data: FormData): Promise<R
   } catch (error) { return failure(error); }
 }
 
+/** COD ageing is reloaded server-side; the current reviewer records a short remark only. */
+export async function savePerformanceCodRemark(data: FormData): Promise<ReviewActionResult> {
+  const authorization = await requirePagePermission("performance_review", "access");
+  try {
+    const { companyId, station, review, access } = await context(authorization, data);
+    if (!access.canEditRca && !access.canComplete) throw Error("Only the current reviewer or Program Manager can record COD remarks.");
+    if (!isCodRemarkKey(text(data, "metric_key"))) throw Error("Select the COD pending 2+ days exception.");
+    const remark = codRemark(text(data, "root_cause"));
+    const [row] = await loadCodRca(companyId, station.station_code);
+    if (!row) throw Error("No COD balance is pending for 2+ days in the latest report. Refresh the review.");
+    const result = await supabaseAdmin!.rpc("ops_mutate_manager_review", {
+      p_company: companyId, p_actor: authorization.userId, p_review: review.id, p_action: "item",
+      p_data: { metric_key: row.key, metric_label: row.label, root_cause: remark, corrective_action: "",
+        action_owner: authorization.fullName || "Reviewer", due_date: review.source_date, status: "done",
+        severity: row.severity, actual_value: row.actual, target_value: row.target, target_direction: row.direction,
+        expected_review_version: review.updated_at, ...author(authorization, access.actor.label) }
+    });
+    rpcError(result.error);
+    return finish("COD remark saved.");
+  } catch (error) { return failure(error); }
+}
+
+async function requireCodRemark(companyId: string, stationCode: string, reviewId: string) {
+  const [rows, saved] = await Promise.all([
+    loadCodRca(companyId, stationCode),
+    supabaseAdmin!.from("ops_performance_review_items").select("metric_key,root_cause").eq("company_id", companyId).eq("review_id", reviewId)
+  ]);
+  if (saved.error) throw Error("Unable to check saved COD remarks. Please retry.");
+  if (missingCodRemark(rows, saved.data ?? [])) throw Error("Add a short reason / remark for COD pending 2+ days in RCA before completing this review.");
+}
+
 /** One common comment box: save a note, or complete the assigned stage with that note. */
 export async function savePerformanceReviewComment(data:FormData):Promise<ReviewActionResult> {
   const authorization=await requirePagePermission("performance_review","access");
@@ -160,6 +194,7 @@ export async function savePerformanceReviewComment(data:FormData):Promise<Review
       if (saved.error) throw Error("Unable to check saved delay reasons. Please retry.");
       const missing = missingDisciplineReasons(delays, saved.data ?? []);
       if (missing.length) throw Error(`Add ${missing.length} short delay reason${missing.length === 1 ? "" : "s"} in RCA before completing: ${missing.slice(0, 3).map(row => row.label).join("; ")}${missing.length > 3 ? "; …" : ""}.`);
+      await requireCodRemark(companyId, station.station_code, review.id);
     }
     const result=await supabaseAdmin!.rpc("ops_mutate_manager_review",{p_company:companyId,p_actor:authorization.userId,p_review:review.id,p_action:complete?"complete":"comment",p_data:{note,step_id:step?.id,expected_review_version:review.updated_at,...author(authorization,access.actor.label)}});
     rpcError(result.error);
@@ -207,11 +242,13 @@ export async function savePerformanceConnection(data:FormData):Promise<ReviewAct
 export async function bypassPerformanceReviewLevel(data: FormData): Promise<ReviewActionResult> {
   const authorization = await requirePagePermission("performance_review", "access");
   try {
-    const { companyId, review, access, steps } = await context(authorization, data);
+    const { companyId, station, review, access, steps } = await context(authorization, data);
     if (!access.canBypass) throw new Error("Only Program Manager, National Head, Owner or Tech can skip a review level within their station access.");
     const step = steps.find(entry => entry.id === text(data, "step_id") && entry.status === "pending" && visibleReviewStep(entry));
     if (!step) throw new Error("This review level is no longer pending. Refresh to continue.");
     const reason = reviewBypassReason(text(data, "reason"));
+    // Skipping the final outstanding stage must not silently bypass the COD requirement.
+    if (!steps.some(entry => entry.id !== step.id && entry.status === "pending")) await requireCodRemark(companyId, station.station_code, review.id);
     const result = await supabaseAdmin!.rpc("ops_bypass_review_level", {
       p_company: companyId, p_actor: authorization.userId, p_review: review.id, p_step: step.id,
       p_reason: reason, p_expected_version: text(data, "review_version") || null,

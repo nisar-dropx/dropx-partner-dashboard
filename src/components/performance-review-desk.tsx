@@ -30,6 +30,8 @@ import { ReviewActionForm } from "@/components/review-action-form";
 import { discussionFeedUpdates, visibleReviewStep } from "@/lib/ops-pulse/review-policy";
 import type { ReactNode } from "react";
 import { buildDisciplineRca, isDisciplineRcaKey, missingDisciplineReasons } from "@/lib/ops-pulse/review-discipline-rca";
+import { buildCodRca, COD_REMARK_KEY, isCodRemarkKey, missingCodRemark } from "@/lib/ops-pulse/review-cod-rca";
+const isReasonOnlyKey = (key: string) => isDisciplineRcaKey(key) || isCodRemarkKey(key);
 
 export type ReviewMetric = {
   actual: number | null;
@@ -145,16 +147,18 @@ export function PerformanceReviewDesk(props: Props) {
     const labelKey = stationKey(item.metric_label);
     if (labelKey && !itemByMetric.has(labelKey)) itemByMetric.set(labelKey, item);
   }
-  const resolveItem = (metric: ReviewMetric) => isDisciplineRcaKey(metric.key) ? itemByMetric.get(metric.key) : itemByMetric.get(metric.key) ?? itemByMetric.get(stationKey(metric.label)) ?? itemByMetric.get(metric.label);
+  const resolveItem = (metric: ReviewMetric) => isReasonOnlyKey(metric.key) ? itemByMetric.get(metric.key) : itemByMetric.get(metric.key) ?? itemByMetric.get(stationKey(metric.label)) ?? itemByMetric.get(metric.label);
   const carriedActions = selectedItems.filter((item) => item.review_id !== review?.id);
   const disciplineRows = buildDisciplineRca(snapshot, props.utrDiscipline.discipline);
+  const codRows = buildCodRca(props.codSnapshot);
+  const codRemarkMissing = missingCodRemark(codRows, currentItems);
   const missingReasons = missingDisciplineReasons(disciplineRows, currentItems);
   const metricMisses = metrics.filter((metric) => metric.severity === "red" || metric.severity === "amber");
-  const misses = [...metricMisses, ...disciplineRows];
+  const misses = [...metricMisses, ...disciplineRows, ...codRows];
   // Saved RCA must remain visible even when a later source refresh makes its metric green or unavailable.
   const savedOnlyRows: ReviewMetric[] = currentItems
     .filter((item) => {
-      const linkedToMiss = misses.some((metric) => metric.key === item.metric_key || (!isDisciplineRcaKey(item.metric_key) && stationKey(metric.label) === stationKey(item.metric_label)));
+      const linkedToMiss = misses.some((metric) => metric.key === item.metric_key || (!isReasonOnlyKey(item.metric_key) && stationKey(metric.label) === stationKey(item.metric_label)));
       return !linkedToMiss && Boolean(item.root_cause || item.corrective_action);
     })
     .map((item) => {
@@ -167,8 +171,8 @@ export function PerformanceReviewDesk(props: Props) {
         severity: (item.severity === "amber" ? "amber" : "red") as ReviewMetric["severity"],
         short: item.metric_label,
         target: item.target_value == null ? null : Number(item.target_value),
-        reasonOnly: isDisciplineRcaKey(item.metric_key),
-        evidence: isDisciplineRcaKey(item.metric_key) ? "Saved delay reason · no longer flagged in current source data" : undefined
+        reasonOnly: isReasonOnlyKey(item.metric_key),
+        evidence: isCodRemarkKey(item.metric_key) ? "Saved COD remark and amount · no longer flagged in the current imported position" : isDisciplineRcaKey(item.metric_key) ? "Saved delay reason · no longer flagged in current source data" : undefined
       };
     });
   const rcaRows = [...misses, ...savedOnlyRows];
@@ -281,7 +285,7 @@ export function PerformanceReviewDesk(props: Props) {
             key={review?.id ?? `${selectedCode}-${date}-not-started`}
             canEdit={canEdit}
             canEditDiscipline={canEdit || canCompleteStep}
-            activeDisciplineKeys={disciplineRows.map(row => row.key)}
+            activeDisciplineKeys={[...disciplineRows, ...codRows].map(row => row.key)}
             date={date}
             itemsByMetric={itemsByMetricForRca}
             rows={rcaRows}
@@ -290,7 +294,7 @@ export function PerformanceReviewDesk(props: Props) {
             stationCode={selectedCode}
             reviewStarted={Boolean(review)}
             startControl={!review && canAdd && !props.readOnlyPreview ? <ReviewActionForm action={startPerformanceReview}><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="source_type" value={sourceType}/><input type="hidden" name="source_batch_id" value={sourceBatchId ?? ""}/><input type="hidden" name="report_week" value={sourceWeek}/><button className="button">Start review & add RCA</button></ReviewActionForm> : undefined}
-            editHint={!canEdit ? canCompleteStep ? "You can add short delay reasons. Performance RCA is editable by the first-stage reviewer or authorised oversight." : "View only at this stage. The assigned reviewer or authorised oversight can update these entries." : undefined}
+            editHint={!canEdit ? canCompleteStep ? "You can add short delay reasons and COD remarks. Performance RCA is editable by the first-stage reviewer or authorised oversight." : "View only at this stage. The assigned reviewer or authorised oversight can update these entries." : undefined}
           />
         ) : null}
         <PerformanceCarriedActions items={carriedActions} previous={previousStationReviews} review={review} canUpdate={props.canManageActions} selectedDate={date}/>
@@ -317,7 +321,7 @@ export function PerformanceReviewDesk(props: Props) {
       </section>
 
       <section className="panel performance-review-section performance-cps-review" id="review-cost">
-        <PerformanceCodPending key={`${selectedCode}-${props.codSnapshot.batchId}`} snapshot={props.codSnapshot}/>
+        <PerformanceCodPending key={`${selectedCode}-${props.codSnapshot.batchId}`} snapshot={props.codSnapshot} remarkSaved={Boolean(itemByMetric.get(COD_REMARK_KEY)?.root_cause?.trim())}/>
         <div className="panel-head"><div><span className="performance-review-kicker">02 · CPS</span><h2>Cost and allocation</h2><p className="subtle">Click a card for its 7-day, 14-day or MTD history. Use i for the selected-day details.</p></div></div>
         <div className="performance-cps-cards">
           <CostTrendCard metric="salary_da_cps" label="Salary DA CPS" value={money(snapshot.salaryDaCps)} summary={`${money(snapshot.salaryDaCost)} total`}><p><span>Per-shipment / variable</span><b>{money(snapshot.variableDaPay)}</b></p><p><span>MG / salary</span><b>{money(snapshot.mgSalaryPay)}</b></p><p><span>Kilometre / fuel</span><b>{money(snapshot.fuelPay)}</b></p><p><span>FE payment setup gaps</span><b>{snapshot.unmappedFeCount}</b></p></CostTrendCard>
@@ -342,6 +346,8 @@ export function PerformanceReviewDesk(props: Props) {
     {review ? <section className="review-discussion" id="review-discussion">
       <header><div><h3>Review discussion</h3><p>{review.status === "closed" ? "Review completed · all inputs remain visible" : activeStep ? `${activeStep.proxy_reviewer_name||activeStep.reviewer_name} reviews with ${selectedSteps.findIndex(step=>step.id===activeStep.id)>0?selectedSteps[selectedSteps.findIndex(step=>step.id===activeStep.id)-1].reviewer_name:props.stationLeads}` : "Review manager not assigned"}</p></div><span>{reviewUpdates.length} updates</span></header>
       {review.status !== "closed" && missingReasons.length ? <p className="review-delay-required"><a href="#review-rca">{missingReasons.length} delay reason{missingReasons.length === 1 ? "" : "s"} required in RCA</a> before completing this review.</p> : null}
+      {review.status !== "closed" && codRemarkMissing ? <p className="review-delay-required"><a href="#review-cod-remark">COD pending 2+ days · reason / remark required</a> before completing this review.</p> : null}
+      {review.status !== "closed" && props.codSnapshot.error ? <p className="review-delay-required">COD ageing could not be verified. Refresh the COD report before completing this review.</p> : null}
       {canComment || canCompleteStep ? <ReviewActionForm key={review.id} action={savePerformanceReviewComment} className="review-comment-form" resetOnSuccess>
         <input type="hidden" name="review_id" value={review.id}/><input type="hidden" name="source_date" value={date}/><input type="hidden" name="station_code" value={selectedCode}/><input type="hidden" name="step_id" value={activeStep?.id ?? ""}/>
         <label>Your review input<textarea name="feedback" maxLength={4000} placeholder="Add context, feedback or the next follow-up…" rows={2}/></label>

@@ -292,3 +292,6 @@
   .performance-review-desk .review-manager-tabs button { flex: 0 0 240px; }
   .performance-review-desk .review-scorecard .performance-review-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
+.review-cod-remark-link { margin:0;padding:10px 14px;background:#fff1f0;font-size:12px;font-weight:650; }
+.review-cod-remark-link a { color:#b42318;display:inline-flex;align-items:center;min-height:32px; }
+#review-cod-remark { scroll-margin-top:96px; }

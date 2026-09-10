@@ -5,9 +5,10 @@ import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 import { Fragment, type ReactNode } from "react";
 import { formatDashboardDate } from "@/lib/date-format";
 import type { PerformanceReviewItem } from "@/lib/ops-pulse/performance-review";
-import { savePerformanceDisciplineReason, savePerformanceReviewItem } from "@/app/ops-pulse/performance/actions";
+import { savePerformanceCodRemark, savePerformanceDisciplineReason, savePerformanceReviewItem } from "@/app/ops-pulse/performance/actions";
 import { ReviewActionForm } from "@/components/review-action-form";
 import { DISCIPLINE_REASON_MAX } from "@/lib/ops-pulse/review-discipline-rca";
+import { codRemarkMoney, isCodRemarkKey } from "@/lib/ops-pulse/review-cod-rca";
 import { ReviewPersonHistoryLink } from "@/components/review-attendance-history";
 
 type ReviewMetric = {
@@ -55,24 +56,26 @@ export function PerformanceRcaActions({
   editHint
 }: Props) {
   if (!rows.length) return null;
-  const orderedRows = [...rows.filter(row=>!row.reasonOnly), ...rows.filter(row=>row.reasonOnly)];
+  const orderedRows = [...rows.filter(row=>!row.reasonOnly), ...rows.filter(row=>row.reasonOnly && !isCodRemarkKey(row.key)), ...rows.filter(row=>isCodRemarkKey(row.key))];
+  const group = (row: ReviewMetric) => isCodRemarkKey(row.key) ? "COD pending 2+ days · remark only" : row.reasonOnly ? "Opening & UTR delays · reason only" : "Performance misses · RCA & action plan";
   const canSaveMetric = reviewStarted && canEdit;
   const canSaveReason = reviewStarted && canEditDiscipline;
 
   return (
     <div className="performance-review-actions" id="review-rca">
-      <div className="review-rca-heading"><div><h3>RCA & reporting reasons</h3><p className="review-rca-hint">Performance misses: RCA and action plan. Opening / UTR delays: one short reason only.</p></div>{startControl}</div>
+      <div className="review-rca-heading"><div><h3>RCA & reporting reasons</h3><p className="review-rca-hint">Performance misses: RCA and action plan. Opening / UTR delays and COD pending 2+ days: one short reason only.</p></div>{startControl}</div>
       {!reviewStarted ? <p className="review-rca-locked">The review has not started. The misses are listed below; start the review to save RCA and delay reasons.</p> : editHint ? <p className="review-rca-locked">{editHint}</p> : null}
       {orderedRows.map((metric,index) => {
         const item = itemsByMetric.get(metric.key);
+        const cod = isCodRemarkKey(metric.key);
         return (
           <Fragment key={`action-${metric.key}`}>
-          {index===0 || Boolean(orderedRows[index-1].reasonOnly)!==Boolean(metric.reasonOnly) ? <h4 className="review-rca-group">{metric.reasonOnly ? "Opening & UTR delays · reason only" : "Performance misses · RCA & action plan"}</h4> : null}
-          <ReviewDetails className="performance-action-item">
+          {index===0 || group(orderedRows[index-1])!==group(metric) ? <h4 className="review-rca-group">{group(metric)}</h4> : null}
+          <ReviewDetails className="performance-action-item" id={cod ? "review-cod-remark" : undefined}>
             <summary>
               <span className={`metric-dot ${metric.severity}`} />
               <strong>{metric.label}</strong>
-              {metric.reasonOnly ? <small>{metric.actual == null ? "Recorded delay" : `${metric.actual} min late`}</small> : <small>
+              {metric.reasonOnly ? <small>{cod ? metric.actual == null ? "Recorded COD pendency" : `${codRemarkMoney(metric.actual)} aged 2+ days` : metric.actual == null ? "Recorded delay" : `${metric.actual} min late`}</small> : <small>
                 Actual {valueText(metric.actual)}
                 {metric.target == null ? "" : ` · Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}
               </small>}
@@ -81,14 +84,14 @@ export function PerformanceRcaActions({
             {metric.reasonOnly ? <div className="review-delay-detail">
               <p className="review-delay-evidence">{metric.evidence}</p>
               {metric.key.startsWith("utr_late_") ? <ReviewPersonHistoryLink personId={metric.key.replace(/^utr_late_(employee|contractor)_/, "$1:")}/> : null}
-              {canSaveReason && activeDisciplineKeys.includes(metric.key) ? <ReviewActionForm action={savePerformanceDisciplineReason} className="review-delay-form">
+              {canSaveReason && activeDisciplineKeys.includes(metric.key) ? <ReviewActionForm action={cod ? savePerformanceCodRemark : savePerformanceDisciplineReason} className="review-delay-form">
                 <input type="hidden" name="review_id" value={reviewId} />
                 <input type="hidden" name="source_date" value={date} />
                 <input type="hidden" name="station_code" value={stationCode} />
                 <input type="hidden" name="metric_key" value={metric.key} />
-                <label>Reason for delay<input required name="root_cause" maxLength={DISCIPLINE_REASON_MAX} defaultValue={item?.root_cause ?? ""} placeholder="Brief reason, e.g. transport delay" /></label>
-                <button className="button secondary">Save reason</button>
-              </ReviewActionForm> : <p className="review-delay-saved"><b>Reason</b> {item?.root_cause || (!reviewStarted ? "Start the review to add a short reason. No action plan is needed for this delay." : "Awaiting a short reason from the reviewer.")}</p>}
+                <label>{cod ? "COD pendency reason / remarks" : "Reason for delay"}<input required name="root_cause" maxLength={DISCIPLINE_REASON_MAX} defaultValue={item?.root_cause ?? ""} placeholder={cod ? "Why is this COD still pending?" : "Brief reason, e.g. transport delay"} /></label>
+                <button className="button secondary">{cod ? "Save COD remark" : "Save reason"}</button>
+              </ReviewActionForm> : <p className="review-delay-saved"><b>{cod ? "COD remarks" : "Reason"}</b> {item?.root_cause || (!reviewStarted ? "Start the review to add a short reason. No action plan is needed." : "Awaiting a short reason from the reviewer.")}</p>}
             </div> : canSaveMetric ? (
               <ReviewActionForm action={savePerformanceReviewItem} className="performance-rca-form">
                 <input type="hidden" name="review_id" value={reviewId} />
