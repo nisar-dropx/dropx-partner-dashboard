@@ -2,6 +2,8 @@
 
 People sends the previous attendance day's Unplanned Leave digest at 08:00 Asia/Kolkata.
 Ops Pulse sends the previous performance day's review digest at 20:30 Asia/Kolkata.
+Ops also sends a compact `performance_data_updated` notice after a completed daily
+performance import is saved, independently of the evening review digest.
 These jobs run on the respective production Vercel project, not on a laptop or Codex.
 
 ## Administration
@@ -40,3 +42,23 @@ cron secret rejection, thread isolation and settings validation. Snapshot tests 
 named-person coverage, HR scope, verified location mailboxes, no duplicate recipients,
 HTML escaping, dynamic dates and EDSP/XPT exclusions. Transactional queue tests verify
 duplicate enqueue and repeated claim protection and roll back without sending mail.
+
+## Performance data update notices
+Settings → Notifications has separate enable/disable/pause controls, editable monthly
+subject and dated message, operation models and recipient Ops role codes. The existing
+minute-level portal worker observes completed import batches, never the user's browser.
+Only completed batches with imported facts trigger; failed, incomplete, duplicate-only,
+future/current performance days, and pre-activation historical imports do not trigger.
+The initial activation starts with the previous performance date, excluding older backfills.
+The actual performance date is always shown, so a delayed import is not called yesterday.
+
+One run per company/performance date and one delivery per active corporate recipient.
+Only updated stations in the recipient's current Operations membership/role scope are
+included. Location mailboxes use configured membership/station-email mappings. Scope is
+rechecked immediately before SMTP, and monthly threads are independent of review digests.
+Only EDSP/XPT are initially included. SMTP uncertainty is held, never blindly retried.
+Migration: `20260910132830_ops_performance_data_update_notifications.sql`. All four new
+RPCs are invoker/service-role-only and reuse existing RLS-protected outbox tables.
+
+Run `node scripts/verify-performance-data-updates.mjs` and the rollback-only SQL
+`scripts/verify-performance-data-updates.sql`; neither sends an email.

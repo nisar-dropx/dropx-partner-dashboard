@@ -7,6 +7,7 @@ export type DigestControl = {company_id:string;portal:"people"|"ops";event_key:s
 export type DigestMessage = {email:string;name:string;subject:string;html:string;text:string;scope:Record<string,unknown>};
 type DigestDelivery = {id:string;company_id:string;event_key:string;report_date:string;recipient_email:string;subject:string;html:string;body:string};
 export type DigestBuilder = (db:SupabaseClient,control:DigestControl,date:string)=>Promise<{checkedAt:string;messages:DigestMessage[]}>;
+export type DeliverySummary = {queued:number;accepted:number;uncertain:number;skipped:number;errors:string[]};
 export function digestDatabase() {
  const url=process.env.NEXT_PUBLIC_SUPABASE_URL,key=process.env.SUPABASE_SERVICE_ROLE_KEY;
  if(!url||!key)throw new Error("Notification database is not configured.");
@@ -51,7 +52,12 @@ export async function processPortalDigests(portal:"people"|"ops",eventKey:string
   if(queued.error)throw new Error(queued.error.message);
   if(queued.data)summary.queued+=batch.messages.length;
  }
- const claimed=await db.rpc("portal_claim_digest",{p_portal:portal,p_limit:80});
+ return deliverPortalDigestQueue(db,portal,summary);
+}
+
+/** Shared SMTP/thread/receipt handling; event queues have independent claim eligibility. */
+export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"|"ops",summary:DeliverySummary,claimRpc:"portal_claim_digest"|"portal_claim_ops_data_updates"="portal_claim_digest") {
+ const claimed=await db.rpc(claimRpc,claimRpc==="portal_claim_digest"?{p_portal:portal,p_limit:80}:{p_limit:80});
  if(claimed.error)throw new Error(claimed.error.message);
  for(let offset=0;offset<(claimed.data||[]).length;offset+=4) {
   await Promise.all(claimed.data.slice(offset,offset+4).map(async (delivery:DigestDelivery)=>{
@@ -66,6 +72,17 @@ export async function processPortalDigests(portal:"people"|"ops",eventKey:string
     ]);
     const error=controlResult.error||smtpResult.error||profileResult.error||threadResult.error;
     if(error)throw new Error(error.message);
+    if(delivery.event_key==='performance_data_updated') {
+     const authorized=await db.rpc('portal_ops_data_update_recipients',{p_company_id:delivery.company_id,p_report_date:delivery.report_date});
+     if(authorized.error)throw new Error(authorized.error.message);
+     const recipient=(authorized.data||[]).find((r:{email:string})=>r.email===delivery.recipient_email);
+     // Recheck scope after enqueue: a removed location must never leak in a saved payload.
+     const saved=await db.from('portal_digest_deliveries').select('scope_summary').eq('id',delivery.id).single();
+     if(saved.error)throw new Error(saved.error.message);
+     const allowed=new Set((recipient?.stations||[]).map((s:{id:string})=>s.id));
+     const ids=saved.data.scope_summary?.stationIds;
+     if(!recipient||!Array.isArray(ids)||!ids.length||ids.some((id:string)=>!allowed.has(id)))throw new Error('Recipient performance scope changed; notification held.');
+    }
     if(!digestEnabled(controlResult.data as DigestControl)||!smtpResult.data.is_enabled||!profileResult.data?.length) {
      const skipped=await db.from("portal_digest_deliveries").update({status:"skipped",error:"Notification disabled or recipient no longer active.",completed_at:new Date().toISOString()}).eq("id",delivery.id).eq("status","sending");
      if(skipped.error)throw new Error(skipped.error.message);summary.skipped++;return;
