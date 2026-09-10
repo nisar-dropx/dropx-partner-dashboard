@@ -3,6 +3,7 @@
 import { ArrowLeftRight, CalendarDays, Check, Clock3, RefreshCw, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatShiftClock } from "@/lib/roster-plan-preference";
+import { rosterChangeDeadlineShortLabel } from "@/lib/roster-change-deadline";
 import type { AppAccount } from "./connect-profile-app";
 
 type Shift = { id: string; name: string; code: string; start_time: string; end_time: string };
@@ -234,7 +235,7 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
   function swapActionLabel(day: RosterDay) {
     if (day.canSwap && day.partners.length) return "Request swap";
     if (day.canSwap) return "No valid swap";
-    return `Closed ${data?.leadHours ?? 24}h before`;
+    return rosterChangeDeadlineShortLabel();
   }
 
   return (

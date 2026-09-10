@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
 import { formatShiftClock, preferActiveRosterRowsByKey } from "@/lib/roster-plan-preference";
+import { isRosterChangePastDeadline, rosterChangeDeadlineMessage, ROSTER_CHANGE_DEADLINE_HOUR_IST } from "@/lib/roster-change-deadline";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 type WorkerType = "employee" | "contractor";
@@ -274,21 +275,10 @@ async function accountFrom(url: URL, body?: Record<string, unknown>) {
   return { account, workerType, identities };
 }
 
-async function swapCutoff(companyId: string) {
-  const result = await db().from("hr_company_settings").select("roster_swap_lead_hours").eq("company_id", companyId).maybeSingle();
-  if (result.error && !/roster_swap_lead_hours/i.test(result.error.message)) throw new Error(result.error.message);
-  return Number(result.data?.roster_swap_lead_hours ?? 24);
-}
-
-function assertBeforeCutoff(entry: Entry, leadHours: number) {
-  const start = shiftOf(entry)?.start_time?.slice(0, 8) ?? "00:00:00";
-  const beginsAt = Date.parse(`${entry.roster_date}T${start}+05:30`);
-  if (!Number.isFinite(beginsAt) || Date.now() > beginsAt - leadHours * 3_600_000) throw new Error(`Shift swaps close ${leadHours} hours before the shift.`);
-}
-
-function assertSwapBeforeCutoff(requester: Entry, partner: Entry, rosterDate: string, leadHours: number) {
-  const workingEntries = [requester, partner].filter((entry) => entry.day_type === "working");
-  for (const entry of workingEntries) assertBeforeCutoff({ ...entry, roster_date: rosterDate }, leadHours);
+function assertSwapBeforeCutoff(_requester: Entry, _partner: Entry, rosterDate: string) {
+  if (isRosterChangePastDeadline(rosterDate)) {
+    throw new Error(rosterChangeDeadlineMessage());
+  }
 }
 
 async function immediateManager(companyId: string, workerType: WorkerType, workerId: string) {
@@ -370,7 +360,7 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   for (const item of contractors.data ?? []) names.set(`contractor:${item.id}`, { name: item.full_name, code: item.dropx_id });
   const shifts = new Map<string, Shift>();
   for (const item of storedShifts.data ?? []) shifts.set(item.id, item as Shift);
-  const leadHours = await swapCutoff(account.companyId);
+  const leadHours = ROSTER_CHANGE_DEADLINE_HOUR_IST;
   const entriesById = new Map([...own, ...colleagueEntries].map((entry) => [entry.id, entry]));
   const colleagueWorkers = colleagueEntries.map((item) => ({ workerType: item.worker_type, workerId: item.worker_id }));
   const [designationByWorker, stationDesignationRequired] = await Promise.all([
@@ -392,7 +382,7 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
         designationByWorker.get(`${candidate.worker_type}:${candidate.worker_id}`) ?? null
       )));
     const partners = meaningfulPartners.filter((candidate) => {
-      try { assertSwapBeforeCutoff(entry, candidate, entry.roster_date, leadHours); return true; }
+      try { assertSwapBeforeCutoff(entry, candidate, entry.roster_date); return true; }
       catch { return false; }
     }).map((candidate) => ({ id: candidate.id, workerType: candidate.worker_type, workerId: candidate.worker_id, ...names.get(`${candidate.worker_type}:${candidate.worker_id}`), dayType: candidate.day_type, shift: candidate.day_type === "weekly_off" ? null : shiftOf(candidate) }));
     const canSwap = !meaningfulPartners.length || Boolean(partners.length);
@@ -467,7 +457,7 @@ export async function POST(request: Request) {
         }
       }
     }
-    const leadHours = await swapCutoff(account.companyId); assertSwapBeforeCutoff(requester, partner, rosterDate, leadHours);
+    assertSwapBeforeCutoff(requester, partner, rosterDate);
     // People policy: roster_swap = immediate reporting manager only (no L2 / HR).
     const managerUserId = await immediateManager(account.companyId, requester.worker_type, requester.worker_id);
     if (!managerUserId) throw new Error("No reporting manager is set for this person, so the swap cannot be sent for approval.");

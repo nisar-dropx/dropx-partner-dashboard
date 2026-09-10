@@ -17,6 +17,7 @@ import { useRouter } from "next/navigation";
 import { importOpsRosterWorkbook, prepareOpsRoster, saveOpsRosterAssignments, submitOpsRoster } from "@/app/ops-pulse/rostering/actions";
 import type { OpsRosterEntry, OpsRosterHoliday, OpsRosterPerson, OpsRosterPlan, OpsRosterShift } from "@/lib/ops-pulse/rostering";
 import { formatShiftClock } from "@/lib/roster-plan-preference";
+import { isRosterChangePastDeadline, rosterChangeDeadlineMessage } from "@/lib/roster-change-deadline";
 import {
   applyRosterDrop,
   decodeRosterDragPayload,
@@ -71,7 +72,6 @@ function compactTime(value: string) {
 function dayLabel(date: string) { return new Intl.DateTimeFormat("en-IN", { weekday: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)); }
 function dateLabel(date: string) { return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)); }
 function fullDateLabel(date: string) { return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)); }
-function rosterInstant(date: string, startTime = "00:00") { return new Date(`${date}T${startTime.slice(0, 5)}:00+05:30`).getTime(); }
 function mondayOf(date: string) {
   const value = new Date(`${date}T00:00:00Z`);
   const day = value.getUTCDay() || 7;
@@ -109,8 +109,7 @@ export function OpsRosterPlanner({
   approvalRequired,
   routeReady,
   today,
-  nowIso,
-  changeCutoffHours
+  nowIso
 }: {
   stationId: string;
   stationCode: string;
@@ -128,7 +127,6 @@ export function OpsRosterPlanner({
   routeReady: boolean;
   today: string;
   nowIso: string;
-  changeCutoffHours: number;
 }) {
   const router = useRouter();
   const initial = useMemo(() => initialAssignments(plan?.entries ?? []), [plan?.entries]);
@@ -195,25 +193,17 @@ export function OpsRosterPlanner({
   }, [assignments, people, templateStart]);
   const activeShift = activeTool?.kind === "shift" ? shiftById.get(activeTool.shiftId) : null;
   const interactionAllowed = (editingEnabled || canStart) && !isPreparing;
-  const cutoffMessage = `Roster changes are allowed only until ${changeCutoffHours} hours before the rostered shift.`;
+  const cutoffMessage = rosterChangeDeadlineMessage();
 
-  const lockReason = useCallback((date: string, payload?: RosterDragPayload | null, fallback?: RosterAssignmentValue) => {
+  const lockReason = useCallback((date: string, _payload?: RosterDragPayload | null, _fallback?: RosterAssignmentValue) => {
     if (date < today) return "Past roster dates cannot be edited.";
     if (date < templateStartRef.current) return `This roster change starts on ${dateLabel(templateStartRef.current)}. Earlier dates are view only.`;
-    const assignment = payload?.tool.kind === "shift"
-      ? { dayType: "working" as const, shiftId: payload.tool.shiftId, notes: null }
-      : payload?.tool.kind === "weekly_off"
-        ? { dayType: "weekly_off" as const, shiftId: null, notes: null }
-        : fallback;
-    const startTime = assignment?.dayType === "working" && assignment.shiftId
-      ? shiftById.get(assignment.shiftId)?.startTime
-      : "00:00";
     // Cut off against the weekday occurrence in the week being viewed (e.g. 12–13 Sep),
     // not an earlier same weekday in the template week (e.g. 5–6 Sep).
     const templateDate = recurringTemplateDate(templateStartRef.current, date);
     const cutoffDate = nextRosterOccurrenceOnOrAfter(templateDate, date > today ? date : today);
-    return rosterInstant(cutoffDate, startTime) - new Date(nowIso).getTime() < changeCutoffHours * 60 * 60 * 1000 ? cutoffMessage : null;
-  }, [changeCutoffHours, cutoffMessage, nowIso, shiftById, today]);
+    return isRosterChangePastDeadline(cutoffDate, new Date(nowIso).getTime()) ? cutoffMessage : null;
+  }, [cutoffMessage, nowIso, today]);
 
   useEffect(() => {
     editingEnabledRef.current = editable;
@@ -441,7 +431,7 @@ export function OpsRosterPlanner({
       const shiftId = defaultShifts[personKey(person)];
       if (!shiftId || !shiftById.has(shiftId)) continue;
       for (const date of templateDates) {
-        if (rosterInstant(nextRosterOccurrenceOnOrAfter(date, today), shiftById.get(shiftId)?.startTime) - new Date(nowIso).getTime() < changeCutoffHours * 60 * 60 * 1000) continue;
+        if (isRosterChangePastDeadline(nextRosterOccurrenceOnOrAfter(date, today), new Date(nowIso).getTime())) continue;
         const key = cellKey(person, date);
         if (next.has(key)) continue;
         next.set(key, { dayType: "working", shiftId, notes: null });
