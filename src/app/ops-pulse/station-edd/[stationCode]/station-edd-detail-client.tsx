@@ -1,13 +1,14 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, RefreshCw, ShieldCheck, Users, PackageSearch, ListFilter, X } from "lucide-react";
 import { TrackingDetailModal } from "@/components/tracking-detail-modal";
 import type { EddStationPayload, EddStationResult } from "@/lib/ops-pulse/edd-worker";
-import { eddCurrentState } from "@/lib/ops-pulse/edd-verification";
+import { applyEddLookup, eddCurrentState } from "@/lib/ops-pulse/edd-verification";
 import { STATION_EDD_RULE, stationEddDate, stationEddPosition, stationEddToday, summarizeStationEdd, stationEddAssociates, stationEddAssociateKey, type StationEddDay, type StationEddFilter } from "@/lib/ops-pulse/station-edd";
 import { ASSOCIATE_FOCUS, ASSOCIATE_SORTS, EDD_PERIODS, EDD_POSITIONS, STATUS_SORTS, TID_SORTS, readEddControls, selectEddAssociates, selectEddStatuses, selectEddTids, type EddQuery } from "@/lib/ops-pulse/edd-table-controls";
 import { Field, ResetFilters, SortHeader, TablePager, TableSearch, useEddQuery } from "../edd-table-ui";
 import { StationEddDownload } from "../station-edd-download";
+import { useEddAutoRefresh } from "../use-edd-auto-refresh";
 import s from "../station-edd.module.css";
 
 const n = (value: number) => value.toLocaleString("en-IN");
@@ -29,20 +30,28 @@ export function StationEddDetailClient({ stationCode, initialQuery = {} }: { sta
   const controls = useMemo(() => readEddControls(new URLSearchParams(query)), [query]);
   const [page, setPage] = useState(1);
   const [openTid, setOpenTid] = useState<string | null>(null);
-  const [today, setToday] = useState(stationEddToday());
+  const [clock, setClock] = useState(Date.now());
+  const today = stationEddToday(new Date(clock));
+  const requestVersion = useRef(0);
   const reload = useCallback(async () => {
+    const version = ++requestVersion.current;
     const result = await json<EddStationResult>("/api/ops-pulse/station-edd?stationCode=" + encodeURIComponent(stationCode));
-    setPayload(result.status === "ok" ? result.payload : null);
+    if (version !== requestVersion.current) return;
+    setPayload(result.status === "ok" ? result.payload : null); setClock(Date.now());
   }, [stationCode]);
   useEffect(() => {
     let cancelled = false;
-    void json<EddStationResult>("/api/ops-pulse/station-edd?stationCode=" + encodeURIComponent(stationCode))
-      .then(result => { if (!cancelled) setPayload(result.status === "ok" ? result.payload : null); })
+    setLoading(true); setPayload(null); setError(null);
+    void reload()
       .catch(cause => { if (!cancelled) setError(cause.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
-    const timer = setInterval(() => setToday(stationEddToday()), 60000);
-    return () => { cancelled = true; clearInterval(timer); };
-  }, [stationCode]);
+    return () => { cancelled = true; requestVersion.current++; };
+  }, [reload]);
+  useEddAutoRefresh(async () => {
+    setClock(Date.now());
+    try { await reload(); setError(null); }
+    catch { setError("Automatic refresh failed. Displayed observations may be older; retry Reload data."); }
+  }, !loading && !busy);
   function change(patch: EddQuery) { updateQuery(patch); setPage(1); }
   async function refresh(kind: "source" | "verify" | "reload") {
     setBusy(kind); setError(null); setMessage("");
@@ -57,9 +66,9 @@ export function StationEddDetailClient({ stationCode, initialQuery = {} }: { sta
     finally { setBusy(""); }
   }
   const packages = useMemo(() => [...new Map((payload?.packages ?? []).map(p => [p.trackingId, p])).values()], [payload]);
-  const summary = useMemo(() => summarizeStationEdd(stationCode, payload ? packages : null, payload?.fetchedAt ?? null, today), [stationCode, payload, packages, today]);
+  const summary = useMemo(() => summarizeStationEdd(stationCode, payload ? packages : null, payload?.fetchedAt ?? null, today), [stationCode, payload, packages, today, clock]);
   const todayAssociates = useMemo(() => stationEddAssociates(packages, today), [packages, today]);
-  const tids = useMemo(() => selectEddTids(packages, controls, today), [packages, controls, today]);
+  const tids = useMemo(() => selectEddTids(packages, controls, today), [packages, controls, today, clock]);
   const associates = useMemo(() => selectEddAssociates(packages, controls, today), [packages, controls, today]);
   const statuses = useMemo(() => selectEddStatuses(summary.statuses, controls), [summary.statuses, controls]);
   const associateOptions = useMemo(() => {
@@ -97,6 +106,7 @@ export function StationEddDetailClient({ stationCode, initialQuery = {} }: { sta
     {error ? <p role="alert" className={s.error}>{error}</p> : null}{message ? <p role="status" className={s.notice}>{message}</p> : null}{busy ? <p className={s.notice} role="status">{busy === "source" ? "Refreshing source backlog. Large stations can take up to five minutes; existing data stays visible." : busy === "verify" ? "Checking tracking histories…" : "Loading latest data…"}</p> : null}
     {loading ? <div className={s.empty}>Loading station EDDs…</div> : !payload ? <div className={s.empty}>No observed records yet. Use Source tools to refresh this station. Missing data is not a zero count.</div> : <>
       <div className={s.contextBar}><span>Today’s station summary · {today} · IST</span><span>Latest observation {dateTime(payload.fetchedAt)} IST</span></div>
+      <p className={s.tableHelp}>Auto-refresh every minute. Pending requires a history check within 15 minutes; older or incomplete checks remain separate. {summary.todayUnverified > 0 ? "Pending coverage is incomplete — zero confirmed pending does not mean the station is cleared." : ""}</p>
       <section className={s.metrics} aria-label="Today's station EDD position">{([
         ["atStation", "Pending first dispatch", summary.todayAtStation, "Never dispatched or attempted", "orange"],
         ["onRoad", "On the road", summary.todayOnRoad, "Dispatched · not completed", "blue"],
@@ -150,6 +160,13 @@ export function StationEddDetailClient({ stationCode, initialQuery = {} }: { sta
       </section>
       <details className={s.definitions}><summary>How EDD positions are counted</summary><p>{STATION_EDD_RULE}</p><p>{summary.excludedReverse} reverse records excluded. Only records observed within the last seven days are retained. “All observed dates” can include undated TIDs; the associate table requires a known EDD.</p></details>
     </>}
-    <TrackingDetailModal trackingId={openTid} stationHint={stationCode} onClose={() => { setOpenTid(null); void reload().catch(() => {}); }}/>
+    <TrackingDetailModal trackingId={openTid} stationHint={stationCode} onLookupComplete={result => {
+      if (result.stationCode !== stationCode || result.trackingId !== openTid) return;
+      requestVersion.current++; // An earlier background response must not undo this newer observation.
+      const checkedAt = new Date().toISOString();
+      setPayload(current => current ? { ...current, fetchedAt: checkedAt,
+        packages: current.packages.map(p => p.trackingId === result.trackingId ? applyEddLookup(p, result, checkedAt) : p) } : current);
+      setClock(Date.now()); setMessage("Live tracking result applied to the table and station counts.");
+    }} onClose={() => { setOpenTid(null); void reload().catch(() => setError("Unable to reload the saved EDD counts. The live lookup remains visible in this view.")); }}/>
   </div>;
 }

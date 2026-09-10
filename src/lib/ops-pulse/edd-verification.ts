@@ -11,6 +11,37 @@ export type VerifiedEddPackage = EddPackage & {
   driverName?: string | null; sourceAt?: string; verifiedAt?: string | null;
   verification?: EddVerification | null; isAccessPoint?: boolean;
 };
+export const EDD_PENDING_MAX_AGE_MS = 15 * 60 * 1000;
+export function eddPendingEvidenceFresh(pkg: VerifiedEddPackage, now = Date.now()) {
+  const checked = Date.parse(pkg.verifiedAt || "");
+  return Number.isFinite(checked) && checked <= now && now - checked <= EDD_PENDING_MAX_AGE_MS;
+}
+export function eddNextCheckAt(state: string | null, now = Date.now()) {
+  const status = (state || "").trim().toUpperCase();
+  const delay = status === "DELIVERED" ? 7 * 86400000 : ["INDUCTED", "RECEIVED"].includes(status) ? 5 * 60000 : 2 * 3600000;
+  return new Date(now + delay).toISOString();
+}
+
+export type EddLookupObservation = {
+  packageStatus?: string | null; estimatedArrivalTime?: string | null; promisedDeliveryTime?: string | null;
+  driverName?: string | null; driverId?: string | null; lastUpdatedTime?: string | null;
+  history?: PackageHistoryEvent[]; historyComplete?: boolean;
+};
+export function eddVerificationFromLookup(body: EddLookupObservation): EddVerification {
+  const history = Array.isArray(body.history) ? body.history : [];
+  const facts = eddHistoryFacts(history);
+  return { state: body.packageStatus?.trim().toUpperCase() || null,
+    edd: eddIstDate(body.estimatedArrivalTime) || eddIstDate(body.promisedDeliveryTime),
+    driverName: body.driverName || null, driverId: body.driverId || null, lastUpdatedAt: body.lastUpdatedTime || null, ...facts,
+    historyComplete: facts.historyComplete && (body.historyComplete === true || (body.historyComplete == null && history.length < 20)) };
+}
+/** Reconcile the same live result in the table immediately, even while its dialog is open. */
+export function applyEddLookup(pkg: EddPackage, body: EddLookupObservation, checkedAt: string): EddPackage {
+  const verification = eddVerificationFromLookup(body);
+  const next = { ...pkg, verification, verifiedAt: checkedAt,
+    driverId: body.driverId || pkg.driverId, driverName: body.driverName || pkg.driverName };
+  return { ...next, state: eddCurrentState(next) };
+}
 const istDateFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" });
 export function eddIstDate(value: string | null | undefined): string | null {
   if (!value) return null;

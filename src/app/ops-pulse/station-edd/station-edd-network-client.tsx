@@ -1,11 +1,12 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ArrowRight, RefreshCw, ShieldCheck, MapPin } from "lucide-react";
 import type { EddStationOption } from "@/lib/ops-pulse/edd-stations";
 import { STATION_EDD_RULE, stationEddFreshness, summarizeStationEdd, type StationEddSummary } from "@/lib/ops-pulse/station-edd";
 import { NETWORK_FOCUS, NETWORK_SORTS, readNetworkControls, selectEddStations, type EddQuery } from "@/lib/ops-pulse/edd-table-controls";
 import { Field, ResetFilters, SortHeader, TableSearch, useEddQuery } from "./edd-table-ui";
 import { StationEddDownload } from "./station-edd-download";
+import { useEddAutoRefresh } from "./use-edd-auto-refresh";
 import s from "./station-edd.module.css";
 
 const cols = [["todayAtStation", "Pending", "atStation"], ["todayOnRoad", "On road", "onRoad"], ["todayDelivered", "Delivered", "delivered"], ["todayHfr", "HFR", "hfr"], ["todayUnverified", "Needs checks", "unverified"], ["overdueAtStation", "Overdue pending", "atStation"]] as const;
@@ -19,6 +20,7 @@ export function StationEddNetworkClient({ stations, initialNetwork, initialError
   const [error, setError] = useState(initialError);
   const [message, setMessage] = useState("");
   const [period, setPeriod] = useState("today");
+  const requestVersion = useRef(0);
   const names = useMemo(() => new Map(stations.map(v => [v.code, v.name])), [stations]);
   const filtered = useMemo(() => selectEddStations(rows, names, controls), [rows, names, controls]);
   const sum = (key: typeof cols[number][0] | "todayTotal" | "missingDate") => filtered.reduce((value, row) => value + row[key], 0);
@@ -26,8 +28,9 @@ export function StationEddNetworkClient({ stations, initialNetwork, initialError
   const networkReport = "/api/ops-pulse/station-edd/network/report?" + reportQuery;
   const pendingReport = "/api/ops-pulse/station-edd/network/report?" + new URLSearchParams({ ...query, report: "pending", day: period });
   function sort(column: string) { update({ sort: column, direction: controls.sort === column && controls.direction === "desc" ? "asc" : "desc" }); }
-  async function reload(verify = false) {
-    setBusy(verify ? "verify" : "reload"); setError(null); setMessage("");
+  async function reload(verify = false, quiet = false) {
+    const version = ++requestVersion.current;
+    if (!quiet) { setBusy(verify ? "verify" : "reload"); setError(null); setMessage(""); }
     try {
       if (verify) {
         const response = await fetch("/api/ops-pulse/station-edd/verify", { method: "POST" });
@@ -38,12 +41,14 @@ export function StationEddNetworkClient({ stations, initialNetwork, initialError
       const response = await fetch("/api/ops-pulse/station-edd/network", { cache: "no-store" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Counts could not be loaded.");
-      setRows(body.stations);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to refresh."); }
-    finally { setBusy(""); }
+      if (version === requestVersion.current) { setRows(body.stations); setError(null); }
+    } catch (cause) { if (version === requestVersion.current) setError(quiet ? "Automatic refresh failed. Displayed observations may be older; retry Reload data." : cause instanceof Error ? cause.message : "Unable to refresh."); }
+    finally { if (!quiet) setBusy(""); }
   }
+  useEddAutoRefresh(() => reload(false, true), !busy);
   return <div className={s.workspace}>
     <div className={s.contextBar}><span><MapPin size={15}/> {filtered.length} of {stations.length} stations selected · summary follows filters</span><span>EDD {rows[0]?.today} · IST</span></div>
+    <p className={s.tableHelp}>Auto-refresh every minute. Pending counts require history checked within 15 minutes. “Needs checks” is unresolved coverage, not cleared stock.</p>
     <section className={s.metrics} aria-label="Today's EDD position">
       {([["Known EDDs today", sum("todayTotal"), "Selected stations · all positions", "neutral"], ["Pending first dispatch", sum("todayAtStation"), "Never dispatched or attempted", "orange"], ["On the road", sum("todayOnRoad"), "Dispatched · not completed", "blue"], ["Delivered", sum("todayDelivered"), "Recorded delivery outcome", "green"], ["HFR", sum("todayHfr"), "Attempted before today", "purple"]] as const).map(([label, count, hint, tone]) => <div key={label} className={[s.metric, s[tone]].join(" ")}><span>{label}</span><strong>{n(count)}</strong><small>{hint}</small></div>)}
     </section>

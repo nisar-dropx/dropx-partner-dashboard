@@ -1,9 +1,9 @@
 import type { EddPackage, EddStationPayload } from "@/lib/ops-pulse/edd-worker";
-import { eddCurrentState, eddIstDate } from "./edd-verification";
+import { eddCurrentState, eddIstDate, eddPendingEvidenceFresh } from "./edd-verification";
 
 export type StationEddFilter = "atStation" | "onRoad" | "delivered" | "hfr" | "attempted" | "unverified" | "other" | "all";
 export type StationEddDay = "today" | "overdue" | "pending" | "all";
-export const STATION_EDD_RULE = "Pending first dispatch = due shipment currently INDUCTED or RECEIVED, with verified history and no dispatch or attempt scans. A prior-day attempt is HFR, even after re-induction. Same-day attempts, on-road and delivered packages are never pending. Driver IDs alone do not prove dispatch. Unverified history is shown separately. Dates use IST; reverse shipments are excluded. Counts reflect recorded observations, not continuous live tracking.";
+export const STATION_EDD_RULE = "Pending first dispatch = due shipment currently INDUCTED or RECEIVED, with complete history checked within 15 minutes and no dispatch or attempt scans. Older checks move to Needs history check, never a confirmed zero-pendency claim. A prior-day attempt is HFR, even after re-induction. Same-day attempts, on-road and delivered packages are never pending. Driver IDs alone do not prove dispatch. Dates use IST; reverse shipments are excluded. Open views reload recorded observations every minute; source scans can still arrive later.";
 
 const todayFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" });
 export function stationEddToday(now = new Date()) { return todayFormatter.format(now); }
@@ -27,7 +27,7 @@ export function stationEddPosition(pkg: EddPackage, today = stationEddToday()): 
   if (state === "IN_TRANSIT" && !history?.historyComplete) return "unverified";
   if (["DELIVERY_ATTEMPTED", "DELIVERY_FAILED", "DELIVERY_REJECTED", "REJECTED"].includes(state) || history?.firstAttemptAt || history?.firstDispatchAt) return "attempted";
   if (["INDUCTED", "RECEIVED"].includes(state)) {
-    if (!history?.historyComplete || eddIstDate(pkg.verifiedAt) !== today ||
+    if (!history?.historyComplete || !eddPendingEvidenceFresh(pkg) || eddIstDate(pkg.verifiedAt) !== today ||
       (pkg.sourceAt && Date.parse(pkg.verifiedAt || "") < Date.parse(pkg.sourceAt))) return "unverified";
     return "atStation";
   }

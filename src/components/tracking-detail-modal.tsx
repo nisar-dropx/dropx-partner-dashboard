@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import type { TrackingLookupResult } from "@/lib/ops-pulse/tracking-lookup";
 
@@ -26,14 +26,18 @@ function formatAmount(value: number | null) {
 export function TrackingDetailModal({
   trackingId,
   stationHint,
-  onClose
+  onClose,
+  onLookupComplete
 }: {
   trackingId: string | null;
   stationHint?: string;
   onClose: () => void;
+  onLookupComplete?: (result: Extract<TrackingLookupResult, { status: "found" }>) => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<TrackingLookupResult | { status: "error"; message: string } | null>(null);
+  const lookupCallback = useRef(onLookupComplete);
+  useEffect(() => { lookupCallback.current = onLookupComplete; }, [onLookupComplete]);
 
   useEffect(() => {
     if (!trackingId) return;
@@ -51,6 +55,7 @@ export function TrackingDetailModal({
           setResult({ status: "error", message: String(payload.error ?? "Unable to look up this tracking ID.") });
         } else {
           setResult(payload as TrackingLookupResult);
+          if (payload.status === "found" && payload.trackingId === trackingId) lookupCallback.current?.(payload);
         }
       })
       .catch(() => {

@@ -6,8 +6,10 @@ import * as XLSX from "xlsx";
 
 const source = readFileSync(new URL("../src/lib/ops-pulse/station-edd.ts", import.meta.url), "utf8");
 const transpile = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+// Negative evidence is time-sensitive. Freeze the scenario clock, never production time.
+class EddTestDate extends Date { constructor(...args) { super(...(args.length ? args : ["2026-09-09T10:05:00Z"])); } static now() { return Date.parse("2026-09-09T10:05:00Z"); } }
 const verification = {};
-new Function("require","exports",transpile(readFileSync(new URL("../src/lib/ops-pulse/edd-verification.ts",import.meta.url),"utf8")))(()=>({}),verification);
+new Function("require","exports","Date",transpile(readFileSync(new URL("../src/lib/ops-pulse/edd-verification.ts",import.meta.url),"utf8")))(()=>({}),verification,EddTestDate);
 const edd = {};
 new Function("require","exports",transpile(source))(()=>verification,edd);
 const today = "2026-09-09";
@@ -122,6 +124,22 @@ assert.equal(edd.stationEddPosition(pkg("unknown","INDUCTED",{verification:null}
 assert.equal(edd.stationEddPosition(pkg("partial","RECEIVED",{verification:{historyComplete:false}}),today),"unverified");
 assert.equal(edd.stationEddPosition(pkg("newer","INDUCTED",{sourceAt:today+"T11:00:00Z"}),today),"unverified","a newer source scan invalidates older no-dispatch evidence");
 assert.equal(edd.stationEddPosition(pkg("372163051022","INDUCTED",{verification:{state:"DELIVERED"}}),today),"delivered","delivered lookup cannot remain in pending");
+assert.equal(edd.stationEddPosition(pkg("stale-pending","INDUCTED",{verifiedAt:today+"T09:49:59Z"}),today),"unverified","a 15-minute-old negative history is not confirmed current pending");
+assert.equal(verification.eddNextCheckAt("INDUCTED",Date.parse(today+"T10:00:00Z")),today+"T10:05:00.000Z");
+assert.equal(verification.eddNextCheckAt("DELIVERED",Date.parse(today+"T10:00:00Z")),"2026-09-16T10:00:00.000Z");
+const gntfLookup={packageStatus:"IN_TRANSIT",driverName:"Associate",driverId:"A2EVIYL88DSKW1",history:[
+  {state:"IN_TRANSIT",time:"2026-09-10T05:14:18.783Z"},
+  {state:"IN_TRANSIT",time:"2026-09-10T04:43:07.962Z"},
+  {state:"INDUCTED",time:"2026-09-10T04:39:00Z"},
+  {state:"INDUCTED",time:"2026-09-10T02:35:00Z"},
+  {state:"MANIFESTED",time:"2026-09-03T10:33:00Z"}
+]};
+const gntf=verification.applyEddLookup(pkg("372261101629","INDUCTED",{ead:"2026-09-10",sourceAt:"2026-09-10T04:20:00Z"}),gntfLookup,"2026-09-10T05:15:00Z");
+assert.equal(gntf.verification.firstDispatchAt,"2026-09-10T04:43:07.962Z");
+assert.equal(edd.stationEddPosition(gntf,"2026-09-10"),"onRoad","live outbound scan must immediately remove the sample TID from pending");
+assert.equal(edd.summarizeStationEdd("GNTF",[gntf],gntf.verifiedAt,"2026-09-10").todayAtStation,0);
+assert.equal(edd.stationEddAssociates([gntf],"2026-09-10")[0].onRoad,1);
+assert.equal(verification.eddVerificationFromLookup({...gntfLookup,historyComplete:false}).historyComplete,false);
 const sent = [pkg("a","DELIVERED",{driverId:"A",driverName:"Associate A"}),pkg("b","IN_TRANSIT_TO_CUSTOMER",{driverId:"A"}),pkg("c","INDUCTED",{driverId:"A"}),pkg("a","DELIVERED",{driverId:"A",driverName:"Associate A"})];
 assert.deepEqual(edd.stationEddAssociates(sent,today),[{id:"A",name:"Associate A",sent:2,delivered:1,onRoad:1,attempted:0,other:0}],"unique dispatched cohort, never retained station driver IDs");
 assert.equal(verification.eddHistoryFacts([]).historyComplete,false);
@@ -250,3 +268,18 @@ assert.equal(XLSX.utils.sheet_to_json(networkFilteredBook.Sheets["Pending TIDs"]
 denied = true;
 assert.equal((await networkReportModule.GET(new Request("https://example.test/api?report=pending"))).status, 403);
 console.log("PASS Network export: station search/workload filters apply to summaries and TID sheets without expanding access.");
+
+// Execute polling lifecycle with controlled effects, rather than sleeping in tests.
+const hookEffects=[]; const windowEvents=new Map(); const documentEvents=new Map(); let tick; let cleared=false;
+const fakeDocument={visibilityState:"visible",addEventListener:(key,fn)=>documentEvents.set(key,fn),removeEventListener:(key)=>documentEvents.delete(key)};
+const fakeWindow={setInterval:(fn,delay)=>{assert.equal(delay,60000);tick=fn;return 1;},clearInterval:()=>{cleared=true;},addEventListener:(key,fn)=>windowEvents.set(key,fn),removeEventListener:(key)=>windowEvents.delete(key)};
+const autoRefresh={};
+new Function("require","exports","window","document",transpile(readFileSync(new URL("../src/app/ops-pulse/station-edd/use-edd-auto-refresh.ts",import.meta.url),"utf8")))(()=>({useRef:value=>({current:value}),useEffect:fn=>hookEffects.push(fn)}),autoRefresh,fakeWindow,fakeDocument);
+let reads=0; let resolveRead;
+autoRefresh.useEddAutoRefresh(()=>{reads++;return new Promise(resolve=>{resolveRead=resolve;});});
+const cleanups=hookEffects.map(fn=>fn());
+tick(); windowEvents.get("focus")(); assert.equal(reads,1,"timer and focus do not overlap reads");
+resolveRead(); await Promise.resolve(); fakeDocument.visibilityState="hidden"; tick(); assert.equal(reads,1);
+fakeDocument.visibilityState="visible"; documentEvents.get("visibilitychange")(); assert.equal(reads,2,"returning to a tab reads latest data");
+resolveRead(); await Promise.resolve(); cleanups.forEach(fn=>fn?.()); assert.equal(cleared,true); assert.equal(windowEvents.size,0); assert.equal(documentEvents.size,0);
+console.log("PASS GNTF outbound regression, pending evidence expiry, five-minute rechecks, live lookup reconciliation and auto-refresh lifecycle.");

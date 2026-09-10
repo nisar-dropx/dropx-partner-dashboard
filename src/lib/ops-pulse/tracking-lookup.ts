@@ -18,6 +18,8 @@ export type TrackingLookupResult =
       packageStatus: string | null;
       reasonCode: string | null;
       driverName: string | null;
+      driverId?: string | null;
+      historyComplete?: boolean;
       provider: string | null;
       shipDate: string | null;
       promisedDeliveryTime: string | null;
@@ -143,7 +145,7 @@ export async function lookupTrackingId(params: {
     found = await lookupViaStationSession(baseUrl, adminKey, stationCode, trackingId);
     if (found) break;
   }
-  if (!found) return { status: "not_found" };
+  if (!found || String(found.trackingId || "") !== trackingId) return { status: "not_found" };
 
   const actualStationCode = String(found.stationCode ?? "").trim().toUpperCase();
   const location = byStationCode.get(actualStationCode);
@@ -156,7 +158,7 @@ export async function lookupTrackingId(params: {
     try {
       const { rememberEddLookup } = await import("./edd-ledger");
       await rememberEddLookup(actualStationCode, trackingId, found);
-    } catch { /* A cache write must not hide a valid live tracking response. */ }
+    } catch { console.error("[edd-lookup] Unable to persist verified tracking observation."); }
   }
 
   return {
@@ -167,6 +169,8 @@ export async function lookupTrackingId(params: {
     packageStatus: found.packageStatus ?? null,
     reasonCode: found.reasonCode ?? null,
     driverName: found.driverName ?? null,
+    driverId: found.driverId ?? null,
+    historyComplete: found.historyComplete,
     provider: found.provider ?? null,
     shipDate: found.shipDate ?? null,
     promisedDeliveryTime: found.promisedDeliveryTime ?? null,

@@ -2,21 +2,17 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { EddPackage, EddStationResult } from "./edd-worker";
-import { eddCurrentState, eddHistoryFacts, eddIstDate, type EddVerification } from "./edd-verification";
+import { eddCurrentState, eddHistoryFacts, eddIstDate, eddNextCheckAt, eddVerificationFromLookup, type EddLookupObservation, type EddVerification } from "./edd-verification";
 import type { PackageHistoryEvent } from "./tracking-lookup";
 import { stationEddToday } from "./station-edd";
 import { eddSourceSession, eddSourceSummaries, eddSourceHistory } from "./edd-source";
 
 type LedgerRow = { station_code: string; tracking_id: string; source: EddPackage; source_at: string; verification: EddVerification | null; verified_at: string | null };
-type LookupObservation = { packageStatus?: string|null; estimatedArrivalTime?: string|null; promisedDeliveryTime?: string|null; driverName?: string|null; driverId?: string|null; lastUpdatedTime?: string|null; history?: PackageHistoryEvent[]; historyComplete?: boolean };
-export async function rememberEddLookup(stationCode:string,trackingId:string,body:LookupObservation) {
+export async function rememberEddLookup(stationCode:string,trackingId:string,body:EddLookupObservation) {
   if (!supabaseAdmin) return;
-  const history = Array.isArray(body.history) ? body.history : [];
-  const facts = eddHistoryFacts(history);
-  const verification:EddVerification = { state:body.packageStatus||null, edd:eddIstDate(body.estimatedArrivalTime)||eddIstDate(body.promisedDeliveryTime), driverName:body.driverName||null,driverId:body.driverId||null,lastUpdatedAt:body.lastUpdatedTime||null,...facts,
-    historyComplete:facts.historyComplete && (body.historyComplete===true || (body.historyComplete==null&&history.length<20)) };
+  const verification = eddVerificationFromLookup(body);
   const now=new Date();
-  const {error}=await supabaseAdmin.from("edd_package_ledger").update({verification,verified_at:now.toISOString(),next_check_at:new Date(now.getTime()+(verification.state==="DELIVERED"?7*86400000:2*3600000)).toISOString()}).eq("station_code",stationCode).eq("tracking_id",trackingId);
+  const {error}=await supabaseAdmin.from("edd_package_ledger").update({verification,verified_at:now.toISOString(),next_check_at:eddNextCheckAt(verification.state,now.getTime())}).eq("station_code",stationCode).eq("tracking_id",trackingId);
   if(error)throw new Error(error.message);
 }
 export async function ingestEddObservations(codes?: string[]) {
@@ -152,7 +148,7 @@ export async function verifyEddBatch(codes?: string[]) {
               ...facts,historyComplete:facts.historyComplete&&result.historyComplete};
             const now=new Date();
             const {error:writeError}=await supabaseAdmin!.from("edd_package_ledger").update({verification,verified_at:now.toISOString(),
-              next_check_at:new Date(now.getTime()+(verification.state==="DELIVERED"?7*86400000:2*3600000)).toISOString()})
+              next_check_at:eddNextCheckAt(verification.state,now.getTime())})
               .eq("station_code",row.station_code).eq("tracking_id",row.tracking_id);
             if(writeError)throw new Error(writeError.message);
             verified++;continue;
@@ -173,7 +169,7 @@ export async function verifyEddBatch(codes?: string[]) {
             historyComplete: facts.historyComplete && history.length === body.history.length && (body.historyComplete === true || (body.historyComplete == null && history.length < 20)) };
           const now = new Date();
           const { error: writeError } = await supabaseAdmin!.from("edd_package_ledger").update({ verification, verified_at: now.toISOString(),
-            next_check_at: new Date(now.getTime()+(verification.state === "DELIVERED" ? 7*86400000 : 2*3600000)).toISOString() })
+            next_check_at: eddNextCheckAt(verification.state,now.getTime()) })
             .eq("station_code",row.station_code).eq("tracking_id",row.tracking_id);
           if (writeError) throw new Error(writeError.message);
           verified++;
