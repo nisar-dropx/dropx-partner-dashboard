@@ -4,6 +4,15 @@ import { notifyEmployeeExitSubmitted, notifyEmployeeExitWithdrawal, notifyExitAp
 import { createAppNotification } from "../../../../src/lib/app-notifications";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { todayInIndia } from "../../../../src/lib/india-date";
+import {
+  classifyResignationTier,
+  planResignationSeats,
+  resolveResignationSeats,
+  resignationRouteSummary,
+  type ChainManagerSeat,
+  type ResignationSeatKind
+} from "../../../../src/lib/exit-resignation-route";
+import type { DesignationLabel } from "../../../../src/lib/approval-designation-labels";
 
 type PeopleProfileType = "employee" | "user" | "contractor";
 type WorkerContext = {
@@ -21,7 +30,7 @@ type WorkerContext = {
 
 type ApprovalRouteRow = {
   company_id: string;
-  workflow_step_id: string;
+  workflow_step_id: string | null;
   step_order: number;
   step_name: string;
   approver_role: string;
@@ -118,7 +127,7 @@ async function resolveWorker(profileType: string, accountId: string): Promise<Wo
   };
 }
 
-async function reportingManagerChain(context: WorkerContext, levels: number) {
+async function reportingManagerChain(context: WorkerContext, levels: number): Promise<ChainManagerSeat[]> {
   const sourceColumn = context.workerType === "contractor" ? "contractor_id" : "employee_id";
   const today = todayInIndia();
   const { data: engagement } = await db().from("hr_engagements")
@@ -129,10 +138,10 @@ async function reportingManagerChain(context: WorkerContext, levels: number) {
     .order("start_date", { ascending: false })
     .limit(1)
     .maybeSingle();
-  const chain: Array<{ userId: string; name: string; positionTitle: string | null }> = [];
+  const chain: ChainManagerSeat[] = [];
   if (engagement) {
     const { data: assignment } = await db().from("hr_work_assignments")
-      .select("id")
+      .select("id, designation_id")
       .eq("company_id", context.account.companyId)
       .eq("engagement_id", engagement.id)
       .eq("is_primary", true)
@@ -159,7 +168,7 @@ async function reportingManagerChain(context: WorkerContext, levels: number) {
         if (!relationship?.manager_assignment_id || seenAssignments.has(relationship.manager_assignment_id)) break;
         seenAssignments.add(relationship.manager_assignment_id);
         const { data: managerAssignment } = await db().from("hr_work_assignments")
-          .select("id, engagement_id, position_title")
+          .select("id, engagement_id, position_title, designation_id")
           .eq("company_id", context.account.companyId)
           .eq("id", relationship.manager_assignment_id)
           .maybeSingle();
@@ -170,17 +179,25 @@ async function reportingManagerChain(context: WorkerContext, levels: number) {
             .eq("id", managerAssignment.engagement_id)
             .maybeSingle();
           if (managerEngagement) {
-            const [{ data: link }, { data: person }] = await Promise.all([
+            const [{ data: link }, { data: person }, designationResult] = await Promise.all([
               db().from("hr_user_person_links")
               .select("user_id")
               .eq("company_id", context.account.companyId)
               .eq("person_id", managerEngagement.person_id)
               .eq("status", "active")
               .maybeSingle(),
-              db().from("hr_people").select("display_name").eq("company_id", context.account.companyId).eq("id", managerEngagement.person_id).maybeSingle()
+              db().from("hr_people").select("display_name").eq("company_id", context.account.companyId).eq("id", managerEngagement.person_id).maybeSingle(),
+              managerAssignment.designation_id
+                ? db().from("designations").select("name, code").eq("company_id", context.account.companyId).eq("id", managerAssignment.designation_id).maybeSingle()
+                : Promise.resolve({ data: null })
             ]);
             if (!link?.user_id) break;
-            chain.push({ userId: link.user_id, name: person?.display_name ?? `Manager level ${level}`, positionTitle: managerAssignment.position_title });
+            chain.push({
+              userId: link.user_id,
+              name: person?.display_name ?? `Manager level ${level}`,
+              positionTitle: managerAssignment.position_title,
+              designation: designationResult.data ? { name: designationResult.data.name, code: designationResult.data.code } : null
+            });
             subjectAssignmentId = managerAssignment.id;
             continue;
           }
@@ -198,10 +215,78 @@ async function reportingManagerChain(context: WorkerContext, levels: number) {
       .maybeSingle();
     if (profile?.reports_to_user_id) {
       const { data: manager } = await db().from("profiles").select("id, full_name").eq("company_id", context.account.companyId).eq("id", profile.reports_to_user_id).eq("is_active", true).maybeSingle();
-      if (manager) chain.push({ userId: manager.id, name: manager.full_name ?? "Reporting manager", positionTitle: null });
+      if (manager) chain.push({ userId: manager.id, name: manager.full_name ?? "Reporting manager", positionTitle: null, designation: null });
     }
   }
   return chain;
+}
+
+async function requesterDesignation(context: WorkerContext): Promise<DesignationLabel | null> {
+  const sourceColumn = context.workerType === "contractor" ? "contractor_id" : "employee_id";
+  const today = todayInIndia();
+  const { data: engagement } = await db().from("hr_engagements")
+    .select("id")
+    .eq("company_id", context.account.companyId)
+    .eq(sourceColumn, context.workerId)
+    .eq("status", "active")
+    .order("start_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (engagement) {
+    const { data: assignment } = await db().from("hr_work_assignments")
+      .select("designation_id")
+      .eq("company_id", context.account.companyId)
+      .eq("engagement_id", engagement.id)
+      .eq("is_primary", true)
+      .lte("effective_from", today)
+      .or(`effective_to.is.null,effective_to.gte.${today}`)
+      .order("effective_from", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (assignment?.designation_id) {
+      const { data } = await db().from("designations").select("name, code").eq("company_id", context.account.companyId).eq("id", assignment.designation_id).maybeSingle();
+      if (data) return { name: data.name, code: data.code };
+    }
+  }
+  if (context.workerType === "employee") {
+    const { data } = await db().from("employees").select("designations(name, code)").eq("company_id", context.account.companyId).eq("id", context.workerId).maybeSingle();
+    const relation = Array.isArray(data?.designations) ? data?.designations[0] : data?.designations;
+    if (relation?.name) return { name: relation.name, code: relation.code ?? null };
+  }
+  return null;
+}
+
+function isHrWorkflowStep(step: { code?: string | null; name?: string | null; approver_role?: string | null; approver_source?: string | null }) {
+  const code = String(step.code ?? "").toUpperCase();
+  const role = String(step.approver_role ?? "").toUpperCase();
+  const name = String(step.name ?? "").toLowerCase();
+  const source = String(step.approver_source ?? "").toLowerCase();
+  if (code === "HR_APPROVAL") return true;
+  if (["HR_MANAGER", "CONFIGURED_ROLE", "HRMS_ADMIN", "HRE", "HRM"].includes(role)) return true;
+  if (source === "role" && (name.includes("hr") || name.includes("human resource"))) return true;
+  return name.includes("hr approval") || name.includes("hr manager") || name.includes("human resources");
+}
+
+function pickWorkflowStepForSeat(steps: any[], kind: ResignationSeatKind, usedStepIds: Set<string>) {
+  const unused = steps.filter((step) => !usedStepIds.has(step.id));
+  if (kind === "cluster_manager" || kind === "business_head") {
+    const byName = unused.find((step) => {
+      const name = String(step.name ?? "").toLowerCase();
+      if (kind === "cluster_manager") return name.includes("cluster");
+      return name.includes("business") || name.includes("national") || name.includes("head");
+    });
+    if (byName) return byName;
+    return unused.find((step) => step.approver_source === "reporting_manager" || step.approver_role === "REPORTING_MANAGER") ?? null;
+  }
+  if (kind === "managing_partner") {
+    return unused.find((step) => step.approver_role === "OWNER"
+      || String(step.code ?? "").toUpperCase() === "OWNER_APPROVAL"
+      || String(step.name ?? "").toLowerCase().includes("managing partner")
+      || String(step.name ?? "").toLowerCase().includes("leadership")) ?? null;
+  }
+  return unused.find((step) => isHrWorkflowStep(step))
+    ?? unused.find((step) => step.approver_source === "role")
+    ?? null;
 }
 
 async function activeRoleUsers(companyId: string, roleId: string) {
@@ -241,39 +326,119 @@ async function configuredApprovalRoute(context: WorkerContext, scenario: string)
   const directSteps = (storedSteps ?? []).filter((step) => step.scenario === scenario);
   const steps = directSteps.length ? directSteps : (storedSteps ?? []).filter((step) => step.scenario === "all");
   if (!steps.length) throw new Error("No approval workflow is active for resignations. Configure it in Offboarding Masters.");
-  const highestLevel = steps.reduce((maximum, step) => step.approver_source === "reporting_manager" ? Math.max(maximum, Number(step.hierarchy_level ?? 0)) : maximum, 0);
-  const [managerChain, approvalUsers] = await Promise.all([reportingManagerChain(context, highestLevel), activeApprovalUserIds(context.account.companyId)]);
+
+  const employeeSteps = steps.filter((step) => {
+    const sources = Array.isArray(step.applies_to_sources) && step.applies_to_sources.length ? step.applies_to_sources : ["employee", "hr"];
+    return sources.includes("employee");
+  });
+
+  const [designation, managerChain, approvalUsers] = await Promise.all([
+    requesterDesignation(context),
+    reportingManagerChain(context, 16),
+    activeApprovalUserIds(context.account.companyId)
+  ]);
+  const tier = classifyResignationTier(designation);
+  const planned = planResignationSeats(tier);
+  const { resolved, skipped } = resolveResignationSeats({ seats: planned, chain: managerChain });
+
   const rows: ApprovalRouteRow[] = [];
   const preview: ApprovalRoutePreview[] = [];
-  for (const step of steps) {
-    const source = step.approver_source === "role" ? "role" : "reporting_manager";
-    if (source === "reporting_manager") {
-      const hierarchyLevel = Number(step.hierarchy_level ?? 0);
-      const manager = hierarchyLevel > 0 ? managerChain[hierarchyLevel - 1] : null;
-      if (!manager) {
-        if (step.unavailable_behavior === "skip") continue;
-        throw new Error(`${step.name} cannot be resolved from the current reporting hierarchy. Update the employee's reporting line or change this step's fallback in Offboarding Masters.`);
+  const usedStepIds = new Set<string>();
+  let fallbackOrder = 10;
+
+  for (const seat of resolved) {
+    if (seat.status !== "resolved") continue;
+    const master = pickWorkflowStepForSeat(employeeSteps.length ? employeeSteps : steps, seat.kind, usedStepIds);
+    if (master) usedStepIds.add(master.id);
+
+    if (seat.approverSource === "reporting_manager") {
+      if (!seat.assignedUserId) continue;
+      if (!approvalUsers.has(seat.assignedUserId)) {
+        throw new Error(`${seat.detail} is in the reporting route but does not have Approval Inbox approval access. Update the manager's role access or this workflow step in Offboarding Masters.`);
       }
-      if (!approvalUsers.has(manager.userId)) throw new Error(`${manager.name} is in the reporting route but does not have Approval Inbox approval access. Update the manager's role access or this workflow step in Offboarding Masters.`);
-      rows.push({ company_id: context.account.companyId, workflow_step_id: step.id, step_order: step.step_order, step_name: step.name, approver_role: "REPORTING_MANAGER", approver_source: source, hierarchy_level: hierarchyLevel, approver_role_id: null, assigned_user_id: manager.userId, is_required: step.is_required });
-      preview.push({ stepOrder: step.step_order, stepName: step.name, approverName: manager.name, detail: manager.positionTitle || `Reporting hierarchy level ${hierarchyLevel}` });
+      const manager = managerChain.find((row) => row.userId === seat.assignedUserId);
+      rows.push({
+        company_id: context.account.companyId,
+        workflow_step_id: master?.id ?? null,
+        step_order: master?.step_order ?? fallbackOrder,
+        step_name: master?.name ?? seat.label,
+        approver_role: "REPORTING_MANAGER",
+        approver_source: "reporting_manager",
+        hierarchy_level: null,
+        approver_role_id: null,
+        assigned_user_id: seat.assignedUserId,
+        is_required: master?.is_required !== false
+      });
+      preview.push({
+        stepOrder: master?.step_order ?? fallbackOrder,
+        stepName: master?.name ?? seat.label,
+        approverName: manager?.name ?? "Reporting manager",
+        detail: seat.detail
+      });
+      fallbackOrder += 10;
       continue;
     }
-    if (!step.approver_role_id) {
-      if (step.unavailable_behavior === "skip") continue;
-      throw new Error(`${step.name} does not have an approver role selected in Offboarding Masters.`);
+
+    if (master?.approver_role_id) {
+      const roleUsers = await activeRoleUsers(context.account.companyId, master.approver_role_id);
+      const roleRelation = Array.isArray(master.hr_roles) ? master.hr_roles[0] : master.hr_roles;
+      if (!roleUsers.length && master.unavailable_behavior !== "skip") {
+        throw new Error(`${roleRelation?.name ?? master.name} has no active user assignment. Assign the role in Users & Access or update Offboarding Masters.`);
+      }
+      if (!roleUsers.length) continue;
+      rows.push({
+        company_id: context.account.companyId,
+        workflow_step_id: master.id,
+        step_order: master.step_order,
+        step_name: master.name,
+        approver_role: "CONFIGURED_ROLE",
+        approver_source: "role",
+        hierarchy_level: null,
+        approver_role_id: master.approver_role_id,
+        assigned_user_id: null,
+        is_required: master.is_required !== false
+      });
+      preview.push({
+        stepOrder: master.step_order,
+        stepName: master.name,
+        approverName: roleRelation?.name ?? "Configured People role",
+        detail: `${roleUsers.length} active approver${roleUsers.length === 1 ? "" : "s"}`
+      });
+      fallbackOrder += 10;
+      continue;
     }
-    const roleUsers = await activeRoleUsers(context.account.companyId, step.approver_role_id);
-    const roleRelation = Array.isArray(step.hr_roles) ? step.hr_roles[0] : step.hr_roles;
-    if (!roleUsers.length) {
-      if (step.unavailable_behavior === "skip") continue;
-      throw new Error(`${roleRelation?.name ?? step.name} has no active user assignment. Assign the role in Users & Access or update Offboarding Masters.`);
-    }
-    rows.push({ company_id: context.account.companyId, workflow_step_id: step.id, step_order: step.step_order, step_name: step.name, approver_role: "CONFIGURED_ROLE", approver_source: source, hierarchy_level: null, approver_role_id: step.approver_role_id, assigned_user_id: null, is_required: step.is_required });
-    preview.push({ stepOrder: step.step_order, stepName: step.name, approverName: roleRelation?.name ?? "Configured People role", detail: `${roleUsers.length} active approver${roleUsers.length === 1 ? "" : "s"}` });
+
+    // Shared HR / Owner queue without a configured role id — still create the approval step.
+    rows.push({
+      company_id: context.account.companyId,
+      workflow_step_id: master?.id ?? null,
+      step_order: master?.step_order ?? fallbackOrder,
+      step_name: master?.name ?? seat.label,
+      approver_role: seat.approverRole === "OWNER" ? "OWNER" : (master?.approver_role === "CONFIGURED_ROLE" ? "CONFIGURED_ROLE" : seat.approverRole),
+      approver_source: "role",
+      hierarchy_level: null,
+      approver_role_id: master?.approver_role_id ?? null,
+      assigned_user_id: null,
+      is_required: master?.is_required !== false
+    });
+    preview.push({
+      stepOrder: master?.step_order ?? fallbackOrder,
+      stepName: master?.name ?? seat.label,
+      approverName: seat.label,
+      detail: seat.detail
+    });
+    fallbackOrder += 10;
   }
+
   if (!rows.length) throw new Error("The configured workflow does not resolve to an active approval step.");
-  return { rows, preview, firstManagerId: rows.find((row) => row.approver_source === "reporting_manager")?.assigned_user_id ?? null };
+  return {
+    rows,
+    preview,
+    firstManagerId: rows.find((row) => row.approver_source === "reporting_manager")?.assigned_user_id ?? null,
+    skipped,
+    routeSummary: resignationRouteSummary(resolved),
+    tier
+  };
 }
 
 async function taskOwnerUser(context: WorkerContext, role: string) {
@@ -553,8 +718,27 @@ export async function POST(request: Request) {
     if (insertError) throw new Error(insertError.message);
 
     if (approvalRows.length) {
-      const inserted = await db().from("hr_exit_approvals").insert(approvalRows.map((step) => ({ ...step, case_id: exitCase.id })));
+      const inserted = await db().from("hr_exit_approvals").insert(approvalRows.map((step) => ({
+        company_id: step.company_id,
+        case_id: exitCase.id,
+        workflow_step_id: step.workflow_step_id || null,
+        step_order: step.step_order,
+        step_name: step.step_name,
+        approver_role: step.approver_role,
+        assigned_user_id: step.assigned_user_id,
+        is_required: step.is_required
+      })));
       if (inserted.error) throw new Error(inserted.error.message);
+    }
+    if (approvalRoute.skipped?.length) {
+      await db().from("hr_exit_events").insert({
+        company_id: context.account.companyId,
+        case_id: exitCase.id,
+        event_code: "MANAGER_LEVEL_SKIPPED",
+        title: "Reporting manager level skipped",
+        actor_name: context.account.name ?? context.worker.full_name,
+        details: { skipped: approvalRoute.skipped, route: approvalRoute.routeSummary, tier: approvalRoute.tier }
+      });
     }
     if (policyResult.data?.auto_create_tasks !== false) {
       const { data: templates } = await db().from("hr_exit_task_templates").select("*").eq("company_id", context.account.companyId).eq("is_active", true).in("scenario", ["resignation", "all"]).order("display_order");
