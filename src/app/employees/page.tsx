@@ -89,6 +89,7 @@ type EmployeeRow = {
   profile_photo_path?: string | null;
   upload_urls?: Record<string, string>;
   is_active: boolean;
+  people_lifecycle_status?: string | null;
   stations?: {
     station_code: string;
     station_name: string | null;
@@ -132,7 +133,11 @@ function statutoryLabel(values: string[] | null | undefined) {
 }
 
 function employeeStatus(employee: EmployeeRow) {
-  if (!employee.is_active) return "Inactive";
+  // HRMS offboarding is authoritative: do not show Active from profile_completion alone.
+  const lifecycle = String(employee.people_lifecycle_status ?? "").trim().toLowerCase();
+  if (lifecycle === "offboarded" || !employee.is_active) return "Inactive";
+  if (lifecycle === "offboarding") return "Offboarding";
+  if (lifecycle === "suspended") return "Suspended";
   if (employee.profile_completion_status === "active") return "Active";
   if (employee.profile_completion_status === "under_review") return "Under review";
   if (employee.profile_completion_status === "returned") return "Returned";
@@ -341,7 +346,7 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
   const [initialEmployeesResult, contractorIdsResult, locationsResult, designationsResult, positionsResult] = await Promise.all([
     supabaseAdmin
       .from("employees")
-      .select("id, employee_code, biometric_id, full_name, mobile_country_code, mobile, email, date_of_join, location_id, designation_id, org_position_id, statutory_applicability, profile_completion_status, profile_return_remarks, profile_completed_at, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, father_name, blood_group, is_handicapped, address, state_code, pincode, landmark, emergency_contact_name, emergency_contact_number, emergency_contact_relation, bank_account_no, ifsc, pf_uan, pf_account_no, esi_no, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, is_active, stations (station_code, station_name, providers (name), location_models (code, name)), designations (code, name)")
+      .select("id, employee_code, biometric_id, full_name, mobile_country_code, mobile, email, date_of_join, location_id, designation_id, org_position_id, statutory_applicability, profile_completion_status, profile_return_remarks, profile_completed_at, gender, date_of_birth, aadhaar_number, pan_number, eshram_uan, father_name, blood_group, is_handicapped, address, state_code, pincode, landmark, emergency_contact_name, emergency_contact_number, emergency_contact_relation, bank_account_no, ifsc, pf_uan, pf_account_no, esi_no, driving_license_no, driving_license_exp_date, vehicle_reg_no, vehicle_reg_exp_date, vehicle_insurance_exp_date, vehicle_pollution_exp_date, aadhaar_front_path, aadhaar_back_path, pan_upload_path, dl_front_path, dl_back_path, profile_photo_path, is_active, people_lifecycle_status, stations (station_code, station_name, providers (name), location_models (code, name)), designations (code, name)")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false }),
     supabaseAdmin
@@ -371,13 +376,34 @@ async function loadEmployees(companyId: string, authorization: AuthorizationCont
   if (isMissingColumnError(initialEmployeesResult.error)) {
     const fallbackEmployeesResult = await supabaseAdmin
       .from("employees")
-      .select("id, employee_code, full_name, mobile_country_code, mobile, email, date_of_join, statutory_applicability, is_active, stations (station_code, station_name, providers (name), location_models (code, name)), designations (code, name)")
+      .select("id, employee_code, full_name, mobile_country_code, mobile, email, date_of_join, statutory_applicability, is_active, people_lifecycle_status, stations (station_code, station_name, providers (name), location_models (code, name)), designations (code, name)")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
-    employeesResult = {
-      ...fallbackEmployeesResult,
-      data: (fallbackEmployeesResult.data ?? []).map((employee) => ({ ...employee, profile_completion_status: "pending", profile_completed_at: null }))
-    } as typeof initialEmployeesResult;
+    if (isMissingColumnError(fallbackEmployeesResult.error)) {
+      const legacyEmployeesResult = await supabaseAdmin
+        .from("employees")
+        .select("id, employee_code, full_name, mobile_country_code, mobile, email, date_of_join, statutory_applicability, is_active, stations (station_code, station_name, providers (name), location_models (code, name)), designations (code, name)")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false });
+      employeesResult = {
+        ...legacyEmployeesResult,
+        data: (legacyEmployeesResult.data ?? []).map((employee) => ({
+          ...employee,
+          profile_completion_status: "pending",
+          profile_completed_at: null,
+          people_lifecycle_status: null
+        }))
+      } as typeof initialEmployeesResult;
+    } else {
+      employeesResult = {
+        ...fallbackEmployeesResult,
+        data: (fallbackEmployeesResult.data ?? []).map((employee) => ({
+          ...employee,
+          profile_completion_status: "pending",
+          profile_completed_at: null
+        }))
+      } as typeof initialEmployeesResult;
+    }
   }
 
   if (employeesResult.error) {

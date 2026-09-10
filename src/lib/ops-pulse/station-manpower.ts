@@ -163,7 +163,8 @@ export async function loadOpsStationManpower(
       .or(`is_active.eq.true,last_working_date.gte.${asOf}`);
     engagementQuery.lte("start_date", asOf).or(`end_date.is.null,end_date.gte.${asOf}`);
   } else {
-    employeeQuery.eq("is_active", true); contractorQuery.eq("is_active", true);
+    employeeQuery.eq("is_active", true).not("people_lifecycle_status", "in", '("offboarding","offboarded")');
+    contractorQuery.eq("is_active", true).not("people_lifecycle_status", "in", '("offboarding","offboarded")');
     engagementQuery.eq("status", "active"); designationQuery.eq("is_active", true);
   }
 
