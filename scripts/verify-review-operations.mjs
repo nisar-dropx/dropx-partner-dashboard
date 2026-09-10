@@ -79,7 +79,7 @@ const db = { from(table) { const query = { select() { return query; }, eq(key,va
   maybeSingle() { return Promise.resolve({data: table === "edd_performance_daily" ? {date:day,assigned:100,delivered:55,returned:5,held:40,yet_to_dispatch:10,updated_at:time("23:55")} : null,error:fail?{message:"failure"}:null}); }
 }; return query; } };
 const data = moduleFrom("src/lib/ops-pulse/review-operations-data.ts", { "server-only": {}, "@/lib/supabase-admin": {supabaseAdmin: db},
-  "./edd-ledger": {}, "./station-edd": {}, "./station-manpower": {}, "./station-opening-punches": {}, "./review-operations": logic });
+  "./edd-ledger": {}, "./edd-worker": {}, "./station-edd": {}, "./station-manpower": {}, "./station-opening-punches": {}, "./review-operations": logic });
 const loaded = await data.loadReviewEddHistory("company-one", "station-one", "GNTF", day);
 assert.deepEqual(requests, [["ops_review_edd_observations","company_id","company-one"],["ops_review_edd_observations","station_id","station-one"],["ops_review_edd_observations","work_date",day],["edd_performance_daily","station_code","GNTF"],["edd_performance_daily","date",day]]);
 assert.equal(loaded.timeline.routeLatest.routeDispatched,100);
@@ -88,20 +88,21 @@ assert.ok((await data.loadReviewEddHistory("company-one","station-one","GNTF",da
 
 const captureEvents = [], capturedRows = [];
 const captureDb = { from(table) {
-  if (table === "edd_station_snapshots") return { select: async () => ({ data: [{station_code:"GNTF",fetched_at:time("21:06")}], error:null }) };
+  if (table === "edd_station_snapshots") return { select: async () => ({ data: [{station_code:"GNTF",fetched_at:time("12:51")}], error:null }) };
   if (table === "edd_performance_snapshots") return { select: async () => ({ data: [{station_code:"GNTF",window_from:day,window_to:day,fetched_at:time("21:08"),assigned:100,delivered:55,returned:5,held:40,yet_to_dispatch:10}], error:null }) };
   if (table === "stations") return { select() { return { in: async () => ({data:[{id:"station-one",company_id:"company-one",station_code:"GNTF"}],error:null}) }; } };
   if (table === "ops_review_edd_observations") return { upsert: async rows => { capturedRows.push(...rows); return {error:null}; } };
   throw new Error(`Unexpected capture table ${table}`);
 } };
 const captureData = moduleFrom("src/lib/ops-pulse/review-operations-data.ts", { "server-only": {}, "@/lib/supabase-admin": {supabaseAdmin:captureDb},
-  "./edd-ledger": { ingestEddObservations: async codes => captureEvents.push(`ingest:${codes.join(",")}`),
-    loadEddLedger: async codes => { captureEvents.push(`load:${codes.join(",")}`); return new Map([["GNTF",{packages:[],fetchedAt:time("21:06")}]]); } },
-  "./station-edd": { stationEddToday: () => day, summarizeStationEdd: () => ({todayTotal:0,todayAtStation:0,todayOnRoad:0,todayDelivered:0,todayHfr:0,todayAttempted:0,todayUnverified:0,todayOther:0,missingDate:0,hasSnapshot:true}) },
+  "./edd-ledger": { loadEddLedger: async codes => { captureEvents.push(`load:${codes.join(",")}`); return new Map([["GNTF",{packages:[],fetchedAt:time("12:51")}]]); } },
+  "./edd-worker": { fetchEddStation: async ({stationCode}) => { captureEvents.push(`worker:${stationCode}`); return {status:"ok",payload:{stationCode,fetchedAt:time("21:06"),packages:[]}}; } },
+  "./station-edd": { stationEddToday: () => day, summarizeStationEdd: (_code,_packages,fetchedAt) => { captureEvents.push(`summary:${fetchedAt}`); return {todayTotal:0,todayAtStation:0,todayOnRoad:0,todayDelivered:0,todayHfr:0,todayAttempted:0,todayUnverified:0,todayOther:0,missingDate:0,hasSnapshot:true}; } },
   "./station-manpower": {}, "./station-opening-punches": {}, "./review-operations": logic });
 assert.equal((await captureData.captureReviewEddHistory()).captured,1);
-assert.deepEqual(captureEvents,["ingest:GNTF","load:GNTF"],"review capture imports the latest worker snapshot before reading the ledger");
+assert.deepEqual(captureEvents,["load:GNTF","worker:GNTF","summary:2026-09-09T21:06:00+05:30"],"review capture reads the live worker snapshot instead of the stale application copy");
 assert.equal(capturedRows[0].backlog_at,time("21:06"));
+assert.equal(capturedRows[0].source_at,time("21:06"));
 assert.equal(capturedRows[0].counts.routeDispatched,100);
 
 let captures = 0;

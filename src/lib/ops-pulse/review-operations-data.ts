@@ -1,7 +1,8 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { CodLocationRow } from "./cod";
-import { ingestEddObservations, loadEddLedger } from "./edd-ledger";
+import { loadEddLedger } from "./edd-ledger";
+import { fetchEddStation } from "./edd-worker";
 import { summarizeStationEdd, stationEddToday } from "./station-edd";
 import { loadOpsStationManpower } from "./station-manpower";
 import { isPeopleDesignation } from "./station-opening-punches";
@@ -82,24 +83,37 @@ export async function captureReviewEddHistory() {
   let captured = 0;
   for (let offset = 0; offset < mapped.length; offset += 6) {
     const batch = mapped.slice(offset, offset + 6), batchCodes = batch.map(s => s.station_code);
-    // A successful worker refresh lands in edd_station_snapshots first. Import
-    // that exact snapshot before reading the package ledger, otherwise the
-    // five-minute review can keep recording yesterday's package cohort even
-    // while the live EDD network page already shows today's source totals.
-    await ingestEddObservations(batchCodes);
-    const ledger = await loadEddLedger(batchCodes);
+    // The live worker and the application ledger can use different Supabase
+    // projects. Read the worker's current cached cohort directly, then carry
+    // over prior history verification only when its timestamp still validates
+    // the new source package. A worker failure falls back to the ledger with
+    // its stored snapshot timestamp, which the freshness gate will suppress.
+    const [ledger, liveResults] = await Promise.all([
+      loadEddLedger(batchCodes),
+      Promise.all(batchCodes.map(code => fetchEddStation({ stationCode: code }).catch(() => null)))
+    ]);
+    const live = new Map(liveResults.flatMap(result => result?.status === "ok" ? [[result.payload.stationCode, result.payload] as const] : []));
     const observedAt = new Date();
     if (stationEddToday(observedAt) !== date) break; // Do not cross EOD with a mixed-day sample.
     const rows = batch.map(station => {
       const entry = ledger.get(station.station_code);
+      const source = live.get(station.station_code);
+      const verifiedById = new Map((entry?.packages ?? []).map(pkg => [pkg.trackingId, pkg]));
+      const packages = source?.packages.map(pkg => {
+        const prior = verifiedById.get(pkg.trackingId);
+        return { ...pkg, sourceAt: source.fetchedAt, verification: prior?.verification ?? null,
+          verifiedAt: prior?.verifiedAt ?? null, driverName: prior?.driverName ?? prior?.verification?.driverName ?? null };
+      }) ?? entry?.packages ?? null;
       const route = performance.get(station.station_code);
-      const summary = summarizeStationEdd(station.station_code, entry?.packages ?? null, entry?.fetchedAt ?? null, date);
+      const sourceAt = source?.fetchedAt ?? entry?.fetchedAt ?? null;
+      const backlogAt = source?.fetchedAt ?? backlog.get(station.station_code) ?? null;
+      const summary = summarizeStationEdd(station.station_code, packages, sourceAt, date);
       const { todayTotal, todayAtStation, todayOnRoad, todayDelivered, todayHfr, todayAttempted, todayUnverified, todayOther, missingDate, hasSnapshot } = summary;
       const routeCounts = normalizeReviewRouteCounts(route ? { workDate: String(route.window_from), assigned: route.assigned,
         delivered: route.delivered, returned: route.returned, held: route.held, yetToDispatch: route.yet_to_dispatch } : null, date);
       return { company_id: station.company_id, station_id: station.id, station_code: station.station_code, work_date: date,
         captured_slot: new Date(Math.floor(observedAt.getTime() / 300_000) * 300_000).toISOString(), observed_at: observedAt.toISOString(),
-        source_at: entry?.fetchedAt ?? null, backlog_at: backlog.get(station.station_code) ?? null, performance_at: route?.fetched_at ?? null,
+        source_at: sourceAt, backlog_at: backlogAt, performance_at: route?.fetched_at ?? null,
         counts: { todayTotal, todayAtStation, todayOnRoad, todayDelivered, todayHfr, todayAttempted, todayUnverified, todayOther, missingDate, hasSnapshot, ...routeCounts } };
     });
     const result = await db.from("ops_review_edd_observations").upsert(rows,
