@@ -75,6 +75,7 @@ export async function loadPricing(
   context: FinanceContext,
   month?: string,
   station?: string,
+  asOf = false,
 ) {
   const rows: PricingCard[] = [];
   for (let offset = 0; ; offset += 1000) {
@@ -89,7 +90,10 @@ export async function loadPricing(
       .order("revision", { ascending: false })
       .order("id")
       .range(offset, offset + 999);
-    if (month) query = query.eq("effective_month", `${month}-01`);
+    if (month)
+      query = asOf
+        ? query.lte("effective_month", `${month}-01`)
+        : query.eq("effective_month", `${month}-01`);
     if (station) query = query.eq("station_code", station);
     if (!context.authorization.hasAllLocationAccess)
       query = query.in(
@@ -113,6 +117,25 @@ export function latestCards(history: PricingCard[]) {
     seen.add(key);
     return true;
   });
+}
+export function effectiveCards(history: PricingCard[], month: string) {
+  const cutoff = `${month}-01`;
+  const seen = new Set<string>();
+  return [...history]
+    .filter((card) => card.effective_month <= cutoff)
+    .sort(
+      (a, b) =>
+        b.effective_month.localeCompare(a.effective_month) ||
+        b.revision - a.revision ||
+        b.created_at.localeCompare(a.created_at) ||
+        b.id.localeCompare(a.id),
+    )
+    .filter((card) => {
+      const key = `${card.provider}/${card.station_code}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 export type Query = Record<string, string | string[] | undefined>;
 function value(query: Query, key: string) {
@@ -182,13 +205,13 @@ export async function loadBusiness(context: FinanceContext, query: Query) {
       p_through: filters.through,
       p_station_codes: stationCodes,
     }),
-    loadPricing(context, filters.month),
+    loadPricing(context, filters.month, undefined, true),
   ]);
   if (response.error)
     throw new Error(
       "Unable to load live shipment and cost data. Please retry.",
     );
-  const cards = latestCards(history).filter(
+  const cards = effectiveCards(history, filters.month).filter(
     (c) => stationCodes === null || stationCodes.includes(c.station_code),
   );
   const snapshot = response.data as Snapshot;
@@ -206,11 +229,12 @@ export async function loadBusiness(context: FinanceContext, query: Query) {
     for (let offset = 0; ; offset += 1000) {
       const { data, error } = await context.db
         .from("finance_pricing_revisions")
-        .select("id,station_code,revision,rates")
+        .select("id,station_code,effective_month,revision,rates")
         .eq("company_id", context.companyId)
         .eq("provider", "Amazon")
-        .eq("effective_month", `${filters.month}-01`)
+        .lte("effective_month", `${filters.month}-01`)
         .in("station_code", parents)
+        .order("effective_month", { ascending: false })
         .order("revision", { ascending: false })
         .order("id")
         .range(offset, offset + 999);

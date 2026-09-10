@@ -69,6 +69,9 @@ export type BusinessRow = {
   profit: string | null;
   mg: string | null;
   mgVolume: string | null;
+  monthlyFee: string | null;
+  returns: string | null;
+  pricingEffectiveMonth: string | null;
   revision: number | null;
   basis: string;
   issues: string[];
@@ -106,6 +109,7 @@ export type DailyShipment = {
   work_date: string;
   deliveries: string | null;
   mfn: string | null;
+  returns?: string | null;
   smd: string | null;
   ihs: string | null;
   updated_at: string;
@@ -121,6 +125,7 @@ export type BusinessDay = {
   swa: string | null;
   date: string;
   deliveries: string | null;
+  returns: string | null;
   mgVolume: string | null;
   excessVolume: string | null;
   base: string | null;
@@ -188,9 +193,21 @@ export function buildDailyRows(
     const s = shipments.get(date),
       c = costs.get(date),
       issues: string[] = [];
-    const eligible =
+    const amazonDeliveries =
       provider === "Amazon" && s?.mg_deliveries !== undefined
         ? s.mg_deliveries
+        : (s?.deliveries ?? null);
+    const returns =
+      provider === "Amazon" && s
+        ? s.returns === undefined
+          ? "0"
+          : s.returns
+        : null;
+    const eligible =
+      provider === "Amazon"
+        ? amazonDeliveries !== null && returns !== null
+          ? addQuantities([amazonDeliveries, returns])
+          : null
         : (s?.deliveries ?? null);
     if (provider === "Amazon" && s?.swa != null && decimal(s.swa) > zero)
       issues.push(
@@ -205,7 +222,7 @@ export function buildDailyRows(
     if (!s)
       issues.push("Shipment report pending; variable earnings incomplete");
     if (!pricing && !options.xpt)
-      issues.push("Rate card missing for this month");
+      issues.push("Rate card missing by this month");
     else if (provider === "Amazon" && options.xpt) {
       if (rates.mg_amount_including_mhe != null)
         base = subtractAmounts(
@@ -227,7 +244,7 @@ export function buildDailyRows(
           variable = variableAccrual(
             (decimal(eligible) * decimal(options.parentRate)) / scale,
           );
-        else issues.push("Parent station variable rate missing for this month");
+        else issues.push("Parent station variable rate missing by this month");
       }
       if (s?.mfn != null && decimal(s.mfn) > zero)
         issues.push(
@@ -236,13 +253,17 @@ export function buildDailyRows(
       revenue = addAmounts([base, variable]);
     } else if (provider === "Amazon") {
       if (rates.mg_amount_including_mhe != null) {
+        const monthlyBase = addQuantities([
+          rates.mg_amount_including_mhe,
+          rates.fire_safety_equipment_fee ?? null,
+        ])!;
         base = subtractAmounts(
           mgEstimate(
-            rates.mg_amount_including_mhe,
+            monthlyBase,
             index + 1,
             Number(monthDays),
           ),
-          mgEstimate(rates.mg_amount_including_mhe, index, Number(monthDays)),
+          mgEstimate(monthlyBase, index, Number(monthDays)),
         );
       }
       if (rates.delivery_mg_volume != null) {
@@ -302,6 +323,7 @@ export function buildDailyRows(
     return {
       date,
       deliveries: s?.deliveries ?? null,
+      returns,
       eligibleDeliveries: eligible,
       swa: s?.swa ?? null,
       mgVolume,
@@ -393,14 +415,14 @@ export function buildBusinessRows(
     let revenue: string | null = null;
     let basis = "Pricing missing";
     if (!place) issues.push("Location mapping missing");
-    if (!pricing) issues.push("No rate card for this month");
+    if (!pricing) issues.push("No rate card effective by this month");
     else if (provider === "Amazon" && xpt) {
-      basis = `XPT fixed payout/calendar days + all XPT Amazon deliveries × ${parentStation ?? "parent"} variable rate`;
+      basis = `XPT fixed payout/calendar days + all XPT Amazon deliveries and C-returns × ${parentStation ?? "parent"} variable rate`;
     } else if (provider === "Amazon") {
       basis =
-        "Daily MG + daily excess Amazon deliveries × variable slab + MFN × MFN rate";
+        "Daily MG and monthly fee + daily excess Amazon deliveries and C-returns × variable slab + MFN × MFN rate";
       issues.push(
-        "IHS/SMD settlement rules, shortfall recovery, fees and tax are not included",
+        "IHS/SMD settlement rules, shortfall recovery, other fees and tax are not included",
       );
     } else if (provider === "Flipkart") {
       basis = `Monthly ${pricing.slab_mode === "all_units" ? "all-units" : "progressive"} delivery slabs`;
@@ -494,6 +516,9 @@ export function buildBusinessRows(
             : null,
         mg: pricing?.rates.mg_amount_including_mhe ?? null,
         mgVolume: pricing?.rates.delivery_mg_volume ?? null,
+        monthlyFee: pricing?.rates.fire_safety_equipment_fee ?? null,
+        returns: addQuantities(daily.map((d) => d.returns)),
+        pricingEffectiveMonth: pricing?.effective_month ?? null,
         revision: pricing?.revision ?? null,
         basis,
         issues,

@@ -29,6 +29,7 @@ export function DailyBreakup({
       key:
         | "deliveries"
         | "eligibleDeliveries"
+        | "returns"
         | "swa"
         | "mgVolume"
         | "excessVolume"
@@ -45,6 +46,7 @@ export function DailyBreakup({
       [
         "deliveries",
         "eligibleDeliveries",
+        "returns",
         "swa",
         "mgVolume",
         "excessVolume",
@@ -99,6 +101,15 @@ export function DailyBreakup({
             Monthly MG volume: <strong>{quantity(one.mgVolume)}</strong>
           </span>
           <span>
+            Monthly fee: <strong>{money(one.monthlyFee)}</strong>
+          </span>
+          <span>
+            Rate effective:{" "}
+            <strong>
+              {one.pricingEffectiveMonth?.slice(0, 7) ?? "Pending"}
+            </strong>
+          </span>
+          <span>
             {one.model === "xpt"
               ? "Parent delivery rate:"
               : "Excess-delivery rate:"}{" "}
@@ -130,13 +141,15 @@ export function DailyBreakup({
       <div className="fin-notice">
         SWA has separate pricing and is excluded from the calculation until its
         rates are supplied. XPT revenue is fixed payout divided by calendar days
-        plus all XPT Amazon deliveries at the parent’s variable rate. Parent MG
-        excess delivery earnings are calculated separately for each day, with no
-        negative excess or carry-forward between days. MG volume keeps its full
-        precision. MFN is a separate pickup count. IHS quantities and SMD rates
-        are shown for review; IHS earnings and any separate SMD adjustment await
-        the billing rules. Flipkart daily earnings are changes in its cumulative
-        monthly slab amount.
+        plus all XPT Amazon deliveries and C-returns at the parent’s variable
+        rate. Parent MG
+        excess delivery earnings use Amazon deliveries plus C-returns and are
+        calculated separately for each day, with no negative excess or
+        carry-forward between days. MG volume keeps its full precision. MFN is
+        a separate pickup count. IHS quantities and SMD rates are shown for
+        review; IHS earnings and any separate SMD adjustment await the billing
+        rules. Flipkart daily earnings are changes in its cumulative monthly slab
+        amount.
       </div>
       <div className="fin-table-wrap">
         <table className="fin-table fin-daily-table">
@@ -145,7 +158,8 @@ export function DailyBreakup({
               <th>Date</th>
               <th>All deliveries</th>
               <th>SWA (unpriced)</th>
-              <th>Amazon billable deliveries</th>
+              <th>C-returns</th>
+              <th>MG billable volume</th>
               <th>Daily MG volume</th>
               <th>Variable billable volume</th>
               <th>MG / XPT fixed revenue</th>
@@ -171,6 +185,7 @@ export function DailyBreakup({
                 </td>
                 <td>{quantity(sum("deliveries"))}</td>
                 <td>{quantity(sum("swa"))}</td>
+                <td>{quantity(sum("returns"))}</td>
                 <td>{quantity(sum("eligibleDeliveries"))}</td>
                 <td>
                   {one
@@ -219,7 +234,7 @@ export function DailyBreakup({
           </tbody>
           <tfoot>
             <tr>
-              <th colSpan={6}>MTD total</th>
+              <th colSpan={7}>MTD total</th>
               <th>
                 {money(
                   addAmounts(rows.flatMap((r) => r.daily.map((d) => d.base))),

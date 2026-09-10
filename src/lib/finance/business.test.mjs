@@ -623,19 +623,60 @@ test("SMD does not get charged twice and IHS is not guessed from the MFN/return 
   assert.match(d.issues.join(), /separate SMD billing rule pending/);
   assert.match(d.issues.join(), /IHS earnings pending/);
 });
-test("Current-month defaults do not reuse prior-month rate cards", async () => {
+test("Current-month reports carry forward the latest effective rate card", async () => {
   const f = data.businessFilters({});
   assert.equal(f.month, pricing.todayIndia().slice(0, 7));
   assert.equal(f.through, pricing.todayIndia());
+  const prior = { ...card, effective_month: "2026-08-01", revision: 3 };
+  const newer = {
+    ...card,
+    id: "c2",
+    effective_month: "2026-09-01",
+    revision: 1,
+  };
+  assert.deepEqual(data.effectiveCards([prior, newer], "2026-09"), [newer]);
+  assert.deepEqual(data.effectiveCards([prior, newer], "2026-08"), [prior]);
   calls = [];
   const context = await data.financeContext("finance_revenue");
   await data.loadBusiness(context, {});
   assert.ok(
     calls.some(
       (c) =>
-        c[0] === "eq" && c[1] === "effective_month" && c[2] === `${f.month}-01`,
+        c[0] === "lte" &&
+        c[1] === "effective_month" &&
+        c[2] === `${f.month}-01`,
     ),
   );
+});
+test("C-returns share the daily MG threshold and the monthly fee accrues with MG", () => {
+  const { pc, snap } = dailyFixture("2026-09", 1, {
+    mg_amount_including_mhe: "30000",
+    delivery_mg_volume: "3000",
+    fire_safety_equipment_fee: "300",
+  });
+  snap.daily_shipments[0] = {
+    ...snap.daily_shipments[0],
+    deliveries: "90",
+    mg_deliveries: "90",
+    returns: "20",
+    mfn: "0",
+  };
+  const [day] = performance.buildDailyRows(
+    snap,
+    "KOZA",
+    "Amazon",
+    pc,
+    "2026-09",
+    "2026-09-01",
+    false,
+  );
+  assert.equal(day.base, "1010.00");
+  assert.equal(day.returns, "20");
+  assert.equal(day.eligibleDeliveries, "110");
+  assert.equal(day.mgVolume, "100");
+  assert.equal(day.excessVolume, "10");
+  assert.equal(day.variable, "200.00");
+  assert.equal(day.revenue, "1210.00");
 });
 test("Daily costs preserve nulls and cannot allocate another client's station expenses", () => {
   const { pc, snap } = dailyFixture();
@@ -993,7 +1034,7 @@ test("An XPT-only reader inherits the company/month-scoped parent rate without p
                 const parentQuery = steps.some(
                   (s) =>
                     s[0] === "select" &&
-                    s[1] === "id,station_code,revision,rates",
+                    s[1] === "id,station_code,effective_month,revision,rates",
                 );
                 resolve({
                   data: parentQuery
@@ -1001,6 +1042,7 @@ test("An XPT-only reader inherits the company/month-scoped parent rate without p
                         {
                           id: "p2",
                           station_code: "KGQA",
+                          effective_month: "2026-08-01",
                           revision: 2,
                           rates: {
                             variable_slab: "22",
@@ -1010,6 +1052,7 @@ test("An XPT-only reader inherits the company/month-scoped parent rate without p
                         {
                           id: "p1",
                           station_code: "KGQA",
+                          effective_month: "2026-08-01",
                           revision: 1,
                           rates: { variable_slab: "21" },
                         },
@@ -1070,13 +1113,17 @@ test("An XPT-only reader inherits the company/month-scoped parent rate without p
     assert.ok(
       steps.some(
         (s) =>
-          s[0] === "eq" && s[1] === "effective_month" && s[2] === "2026-08-01",
+          s[0] === "lte" &&
+          s[1] === "effective_month" &&
+          s[2] === "2026-08-01",
       ),
     );
   }
   const parentQuery = queries.find((steps) =>
     steps.some(
-      (s) => s[0] === "select" && s[1] === "id,station_code,revision,rates",
+      (s) =>
+        s[0] === "select" &&
+        s[1] === "id,station_code,effective_month,revision,rates",
     ),
   );
   assert.ok(

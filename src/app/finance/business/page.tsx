@@ -217,11 +217,13 @@ export default async function BusinessPage({
       </section>
       <div className="fin-notice">
         <strong>Management estimate, before final billing.</strong> Amazon uses
-        monthly MG × {elapsed}/{monthEnd(filters.month).slice(8)} calendar days.
-        Each day adds max(0, Amazon deliveries − monthly MG volume ÷ calendar
-        days) × variable slab rate, plus MFN count × MFN rate. SWA is excluded
-        pending its separate rates. IHS/SMD settlement rules, recoveries, fees
-        and tax remain outside this estimate. Flipkart uses configured monthly
+        (monthly MG + configured monthly fee) × {elapsed}/
+        {monthEnd(filters.month).slice(8)} calendar days. Each day adds max(0,
+        Amazon deliveries + C-returns − monthly MG volume ÷ calendar days) ×
+        variable slab rate, plus MFN count × MFN rate. A rate card remains
+        effective until a newer month replaces it. SWA is excluded pending its
+        separate rates. IHS/SMD settlement rules, recoveries, other fees and tax
+        remain outside this estimate. Flipkart uses configured monthly
         delivery slabs. P&L subtracts recorded operating costs only; missing
         expense days and unallocated overhead can overstate profit.
       </div>
@@ -368,7 +370,8 @@ export default async function BusinessPage({
                     {quantity(row.deliveries)}
                     {row.provider === "Amazon" && (
                       <small>
-                        Amazon {quantity(row.eligibleDeliveries)} · SWA{" "}
+                        MG billable {quantity(row.eligibleDeliveries)} incl.
+                        C-returns {quantity(row.returns)} · SWA{" "}
                         {quantity(row.swaDeliveries)} (unpriced)
                       </small>
                     )}
@@ -386,6 +389,9 @@ export default async function BusinessPage({
                           ? `Volume: ${quantity(row.mgVolume)}`
                           : row.basis}
                       </small>
+                      {row.monthlyFee !== null && (
+                        <small>Monthly fee: {money(row.monthlyFee)}</small>
+                      )}
                     </td>
                   )}
                   <td>
@@ -403,7 +409,7 @@ export default async function BusinessPage({
                     )}
                     <small>
                       {row.revision
-                        ? `Rate revision ${row.revision}`
+                        ? `Effective ${row.pricingEffectiveMonth?.slice(0, 7)} · revision ${row.revision}`
                         : "Rate card needed"}
                     </small>
                   </td>

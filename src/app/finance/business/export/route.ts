@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     if (daily && query.daily && query.daily !== "all" && !selected.length)
       throw new Error("No permitted allocation matches this daily breakup.");
     const caveat =
-      "Management estimate only. Daily MG plus positive daily excess deliveries at the variable slab rate, plus MFN. XPT uses its fixed payout plus all its Amazon deliveries at the parent variable rate. SWA is excluded pending separate pricing. IHS/SMD settlement rules, recoveries, fees and tax are excluded. Costs are imported operating costs only. Blank values are unavailable; pending earnings are excluded.";
+      "Management estimate only. Monthly MG and configured monthly fee are divided by the selected month's actual calendar days. Positive daily excess uses Amazon deliveries plus C-returns above the prorated MG volume, at the variable slab rate, plus MFN. The latest rate card effective on or before the selected month remains active until replaced. XPT uses its fixed payout plus all its Amazon deliveries and C-returns at the parent variable rate. SWA is excluded pending separate pricing. IHS/SMD settlement rules, recoveries, other fees and tax are excluded. Costs are imported operating costs only. Blank values are unavailable; pending earnings are excluded.";
     const dailyBody = daily
       ? csvText([
           [
@@ -32,7 +32,8 @@ export async function GET(request: Request) {
             "Date",
             "Deliveries",
             "SWA deliveries (unpriced)",
-            "Amazon billable deliveries",
+            "C-returns",
+            "MG billable volume",
             "Pricing model",
             "Parent station",
             "Parent rate revision",
@@ -68,6 +69,7 @@ export async function GET(request: Request) {
               d.date,
               d.deliveries,
               d.swa,
+              d.returns,
               d.eligibleDeliveries,
               r.model,
               r.parentStation,
@@ -112,9 +114,12 @@ export async function GET(request: Request) {
       "Through",
       "Deliveries",
       "SWA deliveries (unpriced)",
-      "Amazon billable deliveries",
+      "C-returns",
+      "MG billable volume",
       "Monthly MG",
+      "Monthly fee",
       "MG delivery volume",
+      "Pricing effective month",
       "Rate revision",
       "MTD revenue estimate INR",
       ...(tab === "pnl"
@@ -159,9 +164,12 @@ export async function GET(request: Request) {
           filters.through,
           r.deliveries,
           r.swaDeliveries,
+          r.returns,
           r.eligibleDeliveries,
           r.mg,
+          r.monthlyFee,
           r.mgVolume,
+          r.pricingEffectiveMonth,
           r.revision,
           r.revenue,
           ...(tab === "pnl"

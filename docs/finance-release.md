@@ -50,8 +50,10 @@ files or database credentials. Re-importing an existing month/station is rejecte
 Use Edit for corrections and Copy to month for a new effective month. Prior
 revisions remain available, and stale concurrent edits fail atomically.
 
-Amazon MTD revenue is the sum of daily MG accrual, daily positive excess delivery
-volume × variable_slab, and MFN count × mfn_rate. Both MG payout and volume use
+Amazon rate cards remain effective from their effective month until a later card
+replaces them. Amazon MTD revenue is the sum of daily MG plus the configured
+monthly fee accrual, daily positive excess delivery and C-return volume ×
+variable_slab, and MFN count × mfn_rate. MG payout, monthly fee and MG volume use
 the actual calendar month (including leap years). Excess is computed independently
 per day, with no shortfall carry-forward, and fractional thresholds are preserved.
 Component totals use cumulative paise rounding, so displayed daily revenue sums
@@ -67,9 +69,10 @@ Daily reports expose their actual quantities and pricing for review, but do not 
 additional earnings. Shortfall recovery, fees and tax are not included. Flipkart
 retains configured cumulative monthly slabs; daily amounts are changes in that total.
 
-Apply scripts/finance/business_daily_v2.sql, business_daily_v3.sql and
-business_daily_v4.sql for the service-only daily reader, batched audit lookup and
-separate Amazon/SWA quantities.
+Apply scripts/finance/business_daily_v2.sql, business_daily_v3.sql,
+business_daily_v4.sql and the latest Supabase Finance migration for the
+service-only daily reader, batched audit lookup, separate Amazon/SWA quantities
+and C-return billing volume.
 Raw IHS/SMD audit data matches the current CPS source batch, station, date and
 associate. Shipment-type duplicates use the first row, matching the existing capacity
 reader; superseded imports are not added again. The monthly overview is the default.

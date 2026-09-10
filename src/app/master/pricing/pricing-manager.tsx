@@ -280,7 +280,7 @@ export function PricingManager({
       )}
       <div className="fin-filters">
         <label>
-          Effective month
+          Effective from month
           <select value={month} onChange={(e) => setMonth(e.target.value)}>
             <option value="">All months</option>
             {months.map((m) => (
@@ -322,7 +322,7 @@ export function PricingManager({
               <tr>
                 <th>Allocation / location</th>
                 <th>Client & model</th>
-                <th>Effective month</th>
+                <th>Effective from</th>
                 <th>Monthly MG / XPT fixed / slabs</th>
                 <th>MG delivery volume</th>
                 <th>Revision</th>
@@ -515,7 +515,7 @@ export function PricingManager({
                 </datalist>
               </label>
               <label>
-                Effective month
+                Effective from month
                 <input
                   type="month"
                   required
@@ -531,18 +531,18 @@ export function PricingManager({
               </label>
             </div>
             <p className="subtle">
-              Rates apply to this calendar month only. Use “Copy to month” for a
-              new period. Editing this month creates a new revision and
-              recalculates its estimates.
+              Rates start in this calendar month and remain active until a newer
+              effective month is saved. Editing the same start month creates a
+              new revision and recalculates affected estimates.
             </p>
             {editing.provider === "Amazon" && isXptPricing(editing) ? (
               <>
                 <div className="fin-notice">
                   <strong>XPT of {editing.rates.parent_station_code}</strong>.
-                  Every delivered Amazon package (excluding SWA) earns the
-                  parent station’s Variable_Slab rate for this month, with no MG
-                  volume threshold. Editing the parent rate updates the XPT
-                  calculation automatically.
+                  Every Amazon delivery and C-return (excluding SWA) earns the
+                  parent station’s Variable_Slab rate, with no MG volume
+                  threshold. Editing the parent rate updates the XPT calculation
+                  automatically.
                 </div>
                 <label className="fin-label">
                   XPT fixed payout per month (₹)
@@ -735,7 +735,7 @@ export function PricingManager({
             preserve deliberate revision history.
           </p>
           <label className="fin-label">
-            Effective month
+            Effective from month
             <input
               type="month"
               value={importMonth}
