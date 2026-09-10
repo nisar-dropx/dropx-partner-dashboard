@@ -523,7 +523,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
       setError("Complete every applicable verification before saving.");
       return;
     }
-    const blockedCheck = ["pan", "dl", "pf_uan"]
+    const blockedCheck = ["pan", "pan_aadhaar", "dl", "pf_uan"]
       .map((kind) => currentCheck(kind))
       .find((item) => item?.blockSubmit);
     if (blockedCheck) {
