@@ -1,3 +1,5 @@
+
+import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 import type { PerformanceOperationalSnapshot } from "@/lib/ops-pulse/performance-review";
 import {TrendButton} from "@/components/performance-trends";
 import { ReviewPersonHistoryLink } from "@/components/review-attendance-history";
@@ -24,13 +26,13 @@ export function PerformanceOpeningCard({ snapshot }: { snapshot: OpeningSnapshot
   const earlier = snapshot.openingFirstOtherPunch;
   const isLate = (snapshot.openingLateMinutes ?? 0) > 0;
   const variance = snapshot.firstPunchAt ? durationText(snapshot.openingLateMinutes) : "No People opening punch";
-  return <details className={`performance-fact-card opening ${isLate ? "late" : earlier ? "opening-warning" : ""}`} name="performance-review-fact">
+  return <ReviewDetails className={`performance-fact-card opening ${isLate ? "late" : earlier ? "opening-warning" : ""}`} name="performance-review-fact">
     <summary>
       <span>Station opened · People</span>
       <strong>{timeText(snapshot.firstPunchAt)}</strong>
       <small>{earlier ? <b className="opening-warning">Earlier non-People punch</b> : snapshot.firstPunchAt && snapshot.scheduledOpeningTime ? <b className={isLate ? "late" : "on-time"}>{variance}</b> : null}{snapshot.firstPunchBy || "No People opening punch"}</small>
     </summary>
-    <div className="performance-opening-popover"><div className="review-opening-history"><TrendButton group="opening" metric="opening" label="Station opening"/></div>
+    <div className="performance-opening-popover"><ReviewDetailsClose label="Close station opening details"/><div className="review-opening-history"><TrendButton group="opening" metric="opening" label="Station opening"/></div>
       <p><span>Station opening shift</span><b>{timeText(snapshot.scheduledOpeningTime)}</b></p>
       <p><span>First People opening punch</span><b>{timeText(snapshot.firstPunchAt)}</b></p>
       <p><span>People profile</span><b>{snapshot.firstPunchBy || "No People opening punch"}</b></p>
@@ -47,5 +49,5 @@ export function PerformanceOpeningCard({ snapshot }: { snapshot: OpeningSnapshot
       <p><span>Source</span><b>{snapshot.openingShiftSource || "No approved station roster"}</b></p>
       <p><span>Opening punch window</span><b>{snapshot.openingWindowStart.slice(0, 5)}–{snapshot.openingWindowEnd.slice(0, 5)}</b></p>
     </div>
-  </details>;
+  </ReviewDetails>;
 }

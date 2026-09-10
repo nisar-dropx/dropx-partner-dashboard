@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { PerformanceConnection } from "@/lib/ops-pulse/performance-review";
 import { savePerformanceConnection } from "@/app/ops-pulse/performance/actions";
 import { ReviewActionForm } from "@/components/review-action-form";
-import { clearanceVariance } from "@/lib/ops-pulse/station-review-targets";
+import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 import {TrendButton} from "@/components/performance-trends";
 
 function clockValue(value:string|null) {
@@ -12,13 +12,13 @@ function clockValue(value:string|null) {
 function persistedConnectionId(id:string|undefined) {
   return id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id : "";
 }
-export function PerformanceConnections({connections,date,stationCode,canEdit,clearanceCutoff=null}:{
-  connections:PerformanceConnection[]; date:string; stationCode:string; canEdit:boolean; clearanceCutoff?:string|null;
+export function PerformanceConnections({connections,date,stationCode,canEdit}:{
+  connections:PerformanceConnection[]; date:string; stationCode:string; canEdit:boolean;
 }) {
-  const [adding,setAdding]=useState(connections.length===0);
+  const [adding,setAdding]=useState(false);
   const timingForm=(connection:PerformanceConnection|null,index:number)=> <ReviewActionForm
     key={`${stationCode}-${date}-${connection?.id||"new"}-${connection?.version||0}`}
-    action={savePerformanceConnection} className="performance-operations-form review-station-times"
+    action={savePerformanceConnection} resetOnSuccess={!connection} className="performance-operations-form review-station-times"
     onSaved={()=>{if(!connection)setAdding(false);}}>
     <input type="hidden" name="source_date" value={date}/>
     <input type="hidden" name="station_code" value={stationCode}/>
@@ -27,26 +27,24 @@ export function PerformanceConnections({connections,date,stationCode,canEdit,cle
     <label>Vehicle / connection<input name="label" maxLength={100} required defaultValue={connection?.label||`Vehicle ${index+1}`}/></label>
     <label>Vehicle arrival<input name="arrival" type="time" required defaultValue={clockValue(connection?.arrival_at??null)}/></label>
     <label>Unloading complete<input name="unloading" type="time" defaultValue={clockValue(connection?.unloading_at??null)}/></label>
-    <label>Vehicle cleared (manual)<input name="clearance" type="time" defaultValue={clockValue(connection?.clearance_at??null)}/></label>
     <button className="button secondary">Save vehicle timings</button>
   </ReviewActionForm>;
   return <section className="review-vehicles" aria-label="Station vehicles">
-    <header><span><strong>Station vehicles · {connections.length}</strong><small>{clearanceCutoff ? `Clearance cutoff ${clearanceCutoff} · IST` : "Arrival → unloading → clearance · each vehicle separately"}</small></span>
-      <div className="review-history-actions"><TrendButton group="station" metric="arrival" label="Vehicle timings and EMD"/>{canEdit?<button type="button" className="button secondary" disabled={adding} onClick={()=>setAdding(true)}>+ Add vehicle</button>:null}</div>
+    <header><span><strong>Station vehicles · {connections.length}</strong><small>Arrival & unloading · IST</small></span>
+      <div className="review-history-actions"><TrendButton group="station" metric="arrival" label="Vehicle timings and EMD"/>{canEdit?<button type="button" className="button secondary" aria-expanded={adding} aria-controls="review-new-vehicle" onClick={()=>setAdding(v=>!v)}>{adding?"Close new vehicle":"+ Add vehicle"}</button>:null}</div>
     </header>
     {connections.map((connection,index)=>{
-      const variance=clearanceVariance(connection.clearance_at,date,clearanceCutoff);
-      return <details key={connection.id} className="review-vehicle" open={connections.length===1}>
-        <summary><span><strong>{connection.label||`Vehicle ${index+1}`}</strong><small>{clockValue(connection.arrival_at)||"—"} → {clockValue(connection.unloading_at)||"—"} → {clockValue(connection.clearance_at)||"—"}</small></span>
-          {variance!==null?<span className={variance>0?"review-target-missed":"review-target-met"}>{variance>0?`${variance} min late`:"Within cutoff"}</span>:null}
+      return <ReviewDetails key={connection.id} className="review-vehicle">
+        <summary><span><strong>{connection.label||`Vehicle ${index+1}`}</strong><small>Arrived {clockValue(connection.arrival_at)||"—"} · Unloaded {clockValue(connection.unloading_at)||"Not entered"}</small></span><span className="review-expand-label">{canEdit?"Edit timings":"View timings"}</span>
         </summary>
+        <ReviewDetailsClose label={`Close ${connection.label||`Vehicle ${index+1}`} timings`}/>
         {canEdit?timingForm(connection,index):<div className="performance-operations-form review-station-times">
-          <label>Vehicle arrival<strong>{clockValue(connection.arrival_at)||"—"}</strong></label><label>Unloading complete<strong>{clockValue(connection.unloading_at)||"—"}</strong></label><label>Vehicle cleared (manual)<strong>{clockValue(connection.clearance_at)||"—"}</strong></label>
+          <label>Vehicle arrival<strong>{clockValue(connection.arrival_at)||"—"}</strong></label><label>Unloading complete<strong>{clockValue(connection.unloading_at)||"—"}</strong></label>
         </div>}
         <small className="review-cod-source">Updated by {connection.updated_by_name || "Station team"}</small>
-      </details>;
+      </ReviewDetails>;
     })}
-    {canEdit&&adding?<div className="review-new-vehicle"><small>Save this vehicle, then use + Add vehicle for the next connection.</small>{timingForm(null,connections.length)}{connections.length?<button type="button" className="button secondary" onClick={()=>setAdding(false)}>Cancel new vehicle</button>:null}</div>:null}
-    {!canEdit&&!connections.length?<p>No vehicle timings entered.</p>:null}
+    {canEdit?<div id="review-new-vehicle" className="review-new-vehicle" hidden={!adding}><small>Add each vehicle separately. Closing keeps your draft until you leave this review.</small>{timingForm(null,connections.length)}</div>:null}
+    {!connections.length&&!adding?<p className="review-empty">No vehicle timings entered.{canEdit?" Use + Add vehicle to record arrival and unloading.":""}</p>:null}
   </section>;
 }

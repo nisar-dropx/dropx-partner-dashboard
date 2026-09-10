@@ -185,10 +185,12 @@ export async function savePerformanceConnection(data:FormData):Promise<ReviewAct
     if (stepsResult.error) throw new Error("Unable to check the current review stage.");
     const access=await getReviewAccess(authorization,station.id,review,stepsResult.data ?? [],{ inScope: true });
     if (!access.canEditConnections) throw new Error("Only the station team, first review manager on their stage, or Program Manager can edit connection timings.");
-    const times = stationTimingClocks({ arrival: text(data, "arrival"), unloading: text(data, "unloading"), clearance: text(data, "clearance") }, date);
+    // Vehicle clearance is retired. The RPC preserves historical values; new
+    // saves use only arrival/unloading. EDD clearance comes from the live ledger.
+    const { arrival, unloading } = stationTimingClocks({ arrival: text(data, "arrival"), unloading: text(data, "unloading"), clearance: "" }, date);
     const result = await supabaseAdmin!.rpc("ops_save_review_connection", {
       p_company: companyId, p_actor: authorization.userId, p_station: station.id, p_data: {
-        ...times,
+        arrival, unloading,
         id: text(data, "connection_id"),
         version: Number(text(data, "version")) || 1,
         service_date: date,

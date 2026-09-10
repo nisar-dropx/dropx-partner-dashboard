@@ -1,4 +1,6 @@
 "use client";
+
+import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 import { useMemo, useState } from "react";
 import { codFilterParams, filterReviewCod, groupReviewCodAssociates, summarizeReviewCod } from "@/lib/ops-pulse/review-cod";
 import type { ReviewCodFilters, ReviewCodLine, ReviewCodSnapshot } from "@/lib/ops-pulse/review-cod";
@@ -54,8 +56,8 @@ export function PerformanceCodPending({snapshot}:{snapshot:ReviewCodSnapshot}) {
   }
 
   return <section className={`review-cod-pending ${summary?.tone || "neutral"}`} aria-label="COD pending">
-    <details onToggle={event => {if (event.currentTarget.open) void loadDetails();}}>
-      <summary><span><strong>COD pending</strong><small>{summary ? summary.total ? `${summary.tidCount} TIDs · ${summary.overdueAmount ? `${money(summary.overdueAmount)} aged 2+ days` : "No balance aged 2+ days"}` : "No COD pending in this report" : snapshot.error}</small></span><b>{summary ? money(summary.total) : "—"}</b><span className="review-cod-info" aria-label="Show COD ageing and details">i</span></summary>
+    <ReviewDetails onToggle={event => {if (event.currentTarget.open) void loadDetails();}}>
+      <summary><span><strong>COD pending</strong><small>{summary ? summary.total ? `${summary.tidCount} TIDs · ${summary.overdueAmount ? `${money(summary.overdueAmount)} aged 2+ days` : "No balance aged 2+ days"}` : "No COD pending in this report" : snapshot.error}</small></span><b>{summary ? money(summary.total) : "—"}</b><span className="review-cod-info" aria-label="Show COD ageing and details">i</span></summary><ReviewDetailsClose/>
       {summary ? <div className="review-cod-body">
         <p className="review-cod-source">Latest imported position · {snapshot.importedAt ? new Date(snapshot.importedAt).toLocaleString("en-IN", {timeZone:"Asia/Kolkata"}) : "—"}. Not a historical review-day balance.</p>
         <div className="review-cod-buckets" role="group" aria-label="Filter COD by ageing">
@@ -77,16 +79,16 @@ export function PerformanceCodPending({snapshot}:{snapshot:ReviewCodSnapshot}) {
           <div className="review-cod-rows">
             {view === "days" ? selected.summary.days.slice(start, start+pageSize).map(row => <button type="button" className={`review-cod-row ${row.overdue ? "overdue" : ""}`} key={row.label} onClick={() => drillInto("day", row.label)}><span><strong>{row.label}</strong><small>{row.lines} source lines · View TIDs</small></span><b>{money(row.amount)} ›</b></button>) : null}
             {view === "associates" ? selected.associates.slice(start, start+pageSize).map(row => <button type="button" className={`review-cod-row ${row.overdueAmount ? "overdue" : ""}`} key={row.key} onClick={() => drillInto("associate", row.key)}><span><strong>{row.name}</strong><small>{row.id || "ID not supplied"} · {row.tidCount} TIDs · View details</small></span><b>{money(row.amount)} ›</b></button>) : null}
-            {view === "tids" ? selected.lines.slice(start, start+pageSize).map(line => <details className={`review-cod-tid ${line.overdue ? "overdue" : ""}`} key={line.rowNumber}>
-              <summary className="review-cod-row"><span><strong>{line.trackingId || "TID not supplied"}</strong><small>{line.associate} · {line.pendingDate || "Date not supplied"} · {line.bucket}</small></span><b>{money(line.amount)} ›</b></summary>
+            {view === "tids" ? selected.lines.slice(start, start+pageSize).map(line => <ReviewDetails className={`review-cod-tid ${line.overdue ? "overdue" : ""}`} key={line.rowNumber}>
+              <summary className="review-cod-row"><span><strong>{line.trackingId || "TID not supplied"}</strong><small>{line.associate} · {line.pendingDate || "Date not supplied"} · {line.bucket}</small></span><b>{money(line.amount)} ›</b></summary><ReviewDetailsClose/>
               <dl><div><dt>Order ID</dt><dd>{line.orderId || "Not supplied"}</dd></div><div><dt>DA ID</dt><dd>{line.associateId || "Not supplied"}</dd></div><div><dt>Cash status</dt><dd>{line.status}</dd></div><div><dt>Source line</dt><dd>{line.rowNumber}</dd></div></dl>
-            </details>) : null}
+            </ReviewDetails>) : null}
             {!rowCount ? <p>No COD pending in this selection.</p> : null}
           </div>
           {rowCount > pageSize ? <nav className="review-backlog-pages"><button type="button" disabled={page === 1} onClick={() => setPage(page-1)}>Previous</button><span>{page} / {Math.ceil(rowCount/pageSize)}</span><button type="button" disabled={page*pageSize >= rowCount} onClick={() => setPage(page+1)}>Next</button></nav> : null}
         </> : null}
         <small className="review-cod-source">Amazon’s ageing buckets · all order lines retained. Excel includes this station and the selected ageing, date and DA filters only.</small>
       </div> : null}
-    </details>
+    </ReviewDetails>
   </section>;
 }

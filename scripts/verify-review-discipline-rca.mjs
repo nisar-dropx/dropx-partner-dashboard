@@ -80,6 +80,7 @@ assert.match((await actions.savePerformanceReviewItem(form())).error, /delay rea
 
 const React = require("react"), { renderToStaticMarkup } = require("react-dom/server");
 const ui = compile("src/components/performance-rca-actions.tsx", {
+  "@/components/review-details": compile("src/components/review-details.tsx"),
   "@/lib/date-format": { formatDashboardDate: v => v }, "@/app/ops-pulse/performance/actions": actions,
   "@/lib/ops-pulse/review-discipline-rca": logic,
   "@/components/review-attendance-history": { ReviewPersonHistoryLink: () => null },

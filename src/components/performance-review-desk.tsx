@@ -1,3 +1,6 @@
+
+import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
+import { ReviewScorecard } from "@/components/review-scorecard";
 import { PerformanceCarriedActions } from "@/components/performance-carried-actions";
 import {PerformanceTrendProvider,TrendButton} from "@/components/performance-trends";
 import { PerformanceVanFuel } from "@/components/performance-van-fuel";
@@ -97,25 +100,22 @@ function stationKey(value: string | null | undefined) {
   return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
-function valueText(value: number | null) {
-  return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
-}
-
 function CostTrendCard({ metric, label, value, summary, children }: { metric: string; label: string; value: string; summary: string; children: ReactNode }) {
   return <article className="performance-cps-card">
     <div className="performance-cps-card-body">
       <span>{label}</span><strong>{value}</strong><small>{summary}</small>
       <TrendButton group="cost" metric={metric} label={label} variant="card"/>
     </div>
-    <details>
+    <ReviewDetails name="review-cost-detail">
       <summary aria-label={`View ${label} details`} title={`View ${label} details`}>i</summary>
-      <div>{children}</div>
-    </details>
+      <div><ReviewDetailsClose label={`Close ${label} details`}/>{children}</div>
+    </ReviewDetails>
   </article>;
 }
 
 function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociateDelivery[]; total: number }) {
   return <div className="performance-associate-popover">
+    <ReviewDetailsClose label="Close associate delivery details"/>
     <div className="performance-associate-popover-scroll">
       <div className="performance-associate-popover-head"><span>Associate</span><span>Delivered</span><span>Assigned</span><span>Payment scheme</span><span>Current rate card</span></div>
       <div className="performance-associate-popover-body">{rows.length ? rows.map((person) => <div className="performance-associate-row" key={`${person.associateId}-${person.name}`}>
@@ -222,15 +222,16 @@ export function PerformanceReviewDesk(props: Props) {
       />
     </section>
 
-    <details className="performance-review-overview"><summary><span><strong>Station reviews · {formatDashboardDate(date)}</strong><small>Selected performance day only · {locations.length} permitted stations</small></span><span className="performance-review-overview-counts"><b>{completedCount} done</b><b>{inReviewCount} active</b><b>{notStartedCount} not started</b></span></summary><div>{locations.map(location=>{
+    <ReviewDetails className="performance-review-overview"><summary><span><strong>Station reviews · {formatDashboardDate(date)}</strong><small>Selected performance day only · {locations.length} permitted stations</small></span><span className="performance-review-overview-counts"><b>{completedCount} done</b><b>{inReviewCount} active</b><b>{notStartedCount} not started</b></span></summary><div>{locations.map(location=>{
       const entry=reviewByStation.get(stationKey(location.station_code));
       const current=entry?steps.find(step=>step.review_id===entry.id&&step.step_order===entry.current_step_order&&step.status==="pending"):null;
       return <article key={location.id}><span><strong>{location.station_code}</strong><small>{formatDashboardDate(date)} · {location.station_name||location.city}</small></span><em className={entry?.status||"not-started"}>{entry?.status.replace("_"," ")||"Not started"}</em><p>{entry?.review_summary||"Takeaway pending"}{entry?<small>Started {new Date(entry.started_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}</small>:null}</p><span><b>{current?.proxy_reviewer_name||current?.reviewer_name||"—"}</b><Link href={reviewLink(date,location.station_code)}>View review →</Link></span></article>;
-    })}</div></details>
-    <details className="performance-review-overview review-earlier-pending" open={props.pendingExpanded}><summary><span><strong>Earlier pending reviews</strong><small>Before {formatDashboardDate(date)} · separate from the selected day</small></span><b>{props.backlog.count} pending</b></summary>
+    })}</div><ReviewDetailsClose label="Close station reviews"/></ReviewDetails>
+    <ReviewDetails className="performance-review-overview review-earlier-pending" open={props.pendingExpanded}><summary><span><strong>Earlier pending reviews</strong><small>Before {formatDashboardDate(date)} · separate from the selected day</small></span><b>{props.backlog.count} pending</b></summary>
       {props.backlog.error?<p role="alert">{props.backlog.error}</p>:<div>{props.backlog.rows.map(entry=><article key={entry.id}><span><strong>{entry.station_code}</strong><small>Performance {formatDashboardDate(entry.source_date)}</small></span><em className="in_review">Pending</em><p>{entry.pending_role}<small>{entry.pending_name||"Manager not linked"}</small></p><span><small>Started {new Date(entry.started_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}</small><Link href={reviewLink(entry.source_date,entry.station_code)}>Review {formatDashboardDate(entry.source_date)} →</Link></span></article>)}{!props.backlog.count?<p className="review-empty">No earlier pending reviews.</p>:null}</div>}
       {props.backlog.count>props.backlog.pageSize?<nav className="review-backlog-pages">{props.backlog.page>1?<Link href={reviewLink(date,selectedCode,props.backlog.page-1)}>← Previous</Link>:null}<span>Page {props.backlog.page} of {Math.ceil(props.backlog.count/props.backlog.pageSize)}</span>{props.backlog.page*props.backlog.pageSize<props.backlog.count?<Link href={reviewLink(date,selectedCode,props.backlog.page+1)}>Next →</Link>:null}</nav>:null}
-    </details>
+      <ReviewDetailsClose label="Close earlier pending reviews"/>
+    </ReviewDetails>
 
     <section className="performance-review-statusbar">
       <div><span>Source</span><strong>{sourceType === "amazon_hawkeye_daily" ? "Hawkeye D-1" : sourceType === "daily_edsp_metrics" ? "Daily EDSP" : "Operational data"}</strong></div>
@@ -251,12 +252,14 @@ export function PerformanceReviewDesk(props: Props) {
     <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update vehicle timings and noon EMD; view the full review":canEdit?"Your review · update RCA, actions, takeaway and station timings":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
     <PerformanceReviewExceptions key={`${selectedCode}-${date}-${review?.updated_at??"not-started"}`} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy} canAccessBypass={props.canAccessBypass} canAccessProxy={props.canAccessProxy} canUndoBypass={props.canUndoBypass} canStart={canAdd} hasRoute={Boolean(review||reviewChain.length)} routeLabel={reviewChain.map((step)=>`${step.reviewerRole} · ${step.reviewerName}`).join(" → ") || selectedSteps.map((step)=>`${step.reviewer_role} · ${step.reviewer_name}`).join(" → ")}/>
 
+    <nav className="review-section-nav" aria-label="Jump to review section"><a href="#review-performance">Overview</a>{rcaRows.length?<a href="#review-rca">RCA & reasons <b>{rcaRows.length}</b></a>:null}<a href="#review-station-updates">Vehicle & EMD</a><a href="#review-cost">Cost & COD</a><a href="#review-followups">Actions</a>{review?<a href="#review-discussion">Discussion</a>:null}</nav>
+
     <div className="performance-review-columns">
-      <section className="panel performance-review-section">
+      <section className="panel performance-review-section" id="review-performance">
         <div className="panel-head"><div><span className="performance-review-kicker">01 · PERFORMANCE</span><h2>D-1 station performance</h2><p className="subtle">Uploaded Amazon metrics, opening discipline and action ownership in one review.</p></div><div className="review-history-actions"><TrendButton group="performance" metric="metric_health" label="Performance"/><strong className={misses.length ? "review-risk" : "review-good"}>{misses.length} exception{misses.length === 1 ? "" : "s"}</strong></div></div>
         <div className="performance-review-facts">
-          <details className="performance-fact-card" name="performance-review-fact"><summary><span>Delivered · view split</span><strong>{snapshot.deliveredCount.toLocaleString("en-IN")}</strong><small>{snapshot.associateDeliveries.length} delivering associate{snapshot.associateDeliveries.length === 1 ? "" : "s"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></details>
-          <details className="performance-fact-card" name="performance-review-fact"><summary><span>Average allocation · view split</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / {snapshot.activeFeCount} active FEs</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></details>
+          <ReviewDetails className="performance-fact-card" name="performance-review-fact"><summary><span>Delivered · view split</span><strong>{snapshot.deliveredCount.toLocaleString("en-IN")}</strong><small>{snapshot.associateDeliveries.length} delivering associate{snapshot.associateDeliveries.length === 1 ? "" : "s"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></ReviewDetails>
+          <ReviewDetails className="performance-fact-card" name="performance-review-fact"><summary><span>Average allocation · view split</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / {snapshot.activeFeCount} active FEs</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></ReviewDetails>
           <PerformanceOpeningCard snapshot={snapshot}/>
           <PerformanceEddClearanceCard data={props.eddClearance}/>
           <PerformanceUtrDisciplineCard data={props.utrDiscipline} date={date}/>
@@ -272,10 +275,7 @@ export function PerformanceReviewDesk(props: Props) {
             <p>{previousReview.review_summary}</p>
           </div>
         ) : null}
-        <details className="performance-inline-detail" open>
-          <summary><span>Performance scorecard · today&apos;s uploaded metrics</span><b>{metrics.length} metrics</b></summary>
-          <p className="review-history-hint">This is where today&apos;s Hawkeye upload lands. Click any metric for daily values · 7 or 14 days</p><div className="performance-review-metrics">{metrics.map((metric) => <article className={metric.severity} key={metric.key}><span title={metric.label}>{metric.short}</span><strong>{valueText(metric.actual)}</strong><small>{metric.target == null ? "Reference metric" : `Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}</small><TrendButton group="performance" metric={metric.key} label={metric.short} variant="card"/></article>)}</div>
-        </details>
+        <ReviewScorecard key={`${selectedCode}-${date}`} metrics={metrics}/>
         {rcaRows.length ? (
           <PerformanceRcaActions
             key={review?.id ?? `${selectedCode}-${date}-not-started`}
@@ -295,8 +295,8 @@ export function PerformanceReviewDesk(props: Props) {
         ) : null}
         <PerformanceCarriedActions items={carriedActions} previous={previousStationReviews} review={review} canUpdate={props.canManageActions} selectedDate={date}/>
         {props.stationTargetsError ? <p role="alert">{props.stationTargetsError}</p> : null}
-        <div className="review-station-updates">
-          <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections} clearanceCutoff={props.stationTargets.clearanceCutoff}/>
+        <div className="review-station-updates" id="review-station-updates">
+          <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
           <PerformanceNoonEmdEntry target={props.stationTargets.emdNoonTarget} entry={props.noonEmd.row} error={props.noonEmd.error} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
         </div>
         {review && canEdit ? (
@@ -316,7 +316,7 @@ export function PerformanceReviewDesk(props: Props) {
         ) : null}
       </section>
 
-      <section className="panel performance-review-section performance-cps-review">
+      <section className="panel performance-review-section performance-cps-review" id="review-cost">
         <PerformanceCodPending key={`${selectedCode}-${props.codSnapshot.batchId}`} snapshot={props.codSnapshot}/>
         <div className="panel-head"><div><span className="performance-review-kicker">02 · CPS</span><h2>Cost and allocation</h2><p className="subtle">Click a card for its 7-day, 14-day or MTD history. Use i for the selected-day details.</p></div></div>
         <div className="performance-cps-cards">

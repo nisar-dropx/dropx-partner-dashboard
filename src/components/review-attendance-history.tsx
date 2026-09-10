@@ -1,6 +1,8 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
+
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { formatDashboardDate } from "@/lib/date-format";
 import { reviewClock, type UtrDiscipline } from "@/lib/ops-pulse/review-operations";
 import { historyPeriodDays, historyStatusLabels, summarizeAttendance, type AttendancePeriod, type ReviewAttendanceHistory } from "@/lib/ops-pulse/review-attendance-history";
@@ -65,7 +67,9 @@ export function ReviewPersonHistory({ personId }: { personId: string }) {
 
 export function ReviewPersonHistoryLink({ personId, label = "View 7-day / MTD attendance" }: { personId: string; label?: string }) {
   const [open,setOpen] = useState(false);
-  return <div className="review-person-inline"><button type="button" className="review-person-link" aria-expanded={open} onClick={()=>setOpen(v=>!v)}>{label}<span aria-hidden="true"> {open?"▴":"›"}</span></button>{open?<ReviewPersonHistory personId={personId}/>:null}</div>;
+  const trigger = useRef<HTMLButtonElement>(null), id = useId();
+  const close = () => { setOpen(false); trigger.current?.focus({preventScroll:true}); };
+  return <div className="review-person-inline" onKeyDown={event=>{if(open&&event.key==="Escape"){event.preventDefault();event.stopPropagation();close();}}}><button ref={trigger} type="button" className="review-person-link" aria-expanded={open} aria-controls={id} onClick={()=>setOpen(v=>!v)}>{label}<span aria-hidden="true"> {open?"▴":"›"}</span></button><div id={id} hidden={!open}>{open?<><div className="review-details-close-row"><button type="button" className="review-details-close" onClick={close}>× Close person history</button></div><ReviewPersonHistory personId={personId}/></>:null}</div></div>;
 }
 
 export function UtrRepeatSummary() {
@@ -108,9 +112,10 @@ export function ReviewAttendanceExceptionsCard() {
   const absence=items.filter(i=>i.day.status==="unplanned_absence").length, worked=items.filter(i=>i.day.status==="week_off_worked").length;
   const unchecked=items.filter(i=>["absence_unconfirmed","attendance_conflict"].includes(i.day.status)).length;
   const pending=items.filter(i=>i.day.status==="leave_pending").length;
-  return <details className={`performance-fact-card review-operation-card review-attendance-exceptions ${absence?"late":""}`} name="performance-review-fact">
+  return <ReviewDetails className={`performance-fact-card review-operation-card review-attendance-exceptions ${absence?"late":""}`} name="performance-review-fact">
     <summary aria-label="Unplanned leave and week-off work — view staff details"><span>Unplanned leave / week-off work</span><strong>{history?.data?`${absence} unplanned absence · ${worked} worked on week-off`:history?.error?"Data unavailable":"Checking attendance…"}</strong><small>{history?.data?`${unchecked} need punch checks · ${pending} leave applications pending · selected review day`:"Verified roster, leave applications and attendance"}</small></summary>
     <div className="review-operation-popover">
+      <ReviewDetailsClose label="Close attendance exceptions"/>
       <header><div><b>Attendance exceptions · {history?formatDashboardDate(history.date):""}</b><p>Selected review day · People staff</p></div></header>
       {!history?.data?<HistoryState/>:personId?<><button type="button" className="review-attendance-button" onClick={()=>setPersonId(null)}>← Attendance exceptions</button><ReviewPersonHistory key={personId} personId={personId}/></>:<>
         <div className="review-attendance-filters"><label>Show <select aria-label="Filter attendance exceptions" value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">All exceptions</option><option value="unplanned_absence">Unplanned absence</option><option value="week_off_worked">Worked on week-off</option><option value="check">Needs checking</option><option value="leave_pending">Leave requested</option></select></label></div>
@@ -121,5 +126,5 @@ export function ReviewAttendanceExceptionsCard() {
         <p className="review-operation-note">Unplanned absence requires a recorded absence after a scheduled shift ends, without an active leave application. Missing punches alone stay under “Needs checking”. A week-off punch does not authorize overtime. Click any person for 7-day / MTD details.</p>
       </>}
     </div>
-  </details>;
+  </ReviewDetails>;
 }

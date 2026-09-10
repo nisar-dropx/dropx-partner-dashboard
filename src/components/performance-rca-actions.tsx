@@ -1,5 +1,7 @@
 "use client";
 
+import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
+
 import { Fragment, type ReactNode } from "react";
 import { formatDashboardDate } from "@/lib/date-format";
 import type { PerformanceReviewItem } from "@/lib/ops-pulse/performance-review";
@@ -66,7 +68,7 @@ export function PerformanceRcaActions({
         return (
           <Fragment key={`action-${metric.key}`}>
           {index===0 || Boolean(orderedRows[index-1].reasonOnly)!==Boolean(metric.reasonOnly) ? <h4 className="review-rca-group">{metric.reasonOnly ? "Opening & UTR delays · reason only" : "Performance misses · RCA & action plan"}</h4> : null}
-          <details className="performance-action-item">
+          <ReviewDetails className="performance-action-item">
             <summary>
               <span className={`metric-dot ${metric.severity}`} />
               <strong>{metric.label}</strong>
@@ -75,7 +77,7 @@ export function PerformanceRcaActions({
                 {metric.target == null ? "" : ` · Target ${metric.direction === "higher" ? "≥" : "≤"} ${valueText(metric.target)}`}
               </small>}
               <b>{metric.reasonOnly ? item?.root_cause?.trim() ? "Reason saved" : "Reason required" : item?.status?.replaceAll("_", " ") || "Needs RCA"}<span className="review-rca-edit-label">{!reviewStarted ? "View miss ›" : metric.reasonOnly ? canSaveReason && activeDisciplineKeys.includes(metric.key) ? item?.root_cause?.trim() ? "Edit reason ›" : "Add reason ›" : "View reason ›" : canSaveMetric ? "Edit RCA & plan ›" : "View RCA ›"}</span></b>
-            </summary>
+            </summary><ReviewDetailsClose/>
             {metric.reasonOnly ? <div className="review-delay-detail">
               <p className="review-delay-evidence">{metric.evidence}</p>
               {metric.key.startsWith("utr_late_") ? <ReviewPersonHistoryLink personId={metric.key.replace(/^utr_late_(employee|contractor)_/, "$1:")}/> : null}
@@ -133,7 +135,7 @@ export function PerformanceRcaActions({
                 <p><b>Owner / due</b>{item?.action_owner || "—"}{item?.due_date ? ` · ${formatDashboardDate(item.due_date)}` : ""}</p>
               </div>
             )}
-          </details>
+          </ReviewDetails>
           </Fragment>
         );
       })}

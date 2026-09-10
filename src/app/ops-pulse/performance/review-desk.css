@@ -1,5 +1,6 @@
 /* Scoped to Review Desk: readable controls at browser zoom without widening the page. */
 .performance-review-desk { min-width: 0; max-width: 100%; }
+.performance-review-desk [hidden] { display: none !important; }
 .performance-review-desk .performance-review-facts { grid-template-columns: repeat(3,minmax(0,1fr)); }
 .performance-review-desk .review-operation-card > summary { min-height: 86px; }
 .performance-review-desk .review-operation-card > summary strong { font-size: 15px; line-height: 1.45; }
@@ -214,4 +215,76 @@
   .review-followups > header { align-items: flex-start; }
   .review-followups summary { align-items: flex-start; }
   .review-noon-emd { align-items: flex-start; }
+}
+
+/* Compact review workspace: keep summaries visible, expand detail in place. */
+.review-section-nav { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px 0; margin: 3px 0 8px; }
+.review-section-nav a { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 7px 11px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; color: #475569; text-decoration: none; font-size: 12px; font-weight: 650; }
+.review-section-nav a:hover { border-color: #fdba74; color: #c2410c; }
+.review-section-nav b { background: #fff1e5; border-radius: 5px; padding: 1px 5px; color: #9a3412; }
+.performance-review-desk :is(#review-performance,#review-station-updates,#review-cost,#review-followups,#review-discussion) { scroll-margin-top: 85px; }
+.performance-review-desk .panel-head { padding: 12px 14px; }
+.performance-review-desk .panel-head h2 { font-size: 17px; }
+.performance-review-desk .panel-head .subtle { font-size: 12px; margin-top: 4px; }
+.performance-review-desk .performance-review-control { padding: 12px; }
+.performance-review-desk .performance-review-facts > details[open] { grid-column: 1/-1; }
+.performance-review-desk .performance-review-facts > details[open] > summary { min-height: auto; padding-bottom: 10px; background: #fff7ed; }
+.performance-review-desk .performance-fact-card[open] > summary::after { content: "−"; }
+.performance-review-desk .performance-review-facts :is(.review-operation-popover,.performance-opening-popover,.performance-associate-popover) { position: static; width: auto; max-width: 100%; max-height: min(650px,75dvh); overflow: auto; margin: 0; border: 0; border-radius: 0; padding: 0 12px 12px; box-shadow: none; overscroll-behavior: contain; }
+.performance-review-desk .performance-review-facts small { font-size: 11px; white-space: normal; line-height: 1.45; }
+.performance-review-desk .performance-review-facts > :is(article,details) > :is(span,summary) > span { font-size: 10px; }
+.performance-review-desk .performance-fact-card > summary small { flex-wrap: wrap; }
+.performance-review-desk .performance-fact-card > summary small b { font-size: 10px; }
+.performance-review-desk .performance-opening-popover p,.performance-review-desk .performance-opening-popover p b { font-size: 12px; }
+.performance-review-desk .performance-associate-popover :is(.performance-associate-popover-head,.performance-associate-row span,.performance-associate-row strong,.performance-associate-row b,.performance-associate-popover-foot) { font-size: 12px; }
+.performance-review-desk .performance-associate-popover-scroll { border: 1px solid #e2e8f0; border-radius: 8px; }
+.review-details-close-row { display: flex; justify-content: flex-end; position: sticky; top: 0; z-index: 5; padding: 6px 0; background: #fff; }
+.performance-review-desk .review-details-close { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #dce2ea; border-radius: 7px; min-height: 36px; padding: 6px 11px; color: #475569; background: #fff; font: inherit; font-size: 12px; cursor: pointer; }
+.review-details-close span { font-size: 18px; line-height: 1; }
+.performance-review-desk :is(button,a,summary):focus-visible { outline: 2px solid #ea580c; outline-offset: 3px; }
+.performance-review-desk details:not(.performance-fact-card) > summary { min-height: 40px; }
+.performance-review-desk :is(.review-vehicle,.performance-inline-detail,.performance-review-overview,.performance-action-item,.review-followups) > summary::after { content: "⌄"; font-size: 16px; color: #64748b; margin-left: auto; flex-shrink: 0; }
+.performance-review-desk :is(.review-vehicle,.performance-inline-detail,.performance-review-overview,.performance-action-item,.review-followups)[open] > summary::after { content: "⌃"; }
+.performance-review-desk :is(.performance-action-item,.review-vehicle,.review-followups) > .review-details-close-row { padding: 4px 10px; }
+.review-scorecard-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding: 0 12px; }
+.review-scorecard-toolbar .review-details-close-row { position: static; }
+.review-scorecard-empty { padding: 0 12px 12px; font-size: 12px; color: #64748b; }
+.performance-review-desk .review-scorecard .performance-review-metrics { grid-template-columns: repeat(auto-fill,minmax(135px,1fr)); }
+.performance-review-desk .review-history-hint { margin: 4px 12px 8px; font-size: 11px; }
+.performance-review-desk .review-station-updates { margin: 10px 12px; grid-template-columns: minmax(0,1fr); gap: 8px; }
+.performance-review-desk .review-vehicles .review-station-times { grid-template-columns: repeat(3,minmax(0,1fr)); padding: 10px; }
+.performance-review-desk .review-vehicles .review-station-times button { justify-self: start; }
+.review-expand-label { color: #c2410c; font-size: 12px; white-space: nowrap; }
+.performance-review-desk .review-station-updates .review-noon-emd { padding: 10px 12px; gap: 8px 16px; align-items: center; }
+.performance-review-desk .review-noon-emd p { margin-bottom: 0; }
+.performance-review-desk .review-noon-emd > small:last-child { flex-basis: 100%; }
+.performance-review-desk .performance-cps-card-body { min-height: 75px; padding: 10px 45px 10px 11px; }
+.performance-review-desk .performance-cps-card-body > span { font-size: 10px; }
+.performance-review-desk .performance-cps-card-body > small { font-size: 11px; }
+.performance-review-desk .performance-cps-cards p { font-size: 12px; }
+.performance-review-desk .performance-cps-card > details > summary { min-height: 32px; width: 32px; height: 32px; }
+.performance-review-desk .performance-cps-cards { align-items: start; }
+.performance-review-desk .performance-cps-card:has(details[open]) { grid-column: 1/-1; }
+.performance-review-desk .review-cod-pending { margin: 10px; }
+.performance-review-desk .review-comment-feed { max-height: 320px; overflow: auto; overscroll-behavior: contain; }
+.performance-review-desk .review-followups,.performance-review-desk .review-discussion { padding: 12px; }
+@media (max-width:650px) {
+  .review-section-nav { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 9px; scrollbar-width: thin; }
+  .review-section-nav a { white-space: nowrap; flex-shrink: 0; min-height: 44px; }
+  .performance-review-desk .performance-review-picker { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); width: 100%; }
+  .performance-review-desk .performance-review-picker label { min-width: 0; }
+  .performance-review-desk .performance-review-picker :is(input,select,button) { width: 100%; min-height: 44px; }
+  .performance-review-desk .review-vehicles .review-station-times { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .performance-review-desk .review-vehicles .review-station-times label:first-of-type { grid-column: 1/-1; }
+  .performance-review-desk .review-vehicles .review-station-times button { grid-column: 1/-1; width: 100%; }
+  .performance-review-desk :is(.button,.review-details-close,.review-attendance-button,.review-attendance-period button,.review-person-link) { min-height: 44px; }
+  .performance-review-desk .review-person-link { padding: 7px 0; }
+  .performance-review-desk .performance-action-item > summary { display: grid; grid-template-columns: 8px minmax(0,1fr) auto; gap: 5px 8px; }
+  .performance-review-desk .performance-action-item > summary > :is(small,b) { grid-column: 2/3; margin: 0; }
+  .performance-review-desk .performance-action-item > summary::after { grid-column: 3; grid-row: 1; }
+  .performance-review-desk .review-attendance-filters :is(input,select) { width: 100%; min-height: 44px; }
+  .performance-review-desk .review-vehicles header { align-items: flex-start; }
+  .performance-review-desk .review-manager-tabs { flex-wrap: nowrap; overflow-x: auto; padding: 2px; }
+  .performance-review-desk .review-manager-tabs button { flex: 0 0 240px; }
+  .performance-review-desk .review-scorecard .performance-review-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }

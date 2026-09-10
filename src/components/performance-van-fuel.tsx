@@ -1,4 +1,6 @@
 "use client";
+
+import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   fuelDates,
@@ -312,8 +314,8 @@ export function FuelHistory({ data }: { data: ReviewFuel }) {
           onClose={() => setExpanded(false)}
         />
       ) : null}
-      <details className="review-fuel-entries">
-        <summary>Filling and expense details · {entries.length}</summary>
+      <ReviewDetails className="review-fuel-entries">
+        <summary>Filling and expense details · {entries.length}</summary><ReviewDetailsClose/>
         <div
           className="review-fuel-scroll"
           tabIndex={0}
@@ -348,7 +350,7 @@ export function FuelHistory({ data }: { data: ReviewFuel }) {
             </tbody>
           </table>
         </div>
-      </details>
+      </ReviewDetails>
       <p className="review-fuel-note">
         ₹0 means no entry recorded, not confirmation of no fuel use. Latest
         recorded card filling:{" "}

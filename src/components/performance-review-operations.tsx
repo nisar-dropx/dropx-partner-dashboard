@@ -1,3 +1,5 @@
+
+import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 import { reviewClock, type ReviewEddTimeline, type UtrDiscipline } from "@/lib/ops-pulse/review-operations";
 import { formatDashboardDate } from "@/lib/date-format";
 import { UtrAttendanceDrilldown, UtrRepeatSummary } from "@/components/review-attendance-history";
@@ -6,13 +8,14 @@ const count = (value: number | null | undefined) => value == null ? "—" : valu
 
 export function PerformanceEddClearanceCard({ data }: { data: { timeline: ReviewEddTimeline; error: string | null } }) {
   const { timeline: t, error } = data;
-  return <details className={`performance-fact-card review-operation-card ${t.latest?.counts.todayAtStation ? "late" : ""}`} name="performance-review-fact">
+  return <ReviewDetails className={`performance-fact-card review-operation-card ${t.latest?.counts.todayAtStation ? "late" : ""}`} name="performance-review-fact">
     <summary aria-label="At station EDD cleared time — view half-hour history">
       <span>At station EDD cleared time</span>
       <strong>{error ? "Data unavailable" : t.summary}</strong>
       <small>{t.latest ? `Observed ${reviewClock(t.latest.observedAt)} IST${t.current ? "" : " · capture gap"}` : "06:00–EOD history"}</small>
     </summary>
     <div className="review-operation-popover">
+      <ReviewDetailsClose label="Close EDD clearance history"/>
       <header><div><b>EDD clearance · {formatDashboardDate(t.day)}</b><p>Half-hour checkpoints · all times IST</p></div><span className="review-operation-tag">Automatic</span></header>
       {error ? <p role="alert">{error}</p> : null}
       <div className="review-operation-summary"><span>Day-start EDD <b>{count(t.dayStart)}</b></span><span>Latest pending <b>{count(t.latest?.counts.hasSnapshot ? t.latest.counts.todayAtStation : null)}</b></span><span>Awaiting checks <b>{count(t.latest?.counts.hasSnapshot ? t.latest.counts.todayUnverified : null)}</b></span></div>
@@ -25,26 +28,27 @@ export function PerformanceEddClearanceCard({ data }: { data: { timeline: Review
             <td>{c ? count(c.todayUnverified + c.todayOther) : "—"}</td><td>{row.point ? <>{reviewClock(row.point.observedAt)}<small>{row.state}</small></> : row.state}</td>
           </tr>; })}</tbody></table>
       </div>
-      <p className="review-operation-note">“Cleared by” is the first recorded zero-pending observation in the latest uninterrupted clear run, not an exact scan time. Recording runs every 5 minutes. Unchecked TIDs, missing EDD dates, stale sources or capture gaps prevent confirmation. Scroll inside this panel; click the card again to close.</p>
+      <p className="review-operation-note">“Cleared by” is the first recorded zero-pending observation in the latest uninterrupted clear run, not an exact scan time. Recording runs every 5 minutes. Unchecked TIDs, missing EDD dates, stale sources or capture gaps prevent confirmation.</p>
       {t.latest ? <p className="review-operation-note">Latest source: stock {reviewClock(t.latest.backlogAt)} · outcomes {reviewClock(t.latest.performanceAt)} · {count(t.latest.counts.missingDate)} missing EDD dates · {count(t.latest.counts.todayHfr)} prior-day HFR.</p> : null}
     </div>
-  </details>;
+  </ReviewDetails>;
 }
 
 export function PerformanceUtrDisciplineCard({ data, date }: { data: { discipline: UtrDiscipline; error: string | null }; date: string }) {
   const { discipline: d, error } = data;
-  return <details className={`performance-fact-card review-operation-card ${d.late || d.notReported ? "late" : ""}`} name="performance-review-fact">
+  return <ReviewDetails className={`performance-fact-card review-operation-card ${d.late || d.notReported ? "late" : ""}`} name="performance-review-fact">
     <summary aria-label="UTR reporting discipline — view staff attendance">
       <span>UTR reporting discipline</span><strong>{error ? "Data unavailable" : d.scheduled ? `${d.onTime}/${d.scheduled} on time` : "No scheduled shifts"}</strong>
       <small>{d.late} late · {d.notReported} not reported{d.noShift ? ` · ${d.noShift} shift missing` : ""}</small>
       <UtrRepeatSummary/>
     </summary>
     <div className="review-operation-popover">
+      <ReviewDetailsClose label="Close UTR reporting details"/>
       <header><div><b>UTR reporting · {formatDashboardDate(date)}</b><p>Station People staff · approved shifts and attendance</p></div><span className="review-operation-tag">{d.onTime}/{d.scheduled} on time</span></header>
       {error ? <p role="alert">{error}</p> : null}
       <div className="review-operation-summary"><span>Scheduled <b>{d.scheduled}</b></span><span>On time <b>{d.onTime}</b></span><span>Late <b>{d.late}</b></span><span>Not reported <b>{d.notReported}</b></span></div>
       <UtrAttendanceDrilldown discipline={d}/>
       <p className="review-operation-note">On time uses the approved shift’s reporting grace. {d.excluded} leave/off-duty staff are excluded; {d.noShift} without a linked shift are shown separately, never counted as on time. Worked hours come from attendance; an incomplete in/out pair is not shown as zero hours. Physical-location exceptions remain visible.</p>
     </div>
-  </details>;
+  </ReviewDetails>;
 }

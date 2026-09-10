@@ -1,5 +1,7 @@
 "use client";
 
+import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
+
 import { useState } from "react";
 import type { PerformanceFollowup, PerformanceReview } from "@/lib/ops-pulse/performance-review";
 import { savePerformanceFollowup } from "@/app/ops-pulse/performance/actions";
@@ -22,17 +24,17 @@ export function PerformanceFollowups({review,date,rows,count,error,canAdd,canUpd
   const [showDone,setShowDone]=useState(false);
   const visible=rows.filter(item=>showDone||item.status!=="done");
   const open=rows.filter(item=>item.status!=="done");
-  return <section className="review-followups" aria-label="Station action items">
+  return <section className="review-followups" id="review-followups" aria-label="Station action items">
     <header><div><h3>Action items <small>{open.length} open</small></h3><p>Actions carry into the next review until done. Closing a review does not close its actions.</p></div>{review&&canAdd?<button type="button" className="button secondary" onClick={()=>setAdding(!adding)}>{adding?"Cancel":"+ Action"}</button>:null}</header>
     {error?<p role="alert">{error}</p>:null}
     {review&&canAdd&&adding?<ActionForm key={rows.length} review={review} onSaved={()=>setAdding(false)}/>:null}
     {rows.some(item=>item.status==="done")?<label className="review-done-toggle"><input type="checkbox" checked={showDone} onChange={e=>setShowDone(e.target.checked)}/>Show completed actions</label>:null}
-    {visible.map(item=><details key={item.id} className={item.status}>
-      <summary><span><strong>Action {item.action_number} · {item.title}</strong><small>From {day(item.source_date)} · {item.owner_label} · ETA {day(item.due_date)}</small></span><b>{item.status==="done"?"Done":item.due_date<date?"Overdue":item.due_date===date?"Due this review":item.status.replace("_"," ")}</b></summary>
+    {visible.map(item=><ReviewDetails key={item.id} className={item.status}>
+      <summary><span><strong>Action {item.action_number} · {item.title}</strong><small>From {day(item.source_date)} · {item.owner_label} · ETA {day(item.due_date)}</small></span><b>{item.status==="done"?"Done":item.due_date<date?"Overdue":item.due_date===date?"Due this review":item.status.replace("_"," ")}</b></summary><ReviewDetailsClose/>
       {item.progress_note?<p>{item.progress_note}</p>:null}
       {review&&canUpdate?<ActionForm key={item.version} item={item} review={review}/>:null}
       <small>Updated by {item.updated_by_name} · {new Date(item.updated_at).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}</small>
-    </details>)}
+    </ReviewDetails>)}
     {!visible.length&&!error?<p className="review-empty">{rows.length?"No open action items.":review?"No action items recorded yet.":"Start the review to add action items."}</p>:null}
     {count>rows.length?<p>Showing {rows.length} of {count} actions, unresolved first.</p>:null}
   </section>;

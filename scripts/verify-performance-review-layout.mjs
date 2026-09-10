@@ -36,7 +36,7 @@ const checks = [
   [component.includes("Loaded performance date"), "loaded source date is explicit beside the picker"],
   [carriedActions.includes('const openItems=items.filter(item=>item.status!=="done")') && carriedActions.includes("if(!openItems.length)return null"), "completed carry-forward actions do not show an empty open-actions section"],
   [carriedActions.includes("const openCount=openItems.length") && carriedActions.includes("{openItems.map(item=>{"), "carry-forward count and cards use the same open-only collection"],
-  [carriedActions.includes('return <details className="review-followups">'), "carry-forward actions start collapsed instead of opening on first load"],
+  [carriedActions.includes('return <ReviewDetails className="review-followups">'), "carry-forward actions start collapsed instead of opening on first load"],
   [navigation.includes('code: "performance_review_status", label: "Review Status"'), "review status has its own OpsPulse submenu and permission code"],
   [accessPages.includes('["performance_review"], "performance_review_status"'), "review status starts from existing review grants and remains independently configurable"],
   [permissionMatrix.includes('"performance_review_cluster_filter", "performance_review_status"'), "review status permission stays grouped under Performance"],
@@ -57,3 +57,4 @@ if (failures.length) {
 await import("./verify-review-operations.mjs");
 await import("./verify-review-discipline-rca.mjs");
 await import("./verify-review-attendance-history.mjs");
+await import("./verify-review-compact-ux.mjs");

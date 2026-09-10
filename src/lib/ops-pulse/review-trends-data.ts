@@ -251,7 +251,7 @@ export async function loadReviewTrends(
       readTrendPages((offset) =>
         db
           .from("ops_performance_connections")
-          .select("service_date,arrival_at,unloading_at,clearance_at")
+          .select("service_date,arrival_at,unloading_at")
           .eq("company_id", companyId)
           .eq("station_id", station.id)
           .gte("service_date", from)
@@ -283,15 +283,12 @@ export async function loadReviewTrends(
     for (const [key, label, column] of [
       ["arrival", "First vehicle arrival", "arrival_at"],
       ["unloading", "Last unloading complete", "unloading_at"],
-      ["clearance", "Last station clearance", "clearance_at"],
     ]) {
-      const cutoff = targets?.clearanceCutoff?.split(":").map(Number);
       series.push({
         key,
         label,
         unit: "time",
-        target:
-          key === "clearance" && cutoff ? cutoff[0] * 60 + cutoff[1] : null,
+        target: null,
         direction: "lower",
         note: "All saved vehicles for each service date. +1d indicates an overnight completion. Missing timings remain gaps.",
         points: dates.map((date) => {
