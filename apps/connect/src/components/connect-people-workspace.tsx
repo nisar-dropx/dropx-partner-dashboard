@@ -3,16 +3,19 @@
 import { CalendarDays, ChevronRight, ClipboardCheck, LocateFixed, ReceiptText, Settings, ShieldCheck, SwitchCamera } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
+import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
 type Counts = { leave: number; attendance: number; rosters: number; exits: number; location: number; claims: number };
 
 export function ConnectPeopleWorkspace({
   account,
+  active = true,
   onApprovals,
   onSettings,
   onSwitch
 }: {
   account: AppAccount;
+  active?: boolean;
   onApprovals: () => void;
   onSettings: () => void;
   onSwitch: () => void;
@@ -20,6 +23,9 @@ export function ConnectPeopleWorkspace({
   const [counts, setCounts] = useState<Counts>({ leave: 0, attendance: 0, rosters: 0, exits: 0, location: 0, claims: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
+  const [refreshKey, setRefreshKey] = useState(0);
+  setReload(() => setRefreshKey((value) => value + 1));
 
   useEffect(() => {
     let cancelled = false;
@@ -45,13 +51,14 @@ export function ConnectPeopleWorkspace({
         location: workflow.locationSupportPackages?.length ?? 0,
         claims: reimbursements.approvals?.length ?? 0
       });
+      markLoaded();
     }).catch((reason) => {
       if (!cancelled) setError(reason instanceof Error ? reason.message : "Unable to load manager workspace.");
     }).finally(() => {
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [account.companyId, account.id, account.profileType]);
+  }, [account.companyId, account.id, account.profileType, refreshKey, markLoaded]);
 
   const peopleRequests = counts.leave + counts.attendance + counts.exits;
   const operations = counts.location + counts.rosters;

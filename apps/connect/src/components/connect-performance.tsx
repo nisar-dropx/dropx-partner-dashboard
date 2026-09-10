@@ -1,9 +1,10 @@
 "use client";
 
 import { Award, BarChart3, CalendarDays, Check, ChevronDown, CircleGauge, MapPinned, Sparkles, Target, TrendingUp, UsersRound } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { readJsonResponse, userFacingError } from "../lib/user-facing-error";
+import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
 type Cycle = { id: string; name: string; period_start: string; period_end: string; self_review_due: string | null; manager_review_due: string | null; status: string; rating_scale: number };
 type Review = { id: string; cycle_id: string; worker_name?: string | null; worker_code?: string | null; status: string; designation_name: string | null; department_name: string | null; self_rating: number | null; manager_rating: number | null; final_rating: number | null; self_comments: string | null; manager_comments: string | null; calibration_comments: string | null; self_submitted_at: string | null; manager_submitted_at: string | null; acknowledged_at: string | null };
@@ -44,7 +45,7 @@ function Status({ value }: { value: string }) {
   return <span className={`dx-performance-status ${tone}`}>{label(value)}</span>;
 }
 
-export function ConnectPerformance({ account }: { account: AppAccount }) {
+export function ConnectPerformance({ account, active = true }: { account: AppAccount; active?: boolean }) {
   const [data, setData] = useState<Payload | null>(null);
   const [section, setSection] = useState<"scorecards" | "cps" | "reviews">("scorecards");
   const [weekKey, setWeekKey] = useState<number | null>(null);
@@ -55,18 +56,23 @@ export function ConnectPerformance({ account }: { account: AppAccount }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [refresh, setRefresh] = useState(0);
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
+  const backgroundRefresh = useRef(false);
+  setReload(() => { backgroundRefresh.current = true; setRefresh((value) => value + 1); });
 
   useEffect(() => {
-    setLoading(true); setError("");
+    const background = backgroundRefresh.current;
+    backgroundRefresh.current = false;
+    if (!background) { setLoading(true); setError(""); }
     const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
     if (weekKey) query.set("weekKey", String(weekKey));
     query.set("cpsMonth", cpsMonth);
     fetch(`/api/connect/performance?${query}`, { cache: "no-store" })
       .then((response) => readJsonResponse<Payload>(response, "Unable to load performance. Please try again."))
-      .then((payload) => { setData(payload); setWeekKey((current) => current ?? payload.operational?.selectedWeekKey ?? (payload.operational?.selectedYear && payload.operational?.selectedWeek ? payload.operational.selectedYear * 100 + payload.operational.selectedWeek : null)); setCpsMonth(payload.operational?.selectedCpsMonth ?? currentMonthIndia()); setActiveReviewId((current) => payload.reviews.some((item) => item.id === current) ? current : payload.reviews[0]?.id ?? ""); })
+      .then((payload) => { setData(payload); setWeekKey((current) => current ?? payload.operational?.selectedWeekKey ?? (payload.operational?.selectedYear && payload.operational?.selectedWeek ? payload.operational.selectedYear * 100 + payload.operational.selectedWeek : null)); setCpsMonth(payload.operational?.selectedCpsMonth ?? currentMonthIndia()); setActiveReviewId((current) => payload.reviews.some((item) => item.id === current) ? current : payload.reviews[0]?.id ?? ""); markLoaded(); })
       .catch((reason) => setError(userFacingError(reason, "Unable to load performance. Please try again.")))
-      .finally(() => setLoading(false));
-  }, [account.id, account.profileType, cpsMonth, refresh, weekKey]);
+      .finally(() => { if (!background) setLoading(false); });
+  }, [account.id, account.profileType, cpsMonth, refresh, weekKey, markLoaded]);
 
   const cycles = useMemo(() => new Map((data?.cycles ?? []).map((item) => [item.id, item])), [data?.cycles]);
   const activeReview = data?.reviews.find((item) => item.id === activeReviewId) ?? data?.reviews[0] ?? null;

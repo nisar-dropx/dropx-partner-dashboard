@@ -4,6 +4,7 @@ import { CalendarDays, Clock3, FileCheck2, Info, Laptop, Paperclip, Pencil, Rota
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectWfh } from "./connect-wfh";
+import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
 type LeaveSection = "leave" | "wfh";
 type LeaveTab = "request" | "history";
@@ -78,9 +79,11 @@ function inclusiveDays(fromDate: string, toDate: string) {
 
 export function ConnectLeave({
   account,
+  active = true,
   initialSection = "leave"
 }: {
   account: AppAccount;
+  active?: boolean;
   initialSection?: LeaveSection;
 }) {
   const wfhEligible = (account.pageAccess ?? []).includes("wfh");
@@ -102,6 +105,7 @@ export function ConnectLeave({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const proofInput = useRef<HTMLInputElement>(null);
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
 
   useEffect(() => {
     if (initialSection === "wfh" && wfhEligible) setSection("wfh");
@@ -139,12 +143,14 @@ export function ConnectLeave({
       setData(payload);
       setLeaveTypeId((current) => current && payload.types.some((item: LeaveType) => item.id === current) ? current : payload.types[0]?.id ?? "");
       if (options?.silent) setError("");
+      markLoaded();
     } catch (reasonValue) {
       setError(reasonValue instanceof Error ? reasonValue.message : "Unable to load time off.");
     } finally {
       if (!options?.silent) setLoading(false);
     }
-  }, [account.id, account.profileType, leaveEligible]);
+  }, [account.id, account.profileType, leaveEligible, markLoaded]);
+  setReload(() => loadLeave(1, { silent: true }));
 
   useEffect(() => { void loadLeave(1); }, [loadLeave]);
   const selectedType = data?.types.find((item) => item.id === leaveTypeId) ?? null;

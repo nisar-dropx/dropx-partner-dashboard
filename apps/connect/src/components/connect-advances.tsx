@@ -2,6 +2,7 @@
 
 import { IndianRupee, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
 type Account = { id: string; profileType: string; reference?: string | null; name?: string | null; role?: string | null };
 type AdvanceRequest = {
@@ -31,7 +32,7 @@ function formatWhen(value: string) {
   });
 }
 
-export function ConnectAdvances({ account }: { account: Account }) {
+export function ConnectAdvances({ account, active = true }: { account: Account; active?: boolean }) {
   const [rows, setRows] = useState<AdvanceRequest[]>([]);
   const [eligibleForAdvance, setEligibleForAdvance] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -41,9 +42,10 @@ export function ConnectAdvances({ account }: { account: Account }) {
   const [purpose, setPurpose] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true);
     setError("");
     try {
       const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
@@ -55,9 +57,11 @@ export function ConnectAdvances({ account }: { account: Account }) {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to load advance requests.");
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
+      markLoaded();
     }
-  }, [account.id, account.profileType]);
+  }, [account.id, account.profileType, markLoaded]);
+  setReload(() => load(true));
 
   useEffect(() => {
     void load();

@@ -3,6 +3,7 @@
 import { ArrowLeftRight, CalendarClock, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, DoorOpen, FileText, LocateFixed, ReceiptText, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
+import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
 type RequestKind = "attendance" | "location_flag" | "leave" | "reimbursement" | "roster_swap" | "exit";
 
@@ -84,15 +85,16 @@ async function safeJson(response: Response) {
   try { return await response.json(); } catch { return null; }
 }
 
-export function ConnectMyRequests({ account }: { account: AppAccount }) {
+export function ConnectMyRequests({ account, active = true }: { account: AppAccount; active?: boolean }) {
   const [requests, setRequests] = useState<UnifiedRequest[]>([]);
   const [filter, setFilter] = useState<"all" | RequestKind>("all");
   const [month, setMonth] = useState(currentMonthKey());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true);
     setError("");
     const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
     const [attendanceResult, flagResult, leaveResult, reimbursementResult, rosterResult, exitResult] = await Promise.allSettled([
@@ -242,8 +244,10 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
     setRequests(unified);
     const failedAll = [attendanceResult, flagResult, leaveResult, reimbursementResult, rosterResult, exitResult].every((result) => result.status === "rejected");
     if (failedAll) setError("Unable to load your requests.");
-    setLoading(false);
-  }, [account.id, account.profileType]);
+    if (!background) setLoading(false);
+    markLoaded();
+  }, [account.id, account.profileType, markLoaded]);
+  setReload(() => load(true));
 
   useEffect(() => { void load(); }, [load]);
 

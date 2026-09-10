@@ -21,6 +21,7 @@ import {
   X
 } from "lucide-react";
 import type { AppAccount } from "./connect-profile-app";
+import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
 type Channel = "general" | "connect" | "integrity";
 type Section = "updates" | "hr-help" | "speak-up";
@@ -87,7 +88,8 @@ function readableSize(value: number) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function ConnectCommunicationCenter({ account }: { account: AppAccount }) {
+export function ConnectCommunicationCenter({ account, active = true }: { account: AppAccount; active?: boolean }) {
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
   const [section, setSection] = useState<Section>("updates");
   const [settings, setSettings] = useState<ChannelSetting[]>([]);
   const [cases, setCases] = useState<CommunicationCase[]>([]);
@@ -125,12 +127,14 @@ export function ConnectCommunicationCenter({ account }: { account: AppAccount })
       setSettings(payload.settings ?? []);
       setCases(payload.cases ?? []);
       setAnnouncements(payload.announcements ?? []);
+      markLoaded();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to open Connect.");
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, [query, markLoaded]);
+  setReload(() => load(true));
 
   useEffect(() => { void load(); }, [load]);
 

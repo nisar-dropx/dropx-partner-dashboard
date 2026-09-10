@@ -16,7 +16,7 @@ import {
   UserRound,
   UserRoundX
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import {
   dashboardMotivationContext,
@@ -33,6 +33,7 @@ import {
   type AttendanceInsightRow
 } from "../lib/attendance-insights";
 import { readJsonResponse, userFacingError } from "../lib/user-facing-error";
+import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
 type Profile = {
   editable: Record<string, string>;
@@ -155,6 +156,7 @@ function Metric({
 
 export function ConnectDashboard({
   account,
+  active = true,
   onAttendance,
   onAdvances,
   onLeave,
@@ -164,6 +166,8 @@ export function ConnectDashboard({
   variant = "people"
 }: {
   account: AppAccount;
+  /** Whether this screen is the one currently shown (vs. kept alive but hidden behind another tab). Triggers a background refresh on becoming active again if the data has gone stale. */
+  active?: boolean;
   onAttendance: () => void;
   onAdvances: () => void;
   onLeave: () => void;
@@ -180,6 +184,12 @@ export function ConnectDashboard({
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [motivation, setMotivation] = useState("");
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
+  // A background staleness refresh must not blank the dashboard back to its
+  // loading state - only the very first load should do that. This flag is
+  // read (and reset) once by the fetch effect below when refreshKey bumps.
+  const backgroundRefresh = useRef(false);
+  setReload(() => { backgroundRefresh.current = true; setRefreshKey((value) => value + 1); });
 
   useEffect(() => {
     if (!profile || !attendance) {
@@ -272,11 +282,15 @@ export function ConnectDashboard({
   }, [account.companyId, account.id, account.profileType, attendance, profile]);
 
   useEffect(() => {
-    setProfile(null);
-    setAttendance(null);
-    setOpenFlags([]);
-    setPunchState(null);
-    setError("");
+    const background = backgroundRefresh.current;
+    backgroundRefresh.current = false;
+    if (!background) {
+      setProfile(null);
+      setAttendance(null);
+      setOpenFlags([]);
+      setPunchState(null);
+      setError("");
+    }
     const executive = account.profileType !== "employee" && account.profileType !== "user";
     const profileUrl = executive
       ? `/api/connect/field-executive-profile?executiveId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`
@@ -312,8 +326,9 @@ export function ConnectDashboard({
       setVerifications(nextVerifications);
       setOpenFlags(punchPayload.flags);
       setPunchState(punchPayload.shift);
+      markLoaded();
     }).catch((reason) => setError(userFacingError(reason, "Unable to load dashboard. Please try again.")));
-  }, [account.id, account.profileType, refreshKey]);
+  }, [account.id, account.profileType, refreshKey, markLoaded]);
 
   const alerts = useMemo(() => {
     if (!profile) return [] as DashboardAlert[];

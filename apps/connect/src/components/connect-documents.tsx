@@ -3,6 +3,7 @@
 import { BadgeCheck, Download, FileCheck2, FileClock, FilePlus2, FileText, HeartPulse, ShieldCheck, WalletCards, X } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { AppAccount } from "./connect-profile-app";
+import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
 type DocumentRow = {
   id: string;
@@ -45,7 +46,7 @@ type DocumentSection = "payslips" | "insurance" | "hr" | "requests";
 function title(value: string) { return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function date(value: string) { return new Date(value).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }); }
 
-export function ConnectDocuments({ account }: { account: AppAccount }) {
+export function ConnectDocuments({ account, active = true }: { account: AppAccount; active?: boolean }) {
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [requestTypes, setRequestTypes] = useState<RequestType[]>([]);
   const [requests, setRequests] = useState<DocumentRequest[]>([]);
@@ -58,9 +59,11 @@ export function ConnectDocuments({ account }: { account: AppAccount }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
 
-  const load = useCallback(async () => {
-    setLoading(true); setError("");
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true);
+    setError("");
     try {
       const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
       const response = await fetch(`/api/connect/documents?${query}`, { cache: "no-store" });
@@ -71,9 +74,11 @@ export function ConnectDocuments({ account }: { account: AppAccount }) {
       setRequests(payload.requests ?? []);
       setSummary(payload.summary ?? { total: 0, pay: 0, issued: 0, requests: 0 });
       setRequestTypeId((current) => current || payload.requestTypes?.[0]?.id || "");
+      markLoaded();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load documents."); }
-    finally { setLoading(false); }
-  }, [account.id, account.profileType]);
+    finally { if (!background) setLoading(false); }
+  }, [account.id, account.profileType, markLoaded]);
+  setReload(() => load(true));
 
   useEffect(() => { void load(); }, [load]);
 

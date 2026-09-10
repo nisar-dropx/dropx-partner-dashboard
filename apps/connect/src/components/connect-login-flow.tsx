@@ -122,6 +122,15 @@ export function ConnectLoginFlow() {
     setBiometricEnabled(localStorage.getItem(biometricKey) === "true");
   }, []);
 
+  // Screens the user has opened at least once this session stay mounted
+  // (hidden, not removed) after navigating away, so switching tabs is
+  // instant and each screen's own fetched data survives the switch instead
+  // of being thrown away and re-fetched from scratch every time.
+  const [visitedSteps, setVisitedSteps] = useState<Set<Step>>(() => new Set());
+  useEffect(() => {
+    setVisitedSteps((current) => (current.has(step) ? current : new Set(current).add(step)));
+  }, [step]);
+
   function route(rows: AppAccount[]) {
     const serverDefault = rows.find((row) => row.isDefault);
     const saved = serverDefault ? accountKey(serverDefault) : "";
@@ -270,7 +279,7 @@ export function ConnectLoginFlow() {
   async function logout() {
     await fetch("/api/connect/auth/session", { method: "DELETE" });
     setCountryCode("91"); setMobile(""); setPin(""); setConfirmPin(""); setOtp("");
-    setAccounts([]); setLockedAccounts([]); setAccount(null); setAvatar(""); setDrawer(false); setProfileMenu(false); setNotificationMenu(false); setNotifications([]); setUnreadNotifications(0); setStep("mobile"); setNotice("Logged out."); setError("");
+    setAccounts([]); setLockedAccounts([]); setAccount(null); setAvatar(""); setDrawer(false); setProfileMenu(false); setNotificationMenu(false); setNotifications([]); setUnreadNotifications(0); setStep("mobile"); setNotice("Logged out."); setError(""); setVisitedSteps(new Set());
   }
   async function loadNotifications(showPanel = true) {
     if (!account) return;
@@ -435,6 +444,9 @@ export function ConnectLoginFlow() {
   }
   function choose(next: AppAccount) {
     setAccount(next); setAvatar(next.profilePhotoUrl || ""); setDrawer(false); setStep(landingPage(next));
+    // Kept-alive screens are scoped to the previous account; switching
+    // workspaces must not leave another account's cached screen visible.
+    setVisitedSteps(new Set());
   }
   function open(next: Step) {
     setDrawer(false); setProfileMenu(false); setError(""); setNotice("");
@@ -617,20 +629,19 @@ export function ConnectLoginFlow() {
         <AttendanceLocationMonitor account={account} />
       ) : null}
       {account ? <ConnectNativeBridge account={account} /> : null}
-      {step === "dashboard" && account && isManagerAccount(account) ? <ConnectPeopleWorkspace account={account} onApprovals={() => open("approvals")} onSettings={() => open("settings")} onSwitch={() => open("accounts")} /> : null}
-      {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onLeave={() => open("leave")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRoster={() => open("roster")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
-      {step === "profile" && account && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
-      {step === "documents" && account && peopleSelfService(account) && allowed(account, "documents") ? <ConnectDocuments account={account} /> : null}
-      {step === "requests" && account && peopleSelfService(account) ? <ConnectMyRequests account={account} /> : null}
-      {step === "approvals" && account && canViewApprovals(account, hasReportees) ? <ConnectApprovalInbox account={account} /> : null}
-      {step === "advances" && account && sharedSelfService(account) && allowed(account, "advances") ? <ConnectAdvances account={account} /> : null}
-      {step === "reimbursements" && account && peopleSelfService(account) && allowed(account, "reimbursements") ? <ConnectReimbursements account={account} /> : null}
-      {step === "attendance" && account && allowed(account, "attendance") ? <ConnectAttendance account={account} /> : null}
-      {step === "roster" && account && allowed(account, "roster") ? <ConnectRoster account={account} /> : null}
-      {step === "leave" && account && showLeaveNav(account) ? <ConnectLeave account={account} initialSection={leaveSection} /> : null}
-      {step === "lop" && account && showLeaveNav(account) ? <ConnectLeave account={account} initialSection={leaveSection} /> : null}
-      {step === "performance" && account && allowed(account, "performance") ? <ConnectPerformance account={account} /> : null}
-      {step === "connect" && account ? <ConnectCommunicationCenter account={account} /> : null}
+      {(step === "dashboard" || visitedSteps.has("dashboard")) && account && isManagerAccount(account) ? <div hidden={step !== "dashboard"}><ConnectPeopleWorkspace account={account} active={step === "dashboard"} onApprovals={() => open("approvals")} onSettings={() => open("settings")} onSwitch={() => open("accounts")} /></div> : null}
+      {(step === "dashboard" || visitedSteps.has("dashboard")) && account && !isManagerAccount(account) ? <div hidden={step !== "dashboard"}><ConnectDashboard account={account} active={step === "dashboard"} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onLeave={() => open("leave")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRoster={() => open("roster")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /></div> : null}
+      {(step === "profile" || visitedSteps.has("profile")) && account && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <div hidden={step !== "profile"}><ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /></div> : null}
+      {(step === "documents" || visitedSteps.has("documents")) && account && peopleSelfService(account) && allowed(account, "documents") ? <div hidden={step !== "documents"}><ConnectDocuments account={account} active={step === "documents"} /></div> : null}
+      {(step === "requests" || visitedSteps.has("requests")) && account && peopleSelfService(account) ? <div hidden={step !== "requests"}><ConnectMyRequests account={account} active={step === "requests"} /></div> : null}
+      {(step === "approvals" || visitedSteps.has("approvals")) && account && canViewApprovals(account, hasReportees) ? <div hidden={step !== "approvals"}><ConnectApprovalInbox account={account} active={step === "approvals"} /></div> : null}
+      {(step === "advances" || visitedSteps.has("advances")) && account && sharedSelfService(account) && allowed(account, "advances") ? <div hidden={step !== "advances"}><ConnectAdvances account={account} active={step === "advances"} /></div> : null}
+      {(step === "reimbursements" || visitedSteps.has("reimbursements")) && account && peopleSelfService(account) && allowed(account, "reimbursements") ? <div hidden={step !== "reimbursements"}><ConnectReimbursements account={account} active={step === "reimbursements"} /></div> : null}
+      {(step === "attendance" || visitedSteps.has("attendance")) && account && allowed(account, "attendance") ? <div hidden={step !== "attendance"}><ConnectAttendance account={account} active={step === "attendance"} /></div> : null}
+      {(step === "roster" || visitedSteps.has("roster")) && account && allowed(account, "roster") ? <div hidden={step !== "roster"}><ConnectRoster account={account} active={step === "roster"} /></div> : null}
+      {(step === "leave" || step === "lop" || visitedSteps.has("leave") || visitedSteps.has("lop")) && account && showLeaveNav(account) ? <div hidden={step !== "leave" && step !== "lop"}><ConnectLeave account={account} active={step === "leave" || step === "lop"} initialSection={leaveSection} /></div> : null}
+      {(step === "performance" || visitedSteps.has("performance")) && account && allowed(account, "performance") ? <div hidden={step !== "performance"}><ConnectPerformance account={account} active={step === "performance"} /></div> : null}
+      {(step === "connect" || visitedSteps.has("connect")) && account ? <div hidden={step !== "connect"}><ConnectCommunicationCenter account={account} active={step === "connect"} /></div> : null}
       {step === "settings" && account && allowed(account, "settings") ? <section className="dx-settings">
         <header className="dx-page-intro"><small>Personalisation</small><h1>Settings</h1><p>Control sign-in and the account you open first.</p></header>
         <div className="dx-settings-grid">

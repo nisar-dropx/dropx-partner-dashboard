@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatShiftClock } from "@/lib/roster-plan-preference";
 import { rosterChangeDeadlineShortLabel } from "@/lib/roster-change-deadline";
 import type { AppAccount } from "./connect-profile-app";
+import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
 
 type Shift = { id: string; name: string; code: string; start_time: string; end_time: string };
 type Partner = { id: string; workerType: string; workerId: string; name?: string; code?: string; dayType: "working" | "weekly_off"; shift: Shift | null };
@@ -83,7 +84,7 @@ const statusLabel: Record<SwapRequest["status"], string> = {
   expired: "Expired"
 };
 
-export function ConnectRoster({ account }: { account: AppAccount }) {
+export function ConnectRoster({ account, active = true }: { account: AppAccount; active?: boolean }) {
   const [data, setData] = useState<RosterPayload | null>(null);
   const [selectedDay, setSelectedDay] = useState<RosterDay | null>(null);
   const [partnerEntryId, setPartnerEntryId] = useState("");
@@ -93,9 +94,10 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const today = localIsoDate();
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true);
     setError("");
     try {
       const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
@@ -103,12 +105,14 @@ export function ConnectRoster({ account }: { account: AppAccount }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to load your roster.");
       setData(payload);
+      markLoaded();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to load your roster.");
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
-  }, [account.id, account.profileType]);
+  }, [account.id, account.profileType, markLoaded]);
+  setReload(() => load(true));
 
   useEffect(() => {
     void load();

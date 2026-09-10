@@ -29,6 +29,7 @@ import {
   type AttendanceInsightRow
 } from "@/lib/attendance-insights";
 import { readJsonResponse, userFacingError } from "@/lib/user-facing-error";
+import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
 type Regularization = {
@@ -227,7 +228,8 @@ function localIsoDate(date = new Date()) {
 
 const readPosition = readResilientPosition;
 
-export function ConnectAttendance({ account }: { account: Account }) {
+export function ConnectAttendance({ account, active = true }: { account: Account; active?: boolean }) {
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const [month, setMonth] = useState(currentMonth);
@@ -243,17 +245,22 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const [supportNotice, setSupportNotice] = useState("");
   const selectedDayRef = useRef<HTMLDivElement>(null);
 
-  const loadAttendance = useCallback(() => {
-    setData(null);
+  const loadAttendance = useCallback((background = false) => {
+    // A background revalidation (screen was already showing data, just
+    // gone stale after being kept alive off-screen) must not blank the
+    // calendar back to the loading state - only a genuine first load does.
+    if (!background) setData(null);
     setError("");
     fetch(`/api/connect/attendance?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}&month=${month}`)
       .then(async (response) => {
         const payload = await readJsonResponse<Attendance>(response, "Unable to load attendance. Please try again.");
         setData(payload);
         setSelected((current) => current ? payload.rows.find((row) => row.date === current.date) ?? null : null);
+        markLoaded();
       })
       .catch((reason) => setError(userFacingError(reason, "Unable to load attendance. Please try again.")));
-  }, [account.id, account.profileType, month]);
+  }, [account.id, account.profileType, month, markLoaded]);
+  setReload(() => loadAttendance(true));
 
   const loadPunchStatus = useCallback(async () => {
     const response = await fetch(

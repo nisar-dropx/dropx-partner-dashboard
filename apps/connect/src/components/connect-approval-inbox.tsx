@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
 import { userFacingError } from "@/lib/user-facing-error";
+import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
 
 type ExpenseItem = {
   id: string;
@@ -314,7 +315,8 @@ function ApprovalToolbar({
   );
 }
 
-export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
+export function ConnectApprovalInbox({ account, active = true }: { account: AppAccount; active?: boolean }) {
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
   const [section, setSection] = useState<ApprovalSection>("time-off");
   const [reporteeScope, setReporteeScope] = useState<ReporteeScope>("immediate");
   const [reimbursements, setReimbursements] = useState<ReimbursementApproval[]>([]);
@@ -338,8 +340,9 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
   const [notice, setNotice] = useState("");
   const [othersOpen, setOthersOpen] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true); setError("");
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true);
+    setError("");
     try {
       const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType, reporteeScope });
       const [reimbursementResponse, leaveResponse] = await Promise.all([
@@ -377,8 +380,9 @@ export function ConnectApprovalInbox({ account }: { account: AppAccount }) {
         return current;
       });
     } catch (reason) { setError(userFacingError(reason, "Unable to load approvals.")); }
-    finally { setLoading(false); }
-  }, [account.id, account.profileType, reporteeScope]);
+    finally { if (!background) setLoading(false); markLoaded(); }
+  }, [account.id, account.profileType, reporteeScope, markLoaded]);
+  setReload(() => load(true));
 
   useEffect(() => { void load(); }, [load]);
 

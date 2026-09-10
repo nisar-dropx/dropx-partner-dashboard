@@ -13,6 +13,7 @@ import {
   sumExpectedExpenses
 } from "@/lib/expense-request-form";
 import type { AppAccount } from "./connect-profile-app";
+import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
 
 type Category = { id: string; code: string; name: string; description?: string | null; receipt_required: boolean; receipt_threshold: number; per_item_limit?: number | null; per_day_limit?: number | null };
 type Station = { id: string; code: string; name: string; region?: string | null; cluster?: string | null };
@@ -49,7 +50,8 @@ function first<T>(value: T | T[] | null | undefined) { return Array.isArray(valu
 function statusLabel(status: string) { return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function amountInput(value: number) { return value > 0 ? String(value) : ""; }
 
-export function ConnectReimbursements({ account }: { account: AppAccount }) {
+export function ConnectReimbursements({ account, active = true }: { account: AppAccount; active?: boolean }) {
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
   const [data, setData] = useState<Payload | null>(null);
   const [tab, setTab] = useState<"requests" | "claims">("requests");
   const [purposeCode, setPurposeCode] = useState("");
@@ -73,8 +75,9 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
   const [withdrawTarget, setWithdrawTarget] = useState<{ kind: "pre_request" | "claim"; id: string } | null>(null);
   const [withdrawReason, setWithdrawReason] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true); setError("");
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true);
+    setError("");
     try {
       const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
       const response = await fetch(`/api/connect/reimbursements?${query}`, { cache: "no-store" });
@@ -86,8 +89,9 @@ export function ConnectReimbursements({ account }: { account: AppAccount }) {
         preRequests: payload.preRequests ?? []
       });
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to load expense requests."); }
-    finally { setLoading(false); }
-  }, [account.id, account.profileType]);
+    finally { if (!background) setLoading(false); markLoaded(); }
+  }, [account.id, account.profileType, markLoaded]);
+  setReload(() => load(true));
 
   useEffect(() => { void load(); }, [load]);
 
