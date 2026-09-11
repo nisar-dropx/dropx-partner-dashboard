@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import * as XLSX from "xlsx";
+import JSZip from "jszip";
 const compile = (path, mocks = {}) => {
   const m = { exports: {} };
   new Function(
@@ -175,4 +177,88 @@ test("shared-cost edit cannot move an out-of-scope allocation into scope", async
     form.set(k, v);
   assert.equal((await actions.saveCpsCost(form)).ok, false);
   assert.equal(wrote, false);
+});
+test("Excel round-trip keeps all days, numeric costs, data gaps and safe text", async () => {
+  const days = Array.from({ length: 31 }, (_, i) => ({
+    station_code: "A",
+    work_date: `2026-08-${String(i + 1).padStart(2, "0")}`,
+    deliveries: 100,
+    activity: 110,
+    associate_rows: 2,
+    unmapped: 1,
+    unpaid: 0,
+    da: 900,
+    utr: 100,
+    van: 200,
+    other: 300,
+    rent: 100,
+    total: 1500,
+    target: null,
+    shipment_present: true,
+    utr_configured: true,
+  }));
+  const workbook = compile("../report-workbook.ts", {
+    xlsx: XLSX,
+    jszip: { default: JSZip },
+  });
+  const endpoint = compile("../../app/api/ops-pulse/cps/report/route.ts", {
+    "@/lib/authorization": {
+      getAuthorization: async () => context,
+      hasPermission: () => true,
+    },
+    "@/lib/ops-pulse/cps-data": {
+      cpsScope: async () => ({
+        companyId: "company-a",
+        selected: [all[0]],
+        period: domain.cpsPeriod(
+          { view: "monthly", month: "2026-08" },
+          "2026-09-11",
+        ),
+      }),
+      loadCpsSnapshot: async () => ({
+        daily: days,
+        breakup: days.map((d) => ({
+          work_date: d.work_date,
+          station_code: "A",
+          head: "Other",
+          source: "CPS Inputs",
+          sub_head: '=HYPERLINK("https://invalid.example")',
+          amount: 300,
+        })),
+        generated_at: "2026-09-11T00:00:00Z",
+      }),
+    },
+    "@/lib/ops-pulse/cps": domain,
+    "@/lib/report-workbook": workbook,
+    "@/lib/ops-pulse/adhoc-activity": { adHocClusterLabel: (l) => l.cluster },
+  });
+  const response = await endpoint.GET(
+    new Request(
+      "https://ops.dropxlogistics.com/api/ops-pulse/cps/report?view=monthly&month=2026-08",
+    ),
+  );
+  assert.equal(response.status, 200);
+  assert.match(
+    response.headers.get("content-disposition"),
+    /cps-monthly-2026-08-01-to-2026-08-31.xlsx/,
+  );
+  const book = XLSX.read(new Uint8Array(await response.arrayBuffer()), {
+    type: "array",
+  });
+  assert.deepEqual(book.SheetNames, [
+    "Summary",
+    "Station CPS",
+    "Daily CPS",
+    "Cost breakup",
+  ]);
+  assert.equal(XLSX.utils.sheet_to_json(book.Sheets["Daily CPS"]).length, 31);
+  const [summary] = XLSX.utils.sheet_to_json(book.Sheets.Summary);
+  assert.equal(summary.Deliveries, 3100);
+  assert.equal(summary["Recorded cost"], 46500);
+  assert.equal(summary["Recorded CPS"], 15);
+  assert.equal(summary.Status, "Provisional");
+  assert.match(summary["Data gaps"], /payment setup/);
+  const cell = book.Sheets["Cost breakup"].D2;
+  assert.equal(cell.t, "s");
+  assert.equal(cell.f, undefined);
 });
