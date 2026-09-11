@@ -10,6 +10,7 @@ import {
   type RentRecord,
 } from "@/lib/finance/rent";
 import { deleteRent, saveRent } from "./actions";
+import { RentalDocumentPanel } from "./rental-document-panel";
 
 type Location = { code: string; name: string; region: string; parent: string | null };
 
@@ -82,6 +83,7 @@ export function RentManager({
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("Active");
   const [editing, setEditing] = useState<RentInput | null>(null);
+  const [documentsFor, setDocumentsFor] = useState<RentRecord | null>(null);
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -251,6 +253,7 @@ export function RentManager({
                 <th>Monthly total</th>
                 <th>Effective period</th>
                 <th>Source</th>
+                <th>Rental agreement</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -275,6 +278,12 @@ export function RentManager({
                     <small>{record.source_sheet ? `${record.source_sheet}${record.source_row ? ` · row ${record.source_row}` : ""}` : `Updated ${record.updated_at.slice(0, 10)}`}</small>
                   </td>
                   <td>
+                    {record.agreement_document ? <>
+                      <button className="button secondary small" type="button" onClick={() => setDocumentsFor(record)}>View agreement</button>
+                      <small>{record.agreement_document.file_name}</small>
+                    </> : canEdit ? <button className="button secondary small" type="button" onClick={() => setDocumentsFor(record)}>Upload agreement</button> : <span className="subtle">Not uploaded</span>}
+                  </td>
+                  <td>
                     <div className="fin-actions">
                       {canEdit && <button className="button secondary small" type="button" onClick={() => edit(record)}>Edit</button>}
                       {canEdit && <button className="button ghost small" type="button" disabled={pending} onClick={() => remove(record)}>Delete</button>}
@@ -283,12 +292,14 @@ export function RentManager({
                 </tr>
               ))}
               {!filtered.length && (
-                <tr><td colSpan={8} className="fin-empty">No rent agreements match these filters.</td></tr>
+                <tr><td colSpan={9} className="fin-empty">No rent agreements match these filters.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </section>
+
+      {documentsFor && <RentalDocumentPanel key={documentsFor.id} record={documentsFor} canEdit={canEdit} onClose={() => setDocumentsFor(null)} />}
 
       {editing && (
         <Modal title={editing.id ? `Edit rent · ${editing.site_code}` : "Add rent agreement"} onClose={() => !pending && setEditing(null)}>
@@ -346,6 +357,7 @@ export function RentManager({
               <textarea required maxLength={500} value={editing.change_reason} onChange={(event) => update("change_reason", event.target.value)} />
             </label>
             {error && <div className="fin-notice error" role="alert">{error}</div>}
+            <p className="subtle">{editing.id ? "View, upload or replace the rental document using the Rental agreement column. Saved documents are kept when you edit these details." : "After saving, use Upload agreement to attach the rental document."}</p>
             <div className="fin-dialog-footer">
               <button className="button secondary" type="button" disabled={pending} onClick={() => setEditing(null)}>Cancel</button>
               <button className="button" type="submit" disabled={pending}>{pending ? "Saving…" : "Save rent agreement"}</button>

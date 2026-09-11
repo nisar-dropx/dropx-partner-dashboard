@@ -1,4 +1,5 @@
 import { addAmounts, decimal, mgEstimate, subtractAmounts } from "./pricing";
+import type { RentalDocument } from "./rental-document";
 
 export type RentInput = {
   id?: string | null;
@@ -17,6 +18,7 @@ export type RentInput = {
 
 export type RentRecord = RentInput & {
   id: string;
+  agreement_document?: RentalDocument | null;
   source_file: string | null;
   source_sheet: string | null;
   source_row: number | null;

@@ -81,7 +81,7 @@ export async function loadRent(context: FinanceContext) {
     let query = context.db
       .from("finance_rent_master")
       .select(
-        "id,site_code,allocation_station_code,parent_station_code,region,payee_name,monthly_rent,monthly_maintenance,effective_from,effective_to,change_reason,source_file,source_sheet,source_row,created_at,updated_at",
+        "id,site_code,allocation_station_code,parent_station_code,region,payee_name,monthly_rent,monthly_maintenance,effective_from,effective_to,change_reason,source_file,source_sheet,source_row,created_at,updated_at,agreement_document:finance_rent_documents!finance_rent_master_agreement_document_id_fkey(id,file_name,content_type,file_size,uploaded_at)",
       )
       .eq("company_id", context.companyId)
       .is("deleted_at", null)
@@ -107,6 +107,8 @@ export async function loadRent(context: FinanceContext) {
         // the data boundary before the records reach the UI or calculators.
         monthly_rent: String(record.monthly_rent ?? "0"),
         monthly_maintenance: String(record.monthly_maintenance ?? "0"),
+        agreement_document: Array.isArray(record.agreement_document)
+          ? record.agreement_document[0] ?? null : record.agreement_document,
       })) as RentRecord[],
     );
     if ((data ?? []).length < 1000) break;

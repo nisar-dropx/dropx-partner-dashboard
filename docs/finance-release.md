@@ -1,5 +1,25 @@
 # Finance deployment
 
+## Rental agreement documents
+
+Rent Master has Upload agreement / View agreement for each rent row. The same-page
+viewer supports PDF/JPG/PNG (up to 4 MB), download, replacement and the most recent
+50 immutable document versions. Save a new rent record before attaching a document.
+Existing rent edits retain attachments. File replacements never change rent amounts.
+
+Apply `supabase/migrations/20260911060916_finance_rental_documents.sql` before the
+matching app deployment. The private bucket has no browser policies. Finance host,
+page access, company and current allocation scope are checked on every file request;
+uploads require Finance rent edit permission and deny read-only previews. MIME,
+extension, magic bytes and size are validated. Download/preview uses a two-minute
+signed URL after authorization; no public file URL is persisted. Replacements use
+new object keys and an atomic, stale-write-protected RPC, retaining old files and
+the existing rent audit. Uncertain commits never delete possibly linked objects.
+
+Checks: `node --test src/lib/finance/rental-document.test.mjs` plus the existing
+Finance portal/business tests. `scripts/finance/verify-rental-documents.sql` runs
+database assertions inside a transaction and rolls back every test record.
+
 Finance runs at `https://fin.dropxlogistics.com` in its own Vercel project:
 
 - Project: `dropx-finance`

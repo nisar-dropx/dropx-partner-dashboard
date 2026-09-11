@@ -8,3 +8,10 @@
 .metric-card{display:flex;flex-direction:column;gap:10px;padding:22px;background:#fff;border:1px solid #e2e8f0;border-radius:14px}.metric-card>span{color:#64748b;font-size:13px;font-weight:650}.metric-card>strong{font-size:28px;color:#172034}.metric-card>small{color:#64748b}
 @media(max-width:1100px){.finance-action-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:650px){.finance-action-grid,.summary-grid{grid-template-columns:1fr}.finance-action-grid{padding:12px}.finance-action-card{min-height:100px}}
+.fin-dialog.fin-rental-document-dialog { width: min(1000px, calc(100vw - 32px)); }
+.fin-rental-document-preview { width: 100%; height: min(60vh, 650px); border: 1px solid #dbe2ed; border-radius: 8px; background: #f6f8fb; }
+.fin-rental-document-upload { padding: 18px 0; border-top: 1px solid #e5eaf0; margin-top: 18px; }
+.fin-rental-document-history { margin-top: 16px; }
+.fin-rental-document-history summary { cursor: pointer; font-weight: 600; }
+.fin-rental-document-history ul { padding-left: 20px; }
+.fin-rental-document-history li { margin: 10px 0; overflow-wrap: anywhere; }
