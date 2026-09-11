@@ -51,7 +51,7 @@ begin
   exception when check_violation then denied := true; end;
   assert denied, 'Oversized document allowed';
   perform public.finance_attach_rent_document(company,actor,rent_id,stamp,'TEST',item);
-  assert (select count(*)=2 from public.finance_rent_documents where rent_id=rent_id and company_id=company), 'Previous version lost';
+  assert (select count(*)=2 from public.finance_rent_documents d where d.rent_id=before_row.id and d.company_id=company), 'Previous version lost';
   assert (select agreement_document_id=second_id from public.finance_rent_master where id=rent_id), 'Replacement not current';
   assert (select count(*)=2 from public.finance_rent_audit where company_id=company), 'Attachment audit missing';
   select updated_at into stamp from public.finance_rent_master where id=rent_id;
