@@ -21,7 +21,9 @@ export async function cpsScope(auth: AuthorizationContext, params: CpsParams) {
   );
   if (locations.error)
     throw Error("Location access could not be loaded. Please retry.");
-  const all = locations.locations;
+  // The shared owner loader includes hidden masters; CPS's calculation excludes
+  // them. Keep pickers, input validation, report counts and the RPC in parity.
+  const all = locations.locations.filter((l) => !l.hide_from_location_list);
   const selected = all.filter(
     (l) =>
       (!params.station || l.station_code === params.station) &&

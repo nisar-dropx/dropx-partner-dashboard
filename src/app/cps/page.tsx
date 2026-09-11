@@ -173,10 +173,7 @@ export default async function CpsPage({
       detail.set(key, r);
     }
     return (
-      <AppShell
-        active={view === "overview" ? "Overview" : cpsViews[view].label}
-        pageCode={cpsViews[view].permission}
-      >
+      <AppShell active="CPS" pageCode={cpsViews[view].permission}>
         <div className="ops-command-center cps-workspace">
           <PageHead
             eyebrow="OPS PULSE · COST PER SHIPMENT"
@@ -241,7 +238,9 @@ export default async function CpsPage({
                   {period.mode.toUpperCase()}: {period.from} – {period.to}
                 </strong>
                 <span>
-                  {selected.length} locations · {period.days} days
+                  {selected.length}{" "}
+                  {selected.length === 1 ? "location" : "locations"} ·{" "}
+                  {period.days} {period.days === 1 ? "day" : "days"}
                 </span>
                 <small>
                   Snapshot{" "}
@@ -254,7 +253,7 @@ export default async function CpsPage({
                         minute: "2-digit",
                       })
                     : "—"}{" "}
-                  IST · refreshes within 30 seconds
+                  IST · 30-second cache · use Refresh for updates
                 </small>
               </div>
               {!selected.length ? (

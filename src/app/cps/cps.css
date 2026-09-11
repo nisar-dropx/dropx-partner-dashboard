@@ -1,7 +1,12 @@
 .cps-workspace {
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   color: #253044;
+}
+.cps-workspace > * {
+  min-width: 0;
 }
 .cps-tabs {
   display: flex;

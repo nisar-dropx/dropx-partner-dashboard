@@ -62,6 +62,18 @@ test("forged station and intersecting filters cannot widen permitted locations",
     0,
   );
   assert.equal((await d.cpsScope(context, {})).selected.length, 1);
+  const withHidden = dataModule(null, [
+    all[0],
+    { ...all[1], hide_from_location_list: true },
+  ]);
+  assert.deepEqual(
+    (await withHidden.cpsScope(context, {})).all.map((l) => l.station_code),
+    ["A"],
+  );
+  assert.equal(
+    (await withHidden.cpsScope(context, { station: "B" })).selected.length,
+    0,
+  );
 });
 test("RPC receives company, sorted station scope and exact period; empty scope does not query", async () => {
   const calls = [];
