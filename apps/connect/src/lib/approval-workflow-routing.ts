@@ -223,6 +223,10 @@ async function findAvailable(candidates: Candidate[], companyId: string, routeId
 export async function resolveConfiguredApprovalWorkflow(input: {
   companyId: string; workflowCode: string; workerType: "employee" | "contractor"; workerId: string; asOf?: string;
   maxLevel?: 1 | 2 | 3;
+  /** Skip peer same_location/cluster/region scopes and use the reporting chain only. */
+  reportingChainOnly?: boolean;
+  /** When true, missing manager levels are skipped instead of throwing (caller may send to HR). */
+  allowMissingApprovers?: boolean;
 }): Promise<{ routeName: string; steps: ConfiguredApprovalStep[]; routeId: string } | null> {
   const asOf = input.asOf ?? indiaToday();
   const worker = await activeWorkerAssignment(input.companyId, input.workerType, input.workerId, asOf);
@@ -234,18 +238,30 @@ export async function resolveConfiguredApprovalWorkflow(input: {
   const excludedPeople = new Set<string>([worker.engagement.person_id]);
   const steps: ConfiguredApprovalStep[] = [];
   let lastChainIndex = -1;
+  const peerScopes = new Set<SearchScope>(["same_location", "same_cluster", "same_region"]);
   for (const level of [1, 2, 3] as const) {
     if (level > maxLevel) continue;
     if (level === 2 && !route.level_2_required) continue;
     if (level === 3 && !route.hr_final_required) continue;
     const designationId = level === 1 ? route.level_1_designation_id : level === 2 ? route.level_2_designation_id : route.hr_final_designation_id;
-    if (!designationId) throw new Error(`${level === 3 ? "HR final" : `Level ${level}`} approver designation is missing. Contact HR.`);
-    const searchScope = level === 1 ? route.level_1_search_scope : level === 2 ? route.level_2_search_scope : route.hr_final_search_scope;
+    if (!designationId) {
+      if (input.allowMissingApprovers) continue;
+      throw new Error(`${level === 3 ? "HR final" : `Level ${level}`} approver designation is missing. Contact HR.`);
+    }
+    const configuredScope = level === 1 ? route.level_1_search_scope : level === 2 ? route.level_2_search_scope : route.hr_final_search_scope;
     const fallbackMode = level === 1 ? route.level_1_fallback_mode : level === 2 ? route.level_2_fallback_mode : route.hr_final_fallback_mode;
     const fallbackPersonId = level === 1 ? route.level_1_fallback_person_id : level === 2 ? route.level_2_fallback_person_id : route.hr_final_fallback_person_id;
-    const primaryCandidates = ["reporting_chain", "immediate_reporting_manager", "manager_above_team_lead"].includes(searchScope)
-      ? chainCandidates(chain, searchScope, designationId, lastChainIndex, designationById)
-      : await scopedDesignationCandidates(input.companyId, designationId, searchScope, worker.assignment.location_id, asOf);
+    const forceChain = Boolean(input.reportingChainOnly) && (peerScopes.has(configuredScope) || level <= 2);
+    const searchScope: SearchScope = forceChain
+      ? (level === 1 ? "immediate_reporting_manager" : "reporting_chain")
+      : configuredScope;
+    const primaryCandidates = forceChain
+      ? (level === 1
+        ? chainCandidates(chain, "immediate_reporting_manager", designationId, lastChainIndex, designationById)
+        : chain.filter((item) => item.chainIndex > lastChainIndex))
+      : ["reporting_chain", "immediate_reporting_manager", "manager_above_team_lead"].includes(searchScope)
+        ? chainCandidates(chain, searchScope, designationId, lastChainIndex, designationById)
+        : await scopedDesignationCandidates(input.companyId, designationId, searchScope, worker.assignment.location_id, asOf);
     let resolved = await findAvailable(primaryCandidates, input.companyId, route.id, level, excludedPeople, "configured_designation", null, null, asOf);
     const original = primaryCandidates.find((item) => !excludedPeople.has(item.personId)) ?? null;
     if (original) {
@@ -257,20 +273,25 @@ export async function resolveConfiguredApprovalWorkflow(input: {
     }
     if (!resolved && fallbackMode !== "block") {
       let fallbackCandidates: Candidate[] = [];
-      if (fallbackMode === "specific_person" && fallbackPersonId) {
-        const candidate = await activePersonCandidate(input.companyId, fallbackPersonId, asOf);
-        if (candidate) fallbackCandidates = [candidate];
-      } else if (fallbackMode === "target_reporting_manager" || fallbackMode === "next_reporting_manager") {
+      if (forceChain || fallbackMode === "target_reporting_manager" || fallbackMode === "next_reporting_manager") {
         const after = original?.chainIndex ?? lastChainIndex;
         fallbackCandidates = chain.filter((item) => item.chainIndex > after);
+      } else if (fallbackMode === "specific_person" && fallbackPersonId) {
+        const candidate = await activePersonCandidate(input.companyId, fallbackPersonId, asOf);
+        if (candidate) fallbackCandidates = [candidate];
       } else {
         const fallbackScope = fallbackMode.replace("same_designation_", "same_") as SearchScope;
         fallbackCandidates = await scopedDesignationCandidates(input.companyId, designationId, fallbackScope, worker.assignment.location_id, asOf);
       }
       resolved = await findAvailable(fallbackCandidates, input.companyId, route.id, level, excludedPeople, "fallback", original?.personId ?? null, original ? "Configured approver unavailable" : "Configured designation not found", asOf);
     }
-    if (!resolved) throw new Error(`${level === 3 ? "HR final" : `Level ${level}`} approval is not available for this request. Contact HR.`);
+    if (!resolved) {
+      if (input.allowMissingApprovers) continue;
+      throw new Error(`${level === 3 ? "HR final" : `Level ${level}`} approval is not available for this request. Contact HR.`);
+    }
     if (level === 3) resolved.step.step_name = "HR final approval";
+    else if (forceChain && level === 1) resolved.step.step_name = "Reporting manager approval";
+    else if (forceChain) resolved.step.step_name = "Next reporting manager approval";
     steps.push(resolved.step);
     excludedPeople.add(resolved.candidate.personId);
     if (resolved.candidate.chainIndex >= 0) lastChainIndex = Math.max(lastChainIndex, resolved.candidate.chainIndex);

@@ -11,6 +11,7 @@ import {
 } from "@/lib/workforce-profiles";
 import { requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
 import { connectWfhEligible, loadConnectWfhPolicies } from "./connect-wfh-access";
+import { connectSiteVisitEligible, loadConnectSiteVisitPolicies } from "./connect-site-visit-access";
 
 export type ConnectAccount = {
   id: string;
@@ -815,6 +816,9 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   const wfhPolicies = await loadConnectWfhPolicies(
     [...new Set(loginAccounts.map((account) => account.company_id))]
   );
+  const siteVisitPolicies = await loadConnectSiteVisitPolicies(
+    [...new Set(loginAccounts.map((account) => account.company_id))]
+  );
 
   return Promise.all(loginAccounts
     .filter((account) => companyNameById.has(account.company_id))
@@ -830,11 +834,10 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         account.profile_type,
         account.designation_id ? peopleModuleByDesignationId.get(account.designation_id) : null
       );
-      // WFH is never granted via designation/category app_page_access.
-      // It is shown only when People → Attendance master → Work From Home Policy
-      // lists the worker's designation in eligible_designation_ids.
+      // WFH and Site Visit are never granted via designation/category app_page_access.
+      // Each is shown only when its People attendance master lists the worker's designation.
       const pageAccess = resolveConnectPageAccess(account.profile_type, categoryPages, designationPages)
-        .filter((page) => page !== "wfh");
+        .filter((page) => page !== "wfh" && page !== "site_visit");
       const designationId = account.designation_id ?? null;
       const designationLabel = designationId
         ? {
@@ -853,6 +856,16 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         })
       ) {
         pageAccess.push("wfh");
+      }
+      if (
+        (account.profile_type === "employee" || account.profile_type === "contractor")
+        && connectSiteVisitEligible({
+          policy: siteVisitPolicies.get(account.company_id),
+          designationId,
+          designation: designationLabel
+        })
+      ) {
+        pageAccess.push("site_visit");
       }
 
       return {

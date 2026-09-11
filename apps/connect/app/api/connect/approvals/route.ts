@@ -3,8 +3,9 @@ import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/
 import { resolveConnectActorUserId, resolveConnectActorUserIds } from "../../../../src/lib/connect-approver-identity";
 import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval, listConnectReturnedRosters, resubmitConnectReturnedRoster, listConnectExitApprovals, decideConnectExitApproval, listConnectExitWithdrawalApprovals, decideConnectExitWithdrawal } from "../../../../src/lib/connect-manager-approvals";
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
-import { loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
+import { connectReporteeMatches, loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
 import { decideConnectWfhApproval, decideConnectWfhHrApproval, listConnectWfhApprovals, listConnectWfhHrApprovals } from "../../../../src/lib/connect-wfh-data";
+import { decideConnectSiteVisitApproval, decideConnectSiteVisitHrApproval, listConnectSiteVisitApprovals, listConnectSiteVisitHrApprovals } from "../../../../src/lib/connect-site-visit-data";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
 
@@ -78,7 +79,9 @@ export async function GET(request: Request) {
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     const reportees = await loadConnectReporteeAccess(account, scope);
     const approverUserIds = await resolveConnectActorUserIds(account);
-    const [leaveApprovals, wfhApprovals, wfhHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals] = await Promise.all([
+    const matchesReportee = (profileType: string, profileId: string | null) =>
+      connectReporteeMatches(reportees, profileType, profileId);
+    const [leaveApprovals, wfhApprovals, wfhHrApprovals, siteVisitApprovals, siteVisitHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals] = await Promise.all([
       listLeaveApprovals(account),
       approverUserIds.length
         ? listConnectWfhApprovals({
@@ -88,7 +91,15 @@ export async function GET(request: Request) {
             matchesReportee: () => true
           })
         : Promise.resolve([]),
-      listConnectWfhHrApprovals(account),
+      listConnectWfhHrApprovals(account, matchesReportee),
+      approverUserIds.length
+        ? listConnectSiteVisitApprovals({
+            companyId: account.companyId,
+            approverUserIds,
+            matchesReportee: () => true
+          })
+        : Promise.resolve([]),
+      listConnectSiteVisitHrApprovals(account, matchesReportee),
       listConnectLocationSupportPackages(account, reportees),
       listConnectAttendanceApprovals(account, reportees),
       listConnectAttendanceHrApprovals(account, reportees),
@@ -98,7 +109,22 @@ export async function GET(request: Request) {
       listConnectExitApprovals(account),
       listConnectExitWithdrawalApprovals(account)
     ]);
-    return NextResponse.json({ scope, leaveApprovals, wfhApprovals, wfhHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({
+      scope,
+      leaveApprovals,
+      wfhApprovals,
+      wfhHrApprovals,
+      siteVisitApprovals,
+      siteVisitHrApprovals,
+      locationSupportPackages,
+      attendanceApprovals,
+      attendanceHrApprovals,
+      rosterApprovals,
+      rosterSwapApprovals,
+      returnedRosters,
+      exitApprovals,
+      exitWithdrawalApprovals
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to load approvals.") }, { status: 400 });
   }
@@ -170,6 +196,36 @@ export async function PATCH(request: Request) {
         companyId: account.companyId,
         approverUserId,
         requestId: wfhRequestId,
+        decision: decision as "approved" | "rejected",
+        note
+      });
+      return NextResponse.json({ ok: true, notice: result.notice });
+    }
+    const siteVisitRequestId = clean(body.siteVisitRequestId);
+    if (siteVisitRequestId) {
+      const decision = clean(body.decision);
+      const note = clean(body.note);
+      const queue = clean(body.siteVisitQueue);
+      if (queue === "hr") {
+        if (decision !== "approved" && decision !== "returned" && decision !== "rejected") {
+          throw new Error("Choose Apply Site Visit, Return, or Reject.");
+        }
+        const result = await decideConnectSiteVisitHrApproval({
+          account,
+          requestId: siteVisitRequestId,
+          decision: decision as "approved" | "returned" | "rejected",
+          note,
+          defaultIn: clean(body.defaultIn) || "09:00",
+          defaultOut: clean(body.defaultOut) || "18:00"
+        });
+        return NextResponse.json({ ok: true, notice: result.notice });
+      }
+      const approverUserId = await requireActorUserId(account, "approve site visit");
+      if (decision !== "approved" && decision !== "rejected") throw new Error("Choose Approve or Reject.");
+      const result = await decideConnectSiteVisitApproval({
+        companyId: account.companyId,
+        approverUserId,
+        requestId: siteVisitRequestId,
         decision: decision as "approved" | "rejected",
         note
       });

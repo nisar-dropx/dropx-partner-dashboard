@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ClipboardCheck, Clock3, DoorOpen, FileText, Home, LocateFixed, MapPin, RotateCcw, X } from "lucide-react";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ClipboardCheck, Clock3, DoorOpen, FileText, Home, LocateFixed, MapPin, MapPinned, RotateCcw, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
 import { userFacingError } from "@/lib/user-facing-error";
@@ -186,7 +186,7 @@ type ExitWithdrawalApproval = {
   requestedAt: string | null;
 };
 
-type ApprovalSection = "time-off" | "wfh" | "attendance" | "rosters" | "location-integrity" | "reimbursements" | "exits";
+type ApprovalSection = "time-off" | "wfh" | "site-visit" | "attendance" | "rosters" | "location-integrity" | "reimbursements" | "exits";
 type ReporteeScope = "immediate" | "team";
 
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
@@ -324,6 +324,8 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
   const [wfhApprovals, setWfhApprovals] = useState<WfhApproval[]>([]);
   const [wfhHrApprovals, setWfhHrApprovals] = useState<WfhApproval[]>([]);
+  const [siteVisitApprovals, setSiteVisitApprovals] = useState<WfhApproval[]>([]);
+  const [siteVisitHrApprovals, setSiteVisitHrApprovals] = useState<WfhApproval[]>([]);
   const [attendanceApprovals, setAttendanceApprovals] = useState<AttendanceApproval[]>([]);
   const [attendanceHrApprovals, setAttendanceHrApprovals] = useState<AttendanceApproval[]>([]);
   const [rosterApprovals, setRosterApprovals] = useState<RosterApproval[]>([]);
@@ -339,6 +341,23 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [othersOpen, setOthersOpen] = useState(false);
+  const othersRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!othersOpen) return;
+    function onPointerDown(event: MouseEvent | TouchEvent) {
+      const target = event.target as Node | null;
+      if (othersRef.current && target && !othersRef.current.contains(target)) {
+        setOthersOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+    };
+  }, [othersOpen]);
 
   const load = useCallback(async (background = false) => {
     if (!background) setLoading(true);
@@ -360,6 +379,8 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
       setLeaveApprovals(leavePayload.leaveApprovals ?? []);
       setWfhApprovals(leavePayload.wfhApprovals ?? []);
       setWfhHrApprovals(leavePayload.wfhHrApprovals ?? []);
+      setSiteVisitApprovals(leavePayload.siteVisitApprovals ?? []);
+      setSiteVisitHrApprovals(leavePayload.siteVisitHrApprovals ?? []);
       setAttendanceApprovals(leavePayload.attendanceApprovals ?? []);
       setAttendanceHrApprovals(leavePayload.attendanceHrApprovals ?? []);
       setRosterApprovals(leavePayload.rosterApprovals ?? []);
@@ -376,6 +397,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
           if ((leavePayload.exitApprovals ?? []).length || (leavePayload.exitWithdrawalApprovals ?? []).length) return "exits";
           if ((leavePayload.locationSupportPackages ?? []).length) return "location-integrity";
           if ((leavePayload.wfhApprovals ?? []).length || (leavePayload.wfhHrApprovals ?? []).length) return "wfh";
+          if ((leavePayload.siteVisitApprovals ?? []).length || (leavePayload.siteVisitHrApprovals ?? []).length) return "site-visit";
         }
         return current;
       });
@@ -462,6 +484,29 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
       if (!response.ok) throw new Error(payload.error || "Unable to update WFH approval.");
       setNotice(payload.notice); setNotes((current) => ({ ...current, [`wfh:${requestId}`]: "" })); await load();
     } catch (reason) { setError(userFacingError(reason, "Unable to update WFH approval.")); }
+    finally { setSaving(false); }
+  }
+
+  async function decideSiteVisit(requestId: string, decision: "approved" | "rejected" | "returned", queue: "manager" | "hr" = "manager") {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/approvals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: account.id,
+          profileType: account.profileType,
+          siteVisitRequestId: requestId,
+          siteVisitQueue: queue,
+          decision,
+          note: notes[`site-visit:${requestId}`] ?? "",
+          ...(queue === "hr" ? { defaultIn: "09:00", defaultOut: "18:00" } : {})
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to update site visit approval.");
+      setNotice(payload.notice); setNotes((current) => ({ ...current, [`site-visit:${requestId}`]: "" })); await load();
+    } catch (reason) { setError(userFacingError(reason, "Unable to update site visit approval.")); }
     finally { setSaving(false); }
   }
 
@@ -606,10 +651,22 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
   const rosterCount = rosterApprovals.length + rosterSwapApprovals.length + returnedRosters.length;
   const reimbursementCount = reimbursements.length + preRequestApprovals.length;
   const exitCount = exitApprovals.length + exitWithdrawalApprovals.length;
+  const siteVisitCount = siteVisitApprovals.length + siteVisitHrApprovals.length;
+  const wfhCount = wfhApprovals.length + wfhHrApprovals.length;
   const scopeName = reporteeScope === "immediate" ? "immediate reportees" : "entire reporting team";
-  const othersCount = leaveApprovals.length + reimbursementCount + wfhApprovals.length + wfhHrApprovals.length + exitCount;
-  const othersActive = section === "time-off" || section === "reimbursements" || section === "wfh" || section === "exits";
-  const othersLabel = section === "time-off" ? "Time off" : section === "reimbursements" ? "Reimbursements" : section === "wfh" ? "WFH" : section === "exits" ? "Exits" : "Others";
+  const othersCount = leaveApprovals.length + reimbursementCount + wfhCount + siteVisitCount + exitCount;
+  const othersActive = section === "time-off" || section === "reimbursements" || section === "wfh" || section === "site-visit" || section === "exits";
+  const othersLabel = section === "time-off"
+    ? "Time off"
+    : section === "reimbursements"
+      ? "Reimbursements"
+      : section === "wfh"
+        ? "WFH"
+        : section === "site-visit"
+          ? "Site visit"
+          : section === "exits"
+            ? "Exits"
+            : "Others";
 
   function selectSection(next: ApprovalSection) {
     setSection(next);
@@ -693,7 +750,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
       <header className="dx-page-intro">
         <small>Manager workspace</small>
         <h1>Approval inbox</h1>
-        <p>Assigned approval steps plus HR attendance/WFH finalization in your People attendance scope — managers no longer need People for these queues.</p>
+        <p>Assigned approval steps plus HR attendance/WFH/Site visit finalization for people in the selected reporting scope.</p>
       </header>
       <div className="dx-approval-scope">
         <div aria-label="Choose reportee view" className="dx-approval-scope-switch" role="group">
@@ -715,8 +772,8 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
           </button>
         </div>
         <p>{reporteeScope === "immediate"
-          ? "Location checks: direct reportees only. Time off, reimbursements, attendance, rosters, WFH and exits always use steps assigned to you."
-          : "Location checks: full reporting tree. Other tabs still only show steps assigned to you — switching team scope does not invent new assignments."}</p>
+          ? "Shows direct reportees only for location checks and HR finalization. Assigned manager steps still appear when you are the named approver."
+          : "Shows your full reporting tree for location checks and HR finalization. Assigned manager steps still appear when you are the named approver."}</p>
       </div>
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
@@ -731,7 +788,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
           <button className={section === "location-integrity" ? "active" : ""} onClick={() => selectSection("location-integrity")} type="button">
             Location<span>{supportPackages.length}</span>
           </button>
-          <div className={`dx-approval-others${othersOpen ? " open" : ""}`}>
+          <div className={`dx-approval-others${othersOpen ? " open" : ""}`} ref={othersRef}>
             <button
               aria-expanded={othersOpen}
               className={othersActive ? "active" : ""}
@@ -749,7 +806,10 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   Reimbursements<span>{reimbursementCount}</span>
                 </button>
                 <button className={section === "wfh" ? "active" : ""} onClick={() => selectSection("wfh")} type="button">
-                  WFH<span>{wfhApprovals.length + wfhHrApprovals.length}</span>
+                  WFH<span>{wfhCount}</span>
+                </button>
+                <button className={section === "site-visit" ? "active" : ""} onClick={() => selectSection("site-visit")} type="button">
+                  Site visit<span>{siteVisitCount}</span>
                 </button>
                 <button className={section === "exits" ? "active" : ""} onClick={() => selectSection("exits")} type="button">
                   Exits<span>{exitCount}</span>
@@ -775,7 +835,10 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
             Location<span>{supportPackages.length}</span>
           </button>
           <button className={section === "wfh" ? "active" : ""} onClick={() => selectSection("wfh")} type="button">
-            WFH<span>{wfhApprovals.length + wfhHrApprovals.length}</span>
+            WFH<span>{wfhCount}</span>
+          </button>
+          <button className={section === "site-visit" ? "active" : ""} onClick={() => selectSection("site-visit")} type="button">
+            Site visit<span>{siteVisitCount}</span>
           </button>
           <button className={section === "exits" ? "active" : ""} onClick={() => selectSection("exits")} type="button">
             Exits<span>{exitCount}</span>
@@ -874,7 +937,74 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
             </>
           ) : null}
           {!wfhApprovals.length && !wfhHrApprovals.length ? (
-            <div className="dx-empty"><Home /><strong>No WFH approvals</strong><small>No work-from-home steps or HR finalizations in your scope are waiting.</small></div>
+            <div className="dx-empty"><Home /><strong>No WFH approvals</strong><small>No work-from-home steps or HR finalizations in your reporting scope are waiting.</small></div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {!loading && section === "site-visit" ? (
+        <div className="dx-approval-list">
+          {siteVisitApprovals.length ? (
+            <>
+              <header className="dx-approval-section-head">
+                <strong>Reporting manager</strong>
+                <span>{siteVisitApprovals.length} pending</span>
+              </header>
+              {siteVisitApprovals.map((approval) => (
+                <article className="dx-approval-card" key={approval.id}>
+                  <ApprovalHead
+                    badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+                    eyebrow={`${approval.requestNo} · ${approval.stepName}`}
+                    meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                    name={approval.requesterName}
+                  />
+                  <dl className="dx-approval-facts">
+                    <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
+                    <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
+                  </dl>
+                  <ApprovalNote id={`site-visit:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`site-visit:${approval.requestId}`, value)} placeholder="Note for worker (optional)" />
+                  <ApprovalToolbar
+                    onApprove={() => void decideSiteVisit(approval.requestId, "approved", "manager")}
+                    onReject={() => void decideSiteVisit(approval.requestId, "rejected", "manager")}
+                    saving={saving}
+                    showReturn={false}
+                  />
+                </article>
+              ))}
+            </>
+          ) : null}
+          {siteVisitHrApprovals.length ? (
+            <>
+              <header className="dx-approval-section-head">
+                <strong>HR finalization</strong>
+                <span>{siteVisitHrApprovals.length} pending</span>
+              </header>
+              {siteVisitHrApprovals.map((approval) => (
+                <article className="dx-approval-card" key={`hr:${approval.id}`}>
+                  <ApprovalHead
+                    badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+                    eyebrow={`${approval.requestNo} · Present · Site visit`}
+                    meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                    name={approval.requesterName}
+                  />
+                  <dl className="dx-approval-facts">
+                    <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
+                    <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
+                    {approval.managerName ? <div><dt>Manager</dt><dd>{approval.managerName}{approval.managerNote ? ` · ${approval.managerNote}` : ""}</dd></div> : null}
+                  </dl>
+                  <ApprovalNote id={`site-visit:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`site-visit:${approval.requestId}`, value)} placeholder="Note when returning or rejecting" />
+                  <ApprovalToolbar
+                    onApprove={() => void decideSiteVisit(approval.requestId, "approved", "hr")}
+                    onReject={() => void decideSiteVisit(approval.requestId, "rejected", "hr")}
+                    onReturn={() => void decideSiteVisit(approval.requestId, "returned", "hr")}
+                    saving={saving}
+                  />
+                </article>
+              ))}
+            </>
+          ) : null}
+          {!siteVisitApprovals.length && !siteVisitHrApprovals.length ? (
+            <div className="dx-empty"><MapPinned /><strong>No site visit approvals</strong><small>No site-visit steps or HR finalizations in your reporting scope are waiting.</small></div>
           ) : null}
         </div>
       ) : null}

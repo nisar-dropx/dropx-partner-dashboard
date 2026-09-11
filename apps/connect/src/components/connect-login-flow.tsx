@@ -28,7 +28,7 @@ import { userFacingError } from "@/lib/user-facing-error";
 // browser back/forward, and deep-linking harder than they'd be as real
 // routes. Converting to routes is a deliberate follow-up, out of scope for
 // the styling/consistency pass that touched this file.
-type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "approvals" | "requests" | "payments" | "advances" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "performance" | "connect" | "settings";
+type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "approvals" | "requests" | "payments" | "advances" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "site_visit" | "performance" | "connect" | "settings";
 type ConnectNotification = {
   id: string;
   title: string;
@@ -63,9 +63,10 @@ const canViewApprovals = (account: AppAccount | null, hasReportees: boolean) => 
 const showLeaveNav = (account: AppAccount | null) => Boolean(
   account &&
   active(account) &&
-  (allowed(account, "leave") || account.profileType === "contractor" || allowed(account, "wfh"))
+  (allowed(account, "leave") || account.profileType === "contractor" || allowed(account, "wfh") || allowed(account, "site_visit"))
 );
 const showWfhInLeave = (account: AppAccount | null) => Boolean(account && active(account) && allowed(account, "wfh"));
+const showSiteVisitInLeave = (account: AppAccount | null) => Boolean(account && active(account) && allowed(account, "site_visit"));
 
 function landingPage(account: AppAccount): Step {
   if (!active(account)) return "profile";
@@ -112,7 +113,7 @@ export function ConnectLoginFlow() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [avatar, setAvatar] = useState("");
-  const [leaveSection, setLeaveSection] = useState<"leave" | "wfh">("leave");
+  const [leaveSection, setLeaveSection] = useState<"leave" | "wfh" | "site_visit">("leave");
   const [lockedAccounts, setLockedAccounts] = useState<AppAccount[]>([]);
   const [hasReportees, setHasReportees] = useState(false);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
@@ -322,7 +323,7 @@ export function ConnectLoginFlow() {
       }
     }
     const destination = (notification.route === "communication_center" ? "connect" : notification.route) as Step | null | undefined;
-    if (destination && ["dashboard", "profile", "documents", "approvals", "requests", "advances", "reimbursements", "attendance", "roster", "leave", "lop", "wfh", "performance", "connect", "settings"].includes(destination)) {
+    if (destination && ["dashboard", "profile", "documents", "approvals", "requests", "advances", "reimbursements", "attendance", "roster", "leave", "lop", "wfh", "site_visit", "performance", "connect", "settings"].includes(destination)) {
       setNotificationMenu(false);
       open(destination);
     } else if (destination) {
@@ -455,6 +456,10 @@ export function ConnectLoginFlow() {
       if (!account || !showWfhInLeave(account)) return;
       setLeaveSection("wfh");
       next = "leave";
+    } else if (next === "site_visit") {
+      if (!account || !showSiteVisitInLeave(account)) return;
+      setLeaveSection("site_visit");
+      next = "leave";
     } else if (next === "leave") {
       setLeaveSection("leave");
     }
@@ -498,7 +503,7 @@ export function ConnectLoginFlow() {
     setStep(refreshed ? landingPage(refreshed) : "accounts");
   }
 
-  const loggedIn = ["accounts","dashboard","profile","documents","approvals","requests","payments","advances","reimbursements","attendance","roster","leave","lop","wfh","performance","connect","settings"].includes(step);
+  const loggedIn = ["accounts","dashboard","profile","documents","approvals","requests","payments","advances","reimbursements","attendance","roster","leave","lop","wfh","site_visit","performance","connect","settings"].includes(step);
   const screenLabel: Partial<Record<Step, string>> = {
     accounts: "Accounts",
     dashboard: "Today",

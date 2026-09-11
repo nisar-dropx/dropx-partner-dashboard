@@ -1,12 +1,13 @@
 "use client";
 
-import { CalendarDays, Clock3, FileCheck2, Info, Laptop, Paperclip, Pencil, RotateCcw, Upload } from "lucide-react";
+import { CalendarDays, Clock3, FileCheck2, Info, Laptop, MapPinned, Paperclip, Pencil, RotateCcw, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { AppAccount } from "./connect-profile-app";
+import { ConnectSiteVisit } from "./connect-site-visit";
 import { ConnectWfh } from "./connect-wfh";
 import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
-type LeaveSection = "leave" | "wfh";
+type LeaveSection = "leave" | "wfh" | "site_visit";
 type LeaveTab = "request" | "history";
 type LeaveType = {
   id: string;
@@ -87,10 +88,16 @@ export function ConnectLeave({
   initialSection?: LeaveSection;
 }) {
   const wfhEligible = (account.pageAccess ?? []).includes("wfh");
+  const siteVisitEligible = (account.pageAccess ?? []).includes("site_visit");
   const leaveEligible = (account.pageAccess ?? []).includes("leave") || account.profileType === "contractor";
-  const [section, setSection] = useState<LeaveSection>(
-    initialSection === "wfh" && wfhEligible ? "wfh" : leaveEligible ? "leave" : "wfh"
-  );
+  const flexibleEligible = wfhEligible || siteVisitEligible;
+  const [section, setSection] = useState<LeaveSection>(() => {
+    if (initialSection === "site_visit" && siteVisitEligible) return "site_visit";
+    if (initialSection === "wfh" && wfhEligible) return "wfh";
+    if (leaveEligible) return "leave";
+    if (wfhEligible) return "wfh";
+    return "site_visit";
+  });
   const [tab, setTab] = useState<LeaveTab>("request");
   const [data, setData] = useState<LeaveData | null>(null);
   const [leaveTypeId, setLeaveTypeId] = useState("");
@@ -108,9 +115,10 @@ export function ConnectLeave({
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
 
   useEffect(() => {
-    if (initialSection === "wfh" && wfhEligible) setSection("wfh");
+    if (initialSection === "site_visit" && siteVisitEligible) setSection("site_visit");
+    else if (initialSection === "wfh" && wfhEligible) setSection("wfh");
     else if (initialSection === "leave" && leaveEligible) setSection("leave");
-  }, [initialSection, leaveEligible, wfhEligible]);
+  }, [initialSection, leaveEligible, siteVisitEligible, wfhEligible]);
 
   const resetForm = useCallback(() => {
     setEditingRequestId(null);
@@ -240,23 +248,33 @@ export function ConnectLeave({
       <header className="dx-page-intro">
         <small>Time off</small>
         <h1>Leave</h1>
-        <p>{wfhEligible
-          ? "Plan time away or request work from home."
+        <p>{flexibleEligible
+          ? "Plan time away, work from home, or a site visit."
           : "Plan time away and follow every request."}</p>
       </header>
 
-      {wfhEligible && leaveEligible ? (
+      {(leaveEligible && flexibleEligible) || (wfhEligible && siteVisitEligible) ? (
         <nav className="dx-leave-section-nav" aria-label="Leave options">
-          <button className={section === "leave" ? "active" : ""} onClick={() => setSection("leave")} type="button">
-            <CalendarDays />Leave
-          </button>
-          <button className={section === "wfh" ? "active" : ""} onClick={() => setSection("wfh")} type="button">
-            <Laptop />Work from home
-          </button>
+          {leaveEligible ? (
+            <button className={section === "leave" ? "active" : ""} onClick={() => setSection("leave")} type="button">
+              <CalendarDays />Leave
+            </button>
+          ) : null}
+          {wfhEligible ? (
+            <button className={section === "wfh" ? "active" : ""} onClick={() => setSection("wfh")} type="button">
+              <Laptop />Work from home
+            </button>
+          ) : null}
+          {siteVisitEligible ? (
+            <button className={section === "site_visit" ? "active" : ""} onClick={() => setSection("site_visit")} type="button">
+              <MapPinned />Site visit
+            </button>
+          ) : null}
         </nav>
       ) : null}
 
       {section === "wfh" && wfhEligible ? <ConnectWfh account={account} embedded /> : null}
+      {section === "site_visit" && siteVisitEligible ? <ConnectSiteVisit account={account} embedded /> : null}
 
       {section === "leave" && leaveEligible ? <>
       <div className="dx-leave-summary">

@@ -232,6 +232,19 @@ export function attendanceDayInsight(
     };
   }
 
+  if (row.workMode === "site_visit" || /site visit/.test(state) || /site visit/.test(remark)) {
+    return {
+      calendarClass: "paid-leave",
+      detail: "Approved site visit. Present · Site visit is recorded as paid working time.",
+      headline: "Present · Site visit",
+      issues: [],
+      label: "Present · Site visit",
+      needsRegularization: false,
+      payDayType: "present_wfh",
+      tone: "blue"
+    };
+  }
+
   if (payDayType === "week_off" || statusIsWeekOff(row, state)) {
     return {
       calendarClass: "week-off",

@@ -165,8 +165,7 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount, _r
   })));
 }
 
-export async function listConnectAttendanceHrApprovals(account: ConnectAccount, _reportees: ConnectReporteeAccess) {
-  void _reportees;
+export async function listConnectAttendanceHrApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
   const scope = await loadConnectAttendanceApproveScope(account);
   if (!scope.canFinalize) return [];
   const access = await loadConnectAccessibleWorkforceIds(account, scope);
@@ -179,8 +178,11 @@ export async function listConnectAttendanceHrApprovals(account: ConnectAccount, 
     .order("created_at");
   if (requestsResult.error) throw new Error(requestsResult.error.message);
 
+  // Immediate reportees / Entire team toggle applies to HR finalization too —
+  // only show workers inside the selected reporting scope (not the full attendance grant).
   const rows = (requestsResult.data ?? []).filter((request) =>
     connectWorkforceMatches(access, String(request.profile_type), String(request.profile_id))
+    && connectReporteeMatches(reportees, request.profile_type, request.profile_id)
   );
 
   const filtered = [];
