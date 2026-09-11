@@ -9,6 +9,7 @@ const page = read("src/app/cps/adhoc-activity/page.tsx");
 const data = read("src/lib/ops-pulse/adhoc-activity.ts");
 const filters = read("src/components/cps-adhoc-filters.tsx");
 const table = read("src/components/cps-adhoc-table.tsx");
+const report = read("src/app/api/ops-pulse/cps/adhoc-activity/report/route.ts");
 
 const checks = [
   [navigation.includes('label: "Adhoc Van & DA", href: "/cps/adhoc-activity"'), "CPS navigation must expose the Adhoc Van & DA submenu."],
@@ -19,6 +20,9 @@ const checks = [
   [data.includes('from("cps_cashbook_daily")') && data.includes("isCashbookAdHocVan") && data.includes("approvedRequestNumbers"), "Cashbook Adhoc Van payments must be included without double-counting linked requests."],
   [data.includes("location.aom") && page.includes("adHocClusterLabel"), "AOM must be the cluster-filter fallback when no Cluster Manager is mapped."],
   [table.includes("day-level activity") && table.includes("setExpanded"), "Station totals must expand into day-level detail without leaving the table."],
+  [table.includes("Click a date for reasons and remarks") && table.includes("entry.reason") && table.includes("entry.remark") && data.includes("payment_request_answers"), "Each activity date must expose the recorded reason and remark for its Adhoc entries."],
+  [["station", "vanCount", "vanAmount", "daCount", "daAmount", "totalCount", "totalAmount"].every((column) => table.includes(`column="${column}"`)), "Every station-summary column must be sortable."],
+  [table.includes("Download Excel") && report.includes("workbookResponse") && report.includes('name: "Reasons and remarks"') && report.includes('hasPermission(authorization, "cps_overview", "access")'), "The scoped Excel report must include reasons and remarks and enforce CPS access."],
   [page.includes("Linked Cashbook payments are shown but never double-counted") && page.includes("Pending, returned and rejected requests are excluded"), "The counting rule must remain visible to users."]
 ];
 
@@ -28,4 +32,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("CPS Adhoc Van & DA scope, filters and day-level table verified.");
+console.log("CPS Adhoc Van & DA scope, filters, sorting, Excel report and date details verified.");
