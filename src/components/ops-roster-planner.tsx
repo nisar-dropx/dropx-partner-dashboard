@@ -27,6 +27,7 @@ import {
   recurringTemplateDate,
   rosterAssignmentToDragPayload,
   rosterCoverage,
+  rosterMonthEnd,
   rosterMonthMaxWeekStart,
   rosterWeek,
   rosterWeekInCurrentMonth,
@@ -135,6 +136,8 @@ export function OpsRosterPlanner({
   const [assignments, setAssignments] = useState(initial);
   const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set());
   const [templateStart, setTemplateStart] = useState(plan?.periodStart ?? blankPeriodStart);
+  const [livePeriodEnd, setLivePeriodEnd] = useState(plan?.periodEnd ?? moveIsoDate(plan?.periodStart ?? blankPeriodStart, 6));
+  const [liveRecurring, setLiveRecurring] = useState(plan?.status === "approved" && plan?.rosterKind === "recurring_weekly");
   const [weekStart, setWeekStart] = useState(initialWeekStart);
   const [activePlanId, setActivePlanId] = useState<string | null>(plan?.id ?? null);
   const [query, setQuery] = useState("");
@@ -169,7 +172,12 @@ export function OpsRosterPlanner({
   const dragDropHandledRef = useRef(false);
   const activeDragPayloadRef = useRef<RosterDragPayload | null>(null);
 
-  const dates = useMemo(() => rosterWeekInCurrentMonth(weekStart, today), [today, weekStart]);
+  const isRecurring = liveRecurring;
+  const monthEnd = useMemo(() => rosterMonthEnd(today), [today]);
+  const dates = useMemo(() => {
+    if (isRecurring) return rosterWeekInCurrentMonth(weekStart, today);
+    return rosterWeek(weekStart).filter((date) => date >= templateStart && date <= livePeriodEnd && date <= monthEnd);
+  }, [isRecurring, livePeriodEnd, monthEnd, templateStart, today, weekStart]);
   const maxWeekStart = useMemo(() => rosterMonthMaxWeekStart(today), [today]);
   const holidayByDate = useMemo(() => new Map(holidays.map((holiday) => [holiday.calendarDate, holiday])), [holidays]);
   const shiftById = useMemo(() => new Map(shifts.map((shift) => [shift.id, shift])), [shifts]);
@@ -179,33 +187,39 @@ export function OpsRosterPlanner({
       && (!needle || `${person.name} ${person.code} ${person.designation}`.toLowerCase().includes(needle)));
   }, [people, query, workerType]);
   const projectedAssignments = useMemo(() => {
+    if (!isRecurring) return assignments;
     const projected = new Map<string, RosterAssignmentValue>();
     for (const person of visiblePeople) for (const date of dates) {
       const assignment = assignments.get(cellKey(person, recurringTemplateDate(templateStart, date)));
       if (assignment) projected.set(cellKey(person, date), assignment);
     }
     return projected;
-  }, [assignments, dates, templateStart, visiblePeople]);
+  }, [assignments, dates, isRecurring, templateStart, visiblePeople]);
   const coverage = useMemo(() => rosterCoverage(visiblePeople.map(personKey), dates, projectedAssignments), [dates, projectedAssignments, visiblePeople]);
   const submissionCoverage = useMemo(() => {
-    const templateDates = rosterWeek(templateStart);
-    const expected = people.length * templateDates.length;
-    const ready = people.reduce((total, person) => total + templateDates.filter((date) => assignments.has(cellKey(person, date))).length, 0);
+    const coverageDates = isRecurring
+      ? rosterWeek(templateStart)
+      : rosterWeek(templateStart).filter((date) => date <= livePeriodEnd);
+    const expected = people.length * coverageDates.length;
+    const ready = people.reduce((total, person) => total + coverageDates.filter((date) => assignments.has(cellKey(person, date))).length, 0);
     return { expected, ready, missing: Math.max(0, expected - ready) };
-  }, [assignments, people, templateStart]);
+  }, [assignments, isRecurring, livePeriodEnd, people, templateStart]);
   const activeShift = activeTool?.kind === "shift" ? shiftById.get(activeTool.shiftId) : null;
   const interactionAllowed = (editingEnabled || canStart) && !isPreparing;
   const cutoffMessage = rosterChangeDeadlineMessage(changeDeadlineHour);
 
   const lockReason = useCallback((date: string, _payload?: RosterDragPayload | null, _fallback?: RosterAssignmentValue) => {
     if (date < today) return "Past roster dates cannot be edited.";
-    if (date < templateStartRef.current) return `This roster change starts on ${dateLabel(templateStartRef.current)}. Earlier dates are view only.`;
-    // Cut off against the weekday occurrence in the week being viewed (e.g. 12–13 Sep),
-    // not an earlier same weekday in the template week (e.g. 5–6 Sep).
-    const templateDate = recurringTemplateDate(templateStartRef.current, date);
-    const cutoffDate = nextRosterOccurrenceOnOrAfter(templateDate, date > today ? date : today);
+    if (isRecurring && date < templateStartRef.current) return `This roster change starts on ${dateLabel(templateStartRef.current)}. Earlier dates are view only.`;
+    if (!isRecurring && (date < templateStartRef.current || date > livePeriodEnd)) {
+      return "This dated roster only covers its selected period. Dates outside it are view only.";
+    }
+    const templateOrDate = isRecurring ? recurringTemplateDate(templateStartRef.current, date) : date;
+    const cutoffDate = isRecurring
+      ? nextRosterOccurrenceOnOrAfter(templateOrDate, date > today ? date : today)
+      : templateOrDate;
     return isRosterChangePastDeadline(cutoffDate, changeDeadlineHour, new Date(nowIso).getTime()) ? cutoffMessage : null;
-  }, [changeDeadlineHour, cutoffMessage, nowIso, today]);
+  }, [changeDeadlineHour, cutoffMessage, isRecurring, livePeriodEnd, nowIso, today]);
 
   useEffect(() => {
     editingEnabledRef.current = editable;
@@ -214,6 +228,8 @@ export function OpsRosterPlanner({
     setActivePlanId(plan?.id ?? null);
     templateStartRef.current = plan?.periodStart ?? blankPeriodStart;
     setTemplateStart(plan?.periodStart ?? blankPeriodStart);
+    setLivePeriodEnd(plan?.periodEnd ?? moveIsoDate(plan?.periodStart ?? blankPeriodStart, 6));
+    setLiveRecurring(plan?.status === "approved" && plan?.rosterKind === "recurring_weekly");
     setWeekStart(initialWeekStart);
     preparedPlanIdRef.current = null;
     preparingRef.current = false;
@@ -224,7 +240,7 @@ export function OpsRosterPlanner({
     setSelectedPeople(new Set());
     setSelectedDates(new Set());
     setCellPicker(null);
-  }, [blankPeriodStart, editable, initial, initialWeekStart, plan?.id, plan?.periodStart]);
+  }, [blankPeriodStart, editable, initial, initialWeekStart, plan?.id, plan?.periodEnd, plan?.periodStart, plan?.rosterKind, plan?.status]);
 
   useEffect(() => {
     if (weekStart > maxWeekStart) setWeekStart(maxWeekStart);
@@ -271,6 +287,9 @@ export function OpsRosterPlanner({
     preparedPlanIdRef.current = result.planId;
     templateStartRef.current = result.periodStart;
     setTemplateStart(result.periodStart);
+    setLivePeriodEnd(result.periodEnd ?? moveIsoDate(result.periodStart, 6));
+    setLiveRecurring(false);
+    setWeekStart(result.periodStart < initialWeekStart ? initialWeekStart : result.periodStart);
     assignmentsRef.current = preparedAssignments;
     setAssignments(preparedAssignments);
     editingEnabledRef.current = true;
@@ -279,7 +298,7 @@ export function OpsRosterPlanner({
     setMessage({ tone: "success", text: result.message });
     router.refresh();
     return true;
-  }, [canStart, plan?.status, router, stationId]);
+  }, [canStart, initialWeekStart, plan?.status, router, stationId]);
 
   const bulkWeekMonday = useMemo(() => mondayOf(bulkWeekStart || today), [bulkWeekStart, today]);
   const bulkWeekSunday = useMemo(() => moveIsoDate(bulkWeekMonday, 6), [bulkWeekMonday]);
@@ -307,7 +326,13 @@ export function OpsRosterPlanner({
         setAssignments(next);
         templateStartRef.current = result.periodStart;
         setTemplateStart(result.periodStart);
+        setLivePeriodEnd(result.periodEnd ?? moveIsoDate(result.periodStart, 6));
+        setLiveRecurring(false);
         setWeekStart(result.periodStart < initialWeekStart ? initialWeekStart : result.periodStart);
+        if (result.planId) {
+          activePlanIdRef.current = result.planId;
+          setActivePlanId(result.planId);
+        }
         setDirtyKeys(new Set());
       }
       router.refresh();
@@ -322,7 +347,8 @@ export function OpsRosterPlanner({
   }, [cellPicker]);
 
   const commitDrop = useCallback((person: OpsRosterPerson, date: string, payload: RosterDragPayload) => {
-    const targetKey = cellKey(person, recurringTemplateDate(templateStartRef.current, date));
+    const assignmentDate = isRecurring ? recurringTemplateDate(templateStartRef.current, date) : date;
+    const targetKey = cellKey(person, assignmentDate);
     if (payload.sourceKey === targetKey) return;
     setAssignments((current) => {
       const next = applyRosterDrop(current, targetKey, payload).assignments;
@@ -331,11 +357,12 @@ export function OpsRosterPlanner({
     });
     setDirtyKeys((current) => new Set([...current, targetKey, ...(payload.sourceKey ? [payload.sourceKey] : [])]));
     setMessage(null);
-  }, []);
+  }, [isRecurring]);
 
   const assignmentAt = useCallback((person: OpsRosterPerson, date: string, fallback?: RosterAssignmentValue) => {
-    return assignmentsRef.current.get(cellKey(person, recurringTemplateDate(templateStartRef.current, date))) ?? fallback;
-  }, []);
+    const assignmentDate = isRecurring ? recurringTemplateDate(templateStartRef.current, date) : date;
+    return assignmentsRef.current.get(cellKey(person, assignmentDate)) ?? fallback;
+  }, [isRecurring]);
 
   const dropPayload = useCallback(async (person: OpsRosterPerson, date: string, payload: RosterDragPayload | null) => {
     if (!payload) return;
@@ -346,16 +373,16 @@ export function OpsRosterPlanner({
       setMessage({ tone: "error", text: reason });
       return;
     }
-    const currentPayload = payload.sourceKey
+    const currentPayload = payload.sourceKey && isRecurring
       ? { ...payload, sourceKey: remapCellKeyToTemplate(payload.sourceKey, templateStartRef.current) }
       : payload;
     commitDrop(person, date, currentPayload);
     setCellPicker(null);
-  }, [assignmentAt, commitDrop, ensureEditing, lockReason]);
+  }, [assignmentAt, commitDrop, ensureEditing, isRecurring, lockReason]);
 
   const removeAssignmentAtKey = useCallback((sourceKey: string) => {
     if (!editingEnabledRef.current) return;
-    const key = remapCellKeyToTemplate(sourceKey, templateStartRef.current);
+    const key = isRecurring ? remapCellKeyToTemplate(sourceKey, templateStartRef.current) : sourceKey;
     setAssignments((current) => {
       if (!current.has(key)) return current;
       const next = new Map(current);
@@ -365,7 +392,7 @@ export function OpsRosterPlanner({
     });
     setDirtyKeys((current) => new Set([...current, key]));
     setMessage(null);
-  }, []);
+  }, [isRecurring]);
 
   function openCellPicker(person: OpsRosterPerson, date: string, rect: DOMRect) {
     const pickerWidth = 248;
@@ -426,14 +453,19 @@ export function OpsRosterPlanner({
 
   async function fillDefaultShifts() {
     if (!editingEnabledRef.current && !(await ensureEditing())) return;
-    const templateDates = rosterWeek(templateStartRef.current);
+    const fillDates = isRecurring
+      ? rosterWeek(templateStartRef.current)
+      : dates;
     const next = new Map(assignmentsRef.current);
     const dirty = new Set<string>();
     for (const person of people) {
       const shiftId = defaultShifts[personKey(person)];
       if (!shiftId || !shiftById.has(shiftId)) continue;
-      for (const date of templateDates) {
-        if (isRosterChangePastDeadline(nextRosterOccurrenceOnOrAfter(date, today), changeDeadlineHour, new Date(nowIso).getTime())) continue;
+      for (const date of fillDates) {
+        const cutoffDate = isRecurring
+          ? nextRosterOccurrenceOnOrAfter(date, today)
+          : date;
+        if (isRosterChangePastDeadline(cutoffDate, changeDeadlineHour, new Date(nowIso).getTime())) continue;
         const key = cellKey(person, date);
         if (next.has(key)) continue;
         next.set(key, { dayType: "working", shiftId, notes: null });
@@ -491,7 +523,9 @@ export function OpsRosterPlanner({
   function moveWeek(offset: number) {
     const next = moveIsoDate(weekStart, offset);
     if (next < initialWeekStart) setWeekStart(initialWeekStart);
-    else if (next > maxWeekStart) setWeekStart(maxWeekStart);
+    else if (isRecurring && next > maxWeekStart) setWeekStart(maxWeekStart);
+    else if (!isRecurring && next > livePeriodEnd) return;
+    else if (!isRecurring && moveIsoDate(next, 6) < templateStart) return;
     else setWeekStart(next);
     setSelectedDates(new Set());
   }
@@ -592,22 +626,24 @@ export function OpsRosterPlanner({
     ? editingEnabled
       ? "Select a shift, click cells to assign, or drag between people and days."
       : pendingRecall
-        ? "Pending approval — use Recall & edit to change this station pattern."
-        : "Click a cell to open an editable draft of this station pattern."
+        ? "Pending approval — use Recall & edit to change this station roster."
+        : "Click a cell to open an editable dated draft for this station."
     : "View only for your current access.";
   const status = editingEnabled && !plan ? "draft" : plan?.status ?? "blank";
   const templateHref = `/rostering/template?station=${encodeURIComponent(stationId)}${activePlanId ? `&plan=${encodeURIComponent(activePlanId)}` : ""}`;
   // Excel follows the same gate as the grid: only once an editable draft is open.
   const canUseExcel = editingEnabled && Boolean(activePlanId);
-  const heroDetail = plan
-    ? `Effective ${fullDateLabel(plan.effectiveFrom ?? plan.periodStart)} · v${plan.revisionNo} · repeats until replaced`
-    : "Start editing to prepare this station’s recurring Monday–Sunday pattern.";
+  const heroDetail = isRecurring
+    ? `Effective ${fullDateLabel(plan?.effectiveFrom ?? plan?.periodStart ?? blankPeriodStart)} · v${plan?.revisionNo ?? 1} · repeats until replaced`
+    : plan
+      ? `Dated ${fullDateLabel(templateStart)} → ${fullDateLabel(livePeriodEnd)} · v${plan.revisionNo} · only these dates change`
+      : "Start editing to prepare a dated Monday–Sunday roster for this station.";
 
   return <section className={`${styles.workspace}${draggingLabel || pointerDrag?.active ? ` ${styles.isDragging}` : ""}`}>
     <header className={styles.hero}>
       <div>
         <span>{status === "approved" ? "Current approved roster" : status === "blank" ? "No roster configured" : status === "pending_approval" ? "Awaiting approval" : "Roster change in progress"}</span>
-        <h2>{stationCode} · Monday to Sunday</h2>
+        <h2>{stationCode} · {isRecurring ? "Monday to Sunday pattern" : "Dated roster"}</h2>
         <p>{heroDetail}</p>
       </div>
       <div className={styles.heroActions}>
@@ -626,7 +662,11 @@ export function OpsRosterPlanner({
     </header>
 
     <div className={styles.toolbar}>
-      <div className={styles.weekNavigation}><button type="button" aria-label="Previous week" onClick={() => moveWeek(-7)} disabled={weekStart <= initialWeekStart}><ChevronLeft size={16} /></button><span><CalendarDays size={15} /><strong>{dateLabel(dates[0])}</strong> to <strong>{dateLabel(dates[dates.length - 1] ?? dates[0])}</strong></span><button type="button" aria-label="Next week" onClick={() => moveWeek(7)} disabled={weekStart >= maxWeekStart}><ChevronRight size={16} /></button></div>
+      <div className={styles.weekNavigation}>
+        <button type="button" aria-label="Previous week" onClick={() => moveWeek(-7)} disabled={weekStart <= initialWeekStart || (!isRecurring && weekStart <= templateStart)}><ChevronLeft size={16} /></button>
+        <span><CalendarDays size={15} /><strong>{dateLabel(dates[0] ?? weekStart)}</strong> to <strong>{dateLabel(dates[dates.length - 1] ?? dates[0] ?? weekStart)}</strong></span>
+        <button type="button" aria-label="Next week" onClick={() => moveWeek(7)} disabled={isRecurring ? weekStart >= maxWeekStart : (dates[dates.length - 1] ?? weekStart) >= livePeriodEnd}><ChevronRight size={16} /></button>
+      </div>
       <label className={styles.search}><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search person, ID or designation" /></label>
       <select aria-label="People type" value={workerType} onChange={(event) => setWorkerType(event.target.value)}><option value="all">Employees & contractors</option><option value="employee">Employees</option><option value="contractor">Independent contractors</option></select>
     </div>
@@ -654,7 +694,8 @@ export function OpsRosterPlanner({
           return <th key={date} className={holiday ? styles.holiday : ""}><label><input type="checkbox" checked={selectedDates.has(date)} onChange={() => setSelectedDates((current) => { const next = new Set(current); if (next.has(date)) next.delete(date); else next.add(date); return next; })} /><span>{dayLabel(date)}<strong>{dateLabel(date)}</strong>{holiday ? <small title={holiday.name}>{holiday.name}</small> : null}</span></label><div className={styles.coverage}><span>{dayCoverage?.working ?? 0} on</span><span>{dayCoverage?.weeklyOff ?? 0} off</span><span className={(dayCoverage?.unassigned ?? 0) ? styles.warning : ""}>{dayCoverage?.unassigned ?? 0} open</span></div></th>;
         })}</tr></thead>
         <tbody>{visiblePeople.length ? visiblePeople.map((person) => <tr key={personKey(person)}><th className={styles.personColumn}><label><input type="checkbox" checked={selectedPeople.has(personKey(person))} onChange={() => setSelectedPeople((current) => { const next = new Set(current); if (next.has(personKey(person))) next.delete(personKey(person)); else next.add(personKey(person)); return next; })} /><span><strong>{person.name}</strong><small>{person.code} · {person.designation || (person.workerType === "employee" ? "Employee" : "Contractor")}</small><em>{person.workerType === "employee" ? "Employee" : "Independent contractor"}</em></span></label></th>{dates.map((date) => {
-          const key = cellKey(person, recurringTemplateDate(templateStart, date));
+          const assignmentDate = isRecurring ? recurringTemplateDate(templateStart, date) : date;
+          const key = cellKey(person, assignmentDate);
           const assignment = assignments.get(key);
           const shift = assignment?.shiftId ? shiftById.get(assignment.shiftId) : null;
           const assignmentPayload = assignment ? rosterAssignmentToDragPayload(assignment, key) : null;
@@ -676,7 +717,7 @@ export function OpsRosterPlanner({
         <span className={styles.excelIcon} aria-hidden="true"><Upload size={16} /></span>
         <div>
           <strong>Excel upload</strong>
-          <small>{stationCode} · choose a week or month, same as People</small>
+          <small>{stationCode} · week or month · dated (non-recurring) only</small>
         </div>
         <span className={styles.excelBadge}>Draft only</span>
         <span className={styles.excelBadgeMuted}>Submit for approval after import</span>
@@ -696,7 +737,7 @@ export function OpsRosterPlanner({
               onChange={(event) => setBulkWeekStart(mondayOf(event.target.value || today))}
               disabled={isImporting}
             />
-            <small>Mon {dateLabel(bulkWeekMonday)} → Sun {dateLabel(bulkWeekSunday)}</small>
+            <small>Mon {dateLabel(bulkWeekMonday)} → Sun {dateLabel(bulkWeekSunday)} · that week only</small>
           </label>
         ) : (
           <label className={styles.excelPeriodField}>
@@ -707,7 +748,7 @@ export function OpsRosterPlanner({
               onChange={(event) => setBulkRosterMonth(event.target.value)}
               disabled={isImporting}
             />
-            <small>Writes only dates inside {bulkRosterMonth}</small>
+            <small>Expands Mon–Sun across every day in {bulkRosterMonth}</small>
           </label>
         )}
       </div>
@@ -717,7 +758,7 @@ export function OpsRosterPlanner({
           <em>1</em>
           <div>
             <strong>Download template</strong>
-            <small>Mon–Sun pattern · WO for week off</small>
+            <small>Mon–Sun columns · WO for week off</small>
           </div>
           <a className="button secondary compact" download href={templateHref}><Download size={14} /> Download</a>
         </li>
@@ -727,7 +768,9 @@ export function OpsRosterPlanner({
             <strong>Upload completed file</strong>
             <small>
               {editingEnabled && activePlanId
-                ? (bulkPeriodMode === "week" ? "Imports the selected week into this draft" : `Applies the weekly pattern inside ${bulkRosterMonth}`)
+                ? (bulkPeriodMode === "week"
+                  ? "Imports the selected week only into this dated draft"
+                  : `Expands Mon–Sun across every day in ${bulkRosterMonth}`)
                 : pendingRecall ? "Recall & edit first, then upload" : "Start or edit the roster first"}
             </small>
           </div>

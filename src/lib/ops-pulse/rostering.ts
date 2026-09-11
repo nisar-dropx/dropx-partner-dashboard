@@ -54,6 +54,8 @@ export type OpsRosterPlan = {
   supersededAt: string | null;
   revisionNo: number;
   status: string;
+  rosterKind: "dated" | "recurring_weekly" | string;
+  planningChannel: string | null;
   submittedAt: string | null;
   decisionNote: string | null;
   entries: OpsRosterEntry[];
@@ -496,6 +498,8 @@ function normalizePlan(row: Record<string, any>): OpsRosterPlan {
     supersededAt: row.superseded_at,
     revisionNo: Number(row.revision_no ?? 1),
     status: row.status,
+    rosterKind: row.roster_kind ?? "recurring_weekly",
+    planningChannel: row.planning_channel ?? null,
     submittedAt: row.submitted_at,
     decisionNote: row.decision_note,
     entries: (row.hr_roster_entries ?? []).map((entry: Record<string, any>) => ({
@@ -515,12 +519,12 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
   const [manpower, planResult, shiftResult] = await Promise.all([
     loadOpsStationManpower(companyId, [location], today),
     db().from("hr_roster_plans")
-      .select("id,name,location_id,period_start,period_end,status,decision_note,roster_kind,effective_from,superseded_at,revision_no,submitted_at,created_at,hr_roster_entries(id,worker_type,worker_id,roster_date,day_type,shift_id,notes)")
+      .select("id,name,location_id,period_start,period_end,status,decision_note,roster_kind,planning_channel,effective_from,superseded_at,revision_no,submitted_at,created_at,hr_roster_entries(id,worker_type,worker_id,roster_date,day_type,shift_id,notes)")
       .eq("company_id", companyId)
       .eq("location_id", location.id)
-      .eq("roster_kind", "recurring_weekly")
+      .in("roster_kind", ["dated", "recurring_weekly"])
       .order("created_at", { ascending: false })
-      .limit(20),
+      .limit(40),
     db().from("hr_shifts")
       .select("id,code,name,start_time,end_time,color")
       .eq("company_id", companyId)
@@ -580,8 +584,11 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
     if (!(key in defaultShifts)) defaultShifts[key] = row.shift_id;
   }
   const plans = (planResult.data ?? []).map((row) => normalizePlan(row as Record<string, any>));
-  const openPlan = plans.find((plan) => ["draft", "returned", "pending_approval"].includes(plan.status)) ?? null;
-  const approved = plans.filter((plan) => plan.status === "approved" && plan.effectiveFrom).sort((left, right) => String(right.effectiveFrom).localeCompare(String(left.effectiveFrom)));
+  const isOpsChannel = (plan: OpsRosterPlan) => plan.planningChannel === "ops" || plan.planningChannel == null;
+  const openPlan = plans.find((plan) => ["draft", "returned", "pending_approval"].includes(plan.status) && isOpsChannel(plan)) ?? null;
+  const approved = plans
+    .filter((plan) => plan.status === "approved" && plan.rosterKind === "recurring_weekly" && plan.effectiveFrom)
+    .sort((left, right) => String(right.effectiveFrom).localeCompare(String(left.effectiveFrom)));
   const activePlan = approved.find((plan) => String(plan.effectiveFrom) <= today && (!plan.supersededAt || today < plan.supersededAt)) ?? null;
   const selectedPlan = openPlan ?? activePlan ?? approved[0] ?? null;
   return {

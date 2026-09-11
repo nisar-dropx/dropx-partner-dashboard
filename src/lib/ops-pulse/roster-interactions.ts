@@ -59,6 +59,7 @@ export function rosterWeekInCurrentMonth(weekStart: string, today: string) {
   return rosterWeek(weekStart).filter((date) => date <= monthEnd);
 }
 
+/** Map a displayed calendar date onto the stored weekday in a recurring template week (display only). */
 export function recurringTemplateDate(templateMonday: string, displayedDate: string) {
   if (![templateMonday, displayedDate].every(validIsoDate)) throw new Error("A valid recurring roster date is required.");
   const weekday = new Date(`${displayedDate}T00:00:00Z`).getUTCDay() || 7;

@@ -19,8 +19,9 @@ import {
 import { nextRosterOccurrenceOnOrAfter } from "@/lib/ops-pulse/roster-interactions";
 import { isRosterChangePastDeadline, rosterChangeDeadlineMessage } from "@/lib/roster-change-deadline";
 import {
+  expandRosterPatternDates,
+  expandTemplateEntryAcrossWindow,
   normalizeRosterCell,
-  recurringRosterDate,
   recurringRosterDays,
   resolveActiveRosterShift,
   resolveRosterBulkUploadWindow
@@ -52,6 +53,8 @@ type ActionResult = {
   message: string;
   planId?: string;
   periodStart?: string;
+  periodEnd?: string;
+  rosterKind?: string;
   entries?: PreparedRosterEntry[];
 } | { ok: false; message: string };
 
@@ -80,11 +83,6 @@ function isOpsRosterChangePastCutoff(input: {
     ? nextRosterOccurrenceOnOrAfter(input.templateOrDate, input.cutoffAsOf)
     : input.templateOrDate;
   return isRosterChangePastDeadline(cutoffDate, input.changeDeadlineHour, input.nowMs ?? Date.now());
-}
-
-function isoWeekday(value: string) {
-  const day = new Date(`${value}T00:00:00Z`).getUTCDay();
-  return day === 0 ? 7 : day;
 }
 
 async function assertPlanner(authorization: AuthorizationContext) {
@@ -127,38 +125,147 @@ function refreshRosterViews() {
   revalidatePath("/payroll");
 }
 
-async function alignOpenOpsRosterToWeek(companyId: string, userId: string, plan: { id: string; period_start: string }, start: string) {
-  const entries = await db().from("hr_roster_entries")
-    .select("id,roster_date")
-    .eq("company_id", companyId)
-    .eq("plan_id", plan.id);
-  if (entries.error) throw new Error(entries.error.message);
+async function seedOpsDatedDraftEntries(
+  companyId: string,
+  authorization: AuthorizationContext,
+  planId: string,
+  locationId: string,
+  periodStart: string,
+  periodEnd: string
+) {
+  const cleared = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", planId);
+  if (cleared.error) throw new Error(cleared.error.message);
 
-  for (const entry of entries.data ?? []) {
-    const rosterDate = addRosterDays(start, isoWeekday(entry.roster_date) - 1);
-    const moved = await db().from("hr_roster_entries")
-      .update({ roster_date: rosterDate })
+  const station = await authorisedStation(companyId, authorization, locationId);
+  const previous = await db().from("hr_roster_plans")
+    .select("id,hr_roster_entries(worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes)")
+    .eq("company_id", companyId)
+    .eq("location_id", locationId)
+    .eq("roster_kind", "recurring_weekly")
+    .eq("status", "approved")
+    .is("superseded_at", null)
+    .order("effective_from", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (previous.error) throw new Error(previous.error.message);
+
+  const currentPeople = await loadOpsStationManpower(companyId, [station], indiaToday());
+  const allowedPeople = new Set(currentPeople.people.map((person) => `${person.workerType}:${person.id}`));
+  const byKey = new Map<string, {
+    company_id: string;
+    plan_id: string;
+    worker_type: string;
+    worker_id: string;
+    location_id: string;
+    roster_date: string;
+    day_type: string;
+    shift_id: string | null;
+    notes: string | null;
+  }>();
+
+  for (const entry of previous.data?.hr_roster_entries ?? []) {
+    if (!allowedPeople.has(`${entry.worker_type}:${entry.worker_id}`)) continue;
+    for (const expanded of expandTemplateEntryAcrossWindow(entry, periodStart, periodEnd)) {
+      byKey.set(`${expanded.worker_type}:${expanded.worker_id}:${expanded.roster_date}`, {
+        company_id: companyId,
+        plan_id: planId,
+        worker_type: expanded.worker_type,
+        worker_id: expanded.worker_id,
+        location_id: locationId,
+        roster_date: expanded.roster_date,
+        day_type: expanded.day_type,
+        shift_id: expanded.shift_id,
+        notes: expanded.notes
+      });
+    }
+  }
+
+  const datedApproved = await db().from("hr_roster_entries")
+    .select("worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes,hr_roster_plans!inner(status,roster_kind,location_id)")
+    .eq("company_id", companyId)
+    .eq("hr_roster_plans.status", "approved")
+    .eq("hr_roster_plans.roster_kind", "dated")
+    .eq("hr_roster_plans.location_id", locationId)
+    .gte("roster_date", periodStart)
+    .lte("roster_date", periodEnd);
+  if (datedApproved.error) throw new Error(datedApproved.error.message);
+  for (const entry of datedApproved.data ?? []) {
+    if (!allowedPeople.has(`${entry.worker_type}:${entry.worker_id}`)) continue;
+    byKey.set(`${entry.worker_type}:${entry.worker_id}:${entry.roster_date}`, {
+      company_id: companyId,
+      plan_id: planId,
+      worker_type: entry.worker_type,
+      worker_id: entry.worker_id,
+      location_id: locationId,
+      roster_date: entry.roster_date,
+      day_type: entry.day_type,
+      shift_id: entry.shift_id,
+      notes: entry.notes
+    });
+  }
+
+  const rows = [...byKey.values()];
+  if (rows.length) {
+    const inserted = await db().from("hr_roster_entries").insert(rows);
+    if (inserted.error) throw new Error(`The roster draft was prepared, but its pattern could not be copied: ${inserted.error.message}`);
+  }
+}
+
+async function realignOpsDatedDraft(
+  companyId: string,
+  authorization: AuthorizationContext,
+  plan: { id: string; period_start: string; period_end?: string | null; roster_kind?: string | null; location_id?: string | null },
+  periodStart: string,
+  periodEnd: string,
+  reseeds = true
+) {
+  const needsRealign = plan.period_start !== periodStart
+    || plan.period_end !== periodEnd
+    || plan.roster_kind === "recurring_weekly";
+  if (!needsRealign) {
+    const entries = await db().from("hr_roster_entries")
+      .select("worker_type,worker_id,roster_date,day_type,shift_id,notes")
       .eq("company_id", companyId)
-      .eq("id", entry.id);
-    if (moved.error) throw new Error(`The open roster could not be moved to the current week: ${moved.error.message}`);
+      .eq("plan_id", plan.id);
+    if (entries.error) throw new Error(entries.error.message);
+    return {
+      id: plan.id,
+      period_start: periodStart,
+      period_end: periodEnd,
+      hr_roster_entries: entries.data ?? []
+    };
   }
 
   const updated = await db().from("hr_roster_plans")
     .update({
-      period_start: start,
-      period_end: addRosterDays(start, 6),
-      effective_from: start,
-      updated_by: userId,
+      period_start: periodStart,
+      period_end: periodEnd,
+      effective_from: periodStart,
+      roster_kind: "dated",
+      updated_by: authorization.userId,
       updated_at: new Date().toISOString()
     })
     .eq("company_id", companyId)
     .eq("id", plan.id)
     .in("status", ["draft", "returned"])
-    .select("id,period_start,hr_roster_entries(worker_type,worker_id,roster_date,day_type,shift_id,notes)")
+    .select("id,period_start,period_end")
     .maybeSingle();
   if (updated.error) throw new Error(updated.error.message);
   if (!updated.data) throw new Error("This roster is no longer editable.");
-  return updated.data;
+  if (reseeds && plan.location_id) {
+    await seedOpsDatedDraftEntries(companyId, authorization, plan.id, plan.location_id, periodStart, periodEnd);
+  }
+  const entries = await db().from("hr_roster_entries")
+    .select("worker_type,worker_id,roster_date,day_type,shift_id,notes")
+    .eq("company_id", companyId)
+    .eq("plan_id", plan.id);
+  if (entries.error) throw new Error(entries.error.message);
+  return {
+    id: updated.data.id,
+    period_start: periodStart,
+    period_end: periodEnd,
+    hr_roster_entries: entries.data ?? []
+  };
 }
 
 async function archiveOpsRosterApprovalRound(companyId: string, planId: string) {
@@ -207,12 +314,13 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
     await assertPlanner(authorization);
     const station = await authorisedStation(companyId, authorization, locationId);
     const start = rosterMonday(indiaToday());
+    const end = addRosterDays(start, 6);
 
     const open = await db().from("hr_roster_plans")
-      .select("id,status,period_start,hr_roster_entries(worker_type,worker_id,roster_date,day_type,shift_id,notes)")
+      .select("id,status,period_start,period_end,roster_kind,location_id,hr_roster_entries(worker_type,worker_id,roster_date,day_type,shift_id,notes)")
       .eq("company_id", companyId)
       .eq("location_id", locationId)
-      .eq("roster_kind", "recurring_weekly")
+      .in("roster_kind", ["dated", "recurring_weekly"])
       .eq("planning_channel", "ops")
       .in("status", ["draft", "returned", "pending_approval"])
       .order("created_at", { ascending: false })
@@ -237,37 +345,44 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
         .eq("company_id", companyId)
         .eq("id", open.data.id)
         .eq("status", "pending_approval")
-        .select("id,period_start,hr_roster_entries(worker_type,worker_id,roster_date,day_type,shift_id,notes)")
+        .select("id,period_start,period_end,roster_kind,location_id")
         .maybeSingle();
       if (recalled.error) throw new Error(recalled.error.message);
       if (!recalled.data) throw new Error("This roster is no longer awaiting approval.");
-      const aligned = recalled.data.period_start === start
-        ? recalled.data
-        : await alignOpenOpsRosterToWeek(companyId, authorization.userId, recalled.data, start);
+      const aligned = await realignOpsDatedDraft(companyId, authorization, recalled.data, start, end, true);
       refreshRosterViews();
       return {
         ok: true,
         planId: aligned.id,
         periodStart: start,
+        periodEnd: end,
+        rosterKind: "dated",
         entries: mapPreparedEntries(aligned.hr_roster_entries ?? []),
         message: "Pending approval recalled. Update week offs or shifts, save, then submit for approval again."
       };
     }
 
     if (open.data) {
-      const aligned = open.data.period_start === start
-        ? open.data
-        : await alignOpenOpsRosterToWeek(companyId, authorization.userId, open.data, start);
+      const aligned = await realignOpsDatedDraft(
+        companyId,
+        authorization,
+        open.data,
+        start,
+        end,
+        open.data.period_start !== start || open.data.period_end !== end || open.data.roster_kind === "recurring_weekly"
+      );
       return {
         ok: true,
         planId: aligned.id,
         periodStart: start,
+        periodEnd: end,
+        rosterKind: "dated",
         entries: mapPreparedEntries(aligned.hr_roster_entries ?? []),
         message: "The open roster change is ready."
       };
     }
 
-    // No Ops draft yet — reuse the approved pattern in-memory. A draft is created only on first save.
+    // No Ops draft yet — reuse the approved pattern in-memory. A dated draft is created only on first save.
     const previous = await db().from("hr_roster_plans")
       .select("id,period_start,hr_roster_entries(worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes)")
       .eq("company_id", companyId)
@@ -286,10 +401,11 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
     const allowedPeople = new Set(currentPeople.people.map((person) => `${person.workerType}:${person.id}`));
     const projected = (previous.data.hr_roster_entries ?? [])
       .filter((entry) => allowedPeople.has(`${entry.worker_type}:${entry.worker_id}`))
+      .flatMap((entry) => expandTemplateEntryAcrossWindow(entry, start, end))
       .map((entry) => ({
         workerType: entry.worker_type as "employee" | "contractor",
         workerId: entry.worker_id,
-        rosterDate: addRosterDays(start, isoWeekday(entry.roster_date) - 1),
+        rosterDate: entry.roster_date,
         dayType: entry.day_type as "working" | "weekly_off",
         shiftId: entry.shift_id,
         notes: entry.notes
@@ -298,6 +414,8 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
       ok: true,
       planId: previous.data.id,
       periodStart: start,
+      periodEnd: end,
+      rosterKind: "dated",
       entries: projected,
       message: "Showing the current approved roster. Save a change to start an Ops draft for approval."
     };
@@ -401,25 +519,32 @@ async function materializeOpsDraftFromApproved(
     .select("id,name,period_start,period_end,status,location_id,created_by,roster_kind,effective_from,revision_no,supersedes_plan_id,hr_roster_plan_locations(location_id)")
     .eq("company_id", companyId)
     .eq("location_id", approved.location_id)
-    .eq("roster_kind", "recurring_weekly")
+    .in("roster_kind", ["dated", "recurring_weekly"])
     .eq("planning_channel", "ops")
     .in("status", ["draft", "returned"])
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (existingOps.error) throw new Error(existingOps.error.message);
-  if (existingOps.data) return existingOps.data;
+  if (existingOps.data) {
+    if (existingOps.data.roster_kind === "dated") return existingOps.data;
+    const start = rosterMonday(indiaToday());
+    const end = addRosterDays(start, 6);
+    await realignOpsDatedDraft(companyId, authorization, existingOps.data, start, end, true);
+    return loadPlan(companyId, authorization, existingOps.data.id);
+  }
 
   const station = await authorisedStation(companyId, authorization, approved.location_id);
   const start = rosterMonday(indiaToday());
+  const end = addRosterDays(start, 6);
   const revision = Number(approved.revision_no ?? 0) + 1;
   const created = await db().from("hr_roster_plans").insert({
     company_id: companyId,
-    name: `${station.station_code} weekly roster · v${revision}`,
+    name: `${station.station_code} roster · ${start} → ${end}`,
     location_id: approved.location_id,
     period_start: start,
-    period_end: addRosterDays(start, 6),
-    roster_kind: "recurring_weekly",
+    period_end: end,
+    roster_kind: "dated",
     effective_from: start,
     supersedes_plan_id: approved.id,
     revision_no: revision,
@@ -435,44 +560,24 @@ async function materializeOpsDraftFromApproved(
     throw new Error(linked.error.message);
   }
 
-  const sourceEntries = await db().from("hr_roster_entries")
-    .select("worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes")
-    .eq("company_id", companyId)
-    .eq("plan_id", approved.id);
-  if (sourceEntries.error) throw new Error(sourceEntries.error.message);
-  const currentPeople = await loadOpsStationManpower(companyId, [station], indiaToday());
-  const allowedPeople = new Set(currentPeople.people.map((person) => `${person.workerType}:${person.id}`));
-  const copied = (sourceEntries.data ?? [])
-    .filter((entry) => allowedPeople.has(`${entry.worker_type}:${entry.worker_id}`))
-    .map((entry) => ({
-      company_id: companyId,
-      plan_id: created.data.id,
-      worker_type: entry.worker_type,
-      worker_id: entry.worker_id,
-      location_id: approved.location_id,
-      roster_date: addRosterDays(start, isoWeekday(entry.roster_date) - 1),
-      day_type: entry.day_type,
-      shift_id: entry.shift_id,
-      notes: entry.notes
-    }));
-  if (copied.length) {
-    const copy = await db().from("hr_roster_entries").insert(copied);
-    if (copy.error) throw new Error(`The roster draft was created, but its pattern could not be copied: ${copy.error.message}`);
-  }
+  await seedOpsDatedDraftEntries(companyId, authorization, created.data.id, approved.location_id, start, end);
   return { ...created.data, hr_roster_plan_locations: [{ location_id: approved.location_id }] };
 }
 
 async function publishPlan(companyId: string, authorization: AuthorizationContext, plan: Awaited<ReturnType<typeof loadPlan>>, note: string, preserveSubmission = false) {
   const now = new Date().toISOString();
-  const ended = await db().from("hr_roster_plans")
-    .update({ superseded_at: plan.effective_from })
-    .eq("company_id", companyId)
-    .eq("location_id", plan.location_id)
-    .eq("roster_kind", "recurring_weekly")
-    .eq("status", "approved")
-    .is("superseded_at", null)
-    .neq("id", plan.id);
-  if (ended.error) throw new Error(ended.error.message);
+  // Dated overlays must not supersede the recurring baseline used for other weeks.
+  if (plan.roster_kind === "recurring_weekly") {
+    const ended = await db().from("hr_roster_plans")
+      .update({ superseded_at: plan.effective_from })
+      .eq("company_id", companyId)
+      .eq("location_id", plan.location_id)
+      .eq("roster_kind", "recurring_weekly")
+      .eq("status", "approved")
+      .is("superseded_at", null)
+      .neq("id", plan.id);
+    if (ended.error) throw new Error(ended.error.message);
+  }
   const approvalUpdate: Record<string, unknown> = {
       status: "approved",
       approver_user_id: null,
@@ -501,7 +606,7 @@ export async function submitOpsRoster(planId: string): Promise<ActionResult> {
     const companyId = requireCompanyId(authorization);
     await assertPlanner(authorization);
     const plan = await loadPlan(companyId, authorization, planId);
-    if (!["draft", "returned"].includes(plan.status) || plan.roster_kind !== "recurring_weekly" || !plan.location_id || !plan.effective_from) {
+    if (!["draft", "returned"].includes(plan.status) || !["dated", "recurring_weekly"].includes(plan.roster_kind ?? "") || !plan.location_id || !plan.effective_from) {
       return { ok: false, message: "This roster is not available for submission." };
     }
     const channel = await db().from("hr_roster_plans").select("planning_channel").eq("company_id", companyId).eq("id", planId).maybeSingle();
@@ -513,20 +618,25 @@ export async function submitOpsRoster(planId: string): Promise<ActionResult> {
     const people = await loadOpsStationManpower(companyId, [station], indiaToday());
     const count = await db().from("hr_roster_entries").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("plan_id", planId);
     if (count.error) throw new Error(count.error.message);
-    if (!people.people.length || !count.count) return { ok: false, message: "Add at least one roster assignment before applying this pattern." };
+    if (!people.people.length || !count.count) return { ok: false, message: "Add at least one roster assignment before applying this roster." };
     const policy = await loadOpsRosteringPolicy(companyId, plan.location_id);
-    const submissionWindowError = rosterSubmissionWindowError({
-      isReplacement: Boolean(plan.supersedes_plan_id),
-      effectiveFrom: plan.effective_from,
-      today: indiaToday(),
-      leadDays: policy.submissionLeadDays
-    });
-    if (submissionWindowError) return { ok: false, message: submissionWindowError };
+    const today = indiaToday();
+    if (plan.roster_kind === "recurring_weekly") {
+      const submissionWindowError = rosterSubmissionWindowError({
+        isReplacement: Boolean(plan.supersedes_plan_id),
+        effectiveFrom: plan.effective_from,
+        today,
+        leadDays: policy.submissionLeadDays
+      });
+      if (submissionWindowError) return { ok: false, message: submissionWindowError };
+    } else if (plan.period_end < today) {
+      return { ok: false, message: "This dated roster only covers past days and cannot be submitted." };
+    }
     const route = await resolveOpsRosterApprovalRoute(authorization, policy, plan.location_id);
     if (route.direct) {
       await publishPlan(companyId, authorization, plan, "Applied under Rostering Policy");
       refreshRosterViews();
-      return { ok: true, message: "Weekly roster applied." };
+      return { ok: true, message: plan.roster_kind === "dated" ? "Dated roster applied." : "Weekly roster applied." };
     }
     if (route.error || !route.steps.length) return { ok: false, message: route.error ?? "No roster approval route is configured." };
     const cleared = await db().from("hr_roster_approval_steps").delete().eq("company_id", companyId).eq("plan_id", planId);
@@ -556,7 +666,7 @@ export async function submitOpsRoster(planId: string): Promise<ActionResult> {
     }).eq("company_id", companyId).eq("id", planId).in("status", ["draft", "returned"]).select("id").maybeSingle();
     if (submitted.error || !submitted.data) throw new Error(submitted.error?.message ?? "This roster is no longer editable.");
     refreshRosterViews();
-    return { ok: true, message: `Weekly roster sent for approval. ${route.summary}` };
+    return { ok: true, message: `Roster sent for approval. ${route.summary}` };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "The roster could not be submitted." };
   }
@@ -587,12 +697,15 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
     }
 
     let plan = await loadPlan(companyId, authorization, planId);
-    if (!["draft", "returned"].includes(plan.status) || !plan.location_id || plan.roster_kind !== "recurring_weekly") {
+    if (plan.status === "approved") {
+      plan = await materializeOpsDraftFromApproved(companyId, authorization, plan);
+    }
+    if (!["draft", "returned"].includes(plan.status) || !plan.location_id || !["dated", "recurring_weekly"].includes(plan.roster_kind ?? "")) {
       return { ok: false, message: "This roster is no longer editable. Recall or prepare a draft first." };
     }
-    if (plan.period_start !== window.periodStart) {
-      const aligned = await alignOpenOpsRosterToWeek(companyId, authorization.userId, plan, window.periodStart);
-      plan = await loadPlan(companyId, authorization, aligned.id);
+    if (plan.period_start !== window.periodStart || plan.period_end !== window.periodEnd || plan.roster_kind === "recurring_weekly") {
+      await realignOpsDatedDraft(companyId, authorization, plan, window.periodStart, window.periodEnd, false);
+      plan = await loadPlan(companyId, authorization, plan.id);
     }
 
     const station = await authorisedStation(companyId, authorization, plan.location_id);
@@ -643,6 +756,14 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
     }> = [];
     const removals: Array<{ workerType: string; workerId: string; date: string }> = [];
     const errors: string[] = [];
+    let skippedCutoff = 0;
+
+    const pastCutoff = (date: string) => isOpsRosterChangePastCutoff({
+      rosterKind: "dated",
+      templateOrDate: date,
+      cutoffAsOf,
+      changeDeadlineHour: policy.changeDeadlineHour
+    });
 
     if (hasWideDays) {
       for (const [index, source] of sourceRows.entries()) {
@@ -656,29 +777,33 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
 
         for (const day of recurringRosterDays) {
           const cell = normalizeRosterCell(readColumn(source, [day, `${day}_SHIFT`, day.slice(0, 3)]));
-          const date = recurringRosterDate(window.periodStart, day);
-          if (date < window.writeStart || date > window.writeEnd) continue;
-          if (cell.kind === "clear") {
-            if (person) removals.push({ workerType: person.workerType, workerId: person.id, date });
-            continue;
-          }
-          const shiftId = cell.kind === "working" ? resolveActiveRosterShift(shiftByCode, cell.shiftCode) : null;
-          if (cell.kind === "working" && !shiftId) rowErrors.push(`${day.toLowerCase()} shift code is inactive or invalid`);
-          else if (person) {
-            upserts.push({
-              company_id: companyId,
-              plan_id: planId,
-              worker_type: person.workerType,
-              worker_id: person.id,
-              location_id: plan.location_id,
-              roster_date: date,
-              day_type: cell.kind,
-              shift_id: shiftId,
-              notes: null
-            });
+          for (const date of expandRosterPatternDates(window.writeStart, window.writeEnd, day)) {
+            if (pastCutoff(date)) {
+              skippedCutoff += 1;
+              continue;
+            }
+            if (cell.kind === "clear") {
+              if (person) removals.push({ workerType: person.workerType, workerId: person.id, date });
+              continue;
+            }
+            const shiftId = cell.kind === "working" ? resolveActiveRosterShift(shiftByCode, cell.shiftCode) : null;
+            if (cell.kind === "working" && !shiftId) rowErrors.push(`${day.toLowerCase()} shift code is inactive or invalid`);
+            else if (person) {
+              upserts.push({
+                company_id: companyId,
+                plan_id: plan.id,
+                worker_type: person.workerType,
+                worker_id: person.id,
+                location_id: plan.location_id!,
+                roster_date: date,
+                day_type: cell.kind,
+                shift_id: shiftId,
+                notes: null
+              });
+            }
           }
         }
-        if (rowErrors.length && errors.length < 12) errors.push(`Row ${index + 2}: ${rowErrors.join(", ")}`);
+        if (rowErrors.length && errors.length < 12) errors.push(`Row ${index + 2}: ${[...new Set(rowErrors)].join(", ")}`);
       }
     } else {
       for (const [index, source] of sourceRows.entries()) {
@@ -691,6 +816,10 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
         const notes = String(readColumn(source, ["NOTES", "REMARKS"])).trim();
         const person = byCode.get(codeRaw.toUpperCase());
         const shift = day === "weekly_off" ? null : resolveActiveRosterShift(shiftByCode, shiftRaw);
+        if (date && date >= window.writeStart && date <= window.writeEnd && pastCutoff(date)) {
+          skippedCutoff += 1;
+          continue;
+        }
         const problem = !codeRaw ? "People ID is missing"
           : !person ? "People ID is not active at this station"
           : locationCode && locationCode !== String(station.station_code).trim().toUpperCase() ? "station code must match this Ops station"
@@ -704,10 +833,10 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
         }
         upserts.push({
           company_id: companyId,
-          plan_id: planId,
+          plan_id: plan.id,
           worker_type: person!.workerType,
           worker_id: person!.id,
-          location_id: plan.location_id,
+          location_id: plan.location_id!,
           roster_date: date,
           day_type: day as "working" | "weekly_off",
           shift_id: shift ?? null,
@@ -722,40 +851,20 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
         message: `Nothing imported. Fix ${errors.join("; ")}${sourceRows.length > errors.length ? ". Other rows may also need attention." : "."}`
       };
     }
-    if (!upserts.length && !removals.length) return { ok: false, message: "The workbook did not contain any roster cells to import for the selected period." };
+    if (!upserts.length && !removals.length) {
+      return {
+        ok: false,
+        message: skippedCutoff
+          ? `Nothing imported. ${skippedCutoff} cell${skippedCutoff === 1 ? "" : "s"} fell on past or locked dates and were skipped.`
+          : "The workbook did not contain any roster cells to import for the selected period."
+      };
+    }
     if (upserts.length + removals.length > 25_000) return { ok: false, message: "The workbook exceeds 25,000 roster cells." };
-
-    for (const row of upserts) {
-      if (!validDate(row.roster_date) || row.roster_date < window.writeStart || row.roster_date > window.writeEnd) {
-        return { ok: false, message: "A selected person, shift or date is outside this roster." };
-      }
-      if (isOpsRosterChangePastCutoff({
-        rosterKind: plan.roster_kind,
-        templateOrDate: row.roster_date,
-        cutoffAsOf,
-        changeDeadlineHour: policy.changeDeadlineHour
-      })) {
-        return { ok: false, message: rosterCutoffMessage(policy.changeDeadlineHour) };
-      }
-    }
-    for (const removal of removals) {
-      if (!validDate(removal.date) || removal.date < window.writeStart || removal.date > window.writeEnd) {
-        return { ok: false, message: "A selected person, shift or date is outside this roster." };
-      }
-      if (isOpsRosterChangePastCutoff({
-        rosterKind: plan.roster_kind,
-        templateOrDate: removal.date,
-        cutoffAsOf,
-        changeDeadlineHour: policy.changeDeadlineHour
-      })) {
-        return { ok: false, message: rosterCutoffMessage(policy.changeDeadlineHour) };
-      }
-    }
 
     const touched = await db().from("hr_roster_plans")
       .update({ updated_by: authorization.userId, updated_at: new Date().toISOString() })
       .eq("company_id", companyId)
-      .eq("id", planId)
+      .eq("id", plan.id)
       .in("status", ["draft", "returned"])
       .select("id")
       .maybeSingle();
@@ -768,34 +877,35 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
     for (const removal of removals) {
       const removed = await db().from("hr_roster_entries").delete()
         .eq("company_id", companyId)
-        .eq("plan_id", planId)
+        .eq("plan_id", plan.id)
         .eq("worker_type", removal.workerType)
         .eq("worker_id", removal.workerId)
         .eq("roster_date", removal.date);
       if (removed.error) throw new Error(removed.error.message);
     }
 
-    if (window.mode === "month") {
-      const trimmedEarly = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", planId).lt("roster_date", window.writeStart);
-      if (trimmedEarly.error) throw new Error(trimmedEarly.error.message);
-      const trimmedLate = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", planId).gt("roster_date", window.writeEnd);
-      if (trimmedLate.error) throw new Error(trimmedLate.error.message);
-    }
+    const trimmedEarly = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", plan.id).lt("roster_date", window.writeStart);
+    if (trimmedEarly.error) throw new Error(trimmedEarly.error.message);
+    const trimmedLate = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", plan.id).gt("roster_date", window.writeEnd);
+    if (trimmedLate.error) throw new Error(trimmedLate.error.message);
 
     const refreshed = await db().from("hr_roster_entries")
       .select("worker_type,worker_id,roster_date,day_type,shift_id,notes")
       .eq("company_id", companyId)
-      .eq("plan_id", planId);
+      .eq("plan_id", plan.id);
     if (refreshed.error) throw new Error(refreshed.error.message);
 
     refreshRosterViews();
     const cellCount = upserts.length + removals.length;
+    const skipNote = skippedCutoff ? ` · ${skippedCutoff} past/locked day${skippedCutoff === 1 ? "" : "s"} skipped` : "";
     return {
       ok: true,
-      planId,
+      planId: plan.id,
       periodStart: window.periodStart,
+      periodEnd: window.periodEnd,
+      rosterKind: "dated",
       entries: mapPreparedEntries(refreshed.data ?? []),
-      message: `${cellCount} roster ${cellCount === 1 ? "cell" : "cells"} imported for ${window.label}. Review, then submit for approval.`
+      message: `${cellCount} roster ${cellCount === 1 ? "cell" : "cells"} imported for ${window.label}${skipNote}. Review, then submit for approval.`
     };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "The workbook could not be imported." };

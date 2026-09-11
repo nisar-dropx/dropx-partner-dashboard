@@ -57,9 +57,9 @@ function validIsoDate(value: string) {
 }
 
 /**
- * Resolve the bulk-upload target window (same rules as People).
+ * Resolve the bulk-upload target window for dated (non-recurring) Ops plans.
  * - week: exact Monday–Sunday week
- * - month: weekly pattern applied inside the selected calendar month
+ * - month: full calendar month; workbook Mon–Sun columns expand across every intersecting week
  */
 export function resolveRosterBulkUploadWindow(input: {
   mode?: string | null;
@@ -88,16 +88,44 @@ export function resolveRosterBulkUploadWindow(input: {
 
   const rosterMonth = String(input.rosterMonth ?? today.slice(0, 7)).trim();
   const bounds = monthBoundsFromYm(rosterMonth);
-  const periodStart = rosterMondayForMonth(rosterMonth, today);
-  const periodEnd = addIsoDays(periodStart, 6);
   return {
     mode,
     label: rosterMonth,
-    periodStart,
-    periodEnd,
+    periodStart: bounds.start,
+    periodEnd: bounds.end,
     writeStart: bounds.start,
     writeEnd: bounds.end
   };
+}
+
+function isoWeekdayUtc(date: string) {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+/** Concrete calendar dates inside [writeStart, writeEnd] matching a Mon–Sun workbook column. */
+export function expandRosterPatternDates(writeStart: string, writeEnd: string, day: RecurringRosterDay) {
+  const targetDow = recurringRosterDays.indexOf(day) + 1;
+  if (targetDow < 1) return [] as string[];
+  const dates: string[] = [];
+  let cursor = writeStart;
+  while (cursor <= writeEnd) {
+    if (isoWeekdayUtc(cursor) === targetDow) dates.push(cursor);
+    cursor = addIsoDays(cursor, 1);
+  }
+  return dates;
+}
+
+/** Expand a recurring template entry across every matching weekday in a dated window. */
+export function expandTemplateEntryAcrossWindow<T extends { roster_date: string }>(
+  entry: T,
+  periodStart: string,
+  periodEnd: string
+): Array<T & { roster_date: string }> {
+  const weekday = isoWeekdayUtc(entry.roster_date);
+  const day = recurringRosterDays[weekday - 1];
+  if (!day) return [];
+  return expandRosterPatternDates(periodStart, periodEnd, day).map((roster_date) => ({ ...entry, roster_date }));
 }
 
 export function normalizeRosterCell(value: unknown) {
