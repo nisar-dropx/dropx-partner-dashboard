@@ -191,12 +191,12 @@ export async function PATCH(request: Request) {
         return NextResponse.json({ ok: true, notice: result.notice });
       }
       const approverUserId = await requireActorUserId(account, "approve work from home");
-      if (decision !== "approved" && decision !== "rejected") throw new Error("Choose Approve or Reject.");
+      if (decision !== "approved" && decision !== "returned" && decision !== "rejected") throw new Error("Choose Approve, Return or Reject.");
       const result = await decideConnectWfhApproval({
         companyId: account.companyId,
         approverUserId,
         requestId: wfhRequestId,
-        decision: decision as "approved" | "rejected",
+        decision: decision as "approved" | "returned" | "rejected",
         note
       });
       return NextResponse.json({ ok: true, notice: result.notice });
@@ -221,12 +221,12 @@ export async function PATCH(request: Request) {
         return NextResponse.json({ ok: true, notice: result.notice });
       }
       const approverUserId = await requireActorUserId(account, "approve business trip");
-      if (decision !== "approved" && decision !== "rejected") throw new Error("Choose Approve or Reject.");
+      if (decision !== "approved" && decision !== "returned" && decision !== "rejected") throw new Error("Choose Approve, Return or Reject.");
       const result = await decideConnectBusinessTripApproval({
         companyId: account.companyId,
         approverUserId,
         requestId: businessTripRequestId,
-        decision: decision as "approved" | "rejected",
+        decision: decision as "approved" | "returned" | "rejected",
         note
       });
       return NextResponse.json({ ok: true, notice: result.notice });

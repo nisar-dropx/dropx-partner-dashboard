@@ -383,9 +383,12 @@ export async function decideConnectWfhApproval(input: {
   companyId: string;
   approverUserId: string;
   requestId: string;
-  decision: "approved" | "rejected";
+  decision: "approved" | "rejected" | "returned";
   note?: string;
 }) {
+  if (input.decision === "returned" && (input.note ?? "").trim().length < 3) {
+    throw new Error("Add a short note explaining why the request is being returned.");
+  }
   const result = await db().rpc("hr_decide_wfh_manager", {
     p_company_id: input.companyId,
     p_request_id: input.requestId,
@@ -428,9 +431,11 @@ export async function decideConnectWfhApproval(input: {
       ? "WFH approved and sent to HR for Present · WFH finalization."
       : status === "pending_manager"
         ? "Approved and routed to the next approver."
-        : status === "rejected"
-          ? "WFH request rejected."
-          : "WFH decision saved."
+        : status === "returned"
+          ? "WFH request returned to the worker."
+          : status === "rejected"
+            ? "WFH request rejected."
+            : "WFH decision saved."
   };
 }
 

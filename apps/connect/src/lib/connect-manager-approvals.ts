@@ -296,7 +296,8 @@ export async function decideConnectAttendanceApproval(account: ConnectAccount, r
   const requestId = clean(requestIdValue);
   const decision = clean(decisionValue);
   const note = clean(noteValue);
-  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !["approved", "rejected"].includes(decision)) throw new Error("Choose Approve or Reject.");
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !["approved", "rejected", "returned"].includes(decision)) throw new Error("Choose Approve, Return or Reject.");
+  if (decision === "returned" && note.length < 3) throw new Error("Add a short note explaining why the request is being returned.");
   const assigned = await db().from("attendance_regularization_approval_steps").select("id,approver_user_id")
     .eq("company_id", account.companyId).eq("request_id", requestId).in("approver_user_id", actorUserIds).eq("status", "pending").maybeSingle();
   if (assigned.error || !assigned.data) throw new Error(assigned.error?.message ?? "This attendance approval is no longer assigned to you.");
@@ -336,6 +337,7 @@ export async function decideConnectAttendanceApproval(account: ConnectAccount, r
   }
   if (result.data === "approved") return "Attendance regularization approved.";
   if (result.data === "pending_hr") return "Manager approvals complete. Awaiting HR attendance finalization.";
+  if (result.data === "returned") return "Attendance correction returned to the worker.";
   return "Attendance regularization rejected.";
 }
 

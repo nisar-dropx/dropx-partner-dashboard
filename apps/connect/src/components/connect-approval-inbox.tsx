@@ -809,7 +809,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
           id={approval.requestId}
           notes={notes}
           onChange={(value) => setNote(approval.requestId, value)}
-          placeholder={noteRequired ? "Required when returning or rejecting" : "Note for worker (optional)"}
+          placeholder={noteRequired ? "Required when returning or rejecting" : "Note for worker (required when returning)"}
         />
         {queue === "hr" ? (
           <ApprovalToolbar
@@ -822,8 +822,8 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
           <ApprovalToolbar
             onApprove={() => void act(() => decideAttendance(approval.requestId, "approved", "manager"))}
             onReject={() => void act(() => decideAttendance(approval.requestId, "rejected", "manager"))}
+            onReturn={() => void act(() => decideAttendance(approval.requestId, "returned", "manager"))}
             saving={saving}
-            showReturn={false}
           />
         )}
       </ApprovalModal>
@@ -1015,7 +1015,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
                   {queue === "hr" && approval.managerName ? <div><dt>Manager</dt><dd>{approval.managerName}{approval.managerNote ? ` · ${approval.managerNote}` : ""}</dd></div> : null}
                 </dl>
-                <ApprovalNote id={`wfh:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`wfh:${approval.requestId}`, value)} placeholder={queue === "hr" ? "Note when returning or rejecting" : "Note for worker (optional)"} />
+                <ApprovalNote id={`wfh:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`wfh:${approval.requestId}`, value)} placeholder="Note for worker (required when returning)" />
                 {queue === "hr" ? (
                   <ApprovalToolbar
                     onApprove={() => void act(() => decideWfh(approval.requestId, "approved", "hr"))}
@@ -1027,8 +1027,8 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   <ApprovalToolbar
                     onApprove={() => void act(() => decideWfh(approval.requestId, "approved", "manager"))}
                     onReject={() => void act(() => decideWfh(approval.requestId, "rejected", "manager"))}
+                    onReturn={() => void act(() => decideWfh(approval.requestId, "returned", "manager"))}
                     saving={saving}
-                    showReturn={false}
                   />
                 )}
               </ApprovalModal>
@@ -1101,7 +1101,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
                   {queue === "hr" && approval.managerName ? <div><dt>Manager</dt><dd>{approval.managerName}{approval.managerNote ? ` · ${approval.managerNote}` : ""}</dd></div> : null}
                 </dl>
-                <ApprovalNote id={`business-trip:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`business-trip:${approval.requestId}`, value)} placeholder={queue === "hr" ? "Note when returning or rejecting" : "Note for worker (optional)"} />
+                <ApprovalNote id={`business-trip:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`business-trip:${approval.requestId}`, value)} placeholder="Note for worker (required when returning)" />
                 {queue === "hr" ? (
                   <ApprovalToolbar
                     onApprove={() => void act(() => decideBusinessTrip(approval.requestId, "approved", "hr"))}
@@ -1113,8 +1113,8 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   <ApprovalToolbar
                     onApprove={() => void act(() => decideBusinessTrip(approval.requestId, "approved", "manager"))}
                     onReject={() => void act(() => decideBusinessTrip(approval.requestId, "rejected", "manager"))}
+                    onReturn={() => void act(() => decideBusinessTrip(approval.requestId, "returned", "manager"))}
                     saving={saving}
-                    showReturn={false}
                   />
                 )}
               </ApprovalModal>

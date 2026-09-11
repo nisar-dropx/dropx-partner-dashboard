@@ -429,9 +429,12 @@ export async function decideConnectBusinessTripApproval(input: {
   companyId: string;
   approverUserId: string;
   requestId: string;
-  decision: "approved" | "rejected";
+  decision: "approved" | "rejected" | "returned";
   note?: string;
 }) {
+  if (input.decision === "returned" && (input.note ?? "").trim().length < 3) {
+    throw new Error("Add a short note explaining why the request is being returned.");
+  }
   const result = await db().rpc("hr_decide_business_trip_manager", {
     p_company_id: input.companyId,
     p_request_id: input.requestId,
@@ -474,9 +477,11 @@ export async function decideConnectBusinessTripApproval(input: {
       ? "Business trip approved and sent to HR for Present · Business trip finalization."
       : status === "pending_manager"
         ? "Approved and routed to the next reporting manager."
-        : status === "rejected"
-          ? "Business trip request rejected."
-          : "Business trip decision saved."
+        : status === "returned"
+          ? "Business trip request returned to the worker."
+          : status === "rejected"
+            ? "Business trip request rejected."
+            : "Business trip decision saved."
   };
 }
 
