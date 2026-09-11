@@ -2,6 +2,7 @@ import "server-only";
 import {createClient, type SupabaseClient} from "@supabase/supabase-js";
 import {createHash, timingSafeEqual} from "node:crypto";
 import nodemailer from "nodemailer";
+import {timeoutFetch} from "./timeout-fetch";
 
 export type DigestControl = {company_id:string;portal:"people"|"ops";event_key:string;state:string;paused_until:string|null;subject_template:string|null;config:Record<string,unknown>};
 export type DigestMessage = {email:string;name:string;subject:string;html:string;text:string;scope:Record<string,unknown>};
@@ -11,7 +12,7 @@ export type DeliverySummary = {queued:number;accepted:number;uncertain:number;sk
 export function digestDatabase() {
  const url=process.env.NEXT_PUBLIC_SUPABASE_URL,key=process.env.SUPABASE_SERVICE_ROLE_KEY;
  if(!url||!key)throw new Error("Notification database is not configured.");
- return createClient(url,key,{auth:{autoRefreshToken:false,persistSession:false},global:{fetch:(input,init)=>fetch(input,{...init,cache:"no-store"})}});
+ return createClient(url,key,{auth:{autoRefreshToken:false,persistSession:false},global:{fetch:timeoutFetch((input,init)=>fetch(input,{...init,cache:"no-store"}))}});
 }
 export function cronAuthorized(request:Request) {
  const secret=process.env.CRON_SECRET;

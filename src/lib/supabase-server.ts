@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 import type { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { timeoutFetch } from "./timeout-fetch";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -116,6 +117,9 @@ export function createServerSupabaseClient(response?: NextResponse, forceOpsStor
         setItem: setStoredValue,
         removeItem: clearStoredValue
       }
+    },
+    global: {
+      fetch: timeoutFetch()
     }
   });
 }

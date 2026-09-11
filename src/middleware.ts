@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isPeopleHostName, isPeoplePortalPath } from "@/lib/people/surface";
+import { timeoutFetch } from "@/lib/timeout-fetch";
+import { TimeoutError, withTimeout } from "@/lib/with-timeout";
+
+const AUTH_TIMEOUT_MS = 5000;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -270,14 +274,24 @@ export async function middleware(request: NextRequest) {
         setItem: setStoredValue,
         removeItem: clearStoredValue
       }
+    },
+    global: {
+      fetch: timeoutFetch()
     }
   });
 
-  const { data } = await supabase.auth.getUser();
-  if (!data.user) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("next", request.nextUrl.pathname);
-    return NextResponse.redirect(loginUrl);
+  try {
+    const { data } = await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Session check");
+    if (!data.user) {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("next", request.nextUrl.pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  } catch (error) {
+    // Middleware is only a fast best-effort gate; the page-level auth check
+    // is authoritative, so a stuck Supabase call here should let the request
+    // through rather than hang until the platform kills the invocation.
+    if (!(error instanceof TimeoutError)) throw error;
   }
 
   if (isPlatformAdminHost && path === "/") {
