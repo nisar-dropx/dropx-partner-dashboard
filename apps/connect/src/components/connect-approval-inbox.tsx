@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ClipboardCheck, Clock3, DoorOpen, FileText, Home, LocateFixed, MapPin, MapPinned, RotateCcw, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ChevronRight, ClipboardCheck, Clock3, DoorOpen, FileText, Home, LocateFixed, MapPin, MapPinned, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
@@ -315,6 +315,48 @@ function ApprovalToolbar({
   );
 }
 
+function ApprovalRow({
+  eyebrow,
+  name,
+  meta,
+  badge,
+  onReview
+}: {
+  eyebrow: string;
+  name: string;
+  meta: string;
+  badge: ReactNode;
+  onReview: () => void;
+}) {
+  return (
+    <button className="dx-approval-row" onClick={onReview} type="button">
+      <div className="dx-approval-row-main">
+        <p className="dx-approval-row-eyebrow">{eyebrow}</p>
+        <strong>{name}</strong>
+        <p className="dx-approval-row-meta">{meta}</p>
+      </div>
+      <div className="dx-approval-row-end">
+        {badge}
+        <ChevronRight />
+      </div>
+    </button>
+  );
+}
+
+function ApprovalModal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div className="dx-approval-modal-backdrop" onClick={onClose}>
+      <div className="dx-approval-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="dx-approval-modal-head">
+          <h3>{title}</h3>
+          <button aria-label="Close" onClick={onClose} type="button"><X /></button>
+        </div>
+        <div className="dx-approval-modal-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 export function ConnectApprovalInbox({ account, active = true }: { account: AppAccount; active?: boolean }) {
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
   const [section, setSection] = useState<ApprovalSection>("time-off");
@@ -342,6 +384,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
   const [notice, setNotice] = useState("");
   const [othersOpen, setOthersOpen] = useState(false);
   const othersRef = useRef<HTMLDivElement | null>(null);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  function closeModal() { setActiveKey(null); }
+  async function act(fn: () => Promise<void>) { await fn(); closeModal(); }
 
   useEffect(() => {
     if (!othersOpen) return;
@@ -680,10 +725,25 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
     setReporteeScope(scope);
   }
 
+  function attendanceKey(approval: AttendanceApproval, queue: "manager" | "hr") { return `attendance:${queue}:${approval.id}`; }
+
+  function renderAttendanceRow(approval: AttendanceApproval, queue: "manager" | "hr") {
+    return (
+      <ApprovalRow
+        badge={<span className="dx-approval-badge">{displayDate(approval.attendanceDate)}</span>}
+        eyebrow={`${regularizationReasonLabel(approval.reasonCode)} · ${approval.stepName}`}
+        key={attendanceKey(approval, queue)}
+        meta={`${approval.workerCode || "—"} · ${profileLabel(approval.profileType)}`}
+        name={approval.workerName}
+        onReview={() => setActiveKey(attendanceKey(approval, queue))}
+      />
+    );
+  }
+
   function renderAttendanceCard(approval: AttendanceApproval, queue: "manager" | "hr") {
     const noteRequired = queue === "hr";
     return (
-      <article className="dx-approval-card" key={`${queue}:${approval.id}`}>
+      <ApprovalModal onClose={closeModal} title={approval.workerName}>
         <ApprovalHead
           badge={<span className="dx-approval-badge">{displayDate(approval.attendanceDate)}</span>}
           eyebrow={`${regularizationReasonLabel(approval.reasonCode)} · ${approval.stepName}`}
@@ -728,20 +788,20 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
         />
         {queue === "hr" ? (
           <ApprovalToolbar
-            onApprove={() => void decideAttendance(approval.requestId, "approved", "hr")}
-            onReject={() => void decideAttendance(approval.requestId, "rejected", "hr")}
-            onReturn={() => void decideAttendance(approval.requestId, "returned", "hr")}
+            onApprove={() => void act(() => decideAttendance(approval.requestId, "approved", "hr"))}
+            onReject={() => void act(() => decideAttendance(approval.requestId, "rejected", "hr"))}
+            onReturn={() => void act(() => decideAttendance(approval.requestId, "returned", "hr"))}
             saving={saving}
           />
         ) : (
           <ApprovalToolbar
-            onApprove={() => void decideAttendance(approval.requestId, "approved", "manager")}
-            onReject={() => void decideAttendance(approval.requestId, "rejected", "manager")}
+            onApprove={() => void act(() => decideAttendance(approval.requestId, "approved", "manager"))}
+            onReject={() => void act(() => decideAttendance(approval.requestId, "rejected", "manager"))}
             saving={saving}
             showReturn={false}
           />
         )}
-      </article>
+      </ApprovalModal>
     );
   }
 
@@ -850,28 +910,43 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
       {!loading && section === "time-off" ? (
         <div className="dx-approval-list">
           {leaveApprovals.length ? leaveApprovals.map((approval) => (
-            <article className="dx-approval-card" key={approval.id}>
-              <ApprovalHead
-                badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
-                eyebrow={`${approval.leaveType} · ${approval.stepName}`}
-                meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                name={approval.requesterName}
-              />
-              <dl className="dx-approval-facts">
-                <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
-                <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
-              </dl>
-              <ApprovalNote id={approval.requestId} notes={notes} onChange={(value) => setNote(approval.requestId, value)} placeholder="Note for worker (optional)" />
-              <ApprovalToolbar
-                onApprove={() => void decideLeave(approval.requestId, "approved")}
-                onReject={() => void decideLeave(approval.requestId, "rejected")}
-                saving={saving}
-                showReturn={false}
-              />
-            </article>
+            <ApprovalRow
+              badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+              eyebrow={`${approval.leaveType} · ${approval.stepName}`}
+              key={approval.id}
+              meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+              name={approval.requesterName}
+              onReview={() => setActiveKey(`time-off:${approval.id}`)}
+            />
           )) : (
             <div className="dx-empty"><Clock3 /><strong>No time-off approvals</strong><small>No time-off steps assigned to you are waiting.</small></div>
           )}
+          {(() => {
+            const id = activeKey?.match(/^time-off:(.+)$/)?.[1];
+            const approval = id ? leaveApprovals.find((item) => item.id === id) : undefined;
+            if (!approval) return null;
+            return (
+              <ApprovalModal onClose={closeModal} title={approval.requesterName}>
+                <ApprovalHead
+                  badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+                  eyebrow={`${approval.leaveType} · ${approval.stepName}`}
+                  meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                  name={approval.requesterName}
+                />
+                <dl className="dx-approval-facts">
+                  <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
+                  <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
+                </dl>
+                <ApprovalNote id={approval.requestId} notes={notes} onChange={(value) => setNote(approval.requestId, value)} placeholder="Note for worker (optional)" />
+                <ApprovalToolbar
+                  onApprove={() => void act(() => decideLeave(approval.requestId, "approved"))}
+                  onReject={() => void act(() => decideLeave(approval.requestId, "rejected"))}
+                  saving={saving}
+                  showReturn={false}
+                />
+              </ApprovalModal>
+            );
+          })()}
         </div>
       ) : null}
 
@@ -884,25 +959,14 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                 <span>{wfhApprovals.length} pending</span>
               </header>
               {wfhApprovals.map((approval) => (
-                <article className="dx-approval-card" key={approval.id}>
-                  <ApprovalHead
-                    badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
-                    eyebrow={`${approval.requestNo} · ${approval.stepName}`}
-                    meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                    name={approval.requesterName}
-                  />
-                  <dl className="dx-approval-facts">
-                    <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
-                    <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
-                  </dl>
-                  <ApprovalNote id={`wfh:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`wfh:${approval.requestId}`, value)} placeholder="Note for worker (optional)" />
-                  <ApprovalToolbar
-                    onApprove={() => void decideWfh(approval.requestId, "approved", "manager")}
-                    onReject={() => void decideWfh(approval.requestId, "rejected", "manager")}
-                    saving={saving}
-                    showReturn={false}
-                  />
-                </article>
+                <ApprovalRow
+                  badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+                  eyebrow={`${approval.requestNo} · ${approval.stepName}`}
+                  key={approval.id}
+                  meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                  name={approval.requesterName}
+                  onReview={() => setActiveKey(`wfh:manager:${approval.id}`)}
+                />
               ))}
             </>
           ) : null}
@@ -913,32 +977,58 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                 <span>{wfhHrApprovals.length} pending</span>
               </header>
               {wfhHrApprovals.map((approval) => (
-                <article className="dx-approval-card" key={`hr:${approval.id}`}>
-                  <ApprovalHead
-                    badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
-                    eyebrow={`${approval.requestNo} · Present · WFH`}
-                    meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                    name={approval.requesterName}
-                  />
-                  <dl className="dx-approval-facts">
-                    <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
-                    <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
-                    {approval.managerName ? <div><dt>Manager</dt><dd>{approval.managerName}{approval.managerNote ? ` · ${approval.managerNote}` : ""}</dd></div> : null}
-                  </dl>
-                  <ApprovalNote id={`wfh:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`wfh:${approval.requestId}`, value)} placeholder="Note when returning or rejecting" />
-                  <ApprovalToolbar
-                    onApprove={() => void decideWfh(approval.requestId, "approved", "hr")}
-                    onReject={() => void decideWfh(approval.requestId, "rejected", "hr")}
-                    onReturn={() => void decideWfh(approval.requestId, "returned", "hr")}
-                    saving={saving}
-                  />
-                </article>
+                <ApprovalRow
+                  badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+                  eyebrow={`${approval.requestNo} · Present · WFH`}
+                  key={`hr:${approval.id}`}
+                  meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                  name={approval.requesterName}
+                  onReview={() => setActiveKey(`wfh:hr:${approval.id}`)}
+                />
               ))}
             </>
           ) : null}
           {!wfhApprovals.length && !wfhHrApprovals.length ? (
             <div className="dx-empty"><Home /><strong>No WFH approvals</strong><small>No work-from-home steps or HR finalizations in your reporting scope are waiting.</small></div>
           ) : null}
+          {(() => {
+            const match = activeKey?.match(/^wfh:(manager|hr):(.+)$/);
+            if (!match) return null;
+            const [, queue, id] = match;
+            const approval = (queue === "hr" ? wfhHrApprovals : wfhApprovals).find((item) => item.id === id);
+            if (!approval) return null;
+            return (
+              <ApprovalModal onClose={closeModal} title={approval.requesterName}>
+                <ApprovalHead
+                  badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+                  eyebrow={queue === "hr" ? `${approval.requestNo} · Present · WFH` : `${approval.requestNo} · ${approval.stepName}`}
+                  meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                  name={approval.requesterName}
+                />
+                <dl className="dx-approval-facts">
+                  <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
+                  <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
+                  {queue === "hr" && approval.managerName ? <div><dt>Manager</dt><dd>{approval.managerName}{approval.managerNote ? ` · ${approval.managerNote}` : ""}</dd></div> : null}
+                </dl>
+                <ApprovalNote id={`wfh:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`wfh:${approval.requestId}`, value)} placeholder={queue === "hr" ? "Note when returning or rejecting" : "Note for worker (optional)"} />
+                {queue === "hr" ? (
+                  <ApprovalToolbar
+                    onApprove={() => void act(() => decideWfh(approval.requestId, "approved", "hr"))}
+                    onReject={() => void act(() => decideWfh(approval.requestId, "rejected", "hr"))}
+                    onReturn={() => void act(() => decideWfh(approval.requestId, "returned", "hr"))}
+                    saving={saving}
+                  />
+                ) : (
+                  <ApprovalToolbar
+                    onApprove={() => void act(() => decideWfh(approval.requestId, "approved", "manager"))}
+                    onReject={() => void act(() => decideWfh(approval.requestId, "rejected", "manager"))}
+                    saving={saving}
+                    showReturn={false}
+                  />
+                )}
+              </ApprovalModal>
+            );
+          })()}
         </div>
       ) : null}
 
@@ -951,25 +1041,14 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                 <span>{siteVisitApprovals.length} pending</span>
               </header>
               {siteVisitApprovals.map((approval) => (
-                <article className="dx-approval-card" key={approval.id}>
-                  <ApprovalHead
-                    badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
-                    eyebrow={`${approval.requestNo} · ${approval.stepName}`}
-                    meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                    name={approval.requesterName}
-                  />
-                  <dl className="dx-approval-facts">
-                    <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
-                    <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
-                  </dl>
-                  <ApprovalNote id={`site-visit:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`site-visit:${approval.requestId}`, value)} placeholder="Note for worker (optional)" />
-                  <ApprovalToolbar
-                    onApprove={() => void decideSiteVisit(approval.requestId, "approved", "manager")}
-                    onReject={() => void decideSiteVisit(approval.requestId, "rejected", "manager")}
-                    saving={saving}
-                    showReturn={false}
-                  />
-                </article>
+                <ApprovalRow
+                  badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+                  eyebrow={`${approval.requestNo} · ${approval.stepName}`}
+                  key={approval.id}
+                  meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                  name={approval.requesterName}
+                  onReview={() => setActiveKey(`site-visit:manager:${approval.id}`)}
+                />
               ))}
             </>
           ) : null}
@@ -980,32 +1059,58 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                 <span>{siteVisitHrApprovals.length} pending</span>
               </header>
               {siteVisitHrApprovals.map((approval) => (
-                <article className="dx-approval-card" key={`hr:${approval.id}`}>
-                  <ApprovalHead
-                    badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
-                    eyebrow={`${approval.requestNo} · Present · Site visit`}
-                    meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                    name={approval.requesterName}
-                  />
-                  <dl className="dx-approval-facts">
-                    <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
-                    <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
-                    {approval.managerName ? <div><dt>Manager</dt><dd>{approval.managerName}{approval.managerNote ? ` · ${approval.managerNote}` : ""}</dd></div> : null}
-                  </dl>
-                  <ApprovalNote id={`site-visit:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`site-visit:${approval.requestId}`, value)} placeholder="Note when returning or rejecting" />
-                  <ApprovalToolbar
-                    onApprove={() => void decideSiteVisit(approval.requestId, "approved", "hr")}
-                    onReject={() => void decideSiteVisit(approval.requestId, "rejected", "hr")}
-                    onReturn={() => void decideSiteVisit(approval.requestId, "returned", "hr")}
-                    saving={saving}
-                  />
-                </article>
+                <ApprovalRow
+                  badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+                  eyebrow={`${approval.requestNo} · Present · Site visit`}
+                  key={`hr:${approval.id}`}
+                  meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                  name={approval.requesterName}
+                  onReview={() => setActiveKey(`site-visit:hr:${approval.id}`)}
+                />
               ))}
             </>
           ) : null}
           {!siteVisitApprovals.length && !siteVisitHrApprovals.length ? (
             <div className="dx-empty"><MapPinned /><strong>No site visit approvals</strong><small>No site-visit steps or HR finalizations in your reporting scope are waiting.</small></div>
           ) : null}
+          {(() => {
+            const match = activeKey?.match(/^site-visit:(manager|hr):(.+)$/);
+            if (!match) return null;
+            const [, queue, id] = match;
+            const approval = (queue === "hr" ? siteVisitHrApprovals : siteVisitApprovals).find((item) => item.id === id);
+            if (!approval) return null;
+            return (
+              <ApprovalModal onClose={closeModal} title={approval.requesterName}>
+                <ApprovalHead
+                  badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
+                  eyebrow={queue === "hr" ? `${approval.requestNo} · Present · Site visit` : `${approval.requestNo} · ${approval.stepName}`}
+                  meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                  name={approval.requesterName}
+                />
+                <dl className="dx-approval-facts">
+                  <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
+                  <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
+                  {queue === "hr" && approval.managerName ? <div><dt>Manager</dt><dd>{approval.managerName}{approval.managerNote ? ` · ${approval.managerNote}` : ""}</dd></div> : null}
+                </dl>
+                <ApprovalNote id={`site-visit:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`site-visit:${approval.requestId}`, value)} placeholder={queue === "hr" ? "Note when returning or rejecting" : "Note for worker (optional)"} />
+                {queue === "hr" ? (
+                  <ApprovalToolbar
+                    onApprove={() => void act(() => decideSiteVisit(approval.requestId, "approved", "hr"))}
+                    onReject={() => void act(() => decideSiteVisit(approval.requestId, "rejected", "hr"))}
+                    onReturn={() => void act(() => decideSiteVisit(approval.requestId, "returned", "hr"))}
+                    saving={saving}
+                  />
+                ) : (
+                  <ApprovalToolbar
+                    onApprove={() => void act(() => decideSiteVisit(approval.requestId, "approved", "manager"))}
+                    onReject={() => void act(() => decideSiteVisit(approval.requestId, "rejected", "manager"))}
+                    saving={saving}
+                    showReturn={false}
+                  />
+                )}
+              </ApprovalModal>
+            );
+          })()}
         </div>
       ) : null}
 
@@ -1017,7 +1122,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                 <strong>Reporting manager</strong>
                 <span>{attendanceApprovals.length} pending</span>
               </header>
-              {attendanceApprovals.map((approval) => renderAttendanceCard(approval, "manager"))}
+              {attendanceApprovals.map((approval) => renderAttendanceRow(approval, "manager"))}
             </>
           ) : null}
           {attendanceHrApprovals.length ? (
@@ -1026,263 +1131,391 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                 <strong>HR finalization</strong>
                 <span>{attendanceHrApprovals.length} pending</span>
               </header>
-              {attendanceHrApprovals.map((approval) => renderAttendanceCard(approval, "hr"))}
+              {attendanceHrApprovals.map((approval) => renderAttendanceRow(approval, "hr"))}
             </>
           ) : null}
           {!attendanceApprovals.length && !attendanceHrApprovals.length ? (
             <div className="dx-empty"><CalendarClock /><strong>No attendance regularizations</strong><small>No manager steps or HR finalizations in your attendance scope are waiting.</small></div>
           ) : null}
+          {(() => {
+            const match = activeKey?.match(/^attendance:(manager|hr):(.+)$/);
+            if (!match) return null;
+            const [, queue, id] = match;
+            const list = queue === "hr" ? attendanceHrApprovals : attendanceApprovals;
+            const approval = list.find((item) => item.id === id);
+            return approval ? renderAttendanceCard(approval, queue as "manager" | "hr") : null;
+          })()}
         </div>
       ) : null}
 
       {!loading && section === "rosters" ? (
         <div className="dx-approval-list">
           {rosterSwapApprovals.length ? rosterSwapApprovals.map((approval) => (
-            <article className="dx-approval-card" key={`swap:${approval.id}`}>
-              <ApprovalHead
-                badge={<span className="dx-approval-badge">Swap</span>}
-                eyebrow={`Shift swap · ${displayDate(approval.rosterDate)}`}
-                meta={`${approval.requesterCode || "—"} ↔ ${approval.partnerCode || "—"}`}
-                name={`${approval.requesterName} ↔ ${approval.partnerName}`}
-              />
-              <dl className="dx-approval-facts">
-                <div><dt>Exchange</dt><dd>{rosterSwapShiftLabel(approval.requesterShift, approval.requesterDayType)} ↔ {rosterSwapShiftLabel(approval.partnerShift, approval.partnerDayType)}</dd></div>
-                <div><dt>Requested</dt><dd>{dateTime(approval.requestedAt)}</dd></div>
-                {approval.requesterNote ? <div><dt>Requester note</dt><dd>{approval.requesterNote}</dd></div> : null}
-                {approval.partnerNote ? <div><dt>Partner note</dt><dd>{approval.partnerNote}</dd></div> : null}
-              </dl>
-              <ApprovalNote id={approval.id} notes={notes} onChange={(value) => setNote(approval.id, value)} placeholder="Note for colleagues (optional)" />
-              <ApprovalToolbar
-                onApprove={() => void decideRosterSwap(approval.id, "approved")}
-                onReject={() => void decideRosterSwap(approval.id, "rejected")}
-                saving={saving}
-                showReturn={false}
-              />
-            </article>
+            <ApprovalRow
+              badge={<span className="dx-approval-badge">Swap</span>}
+              eyebrow={`Shift swap · ${displayDate(approval.rosterDate)}`}
+              key={`swap:${approval.id}`}
+              meta={`${approval.requesterCode || "—"} ↔ ${approval.partnerCode || "—"}`}
+              name={`${approval.requesterName} ↔ ${approval.partnerName}`}
+              onReview={() => setActiveKey(`roster-swap:${approval.id}`)}
+            />
           )) : null}
           {rosterApprovals.length ? rosterApprovals.map((approval) => (
-            <article className="dx-approval-card" key={approval.id}>
-              <ApprovalHead
-                badge={<span className="dx-approval-badge">Rev {approval.revision}</span>}
-                eyebrow={`${approval.stationCode} · ${rosterStageLabel(approval.stageType)}`}
-                meta={`${approval.rowCount} roster cell${approval.rowCount === 1 ? "" : "s"} · Step ${approval.stageNumber}`}
-                name={approval.name || `${approval.stationName || approval.stationCode} weekly roster`}
-              />
-              <dl className="dx-approval-facts">
-                <div><dt>Station</dt><dd>{approval.stationCode}{approval.stationName ? ` · ${approval.stationName}` : ""}</dd></div>
-                <div><dt>Effective week</dt><dd>{displayDate(approval.effectiveFrom)} – {displayDate(approval.periodEnd)}</dd></div>
-                <div><dt>Pattern</dt><dd>Recurring Monday–Sunday roster change</dd></div>
-              </dl>
-              <ApprovalNote
-                id={approval.id}
-                notes={notes}
-                onChange={(value) => setNote(approval.id, value)}
-                placeholder="Required when returning or rejecting"
-              />
-              <ApprovalToolbar
-                onApprove={() => void decideRoster(approval, "approved")}
-                onReject={() => void decideRoster(approval, "rejected")}
-                onReturn={() => void decideRoster(approval, "returned")}
-                saving={saving}
-              />
-            </article>
+            <ApprovalRow
+              badge={<span className="dx-approval-badge">Rev {approval.revision}</span>}
+              eyebrow={`${approval.stationCode} · ${rosterStageLabel(approval.stageType)}`}
+              key={approval.id}
+              meta={`${approval.rowCount} roster cell${approval.rowCount === 1 ? "" : "s"} · Step ${approval.stageNumber}`}
+              name={approval.name || `${approval.stationName || approval.stationCode} weekly roster`}
+              onReview={() => setActiveKey(`roster:${approval.id}`)}
+            />
           )) : null}
           {returnedRosters.length ? returnedRosters.map((item) => (
-            <article className="dx-approval-card returned" key={item.planId}>
-              <ApprovalHead
-                badge={<span className="dx-approval-badge status-returned">Returned</span>}
-                eyebrow={`${item.stationCode} · v${item.revisionNo}`}
-                meta={`Updated ${dateTime(item.updatedAt)} · edit shifts here, then resubmit`}
-                name={item.name || `${item.stationName || item.stationCode} weekly roster`}
-              />
-              <dl className="dx-approval-facts">
-                <div><dt>Week</dt><dd>{displayDate(item.periodStart)} – {displayDate(item.periodEnd)}</dd></div>
-                <div><dt>Return note</dt><dd>{item.returnedNote || "No note provided"}</dd></div>
-              </dl>
-              <ApprovalNote
-                id={item.planId}
-                notes={notes}
-                onChange={(value) => setNote(item.planId, value)}
-                placeholder="Optional resubmit note for approvers"
-              />
-              <div className="dx-approval-toolbar">
-                <button className="toolbar-return" disabled={saving} onClick={() => setEditingReturnedRosterId(item.planId)} type="button">
-                  <CalendarDays />Edit shifts
-                </button>
-                <button className="toolbar-approve" disabled={saving} onClick={() => void resubmitReturnedRoster(item.planId)} type="button">
-                  <Check />Send for approval
-                </button>
-              </div>
-              {editingReturnedRosterId === item.planId ? <ConnectReturnedRosterEditor account={account} planId={item.planId} onClose={() => { setEditingReturnedRosterId(null); void load(); }} /> : null}
-            </article>
+            <ApprovalRow
+              badge={<span className="dx-approval-badge status-returned">Returned</span>}
+              eyebrow={`${item.stationCode} · v${item.revisionNo}`}
+              key={item.planId}
+              meta={`Updated ${dateTime(item.updatedAt)} · edit shifts here, then resubmit`}
+              name={item.name || `${item.stationName || item.stationCode} weekly roster`}
+              onReview={() => setActiveKey(`roster-returned:${item.planId}`)}
+            />
           )) : null}
           {!rosterSwapApprovals.length && !rosterApprovals.length && !returnedRosters.length ? (
             <div className="dx-empty"><ArrowLeftRight /><strong>No roster approvals</strong><small>Shift swaps and weekly roster changes assigned to you will appear here.</small></div>
           ) : null}
+          {(() => {
+            const swapId = activeKey?.match(/^roster-swap:(.+)$/)?.[1];
+            const approval = swapId ? rosterSwapApprovals.find((item) => item.id === swapId) : undefined;
+            if (!approval) return null;
+            return (
+              <ApprovalModal onClose={closeModal} title={`${approval.requesterName} ↔ ${approval.partnerName}`}>
+                <ApprovalHead
+                  badge={<span className="dx-approval-badge">Swap</span>}
+                  eyebrow={`Shift swap · ${displayDate(approval.rosterDate)}`}
+                  meta={`${approval.requesterCode || "—"} ↔ ${approval.partnerCode || "—"}`}
+                  name={`${approval.requesterName} ↔ ${approval.partnerName}`}
+                />
+                <dl className="dx-approval-facts">
+                  <div><dt>Exchange</dt><dd>{rosterSwapShiftLabel(approval.requesterShift, approval.requesterDayType)} ↔ {rosterSwapShiftLabel(approval.partnerShift, approval.partnerDayType)}</dd></div>
+                  <div><dt>Requested</dt><dd>{dateTime(approval.requestedAt)}</dd></div>
+                  {approval.requesterNote ? <div><dt>Requester note</dt><dd>{approval.requesterNote}</dd></div> : null}
+                  {approval.partnerNote ? <div><dt>Partner note</dt><dd>{approval.partnerNote}</dd></div> : null}
+                </dl>
+                <ApprovalNote id={approval.id} notes={notes} onChange={(value) => setNote(approval.id, value)} placeholder="Note for colleagues (optional)" />
+                <ApprovalToolbar
+                  onApprove={() => void act(() => decideRosterSwap(approval.id, "approved"))}
+                  onReject={() => void act(() => decideRosterSwap(approval.id, "rejected"))}
+                  saving={saving}
+                  showReturn={false}
+                />
+              </ApprovalModal>
+            );
+          })()}
+          {(() => {
+            const rosterId = activeKey?.match(/^roster:(.+)$/)?.[1];
+            const approval = rosterId ? rosterApprovals.find((item) => item.id === rosterId) : undefined;
+            if (!approval) return null;
+            return (
+              <ApprovalModal onClose={closeModal} title={approval.name || `${approval.stationName || approval.stationCode} weekly roster`}>
+                <ApprovalHead
+                  badge={<span className="dx-approval-badge">Rev {approval.revision}</span>}
+                  eyebrow={`${approval.stationCode} · ${rosterStageLabel(approval.stageType)}`}
+                  meta={`${approval.rowCount} roster cell${approval.rowCount === 1 ? "" : "s"} · Step ${approval.stageNumber}`}
+                  name={approval.name || `${approval.stationName || approval.stationCode} weekly roster`}
+                />
+                <dl className="dx-approval-facts">
+                  <div><dt>Station</dt><dd>{approval.stationCode}{approval.stationName ? ` · ${approval.stationName}` : ""}</dd></div>
+                  <div><dt>Effective week</dt><dd>{displayDate(approval.effectiveFrom)} – {displayDate(approval.periodEnd)}</dd></div>
+                  <div><dt>Pattern</dt><dd>Recurring Monday–Sunday roster change</dd></div>
+                </dl>
+                <ApprovalNote
+                  id={approval.id}
+                  notes={notes}
+                  onChange={(value) => setNote(approval.id, value)}
+                  placeholder="Required when returning or rejecting"
+                />
+                <ApprovalToolbar
+                  onApprove={() => void act(() => decideRoster(approval, "approved"))}
+                  onReject={() => void act(() => decideRoster(approval, "rejected"))}
+                  onReturn={() => void act(() => decideRoster(approval, "returned"))}
+                  saving={saving}
+                />
+              </ApprovalModal>
+            );
+          })()}
+          {(() => {
+            const planId = activeKey?.match(/^roster-returned:(.+)$/)?.[1];
+            const item = planId ? returnedRosters.find((entry) => entry.planId === planId) : undefined;
+            if (!item) return null;
+            return (
+              <ApprovalModal onClose={closeModal} title={item.name || `${item.stationName || item.stationCode} weekly roster`}>
+                <ApprovalHead
+                  badge={<span className="dx-approval-badge status-returned">Returned</span>}
+                  eyebrow={`${item.stationCode} · v${item.revisionNo}`}
+                  meta={`Updated ${dateTime(item.updatedAt)} · edit shifts here, then resubmit`}
+                  name={item.name || `${item.stationName || item.stationCode} weekly roster`}
+                />
+                <dl className="dx-approval-facts">
+                  <div><dt>Week</dt><dd>{displayDate(item.periodStart)} – {displayDate(item.periodEnd)}</dd></div>
+                  <div><dt>Return note</dt><dd>{item.returnedNote || "No note provided"}</dd></div>
+                </dl>
+                <ApprovalNote
+                  id={item.planId}
+                  notes={notes}
+                  onChange={(value) => setNote(item.planId, value)}
+                  placeholder="Optional resubmit note for approvers"
+                />
+                <div className="dx-approval-toolbar">
+                  <button className="toolbar-return" disabled={saving} onClick={() => setEditingReturnedRosterId(item.planId)} type="button">
+                    <CalendarDays />Edit shifts
+                  </button>
+                  <button className="toolbar-approve" disabled={saving} onClick={() => void act(() => resubmitReturnedRoster(item.planId))} type="button">
+                    <Check />Send for approval
+                  </button>
+                </div>
+                {editingReturnedRosterId === item.planId ? <ConnectReturnedRosterEditor account={account} planId={item.planId} onClose={() => { setEditingReturnedRosterId(null); void load(); }} /> : null}
+              </ApprovalModal>
+            );
+          })()}
         </div>
       ) : null}
 
       {!loading && section === "location-integrity" ? (
         <div className="dx-approval-list">
           {supportPackages.length ? supportPackages.map((item) => (
-            <article className="dx-approval-card" key={item.id}>
-              <ApprovalHead
-                badge={<span className={`dx-approval-badge status-${item.status}`}>{statusLabel(item.status)}</span>}
-                eyebrow={`Location check · ${displayDate(item.punchDate)}`}
-                meta={`${item.workerCode || "—"} · ${profileLabel(item.profileType)}`}
-                name={item.workerName}
-              />
-              <div className="dx-approval-evidence">
-                {item.selfieUrl ? (
-                  <a aria-label="View support selfie" className="dx-approval-evidence-photo" href={item.selfieUrl} rel="noreferrer" target="_blank">
-                    <img alt="" src={item.selfieUrl} />
-                    <Camera />
-                  </a>
-                ) : (
-                  <div aria-hidden="true" className="dx-approval-evidence-photo missing"><Camera /></div>
-                )}
-                <div className="dx-approval-evidence-copy">
-                  <p className="dx-approval-evidence-coords">
-                    <LocateFixed />
-                    <span>{item.lat.toFixed(5)}, {item.lng.toFixed(5)}{item.accuracyM == null ? "" : ` · ±${Math.round(item.accuracyM)}m`}</span>
-                  </p>
-                  <p className="dx-approval-evidence-note">{item.remarks || "Selfie and GPS submitted outside station"}</p>
-                  <div className="dx-approval-evidence-foot">
-                    <small>{item.receivedAt ? dateTime(item.receivedAt) : "Awaiting receipt"}</small>
-                    <a href={`https://www.google.com/maps?q=${item.lat},${item.lng}`} rel="noreferrer" target="_blank"><MapPin />Map</a>
-                  </div>
-                </div>
-              </div>
-              <ApprovalNote id={item.id} notes={notes} onChange={(value) => setNote(item.id, value)} placeholder="Note for worker (optional)" />
-              <ApprovalToolbar
-                onApprove={() => void decideSupportPackage(item.id, "approved")}
-                onReject={() => void decideSupportPackage(item.id, "rejected")}
-                onReturn={() => void decideSupportPackage(item.id, "returned")}
-                saving={saving}
-              />
-            </article>
+            <ApprovalRow
+              badge={<span className={`dx-approval-badge status-${item.status}`}>{statusLabel(item.status)}</span>}
+              eyebrow={`Location check · ${displayDate(item.punchDate)}`}
+              key={item.id}
+              meta={`${item.workerCode || "—"} · ${profileLabel(item.profileType)}`}
+              name={item.workerName}
+              onReview={() => setActiveKey(`location:${item.id}`)}
+            />
           )) : (
             <div className="dx-empty"><LocateFixed /><strong>No location checks</strong><small>No support packages from your {scopeName} are waiting.</small></div>
           )}
+          {(() => {
+            const id = activeKey?.match(/^location:(.+)$/)?.[1];
+            const item = id ? supportPackages.find((entry) => entry.id === id) : undefined;
+            if (!item) return null;
+            return (
+              <ApprovalModal onClose={closeModal} title={item.workerName}>
+                <ApprovalHead
+                  badge={<span className={`dx-approval-badge status-${item.status}`}>{statusLabel(item.status)}</span>}
+                  eyebrow={`Location check · ${displayDate(item.punchDate)}`}
+                  meta={`${item.workerCode || "—"} · ${profileLabel(item.profileType)}`}
+                  name={item.workerName}
+                />
+                <div className="dx-approval-evidence">
+                  {item.selfieUrl ? (
+                    <a aria-label="View support selfie" className="dx-approval-evidence-photo" href={item.selfieUrl} rel="noreferrer" target="_blank">
+                      <img alt="" src={item.selfieUrl} />
+                      <Camera />
+                    </a>
+                  ) : (
+                    <div aria-hidden="true" className="dx-approval-evidence-photo missing"><Camera /></div>
+                  )}
+                  <div className="dx-approval-evidence-copy">
+                    <p className="dx-approval-evidence-coords">
+                      <LocateFixed />
+                      <span>{item.lat.toFixed(5)}, {item.lng.toFixed(5)}{item.accuracyM == null ? "" : ` · ±${Math.round(item.accuracyM)}m`}</span>
+                    </p>
+                    <p className="dx-approval-evidence-note">{item.remarks || "Selfie and GPS submitted outside station"}</p>
+                    <div className="dx-approval-evidence-foot">
+                      <small>{item.receivedAt ? dateTime(item.receivedAt) : "Awaiting receipt"}</small>
+                      <a href={`https://www.google.com/maps?q=${item.lat},${item.lng}`} rel="noreferrer" target="_blank"><MapPin />Map</a>
+                    </div>
+                  </div>
+                </div>
+                <ApprovalNote id={item.id} notes={notes} onChange={(value) => setNote(item.id, value)} placeholder="Note for worker (optional)" />
+                <ApprovalToolbar
+                  onApprove={() => void act(() => decideSupportPackage(item.id, "approved"))}
+                  onReject={() => void act(() => decideSupportPackage(item.id, "rejected"))}
+                  onReturn={() => void act(() => decideSupportPackage(item.id, "returned"))}
+                  saving={saving}
+                />
+              </ApprovalModal>
+            );
+          })()}
         </div>
       ) : null}
 
       {!loading && section === "reimbursements" ? (
         <div className="dx-approval-list">
           {preRequestApprovals.map((approval) => (
-            <article className="dx-approval-card" key={`pre-${approval.id}`}>
-              <ApprovalHead
-                badge={<span className="dx-approval-badge">{approval.request.estimated_amount != null ? money(approval.request.estimated_amount) : "Request"}</span>}
-                eyebrow={`${approval.request.request_no} · Pre-request · ${statusLabel(approval.assignee_role)}`}
-                meta={approval.request.requesterCode || "—"}
-                name={approval.request.requesterName}
-              />
-              <dl className="dx-approval-facts">
-                <div><dt>Purpose</dt><dd>{approval.request.purpose}</dd></div>
-                {(approval.request.trip_from || approval.request.trip_to) ? (
-                  <div><dt>Dates</dt><dd>{approval.request.trip_from || "—"} → {approval.request.trip_to || "—"}</dd></div>
-                ) : null}
-                {approval.request.notes ? <div><dt>Notes</dt><dd>{approval.request.notes}</dd></div> : null}
-              </dl>
-              <ApprovalNote id={`pre:${approval.request.id}`} notes={notes} onChange={(value) => setNote(`pre:${approval.request.id}`, value)} placeholder="Required when rejecting" />
-              <ApprovalToolbar
-                onApprove={() => void decidePreRequest(approval.request.id, "approved")}
-                onReject={() => void decidePreRequest(approval.request.id, "rejected")}
-                saving={saving}
-                showReturn={false}
-              />
-            </article>
+            <ApprovalRow
+              badge={<span className="dx-approval-badge">{approval.request.estimated_amount != null ? money(approval.request.estimated_amount) : "Request"}</span>}
+              eyebrow={`${approval.request.request_no} · Pre-request · ${statusLabel(approval.assignee_role)}`}
+              key={`pre-${approval.id}`}
+              meta={approval.request.requesterCode || "—"}
+              name={approval.request.requesterName}
+              onReview={() => setActiveKey(`reimbursement-pre:${approval.request.id}`)}
+            />
           ))}
           {reimbursements.map((approval) => (
-            <article className="dx-approval-card" key={approval.id}>
-              <ApprovalHead
-                badge={<span className="dx-approval-badge">{money(approval.claim.total_claimed)}</span>}
-                eyebrow={`${approval.claim.claim_no} · Claim · ${approval.step_name}`}
-                meta={approval.claim.purpose}
-                name={approval.claim.requesterName}
-              />
-              <dl className="dx-approval-facts">
-                {approval.claim.hr_expense_items?.map((item) => (
-                  <div key={item.id}>
-                    <dt>{first(item.hr_expense_categories)?.name ?? "Expense"}</dt>
-                    <dd>
-                      {item.expense_date} · {money(item.amount)}
-                    </dd>
-                  </div>
-                ))}
-                {approval.claim.attachments?.filter((attachment) => attachment.url).map((attachment) => (
-                  <div key={attachment.id}>
-                    <dt>Receipt pack</dt>
-                    <dd><a href={attachment.url ?? "#"} rel="noreferrer" target="_blank"><FileText />{attachment.file_name}</a></dd>
-                  </div>
-                ))}
-              </dl>
-              <ApprovalNote id={approval.claim.id} notes={notes} onChange={(value) => setNote(approval.claim.id, value)} placeholder="Required when returning or rejecting" />
-              <ApprovalToolbar
-                onApprove={() => void decideReimbursement(approval.claim.id, "approved")}
-                onReject={() => void decideReimbursement(approval.claim.id, "rejected")}
-                onReturn={() => void decideReimbursement(approval.claim.id, "returned")}
-                saving={saving}
-              />
-            </article>
+            <ApprovalRow
+              badge={<span className="dx-approval-badge">{money(approval.claim.total_claimed)}</span>}
+              eyebrow={`${approval.claim.claim_no} · Claim · ${approval.step_name}`}
+              key={approval.id}
+              meta={approval.claim.purpose}
+              name={approval.claim.requesterName}
+              onReview={() => setActiveKey(`reimbursement-claim:${approval.claim.id}`)}
+            />
           ))}
           {!preRequestApprovals.length && !reimbursements.length ? (
             <div className="dx-empty"><Clock3 /><strong>No reimbursements waiting</strong><small>No reimbursement requests or claims are assigned to you right now.</small></div>
           ) : null}
+          {(() => {
+            const id = activeKey?.match(/^reimbursement-pre:(.+)$/)?.[1];
+            const approval = id ? preRequestApprovals.find((entry) => entry.request.id === id) : undefined;
+            if (!approval) return null;
+            return (
+              <ApprovalModal onClose={closeModal} title={approval.request.requesterName}>
+                <ApprovalHead
+                  badge={<span className="dx-approval-badge">{approval.request.estimated_amount != null ? money(approval.request.estimated_amount) : "Request"}</span>}
+                  eyebrow={`${approval.request.request_no} · Pre-request · ${statusLabel(approval.assignee_role)}`}
+                  meta={approval.request.requesterCode || "—"}
+                  name={approval.request.requesterName}
+                />
+                <dl className="dx-approval-facts">
+                  <div><dt>Purpose</dt><dd>{approval.request.purpose}</dd></div>
+                  {(approval.request.trip_from || approval.request.trip_to) ? (
+                    <div><dt>Dates</dt><dd>{approval.request.trip_from || "—"} → {approval.request.trip_to || "—"}</dd></div>
+                  ) : null}
+                  {approval.request.notes ? <div><dt>Notes</dt><dd>{approval.request.notes}</dd></div> : null}
+                </dl>
+                <ApprovalNote id={`pre:${approval.request.id}`} notes={notes} onChange={(value) => setNote(`pre:${approval.request.id}`, value)} placeholder="Required when rejecting" />
+                <ApprovalToolbar
+                  onApprove={() => void act(() => decidePreRequest(approval.request.id, "approved"))}
+                  onReject={() => void act(() => decidePreRequest(approval.request.id, "rejected"))}
+                  saving={saving}
+                  showReturn={false}
+                />
+              </ApprovalModal>
+            );
+          })()}
+          {(() => {
+            const id = activeKey?.match(/^reimbursement-claim:(.+)$/)?.[1];
+            const approval = id ? reimbursements.find((entry) => entry.claim.id === id) : undefined;
+            if (!approval) return null;
+            return (
+              <ApprovalModal onClose={closeModal} title={approval.claim.requesterName}>
+                <ApprovalHead
+                  badge={<span className="dx-approval-badge">{money(approval.claim.total_claimed)}</span>}
+                  eyebrow={`${approval.claim.claim_no} · Claim · ${approval.step_name}`}
+                  meta={approval.claim.purpose}
+                  name={approval.claim.requesterName}
+                />
+                <dl className="dx-approval-facts">
+                  {approval.claim.hr_expense_items?.map((item) => (
+                    <div key={item.id}>
+                      <dt>{first(item.hr_expense_categories)?.name ?? "Expense"}</dt>
+                      <dd>
+                        {item.expense_date} · {money(item.amount)}
+                      </dd>
+                    </div>
+                  ))}
+                  {approval.claim.attachments?.filter((attachment) => attachment.url).map((attachment) => (
+                    <div key={attachment.id}>
+                      <dt>Receipt pack</dt>
+                      <dd><a href={attachment.url ?? "#"} rel="noreferrer" target="_blank"><FileText />{attachment.file_name}</a></dd>
+                    </div>
+                  ))}
+                </dl>
+                <ApprovalNote id={approval.claim.id} notes={notes} onChange={(value) => setNote(approval.claim.id, value)} placeholder="Required when returning or rejecting" />
+                <ApprovalToolbar
+                  onApprove={() => void act(() => decideReimbursement(approval.claim.id, "approved"))}
+                  onReject={() => void act(() => decideReimbursement(approval.claim.id, "rejected"))}
+                  onReturn={() => void act(() => decideReimbursement(approval.claim.id, "returned"))}
+                  saving={saving}
+                />
+              </ApprovalModal>
+            );
+          })()}
         </div>
       ) : null}
 
       {!loading && section === "exits" ? (
         <div className="dx-approval-list">
           {exitWithdrawalApprovals.map((approval) => (
-            <article className="dx-approval-card" key={`exit-withdraw:${approval.caseId}`}>
-              <ApprovalHead
-                badge={<span className="dx-approval-badge">Withdraw</span>}
-                eyebrow={`${approval.caseNumber} · Withdrawal review`}
-                meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                name={approval.requesterName}
-              />
-              <dl className="dx-approval-facts">
-                <div><dt>Last working day</dt><dd>{displayDate(approval.requestedLastWorkingDate)}</dd></div>
-                <div><dt>Exit reason</dt><dd>{approval.reason}</dd></div>
-                <div><dt>Requested</dt><dd>{dateTime(approval.requestedAt)}</dd></div>
-              </dl>
-              <ApprovalNote id={`exit-withdraw:${approval.caseId}`} notes={notes} onChange={(value) => setNote(`exit-withdraw:${approval.caseId}`, value)} placeholder="Required when keeping the exit open" />
-              <ApprovalToolbar
-                approveLabel="Accept withdrawal"
-                onApprove={() => void decideExitWithdrawal(approval.caseId, "approved")}
-                onReject={() => void decideExitWithdrawal(approval.caseId, "rejected")}
-                rejectLabel="Keep exit open"
-                saving={saving}
-                showReturn={false}
-              />
-            </article>
+            <ApprovalRow
+              badge={<span className="dx-approval-badge">Withdraw</span>}
+              eyebrow={`${approval.caseNumber} · Withdrawal review`}
+              key={`exit-withdraw:${approval.caseId}`}
+              meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+              name={approval.requesterName}
+              onReview={() => setActiveKey(`exit-withdraw:${approval.caseId}`)}
+            />
           ))}
           {exitApprovals.map((approval) => (
-            <article className="dx-approval-card" key={approval.id}>
-              <ApprovalHead
-                badge={<span className="dx-approval-badge">Step {approval.stepOrder}</span>}
-                eyebrow={`${approval.caseNumber} · ${approval.stepName}`}
-                meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
-                name={approval.requesterName}
-              />
-              <dl className="dx-approval-facts">
-                <div><dt>Last working day</dt><dd>{displayDate(approval.requestedLastWorkingDate)}</dd></div>
-                <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
-                <div><dt>Submitted</dt><dd>{dateTime(approval.submittedAt)}</dd></div>
-              </dl>
-              <ApprovalNote id={`exit:${approval.id}`} notes={notes} onChange={(value) => setNote(`exit:${approval.id}`, value)} placeholder="Required when rejecting" />
-              <ApprovalToolbar
-                onApprove={() => void decideExit(approval.id, "approved")}
-                onReject={() => void decideExit(approval.id, "rejected")}
-                saving={saving}
-                showReturn={false}
-              />
-            </article>
+            <ApprovalRow
+              badge={<span className="dx-approval-badge">Step {approval.stepOrder}</span>}
+              eyebrow={`${approval.caseNumber} · ${approval.stepName}`}
+              key={approval.id}
+              meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+              name={approval.requesterName}
+              onReview={() => setActiveKey(`exit:${approval.id}`)}
+            />
           ))}
           {!exitApprovals.length && !exitWithdrawalApprovals.length ? (
             <div className="dx-empty"><DoorOpen /><strong>No exit approvals</strong><small>Exit and withdrawal steps assigned to you will appear here.</small></div>
           ) : null}
+          {(() => {
+            const caseId = activeKey?.match(/^exit-withdraw:(.+)$/)?.[1];
+            const approval = caseId ? exitWithdrawalApprovals.find((entry) => entry.caseId === caseId) : undefined;
+            if (!approval) return null;
+            return (
+              <ApprovalModal onClose={closeModal} title={approval.requesterName}>
+                <ApprovalHead
+                  badge={<span className="dx-approval-badge">Withdraw</span>}
+                  eyebrow={`${approval.caseNumber} · Withdrawal review`}
+                  meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                  name={approval.requesterName}
+                />
+                <dl className="dx-approval-facts">
+                  <div><dt>Last working day</dt><dd>{displayDate(approval.requestedLastWorkingDate)}</dd></div>
+                  <div><dt>Exit reason</dt><dd>{approval.reason}</dd></div>
+                  <div><dt>Requested</dt><dd>{dateTime(approval.requestedAt)}</dd></div>
+                </dl>
+                <ApprovalNote id={`exit-withdraw:${approval.caseId}`} notes={notes} onChange={(value) => setNote(`exit-withdraw:${approval.caseId}`, value)} placeholder="Required when keeping the exit open" />
+                <ApprovalToolbar
+                  approveLabel="Accept withdrawal"
+                  onApprove={() => void act(() => decideExitWithdrawal(approval.caseId, "approved"))}
+                  onReject={() => void act(() => decideExitWithdrawal(approval.caseId, "rejected"))}
+                  rejectLabel="Keep exit open"
+                  saving={saving}
+                  showReturn={false}
+                />
+              </ApprovalModal>
+            );
+          })()}
+          {(() => {
+            const id = activeKey?.match(/^exit:(.+)$/)?.[1];
+            const approval = id ? exitApprovals.find((entry) => entry.id === id) : undefined;
+            if (!approval) return null;
+            return (
+              <ApprovalModal onClose={closeModal} title={approval.requesterName}>
+                <ApprovalHead
+                  badge={<span className="dx-approval-badge">Step {approval.stepOrder}</span>}
+                  eyebrow={`${approval.caseNumber} · ${approval.stepName}`}
+                  meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
+                  name={approval.requesterName}
+                />
+                <dl className="dx-approval-facts">
+                  <div><dt>Last working day</dt><dd>{displayDate(approval.requestedLastWorkingDate)}</dd></div>
+                  <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
+                  <div><dt>Submitted</dt><dd>{dateTime(approval.submittedAt)}</dd></div>
+                </dl>
+                <ApprovalNote id={`exit:${approval.id}`} notes={notes} onChange={(value) => setNote(`exit:${approval.id}`, value)} placeholder="Required when rejecting" />
+                <ApprovalToolbar
+                  onApprove={() => void act(() => decideExit(approval.id, "approved"))}
+                  onReject={() => void act(() => decideExit(approval.id, "rejected"))}
+                  saving={saving}
+                  showReturn={false}
+                />
+              </ApprovalModal>
+            );
+          })()}
         </div>
       ) : null}
 

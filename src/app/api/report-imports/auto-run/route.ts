@@ -160,6 +160,11 @@ export async function POST(request: Request) {
         "/api/admin/reports/workforce-supp/run",
         { isoWeek, reportId: sourceType, forceNew: true }
       );
+      // The worker's own runWorkforceSuppNetwork already pushes this file
+      // into Import Master itself (via its DASHBOARD_IMPORT_SERVICE_KEY,
+      // same mechanism BPCL/IOCL/Cashbook use) — verified live 2026-09-11.
+      // Don't import it again here; that would double-import the same
+      // file on every manual "Auto upload" click.
       const week = run.isoWeek || ready.isoWeek || isoWeek;
       const result: AutoRunResult = {
         ok: true,
