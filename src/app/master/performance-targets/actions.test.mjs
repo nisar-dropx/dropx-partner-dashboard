@@ -13,7 +13,7 @@ function compile(url,aliases){
 }
 const pure=compile(new URL('../../../lib/ops-pulse/station-review-targets.ts',root),{});
 const hawkeye=compile(new URL('../../../lib/ops-pulse/hawkeye.ts',root),{});
-function fixture({scope=true,allowed=true,affected=true}={}){
+function fixture({scope=true,allowed=true,affected=true,sourceRows=null}={}){
   const calls=[],saved=[];
   const current={id:'target',metricKey:'afn_premium_dot',reportType:'daily',sourceIndex:5,target:.955,direction:'higher',weight:0,label:'Original',short:'Original',isActive:true,displayOrder:5,unit:'percent'};
   const builder={};
@@ -29,7 +29,7 @@ function fixture({scope=true,allowed=true,affected=true}={}){
     '@/lib/ops-pulse/station-review-targets':pure,
     '@/lib/ops-pulse/station-review-targets-data':{stationTargetCode:id=>'perf_station_review_'+id},
     '@/lib/ops-pulse/hawkeye':hawkeye,
-    '@/lib/ops-pulse/performance-targets':{loadPerformanceTargets:async()=>({rows:[current],error:null}),savePerformanceTarget:async(...args)=>{saved.push(args);return null;},createPerformanceTarget:async(...args)=>{saved.push(args);return null;}}
+    '@/lib/ops-pulse/performance-targets':{loadPerformanceTargets:async()=>({rows:sourceRows??[current],error:null}),savePerformanceTarget:async(...args)=>{saved.push(args);return null;},createPerformanceTarget:async(...args)=>{saved.push(args);return null;}}
   });
   return {actions,calls,saved,current};
 }
@@ -62,4 +62,10 @@ test('blank metric target is explicitly informational, not an accidental fallbac
   const f=fixture();
   await assert.rejects(f.actions.updateReviewMetricTarget(form({metric_key:'afn_premium_dot',target_pct:'',direction:'higher'})),/targets_saved=1/);
   assert.equal(f.saved[0][2].target,null);assert.equal(f.saved[0][2].explicitReviewTarget,true);
+});
+test('editing inherited C-return target updates the actual SLS master row',async()=>{
+  const sls={id:'sls-target',metricKey:'c_ret_fdps',reportType:'sls',sourceIndex:7,target:.955,unit:'percent',isActive:true,weight:5,direction:'higher'};
+  const f=fixture({sourceRows:[sls,{...sls,id:'daily-target',reportType:'daily',sourceIndex:null,target:null}]});
+  await assert.rejects(f.actions.updateReviewMetricTarget(form({metric_key:'c_ret_fdps',target_pct:'85',direction:'higher'})),/targets_saved=1/);
+  assert.deepEqual(f.saved[0],['company','sls-target',{...sls,target:.85,explicitReviewTarget:true}]);
 });

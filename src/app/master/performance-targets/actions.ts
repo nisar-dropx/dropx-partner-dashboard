@@ -31,7 +31,11 @@ export async function updateReviewMetricTarget(formData:FormData) {
   if(direction!=="higher"&&direction!=="lower")targetResult("Choose a valid target direction.");
   const loaded=await loadPerformanceTargets(companyId);
   if(loaded.error)targetResult("Current targets could not be loaded. No changes saved.");
-  const current=loaded.rows.find(row=>row.reportType==="daily"&&row.metricKey===key);
+  const daily=loaded.rows.find(row=>row.reportType==="daily"&&row.metricKey===key);
+  // Edit the same master row supplying the displayed target. An inherited SLS
+  // target must not silently become an independent, diverging daily copy.
+  const current=daily && (daily.target!=null || daily.explicitReviewTarget) ? daily
+    : loaded.rows.find(row=>row.reportType==="sls"&&row.metricKey===key&&row.unit==="percent"&&row.isActive&&row.target!=null) ?? daily;
   const target={...(current??{metricKey:key,label:definition!.label,short:definition!.short,reportType:"daily" as const,sourceIndex:null,weight:0,unit:"percent" as const,displayOrder:100+hawkeyeMetricDefinitions.indexOf(definition!),isActive:true}),target:number===null?null:number/100,direction:direction as "higher"|"lower",explicitReviewTarget:true};
   const error=current?.id?await savePerformanceTarget(companyId,current.id,target):await createPerformanceTarget(companyId,target);
   targetResult(error);

@@ -1,16 +1,45 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 import { reviewClock, type ReviewEddTimeline, type UtrDiscipline } from "@/lib/ops-pulse/review-operations";
-import { formatDashboardDate } from "@/lib/date-format";
+import { dashboardDateInputValue, formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { UtrAttendanceDrilldown, UtrRepeatSummary } from "@/components/review-attendance-history";
 
 const count = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("en-IN");
 
-export function PerformanceEddClearanceCard({ data }: { data: { timeline: ReviewEddTimeline; error: string | null; routeError?: string | null } }) {
-  const { timeline: t, error, routeError } = data;
+export function PerformanceEddClearanceCard({ data, stationCode }: { data: { timeline: ReviewEddTimeline; error: string | null; routeError?: string | null }; stationCode?: string }) {
+  const [liveData, setLiveData] = useState(data);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const day = data.timeline.day;
+  useEffect(() => { setLiveData(data); setRefreshError(null); }, [data]);
+  useEffect(() => {
+    if (!stationCode || day !== dashboardDateInputValue()) return;
+    let stopped = false, inFlight = false;
+    let controller: AbortController | null = null;
+    const refresh = async () => {
+      if (document.hidden || inFlight || stopped) return;
+      inFlight = true;
+      const requestController = new AbortController();
+      controller = requestController;
+      const timeout = setTimeout(() => requestController.abort(), 45_000);
+      try {
+        const response = await fetch("/api/ops-pulse/performance/edd-history?" + new URLSearchParams({ station: stationCode, date: day }), {
+          cache: "no-store", signal: requestController.signal
+        });
+        const result = await response.json();
+        if (!response.ok || !result.timeline || result.timeline.day !== day) throw Error("refresh");
+        if (!stopped) { setLiveData(result); setRefreshError(null); }
+      } catch { if (!stopped) setRefreshError("Refresh unavailable · showing the last recorded observation."); }
+      finally { clearTimeout(timeout); inFlight = false; }
+    };
+    void refresh();
+    const timer = setInterval(() => { void refresh(); }, 60_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { stopped = true; controller?.abort(); clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
+  }, [stationCode, day]);
+  const { timeline: t, error, routeError } = liveData;
   const [view, setView] = useState<"edd" | "route">("edd");
   const route = t.routeLatest;
   return <ReviewDetails className={`performance-fact-card review-operation-card ${t.latestFresh && t.latest?.counts.todayAtStation ? "late" : ""}`} name="performance-review-fact">
@@ -23,6 +52,7 @@ export function PerformanceEddClearanceCard({ data }: { data: { timeline: Review
       <ReviewDetailsClose label="Close delivery movement history"/>
       <header><div><b>Delivery movement · {formatDashboardDate(t.day)}</b><p>Half-hour checkpoints · all times IST</p></div><span className="review-operation-tag">Automatic</span></header>
       {error ? <p role="alert">{error}</p> : null}
+      {refreshError ? <p role="status" className="review-operation-note">{refreshError}</p> : null}
       <div className="review-edd-view-switch" role="tablist" aria-label="Delivery movement view">
         <button type="button" role="tab" aria-selected={view === "edd"} onClick={() => setView("edd")}>EDD due today</button>
         <button type="button" role="tab" aria-selected={view === "route"} onClick={() => setView("route")}>All out on road</button>
@@ -39,7 +69,7 @@ export function PerformanceEddClearanceCard({ data }: { data: { timeline: Review
             </tr>; })}</tbody></table>
         </div>
         <p className="review-operation-note">Stale stock or outcome snapshots are suppressed instead of displaying mismatched figures. “Cleared by” requires a fresh, uninterrupted zero-at-station run with no unchecked or undated TIDs.</p>
-        {t.latest ? <p className="review-operation-note">Latest EDD sources: stock {reviewClock(t.latest.backlogAt)} · outcomes {reviewClock(t.latest.performanceAt)} · {count(t.latest.counts.missingDate)} missing EDD dates · {count(t.latest.counts.todayHfr)} prior-day HFR.</p> : null}
+        {t.latest ? <p className="review-operation-note">Latest EDD sources: stock {formatDashboardDateTime(t.latest.backlogAt)} · outcomes {formatDashboardDateTime(t.latest.performanceAt)} IST · {count(t.latest.counts.missingDate)} missing EDD dates · {count(t.latest.counts.todayHfr)} prior-day HFR.</p> : null}
       </> : <>
         {routeError ? <p role="alert" className="review-operation-note">{routeError}</p> : null}
         <div className="review-operation-summary"><span>Total out on road <b>{count(route?.routeDispatched)}</b></span><span>Physical at station <b>{count(route?.routeAtStation)}</b></span><span>Still out / held <b>{count(route?.routeOutOnRoad)}</b></span><span>Delivered <b>{count(route?.routeDelivered)}</b></span><span>Returned <b>{count(route?.routeReturned)}</b></span></div>

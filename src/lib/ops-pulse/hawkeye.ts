@@ -12,7 +12,7 @@ export const hawkeyeMetricDefinitions: HawkeyeMetricDefinition[] = [
   { label: "AFN Std DEA%", short: "AFN Std DEA" },
   { label: "AFN Std DOT%", short: "AFN Std DOT", targetKey: "afn_standard_dot" },
   { label: "AFN Std LM Miss%", short: "AFN Std LM Miss", targetKey: "afn_standard_lmc_dea" },
-  { label: "AFN Std PDD DSR%", short: "AFN Std DSR" },
+  { label: "AFN Std PDD DSR%", short: "AFN Std DSR", targetKey: "dsr" },
   { label: "Prem DDS%", short: "Premium DDS", targetKey: "dds_premium" },
   { label: "Prem FDDS%", short: "Premium FDDS" },
   { label: "Prem FTDS%", short: "Premium FTDS" },
@@ -61,7 +61,7 @@ export function hawkeyeValue(valuesJson: unknown, label: string) {
   // review-trends.ts and performance/page.tsx (percent(), ragStatus(),
   // target.target comparisons, trend series math) works in the 0-1
   // fraction convention this whole app uses for percent metrics elsewhere
-  // (see performance-targets.ts's hardcoded .955/.935/etc targets).
+  // (the target master stores percentage thresholds as 0-1 fractions).
   // Divide back down here, once, centrally — rather than at every call
   // site — so the stored value's real 0-100 scale never leaks into code
   // that still expects 0-1.

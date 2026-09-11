@@ -55,6 +55,7 @@ if (failures.length) {
 }
 
 await import("./verify-review-operations.mjs");
+await import("./verify-review-live-targets.mjs");
 await import("./verify-review-discipline-rca.mjs");
 await import("./verify-review-cod-rca.mjs");
 await import("./verify-review-attendance-history.mjs");

@@ -135,6 +135,8 @@ function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociat
 export function PerformanceReviewDesk(props: Props) {
   const { canAdd, canCompleteStep, canEdit, canEditConnections, canComment, programManager, connections, updates, reviewChain, date, error, items, locations, metrics, notice, previousReviews, review, reviews, selectedLocation, snapshot, sourceBatchId, sourceType, sourceWeek, steps } = props;
   const selectedCode = selectedLocation.station_code;
+  const deliveryAvailable = snapshot.deliveryDataAvailable !== false;
+  const deliveryLabel = deliveryAvailable ? snapshot.deliveredCount.toLocaleString("en-IN") : "Data not loaded";
   const selectedStationKey = stationKey(selectedCode);
   const previousStationReviews = previousReviews.filter((entry) => stationKey(entry.station_code) === selectedStationKey);
   const previousReview = previousStationReviews[0] ?? null;
@@ -260,12 +262,12 @@ export function PerformanceReviewDesk(props: Props) {
 
     <div className="performance-review-columns">
       <section className="panel performance-review-section" id="review-performance">
-        <div className="panel-head"><div><span className="performance-review-kicker">01 · PERFORMANCE</span><h2>D-1 station performance</h2><p className="subtle">Uploaded Amazon metrics, opening discipline and action ownership in one review.</p></div><div className="review-history-actions"><TrendButton group="performance" metric="metric_health" label="Performance"/><strong className={misses.length ? "review-risk" : "review-good"}>{misses.length} exception{misses.length === 1 ? "" : "s"}</strong></div></div>
+        <div className="panel-head"><div><span className="performance-review-kicker">01 · PERFORMANCE</span><h2>Station performance</h2><p className="subtle">Uploaded Amazon metrics, opening discipline and action ownership in one review.</p></div><div className="review-history-actions"><TrendButton group="performance" metric="metric_health" label="Performance"/><strong className={misses.length ? "review-risk" : "review-good"}>{misses.length} exception{misses.length === 1 ? "" : "s"}</strong></div></div>
         <div className="performance-review-facts">
-          <ReviewDetails className="performance-fact-card" name="performance-review-fact"><summary><span>Delivered · view split</span><strong>{snapshot.deliveredCount.toLocaleString("en-IN")}</strong><small>{snapshot.associateDeliveries.length} delivering associate{snapshot.associateDeliveries.length === 1 ? "" : "s"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></ReviewDetails>
-          <ReviewDetails className="performance-fact-card" name="performance-review-fact"><summary><span>Average allocation · view split</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / {snapshot.activeFeCount} active FEs</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></ReviewDetails>
+          <ReviewDetails className="performance-fact-card" name="performance-review-fact"><summary><span>Delivered · view split</span><strong>{deliveryLabel}</strong><small>{deliveryAvailable ? `${snapshot.associateDeliveries.length} delivering associates · selected day` : "Selected-day delivery import unavailable"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></ReviewDetails>
+          <ReviewDetails className="performance-fact-card" name="performance-review-fact"><summary><span>Average allocation · view split</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{deliveryAvailable ? `${snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / ${snapshot.activeFeCount} active FEs` : "Selected-day delivery import unavailable"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></ReviewDetails>
           <PerformanceOpeningCard snapshot={snapshot}/>
-          <PerformanceEddClearanceCard data={props.eddClearance}/>
+          <PerformanceEddClearanceCard key={`${selectedCode}-${date}`} data={props.eddClearance} stationCode={selectedCode}/>
           <PerformanceUtrDisciplineCard data={props.utrDiscipline} date={date}/>
           <article><span>Metric health</span><strong>{metrics.length - metricMisses.length}/{metrics.length}</strong><small>Within configured range</small></article>
           <ReviewAttendanceExceptionsCard/>

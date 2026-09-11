@@ -169,7 +169,7 @@ function normalizePayload(raw: Record<string, unknown>, stationCode: string): Ed
   return {
     status: String(raw.status ?? "ok"),
     stationCode: String(raw.stationCode ?? stationCode).toUpperCase(),
-    fetchedAt: String(raw.fetchedAt ?? new Date().toISOString()),
+    fetchedAt: String(raw.fetchedAt ?? ""),
     todayYmd: String(raw.todayYmd ?? ""),
     window: { from: String(windowRaw.from ?? ""), to: String(windowRaw.to ?? "") },
     totalCount: Number(raw.totalCount ?? packages.length) || packages.length,
@@ -435,7 +435,7 @@ function normalizePerformancePayload(raw: Record<string, unknown>, stationCode: 
   return {
     stationCode: String(raw.stationCode ?? stationCode).toUpperCase(),
     window: { from: String(windowRaw.from ?? ""), to: String(windowRaw.to ?? "") },
-    fetchedAt: String(raw.fetchedAt ?? new Date().toISOString()),
+    fetchedAt: String(raw.fetchedAt ?? ""),
     assigned: Number(raw.assigned ?? 0) || 0,
     delivered: Number(raw.delivered ?? 0) || 0,
     returned: Number(raw.returned ?? 0) || 0,

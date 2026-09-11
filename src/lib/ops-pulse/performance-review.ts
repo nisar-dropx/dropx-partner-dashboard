@@ -180,6 +180,7 @@ export type PerformanceOperationalSnapshot = {
   dailyCps: number | null;
   dayCost: number | null;
   deliveredCount: number;
+  deliveryDataAvailable?: boolean;
   firstPunchAt: string | null;
   firstPunchBy: string | null;
   firstPunchPersonId?: string | null;
@@ -439,6 +440,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     dailyCps: null,
     dayCost: null,
     deliveredCount: 0,
+    deliveryDataAvailable: false,
     firstPunchAt: null,
     firstPunchBy: null,
     openingFirstOtherPunch: null,
@@ -519,6 +521,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     const current = empty.get(row.station_code);
     if (!current) return;
     current.deliveredCount += numberOrNull(row.package_count) ?? 1;
+    current.deliveryDataAvailable = true;
     const drivers = detailFeByStation.get(row.station_code) ?? new Set<string>();
     const associateId = normalized(row.driver_id) || `NAME_${normalized(row.driver_name)}`;
     if (associateId) {
@@ -546,6 +549,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     const current = empty.get(row.station_code);
     if (!current) return;
     const delivered = numberOrNull(row.delivered) ?? 0;
+    if (numberOrNull(row.delivered) != null) current.deliveryDataAvailable = true;
     const activeIds = numberOrNull(row.active_ids) ?? 0;
     if (delivered) current.deliveredCount = delivered;
     if (activeIds) current.activeFeCount = activeIds;
@@ -556,6 +560,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     const current = empty.get(row.station_code);
     if (!current) return;
     const delivered = numberOrNull(row.total_delivery) ?? 0;
+    if (numberOrNull(row.total_delivery) != null) current.deliveryDataAvailable = true;
     shipmentDeliveryByStation.set(row.station_code, (shipmentDeliveryByStation.get(row.station_code) ?? 0) + delivered);
     current.variableDaPay += numberOrNull(row.variable_pay) ?? 0;
     current.mgSalaryPay += numberOrNull(row.mg_pay) ?? 0;

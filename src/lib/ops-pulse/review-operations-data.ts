@@ -2,11 +2,12 @@ import "server-only";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { CodLocationRow } from "./cod";
 import { loadEddLedger } from "./edd-ledger";
-import { fetchEddStation } from "./edd-worker";
+import { fetchEddStation, fetchEddPerformanceStation } from "./edd-worker";
+import { mergeReviewEddCohort } from "./review-edd-cohort";
 import { summarizeStationEdd, stationEddToday } from "./station-edd";
 import { loadOpsStationManpower } from "./station-manpower";
 import { isPeopleDesignation } from "./station-opening-punches";
-import { buildReviewEddTimeline, buildUtrDiscipline, normalizeReviewRouteCounts, type ReviewEddPoint, type ReviewRouteSnapshot } from "./review-operations";
+import { buildReviewEddTimeline, buildUtrDiscipline, normalizeReviewRouteCounts, reviewEddSourceFresh, type ReviewEddPoint, type ReviewRouteSnapshot } from "./review-operations";
 
 /** Server components call this only after review permission + station scope resolution. */
 export async function loadReviewEddHistory(companyId: string, stationId: string, stationCode: string, date: string) {
@@ -62,7 +63,7 @@ export async function loadReviewUtrDiscipline(companyId: string, station: CodLoc
 /** Additive, aggregate-only audit. No source refresh or classification mutations.
  * Private cron captures at five-minute resolution; the UI groups half-hour checkpoints.
  * Historical intervals are NEVER backfilled from today's latest package states. */
-export async function captureReviewEddHistory() {
+export async function captureReviewEddHistory(): Promise<{ captured: number; date?: string; skipped?: string; fresh?: number; staleStations?: string[]; failedSources?: string[] }> {
   if (!supabaseAdmin) throw Error("EDD history database is unavailable.");
   const db = supabaseAdmin, now = new Date(), date = stationEddToday(now);
   if (now.getTime() < Date.parse(`${date}T06:00:00+05:30`)) return { captured: 0, skipped: "Before 06:00 IST" };
@@ -81,6 +82,7 @@ export async function captureReviewEddHistory() {
   const backlog = new Map((stocks.data ?? []).map(s => [s.station_code, s.fetched_at]));
   const performance = new Map((outcomes.data ?? []).map(s => [s.station_code, s]));
   let captured = 0;
+  const staleStations: string[] = [], failedSources: string[] = [];
   for (let offset = 0; offset < mapped.length; offset += 6) {
     const batch = mapped.slice(offset, offset + 6), batchCodes = batch.map(s => s.station_code);
     // The live worker and the application ledger can use different Supabase
@@ -88,38 +90,43 @@ export async function captureReviewEddHistory() {
     // over prior history verification only when its timestamp still validates
     // the new source package. A worker failure falls back to the ledger with
     // its stored snapshot timestamp, which the freshness gate will suppress.
-    const [ledger, liveResults] = await Promise.all([
+    const [ledger, liveResults, outcomeResults] = await Promise.all([
       loadEddLedger(batchCodes),
-      Promise.all(batchCodes.map(code => fetchEddStation({ stationCode: code }).catch(() => null)))
+      Promise.all(batchCodes.map(code => fetchEddStation({ stationCode: code }).catch(() => { failedSources.push(`${code}:stock`); return null; }))),
+      Promise.all(batchCodes.map(code => fetchEddPerformanceStation({ stationCode: code }).catch(() => { failedSources.push(`${code}:outcomes`); return null; })))
     ]);
-    const live = new Map(liveResults.flatMap(result => result?.status === "ok" ? [[result.payload.stationCode, result.payload] as const] : []));
+    const live = new Map(liveResults.flatMap((result, index) => result?.status === "ok" && result.payload.stationCode === batchCodes[index] ? [[result.payload.stationCode, result.payload] as const] : []));
+    const liveOutcomes = new Map(outcomeResults.flatMap((result, index) => result?.status === "ok" && result.payload.stationCode === batchCodes[index] && result.payload.window.from === date && result.payload.window.to === date ? [[result.payload.stationCode, result.payload] as const] : []));
     const observedAt = new Date();
     if (stationEddToday(observedAt) !== date) break; // Do not cross EOD with a mixed-day sample.
     const rows = batch.map(station => {
       const entry = ledger.get(station.station_code);
       const source = live.get(station.station_code);
-      const verifiedById = new Map((entry?.packages ?? []).map(pkg => [pkg.trackingId, pkg]));
-      const packages = source?.packages.map(pkg => {
-        const prior = verifiedById.get(pkg.trackingId);
-        return { ...pkg, sourceAt: source.fetchedAt, verification: prior?.verification ?? null,
-          verifiedAt: prior?.verifiedAt ?? null, driverName: prior?.driverName ?? prior?.verification?.driverName ?? null };
-      }) ?? entry?.packages ?? null;
-      const route = performance.get(station.station_code);
+      const outcome = liveOutcomes.get(station.station_code);
+      const packages = source || entry || outcome ? mergeReviewEddCohort(entry?.packages ?? [], source ?? null, outcome ?? null) : null;
+      // Both sides of the checkpoint now use the worker's current source. The
+      // old DB copy is an explicit fallback, not the authoritative live feed.
+      const route = outcome ? { window_from: outcome.window.from, fetched_at: outcome.fetchedAt,
+        assigned: outcome.assigned, delivered: outcome.delivered, returned: outcome.returned,
+        held: outcome.held, yet_to_dispatch: outcome.yetToDispatch } : performance.get(station.station_code);
       const sourceAt = source?.fetchedAt ?? entry?.fetchedAt ?? null;
       const backlogAt = source?.fetchedAt ?? backlog.get(station.station_code) ?? null;
       const summary = summarizeStationEdd(station.station_code, packages, sourceAt, date);
       const { todayTotal, todayAtStation, todayOnRoad, todayDelivered, todayHfr, todayAttempted, todayUnverified, todayOther, missingDate, hasSnapshot } = summary;
       const routeCounts = normalizeReviewRouteCounts(route ? { workDate: String(route.window_from), assigned: route.assigned,
         delivered: route.delivered, returned: route.returned, held: route.held, yetToDispatch: route.yet_to_dispatch } : null, date);
-      return { company_id: station.company_id, station_id: station.id, station_code: station.station_code, work_date: date,
+      const row = { company_id: station.company_id, station_id: station.id, station_code: station.station_code, work_date: date,
         captured_slot: new Date(Math.floor(observedAt.getTime() / 300_000) * 300_000).toISOString(), observed_at: observedAt.toISOString(),
         source_at: sourceAt, backlog_at: backlogAt, performance_at: route?.fetched_at ?? null,
-        counts: { todayTotal, todayAtStation, todayOnRoad, todayDelivered, todayHfr, todayAttempted, todayUnverified, todayOther, missingDate, hasSnapshot, ...routeCounts } };
+        counts: { todayTotal, todayAtStation, todayOnRoad, todayDelivered, todayHfr, todayAttempted, todayUnverified, todayOther, missingDate,
+          hasSnapshot: hasSnapshot && Boolean(source), captureVersion: 2, sourceMaxAgeMinutes: 35, ...routeCounts } };
+      if (!reviewEddSourceFresh({ observedAt: row.observed_at, sourceAt, backlogAt, performanceAt: row.performance_at, counts: row.counts }, date)) staleStations.push(station.station_code);
+      return row;
     });
     const result = await db.from("ops_review_edd_observations").upsert(rows,
       { onConflict: "company_id,station_id,work_date,captured_slot", ignoreDuplicates: true });
     if (result.error) throw Error(`EDD history capture failed: ${result.error.message}`);
     captured += rows.length;
   }
-  return { captured, date };
+  return { captured, date, fresh: captured - staleStations.length, staleStations, failedSources };
 }
