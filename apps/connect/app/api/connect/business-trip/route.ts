@@ -2,17 +2,17 @@ import { NextResponse } from "next/server";
 import { userFacingError } from "@/lib/user-facing-error";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import {
-  cancelConnectSiteVisitRequest,
-  createConnectSiteVisitRequest,
-  listConnectSiteVisitRequests,
-  type SiteVisitWorkerType
-} from "../../../../src/lib/connect-site-visit-data";
+  cancelConnectBusinessTripRequest,
+  createConnectBusinessTripRequest,
+  listConnectBusinessTripRequests,
+  type BusinessTripWorkerType
+} from "../../../../src/lib/connect-business-trip-data";
 
 function clean(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function workerType(profileType: string): SiteVisitWorkerType | null {
+function workerType(profileType: string): BusinessTripWorkerType | null {
   return profileType === "employee" || profileType === "contractor" ? profileType : null;
 }
 
@@ -21,7 +21,7 @@ async function accountFromRequest(url: URL, body?: Record<string, unknown>) {
   const profileType = clean(body?.profileType ?? url.searchParams.get("profileType"));
   if (!accountId || !profileType) throw new Error("Account is required.");
   const supportedType = workerType(profileType);
-  if (!supportedType) throw new Error("Site visit is available for employees and independent contractors.");
+  if (!supportedType) throw new Error("Business trip is available for employees and independent contractors.");
   const account = await requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
   return { account, workerType: supportedType };
 }
@@ -29,11 +29,11 @@ async function accountFromRequest(url: URL, body?: Record<string, unknown>) {
 export async function GET(request: Request) {
   try {
     const { account, workerType: type } = await accountFromRequest(new URL(request.url));
-    return NextResponse.json(await listConnectSiteVisitRequests(account.companyId, account.id, type), {
+    return NextResponse.json(await listConnectBusinessTripRequests(account.companyId, account.id, type), {
       headers: { "Cache-Control": "private, no-store" }
     });
   } catch (error) {
-    return NextResponse.json({ error: userFacingError(error, "Unable to load site visit.") }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load business trip.") }, { status: 400 });
   }
 }
 
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
     const { account, workerType: type } = await accountFromRequest(new URL(request.url), body);
-    const result = await createConnectSiteVisitRequest({
+    const result = await createConnectBusinessTripRequest({
       companyId: account.companyId,
       workerId: account.id,
       workerType: type,
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
-    return NextResponse.json({ error: userFacingError(error, "Unable to submit site visit.") }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to submit business trip.") }, { status: 400 });
   }
 }
 
@@ -59,7 +59,7 @@ export async function DELETE(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
     const { account, workerType: type } = await accountFromRequest(new URL(request.url), body);
-    const result = await cancelConnectSiteVisitRequest({
+    const result = await cancelConnectBusinessTripRequest({
       companyId: account.companyId,
       workerId: account.id,
       workerType: type,
@@ -67,6 +67,6 @@ export async function DELETE(request: Request) {
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
-    return NextResponse.json({ error: userFacingError(error, "Unable to withdraw site visit.") }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to withdraw business trip.") }, { status: 400 });
   }
 }

@@ -194,7 +194,7 @@ function minutes(value: string) {
 function attendanceLabel(row: Row | undefined) {
   if (!row) return "No record";
   if (row.workMode === "wfh") return "Present · WFH";
-  if (row.workMode === "site_visit") return "Present · Site visit";
+  if (row.workMode === "business_trip") return "Present · Business trip";
   if (row.statusLabel) return row.statusLabel;
   if (row.attendanceStatus) return row.attendanceStatus;
   const status = row.status.toUpperCase();
@@ -515,7 +515,7 @@ export function ConnectAttendance({ account, active = true }: { account: Account
               && selected.statusKind !== "leave"
               && selected.statusKind !== "paid_leave"
               && selected.workMode !== "wfh"
-              && selected.workMode !== "site_visit"
+              && selected.workMode !== "business_trip"
               && !["week-off", "paid-leave", "leave"].includes(selectedInsight.calendarClass)
               && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0)
               ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.needsRegularization ? "Regularize missing punch" : "Request regularization"}</button>

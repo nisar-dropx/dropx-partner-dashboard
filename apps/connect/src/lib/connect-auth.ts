@@ -11,7 +11,7 @@ import {
 } from "@/lib/workforce-profiles";
 import { requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
 import { connectWfhEligible, loadConnectWfhPolicies } from "./connect-wfh-access";
-import { connectSiteVisitEligible, loadConnectSiteVisitPolicies } from "./connect-site-visit-access";
+import { connectBusinessTripEligible, loadConnectBusinessTripPolicies } from "./connect-business-trip-access";
 
 export type ConnectAccount = {
   id: string;
@@ -816,7 +816,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   const wfhPolicies = await loadConnectWfhPolicies(
     [...new Set(loginAccounts.map((account) => account.company_id))]
   );
-  const siteVisitPolicies = await loadConnectSiteVisitPolicies(
+  const businessTripPolicies = await loadConnectBusinessTripPolicies(
     [...new Set(loginAccounts.map((account) => account.company_id))]
   );
 
@@ -834,10 +834,10 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         account.profile_type,
         account.designation_id ? peopleModuleByDesignationId.get(account.designation_id) : null
       );
-      // WFH and Site Visit are never granted via designation/category app_page_access.
+      // WFH and Business Trip are never granted via designation/category app_page_access.
       // Each is shown only when its People attendance master lists the worker's designation.
       const pageAccess = resolveConnectPageAccess(account.profile_type, categoryPages, designationPages)
-        .filter((page) => page !== "wfh" && page !== "site_visit");
+        .filter((page) => page !== "wfh" && page !== "business_trip");
       const designationId = account.designation_id ?? null;
       const designationLabel = designationId
         ? {
@@ -859,13 +859,13 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       }
       if (
         (account.profile_type === "employee" || account.profile_type === "contractor")
-        && connectSiteVisitEligible({
-          policy: siteVisitPolicies.get(account.company_id),
+        && connectBusinessTripEligible({
+          policy: businessTripPolicies.get(account.company_id),
           designationId,
           designation: designationLabel
         })
       ) {
-        pageAccess.push("site_visit");
+        pageAccess.push("business_trip");
       }
 
       return {

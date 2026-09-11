@@ -187,7 +187,7 @@ type ExitWithdrawalApproval = {
   requestedAt: string | null;
 };
 
-type ApprovalSection = "time-off" | "wfh" | "site-visit" | "attendance" | "rosters" | "location-integrity" | "reimbursements" | "exits";
+type ApprovalSection = "time-off" | "wfh" | "business-trip" | "attendance" | "rosters" | "location-integrity" | "reimbursements" | "exits";
 type ReporteeScope = "immediate" | "team";
 
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
@@ -384,8 +384,8 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
   const [wfhApprovals, setWfhApprovals] = useState<WfhApproval[]>([]);
   const [wfhHrApprovals, setWfhHrApprovals] = useState<WfhApproval[]>([]);
-  const [siteVisitApprovals, setSiteVisitApprovals] = useState<WfhApproval[]>([]);
-  const [siteVisitHrApprovals, setSiteVisitHrApprovals] = useState<WfhApproval[]>([]);
+  const [businessTripApprovals, setBusinessTripApprovals] = useState<WfhApproval[]>([]);
+  const [businessTripHrApprovals, setBusinessTripHrApprovals] = useState<WfhApproval[]>([]);
   const [attendanceApprovals, setAttendanceApprovals] = useState<AttendanceApproval[]>([]);
   const [attendanceHrApprovals, setAttendanceHrApprovals] = useState<AttendanceApproval[]>([]);
   const [rosterApprovals, setRosterApprovals] = useState<RosterApproval[]>([]);
@@ -442,8 +442,8 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
       setLeaveApprovals(leavePayload.leaveApprovals ?? []);
       setWfhApprovals(leavePayload.wfhApprovals ?? []);
       setWfhHrApprovals(leavePayload.wfhHrApprovals ?? []);
-      setSiteVisitApprovals(leavePayload.siteVisitApprovals ?? []);
-      setSiteVisitHrApprovals(leavePayload.siteVisitHrApprovals ?? []);
+      setBusinessTripApprovals(leavePayload.businessTripApprovals ?? []);
+      setBusinessTripHrApprovals(leavePayload.businessTripHrApprovals ?? []);
       setAttendanceApprovals(leavePayload.attendanceApprovals ?? []);
       setAttendanceHrApprovals(leavePayload.attendanceHrApprovals ?? []);
       setRosterApprovals(leavePayload.rosterApprovals ?? []);
@@ -460,7 +460,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
           if ((leavePayload.exitApprovals ?? []).length || (leavePayload.exitWithdrawalApprovals ?? []).length) return "exits";
           if ((leavePayload.locationSupportPackages ?? []).length) return "location-integrity";
           if ((leavePayload.wfhApprovals ?? []).length || (leavePayload.wfhHrApprovals ?? []).length) return "wfh";
-          if ((leavePayload.siteVisitApprovals ?? []).length || (leavePayload.siteVisitHrApprovals ?? []).length) return "site-visit";
+          if ((leavePayload.businessTripApprovals ?? []).length || (leavePayload.businessTripHrApprovals ?? []).length) return "business-trip";
         }
         return current;
       });
@@ -550,7 +550,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
     finally { setSaving(false); }
   }
 
-  async function decideSiteVisit(requestId: string, decision: "approved" | "rejected" | "returned", queue: "manager" | "hr" = "manager") {
+  async function decideBusinessTrip(requestId: string, decision: "approved" | "rejected" | "returned", queue: "manager" | "hr" = "manager") {
     setSaving(true); setError(""); setNotice("");
     try {
       const response = await fetch("/api/connect/approvals", {
@@ -559,17 +559,17 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
         body: JSON.stringify({
           accountId: account.id,
           profileType: account.profileType,
-          siteVisitRequestId: requestId,
-          siteVisitQueue: queue,
+          businessTripRequestId: requestId,
+          businessTripQueue: queue,
           decision,
-          note: notes[`site-visit:${requestId}`] ?? "",
+          note: notes[`business-trip:${requestId}`] ?? "",
           ...(queue === "hr" ? { defaultIn: "09:00", defaultOut: "18:00" } : {})
         })
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to update site visit approval.");
-      setNotice(payload.notice); setNotes((current) => ({ ...current, [`site-visit:${requestId}`]: "" })); await load();
-    } catch (reason) { setError(userFacingError(reason, "Unable to update site visit approval.")); }
+      if (!response.ok) throw new Error(payload.error || "Unable to update business trip approval.");
+      setNotice(payload.notice); setNotes((current) => ({ ...current, [`business-trip:${requestId}`]: "" })); await load();
+    } catch (reason) { setError(userFacingError(reason, "Unable to update business trip approval.")); }
     finally { setSaving(false); }
   }
 
@@ -714,19 +714,19 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
   const rosterCount = rosterApprovals.length + rosterSwapApprovals.length + returnedRosters.length;
   const reimbursementCount = reimbursements.length + preRequestApprovals.length;
   const exitCount = exitApprovals.length + exitWithdrawalApprovals.length;
-  const siteVisitCount = siteVisitApprovals.length + siteVisitHrApprovals.length;
+  const businessTripCount = businessTripApprovals.length + businessTripHrApprovals.length;
   const wfhCount = wfhApprovals.length + wfhHrApprovals.length;
   const scopeName = reporteeScope === "immediate" ? "immediate reportees" : "entire reporting team";
-  const othersCount = leaveApprovals.length + reimbursementCount + wfhCount + siteVisitCount + exitCount;
-  const othersActive = section === "time-off" || section === "reimbursements" || section === "wfh" || section === "site-visit" || section === "exits";
+  const othersCount = leaveApprovals.length + reimbursementCount + wfhCount + businessTripCount + exitCount;
+  const othersActive = section === "time-off" || section === "reimbursements" || section === "wfh" || section === "business-trip" || section === "exits";
   const othersLabel = section === "time-off"
     ? "Time off"
     : section === "reimbursements"
       ? "Reimbursements"
       : section === "wfh"
         ? "WFH"
-        : section === "site-visit"
-          ? "Site visit"
+        : section === "business-trip"
+          ? "Business trip"
           : section === "exits"
             ? "Exits"
             : "Others";
@@ -835,7 +835,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
       <header className="dx-page-intro">
         <small>Manager workspace</small>
         <h1>Approval inbox</h1>
-        <p>Assigned approval steps plus HR attendance/WFH/Site visit finalization for people in the selected reporting scope.</p>
+        <p>Assigned approval steps plus HR attendance/WFH/Business trip finalization for people in the selected reporting scope.</p>
       </header>
       <div className="dx-approval-scope">
         <div aria-label="Choose reportee view" className="dx-approval-scope-switch" role="group">
@@ -893,8 +893,8 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                 <button className={section === "wfh" ? "active" : ""} onClick={() => selectSection("wfh")} type="button">
                   WFH<span>{wfhCount}</span>
                 </button>
-                <button className={section === "site-visit" ? "active" : ""} onClick={() => selectSection("site-visit")} type="button">
-                  Site visit<span>{siteVisitCount}</span>
+                <button className={section === "business-trip" ? "active" : ""} onClick={() => selectSection("business-trip")} type="button">
+                  Business trip<span>{businessTripCount}</span>
                 </button>
                 <button className={section === "exits" ? "active" : ""} onClick={() => selectSection("exits")} type="button">
                   Exits<span>{exitCount}</span>
@@ -1037,62 +1037,62 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
         </div>
       ) : null}
 
-      {!loading && section === "site-visit" ? (
+      {!loading && section === "business-trip" ? (
         <div className="dx-approval-list">
-          {siteVisitApprovals.length ? (
+          {businessTripApprovals.length ? (
             <>
               <header className="dx-approval-section-head">
                 <strong>Reporting manager</strong>
-                <span>{siteVisitApprovals.length} pending</span>
+                <span>{businessTripApprovals.length} pending</span>
               </header>
-              {siteVisitApprovals.map((approval) => (
+              {businessTripApprovals.map((approval) => (
                 <ApprovalRow
                   badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
                   eyebrow={`${approval.requestNo} · ${approval.stepName}`}
                   key={approval.id}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
                   name={approval.requesterName}
-                  onApprove={() => void act(() => decideSiteVisit(approval.requestId, "approved", "manager"))}
-                  onReview={() => setActiveKey(`site-visit:manager:${approval.id}`)}
+                  onApprove={() => void act(() => decideBusinessTrip(approval.requestId, "approved", "manager"))}
+                  onReview={() => setActiveKey(`business-trip:manager:${approval.id}`)}
                   saving={saving}
                 />
               ))}
             </>
           ) : null}
-          {siteVisitHrApprovals.length ? (
+          {businessTripHrApprovals.length ? (
             <>
               <header className="dx-approval-section-head">
                 <strong>HR finalization</strong>
-                <span>{siteVisitHrApprovals.length} pending</span>
+                <span>{businessTripHrApprovals.length} pending</span>
               </header>
-              {siteVisitHrApprovals.map((approval) => (
+              {businessTripHrApprovals.map((approval) => (
                 <ApprovalRow
                   badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
-                  eyebrow={`${approval.requestNo} · Present · Site visit`}
+                  eyebrow={`${approval.requestNo} · Present · Business trip`}
                   key={`hr:${approval.id}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
                   name={approval.requesterName}
-                  onApprove={() => void act(() => decideSiteVisit(approval.requestId, "approved", "hr"))}
-                  onReview={() => setActiveKey(`site-visit:hr:${approval.id}`)}
+                  onApprove={() => void act(() => decideBusinessTrip(approval.requestId, "approved", "hr"))}
+                  onReview={() => setActiveKey(`business-trip:hr:${approval.id}`)}
                   saving={saving}
                 />
               ))}
             </>
           ) : null}
-          {!siteVisitApprovals.length && !siteVisitHrApprovals.length ? (
-            <div className="dx-empty"><MapPinned /><strong>No site visit approvals</strong><small>No site-visit steps or HR finalizations in your reporting scope are waiting.</small></div>
+          {!businessTripApprovals.length && !businessTripHrApprovals.length ? (
+            <div className="dx-empty"><MapPinned /><strong>No business trip approvals</strong><small>No business-trip steps or HR finalizations in your reporting scope are waiting.</small></div>
           ) : null}
           {(() => {
-            const match = activeKey?.match(/^site-visit:(manager|hr):(.+)$/);
+            const match = activeKey?.match(/^business-trip:(manager|hr):(.+)$/);
             if (!match) return null;
             const [, queue, id] = match;
-            const approval = (queue === "hr" ? siteVisitHrApprovals : siteVisitApprovals).find((item) => item.id === id);
+            const approval = (queue === "hr" ? businessTripHrApprovals : businessTripApprovals).find((item) => item.id === id);
             if (!approval) return null;
             return (
               <ApprovalModal onClose={closeModal} title={approval.requesterName}>
                 <ApprovalHead
                   badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
-                  eyebrow={queue === "hr" ? `${approval.requestNo} · Present · Site visit` : `${approval.requestNo} · ${approval.stepName}`}
+                  eyebrow={queue === "hr" ? `${approval.requestNo} · Present · Business trip` : `${approval.requestNo} · ${approval.stepName}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
                   name={approval.requesterName}
                 />
@@ -1101,18 +1101,18 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
                   {queue === "hr" && approval.managerName ? <div><dt>Manager</dt><dd>{approval.managerName}{approval.managerNote ? ` · ${approval.managerNote}` : ""}</dd></div> : null}
                 </dl>
-                <ApprovalNote id={`site-visit:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`site-visit:${approval.requestId}`, value)} placeholder={queue === "hr" ? "Note when returning or rejecting" : "Note for worker (optional)"} />
+                <ApprovalNote id={`business-trip:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`business-trip:${approval.requestId}`, value)} placeholder={queue === "hr" ? "Note when returning or rejecting" : "Note for worker (optional)"} />
                 {queue === "hr" ? (
                   <ApprovalToolbar
-                    onApprove={() => void act(() => decideSiteVisit(approval.requestId, "approved", "hr"))}
-                    onReject={() => void act(() => decideSiteVisit(approval.requestId, "rejected", "hr"))}
-                    onReturn={() => void act(() => decideSiteVisit(approval.requestId, "returned", "hr"))}
+                    onApprove={() => void act(() => decideBusinessTrip(approval.requestId, "approved", "hr"))}
+                    onReject={() => void act(() => decideBusinessTrip(approval.requestId, "rejected", "hr"))}
+                    onReturn={() => void act(() => decideBusinessTrip(approval.requestId, "returned", "hr"))}
                     saving={saving}
                   />
                 ) : (
                   <ApprovalToolbar
-                    onApprove={() => void act(() => decideSiteVisit(approval.requestId, "approved", "manager"))}
-                    onReject={() => void act(() => decideSiteVisit(approval.requestId, "rejected", "manager"))}
+                    onApprove={() => void act(() => decideBusinessTrip(approval.requestId, "approved", "manager"))}
+                    onReject={() => void act(() => decideBusinessTrip(approval.requestId, "rejected", "manager"))}
                     saving={saving}
                     showReturn={false}
                   />

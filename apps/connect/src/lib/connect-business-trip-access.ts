@@ -3,7 +3,7 @@ import "server-only";
 import { isWfhHardBlockedDesignation, type DesignationLabel } from "./approval-designation-labels";
 import { supabaseAdmin } from "./supabase-admin";
 
-export type ConnectSiteVisitPolicy = {
+export type ConnectBusinessTripPolicy = {
   is_enabled: boolean;
   eligible_designation_ids: string[];
   max_request_days: number;
@@ -16,12 +16,12 @@ function db() {
   return supabaseAdmin;
 }
 
-export async function loadConnectSiteVisitPolicies(companyIds: string[]) {
+export async function loadConnectBusinessTripPolicies(companyIds: string[]) {
   const unique = [...new Set(companyIds.filter(Boolean))];
-  const map = new Map<string, ConnectSiteVisitPolicy>();
+  const map = new Map<string, ConnectBusinessTripPolicy>();
   if (!unique.length) return map;
   const result = await db()
-    .from("hr_site_visit_policies")
+    .from("hr_business_trip_policies")
     .select("company_id,is_enabled,eligible_designation_ids,max_request_days,allow_backdated,requires_hr_finalization")
     .in("company_id", unique);
   if (result.error) {
@@ -40,8 +40,8 @@ export async function loadConnectSiteVisitPolicies(companyIds: string[]) {
   return map;
 }
 
-export function connectSiteVisitEligible(input: {
-  policy: ConnectSiteVisitPolicy | null | undefined;
+export function connectBusinessTripEligible(input: {
+  policy: ConnectBusinessTripPolicy | null | undefined;
   designationId: string | null | undefined;
   designation: DesignationLabel | null | undefined;
 }) {

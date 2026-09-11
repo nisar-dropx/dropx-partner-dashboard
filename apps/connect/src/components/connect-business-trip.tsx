@@ -4,8 +4,8 @@ import { CalendarDays, Clock3, MapPinned, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { AppAccount } from "./connect-profile-app";
 
-type SiteVisitTab = "request" | "history";
-type SiteVisitRequest = {
+type BusinessTripTab = "request" | "history";
+type BusinessTripRequest = {
   id: string;
   requestNo: string;
   fromDate: string;
@@ -18,9 +18,9 @@ type SiteVisitRequest = {
   hrNote?: string | null;
   hrReviewerName?: string | null;
 };
-type SiteVisitData = {
+type BusinessTripData = {
   policy: { enabled: boolean; maxRequestDays: number; allowBackdated: boolean; requiresHrFinalization: boolean };
-  requests: SiteVisitRequest[];
+  requests: BusinessTripRequest[];
   summary: { pending: number };
 };
 
@@ -39,7 +39,7 @@ function statusLabel(status: string) {
   switch (status) {
     case "pending_manager": return "Pending manager";
     case "pending_hr": return "Pending HR";
-    case "approved": return "Approved · Present Site visit";
+    case "approved": return "Approved · Present Business trip";
     case "returned": return "Returned";
     case "rejected": return "Rejected";
     case "cancelled": return "Withdrawn";
@@ -47,15 +47,15 @@ function statusLabel(status: string) {
   }
 }
 
-export function ConnectSiteVisit({
+export function ConnectBusinessTrip({
   account,
   embedded = false
 }: {
   account: AppAccount;
   embedded?: boolean;
 }) {
-  const [tab, setTab] = useState<SiteVisitTab>("request");
-  const [data, setData] = useState<SiteVisitData | null>(null);
+  const [tab, setTab] = useState<BusinessTripTab>("request");
+  const [data, setData] = useState<BusinessTripData | null>(null);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [reason, setReason] = useState("");
@@ -70,23 +70,23 @@ export function ConnectSiteVisit({
     setReason("");
   }, []);
 
-  const loadSiteVisit = useCallback(async () => {
+  const loadBusinessTrip = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
-      const response = await fetch(`/api/connect/site-visit?${query}`, { cache: "no-store" });
+      const response = await fetch(`/api/connect/business-trip?${query}`, { cache: "no-store" });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to load site visit.");
+      if (!response.ok) throw new Error(payload.error || "Unable to load business trip.");
       setData(payload);
     } catch (reasonValue) {
-      setError(reasonValue instanceof Error ? reasonValue.message : "Unable to load site visit.");
+      setError(reasonValue instanceof Error ? reasonValue.message : "Unable to load business trip.");
     } finally {
       setLoading(false);
     }
   }, [account.id, account.profileType]);
 
-  useEffect(() => { void loadSiteVisit(); }, [loadSiteVisit]);
+  useEffect(() => { void loadBusinessTrip(); }, [loadBusinessTrip]);
 
   const minimumDate = data?.policy.allowBackdated ? undefined : todayInIndia();
   const requestedDays = inclusiveDays(fromDate, toDate);
@@ -96,14 +96,14 @@ export function ConnectSiteVisit({
     event.preventDefault();
     if (!fromDate || !toDate || reason.trim().length < 3) return;
     if (requestedDays > maxDays) {
-      setError(`A site visit request can cover at most ${maxDays} day(s).`);
+      setError(`A business trip request can cover at most ${maxDays} day(s).`);
       return;
     }
     setSubmitting(true);
     setError("");
     setNotice("");
     try {
-      const response = await fetch("/api/connect/site-visit", {
+      const response = await fetch("/api/connect/business-trip", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -115,13 +115,13 @@ export function ConnectSiteVisit({
         })
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to submit site visit.");
-      setNotice(payload.notice || "Site visit request submitted.");
+      if (!response.ok) throw new Error(payload.error || "Unable to submit business trip.");
+      setNotice(payload.notice || "Business trip request submitted.");
       resetForm();
       setTab("history");
-      await loadSiteVisit();
+      await loadBusinessTrip();
     } catch (reasonValue) {
-      setError(reasonValue instanceof Error ? reasonValue.message : "Unable to submit site visit.");
+      setError(reasonValue instanceof Error ? reasonValue.message : "Unable to submit business trip.");
     } finally {
       setSubmitting(false);
     }
@@ -132,7 +132,7 @@ export function ConnectSiteVisit({
     setError("");
     setNotice("");
     try {
-      const response = await fetch("/api/connect/site-visit", {
+      const response = await fetch("/api/connect/business-trip", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -142,11 +142,11 @@ export function ConnectSiteVisit({
         })
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to withdraw site visit.");
-      setNotice(payload.notice || "Site visit request withdrawn.");
-      await loadSiteVisit();
+      if (!response.ok) throw new Error(payload.error || "Unable to withdraw business trip.");
+      setNotice(payload.notice || "Business trip request withdrawn.");
+      await loadBusinessTrip();
     } catch (reasonValue) {
-      setError(reasonValue instanceof Error ? reasonValue.message : "Unable to withdraw site visit.");
+      setError(reasonValue instanceof Error ? reasonValue.message : "Unable to withdraw business trip.");
     } finally {
       setSubmitting(false);
     }
@@ -161,11 +161,11 @@ export function ConnectSiteVisit({
 
       <div className="dx-leave-card">
         <nav>
-          <button className={tab === "request" ? "active" : ""} onClick={() => { setTab("request"); setError(""); }}>Request site visit</button>
+          <button className={tab === "request" ? "active" : ""} onClick={() => { setTab("request"); setError(""); }}>Request business trip</button>
           <button className={tab === "history" ? "active" : ""} onClick={() => { setTab("history"); resetForm(); }}>My requests</button>
         </nav>
-        {loading ? <div className="dx-loader"><span /><small>Loading site visit policy…</small></div> : null}
-        {error ? <div className="dx-alert error">{error}<button onClick={() => void loadSiteVisit()}>Retry</button></div> : null}
+        {loading ? <div className="dx-loader"><span /><small>Loading business trip policy…</small></div> : null}
+        {error ? <div className="dx-alert error">{error}<button onClick={() => void loadBusinessTrip()}>Retry</button></div> : null}
         {notice ? <div className="dx-alert success" aria-live="polite">{notice}</div> : null}
 
         {!loading && tab === "request" ? <form onSubmit={submit}>
@@ -182,9 +182,9 @@ export function ConnectSiteVisit({
                 <input min={fromDate || minimumDate} onChange={(event) => setToDate(event.target.value)} type="date" value={toDate} />
               </label>
             </div>
-            {requestedDays ? <small className="dx-wfh-date-hint">{requestedDays} calendar day{requestedDays === 1 ? "" : "s"} · offs & holidays skipped at HR apply</small> : <small className="dx-wfh-date-hint">Pick the first and last site visit day</small>}
+            {requestedDays ? <small className="dx-wfh-date-hint">{requestedDays} calendar day{requestedDays === 1 ? "" : "s"} · offs & holidays skipped at HR apply</small> : <small className="dx-wfh-date-hint">Pick the first and last business trip day</small>}
           </div>
-          <label>Reason<textarea onChange={(event) => setReason(event.target.value)} placeholder="Why do you need a site visit?" rows={3} value={reason} /></label>
+          <label>Reason<textarea onChange={(event) => setReason(event.target.value)} placeholder="Why do you need a business trip?" rows={3} value={reason} /></label>
           <p className="dx-wfh-date-hint">Peer approvals are skipped. Your reporting manager reviews first; if none, it goes to HR.</p>
           <div className="dx-leave-actions">
             <button className="dx-save" disabled={submitting || !fromDate || !toDate || reason.trim().length < 3 || requestedDays > maxDays} type="submit">
@@ -210,7 +210,7 @@ export function ConnectSiteVisit({
                 </button>
               ) : null}
             </article>
-          )) : <p>No site visit requests yet.</p>}
+          )) : <p>No business trip requests yet.</p>}
         </div> : null}
       </div>
     </>
@@ -222,8 +222,8 @@ export function ConnectSiteVisit({
     <section className="dx-leave">
       <header className="dx-page-intro">
         <small>Attendance</small>
-        <h1>Site visit</h1>
-        <p>Request a date range. After reporting-manager approval, HR marks working days Present · Site visit.</p>
+        <h1>Business trip</h1>
+        <p>Request a date range. After reporting-manager approval, HR marks working days Present · Business trip.</p>
       </header>
       {body}
     </section>

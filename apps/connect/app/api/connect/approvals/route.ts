@@ -5,7 +5,7 @@ import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decid
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
 import { connectReporteeMatches, loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
 import { decideConnectWfhApproval, decideConnectWfhHrApproval, listConnectWfhApprovals, listConnectWfhHrApprovals } from "../../../../src/lib/connect-wfh-data";
-import { decideConnectSiteVisitApproval, decideConnectSiteVisitHrApproval, listConnectSiteVisitApprovals, listConnectSiteVisitHrApprovals } from "../../../../src/lib/connect-site-visit-data";
+import { decideConnectBusinessTripApproval, decideConnectBusinessTripHrApproval, listConnectBusinessTripApprovals, listConnectBusinessTripHrApprovals } from "../../../../src/lib/connect-business-trip-data";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
 
@@ -81,7 +81,7 @@ export async function GET(request: Request) {
     const approverUserIds = await resolveConnectActorUserIds(account);
     const matchesReportee = (profileType: string, profileId: string | null) =>
       connectReporteeMatches(reportees, profileType, profileId);
-    const [leaveApprovals, wfhApprovals, wfhHrApprovals, siteVisitApprovals, siteVisitHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals] = await Promise.all([
+    const [leaveApprovals, wfhApprovals, wfhHrApprovals, businessTripApprovals, businessTripHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals] = await Promise.all([
       listLeaveApprovals(account),
       approverUserIds.length
         ? listConnectWfhApprovals({
@@ -93,13 +93,13 @@ export async function GET(request: Request) {
         : Promise.resolve([]),
       listConnectWfhHrApprovals(account, matchesReportee),
       approverUserIds.length
-        ? listConnectSiteVisitApprovals({
+        ? listConnectBusinessTripApprovals({
             companyId: account.companyId,
             approverUserIds,
             matchesReportee: () => true
           })
         : Promise.resolve([]),
-      listConnectSiteVisitHrApprovals(account, matchesReportee),
+      listConnectBusinessTripHrApprovals(account, matchesReportee),
       listConnectLocationSupportPackages(account, reportees),
       listConnectAttendanceApprovals(account, reportees),
       listConnectAttendanceHrApprovals(account, reportees),
@@ -114,8 +114,8 @@ export async function GET(request: Request) {
       leaveApprovals,
       wfhApprovals,
       wfhHrApprovals,
-      siteVisitApprovals,
-      siteVisitHrApprovals,
+      businessTripApprovals,
+      businessTripHrApprovals,
       locationSupportPackages,
       attendanceApprovals,
       attendanceHrApprovals,
@@ -201,18 +201,18 @@ export async function PATCH(request: Request) {
       });
       return NextResponse.json({ ok: true, notice: result.notice });
     }
-    const siteVisitRequestId = clean(body.siteVisitRequestId);
-    if (siteVisitRequestId) {
+    const businessTripRequestId = clean(body.businessTripRequestId);
+    if (businessTripRequestId) {
       const decision = clean(body.decision);
       const note = clean(body.note);
-      const queue = clean(body.siteVisitQueue);
+      const queue = clean(body.businessTripQueue);
       if (queue === "hr") {
         if (decision !== "approved" && decision !== "returned" && decision !== "rejected") {
-          throw new Error("Choose Apply Site Visit, Return, or Reject.");
+          throw new Error("Choose Apply Business Trip, Return, or Reject.");
         }
-        const result = await decideConnectSiteVisitHrApproval({
+        const result = await decideConnectBusinessTripHrApproval({
           account,
-          requestId: siteVisitRequestId,
+          requestId: businessTripRequestId,
           decision: decision as "approved" | "returned" | "rejected",
           note,
           defaultIn: clean(body.defaultIn) || "09:00",
@@ -220,12 +220,12 @@ export async function PATCH(request: Request) {
         });
         return NextResponse.json({ ok: true, notice: result.notice });
       }
-      const approverUserId = await requireActorUserId(account, "approve site visit");
+      const approverUserId = await requireActorUserId(account, "approve business trip");
       if (decision !== "approved" && decision !== "rejected") throw new Error("Choose Approve or Reject.");
-      const result = await decideConnectSiteVisitApproval({
+      const result = await decideConnectBusinessTripApproval({
         companyId: account.companyId,
         approverUserId,
-        requestId: siteVisitRequestId,
+        requestId: businessTripRequestId,
         decision: decision as "approved" | "rejected",
         note
       });

@@ -232,13 +232,13 @@ export function attendanceDayInsight(
     };
   }
 
-  if (row.workMode === "site_visit" || /site visit/.test(state) || /site visit/.test(remark)) {
+  if (row.workMode === "business_trip" || /business trip/.test(state) || /business trip/.test(remark)) {
     return {
       calendarClass: "paid-leave",
-      detail: "Approved site visit. Present · Site visit is recorded as paid working time.",
-      headline: "Present · Site visit",
+      detail: "Approved business trip. Present · Business trip is recorded as paid working time.",
+      headline: "Present · Business trip",
       issues: [],
-      label: "Present · Site visit",
+      label: "Present · Business trip",
       needsRegularization: false,
       payDayType: "present_wfh",
       tone: "blue"

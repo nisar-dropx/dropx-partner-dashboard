@@ -9,7 +9,7 @@ export const dropxOnePageOptions = [
   { value: "roster", label: "Roster" },
   { value: "leave", label: "Leave" },
   { value: "wfh", label: "Work from home" },
-  { value: "site_visit", label: "Site visit" },
+  { value: "business_trip", label: "Business trip" },
   { value: "performance", label: "Performance" },
   { value: "settings", label: "Settings" }
 ] as const;

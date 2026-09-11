@@ -3,11 +3,11 @@
 import { CalendarDays, Clock3, FileCheck2, Info, Laptop, MapPinned, Paperclip, Pencil, RotateCcw, Upload } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { AppAccount } from "./connect-profile-app";
-import { ConnectSiteVisit } from "./connect-site-visit";
+import { ConnectBusinessTrip } from "./connect-business-trip";
 import { ConnectWfh } from "./connect-wfh";
 import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
-type LeaveSection = "leave" | "wfh" | "site_visit";
+type LeaveSection = "leave" | "wfh" | "business_trip";
 type LeaveTab = "request" | "history";
 type LeaveType = {
   id: string;
@@ -88,15 +88,15 @@ export function ConnectLeave({
   initialSection?: LeaveSection;
 }) {
   const wfhEligible = (account.pageAccess ?? []).includes("wfh");
-  const siteVisitEligible = (account.pageAccess ?? []).includes("site_visit");
+  const businessTripEligible = (account.pageAccess ?? []).includes("business_trip");
   const leaveEligible = (account.pageAccess ?? []).includes("leave") || account.profileType === "contractor";
-  const flexibleEligible = wfhEligible || siteVisitEligible;
+  const flexibleEligible = wfhEligible || businessTripEligible;
   const [section, setSection] = useState<LeaveSection>(() => {
-    if (initialSection === "site_visit" && siteVisitEligible) return "site_visit";
+    if (initialSection === "business_trip" && businessTripEligible) return "business_trip";
     if (initialSection === "wfh" && wfhEligible) return "wfh";
     if (leaveEligible) return "leave";
     if (wfhEligible) return "wfh";
-    return "site_visit";
+    return "business_trip";
   });
   const [tab, setTab] = useState<LeaveTab>("request");
   const [data, setData] = useState<LeaveData | null>(null);
@@ -115,10 +115,10 @@ export function ConnectLeave({
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
 
   useEffect(() => {
-    if (initialSection === "site_visit" && siteVisitEligible) setSection("site_visit");
+    if (initialSection === "business_trip" && businessTripEligible) setSection("business_trip");
     else if (initialSection === "wfh" && wfhEligible) setSection("wfh");
     else if (initialSection === "leave" && leaveEligible) setSection("leave");
-  }, [initialSection, leaveEligible, siteVisitEligible, wfhEligible]);
+  }, [initialSection, leaveEligible, businessTripEligible, wfhEligible]);
 
   const resetForm = useCallback(() => {
     setEditingRequestId(null);
@@ -249,11 +249,11 @@ export function ConnectLeave({
         <small>Time off</small>
         <h1>Leave</h1>
         <p>{flexibleEligible
-          ? "Plan time away, work from home, or a site visit."
+          ? "Plan time away, work from home, or a business trip."
           : "Plan time away and follow every request."}</p>
       </header>
 
-      {(leaveEligible && flexibleEligible) || (wfhEligible && siteVisitEligible) ? (
+      {(leaveEligible && flexibleEligible) || (wfhEligible && businessTripEligible) ? (
         <nav className="dx-leave-section-nav" aria-label="Leave options">
           {leaveEligible ? (
             <button className={section === "leave" ? "active" : ""} onClick={() => setSection("leave")} type="button">
@@ -265,16 +265,16 @@ export function ConnectLeave({
               <Laptop />Work from home
             </button>
           ) : null}
-          {siteVisitEligible ? (
-            <button className={section === "site_visit" ? "active" : ""} onClick={() => setSection("site_visit")} type="button">
-              <MapPinned />Site visit
+          {businessTripEligible ? (
+            <button className={section === "business_trip" ? "active" : ""} onClick={() => setSection("business_trip")} type="button">
+              <MapPinned />Business trip
             </button>
           ) : null}
         </nav>
       ) : null}
 
       {section === "wfh" && wfhEligible ? <ConnectWfh account={account} embedded /> : null}
-      {section === "site_visit" && siteVisitEligible ? <ConnectSiteVisit account={account} embedded /> : null}
+      {section === "business_trip" && businessTripEligible ? <ConnectBusinessTrip account={account} embedded /> : null}
 
       {section === "leave" && leaveEligible ? <>
       <div className="dx-leave-summary">

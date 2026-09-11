@@ -9,14 +9,14 @@ import {
   loadConnectAttendanceApproveScope
 } from "./connect-people-attendance-access";
 import {
-  connectSiteVisitEligible,
-  loadConnectSiteVisitPolicies,
-  type ConnectSiteVisitPolicy
-} from "./connect-site-visit-access";
+  connectBusinessTripEligible,
+  loadConnectBusinessTripPolicies,
+  type ConnectBusinessTripPolicy
+} from "./connect-business-trip-access";
 import { notifyApproverMobile } from "./approver-mobile-notifications";
 import { supabaseAdmin } from "./supabase-admin";
 
-export type SiteVisitWorkerType = "employee" | "contractor";
+export type BusinessTripWorkerType = "employee" | "contractor";
 
 function db() {
   if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
@@ -36,7 +36,7 @@ function daysBetween(fromDate: string, toDate: string) {
   return Math.floor((Date.parse(`${toDate}T00:00:00Z`) - Date.parse(`${fromDate}T00:00:00Z`)) / 86_400_000) + 1;
 }
 
-async function activeWorkforceContext(companyId: string, workerId: string, workerType: SiteVisitWorkerType) {
+async function activeWorkforceContext(companyId: string, workerId: string, workerType: BusinessTripWorkerType) {
   const today = indiaToday();
   const workerColumn = workerType === "employee" ? "employee_id" : "contractor_id";
   const engagementResult = await db().from("hr_engagements").select("id,person_id,status")
@@ -55,7 +55,7 @@ async function activeWorkforceContext(companyId: string, workerId: string, worke
   return { today, engagement: engagementResult.data, assignment: assignmentResult.data };
 }
 
-async function workerIdentity(companyId: string, workerId: string, workerType: SiteVisitWorkerType) {
+async function workerIdentity(companyId: string, workerId: string, workerType: BusinessTripWorkerType) {
   if (workerType === "employee") {
     const result = await db().from("employees")
       .select("full_name,employee_code,designation_id")
@@ -87,9 +87,9 @@ async function designationLabel(companyId: string, designationId: string | null)
   return { name: String(result.data.name ?? ""), code: result.data.code ? String(result.data.code) : null };
 }
 
-async function nextSiteVisitRequestNo(companyId: string) {
+async function nextBusinessTripRequestNo(companyId: string) {
   const prefix = `SV-${indiaToday().replace(/-/g, "").slice(0, 6)}-`;
-  const result = await db().from("hr_site_visit_requests")
+  const result = await db().from("hr_business_trip_requests")
     .select("request_no")
     .eq("company_id", companyId)
     .like("request_no", `${prefix}%`)
@@ -102,14 +102,14 @@ async function nextSiteVisitRequestNo(companyId: string) {
   return `${prefix}${String(next).padStart(5, "0")}`;
 }
 
-async function resolveSiteVisitManagerSteps(input: {
+async function resolveBusinessTripManagerSteps(input: {
   companyId: string;
   workerId: string;
-  workerType: SiteVisitWorkerType;
+  workerType: BusinessTripWorkerType;
   asOf: string;
 }) {
-  // Prefer dedicated site_visit routes; fall back to WFH route shape with peer scopes stripped.
-  for (const workflowCode of ["site_visit", "work_from_home"] as const) {
+  // Prefer dedicated business_trip routes; fall back to WFH route shape with peer scopes stripped.
+  for (const workflowCode of ["business_trip", "work_from_home"] as const) {
     const configured = await resolveConfiguredApprovalWorkflow({
       companyId: input.companyId,
       workflowCode,
@@ -122,7 +122,7 @@ async function resolveSiteVisitManagerSteps(input: {
     });
     if (configured) {
       return {
-        routeName: workflowCode === "site_visit" ? configured.routeName : "Reporting manager (site visit)",
+        routeName: workflowCode === "business_trip" ? configured.routeName : "Reporting manager (business trip)",
         steps: configured.steps.map((step) => ({
           step_name: step.step_name,
           approver_user_id: step.approver_user_id,
@@ -140,26 +140,26 @@ async function resolveSiteVisitManagerSteps(input: {
   }> };
 }
 
-export async function assertConnectSiteVisitAccess(companyId: string, workerId: string, workerType: SiteVisitWorkerType) {
+export async function assertConnectBusinessTripAccess(companyId: string, workerId: string, workerType: BusinessTripWorkerType) {
   const context = await activeWorkforceContext(companyId, workerId, workerType);
   const designationId = context.assignment.designation_id as string | null;
   const [policies, label] = await Promise.all([
-    loadConnectSiteVisitPolicies([companyId]),
+    loadConnectBusinessTripPolicies([companyId]),
     designationLabel(companyId, designationId)
   ]);
   const policy = policies.get(companyId) ?? null;
-  if (!connectSiteVisitEligible({ policy, designationId, designation: label })) {
+  if (!connectBusinessTripEligible({ policy, designationId, designation: label })) {
     if (isWfhHardBlockedDesignation(label)) {
-      throw new Error("Site visit is not available for Team Lead, Station Manager, or Store Manager roles.");
+      throw new Error("Business trip is not available for Team Lead, Station Manager, or Store Manager roles.");
     }
-    throw new Error("Site visit is not enabled for your designation. Ask HR to grant access in the Site Visit policy.");
+    throw new Error("Business trip is not enabled for your designation. Ask HR to grant access in the Business Trip policy.");
   }
-  return { context, policy: policy as ConnectSiteVisitPolicy, designationId, designation: label };
+  return { context, policy: policy as ConnectBusinessTripPolicy, designationId, designation: label };
 }
 
-export async function listConnectSiteVisitRequests(companyId: string, workerId: string, workerType: SiteVisitWorkerType) {
-  const access = await assertConnectSiteVisitAccess(companyId, workerId, workerType);
-  const result = await db().from("hr_site_visit_requests")
+export async function listConnectBusinessTripRequests(companyId: string, workerId: string, workerType: BusinessTripWorkerType) {
+  const access = await assertConnectBusinessTripAccess(companyId, workerId, workerType);
+  const result = await db().from("hr_business_trip_requests")
     .select("id,request_no,start_date,end_date,reason,status,manager_name,manager_note,hr_note,hr_reviewer_name,requested_at,applied_dates,skipped_dates")
     .eq("company_id", companyId)
     .eq("profile_type", workerType)
@@ -210,10 +210,10 @@ export async function listConnectSiteVisitRequests(companyId: string, workerId: 
   };
 }
 
-export async function createConnectSiteVisitRequest(input: {
+export async function createConnectBusinessTripRequest(input: {
   companyId: string;
   workerId: string;
-  workerType: SiteVisitWorkerType;
+  workerType: BusinessTripWorkerType;
   fromDate: string;
   toDate: string;
   reason: string;
@@ -221,20 +221,20 @@ export async function createConnectSiteVisitRequest(input: {
   const reason = input.reason.trim();
   if (reason.length < 3 || reason.length > 1000) throw new Error("Enter a valid reason between 3 and 1,000 characters.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(input.toDate)) {
-    throw new Error("Select the site visit dates.");
+    throw new Error("Select the business trip dates.");
   }
   if (input.toDate < input.fromDate) throw new Error("The end date cannot be before the start date.");
   const days = daysBetween(input.fromDate, input.toDate);
-  const access = await assertConnectSiteVisitAccess(input.companyId, input.workerId, input.workerType);
+  const access = await assertConnectBusinessTripAccess(input.companyId, input.workerId, input.workerType);
   if (days > access.policy.max_request_days) {
-    throw new Error(`A site visit request can cover at most ${access.policy.max_request_days} day(s).`);
+    throw new Error(`A business trip request can cover at most ${access.policy.max_request_days} day(s).`);
   }
   const today = access.context.today;
   if (!access.policy.allow_backdated && input.fromDate < today) {
-    throw new Error("Backdated site visit requests are not allowed.");
+    throw new Error("Backdated business trip requests are not allowed.");
   }
 
-  const overlap = await db().from("hr_site_visit_requests")
+  const overlap = await db().from("hr_business_trip_requests")
     .select("id")
     .eq("company_id", input.companyId)
     .eq("profile_type", input.workerType)
@@ -244,7 +244,7 @@ export async function createConnectSiteVisitRequest(input: {
     .gte("end_date", input.fromDate)
     .limit(1);
   if (overlap.error) throw new Error(overlap.error.message);
-  if (overlap.data?.length) throw new Error("A pending or approved site visit request already overlaps these dates.");
+  if (overlap.data?.length) throw new Error("A pending or approved business trip request already overlaps these dates.");
 
   const identity = await workerIdentity(input.companyId, input.workerId, input.workerType);
   const designationId = access.designationId ?? identity.designationId;
@@ -264,7 +264,7 @@ export async function createConnectSiteVisitRequest(input: {
     || isManagingPartnerDesignation(access.designation);
 
   if (!skipManagerChain) {
-    const configured = await resolveSiteVisitManagerSteps({
+    const configured = await resolveBusinessTripManagerSteps({
       companyId: input.companyId,
       workerId: input.workerId,
       workerType: input.workerType,
@@ -276,10 +276,10 @@ export async function createConnectSiteVisitRequest(input: {
     routeName = "Managing partner / top-level";
   }
 
-  const requestNo = await nextSiteVisitRequestNo(input.companyId);
+  const requestNo = await nextBusinessTripRequestNo(input.companyId);
   const first = steps[0] ?? null;
   const status = first ? "pending_manager" : "pending_hr";
-  const insertResult = await db().from("hr_site_visit_requests").insert({
+  const insertResult = await db().from("hr_business_trip_requests").insert({
     company_id: input.companyId,
     request_no: requestNo,
     profile_type: input.workerType,
@@ -313,9 +313,9 @@ export async function createConnectSiteVisitRequest(input: {
       approver_name: step.approver_name,
       status: index === 0 ? "pending" : "queued"
     }));
-    const stepsResult = await db().from("hr_site_visit_approval_steps").insert(stepRows);
+    const stepsResult = await db().from("hr_business_trip_approval_steps").insert(stepRows);
     if (stepsResult.error) {
-      await db().from("hr_site_visit_requests").delete().eq("id", requestId);
+      await db().from("hr_business_trip_requests").delete().eq("id", requestId);
       throw new Error(stepsResult.error.message);
     }
     const firstApprover = stepRows[0]?.approver_user_id;
@@ -324,11 +324,11 @@ export async function createConnectSiteVisitRequest(input: {
         companyId: input.companyId,
         recipientUserId: firstApprover,
         eventCode: "SITE_VISIT_APPROVAL_REQUIRED",
-        title: "Site visit needs approval",
-        body: `${identity.workerName || "Team member"} requested a site visit (${input.fromDate} – ${input.toDate}). Open Approval Inbox.`,
+        title: "Business trip needs approval",
+        body: `${identity.workerName || "Team member"} requested a business trip (${input.fromDate} – ${input.toDate}). Open Approval Inbox.`,
         route: "approvals",
         sourceKey: requestId,
-        data: { siteVisitRequestId: requestId }
+        data: { businessTripRequestId: requestId }
       });
     }
   }
@@ -338,20 +338,20 @@ export async function createConnectSiteVisitRequest(input: {
     requestNo,
     status,
     notice: status === "pending_hr"
-      ? "Site visit request submitted for HR finalization."
-      : `Site visit request submitted to ${routeName}. Peer approvals are skipped — your reporting manager will review it next.`
+      ? "Business trip request submitted for HR finalization."
+      : `Business trip request submitted to ${routeName}. Peer approvals are skipped — your reporting manager will review it next.`
   };
 }
 
-export async function cancelConnectSiteVisitRequest(input: {
+export async function cancelConnectBusinessTripRequest(input: {
   companyId: string;
   workerId: string;
-  workerType: SiteVisitWorkerType;
+  workerType: BusinessTripWorkerType;
   requestId: string;
 }) {
-  if (!/^[0-9a-f-]{36}$/i.test(input.requestId)) throw new Error("Site visit request is invalid.");
-  await assertConnectSiteVisitAccess(input.companyId, input.workerId, input.workerType);
-  const existing = await db().from("hr_site_visit_requests")
+  if (!/^[0-9a-f-]{36}$/i.test(input.requestId)) throw new Error("Business trip request is invalid.");
+  await assertConnectBusinessTripAccess(input.companyId, input.workerId, input.workerType);
+  const existing = await db().from("hr_business_trip_requests")
     .select("id,status")
     .eq("company_id", input.companyId)
     .eq("id", input.requestId)
@@ -359,22 +359,22 @@ export async function cancelConnectSiteVisitRequest(input: {
     .eq("profile_id", input.workerId)
     .maybeSingle();
   if (existing.error) throw new Error(existing.error.message);
-  if (!existing.data) throw new Error("Site visit request was not found.");
+  if (!existing.data) throw new Error("Business trip request was not found.");
   if (!["pending_manager", "returned"].includes(String(existing.data.status))) {
-    throw new Error("Only pending or returned site visit requests can be withdrawn.");
+    throw new Error("Only pending or returned business trip requests can be withdrawn.");
   }
-  const update = await db().from("hr_site_visit_requests")
+  const update = await db().from("hr_business_trip_requests")
     .update({ status: "cancelled", updated_at: new Date().toISOString() })
     .eq("id", input.requestId);
   if (update.error) throw new Error(update.error.message);
-  await db().from("hr_site_visit_approval_steps")
+  await db().from("hr_business_trip_approval_steps")
     .update({ status: "skipped", updated_at: new Date().toISOString() })
     .eq("request_id", input.requestId)
     .in("status", ["pending", "queued"]);
-  return { notice: "Site visit request withdrawn." };
+  return { notice: "Business trip request withdrawn." };
 }
 
-export async function listConnectSiteVisitApprovals(input: {
+export async function listConnectBusinessTripApprovals(input: {
   companyId: string;
   approverUserId?: string;
   approverUserIds?: string[];
@@ -385,7 +385,7 @@ export async function listConnectSiteVisitApprovals(input: {
     ...(input.approverUserId ? [input.approverUserId] : [])
   ].filter(Boolean))];
   if (!approverIds.length) return [];
-  const stepResult = await db().from("hr_site_visit_approval_steps")
+  const stepResult = await db().from("hr_business_trip_approval_steps")
     .select("id,request_id,step_order,step_name,status")
     .eq("company_id", input.companyId)
     .in("approver_user_id", approverIds)
@@ -397,7 +397,7 @@ export async function listConnectSiteVisitApprovals(input: {
   }
   const steps = stepResult.data ?? [];
   if (!steps.length) return [];
-  const requestResult = await db().from("hr_site_visit_requests")
+  const requestResult = await db().from("hr_business_trip_requests")
     .select("id,request_no,profile_type,profile_id,worker_code,worker_name,start_date,end_date,reason,status")
     .eq("company_id", input.companyId)
     .eq("status", "pending_manager")
@@ -425,14 +425,14 @@ export async function listConnectSiteVisitApprovals(input: {
   });
 }
 
-export async function decideConnectSiteVisitApproval(input: {
+export async function decideConnectBusinessTripApproval(input: {
   companyId: string;
   approverUserId: string;
   requestId: string;
   decision: "approved" | "rejected";
   note?: string;
 }) {
-  const result = await db().rpc("hr_decide_site_visit_manager", {
+  const result = await db().rpc("hr_decide_business_trip_manager", {
     p_company_id: input.companyId,
     p_request_id: input.requestId,
     p_actor_user_id: input.approverUserId,
@@ -442,7 +442,7 @@ export async function decideConnectSiteVisitApproval(input: {
   if (result.error) throw new Error(result.error.message);
   const status = String(result.data ?? "");
   if (status === "pending_manager") {
-    const next = await db().from("hr_site_visit_approval_steps")
+    const next = await db().from("hr_business_trip_approval_steps")
       .select("approver_user_id,request_id")
       .eq("company_id", input.companyId)
       .eq("request_id", input.requestId)
@@ -451,7 +451,7 @@ export async function decideConnectSiteVisitApproval(input: {
       .limit(1)
       .maybeSingle();
     if (!next.error && next.data?.approver_user_id) {
-      const request = await db().from("hr_site_visit_requests")
+      const request = await db().from("hr_business_trip_requests")
         .select("worker_name,start_date,end_date")
         .eq("company_id", input.companyId)
         .eq("id", input.requestId)
@@ -460,27 +460,27 @@ export async function decideConnectSiteVisitApproval(input: {
         companyId: input.companyId,
         recipientUserId: next.data.approver_user_id,
         eventCode: "SITE_VISIT_APPROVAL_REQUIRED",
-        title: "Site visit needs approval",
-        body: `${request.data?.worker_name || "Team member"} requested a site visit (${request.data?.start_date ?? ""} – ${request.data?.end_date ?? ""}). Open Approval Inbox.`,
+        title: "Business trip needs approval",
+        body: `${request.data?.worker_name || "Team member"} requested a business trip (${request.data?.start_date ?? ""} – ${request.data?.end_date ?? ""}). Open Approval Inbox.`,
         route: "approvals",
         sourceKey: `${input.requestId}:${next.data.approver_user_id}`,
-        data: { siteVisitRequestId: input.requestId }
+        data: { businessTripRequestId: input.requestId }
       });
     }
   }
   return {
     status,
     notice: status === "pending_hr"
-      ? "Site visit approved and sent to HR for Present · Site visit finalization."
+      ? "Business trip approved and sent to HR for Present · Business trip finalization."
       : status === "pending_manager"
         ? "Approved and routed to the next reporting manager."
         : status === "rejected"
-          ? "Site visit request rejected."
-          : "Site visit decision saved."
+          ? "Business trip request rejected."
+          : "Business trip decision saved."
   };
 }
 
-export async function listConnectSiteVisitHrApprovals(
+export async function listConnectBusinessTripHrApprovals(
   account: ConnectAccount,
   matchesReportee: (profileType: string, profileId: string | null) => boolean = () => true
 ) {
@@ -489,7 +489,7 @@ export async function listConnectSiteVisitHrApprovals(
   const access = await loadConnectAccessibleWorkforceIds(account, scope);
   if (!access.allowAll && !(access.employeeIds?.size || access.contractorIds?.size)) return [];
 
-  const result = await db().from("hr_site_visit_requests")
+  const result = await db().from("hr_business_trip_requests")
     .select("id,request_no,profile_type,profile_id,worker_code,worker_name,start_date,end_date,reason,manager_name,manager_note,manager_decided_at,requested_at,status")
     .eq("company_id", account.companyId)
     .eq("status", "pending_hr")
@@ -522,7 +522,7 @@ export async function listConnectSiteVisitHrApprovals(
   });
 }
 
-export async function decideConnectSiteVisitHrApproval(input: {
+export async function decideConnectBusinessTripHrApproval(input: {
   account: ConnectAccount;
   requestId: string;
   decision: "approved" | "returned" | "rejected";
@@ -533,13 +533,13 @@ export async function decideConnectSiteVisitHrApproval(input: {
   const scope = await loadConnectAttendanceApproveScope(input.account);
   const actorUserId = scope.actorUserIds[0] ?? null;
   if (!actorUserId || !scope.canFinalize) {
-    throw new Error("Site visit finalization is not enabled for this account.");
+    throw new Error("Business trip finalization is not enabled for this account.");
   }
   if (!/^[0-9a-f-]{36}$/i.test(input.requestId) || !["approved", "returned", "rejected"].includes(input.decision)) {
-    throw new Error("Choose Apply Site Visit, Return, or Reject.");
+    throw new Error("Choose Apply Business Trip, Return, or Reject.");
   }
   if (input.decision !== "approved" && String(input.note ?? "").trim().length < 3) {
-    throw new Error("Add a note when returning or rejecting site visit.");
+    throw new Error("Add a note when returning or rejecting business trip.");
   }
   const defaultIn = input.defaultIn ?? "09:00";
   const defaultOut = input.defaultOut ?? "18:00";
@@ -548,20 +548,20 @@ export async function decideConnectSiteVisitHrApproval(input: {
   }
 
   const access = await loadConnectAccessibleWorkforceIds(input.account, scope);
-  const existing = await db().from("hr_site_visit_requests")
+  const existing = await db().from("hr_business_trip_requests")
     .select("id,profile_type,profile_id,status")
     .eq("company_id", input.account.companyId)
     .eq("id", input.requestId)
     .maybeSingle();
-  if (existing.error || !existing.data) throw new Error(existing.error?.message ?? "Site visit request was not found.");
+  if (existing.error || !existing.data) throw new Error(existing.error?.message ?? "Business trip request was not found.");
   if (String(existing.data.status) !== "pending_hr") {
-    throw new Error("This site visit request is no longer awaiting HR finalization.");
+    throw new Error("This business trip request is no longer awaiting HR finalization.");
   }
   if (!connectWorkforceMatches(access, String(existing.data.profile_type), String(existing.data.profile_id))) {
-    throw new Error("This site visit request is outside your attendance scope.");
+    throw new Error("This business trip request is outside your attendance scope.");
   }
 
-  const result = await db().rpc("hr_finalize_site_visit_request", {
+  const result = await db().rpc("hr_finalize_business_trip_request", {
     p_company_id: input.account.companyId,
     p_request_id: input.requestId,
     p_actor_user_id: actorUserId,
@@ -575,8 +575,8 @@ export async function decideConnectSiteVisitHrApproval(input: {
   const payload = result.data as { appliedDates?: string[]; skippedDates?: unknown[] } | null;
   if (input.decision === "approved") {
     return {
-      notice: `Site visit approved: ${payload?.appliedDates?.length ?? 0} working day(s) marked Present · Site visit; ${payload?.skippedDates?.length ?? 0} date(s) skipped.`
+      notice: `Business trip approved: ${payload?.appliedDates?.length ?? 0} working day(s) marked Present · Business trip; ${payload?.skippedDates?.length ?? 0} date(s) skipped.`
     };
   }
-  return { notice: `Site visit request ${input.decision}.` };
+  return { notice: `Business trip request ${input.decision}.` };
 }

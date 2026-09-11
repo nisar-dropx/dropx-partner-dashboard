@@ -9,7 +9,7 @@ export const dropxOnePageCodes = [
   "roster",
   "leave",
   "wfh",
-  "site_visit",
+  "business_trip",
   "performance",
   "settings"
 ] as const;
