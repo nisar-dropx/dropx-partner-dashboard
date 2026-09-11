@@ -192,7 +192,7 @@ function answerReason(row: AdHocRequestRow) {
     const question = Array.isArray(relation) ? relation[0] : relation;
     const label = normalizedWords(question?.question_text);
     const value = String(answer.answer_value ?? "").trim();
-    if (value && /(REASON|PURPOSE|DESCRIPTION|DEPLOYMENT)/.test(label)) return value;
+    if (value && /(REASON|PURPOSE|DESCRIPTION|JUSTIFICATION|WHY)/.test(label)) return value;
   }
   return "";
 }
