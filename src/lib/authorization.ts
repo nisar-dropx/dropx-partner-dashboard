@@ -8,6 +8,27 @@ import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { loadPeopleDesignations } from "@/lib/people-designation";
 import { getPreviewViewer, hasPreviewProductAccess, selectedPreviewUserId } from "@/lib/portal-preview";
+import { TimeoutError, withTimeout } from "@/lib/with-timeout";
+
+const AUTH_TIMEOUT_MS = 10000;
+
+/**
+ * A single slow-but-alive Supabase response (common under sustained DB load)
+ * should never be indistinguishable from "you're not signed in." Retry once
+ * before letting a timeout propagate - callers can then choose to show a
+ * retryable error instead of redirecting away from work in progress, while a
+ * genuine "no session" response still resolves normally through the usual
+ * null-returning path below.
+ */
+async function getUserWithRetry(supabase: ReturnType<typeof createServerSupabaseClient>) {
+  if (!supabase) return { data: { user: null } };
+  try {
+    return await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Sign-in check");
+  } catch (error) {
+    if (!(error instanceof TimeoutError)) throw error;
+    return await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Sign-in check (retry)");
+  }
+}
 
 export type PermissionAction = "access" | "view" | "add" | "edit";
 
@@ -175,7 +196,7 @@ const ensureMissingCurrentAccessPages = unstable_cache(async (companyId: string)
 
 export const getAuthorization = cache(async (): Promise<AuthorizationContext | null> => {
   const supabase = createServerSupabaseClient();
-  const { data } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
+  const { data } = await getUserWithRetry(supabase);
   if (!data.user || !supabaseAdmin) return null;
   const signedInEmail = normalizeEmail(data.user.email);
 
@@ -453,6 +474,31 @@ export function hasPermission(
 
 export async function requirePagePermission(pageCode: string, action: PermissionAction) {
   const authorization = await getAuthorization();
+  if (!authorization) redirect("/login");
+  if (!hasPermission(authorization, pageCode, action)) {
+    redirect(`/unauthorized?page=${encodeURIComponent(pageCode)}&action=${action}`);
+  }
+  return authorization;
+}
+
+/**
+ * For Server Actions only: a page load has no in-progress user input to lose,
+ * so requirePagePermission's redirect-on-any-failure is fine there. A Server
+ * Action triggered mid-form does have input worth preserving - on a Supabase
+ * timeout specifically, throw a plain Error instead of redirecting, so the
+ * action's own try/catch can surface a retryable message rather than
+ * navigating the browser away and discarding what the user was entering. A
+ * genuine "not signed in" or "not permitted" result still redirects exactly
+ * as before.
+ */
+export async function requirePagePermissionOrThrow(pageCode: string, action: PermissionAction) {
+  let authorization: AuthorizationContext | null;
+  try {
+    authorization = await getAuthorization();
+  } catch (error) {
+    if (error instanceof TimeoutError) throw new Error("Couldn't verify your session right now. Please try again.");
+    throw error;
+  }
   if (!authorization) redirect("/login");
   if (!hasPermission(authorization, pageCode, action)) {
     redirect(`/unauthorized?page=${encodeURIComponent(pageCode)}&action=${action}`);
