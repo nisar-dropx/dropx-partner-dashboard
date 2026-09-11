@@ -14,6 +14,7 @@ const report = read("src/app/api/ops-pulse/cps/adhoc-activity/report/route.ts");
 const checks = [
   [navigation.includes('label: "Adhoc Van & DA", href: "/cps/adhoc-activity"'), "CPS navigation must expose the Adhoc Van & DA submenu."],
   [page.includes('requirePagePermission("cps_overview", "access")') && page.includes("authorization.locationScopeIds"), "The page must enforce CPS access and the signed-in user's location scope."],
+  [[page, report].every(source => source.includes("locationsResult.locations.filter(isAdHocActivityLocation)")) && data.includes("locations.filter(isAdHocActivityLocation)"), "Page filters, report and loader must exclude HO and Amazon Now before querying or aggregating."],
   [data.includes('requestPage("location_id"') && data.includes('requestPage("station_code"') && data.includes('requestPage("location_code"') && data.includes('.gte("work_date", from)') && data.includes('.lte("work_date", to)'), "The source query must cover every permitted location identifier for the selected range."],
   [data.includes("isApprovedPayment(request)") && data.includes('["Van", "DA"]'), "Only carried-out Van and DA requests may be counted."],
   [filters.includes('label="Clusters"') && filters.includes('label="Stations"') && filters.includes('type="date"') && filters.includes(">Today</button>") && filters.includes(">MTD</button>"), "The filter bar must support day/range presets, cluster and multi-station selection."],

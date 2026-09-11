@@ -196,3 +196,96 @@ test("station sorting covers every summary column without mutating the source ro
   assert.equal(module.validAdHocSortKey("unknown"), "totalAmount");
   assert.equal(module.validAdHocSortDirection("unexpected"), "desc");
 });
+
+const hoLocation = { ...location, id: "head-office", station_code: "HQ_NEW", location_models: { code: "DROPX_HO", name: "DROPX HO" } };
+const nowLocation = { ...location, id: "amazon-now", station_code: "TCC3", location_models: [{ code: "NOW", name: "NOW" }] };
+const helperMocks = {
+  "server-only": {},
+  "@/lib/ops-pulse/performance-review": {},
+  "@/lib/ops-pulse/review-trends-data": {},
+  "@/lib/supabase-admin": { supabaseAdmin: null }
+};
+
+test("Adhoc scope excludes master-classified HO/Now and legacy HO codes, retaining other station models", () => {
+  const { isAdHocActivityLocation: eligible } = compile("./adhoc-activity.ts", helperMocks);
+  for (const row of [hoLocation, nowLocation,
+    { ...location, station_code: "HO_TS" },
+    { ...location, station_code: " ho " },
+    { ...location, location_models: { code: null, name: "Amazon Now" } },
+    { ...location, location_models: { code: "new-code", name: "Head Office" } }
+  ]) assert.equal(eligible(row), false, JSON.stringify(row));
+  for (const code of ["EDSP", "XPT", "AMXL", "MDH", "ODH"]) {
+    assert.equal(eligible({ ...location, location_models: { code, name: code } }), true, code);
+  }
+  assert.equal(eligible({ ...location, station_code: "HOSUR", location_models: null }), true, "HO prefix alone must not exclude ordinary station names");
+});
+
+test("excluded locations never enter queries, totals, day details or legacy-code fallbacks", async () => {
+  const request = { id: "request-ok", location_id: location.id, station_code: "QLDA", work_date: "2026-09-07", payment_head_id: "van", status: "approved", amount: 100 };
+  const { db, calls } = queryDb({
+    payment_heads: [{ id: "van", code: "VAN_ADHOC", name: "Adhoc Van" }],
+    payment_requests: [request,
+      { ...request, id: "request-ho", location_id: hoLocation.id, station_code: "HQ_NEW", amount: 500 },
+      { ...request, id: "request-now-conflict", location_id: nowLocation.id, station_code: "QLDA", amount: 600 },
+      { ...request, id: "request-now-code", location_id: null, station_code: "TCC3", amount: 700 },
+      { ...request, id: "request-legacy-ok", location_id: null, station_code: null, location_code: "QLDA", amount: 50 }
+    ],
+    cps_cashbook_daily: [
+      { id: "cash-ok", station_code: "QLDA", expense_date: "2026-09-07", category: "Van Adhoc", amount: 20 },
+      { id: "cash-ho", station_code: "HQ_NEW", expense_date: "2026-09-07", category: "Van Adhoc", amount: 900 },
+      { id: "cash-now", station_code: "TCC3", expense_date: "2026-09-07", category: "Van Adhoc", amount: 800 }
+    ]
+  });
+  const module = compile("./adhoc-activity.ts", {
+    ...helperMocks,
+    "@/lib/supabase-admin": { supabaseAdmin: db },
+    "@/lib/ops-pulse/review-trends-data": { readTrendPages: async read => (await read(0)).data },
+    "@/lib/ops-pulse/performance-review": { isAdHocHead: () => true, adHocCategory: () => "Van", isApprovedPayment: () => true, paymentReason: () => "Reason" }
+  });
+  const result = await module.loadAdHocActivity("company", [location, hoLocation, nowLocation], "2026-09-07", "2026-09-07");
+  assert.deepEqual(result.stations.map(row => row.code), ["QLDA"]);
+  assert.equal(result.totals.totalAmount, 170);
+  assert.equal(result.totals.totalCount, 3);
+  assert.equal(result.totals.activeStations, 1);
+  assert.deepEqual(result.stations[0].days[0].entries.map(row => row.id), ["request-ok", "request-legacy-ok", "cash-ok"]);
+  for (const { operations } of calls) for (const [op, field, values] of operations) {
+    if (op === "in" && ["location_id", "station_code", "location_code"].includes(field)) {
+      assert.deepEqual(values, field === "location_id" ? [location.id] : ["QLDA"]);
+    }
+  }
+  calls.length = 0;
+  const empty = await module.loadAdHocActivity("company", [hoLocation, nowLocation], "2026-09-07", "2026-09-07");
+  assert.deepEqual(empty.stations, []);
+  assert.equal(empty.totals.totalCount, 0);
+  assert.equal(calls.length, 0, "excluded-only scope must not query payments");
+});
+
+test("Excel endpoint applies the same master exclusion, including direct excluded-only URLs", async () => {
+  const helpers = compile("./adhoc-activity.ts", helperMocks);
+  const sort = compile("./adhoc-activity-sort.ts");
+  let permitted = true;
+  const selected = [];
+  const endpoint = compile("../../app/api/ops-pulse/cps/adhoc-activity/report/route.ts", {
+    "@/lib/authorization": { getAuthorization: async () => ({ locationScopeIds: [location.id], hasAllLocationAccess: false }), hasPermission: () => permitted },
+    "@/lib/company-scope": { requireCompanyId: () => "company" },
+    "@/lib/ops-pulse/cod": { todayKolkata: () => "2026-09-11", loadCodLocations: async (company, ids, all) => {
+      assert.equal(company, "company"); assert.deepEqual(ids, [location.id]); assert.equal(all, false);
+      return { locations: [location, hoLocation, nowLocation], error: null };
+    } },
+    "@/lib/ops-pulse/adhoc-activity": { ...helpers, loadAdHocActivity: async (_company, locations) => {
+      selected.push(locations.map(row => row.station_code));
+      return { stations: [], totals: {}, error: null };
+    } },
+    "@/lib/ops-pulse/adhoc-activity-sort": sort,
+    "@/lib/report-workbook": { workbookResponse: sheets => Response.json(sheets) }
+  });
+  const response = await endpoint.GET(new Request("https://ops.dropxlogistics.com/api/ops-pulse/cps/adhoc-activity/report?stations=QLDA,HQ_NEW,TCC3"));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json())[0].rows[0]["Selected stations"], 1);
+  assert.deepEqual(selected[0], ["QLDA"]);
+  await endpoint.GET(new Request("https://ops.dropxlogistics.com/api/ops-pulse/cps/adhoc-activity/report?stations=HQ_NEW,TCC3"));
+  assert.deepEqual(selected[1], [], "excluded-only selection must not widen to all locations");
+  permitted = false;
+  assert.equal((await endpoint.GET(new Request("https://ops.dropxlogistics.com/api/ops-pulse/cps/adhoc-activity/report"))).status, 403);
+  assert.equal(selected.length, 2);
+});

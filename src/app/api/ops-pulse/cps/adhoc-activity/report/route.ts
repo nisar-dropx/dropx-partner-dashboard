@@ -1,6 +1,6 @@
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { adHocClusterLabel, adHocDateRange, loadAdHocActivity } from "@/lib/ops-pulse/adhoc-activity";
+import { adHocClusterLabel, adHocDateRange, isAdHocActivityLocation, loadAdHocActivity } from "@/lib/ops-pulse/adhoc-activity";
 import { sortAdHocStations, validAdHocSortDirection, validAdHocSortKey } from "@/lib/ops-pulse/adhoc-activity-sort";
 import { loadCodLocations, todayKolkata } from "@/lib/ops-pulse/cod";
 import { workbookResponse } from "@/lib/report-workbook";
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     return Response.json({ error: locationsResult.error }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
   }
 
-  const allLocations = locationsResult.locations;
+  const allLocations = locationsResult.locations.filter(isAdHocActivityLocation);
   const clusters = [...new Set(allLocations.map(adHocClusterLabel))].sort((left, right) => left.localeCompare(right));
   const selectedClusters = new Set(listParam(params.get("clusters"), clusters));
   const clusterLocations = allLocations.filter((location) => selectedClusters.has(adHocClusterLabel(location)));
@@ -104,6 +104,7 @@ export async function GET(request: Request) {
         From: range.from,
         To: range.to,
         "Selected stations": selectedLocations.length,
+        "Location scope": "Head Office and Amazon Now excluded",
         "Active stations": activity.totals.activeStations,
         "Adhoc Van": activity.totals.vanCount,
         "Van amount": activity.totals.vanAmount,

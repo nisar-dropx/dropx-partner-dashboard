@@ -4,7 +4,7 @@ import { CpsAdHocTable } from "@/components/cps-adhoc-table";
 import { PageHead } from "@/components/page-head";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { adHocClusterLabel, adHocDateRange, loadAdHocActivity } from "@/lib/ops-pulse/adhoc-activity";
+import { adHocClusterLabel, adHocDateRange, isAdHocActivityLocation, loadAdHocActivity } from "@/lib/ops-pulse/adhoc-activity";
 import { loadCodLocations, todayKolkata } from "@/lib/ops-pulse/cod";
 import "./adhoc-activity.css";
 
@@ -52,7 +52,7 @@ export default async function CpsAdHocActivityPage({ searchParams }: { searchPar
   const defaultFrom = `${today.slice(0, 7)}-01`;
   const range = adHocDateRange({ from: searchParams?.from, to: searchParams?.to, month: searchParams?.month }, today);
   const locationsResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
-  const allLocations = locationsResult.locations;
+  const allLocations = locationsResult.locations.filter(isAdHocActivityLocation);
   const clusterFor = (location: typeof allLocations[number]) => adHocClusterLabel(location);
   const clusters = [...new Set(allLocations.map(clusterFor))].sort((left, right) => left.localeCompare(right));
   const selectedClusters = listParam(searchParams?.clusters, clusters);
@@ -105,7 +105,7 @@ export default async function CpsAdHocActivityPage({ searchParams }: { searchPar
         <section className="panel cps-adhoc-stations">
           <div className="panel-head"><div><h2>Station summary</h2><p className="subtle">Every selected station is shown. Click a station with activity to open its daily breakup.</p></div><span>{selectedLocations.length} stations</span></div>
           <CpsAdHocTable reportParams={reportSearch.toString()} stations={activity.stations} />
-          <footer className="cps-adhoc-source-note">Includes approved, processing and processed requests plus Cashbook rows classified as Van Adhoc. Linked Cashbook payments are shown but never double-counted. Pending, returned and rejected requests are excluded.</footer>
+          <footer className="cps-adhoc-source-note">Head Office and Amazon Now locations are excluded. Includes approved, processing and processed requests plus Cashbook rows classified as Van Adhoc. Linked Cashbook payments are shown but never double-counted. Pending, returned and rejected requests are excluded.</footer>
         </section>
       </div>
     </AppShell>

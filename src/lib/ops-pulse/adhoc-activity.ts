@@ -168,6 +168,16 @@ function normalizedWords(value: unknown) {
   return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
 }
 
+/** Report-only eligibility. Do not hide or delete these locations globally. */
+export function isAdHocActivityLocation(location: CodLocationRow) {
+  const models = Array.isArray(location.location_models) ? location.location_models : [location.location_models];
+  const modelNames = models.flatMap(model => [model?.code, model?.name]).map(normalizedWords);
+  const excludedModels = ["DROPX HO", "HO", "HEAD OFFICE", "NOW", "AMAZON NOW"];
+  if (modelNames.some(model => excludedModels.includes(model))) return false;
+  // Legacy head offices can lack a model mapping (for example HO_TS).
+  return !/^HO(?:$|[_\s-])/.test(normalized(location.station_code));
+}
+
 export function isCashbookAdHocVan(row: Pick<AdHocCashbookRow, "category" | "cps_sub_head" | "expense_type">) {
   return [row.category, row.cps_sub_head, row.expense_type]
     .map(normalizedWords)
@@ -252,7 +262,8 @@ export async function loadAdHocActivity(
   from: string,
   to: string
 ): Promise<AdHocActivityResult> {
-  const stationRows = locations.map(blankStation);
+  const eligibleLocations = locations.filter(isAdHocActivityLocation);
+  const stationRows = eligibleLocations.map(blankStation);
   const empty: AdHocActivityResult = {
     stations: stationRows,
     totals: {
@@ -268,7 +279,7 @@ export async function loadAdHocActivity(
     },
     error: null
   };
-  if (!locations.length) return empty;
+  if (!eligibleLocations.length) return empty;
   if (!supabaseAdmin) return { ...empty, error: "Database service is unavailable." };
   const db = supabaseAdmin;
 
@@ -285,8 +296,8 @@ export async function loadAdHocActivity(
   if (!heads.length) return empty;
 
   const headById = new Map(heads.map((head) => [head.id, head]));
-  const locationIds = locations.map((location) => location.id);
-  const stationCodes = locations.map((location) => normalized(location.station_code));
+  const locationIds = eligibleLocations.map((location) => location.id);
+  const stationCodes = eligibleLocations.map((location) => normalized(location.station_code));
   let requests: AdHocRequestRow[] = [];
   let cashbookRows: AdHocCashbookRow[] = [];
   try {
@@ -332,8 +343,10 @@ export async function loadAdHocActivity(
     if (!isApprovedPayment(request)) continue;
     const head = headById.get(request.payment_head_id);
     if (!head) continue;
-    const station = (request.location_id ? byId.get(request.location_id) : null)
-      ?? byCode.get(normalized(request.station_code || request.location_code));
+    // An explicit location ID is authoritative. A legacy code must not pull
+    // an excluded/out-of-scope location's payment into another station.
+    const station = request.location_id ? byId.get(request.location_id)
+      : byCode.get(normalized(request.station_code || request.location_code));
     if (!station || !request.work_date) continue;
     if (request.request_no) approvedRequestNumbers.add(normalizedWords(request.request_no));
     const requestAmount = amount(request.amount_approved ?? request.amount ?? request.amount_requested);
