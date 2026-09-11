@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { codFilterParams, filterReviewCod, groupReviewCodAssociates, summarizeReviewCod } from "@/lib/ops-pulse/review-cod";
 import type { ReviewCodFilters, ReviewCodLine, ReviewCodSnapshot } from "@/lib/ops-pulse/review-cod";
 
-const money = (value:number) => `₹${value.toLocaleString("en-IN", {maximumFractionDigits:2})}`;
+const money = (value:number) => `₹${value.toLocaleString("en-IN", {maximumFractionDigits:0})}`;
 const pageSize = 30;
 type DetailView = "days" | "associates" | "tids";
 

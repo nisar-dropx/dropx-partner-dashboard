@@ -488,7 +488,7 @@ export default async function PaymentApprovalsPage({
                     <td><strong>{request.request_no}</strong></td>
                     <td>{request.location_code}</td>
                     <td>{request.payment_heads?.name ?? "-"}</td>
-                    <td>{request.amount == null ? "-" : `Rs ${Number(request.amount).toLocaleString("en-IN")}`}</td>
+                    <td>{request.amount == null ? "-" : `Rs ${Number(request.amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
                     <td>{request.profiles?.full_name ?? request.profiles?.email ?? "-"}</td>
                     <td><StatusPill status={paymentStatusLabel(request)} /></td>
                     <td>{formatDashboardDate(request.created_at)}</td>
@@ -525,7 +525,7 @@ export default async function PaymentApprovalsPage({
               ) : null}
               <div className="form-grid three">
                 <label>Payment Head<input className="field" readOnly value={selectedRequest.payment_heads?.name ?? "-"} /></label>
-                <label>{selectedRequest.amount == null && selectedRequest.amount_requested != null ? "Estimated Amount" : "Amount"}<input className="field" readOnly value={(selectedRequest.amount ?? selectedRequest.amount_requested) == null ? "-" : `Rs ${Number(selectedRequest.amount ?? selectedRequest.amount_requested).toLocaleString("en-IN")}`} /></label>
+                <label>{selectedRequest.amount == null && selectedRequest.amount_requested != null ? "Estimated Amount" : "Amount"}<input className="field" readOnly value={(selectedRequest.amount ?? selectedRequest.amount_requested) == null ? "-" : `Rs ${Number(selectedRequest.amount ?? selectedRequest.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`} /></label>
                 <label>Status<input className="field" readOnly value={paymentStatusLabel(selectedRequest)} /></label>
                 <label>Payment Method<input className="field" readOnly value={selectedRequest.payment_mode === "upi_payment" ? "UPI Payment" : selectedRequest.payment_mode === "online_payment" ? "Online Payment" : "Bank Transfer"} /></label>
                 {hasDisplayValue(selectedRequest.account_holder_name) ? <label>Acc Holder Name<input className="field" readOnly value={selectedRequest.account_holder_name ?? "-"} /></label> : null}

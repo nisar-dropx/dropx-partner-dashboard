@@ -9,7 +9,7 @@ export type WorkforcePayoutRow = {
   baseAmount: number; additions: number; grossPayment: number; deductions: number; deductionBreakdown: Array<{ code: string; label: string; amount: number }>; panAadhaarStatus: "LINKED" | "NOT LINKED"; netAmount: number; status: string;
 };
 
-function money(value: number) { return `Rs ${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
+function money(value: number) { return `Rs ${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`; }
 
 export function WorkforcePayoutTable({ rows }: { rows: WorkforcePayoutRow[] }) {
   const [search, setSearch] = useState("");

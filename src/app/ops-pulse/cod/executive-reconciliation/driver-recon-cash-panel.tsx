@@ -19,7 +19,7 @@ import {
 import { confirmDriverReconForDeposit } from "./cash-entry-actions";
 
 function currency(value: number) {
-  return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return value.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 function formatCollectionTime(epochMs: number | null) {

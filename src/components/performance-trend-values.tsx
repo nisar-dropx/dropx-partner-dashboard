@@ -52,7 +52,7 @@ export function TrendPointRequestDetails({ series, point }: { series: TrendSerie
   return <section className="review-van-request-details" aria-label={`Ad-hoc van details for ${dayLabel(point.date)}`}>
     <header>
       <div><strong>{dayLabel(point.date)} · van details</strong><small>{trendPointDetail(series, point)}</small></div>
-      <b>{formatTrendValue(point.value, series.unit)}</b>
+      <b>{formatTrendValue(point.value, series.unit, series.key)}</b>
     </header>
     {requests.length ? <div className="review-van-request-list">{requests.map((request, index) => {
       const remarks = request.remarks?.trim(),
@@ -80,8 +80,8 @@ export function PerformanceTrendValues({ series, period, endDate }: { series: Tr
   const vanSummary = isAdHocVanSeries(series) ? vanPeriodSummary(points) : null;
   return <>
     <div className="review-history-totals">
-      <div><small>{last ? dayLabel(last.date) : "Selected day"}</small><strong>{formatTrendValue(last?.value ?? null, series.unit)}</strong></div>
-      {total != null ? <div><small>{periodLabel} recorded total</small><strong>{formatTrendValue(total, series.unit)}</strong></div> : null}
+      <div><small>{last ? dayLabel(last.date) : "Selected day"}</small><strong>{formatTrendValue(last?.value ?? null, series.unit, series.key)}</strong></div>
+      {total != null ? <div><small>{periodLabel} recorded total</small><strong>{formatTrendValue(total, series.unit, series.key)}</strong></div> : null}
     </div>
     {vanSummary ? <div className="review-history-van-summary" aria-label={`${periodLabel} ad-hoc van summary`}>
       <span><strong>{count(vanSummary.vans)}</strong> vans</span>
@@ -101,8 +101,8 @@ export function PerformanceTrendValues({ series, period, endDate }: { series: Tr
             <span className="review-history-value-date" role="cell">
               <time dateTime={point.date}>{dayLabel(point.date)}</time>
             </span>
-            <span className={`review-history-value-amount${missed ? " history-value-missed" : ""}`} role="cell" aria-label={`${dayLabel(point.date)}: ${formatTrendValue(point.value, series.unit)}`}>
-              <strong>{formatTrendValue(point.value, series.unit)}</strong>
+            <span className={`review-history-value-amount${missed ? " history-value-missed" : ""}`} role="cell" aria-label={`${dayLabel(point.date)}: ${formatTrendValue(point.value, series.unit, series.key)}`}>
+              <strong>{formatTrendValue(point.value, series.unit, series.key)}</strong>
               {missed ? <small>Off target</small> : null}
             </span>
             {point.note && point.note !== "Hawkeye D-1" ? <small className="review-history-value-meta" title={trendPointDetail(series, point)}>{trendPointDetail(series, point)}</small> : null}

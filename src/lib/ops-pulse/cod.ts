@@ -438,8 +438,8 @@ export function amountValue(value: number | string | null | undefined) {
 
 export function formatAmount(value: number | string | null | undefined) {
   return new Intl.NumberFormat("en-IN", {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2
+    maximumFractionDigits: 0,
+    minimumFractionDigits: 0
   }).format(amountValue(value));
 }
 

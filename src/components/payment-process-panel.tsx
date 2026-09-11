@@ -76,7 +76,7 @@ function UpiPaymentQr({ request }: { request: PaymentProcessRequest }) {
     <div style={{ alignItems: "center", background: "#fff", border: "1px solid var(--border)", borderRadius: 14, display: "flex", flexDirection: "column", gap: 8, padding: 14 }}>
       <strong>Scan to pay via UPI</strong>
       <img alt={`UPI QR for ${request.request_no}`} height={220} src={qrDataUrl} width={220} />
-      <small className="subtle">{upiId} · Rs {Number(amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</small>
+      <small className="subtle">{upiId} · Rs {Number(amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</small>
     </div>
   );
 }
@@ -266,7 +266,7 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
         </div>
         <div className="stat-card">
           <span>Total amount</span>
-          <strong>Rs {totalAmount.toLocaleString("en-IN")}</strong>
+          <strong>Rs {totalAmount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</strong>
         </div>
         <div className="stat-card">
           <span>Active banks</span>
@@ -380,7 +380,7 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
                   <td>{request.location_code}</td>
                   <td>{request.payment_head_name ?? "-"}</td>
                   <td>{paymentMethodLabel(request)}</td>
-                  <td>Rs {amountValue(request).toLocaleString("en-IN")}</td>
+                  <td>Rs {amountValue(request).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</td>
                   <td><StatusPill status={statusLabel(request)} /></td>
                   <td>{displayDate(request.created_at)}</td>
                   <td>
@@ -453,7 +453,7 @@ export function PaymentProcessPanel({ banks, requests, finalizeAction, finalizeR
                   <input className="field" readOnly value={processRequest.payment_head_name ?? "-"} />
                 </label>
                 <label>Amount
-                  <input className="field" readOnly value={`Rs ${amountValue(processRequest).toLocaleString("en-IN")}`} />
+                  <input className="field" readOnly value={`Rs ${amountValue(processRequest).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`} />
                 </label>
                 <label>Payment Method
                   <input className="field" readOnly value={paymentMethodLabel(processRequest)} />

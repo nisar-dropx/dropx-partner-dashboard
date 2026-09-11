@@ -62,7 +62,7 @@ export type PaymentReportRequest = {
 };
 
 function formatAmount(amount: number | null) {
-  return amount == null ? "-" : `Rs ${Number(amount).toLocaleString("en-IN")}`;
+  return amount == null ? "-" : `Rs ${Number(amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 }
 
 function formatDate(value: string) {

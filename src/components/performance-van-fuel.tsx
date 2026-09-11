@@ -14,7 +14,7 @@ import {
 import "@/app/ops-pulse/performance/review-fuel.css";
 
 const money = (value: number) =>
-  `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 const litres = (value: number | null) =>
   value == null
     ? "—"

@@ -94,8 +94,8 @@ type Props = {
   steps: PerformanceReviewStep[];
 };
 
-function money(value: number | null | undefined) {
-  return value == null ? "—" : `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+function money(value: number | null | undefined, digits = 0) {
+  return value == null ? "—" : `₹${value.toLocaleString("en-IN", { maximumFractionDigits: digits })}`;
 }
 
 function stationKey(value: string | null | undefined) {
@@ -324,17 +324,17 @@ export function PerformanceReviewDesk(props: Props) {
         <PerformanceCodPending key={`${selectedCode}-${props.codSnapshot.batchId}`} snapshot={props.codSnapshot} remarkSaved={Boolean(itemByMetric.get(COD_REMARK_KEY)?.root_cause?.trim())}/>
         <div className="panel-head"><div><span className="performance-review-kicker">02 · CPS</span><h2>Cost and allocation</h2><p className="subtle">Click a card for its 7-day, 14-day or MTD history. Use i for the selected-day details.</p></div></div>
         <div className="performance-cps-cards">
-          <CostTrendCard metric="salary_da_cps" label="Salary DA CPS" value={money(snapshot.salaryDaCps)} summary={`${money(snapshot.salaryDaCost)} total`}><p><span>Per-shipment / variable</span><b>{money(snapshot.variableDaPay)}</b></p><p><span>MG / salary</span><b>{money(snapshot.mgSalaryPay)}</b></p><p><span>Kilometre / fuel</span><b>{money(snapshot.fuelPay)}</b></p><p><span>FE payment setup gaps</span><b>{snapshot.unmappedFeCount}</b></p></CostTrendCard>
+          <CostTrendCard metric="salary_da_cps" label="Salary DA CPS" value={money(snapshot.salaryDaCps, 2)} summary={`${money(snapshot.salaryDaCost)} total`}><p><span>Per-shipment / variable</span><b>{money(snapshot.variableDaPay)}</b></p><p><span>MG / salary</span><b>{money(snapshot.mgSalaryPay)}</b></p><p><span>Kilometre / fuel</span><b>{money(snapshot.fuelPay)}</b></p><p><span>FE payment setup gaps</span><b>{snapshot.unmappedFeCount}</b></p></CostTrendCard>
           <CostTrendCard metric="ad_hoc_van" label="Ad-hoc van" value={money(snapshot.adHocVanCost)} summary={`${snapshot.adHocVanRequests.length} van${snapshot.adHocVanRequests.length === 1 ? "" : "s"} · ${snapshot.deliveredCount.toLocaleString("en-IN")} total delivered`}>
             {snapshot.adHocVanRequests.length ? snapshot.adHocVanRequests.map((request) => <p key={request.requestNo}><span>{request.requestNo} · {request.head}<small>{request.reason}</small></span><b>{money(request.amount)}</b></p>) : <p><span>No ad-hoc van recorded</span><b>₹0</b></p>}
           </CostTrendCard>
           <CostTrendCard metric="ad_hoc_da" label="Ad-hoc DA" value={money(snapshot.adHocDaCost)} summary={`${snapshot.adHocDaRequests.length} approved request${snapshot.adHocDaRequests.length === 1 ? "" : "s"}`}>
             {snapshot.adHocDaRequests.length ? snapshot.adHocDaRequests.map((request) => <p key={request.requestNo}><span>{request.requestNo} · {request.head}<small>{request.reason}</small></span><b>{money(request.amount)}</b></p>) : <p><span>No approved ad-hoc DA request</span><b>₹0</b></p>}
           </CostTrendCard>
-          <CostTrendCard metric="daily_cps" label="Daily CPS" value={money(snapshot.dailyCps)} summary={`${money(snapshot.dayCost)} total cost`}>
-            {snapshot.costBreakdown.length ? snapshot.costBreakdown.map((line, index) => <p key={`${line.head}-${line.subHead}-${index}`}><span>{line.head} · {line.subHead}<small>{line.source}</small></span><b>{money(line.amount)}<small>{money(line.cps)} CPS</small></b></p>) : <p><span>No cost breakup loaded</span><b>—</b></p>}
+          <CostTrendCard metric="daily_cps" label="Daily CPS" value={money(snapshot.dailyCps, 2)} summary={`${money(snapshot.dayCost)} total cost`}>
+            {snapshot.costBreakdown.length ? snapshot.costBreakdown.map((line, index) => <p key={`${line.head}-${line.subHead}-${index}`}><span>{line.head} · {line.subHead}<small>{line.source}</small></span><b>{money(line.amount)}<small>{money(line.cps, 2)} CPS</small></b></p>) : <p><span>No cost breakup loaded</span><b>—</b></p>}
           </CostTrendCard>
-          <CostTrendCard metric="mtd_cps" label="MTD CPS" value={money(snapshot.mtdCps)} summary={`${money(snapshot.mtdCost)} / ${snapshot.mtdDelivery.toLocaleString("en-IN")} delivered`}><p><span>Month-to-date cost</span><b>{money(snapshot.mtdCost)}</b></p><p><span>Month-to-date delivery</span><b>{snapshot.mtdDelivery.toLocaleString("en-IN")}</b></p><p><span>Includes configured DA, UTR, van, fuel, rent and other heads</span><b>All heads</b></p></CostTrendCard>
+          <CostTrendCard metric="mtd_cps" label="MTD CPS" value={money(snapshot.mtdCps, 2)} summary={`${money(snapshot.mtdCost)} / ${snapshot.mtdDelivery.toLocaleString("en-IN")} delivered`}><p><span>Month-to-date cost</span><b>{money(snapshot.mtdCost)}</b></p><p><span>Month-to-date delivery</span><b>{snapshot.mtdDelivery.toLocaleString("en-IN")}</b></p><p><span>Includes configured DA, UTR, van, fuel, rent and other heads</span><b>All heads</b></p></CostTrendCard>
           <CostTrendCard metric="allocation" label="Allocation" value={snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)} summary={`${snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / ${snapshot.activeFeCount} FEs`}><p><span>Delivered shipments</span><b>{snapshot.deliveredCount.toLocaleString("en-IN")}</b></p><p><span>Active FE IDs</span><b>{snapshot.activeFeCount}</b></p></CostTrendCard>
         </div>
         <PerformanceVanFuel key={`fuel-${selectedCode}-${date}`} station={selectedCode} date={date}/>

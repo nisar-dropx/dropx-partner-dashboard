@@ -46,7 +46,7 @@ type CashStepGateValue = {
 const CashStepGateContext = createContext<CashStepGateValue | null>(null);
 
 function currency(value: number) {
-  return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return value.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 /**

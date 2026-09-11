@@ -5,7 +5,7 @@ import { Fragment, useState } from "react";
 import type { AdHocActivityStation } from "@/lib/ops-pulse/adhoc-activity";
 
 function money(value: number) {
-  return `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  return `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 }
 
 function dateLabel(value: string) {

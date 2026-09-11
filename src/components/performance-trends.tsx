@@ -312,7 +312,7 @@ export function PerformanceTrendProvider({
                     ) : null}
                     {!expanded ? <PerformanceTrendValues series={series} period={period} endDate={date}/> : <div className="review-trend-summary">
                       <strong>
-                        {formatTrendValue(selected?.value ?? null, series.unit)}
+                        {formatTrendValue(selected?.value ?? null, series.unit, series.key)}
                       </strong>
                       <span>
                         {selected?.date ?? "No recorded values"}
@@ -321,7 +321,7 @@ export function PerformanceTrendProvider({
                       <small>
                         {valid.length}/{points.length} days available
                         {delta != null && valid.length > 1
-                          ? ` · ${delta > 0 ? "+" : ""}${series.unit === "time" ? `${Math.round(delta)} min` : series.unit === "percent" ? `${delta.toFixed(1)} pp` : formatTrendValue(delta, series.unit)} change`
+                          ? ` · ${delta > 0 ? "+" : ""}${series.unit === "time" ? `${Math.round(delta)} min` : series.unit === "percent" ? `${delta.toFixed(1)} pp` : formatTrendValue(delta, series.unit, series.key)} change`
                           : ""}
                       </small>
                     </div>}
@@ -349,7 +349,7 @@ export function PerformanceTrendProvider({
                           />
                         ) : null}
                         <text x="34" y="12">
-                          {formatTrendValue(geometry.max, series.unit)}
+                          {formatTrendValue(geometry.max, series.unit, series.key)}
                         </text>
                         <text x="34" y="171">
                           {points[0]?.date.slice(5)}
@@ -381,7 +381,7 @@ export function PerformanceTrendProvider({
                               cy={dot.y}
                               r={highlight === index ? 5 : 3.5}
                               tabIndex={0}
-                              aria-label={`${dot.date}: ${formatTrendValue(dot.value, series.unit)}`}
+                              aria-label={`${dot.date}: ${formatTrendValue(dot.value, series.unit, series.key)}`}
                               onFocus={() => setHighlight(index)}
                               onMouseEnter={() => setHighlight(index)}
                               onClick={() => setHighlight(index)}
@@ -399,7 +399,7 @@ export function PerformanceTrendProvider({
                             >
                               <title>
                                 {dot.date}:{" "}
-                                {formatTrendValue(dot.value, series.unit)}
+                                {formatTrendValue(dot.value, series.unit, series.key)}
                               </title>
                             </circle>
                           ),
@@ -415,7 +415,7 @@ export function PerformanceTrendProvider({
                       <p className="review-trend-target">
                         {expanded ? "Dashed line · current target" : "Current target"}{" "}
                         {series.direction === "lower" ? "≤" : "≥"}{" "}
-                        {formatTrendValue(series.target, series.unit)}
+                        {formatTrendValue(series.target, series.unit, series.key)}
                       </p>
                     ) : null}
                     {expanded ? (
@@ -434,7 +434,7 @@ export function PerformanceTrendProvider({
                               <tr key={point.date} className={selected?.date === point.date ? "selected" : ""}>
                                 <td><button type="button" className="review-trend-day-button" onClick={() => setHighlight(index)}>{point.date}</button></td>
                                 <td>
-                                  {formatTrendValue(point.value, series.unit)}
+                                  {formatTrendValue(point.value, series.unit, series.key)}
                                 </td>
                                 <td>{trendPointDetail(series, point)}</td>
                               </tr>

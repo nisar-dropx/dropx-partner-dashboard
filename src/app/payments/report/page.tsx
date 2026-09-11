@@ -289,7 +289,7 @@ export default async function PaymentReportPage() {
             </div>
             <div className="stat-card">
               <span>Total amount</span>
-              <strong>Rs {totalAmount.toLocaleString("en-IN")}</strong>
+              <strong>Rs {totalAmount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</strong>
             </div>
           </div>
 

@@ -376,8 +376,8 @@ export default async function PaymentRequestsPage({
                       <td><strong>{request.request_no}</strong></td>
                       <td>{request.location_code}</td>
                       <td>{head?.name ?? "-"}</td>
-                      <td>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN")}`}</td>
-                      <td>{request.amount == null ? "-" : `Rs ${Number(request.amount).toLocaleString("en-IN")}`}</td>
+                      <td>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
+                      <td>{request.amount == null ? "-" : `Rs ${Number(request.amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
                       <td>{request.payment_mode ? paymentModeLabel(request.payment_mode) : "-"}</td>
                       <td>{request.account_holder_name ?? "-"}</td>
                       <td>{request.payment_mode === "upi_payment" ? request.payment_reference ?? "-" : request.bank_account_no ?? "-"}</td>
@@ -427,7 +427,7 @@ export default async function PaymentRequestsPage({
                 </label>
                 <label>
                   Estimated Amount
-                  <input className="field" value={bankRequest.amount_requested == null ? "-" : `Rs ${Number(bankRequest.amount_requested).toLocaleString("en-IN")}`} readOnly />
+                  <input className="field" value={bankRequest.amount_requested == null ? "-" : `Rs ${Number(bankRequest.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`} readOnly />
                 </label>
                 <label>
                   Actual Amount *

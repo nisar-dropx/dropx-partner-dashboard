@@ -358,6 +358,7 @@ export function clockMinutes(value: unknown, date?: string) {
 export function formatTrendValue(
   value: number | null,
   unit: TrendSeries["unit"],
+  metricKey?: string,
 ) {
   if (value == null) return "No data";
   if (unit === "time") {
@@ -371,7 +372,7 @@ export function formatTrendValue(
   // was compensating for a raw, unscaled fraction (0.9301 displayed as
   // "0.9301%") that was actually a real data-scaling bug, not a display
   // precision issue; see readHawkeyeDailyRows's percent-scaling fix.
-  return `${unit === "money" ? "₹" : ""}${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}${unit === "percent" ? "%" : ""}`;
+  return `${unit === "money" ? "₹" : ""}${value.toLocaleString("en-IN", { maximumFractionDigits: unit === "money" && !metricKey?.endsWith("cps") ? 0 : 2 })}${unit === "percent" ? "%" : ""}`;
 }
 export function trendGeometry(points: TrendPoint[], target?: number | null) {
   const values = points.flatMap((p) => (p.value == null ? [] : [p.value]));

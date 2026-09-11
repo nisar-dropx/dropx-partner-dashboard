@@ -42,7 +42,7 @@ function periodLabel(from: string, to: string, today: string) {
 }
 
 function money(value: number) {
-  return `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  return `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 }
 
 export default async function CpsAdHocActivityPage({ searchParams }: { searchParams?: SearchParams }) {

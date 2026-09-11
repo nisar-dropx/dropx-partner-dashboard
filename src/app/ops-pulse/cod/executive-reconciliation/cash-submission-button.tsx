@@ -5,7 +5,7 @@ import { useFormStatus } from "react-dom";
 import type { LiabilitySummaryNormalized } from "@/lib/ops-pulse/cash-recon-types";
 
 function currency(value: number) {
-  return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return value.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 export function CashSubmissionButton({
@@ -103,7 +103,7 @@ export function CashSubmissionButton({
             <div className="reconciliation-final-summary" style={{ marginBottom: 14 }}>
               <div><span>Expected</span><strong>₹{currency(cash.expectedAmount)}</strong><small>Cash summary</small></div>
               <div><span>Actual</span><strong>₹{currency(cash.actualAmount)}</strong><small>Count {cash.count}</small></div>
-              <div><span>Short / excess</span><strong>₹{currency(cash.shortExcessAmount)}</strong><small>Must be ₹0.00</small></div>
+              <div><span>Short / excess</span><strong>₹{currency(cash.shortExcessAmount)}</strong><small>Must be ₹0</small></div>
             </div>
             <p className="subtle" style={{ marginBottom: 12 }}>
               Clear station cash liability in SCC, or provide a manual override remark to continue. MPOS is not required for this check.
