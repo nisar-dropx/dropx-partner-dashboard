@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { CpsLink as Link } from "@/components/cps-link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { CpsFilters } from "@/components/cps-filters";

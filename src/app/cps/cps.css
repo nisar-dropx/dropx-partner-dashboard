@@ -28,6 +28,9 @@
   background: #fff4e9;
   border-color: #f4b981;
 }
+.cps-tabs a[aria-busy="true"]::after {
+  content: " …";
+}
 .cps-filters {
   display: flex;
   align-items: end;

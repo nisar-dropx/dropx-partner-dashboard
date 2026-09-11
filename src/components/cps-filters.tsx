@@ -25,7 +25,10 @@ export function CpsFilters({
         new FormData(event.currentTarget).forEach((value, key) => {
           if (String(value)) query.set(key, String(value));
         });
-        start(() => router.push(`/cps?${query.toString()}`, { scroll: false }));
+        start(() => {
+          router.push(`/cps?${query.toString()}`, { scroll: false });
+          router.refresh();
+        });
       }}
     >
       <input type="hidden" name="view" value={params.view || "overview"} />
