@@ -34,18 +34,19 @@ const checks = [
   [
     attendanceManagerList.includes('.in("approver_user_id", actorUserIds)')
       && attendanceManagerList.includes("Explicit step assignment")
+      && !attendanceManagerList.includes("connectReporteeMatches")
       && attendanceHrList.includes("loadConnectAttendanceApproveScope")
       && attendanceHrList.includes("connectWorkforceMatches")
-      && !attendanceManagerList.includes("connectReporteeMatches")
-      && !attendanceHrList.includes("connectReporteeMatches")
+      && attendanceHrList.includes("connectReporteeMatches(reportees")
       && rosterSwapList.includes("connectReporteeMatches(reportees"),
-    "manager attendance is assignee-scoped; HR finalization uses People attendance.approve location/company scope"
+    "manager attendance is assignee-scoped; HR finalization uses attendance.approve scope filtered by selected reportees"
   ],
   [
     approvals.includes("Steps are assigned explicitly")
       && approvals.includes("matchesReportee: () => true")
-      && !approvals.includes("connectReporteeMatches(reportees, profileType, profileId)"),
-    "leave and WFH queues are assignee-scoped (not org-chart filtered)"
+      && approvals.includes("listConnectWfhHrApprovals(account, matchesReportee)")
+      && approvals.includes("connectReporteeMatches(reportees, profileType, profileId)"),
+    "leave and WFH manager queues are assignee-scoped; WFH/Site Visit HR finalization follows selected reportees"
   ],
   [
     reimbursements.includes('.in("approver_user_id", userIds)')
