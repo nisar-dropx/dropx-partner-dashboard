@@ -3,6 +3,7 @@
 import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ChevronRight, ClipboardCheck, Clock3, DoorOpen, FileText, Home, LocateFixed, MapPin, MapPinned, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
+import { ConnectAttachmentViewer } from "./connect-attachment-viewer";
 import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
 import { userFacingError } from "@/lib/user-facing-error";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
@@ -320,26 +321,41 @@ function ApprovalRow({
   name,
   meta,
   badge,
-  onReview
+  onReview,
+  onApprove,
+  approveLabel = "Approve",
+  saving
 }: {
   eyebrow: string;
   name: string;
   meta: string;
   badge: ReactNode;
   onReview: () => void;
+  onApprove?: () => void;
+  approveLabel?: string;
+  saving: boolean;
 }) {
   return (
-    <button className="dx-approval-row" onClick={onReview} type="button">
-      <div className="dx-approval-row-main">
-        <p className="dx-approval-row-eyebrow">{eyebrow}</p>
-        <strong>{name}</strong>
-        <p className="dx-approval-row-meta">{meta}</p>
-      </div>
-      <div className="dx-approval-row-end">
+    <div className="dx-approval-row">
+      <button className="dx-approval-row-open" onClick={onReview} type="button">
+        <div className="dx-approval-row-main">
+          <p className="dx-approval-row-eyebrow">{eyebrow}</p>
+          <strong>{name}</strong>
+          <p className="dx-approval-row-meta">{meta}</p>
+        </div>
         {badge}
-        <ChevronRight />
+      </button>
+      <div className="dx-approval-row-actions">
+        <button className="dx-approval-row-view" onClick={onReview} type="button">
+          <ChevronRight />View more
+        </button>
+        {onApprove ? (
+          <button className="dx-approval-row-approve" disabled={saving} onClick={onApprove} type="button">
+            <Check />{approveLabel}
+          </button>
+        ) : null}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -735,7 +751,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
         key={attendanceKey(approval, queue)}
         meta={`${approval.workerCode || "—"} · ${profileLabel(approval.profileType)}`}
         name={approval.workerName}
+        onApprove={() => void act(() => decideAttendance(approval.requestId, "approved", queue))}
         onReview={() => setActiveKey(attendanceKey(approval, queue))}
+        saving={saving}
       />
     );
   }
@@ -765,15 +783,20 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
         {approval.remarks ? <p className="dx-approval-inline-note">{approval.remarks}</p> : null}
         {approval.evidenceUrl ? (
           <div className="dx-approval-evidence compact">
-            <a aria-label="View CCTV proof" className="dx-approval-evidence-photo" href={approval.evidenceUrl} rel="noreferrer" target="_blank">
-              <img alt="" src={approval.evidenceUrl} />
-              <Camera />
-            </a>
+            <ConnectAttachmentViewer
+              files={[{ label: "CCTV proof", url: approval.evidenceUrl }]}
+              title={`${approval.workerName} · CCTV proof`}
+              trigger={<span className="dx-approval-evidence-photo" aria-label="View CCTV proof"><img alt="" src={approval.evidenceUrl} /><Camera /></span>}
+            />
             <div className="dx-approval-evidence-copy">
               <p className="dx-approval-evidence-note">Workplace CCTV proof attached</p>
               <div className="dx-approval-evidence-foot">
                 <small>Submitted {dateTime(approval.createdAt)}</small>
-                <a href={approval.evidenceUrl} rel="noreferrer" target="_blank"><FileText />Open proof</a>
+                <ConnectAttachmentViewer
+                  files={[{ label: "CCTV proof", url: approval.evidenceUrl }]}
+                  title={`${approval.workerName} · CCTV proof`}
+                  trigger={<><FileText />Open proof</>}
+                />
               </div>
             </div>
           </div>
@@ -878,32 +901,6 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
             ) : null}
           </div>
         </div>
-        <div className="dx-approval-tabs-desktop">
-          <button className={section === "time-off" ? "active" : ""} onClick={() => selectSection("time-off")} type="button">
-            Time off<span>{leaveApprovals.length}</span>
-          </button>
-          <button className={section === "reimbursements" ? "active" : ""} onClick={() => selectSection("reimbursements")} type="button">
-            Reimbursements<span>{reimbursementCount}</span>
-          </button>
-          <button className={section === "attendance" ? "active" : ""} onClick={() => selectSection("attendance")} type="button">
-            Attendance<span>{attendanceCount}</span>
-          </button>
-          <button className={section === "rosters" ? "active" : ""} onClick={() => selectSection("rosters")} type="button">
-            Rosters<span>{rosterCount}</span>
-          </button>
-          <button className={section === "location-integrity" ? "active" : ""} onClick={() => selectSection("location-integrity")} type="button">
-            Location<span>{supportPackages.length}</span>
-          </button>
-          <button className={section === "wfh" ? "active" : ""} onClick={() => selectSection("wfh")} type="button">
-            WFH<span>{wfhCount}</span>
-          </button>
-          <button className={section === "site-visit" ? "active" : ""} onClick={() => selectSection("site-visit")} type="button">
-            Site visit<span>{siteVisitCount}</span>
-          </button>
-          <button className={section === "exits" ? "active" : ""} onClick={() => selectSection("exits")} type="button">
-            Exits<span>{exitCount}</span>
-          </button>
-        </div>
       </nav>
     {loading ? <div className="dx-loader"><span /><small>Loading approvals…</small></div> : null}
 
@@ -916,7 +913,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={approval.id}
               meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
               name={approval.requesterName}
+              onApprove={() => void act(() => decideLeave(approval.requestId, "approved"))}
               onReview={() => setActiveKey(`time-off:${approval.id}`)}
+              saving={saving}
             />
           )) : (
             <div className="dx-empty"><Clock3 /><strong>No time-off approvals</strong><small>No time-off steps assigned to you are waiting.</small></div>
@@ -965,7 +964,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   key={approval.id}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
                   name={approval.requesterName}
+                  onApprove={() => void act(() => decideWfh(approval.requestId, "approved", "manager"))}
                   onReview={() => setActiveKey(`wfh:manager:${approval.id}`)}
+                  saving={saving}
                 />
               ))}
             </>
@@ -983,7 +984,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   key={`hr:${approval.id}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
                   name={approval.requesterName}
+                  onApprove={() => void act(() => decideWfh(approval.requestId, "approved", "hr"))}
                   onReview={() => setActiveKey(`wfh:hr:${approval.id}`)}
+                  saving={saving}
                 />
               ))}
             </>
@@ -1047,7 +1050,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   key={approval.id}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
                   name={approval.requesterName}
+                  onApprove={() => void act(() => decideSiteVisit(approval.requestId, "approved", "manager"))}
                   onReview={() => setActiveKey(`site-visit:manager:${approval.id}`)}
+                  saving={saving}
                 />
               ))}
             </>
@@ -1065,7 +1070,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   key={`hr:${approval.id}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
                   name={approval.requesterName}
+                  onApprove={() => void act(() => decideSiteVisit(approval.requestId, "approved", "hr"))}
                   onReview={() => setActiveKey(`site-visit:hr:${approval.id}`)}
+                  saving={saving}
                 />
               ))}
             </>
@@ -1157,7 +1164,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={`swap:${approval.id}`}
               meta={`${approval.requesterCode || "—"} ↔ ${approval.partnerCode || "—"}`}
               name={`${approval.requesterName} ↔ ${approval.partnerName}`}
+              onApprove={() => void act(() => decideRosterSwap(approval.id, "approved"))}
               onReview={() => setActiveKey(`roster-swap:${approval.id}`)}
+              saving={saving}
             />
           )) : null}
           {rosterApprovals.length ? rosterApprovals.map((approval) => (
@@ -1167,7 +1176,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={approval.id}
               meta={`${approval.rowCount} roster cell${approval.rowCount === 1 ? "" : "s"} · Step ${approval.stageNumber}`}
               name={approval.name || `${approval.stationName || approval.stationCode} weekly roster`}
+              onApprove={() => void act(() => decideRoster(approval, "approved"))}
               onReview={() => setActiveKey(`roster:${approval.id}`)}
+              saving={saving}
             />
           )) : null}
           {returnedRosters.length ? returnedRosters.map((item) => (
@@ -1178,6 +1189,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               meta={`Updated ${dateTime(item.updatedAt)} · edit shifts here, then resubmit`}
               name={item.name || `${item.stationName || item.stationCode} weekly roster`}
               onReview={() => setActiveKey(`roster-returned:${item.planId}`)}
+              saving={saving}
             />
           )) : null}
           {!rosterSwapApprovals.length && !rosterApprovals.length && !returnedRosters.length ? (
@@ -1289,7 +1301,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={item.id}
               meta={`${item.workerCode || "—"} · ${profileLabel(item.profileType)}`}
               name={item.workerName}
+              onApprove={() => void act(() => decideSupportPackage(item.id, "approved"))}
               onReview={() => setActiveKey(`location:${item.id}`)}
+              saving={saving}
             />
           )) : (
             <div className="dx-empty"><LocateFixed /><strong>No location checks</strong><small>No support packages from your {scopeName} are waiting.</small></div>
@@ -1308,10 +1322,11 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                 />
                 <div className="dx-approval-evidence">
                   {item.selfieUrl ? (
-                    <a aria-label="View support selfie" className="dx-approval-evidence-photo" href={item.selfieUrl} rel="noreferrer" target="_blank">
-                      <img alt="" src={item.selfieUrl} />
-                      <Camera />
-                    </a>
+                    <ConnectAttachmentViewer
+                      files={[{ label: "Support selfie", url: item.selfieUrl }]}
+                      title={`${item.workerName} · Support selfie`}
+                      trigger={<span className="dx-approval-evidence-photo" aria-label="View support selfie"><img alt="" src={item.selfieUrl} /><Camera /></span>}
+                    />
                   ) : (
                     <div aria-hidden="true" className="dx-approval-evidence-photo missing"><Camera /></div>
                   )}
@@ -1349,7 +1364,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={`pre-${approval.id}`}
               meta={approval.request.requesterCode || "—"}
               name={approval.request.requesterName}
+              onApprove={() => void act(() => decidePreRequest(approval.request.id, "approved"))}
               onReview={() => setActiveKey(`reimbursement-pre:${approval.request.id}`)}
+              saving={saving}
             />
           ))}
           {reimbursements.map((approval) => (
@@ -1359,7 +1376,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={approval.id}
               meta={approval.claim.purpose}
               name={approval.claim.requesterName}
+              onApprove={() => void act(() => decideReimbursement(approval.claim.id, "approved"))}
               onReview={() => setActiveKey(`reimbursement-claim:${approval.claim.id}`)}
+              saving={saving}
             />
           ))}
           {!preRequestApprovals.length && !reimbursements.length ? (
@@ -1418,7 +1437,13 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   {approval.claim.attachments?.filter((attachment) => attachment.url).map((attachment) => (
                     <div key={attachment.id}>
                       <dt>Receipt pack</dt>
-                      <dd><a href={attachment.url ?? "#"} rel="noreferrer" target="_blank"><FileText />{attachment.file_name}</a></dd>
+                      <dd>
+                        <ConnectAttachmentViewer
+                          files={[{ label: attachment.file_name || "Receipt", url: attachment.url as string, fileName: attachment.file_name }]}
+                          title={`${approval.claim.requesterName} · ${attachment.file_name || "Receipt"}`}
+                          trigger={<><FileText />{attachment.file_name}</>}
+                        />
+                      </dd>
                     </div>
                   ))}
                 </dl>
@@ -1444,7 +1469,10 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={`exit-withdraw:${approval.caseId}`}
               meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
               name={approval.requesterName}
+              approveLabel="Accept withdrawal"
+              onApprove={() => void act(() => decideExitWithdrawal(approval.caseId, "approved"))}
               onReview={() => setActiveKey(`exit-withdraw:${approval.caseId}`)}
+              saving={saving}
             />
           ))}
           {exitApprovals.map((approval) => (
@@ -1454,7 +1482,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={approval.id}
               meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
               name={approval.requesterName}
+              onApprove={() => void act(() => decideExit(approval.id, "approved"))}
               onReview={() => setActiveKey(`exit:${approval.id}`)}
+              saving={saving}
             />
           ))}
           {!exitApprovals.length && !exitWithdrawalApprovals.length ? (

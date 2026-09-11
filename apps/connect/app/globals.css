@@ -16103,9 +16103,7 @@ html.native-app .dx-app-install {
   display: flex;
   gap: 6px;
   padding: 4px;
-  overflow-x: auto;
-  overflow-y: visible;
-  scrollbar-width: none;
+  overflow: visible;
   background: #eef1f5;
   border-radius: 12px;
 }
@@ -16115,15 +16113,11 @@ html.native-app .dx-app-install {
 }
 
 .dx-approval-tabs-primary {
-  display: none;
-  width: 100%;
-  gap: 6px;
-}
-
-.dx-approval-tabs-desktop {
   display: flex;
+  position: relative;
   width: 100%;
   gap: 6px;
+  overflow: visible;
 }
 
 .dx-approval-others {
@@ -16217,22 +16211,35 @@ html.native-app .dx-app-install {
 
 .dx-approval-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px 12px;
   width: 100%;
   padding: 12px 14px;
   background: #fff;
   border: 1px solid #e4e7ec;
   border-radius: 14px;
   box-shadow: 0 1px 4px rgba(16, 24, 40, 0.03);
-  text-align: left;
-  cursor: pointer;
 }
 
 .dx-approval-row:hover,
-.dx-approval-row:focus-visible {
+.dx-approval-row:focus-within {
   border-color: #c94f0d;
+}
+
+.dx-approval-row-open {
+  display: flex;
+  flex: 1 1 220px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
 }
 
 .dx-approval-row-main {
@@ -16272,16 +16279,52 @@ html.native-app .dx-app-install {
   text-overflow: ellipsis;
 }
 
-.dx-approval-row-end {
+.dx-approval-row-actions {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
-.dx-approval-row-end svg {
-  width: 16px;
+.dx-approval-row-view,
+.dx-approval-row-approve {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 7px 11px;
+  border-radius: 9px;
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dx-approval-row-view {
+  color: #344054;
+  background: #f2f4f7;
+  border: 1px solid #e4e7ec;
+}
+
+.dx-approval-row-view svg {
+  width: 13px;
   color: #98a2b3;
+}
+
+.dx-approval-row-approve {
+  color: #fff;
+  background: #087453;
+  border: 0;
+}
+
+.dx-approval-row-approve svg {
+  width: 13px;
+}
+
+.dx-approval-row-approve:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .dx-approval-modal-backdrop {
@@ -16357,6 +16400,159 @@ html.native-app .dx-app-install {
   .dx-approval-modal {
     border-radius: 20px;
   }
+}
+
+.dx-attachment-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dx-attachment-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(16, 24, 40, 0.6);
+}
+
+.dx-attachment-modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 12px 36px rgba(16, 24, 40, 0.3);
+}
+
+.dx-attachment-modal-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #fff;
+  border-bottom: 1px solid #e4e7ec;
+}
+
+.dx-attachment-modal-head h3 {
+  margin: 2px 0 0;
+  color: #101828;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.dx-attachment-modal-head button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: #667085;
+  background: #f2f4f7;
+  border: none;
+  border-radius: 99px;
+  cursor: pointer;
+}
+
+.dx-attachment-modal-head button svg {
+  width: 16px;
+}
+
+.dx-attachment-modal-body {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.dx-attachment-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.dx-attachment-tabs button {
+  padding: 6px 10px;
+  color: #667085;
+  background: #f2f4f7;
+  border: 0;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.dx-attachment-tabs button.active {
+  color: #fff;
+  background: #c94f0d;
+}
+
+.dx-attachment-preview {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #0b0d12;
+  border-radius: 12px;
+}
+
+.dx-attachment-preview img {
+  max-width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+}
+
+.dx-attachment-modal-foot {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px 16px;
+}
+
+.dx-attachment-modal-foot a,
+.dx-attachment-modal-foot button {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.dx-attachment-modal-foot a svg,
+.dx-attachment-modal-foot button svg {
+  width: 14px;
+}
+
+.dx-attachment-open {
+  color: #344054;
+  background: #f2f4f7;
+}
+
+.dx-attachment-download {
+  color: #fff;
+  background: #c94f0d;
+  border: 0;
+}
+
+.dx-attachment-download:disabled {
+  opacity: 0.6;
 }
 
 .dx-approval-card-head {
@@ -16445,7 +16641,8 @@ html.native-app .dx-app-install {
   line-height: 1.45;
 }
 
-.dx-approval-facts dd a {
+.dx-approval-facts dd a,
+.dx-approval-facts dd .dx-attachment-trigger {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -16455,7 +16652,8 @@ html.native-app .dx-app-install {
   font-weight: 650;
 }
 
-.dx-approval-facts dd a svg {
+.dx-approval-facts dd a svg,
+.dx-approval-facts dd .dx-attachment-trigger svg {
   width: 12px;
 }
 
@@ -16562,7 +16760,8 @@ html.native-app .dx-app-install {
   line-height: 1.35;
 }
 
-.dx-approval-inbox .dx-approval-evidence-foot a {
+.dx-approval-inbox .dx-approval-evidence-foot a,
+.dx-approval-inbox .dx-approval-evidence-foot .dx-attachment-trigger {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -16572,7 +16771,8 @@ html.native-app .dx-app-install {
   white-space: nowrap;
 }
 
-.dx-approval-inbox .dx-approval-evidence-foot a svg {
+.dx-approval-inbox .dx-approval-evidence-foot a svg,
+.dx-approval-inbox .dx-approval-evidence-foot .dx-attachment-trigger svg {
   width: 12px;
 }
 
@@ -16806,16 +17006,6 @@ html.native-app .dx-app-install {
   .dx-approval-tabs button {
     font-size: 11px;
     padding-inline: 10px;
-  }
-
-  .dx-approval-tabs-primary {
-    display: flex;
-    position: relative;
-    overflow: visible;
-  }
-
-  .dx-approval-tabs-desktop {
-    display: none;
   }
 
   .dx-approval-tabs {
