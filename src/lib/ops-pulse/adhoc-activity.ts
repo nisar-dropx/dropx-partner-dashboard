@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
-import { adHocCategory, isAdHocHead, isApprovedPayment } from "@/lib/ops-pulse/performance-review";
+import { adHocCategory, isAdHocHead, isApprovedPayment, paymentReason } from "@/lib/ops-pulse/performance-review";
 import { readTrendPages } from "@/lib/ops-pulse/review-trends-data";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -26,6 +26,13 @@ type AdHocRequestRow = {
   approval_status: string | null;
   current_approver_user_id: string | null;
   current_approver_role_id: string | null;
+  remarks: string | null;
+  notes: string | null;
+  details: Record<string, unknown> | null;
+  payment_request_answers: Array<{
+    answer_value: string | null;
+    payment_head_questions: { question_text: string | null } | Array<{ question_text: string | null }> | null;
+  }> | null;
 };
 
 type AdHocCashbookRow = {
@@ -50,6 +57,18 @@ export type AdHocActivityDay = {
   cashbookVanAmount: number;
   totalCount: number;
   totalAmount: number;
+  entries: AdHocActivityEntry[];
+};
+
+export type AdHocActivityEntry = {
+  id: string;
+  source: "Payment request" | "Cashbook";
+  reference: string;
+  category: "Van" | "DA";
+  amount: number;
+  reason: string;
+  remark: string;
+  countedInTotal: boolean;
 };
 
 export type AdHocActivityStation = {
@@ -167,6 +186,32 @@ function cashbookRequestReference(row: AdHocCashbookRow) {
   return candidates.map(normalizedWords).find((value) => /^[A-Z0-9]{8,20}$/.test(value)) ?? null;
 }
 
+function answerReason(row: AdHocRequestRow) {
+  for (const answer of row.payment_request_answers ?? []) {
+    const relation = answer.payment_head_questions;
+    const question = Array.isArray(relation) ? relation[0] : relation;
+    const label = normalizedWords(question?.question_text);
+    const value = String(answer.answer_value ?? "").trim();
+    if (value && /(REASON|PURPOSE|DESCRIPTION|DEPLOYMENT)/.test(label)) return value;
+  }
+  return "";
+}
+
+function requestReason(row: AdHocRequestRow) {
+  const fromAnswer = answerReason(row);
+  if (fromAnswer) return fromAnswer;
+  const details = row.details ?? {};
+  for (const key of ["reason", "purpose", "description", "deployment_reason"]) {
+    const value = String(details[key] ?? "").trim();
+    if (value) return value;
+  }
+  return paymentReason(row);
+}
+
+function requestRemark(row: AdHocRequestRow) {
+  return String(row.remarks ?? row.notes ?? "").trim() || "No remark recorded";
+}
+
 function blankStation(location: CodLocationRow): AdHocActivityStation {
   return {
     id: location.id,
@@ -196,7 +241,8 @@ function blankDay(date: string): AdHocActivityDay {
     cashbookVanCount: 0,
     cashbookVanAmount: 0,
     totalCount: 0,
-    totalAmount: 0
+    totalAmount: 0,
+    entries: []
   };
 }
 
@@ -246,7 +292,7 @@ export async function loadAdHocActivity(
   try {
     const requestPage = (scopeColumn: "location_id" | "station_code" | "location_code", values: string[], offset: number) => db
       .from("payment_requests")
-      .select("id,request_no,location_id,station_code,location_code,payment_head_id,work_date,amount,amount_approved,amount_requested,status,approval_status,current_approver_user_id,current_approver_role_id")
+      .select("id,request_no,location_id,station_code,location_code,payment_head_id,work_date,amount,amount_approved,amount_requested,status,approval_status,current_approver_user_id,current_approver_role_id,remarks,notes,details,payment_request_answers(answer_value,payment_head_questions(question_text))")
       .eq("company_id", companyId)
       .in(scopeColumn, values)
       .in("payment_head_id", heads.map((head) => head.id))
@@ -306,6 +352,18 @@ export async function loadAdHocActivity(
       day.daCount += 1;
       day.daAmount += requestAmount;
     }
+    if (category === "Van" || category === "DA") {
+      day.entries.push({
+        id: request.id,
+        source: "Payment request",
+        reference: request.request_no || request.id,
+        category,
+        amount: requestAmount,
+        reason: requestReason(request),
+        remark: requestRemark(request),
+        countedInTotal: true
+      });
+    }
     station.totalCount += 1;
     station.totalAmount += requestAmount;
     day.totalCount += 1;
@@ -327,7 +385,8 @@ export async function loadAdHocActivity(
     day.cashbookVanAmount += cashbookAmount;
 
     const linkedRequest = cashbookRequestReference(cashbook);
-    if (!linkedRequest || !approvedRequestNumbers.has(linkedRequest)) {
+    const countedInTotal = !linkedRequest || !approvedRequestNumbers.has(linkedRequest);
+    if (countedInTotal) {
       station.vanCount += 1;
       station.vanAmount += cashbookAmount;
       station.totalCount += 1;
@@ -337,6 +396,16 @@ export async function loadAdHocActivity(
       day.totalCount += 1;
       day.totalAmount += cashbookAmount;
     }
+    day.entries.push({
+      id: cashbook.id,
+      source: "Cashbook",
+      reference: linkedRequest || cashbook.id,
+      category: "Van",
+      amount: cashbookAmount,
+      reason: String(cashbook.cps_sub_head || cashbook.category || cashbook.expense_type || "Adhoc Van").trim(),
+      remark: String(cashbook.remarks ?? "").trim() || "No remark recorded",
+      countedInTotal
+    });
     stationDays.set(cashbook.expense_date, day);
     daysByStation.set(station.id, stationDays);
   }

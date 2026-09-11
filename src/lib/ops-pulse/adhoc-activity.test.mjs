@@ -103,7 +103,11 @@ test("today's approved request and Cashbook-only Van are counted, while linked C
     status: "approved",
     approval_status: "FINAL_APPROVED",
     current_approver_user_id: null,
-    current_approver_role_id: null
+    current_approver_role_id: null,
+    remarks: "Manager approved the additional vehicle",
+    notes: null,
+    details: { reason: "Volume exceeded the planned vehicle capacity" },
+    payment_request_answers: []
   };
   const cashbook = [
     { id: "cash-1", expense_date: "2026-09-07", station_code: "QLDA", category: "Van Adhoc", cps_sub_head: null, expense_type: null, amount: 150, remarks: "PAY12345", raw_payload: {} },
@@ -120,7 +124,8 @@ test("today's approved request and Cashbook-only Van are counted, while linked C
     "@/lib/ops-pulse/performance-review": {
       isAdHocHead: () => true,
       adHocCategory: () => "Van",
-      isApprovedPayment: (row) => row.status === "approved"
+      isApprovedPayment: (row) => row.status === "approved",
+      paymentReason: (row) => row.remarks || "Reason not recorded in the request"
     },
     "@/lib/ops-pulse/review-trends-data": { readTrendPages: async (read) => (await read(0)).data },
     "@/lib/supabase-admin": { supabaseAdmin: db }
@@ -134,9 +139,57 @@ test("today's approved request and Cashbook-only Van are counted, while linked C
   assert.equal(result.totals.cashbookVanAmount, 220);
   assert.equal(result.totals.totalCount, 2);
   assert.equal(result.totals.totalAmount, 220);
+  assert.deepEqual(result.stations[0].days[0].entries.map((entry) => ({
+    source: entry.source,
+    reference: entry.reference,
+    reason: entry.reason,
+    remark: entry.remark,
+    countedInTotal: entry.countedInTotal
+  })), [
+    {
+      source: "Payment request",
+      reference: "PAY12345",
+      reason: "Volume exceeded the planned vehicle capacity",
+      remark: "Manager approved the additional vehicle",
+      countedInTotal: true
+    },
+    {
+      source: "Cashbook",
+      reference: "PAY12345",
+      reason: "Van Adhoc",
+      remark: "PAY12345",
+      countedInTotal: false
+    },
+    {
+      source: "Cashbook",
+      reference: "cash-2",
+      reason: "Adhoc Van",
+      remark: "No remark recorded",
+      countedInTotal: true
+    }
+  ]);
   assert.deepEqual(
     calls.filter((call) => call.table === "payment_requests")
       .flatMap((call) => call.operations.filter((operation) => operation[0] === "in").map((operation) => operation[1])),
     ["location_id", "payment_head_id", "station_code", "payment_head_id", "location_code", "payment_head_id"]
   );
+});
+
+test("station sorting covers every summary column without mutating the source rows", () => {
+  const module = compile("./adhoc-activity-sort.ts");
+  const stations = [
+    { code: "ZZZ", vanCount: 1, vanAmount: 200, daCount: 4, daAmount: 80, totalCount: 5, totalAmount: 280 },
+    { code: "AAA", vanCount: 3, vanAmount: 150, daCount: 2, daAmount: 300, totalCount: 5, totalAmount: 450 },
+    { code: "MMM", vanCount: 2, vanAmount: 100, daCount: 1, daAmount: 50, totalCount: 3, totalAmount: 150 }
+  ];
+  const originalOrder = stations.map((station) => station.code);
+
+  assert.deepEqual(module.sortAdHocStations(stations, "station", "asc").map((station) => station.code), ["AAA", "MMM", "ZZZ"]);
+  for (const key of ["vanCount", "vanAmount", "daCount", "daAmount", "totalCount", "totalAmount"]) {
+    const values = module.sortAdHocStations(stations, key, "desc").map((station) => station[key]);
+    assert.deepEqual(values, [...values].sort((left, right) => right - left), `${key} should sort descending`);
+  }
+  assert.deepEqual(stations.map((station) => station.code), originalOrder);
+  assert.equal(module.validAdHocSortKey("unknown"), "totalAmount");
+  assert.equal(module.validAdHocSortDirection("unexpected"), "desc");
 });
