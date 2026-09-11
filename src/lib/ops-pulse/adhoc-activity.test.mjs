@@ -107,7 +107,10 @@ test("today's approved request and Cashbook-only Van are counted, while linked C
     remarks: "Manager approved the additional vehicle",
     notes: null,
     details: { reason: "Volume exceeded the planned vehicle capacity" },
-    payment_request_answers: []
+    payment_request_answers: [
+      { answer_value: "2026-09-07", payment_head_questions: { question_text: "Deployment date" } },
+      { answer_value: "Regular vehicle breakdown", payment_head_questions: { question_text: "Reason for adhoc deployment" } }
+    ]
   };
   const cashbook = [
     { id: "cash-1", expense_date: "2026-09-07", station_code: "QLDA", category: "Van Adhoc", cps_sub_head: null, expense_type: null, amount: 150, remarks: "PAY12345", raw_payload: {} },
@@ -149,7 +152,7 @@ test("today's approved request and Cashbook-only Van are counted, while linked C
     {
       source: "Payment request",
       reference: "PAY12345",
-      reason: "Volume exceeded the planned vehicle capacity",
+      reason: "Regular vehicle breakdown",
       remark: "Manager approved the additional vehicle",
       countedInTotal: true
     },
