@@ -1,8 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  compress: true,
   // Allow Connect API routes to reuse monorepo root libs (attendance reports, etc.).
   experimental: {
-    externalDir: true
+    externalDir: true,
+    optimizePackageImports: ["lucide-react"]
   },
   async headers() {
     return [

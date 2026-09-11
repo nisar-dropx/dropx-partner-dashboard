@@ -1,7 +1,7 @@
 {
   "regions": ["sin1"],
   "crons": [
-    {"path":"/api/cron/portal-notifications","schedule":"* * * * *"},
+    {"path":"/api/cron/portal-notifications","schedule":"*/5 * * * *"},
     { "path": "/api/cron/edd-review-history", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/edd-stock-refresh", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/edd-verification", "schedule": "* * * * *" },
