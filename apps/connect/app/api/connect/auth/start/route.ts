@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { userFacingError } from "@/lib/user-facing-error";
 import { findConnectAccounts, normalizeConnectMobile } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -32,6 +33,6 @@ export async function POST(request: Request) {
       accounts
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to check mobile number." }, { status: 500 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to check mobile number.") }, { status: 500 });
   }
 }

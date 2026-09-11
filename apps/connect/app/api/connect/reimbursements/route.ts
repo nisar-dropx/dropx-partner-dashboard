@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { userFacingError } from "@/lib/user-facing-error";
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { resolveConnectActorUserId, resolveConnectActorUserIds } from "../../../../src/lib/connect-approver-identity";
@@ -197,7 +198,7 @@ export async function GET(request: Request) {
     const payload = await claimPayload(account);
     return NextResponse.json({ ...payload, scope }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load reimbursements." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load reimbursements.") }, { status: 400 });
   }
 }
 
@@ -535,7 +536,7 @@ export async function POST(request: Request) {
     if (kind === "pre_request") return await submitPreRequest(form, account);
     return await submitClaim(form, account);
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to submit reimbursement." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to submit reimbursement.") }, { status: 400 });
   }
 }
 
@@ -642,6 +643,6 @@ export async function PATCH(request: Request) {
     await notifyExpenseUser({ companyId: account.companyId, claimId, recipientUserId: claim.data.claimant_user_id, eventCode: `REIMBURSEMENT_${action.toUpperCase()}`, title: action === "approved" ? "Reimbursement updated" : `Reimbursement ${action}`, body: nextUserId ? `${claim.data.claim_no} was approved and moved to the next approver.` : decision?.claim_status === "approved_for_payment" ? `${claim.data.claim_no} is approved and sent to Payments.` : `${claim.data.claim_no} was ${action}.${note ? ` ${note}` : ""}`, emailSubject: `Reimbursement ${action} · ${claim.data.claim_no}`, emailBody: nextUserId ? `${claim.data.claim_no} was approved and has moved to the next approver.` : decision?.claim_status === "approved_for_payment" ? `${claim.data.claim_no} is fully approved and has been sent to Payments. You can track processing and UTR in DropX One.` : `${claim.data.claim_no} was ${action}.${note ? `\n\nReason: ${note}` : ""}` });
     return NextResponse.json({ ok: true, notice: decision?.claim_status === "approved_for_payment" ? "Approved and sent to Payments." : `Claim ${action}.` });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to update reimbursement." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to update reimbursement.") }, { status: 400 });
   }
 }

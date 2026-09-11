@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { userFacingError } from "@/lib/user-facing-error";
 import { findConnectAccounts } from "@/lib/connect-auth";
 import { normalizeMobile, verifyOtpHash } from "@/lib/connect-otp";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -90,6 +91,6 @@ export async function POST(request: Request) {
       accounts
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to verify OTP." }, { status: 500 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to verify OTP.") }, { status: 500 });
   }
 }

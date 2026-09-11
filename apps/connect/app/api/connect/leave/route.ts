@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { userFacingError } from "@/lib/user-facing-error";
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { resolveWorkforceLeaveApproval, resolveWorkforceLeaveEntitlements, type LeaveWorkerType } from "../../../../src/lib/connect-leave-data";
@@ -251,7 +252,7 @@ export async function GET(request: Request) {
     const previewDays = Math.max(1, Number(url.searchParams.get("days") || 1) || 1);
     return NextResponse.json(await leavePayload(account, type, previewDays), { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load time off." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load time off.") }, { status: 400 });
   }
 }
 
@@ -321,7 +322,7 @@ export async function POST(request: Request) {
     let notification: Awaited<ReturnType<typeof notifyConnectLeaveSubmitted>> | null = null;
     if (!approval.direct) {
       try { notification = await notifyConnectLeaveSubmitted({ companyId: account.companyId, requestId }); }
-      catch (error) { notification = { status: "failed", error: error instanceof Error ? error.message : "Email delivery failed." }; }
+      catch (error) { notification = { status: "failed", error: userFacingError(error, "Email delivery failed.") }; }
     }
     return NextResponse.json({
       ok: true,
@@ -332,7 +333,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     await removeProof(uploadedPath);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to submit time off." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to submit time off.") }, { status: 400 });
   }
 }
 
@@ -380,7 +381,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ ok: true, notice: "Time-off request updated." });
   } catch (error) {
     await removeProof(uploadedPath);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to update time off." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to update time off.") }, { status: 400 });
   }
 }
 
@@ -399,6 +400,6 @@ export async function DELETE(request: Request) {
     if (result.error) throw new Error(result.error.message);
     return NextResponse.json({ ok: true, notice: "Time-off request withdrawn." });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to withdraw time off." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to withdraw time off.") }, { status: 400 });
   }
 }

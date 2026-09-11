@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { userFacingError } from "@/lib/user-facing-error";
 import { findConnectAccounts } from "@/lib/connect-auth";
 import { createOtpSecretHash, clampOtpExpiryMinutes, generateOtp, normalizeMobile } from "@/lib/connect-otp";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -178,6 +179,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, channel: "whatsapp", expiresInMinutes: expiryMinutes });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to send OTP." }, { status: 500 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to send OTP.") }, { status: 500 });
   }
 }

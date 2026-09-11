@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveConnectAttendanceWorker } from "@/lib/connect-attendance-worker";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveAttendancePayDayType } from "@/lib/attendance-pay-day";
+import { userFacingError } from "@/lib/user-facing-error";
 import { fillAttendanceCalendarGaps, loadAttendanceReportRows } from "../../../../../../src/lib/biometric/attendance";
 import { resolveAttendanceRegularizationApprovers } from "../../../../../../src/lib/attendance-regularization-workflow";
 import { notifyAttendanceApprovalRequired } from "../../../../../../src/lib/connect-attendance-notifications";
@@ -49,7 +50,7 @@ function mapConfigError(message: string) {
 }
 
 function errorResponse(error: unknown, fallback: string) {
-  const raw = error instanceof Error ? error.message : fallback;
+  const raw = userFacingError(error, fallback);
   const message = mapConfigError(raw);
   const status = /login|expired/i.test(message) ? 401 : 400;
   return NextResponse.json({ error: message }, { status });

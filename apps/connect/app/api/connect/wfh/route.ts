@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { userFacingError } from "@/lib/user-facing-error";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import {
   cancelConnectWfhRequest,
@@ -32,7 +33,7 @@ export async function GET(request: Request) {
       headers: { "Cache-Control": "private, no-store" }
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load work from home." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load work from home.") }, { status: 400 });
   }
 }
 
@@ -50,7 +51,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to submit work from home." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to submit work from home.") }, { status: 400 });
   }
 }
 
@@ -66,6 +67,6 @@ export async function DELETE(request: Request) {
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to withdraw work from home." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to withdraw work from home.") }, { status: 400 });
   }
 }

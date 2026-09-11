@@ -1,4 +1,5 @@
 import { requireConnectAccount, type ConnectAccount } from "../../../../../../src/lib/connect-auth";
+import { userFacingError } from "@/lib/user-facing-error";
 import { createConnectPayDocument } from "../../../../../../src/lib/connect-pay-document";
 import { supabaseAdmin } from "../../../../../../src/lib/supabase-admin";
 
@@ -90,6 +91,6 @@ export async function GET(request: Request, { params }: { params: { kind: string
       "X-Content-Type-Options": "nosniff"
     }});
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Unable to download document." }, { status: 400 });
+    return Response.json({ error: userFacingError(error, "Unable to download document.") }, { status: 400 });
   }
 }

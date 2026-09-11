@@ -12,6 +12,7 @@ import {
   parseOptionalNumber,
   resolveCompanyPunchGeofence
 } from "@/lib/connect-app-gps-punch";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +51,7 @@ async function readPunchBody(request: NextRequest): Promise<PunchBody> {
 }
 
 function errorResponse(error: unknown, fallback: string) {
-  const raw = error instanceof Error ? error.message : fallback;
+  const raw = userFacingError(error, fallback);
   const message = mapSupabaseConfigError(raw);
   const status = /login|expired/i.test(message) ? 401 : 400;
   return NextResponse.json({ error: message }, { status });

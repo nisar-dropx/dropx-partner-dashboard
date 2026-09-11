@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { userFacingError } from "@/lib/user-facing-error";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { notifyEmployeeExitSubmitted, notifyEmployeeExitWithdrawal, notifyExitApprovalRequired, notifyExitWithdrawalReviewer } from "../../../../src/lib/connect-exit-notifications";
 import { createAppNotification } from "../../../../src/lib/app-notifications";
@@ -559,7 +560,7 @@ export async function GET(request: Request) {
       exitCase: latestCase ? await serializeCase(latestCase) : null
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load exit request." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load exit request.") }, { status: 400 });
   }
 }
 
@@ -771,6 +772,6 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ ok: true, notice: `Resignation submitted successfully. Case ${caseNumber} has been sent for review.` });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to submit exit request." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to submit exit request.") }, { status: 400 });
   }
 }

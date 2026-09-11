@@ -1,4 +1,5 @@
 import { requireConnectAccount, type ConnectAccount } from "../../../../../../src/lib/connect-auth";
+import { userFacingError } from "@/lib/user-facing-error";
 import { supabaseAdmin } from "../../../../../../src/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +34,6 @@ export async function GET(request: Request, { params }: { params: { id: string }
       }
     });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Unable to download medical proof." }, { status: 400 });
+    return Response.json({ error: userFacingError(error, "Unable to download medical proof.") }, { status: 400 });
   }
 }

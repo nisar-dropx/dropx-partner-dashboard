@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { userFacingError } from "@/lib/user-facing-error";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { connectSessionCookieName, findConnectAccounts } from "../../../../src/lib/connect-auth";
@@ -128,7 +129,7 @@ export async function GET(request: Request) {
       draft: await serializeDraft(account.id, account.companyId, account.profileType)
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load draft." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load draft.") }, { status: 400 });
   }
 }
 
@@ -184,6 +185,6 @@ export async function POST(request: Request) {
       notice: "Details saved in draft"
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to save draft." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to save draft.") }, { status: 400 });
   }
 }

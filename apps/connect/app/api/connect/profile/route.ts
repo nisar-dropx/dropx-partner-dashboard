@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { userFacingError } from "@/lib/user-facing-error";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { connectSessionCookieName, findConnectAccounts } from "../../../../src/lib/connect-auth";
@@ -296,7 +297,7 @@ export async function GET(request: Request) {
     const employee = await loadEmployee(account.id, account.companyId);
     return NextResponse.json({ ok: true, profile: await serializeEmployee(employee) });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load profile." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load profile.") }, { status: 400 });
   }
 }
 
@@ -440,6 +441,6 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, profile: await serializeEmployee(employee), notice: "Profile saved successfully." });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to save profile." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to save profile.") }, { status: 400 });
   }
 }

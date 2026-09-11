@@ -4,6 +4,7 @@ import {
   finalizeBiometricPunchLocationIfMissing,
   recordBiometricPunchLocation
 } from "@/lib/connect-biometric-punch-location";
+import { userFacingError } from "@/lib/user-facing-error";
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to record punch location.";
+    const message = userFacingError(error, "Unable to record punch location.");
     const status = message.includes("Login") ? 401 : 400;
     return NextResponse.json({ error: message }, { status });
   }

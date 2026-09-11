@@ -100,7 +100,7 @@ export async function GET(request: Request) {
     ]);
     return NextResponse.json({ scope, leaveApprovals, wfhApprovals, wfhHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load approvals." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load approvals.") }, { status: 400 });
   }
 }
 

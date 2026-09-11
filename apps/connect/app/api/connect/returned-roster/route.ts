@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { userFacingError } from "@/lib/user-facing-error";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { loadConnectReturnedRosterEditor, updateConnectReturnedRosterCell } from "../../../../src/lib/connect-manager-approvals";
 
@@ -20,7 +21,7 @@ export async function GET(request: Request) {
     const editor = await loadConnectReturnedRosterEditor(account, planId);
     return NextResponse.json(editor, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load returned roster." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load returned roster.") }, { status: 400 });
   }
 }
 
@@ -31,6 +32,6 @@ export async function PATCH(request: Request) {
     const notice = await updateConnectReturnedRosterCell(account, body);
     return NextResponse.json({ ok: true, notice });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to update roster cell." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to update roster cell.") }, { status: 400 });
   }
 }

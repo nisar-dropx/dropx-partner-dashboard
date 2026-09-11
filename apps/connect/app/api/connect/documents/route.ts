@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { userFacingError } from "@/lib/user-facing-error";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
@@ -51,7 +52,7 @@ export async function GET(request: Request) {
       summary: { total: documents.length, pay: pay.data?.length ?? 0, issued: issued.data?.length ?? 0, requests: requests.data?.filter((row) => ["submitted", "in_progress", "returned"].includes(row.status)).length ?? 0 }
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load documents." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load documents.") }, { status: 400 });
   }
 }
 
@@ -76,6 +77,6 @@ export async function POST(request: Request) {
     if (result.error) throw new Error(result.error.message);
     return NextResponse.json({ requestId: result.data, message: "Document request submitted to People & Culture." }, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to submit document request." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to submit document request.") }, { status: 400 });
   }
 }
