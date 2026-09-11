@@ -13166,17 +13166,24 @@ html.native-app .dx-app-install {
   white-space: nowrap;
 }
 
+/* Fully self-contained: earlier rules for this selector only set the red
+   fallback colors, so this block (which wins by source order) restates
+   every layout property instead of depending on it for centering. */
 .dx-notification-trigger b {
+  position: absolute;
   top: -4px;
   right: -4px;
+  display: grid;
   min-width: 18px;
   height: 18px;
   padding: 0 4px;
+  place-items: center;
   border: 2px solid #f8f9fd;
   border-radius: 999px;
   background: linear-gradient(135deg, #ff6b2c, #dc2f72);
+  color: #fff;
   font-size: 8px;
-  line-height: 14px;
+  line-height: 1;
 }
 
 .dx-content {
@@ -17498,6 +17505,7 @@ img.dx-selfie-live {
 /* Keep policy-aware attendance colors ahead of the legacy compact rules above. */
 .dx-attendance-summary {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 14px;
 }
 
 .dx-attendance-summary > div:nth-child(3) {
@@ -17552,6 +17560,7 @@ img.dx-selfie-live {
   grid-template-columns: 34px minmax(0, 1fr) auto;
   gap: 9px;
   padding: 9px 11px;
+  margin-bottom: 14px;
 }
 
 .dx-attendance-attention > i {
