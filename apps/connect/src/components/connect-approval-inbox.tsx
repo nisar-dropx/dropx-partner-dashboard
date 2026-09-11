@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ChevronRight, ClipboardCheck, Clock3, DoorOpen, FileText, Home, LocateFixed, MapPin, MapPinned, RotateCcw, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ClipboardCheck, Clock3, DoorOpen, Eye, FileText, Home, LocateFixed, MapPin, MapPinned, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectAttachmentViewer } from "./connect-attachment-viewer";
@@ -337,21 +337,23 @@ function ApprovalRow({
 }) {
   return (
     <div className="dx-approval-row">
-      <button className="dx-approval-row-open" onClick={onReview} type="button">
+      <button className="dx-approval-row-info" onClick={onReview} type="button">
         <div className="dx-approval-row-main">
-          <p className="dx-approval-row-eyebrow">{eyebrow}</p>
+          <div className="dx-approval-row-top">
+            <p className="dx-approval-row-eyebrow">{eyebrow}</p>
+            {badge}
+          </div>
           <strong>{name}</strong>
           <p className="dx-approval-row-meta">{meta}</p>
         </div>
-        {badge}
       </button>
       <div className="dx-approval-row-actions">
-        <button className="dx-approval-row-view" onClick={onReview} type="button">
-          <ChevronRight />View more
+        <button aria-label="View more" className="dx-approval-row-view" onClick={onReview} title="View more" type="button">
+          <Eye />
         </button>
         {onApprove ? (
-          <button className="dx-approval-row-approve" disabled={saving} onClick={onApprove} type="button">
-            <Check />{approveLabel}
+          <button aria-label={approveLabel} className="dx-approval-row-approve" disabled={saving} onClick={onApprove} title={approveLabel} type="button">
+            <Check /><span>{approveLabel}</span>
           </button>
         ) : null}
       </div>
