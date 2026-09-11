@@ -64,6 +64,9 @@ export default async function CpsAdHocActivityPage({ searchParams }: { searchPar
   const selectedLocations = clusterLocations.filter((location) => selectedCodeSet.has(location.station_code));
   const activity = await loadAdHocActivity(companyId, selectedLocations, range.from, range.to);
   const periodName = periodLabel(range.from, range.to, today);
+  const reportSearch = new URLSearchParams({ from: range.from, to: range.to });
+  if (selectedClusters.length !== clusters.length) reportSearch.set("clusters", selectedClusters.join(",") || "_none");
+  if (selectedCodes.length !== stationCodes.length) reportSearch.set("stations", selectedCodes.join(",") || "_none");
   const filterStations = allLocations.map((location) => ({
     code: location.station_code,
     name: location.station_name || location.city || location.station_code,
@@ -101,7 +104,7 @@ export default async function CpsAdHocActivityPage({ searchParams }: { searchPar
 
         <section className="panel cps-adhoc-stations">
           <div className="panel-head"><div><h2>Station summary</h2><p className="subtle">Every selected station is shown. Click a station with activity to open its daily breakup.</p></div><span>{selectedLocations.length} stations</span></div>
-          <CpsAdHocTable stations={activity.stations} />
+          <CpsAdHocTable reportParams={reportSearch.toString()} stations={activity.stations} />
           <footer className="cps-adhoc-source-note">Includes approved, processing and processed requests plus Cashbook rows classified as Van Adhoc. Linked Cashbook payments are shown but never double-counted. Pending, returned and rejected requests are excluded.</footer>
         </section>
       </div>
