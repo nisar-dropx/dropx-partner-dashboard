@@ -2,6 +2,17 @@ import { fetchEddNetwork, fetchEddPerformanceNetwork, refreshEddStation, refresh
 import { stationEddToday } from "./station-edd";
 
 type SourceStation = { stationCode: string; fetchedAt: string | null };
+const loginBusy = (error: unknown) => error instanceof Error && /login is already in progress/i.test(error.message);
+export async function retrySharedLogin<T>(operation: () => Promise<T>, wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))) {
+  try { return await operation(); }
+  catch (error) {
+    if (!loginBusy(error)) throw error;
+    // Respect the upstream lease. No forced login or lock removal; one delayed
+    // retry uses the shared session once the other worker has finished.
+    await wait(10_000);
+    return operation();
+  }
+}
 export function reviewRefreshCandidates(stock: SourceStation[], outcomes: SourceStation[], now = new Date()) {
   const stocks = new Map(stock.map(row => [row.stationCode, Date.parse(row.fetchedAt || "") || 0]));
   const routes = new Map(outcomes.map(row => [row.stationCode, Date.parse(row.fetchedAt || "") || 0]));
@@ -25,18 +36,31 @@ export async function refreshReviewSources(now = new Date()) {
   const [stock, outcomes] = await Promise.all([fetchEddNetwork(), fetchEddPerformanceNetwork()]);
   const candidates = reviewRefreshCandidates(stock.stations, outcomes.stations, now);
   const failedSources: string[] = [];
+  const deadline = Date.now() + 240_000;
   let cursor = 0, refreshed = 0;
   await Promise.all(Array.from({ length: 4 }, async () => {
     while (cursor < candidates.length) {
       const { stationCode } = candidates[cursor++];
-      const results = await Promise.allSettled([
-        refreshEddStation({ stationCode, timeoutMs: 110_000 }),
-        refreshEddPerformanceStation({ stationCode })
-      ]);
-      results.forEach((result, index) => {
-        if (result.status === "rejected") failedSources.push(`${stationCode}:${index === 0 ? "stock" : "outcomes"}`);
-      });
-      if (results.every(result => result.status === "fulfilled")) refreshed++;
+      if (Date.now() > deadline - 30_000) {
+        failedSources.push(`${stationCode}:refresh-deferred`); continue;
+      }
+      let outcomeOk = false;
+      try {
+        // Outcomes first: do not race stock and outcomes for the same login.
+        await retrySharedLogin(() => refreshEddPerformanceStation({ stationCode }));
+        outcomeOk = true;
+      } catch (error) {
+        failedSources.push(`${stationCode}:outcomes`);
+        if (loginBusy(error)) { failedSources.push(`${stationCode}:stock-login-busy`); continue; }
+      }
+      try {
+        await retrySharedLogin(() => {
+          const remaining = deadline - Date.now();
+          if (remaining < 1000) throw Error("Refresh deadline reached");
+          return refreshEddStation({ stationCode, timeoutMs: Math.min(110_000, remaining) });
+        });
+        if (outcomeOk) refreshed++;
+      } catch { failedSources.push(`${stationCode}:stock`); }
     }
   }));
   return { refreshed, attempted: candidates.length, failedSources };

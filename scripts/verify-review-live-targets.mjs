@@ -59,6 +59,9 @@ assert.equal(selected.size,38,"rotation cannot starve stations behind failures")
 assert.equal(calls.length,76,"refresh both sources for every station");
 assert.ok(maxActive<=4);
 calls=[];await refresh.refreshReviewSources(new Date(at("05:29")));assert.equal(calls.length,0);
+let attempts=0,delays=[];
+await refresh.retrySharedLogin(async()=>{if(++attempts===1)throw Error('Another Amazon login is already in progress');return true;},async ms=>{delays.push(ms);});
+assert.equal(attempts,2);assert.deepEqual(delays,[10000],"one delayed retry respects shared login");
 const endpoint=load("src/app/api/ops-pulse/performance/edd-history/route.ts",{
   "@/lib/authorization":{getAuthorization:async()=>({}),hasPermission:()=>true},
   "@/lib/company-scope":{requireCompanyId:()=>"company"},
