@@ -330,6 +330,76 @@ export function OpsRosterPlanner({
     if (!isRecurring && weekStart < templateStart) setWeekStart(templateStart);
   }, [isRecurring, templateStart, weekStart]);
 
+  // Shared core: prepare (or re-anchor) the editable dated draft to `targetWeekStart` and
+  // apply the result to local state. Used both to START editing (ensureEditing, anchored
+  // to whatever week is currently being viewed) and to WALK the already-open edit session
+  // forward/back to an adjacent week (moveWeekForward/moveWeekBack while editing) — a
+  // freshly-prepared dated draft only ever spans one 7-day window, so moving to another
+  // week during the same session means re-anchoring that window, not just changing the
+  // client-side view.
+  const applyPreparedWeek = useCallback(async (targetWeekStart: string) => {
+    preparingRef.current = true;
+    setIsPreparing(true);
+    setMessage({
+      tone: "success",
+      text: plan?.status === "pending_approval"
+        ? "Recalling pending approval so you can edit…"
+        : "Preparing an editable roster…"
+    });
+    let result: Awaited<ReturnType<typeof prepareOpsRoster>>;
+    try {
+      result = await prepareOpsRoster(stationId, targetWeekStart);
+    } catch {
+      preparingRef.current = false;
+      setIsPreparing(false);
+      setMessage({ tone: "error", text: "The editable roster could not be prepared. Please retry." });
+      return false;
+    }
+    preparingRef.current = false;
+    setIsPreparing(false);
+    if (!result.ok || !result.planId || !result.periodStart) {
+      setMessage({ tone: "error", text: result.message });
+      return false;
+    }
+    const preparedAssignments = initialAssignments(result.entries ?? []);
+    const preparedPeriodStart = result.periodStart;
+    activePlanIdRef.current = result.planId;
+    setActivePlanId(result.planId);
+    preparedPlanIdRef.current = result.planId;
+    templateStartRef.current = preparedPeriodStart;
+    setTemplateStart(preparedPeriodStart);
+    const preparedPeriodEnd = result.periodEnd ?? moveIsoDate(preparedPeriodStart, 6);
+    setLivePeriodEnd(preparedPeriodEnd);
+    setLiveRecurring(false);
+    // Keep whatever week the user had navigated to — prepareOpsRoster always anchors
+    // the draft's OWN period to the requested week server-side, but that's just where
+    // the dated override starts; it must not yank the user's in-progress view back to
+    // today. Only clamp if the current view has become genuinely out of range for the
+    // new (dated, non-recurring) period.
+    setWeekStart((current) => (current < preparedPeriodStart ? preparedPeriodStart : current > preparedPeriodEnd ? preparedPeriodEnd : current));
+    assignmentsRef.current = preparedAssignments;
+    setAssignments(preparedAssignments);
+    editingEnabledRef.current = true;
+    setEditingEnabled(true);
+    setDirtyKeys(new Set());
+    setMessage({ tone: "success", text: result.message });
+    // Only refresh when the server actually persisted something (recalled a pending
+    // approval, or realigned an existing open draft) — in the common "no draft yet"
+    // case, prepareOpsRoster computes everything in-memory from the approved baseline
+    // without writing to hr_roster_plans, so the server has nothing new to report.
+    // Refreshing anyway would re-fetch a plan whose status is still "approved" (no
+    // draft exists), and since `editable` is derived from that status, a later
+    // reconciliation pass would see editable=false and revert the very editing mode
+    // this call just turned on — a guaranteed eventual revert, not a rare race, for as
+    // long as this branch never persists a row. Skipping the refresh here removes that
+    // failure mode entirely: local state is already the complete, correct picture.
+    if (result.persisted) {
+      expectedPlanShapeRef.current = planShape({ id: result.planId, periodStart: preparedPeriodStart, periodEnd: preparedPeriodEnd, rosterKind: result.rosterKind ?? "dated" });
+      router.refresh();
+    }
+    return true;
+  }, [plan?.status, router, stationId]);
+
   const ensureEditing = useCallback(async () => {
     if (editingEnabledRef.current) return true;
     // Right-click-to-open-picker and the picker's own drop handler can both call this
@@ -346,75 +416,14 @@ export function OpsRosterPlanner({
       return false;
     }
     if (preparingRef.current) return false;
-    const promise = (async () => {
-      preparingRef.current = true;
-      setIsPreparing(true);
-      setMessage({
-        tone: "success",
-        text: plan?.status === "pending_approval"
-          ? "Recalling pending approval so you can edit…"
-          : "Preparing an editable roster…"
-      });
-      let result: Awaited<ReturnType<typeof prepareOpsRoster>>;
-      try {
-        result = await prepareOpsRoster(stationId, weekStart);
-      } catch {
-        preparingRef.current = false;
-        setIsPreparing(false);
-        setMessage({ tone: "error", text: "The editable roster could not be prepared. Please retry." });
-        return false;
-      }
-      preparingRef.current = false;
-      setIsPreparing(false);
-      if (!result.ok || !result.planId || !result.periodStart) {
-        setMessage({ tone: "error", text: result.message });
-        return false;
-      }
-      const preparedAssignments = initialAssignments(result.entries ?? []);
-      const preparedPeriodStart = result.periodStart;
-      activePlanIdRef.current = result.planId;
-      setActivePlanId(result.planId);
-      preparedPlanIdRef.current = result.planId;
-      templateStartRef.current = preparedPeriodStart;
-      setTemplateStart(preparedPeriodStart);
-      const preparedPeriodEnd = result.periodEnd ?? moveIsoDate(preparedPeriodStart, 6);
-      setLivePeriodEnd(preparedPeriodEnd);
-      setLiveRecurring(false);
-      // Keep whatever week the user had navigated to — prepareOpsRoster always anchors
-      // the draft's OWN period to the current week server-side, but that's just where the
-      // dated override starts; it must not yank the user's in-progress view back to today.
-      // Only clamp if the current view has become genuinely out of range for the new
-      // (dated, non-recurring) period.
-      setWeekStart((current) => (current < preparedPeriodStart ? preparedPeriodStart : current > preparedPeriodEnd ? preparedPeriodEnd : current));
-      assignmentsRef.current = preparedAssignments;
-      setAssignments(preparedAssignments);
-      editingEnabledRef.current = true;
-      setEditingEnabled(true);
-      setDirtyKeys(new Set());
-      setMessage({ tone: "success", text: result.message });
-      // Only refresh when the server actually persisted something (recalled a pending
-      // approval, or realigned an existing open draft) — in the common "no draft yet"
-      // case, prepareOpsRoster computes everything in-memory from the approved baseline
-      // without writing to hr_roster_plans, so the server has nothing new to report.
-      // Refreshing anyway would re-fetch a plan whose status is still "approved" (no
-      // draft exists), and since `editable` is derived from that status, a later
-      // reconciliation pass would see editable=false and revert the very editing mode
-      // this call just turned on — a guaranteed eventual revert, not a rare race, for as
-      // long as this branch never persists a row. Skipping the refresh here removes that
-      // failure mode entirely: local state is already the complete, correct picture.
-      if (result.persisted) {
-        expectedPlanShapeRef.current = planShape({ id: result.planId, periodStart: preparedPeriodStart, periodEnd: preparedPeriodEnd, rosterKind: result.rosterKind ?? "dated" });
-        router.refresh();
-      }
-      return true;
-    })();
+    const promise = applyPreparedWeek(weekStart);
     ensureEditingPromiseRef.current = promise;
     try {
       return await promise;
     } finally {
       ensureEditingPromiseRef.current = null;
     }
-  }, [canStart, initialWeekStart, plan?.status, router, stationId, weekStart]);
+  }, [applyPreparedWeek, canStart, plan?.status, weekStart]);
 
   const bulkWeekMonday = useMemo(() => mondayOf(bulkWeekStart || today), [bulkWeekStart, today]);
   const bulkWeekSunday = useMemo(() => moveIsoDate(bulkWeekMonday, 6), [bulkWeekMonday]);
@@ -661,7 +670,27 @@ export function OpsRosterPlanner({
   // Back only appears once the user has actually navigated away from the current week,
   // so they have a way to return to where they started without overshooting into the
   // past.
-  function moveWeekForward() {
+  //
+  // A freshly-prepared dated draft only ever spans one 7-day window (Monday–Sunday), so
+  // once editing is active there's nothing to navigate to WITHIN that window — moving to
+  // an adjacent week means re-anchoring the draft to that week (applyPreparedWeek), which
+  // reseeds its entries from the approved baseline and discards whatever is in the
+  // window being left. Unsaved changes must be saved first — silently discarding a
+  // planner's in-progress work when they click Next/Back would be worse than blocking
+  // the click with a clear message.
+  async function moveWeekForward() {
+    if (editingEnabled && !isRecurring) {
+      if (dirtyKeys.size) {
+        setMessage({ tone: "error", text: "Save your changes before moving to the next week." });
+        return;
+      }
+      if (isPreparing) return;
+      const next = moveIsoDate(weekStart, 7);
+      if (next > maxWeekStart) return;
+      await applyPreparedWeek(next);
+      setSelectedDates(new Set());
+      return;
+    }
     const next = moveIsoDate(weekStart, 7);
     if (isRecurring) {
       if (next > maxWeekStart) return;
@@ -673,7 +702,20 @@ export function OpsRosterPlanner({
     setSelectedDates(new Set());
   }
 
-  function moveWeekBack() {
+  async function moveWeekBack() {
+    if (editingEnabled && !isRecurring) {
+      if (dirtyKeys.size) {
+        setMessage({ tone: "error", text: "Save your changes before moving to the previous week." });
+        return;
+      }
+      if (isPreparing) return;
+      const next = moveIsoDate(weekStart, -7);
+      const target = next < initialWeekStart ? initialWeekStart : next;
+      if (target === weekStart) return;
+      await applyPreparedWeek(target);
+      setSelectedDates(new Set());
+      return;
+    }
     const next = moveIsoDate(weekStart, -7);
     setWeekStart(next < initialWeekStart ? initialWeekStart : next);
     setSelectedDates(new Set());
@@ -812,9 +854,9 @@ export function OpsRosterPlanner({
 
     <div className={styles.toolbar}>
       <div className={styles.weekNavigation}>
-        {weekStart > initialWeekStart ? <button type="button" aria-label="Back to current week" onClick={moveWeekBack}><ChevronLeft size={16} /></button> : null}
+        {weekStart > initialWeekStart ? <button type="button" aria-label="Back to current week" onClick={() => void moveWeekBack()} disabled={isPreparing}><ChevronLeft size={16} /></button> : null}
         <span><CalendarDays size={15} /><strong>{dateLabel(dates[0] ?? weekStart)}</strong> to <strong>{dateLabel(dates[dates.length - 1] ?? dates[0] ?? weekStart)}</strong></span>
-        <button type="button" aria-label="Next week" onClick={moveWeekForward} disabled={isRecurring ? weekStart >= maxWeekStart : moveIsoDate(weekStart, 7) > livePeriodEnd}><ChevronRight size={16} /></button>
+        <button type="button" aria-label="Next week" onClick={() => void moveWeekForward()} disabled={isPreparing || (isRecurring || editingEnabled ? weekStart >= maxWeekStart : moveIsoDate(weekStart, 7) > livePeriodEnd)}><ChevronRight size={16} /></button>
       </div>
       <label className={styles.search}><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search person, ID or designation" /></label>
       <select aria-label="People type" value={workerType} onChange={(event) => setWorkerType(event.target.value)}><option value="all">Employees & contractors</option><option value="employee">Employees</option><option value="contractor">Independent contractors</option></select>
