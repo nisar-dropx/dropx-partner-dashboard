@@ -62,7 +62,10 @@ const actions = compile('src/app/ops-pulse/performance/actions.ts', {
   'next/cache': { revalidatePath() {} }, '@/lib/company-scope': { requireCompanyId: () => 'company1' }, '@/lib/supabase-admin': { supabaseAdmin: db },
   '@/lib/authorization': { requirePagePermission: async () => ({ userId: 'user1', fullName: 'Test reviewer', hasAllLocationAccess: false, locationScopeIds: ['station1'] }) },
   '@/lib/ops-pulse/performance-review': {}, '@/lib/ops-pulse/review-policy': { visibleReviewStep: () => true, reviewBypassReason: v => v },
-  '@/lib/ops-pulse/review-access': { getReviewAccess: async () => ({ canEditRca: canEdit, canComplete, canComment: true, canBypass, actor: { label: 'AOM' } }) },
+  '@/lib/ops-pulse/review-access': {
+    isScorecardImported: async () => true,
+    getReviewAccess: async () => ({ scorecardImported: true, canEditRca: canEdit, canComplete, canComment: true, canBypass, actor: { label: 'AOM' } })
+  },
   '@/lib/ops-pulse/review-discipline-rca': discipline, '@/lib/ops-pulse/review-discipline-rca-data': { loadDisciplineRca: async () => [] },
   '@/lib/ops-pulse/review-cod-rca': logic, '@/lib/ops-pulse/review-cod-rca-data': source
 });
