@@ -74,7 +74,7 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     ]);
     const error=controlResult.error||smtpResult.error||profileResult.error||threadResult.error;
     if(error)throw new Error(error.message);
-    if(delivery.event_key==='adhoc_usage_digest') {
+    if(delivery.event_key.startsWith('adhoc_usage_digest')) {
      const scope=await loadAdHocMailScope(db,delivery.company_id,String(controlResult.data.config.email_domain||""));
      const recipient=scope.recipients.find(row=>row.email===delivery.recipient_email);
      const saved=await db.from('portal_digest_deliveries').select('scope_summary').eq('id',delivery.id).single();
