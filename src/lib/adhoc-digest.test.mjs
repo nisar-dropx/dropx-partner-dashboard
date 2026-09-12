@@ -17,12 +17,12 @@ const scope = compile("./adhoc-digest-scope.ts");
 const digest = compile("./adhoc-digest.ts", {
   "./ops-pulse/adhoc-activity": {}, "./adhoc-digest-scope": scope
 });
-const station = (id, provider = "AMAZON", model = "EDSP") => ({ id, station_code: id.toUpperCase(), station_name: id, providers: { code: provider }, location_models: { code: model } });
+const station = (id, provider = "AMAZON", model = "EDSP", region = "KL") => ({ id, station_code: id.toUpperCase(), station_name: id, cluster: "Test cluster", region, state: region === "KL" ? "Kerala" : region === "AP" ? "Andhra Pradesh" : "Odisha", providers: { code: provider }, location_models: { code: model } });
 const entry = (category, amount, extra = {}) => ({ category, amount, countedInTotal: true, ...extra });
 const activity = (id, days) => ({ id, code: id.toUpperCase(), days });
 const options = {
   date: "2026-09-11", checkedAt: "2026-09-12T02:30:00Z", subjectTemplate: "Ad hoc usage | {{month}} {{year}}",
-  stations: [station("a"), station("b"), station("now", "AMAZON", "NOW"), station("flip", "FLIPKART", "MDH")],
+  stations: [station("a"), station("b", "AMAZON", "EDSP", "AP"), station("now", "AMAZON", "NOW"), station("flip", "FLIPKART", "MDH", "ODCG")],
   recipients: [{ email: "manager@example.com", name: "Manager <A>", stationIds: ["a", "b", "now", "flip"] }],
   activity: [
     activity("a", [
@@ -40,6 +40,8 @@ const options = {
 test("program allowlist matches both provider and model", () => {
   for (const [provider, model] of [["AMAZON", "EDSP"], ["AMAZON", "XPT"], ["FLIPKART", "ODH"], ["FLIPKART", "MDH"]]) assert.ok(scope.adHocProgram(station("a", provider, model)));
   for (const [provider, model] of [["AMAZON", "NOW"], ["AMAZON", "AMXL"], ["MEESHO", "EDSP"], ["AMAZON", "ODH"], ["FLIPKART", "XPT"], ["DROPX", "DROPX_HO"], ["AMAZON", ""]]) assert.equal(scope.adHocProgram(station("a", provider, model)), null);
+  assert.equal(scope.isAdHocMailStation({ ...station("test"), station_code: "TEST 2" }), false);
+  assert.equal(scope.adHocRegionLabel({ region: null, state: "Kerala" }), "KL");
 });
 
 test("operations membership scope excludes finance, HR, IT, owner, outside domains and unmapped stations", () => {
@@ -48,18 +50,26 @@ test("operations membership scope excludes finance, HR, IT, owner, outside domai
   profiles.push({ id: "outside", email: "outside@elsewhere.com" });
   const memberships = roles.map(role => ({ user_id: role.id, role_id: role.id, has_all_location_access: role.id !== "OPERATIONS_CLM", location_scope_ids: ["a", "now"] }));
   memberships.push({ user_id: "outside", role_id: "OPERATIONS_CLM", has_all_location_access: true });
-  const recipients = scope.resolveAdHocRecipients(options.stations, memberships, roles, profiles, "example.com");
+  const recipients = scope.resolveAdHocRecipients(options.stations, memberships, roles, profiles, "example.com", new Set(["OPERATIONS_CLM"]));
   assert.equal(recipients.length, 1);
   assert.deepEqual(recipients[0].stationIds, ["a"]);
 });
 
-test("location mailbox matching and duplicate profiles merge into one scoped recipient", () => {
+test("location mailboxes receive only stations whose station email matches", () => {
   const roles = [{ id: "location", code: "OPERATIONS_LOCATION", location_access_mode: "scoped" }];
   const profiles = [{ id: "one", email: " Location@Example.com " }, { id: "two", email: "location@example.com" }];
   const memberships = [{ user_id: "one", role_id: "location", location_scope_ids: [] }, { user_id: "two", role_id: "location", location_scope_ids: ["b"] }];
   const recipients = scope.resolveAdHocRecipients([{ ...station("a"), station_email: "location@example.com" }, station("b")], memberships, roles, profiles, "example.com");
   assert.equal(recipients.length, 1);
-  assert.deepEqual(recipients[0].stationIds, ["a", "b"]);
+  assert.deepEqual(recipients[0].stationIds, ["a"]);
+});
+
+test("active Operations Fleet mailbox is eligible but a non-Operations profile is not", () => {
+  const roles = [{ id: "fleet", code: "OPERATIONS_FLTM", location_access_mode: "all_locations" }];
+  const profiles = [{ id: "ops-fleet", email: "fleet@example.com" }, { id: "outside", email: "outside@example.com" }];
+  const memberships = profiles.map(profile => ({ user_id: profile.id, role_id: "fleet", has_all_location_access: true, location_scope_ids: [] }));
+  const recipients = scope.resolveAdHocRecipients(options.stations, memberships, roles, profiles, "example.com", new Set(["ops-fleet"]));
+  assert.deepEqual(recipients.map(recipient => recipient.email), ["fleet@example.com"]);
 });
 
 test("email separates driver and DA, deduplicates linked cashbook entries, and uses report-month boundaries", () => {
@@ -71,7 +81,12 @@ test("email separates driver and DA, deduplicates linked cashbook entries, and u
   assert.equal(message.subject, "Ad hoc usage | September 2026");
   assert.match(message.html, /Manager &lt;A&gt;/);
   assert.match(message.text, /Ad hoc Driver/);
-  assert.match(message.text, /Station total \| 3 \| ₹300.00 \| 4 \| ₹500.00/);
+  assert.match(message.text, /Ad hoc Van — previous day: 2 instances, ₹270.00; MTD: 3 instances, ₹470.00/);
+  assert.match(message.text, /Ad hoc DA \/ WM — previous day: 1 instances, ₹60.00; MTD: 1 instances, ₹60.00/);
+  assert.match(message.text, /Ad hoc Driver — previous day: 1 instances, ₹90.00; MTD: 1 instances, ₹90.00/);
+  assert.match(message.text, /KL REGION[\s\S]*KL total[\s\S]*Ad hoc Van total[\s\S]*Ad hoc DA \/ WM total[\s\S]*Ad hoc Driver total[\s\S]*ODCG REGION[\s\S]*ODCG total/);
+  assert.doesNotMatch(message.text, /Station total|Regional total|Overall total/);
+  assert.doesNotMatch(message.html, />Program</);
   assert.doesNotMatch(message.text, /9,999|NOW|\nB \|/);
 });
 
@@ -80,6 +95,8 @@ test("no message for recipients without a previous-day van; MTD-only and DA-only
   assert.deepEqual(digest.buildAdHocMessages({ ...options, activity: [] }), []);
   const [message] = digest.buildAdHocMessages({ ...options, recipients: [{ email: "f@example.com", name: "F", stationIds: ["flip"] }] });
   assert.doesNotMatch(message.text, /Ad hoc Driver|\nA \|/);
+  assert.doesNotMatch(message.html, /ODCG region/);
+  assert.match(message.text, /Report total/);
 });
 
 test("8am IST trigger reports yesterday and retains the previous month on the first", () => {
