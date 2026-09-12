@@ -166,6 +166,15 @@ export function OpsRosterPlanner({
   const templateStartRef = useRef(plan?.periodStart ?? blankPeriodStart);
   const preparedPlanIdRef = useRef<string | null>(null);
   const preparingRef = useRef(false);
+  // Set immediately before any router.refresh() that follows an in-component action
+  // (prepare/save/submit/import). Lets the reconciliation effect below tell "the
+  // server round-trip I just caused" apart from "the plan changed under me" so it
+  // doesn't wipe local edit state (dates, upload panel, unsaved cells) on its own refresh.
+  const selfInitiatedRefreshRef = useRef(false);
+  // Shares one in-flight prepareOpsRoster() call across concurrent callers
+  // (right-click opening the picker, then picking an option) so they don't
+  // double-prepare and race two router.refresh() calls against each other.
+  const ensureEditingPromiseRef = useRef<Promise<boolean> | null>(null);
   const pointerDragRef = useRef<PointerDragState | null>(null);
   const dragGhostRef = useRef<HTMLDivElement | null>(null);
   const suppressClickRef = useRef(false);
@@ -222,6 +231,32 @@ export function OpsRosterPlanner({
   }, [changeDeadlineHour, cutoffMessage, isRecurring, livePeriodEnd, nowIso, today]);
 
   useEffect(() => {
+    // A router.refresh() we triggered ourselves (prepare/save/submit/import completing)
+    // brings back fresh props reflecting exactly what the action handler already applied
+    // to local state. Re-running the full reset here would just stomp that state back to
+    // stale values (e.g. dates snapping back, the Upload panel disappearing). Reconcile
+    // only the plan id (in case the server assigned a different one than we optimistically
+    // set) and stop — everything else the action handler already set is authoritative.
+    if (selfInitiatedRefreshRef.current) {
+      selfInitiatedRefreshRef.current = false;
+      const nextPlanId = plan?.id ?? null;
+      if (activePlanIdRef.current !== nextPlanId && nextPlanId) {
+        activePlanIdRef.current = nextPlanId;
+        setActivePlanId(nextPlanId);
+      }
+      return;
+    }
+    // Genuine external change (station switch remounts anyway via the page's key, so this
+    // path is for the plan mutating for a reason other than our own in-flight action — e.g.
+    // another user/process editing the same station). Don't discard unsaved local edits;
+    // let the user decide instead of silently reverting their work.
+    if (dirtyKeys.size > 0) {
+      setMessage({
+        tone: "error",
+        text: "This roster changed elsewhere. Your unsaved edits were kept — save or discard them before reloading."
+      });
+      return;
+    }
     editingEnabledRef.current = editable;
     setEditingEnabled(editable);
     activePlanIdRef.current = plan?.id ?? null;
@@ -240,6 +275,7 @@ export function OpsRosterPlanner({
     setSelectedPeople(new Set());
     setSelectedDates(new Set());
     setCellPicker(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blankPeriodStart, editable, initial, initialWeekStart, plan?.id, plan?.periodEnd, plan?.periodStart, plan?.rosterKind, plan?.status]);
 
   useEffect(() => {
@@ -248,6 +284,10 @@ export function OpsRosterPlanner({
 
   const ensureEditing = useCallback(async () => {
     if (editingEnabledRef.current) return true;
+    // Right-click-to-open-picker and the picker's own drop handler can both call this
+    // in quick succession before the first prepare completes — share the one in-flight
+    // call instead of firing prepareOpsRoster twice and racing two refreshes.
+    if (ensureEditingPromiseRef.current) return ensureEditingPromiseRef.current;
     if (!canStart) {
       setMessage({
         tone: "error",
@@ -258,46 +298,55 @@ export function OpsRosterPlanner({
       return false;
     }
     if (preparingRef.current) return false;
-    preparingRef.current = true;
-    setIsPreparing(true);
-    setMessage({
-      tone: "success",
-      text: plan?.status === "pending_approval"
-        ? "Recalling pending approval so you can edit…"
-        : "Preparing an editable roster…"
-    });
-    let result: Awaited<ReturnType<typeof prepareOpsRoster>>;
-    try {
-      result = await prepareOpsRoster(stationId);
-    } catch {
+    const promise = (async () => {
+      preparingRef.current = true;
+      setIsPreparing(true);
+      setMessage({
+        tone: "success",
+        text: plan?.status === "pending_approval"
+          ? "Recalling pending approval so you can edit…"
+          : "Preparing an editable roster…"
+      });
+      let result: Awaited<ReturnType<typeof prepareOpsRoster>>;
+      try {
+        result = await prepareOpsRoster(stationId);
+      } catch {
+        preparingRef.current = false;
+        setIsPreparing(false);
+        setMessage({ tone: "error", text: "The editable roster could not be prepared. Please retry." });
+        return false;
+      }
       preparingRef.current = false;
       setIsPreparing(false);
-      setMessage({ tone: "error", text: "The editable roster could not be prepared. Please retry." });
-      return false;
+      if (!result.ok || !result.planId || !result.periodStart) {
+        setMessage({ tone: "error", text: result.message });
+        return false;
+      }
+      const preparedAssignments = initialAssignments(result.entries ?? []);
+      activePlanIdRef.current = result.planId;
+      setActivePlanId(result.planId);
+      preparedPlanIdRef.current = result.planId;
+      templateStartRef.current = result.periodStart;
+      setTemplateStart(result.periodStart);
+      setLivePeriodEnd(result.periodEnd ?? moveIsoDate(result.periodStart, 6));
+      setLiveRecurring(false);
+      setWeekStart(result.periodStart < initialWeekStart ? initialWeekStart : result.periodStart);
+      assignmentsRef.current = preparedAssignments;
+      setAssignments(preparedAssignments);
+      editingEnabledRef.current = true;
+      setEditingEnabled(true);
+      setDirtyKeys(new Set());
+      setMessage({ tone: "success", text: result.message });
+      selfInitiatedRefreshRef.current = true;
+      router.refresh();
+      return true;
+    })();
+    ensureEditingPromiseRef.current = promise;
+    try {
+      return await promise;
+    } finally {
+      ensureEditingPromiseRef.current = null;
     }
-    preparingRef.current = false;
-    setIsPreparing(false);
-    if (!result.ok || !result.planId || !result.periodStart) {
-      setMessage({ tone: "error", text: result.message });
-      return false;
-    }
-    const preparedAssignments = initialAssignments(result.entries ?? []);
-    activePlanIdRef.current = result.planId;
-    setActivePlanId(result.planId);
-    preparedPlanIdRef.current = result.planId;
-    templateStartRef.current = result.periodStart;
-    setTemplateStart(result.periodStart);
-    setLivePeriodEnd(result.periodEnd ?? moveIsoDate(result.periodStart, 6));
-    setLiveRecurring(false);
-    setWeekStart(result.periodStart < initialWeekStart ? initialWeekStart : result.periodStart);
-    assignmentsRef.current = preparedAssignments;
-    setAssignments(preparedAssignments);
-    editingEnabledRef.current = true;
-    setEditingEnabled(true);
-    setDirtyKeys(new Set());
-    setMessage({ tone: "success", text: result.message });
-    router.refresh();
-    return true;
   }, [canStart, initialWeekStart, plan?.status, router, stationId]);
 
   const bulkWeekMonday = useMemo(() => mondayOf(bulkWeekStart || today), [bulkWeekStart, today]);
@@ -335,6 +384,7 @@ export function OpsRosterPlanner({
         }
         setDirtyKeys(new Set());
       }
+      selfInitiatedRefreshRef.current = true;
       router.refresh();
     });
   }, [bulkPeriodMode, bulkRosterMonth, bulkWeekMonday, initialWeekStart, router]);
@@ -503,6 +553,7 @@ export function OpsRosterPlanner({
           preparedPlanIdRef.current = result.planId;
         }
         if (preparedPlanIdRef.current) {
+          selfInitiatedRefreshRef.current = true;
           router.replace(`/rostering?station=${encodeURIComponent(stationCode)}`);
           router.refresh();
         }
@@ -516,7 +567,10 @@ export function OpsRosterPlanner({
     startSaving(async () => {
       const result = await submitOpsRoster(planId);
       setMessage({ tone: result.ok ? "success" : "error", text: result.message });
-      if (result.ok) router.refresh();
+      if (result.ok) {
+        selfInitiatedRefreshRef.current = true;
+        router.refresh();
+      }
     });
   }
 

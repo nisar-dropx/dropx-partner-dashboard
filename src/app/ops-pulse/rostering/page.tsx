@@ -89,7 +89,7 @@ export default async function OpsRosteringPage({ searchParams }: { searchParams?
           {routeNames ? <span className={rosterStyles.metaRoute}>{routeNames}</span> : null}
         </div>
         <OpsRosterPlanner
-          key={`${selected.id}:${selectedPlan?.id ?? "blank"}`}
+          key={selected.id}
           stationId={selected.id}
           stationCode={selected.station_code}
           plan={selectedPlan}

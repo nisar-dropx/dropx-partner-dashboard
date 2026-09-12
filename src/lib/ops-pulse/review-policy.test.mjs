@@ -11,10 +11,19 @@ test('direct national reporting does not add an AOM',()=>{
 test('no cluster manager uses actual AOM and deduplicates identities',()=>{
   assert.deepEqual(managerReviewChain([person('Team Lead'),person('Area Operations Manager','a'),person('Area Operations Manager','a'),person('National Head')]).map(p=>p.role),['Area Operations Manager','National Head']);
 });
-const base={userId:'tl',owner:false,programManager:false,stationUser:false,inScope:true,canView:true,canAdd:true,canEdit:true,closed:false,firstReviewerId:'cm',currentReviewerId:'cm',currentRole:'Cluster Manager'};
+const base={userId:'tl',owner:false,programManager:false,stationUser:false,inScope:true,canView:true,canAdd:true,canEdit:true,closed:false,firstReviewerId:'cm',currentReviewerId:'cm',currentRole:'Cluster Manager',scorecardImported:true};
 test('station editor can only enter connection timings',()=>{
   const access=reviewCapabilities({...base,stationUser:true});
-  assert.deepEqual(access,{canStart:false,canEditConnections:true,canEditRca:false,canComment:false,canComplete:false,canManageActions:false,canAccessBypass:false,canAccessProxy:true,canBypass:false,canUndoBypass:false,canProxy:false});
+  assert.deepEqual(access,{scorecardImported:true,canStart:false,canEditConnections:true,canEditRca:false,canComment:false,canComplete:false,canManageActions:false,canAccessBypass:false,canAccessProxy:true,canBypass:false,canUndoBypass:false,canProxy:false});
+});
+test('canStart is blocked until the performance scorecard is imported, even for oversight',()=>{
+  assert.equal(reviewCapabilities({...base,owner:true,scorecardImported:false}).canStart,false);
+  assert.equal(reviewCapabilities({...base,owner:true,scorecardImported:true}).canStart,true);
+});
+test('cluster/AOM filter permission grants oversight-level RCA edit rights on any station',()=>{
+  const access=reviewCapabilities({...base,userId:'other',currentReviewerId:'cm',hasClusterFilterAccess:true,closed:true});
+  assert.equal(access.canEditRca,true);
+  assert.equal(reviewCapabilities({...base,userId:'other',currentReviewerId:'cm',closed:true}).canEditRca,false);
 });
 test('CM owns RCA, own stage, and can enter connection timings',()=>{
   assert.equal(reviewCapabilities({...base,userId:'cm'}).canEditRca,true);

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { resolvePerformanceReviewChain } from "@/lib/ops-pulse/performance-review";
-import { getReviewAccess } from "@/lib/ops-pulse/review-access";
+import { getReviewAccess, isScorecardImported } from "@/lib/ops-pulse/review-access";
 import { reviewBypassReason, visibleReviewStep, noonEmdValue, stationTimingClocks } from "@/lib/ops-pulse/review-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { disciplineReason, isDisciplineRcaKey, missingDisciplineReasons } from "@/lib/ops-pulse/review-discipline-rca";
@@ -57,7 +57,8 @@ async function context(authorization: AuthorizationContext, data: FormData) {
   const steps = await supabaseAdmin.from("ops_performance_review_steps").select("id,step_order,reviewer_user_id,reviewer_role,status,bypassed_at,proxy_reviewer_user_id")
     .eq("company_id", companyId).eq("review_id", result.data.id).order("step_order");
   if (steps.error) throw new Error("Unable to check the current review stage.");
-  const access = await getReviewAccess(authorization, station.id, result.data, steps.data ?? [], { inScope: true });
+  const scorecardImported = await isScorecardImported(companyId, station.station_code, date);
+  const access = await getReviewAccess(authorization, station.id, result.data, steps.data ?? [], { inScope: true, scorecardImported });
   return { companyId, station: { ...station, station_name: null }, review: result.data, access, steps: steps.data ?? [] };
 }
 function author(authorization: AuthorizationContext, role: string) {
@@ -72,7 +73,9 @@ export async function startPerformanceReview(data: FormData): Promise<ReviewActi
     const sourceDate = dateValue(text(data, "source_date"));
     const chain = await resolvePerformanceReviewChain(companyId, station.id);
     if (!chain.length) throw new Error("The station review manager is not assigned in People. Contact your administrator.");
-    const access = await getReviewAccess(authorization, station.id, null, chain.map((step, index) => ({ step_order: index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,status:"pending" })), { inScope: true });
+    const scorecardImported = await isScorecardImported(companyId, station.station_code, sourceDate);
+    const access = await getReviewAccess(authorization, station.id, null, chain.map((step, index) => ({ step_order: index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,status:"pending" })), { inScope: true, scorecardImported });
+    if (!access.scorecardImported) throw new Error("Import the Performance Scorecard for this station and date before starting a review.");
     if (!access.canStart) throw new Error("Only the first review manager or authorised oversight team can start this review.");
     const result = await supabaseAdmin!.rpc("ops_start_manager_review", {
       p_company: companyId,p_actor:authorization.userId,p_station:station.id,p_chain:chain,
@@ -100,6 +103,7 @@ export async function savePerformanceReviewItem(data: FormData): Promise<ReviewA
   try {
     const { companyId,review,access }=await context(authorization,data);
     if (!access.canEditRca) throw new Error("RCA and actions are editable by the first review manager during their stage, or Program Manager.");
+    if (!access.scorecardImported) throw new Error("The scorecard for this station and date was removed. Contact your administrator before adding RCA.");
     const metricKey=limited(data,"metric_key",150,true);
     if (isDisciplineRcaKey(metricKey)) throw new Error("Use the delay reason form for opening / UTR exceptions.");
     if (isCodRemarkKey(metricKey)) throw new Error("Use the COD remark form for balances aged 2+ days.");
