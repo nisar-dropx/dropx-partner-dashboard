@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
-import { adHocCategory, isAdHocHead, isApprovedPayment, paymentReason } from "@/lib/ops-pulse/performance-review";
+import { adHocCategory, isAdHocHead, paymentReason } from "@/lib/ops-pulse/performance-review";
 import { readTrendPages } from "@/lib/ops-pulse/review-trends-data";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -114,6 +114,19 @@ function amount(value: unknown) {
 
 function normalized(value: string | null | undefined) {
   return String(value ?? "").trim().toUpperCase();
+}
+
+/**
+ * Operational utilization is dated by deployment/work date and must not wait
+ * for the payment workflow to finish. Drafts and closed negative outcomes do
+ * not represent a submitted utilization record.
+ */
+export function isSubmittedAdHocUsage(request: Pick<AdHocRequestRow, "status" | "approval_status">) {
+  const states = [normalized(request.status), normalized(request.approval_status)];
+  if (states.some(state => ["REJECTED", "RETURNED", "CANCELLED"].includes(state))) return false;
+  return states.some(state => state === "PENDING" || state === "RE_PENDING" || state === "SUBMITTED"
+    || state === "RESUBMITTED" || state === "APPROVED" || state === "PROCESSING"
+    || state === "PROCESSED" || state === "PAID" || state.endsWith("_APPROVED"));
 }
 
 export function validAdHocMonth(value: string | null | undefined, today: string) {
@@ -338,10 +351,10 @@ export async function loadAdHocActivity(
   const byId = new Map(stationRows.map((station) => [station.id, station]));
   const byCode = new Map(stationRows.map((station) => [station.code, station]));
   const daysByStation = new Map<string, Map<string, AdHocActivityDay>>();
-  const approvedRequestNumbers = new Set<string>();
+  const submittedRequestNumbers = new Set<string>();
 
   for (const request of requests) {
-    if (!isApprovedPayment(request)) continue;
+    if (!isSubmittedAdHocUsage(request)) continue;
     const head = headById.get(request.payment_head_id);
     if (!head) continue;
     // An explicit location ID is authoritative. A legacy code must not pull
@@ -349,7 +362,7 @@ export async function loadAdHocActivity(
     const station = request.location_id ? byId.get(request.location_id)
       : byCode.get(normalized(request.station_code || request.location_code));
     if (!station || !request.work_date) continue;
-    if (request.request_no) approvedRequestNumbers.add(normalizedWords(request.request_no));
+    if (request.request_no) submittedRequestNumbers.add(normalizedWords(request.request_no));
     const requestAmount = amount(request.amount_approved ?? request.amount ?? request.amount_requested);
     const category = adHocCategory(head);
     const stationDays = daysByStation.get(station.id) ?? new Map<string, AdHocActivityDay>();
@@ -400,7 +413,7 @@ export async function loadAdHocActivity(
     day.cashbookVanAmount += cashbookAmount;
 
     const linkedRequest = cashbookRequestReference(cashbook);
-    const countedInTotal = !linkedRequest || !approvedRequestNumbers.has(linkedRequest);
+    const countedInTotal = !linkedRequest || !submittedRequestNumbers.has(linkedRequest);
     if (countedInTotal) {
       station.vanCount += 1;
       station.vanAmount += cashbookAmount;

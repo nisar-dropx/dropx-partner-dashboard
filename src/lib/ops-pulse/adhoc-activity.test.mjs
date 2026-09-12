@@ -88,7 +88,24 @@ test("AOM is the grouping fallback and only explicit Adhoc Van Cashbook heads qu
   assert.equal(module.isCashbookAdHocVan({ category: "Station Visits", cps_sub_head: null, expense_type: null }), false);
 });
 
-test("today's approved request and Cashbook-only Van are counted, while linked Cashbook is not duplicated", async () => {
+test("submitted utilization is counted before final payment approval", () => {
+  const module = compile("./adhoc-activity.ts", {
+    "server-only": {},
+    "@/lib/ops-pulse/performance-review": {},
+    "@/lib/ops-pulse/review-trends-data": {},
+    "@/lib/supabase-admin": { supabaseAdmin: null }
+  });
+  for (const [status, approval] of [
+    ["pending", "PENDING"], ["resubmitted", "RE_PENDING"],
+    ["OPERATIONS_CLM_APPROVED", "OPERATIONS_CLM_APPROVED"],
+    ["approved", "FINAL_APPROVED"], ["processing", "PROCESSING"],
+    ["processed", "PROCESSED"]
+  ]) assert.equal(module.isSubmittedAdHocUsage({ status, approval_status: approval }), true, status);
+  for (const state of ["draft", "rejected", "returned", "cancelled", ""])
+    assert.equal(module.isSubmittedAdHocUsage({ status: state, approval_status: state.toUpperCase() }), false, state);
+});
+
+test("today's submitted request and Cashbook-only Van are counted, while linked Cashbook is not duplicated", async () => {
   const request = {
     id: "request-1",
     request_no: "PAY12345",

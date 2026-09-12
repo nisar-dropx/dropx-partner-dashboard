@@ -80,7 +80,7 @@ export default async function CpsAdHocActivityPage({ searchParams }: { searchPar
         <PageHead
           eyebrow={`CPS · ${range.state === "today" ? "Today" : range.state === "single" ? "Day view" : range.state === "mtd" ? "Month to date" : "Date range"}`}
           title="Adhoc Van & DA"
-          subtitle="Station-wise jobs and cost from approved payment requests and Adhoc Van Cashbook payments."
+          subtitle="Station-wise jobs and cost from submitted payment requests and Adhoc Van Cashbook payments."
           action={<span className="cps-adhoc-period-pill">{periodName}</span>}
         />
         <CpsAdHocFilters
@@ -105,7 +105,7 @@ export default async function CpsAdHocActivityPage({ searchParams }: { searchPar
         <section className="panel cps-adhoc-stations">
           <div className="panel-head"><div><h2>Station summary</h2><p className="subtle">Every selected station is shown. Click a station with activity to open its daily breakup.</p></div><span>{selectedLocations.length} stations</span></div>
           <CpsAdHocTable reportParams={reportSearch.toString()} stations={activity.stations} />
-          <footer className="cps-adhoc-source-note">Head Office and Amazon Now locations are excluded. Includes approved, processing and processed requests plus Cashbook rows classified as Van Adhoc. Linked Cashbook payments are shown but never double-counted. Pending, returned and rejected requests are excluded.</footer>
+          <footer className="cps-adhoc-source-note">Head Office and Amazon Now locations are excluded. Includes submitted requests from the deployment date, including requests still pending approval, plus Cashbook rows classified as Van Adhoc. Linked Cashbook payments are shown but never double-counted. Draft, returned, rejected and cancelled requests are excluded.</footer>
         </section>
       </div>
     </AppShell>

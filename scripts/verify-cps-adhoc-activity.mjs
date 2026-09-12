@@ -16,15 +16,15 @@ const checks = [
   [page.includes('requirePagePermission("cps_overview", "access")') && page.includes("authorization.locationScopeIds"), "The page must enforce CPS access and the signed-in user's location scope."],
   [[page, report].every(source => source.includes("locationsResult.locations.filter(isAdHocActivityLocation)")) && data.includes("locations.filter(isAdHocActivityLocation)"), "Page filters, report and loader must exclude HO and Amazon Now before querying or aggregating."],
   [data.includes('requestPage("location_id"') && data.includes('requestPage("station_code"') && data.includes('requestPage("location_code"') && data.includes('.gte("work_date", from)') && data.includes('.lte("work_date", to)'), "The source query must cover every permitted location identifier for the selected range."],
-  [data.includes("isApprovedPayment(request)") && data.includes('["Van", "DA"]'), "Only carried-out Van and DA requests may be counted."],
+  [data.includes("isSubmittedAdHocUsage(request)") && data.includes('["Van", "DA"]'), "Submitted Van and DA utilization must be counted before final payment approval."],
   [filters.includes('label="Clusters"') && filters.includes('label="Stations"') && filters.includes('type="date"') && filters.includes(">Today</button>") && filters.includes(">MTD</button>"), "The filter bar must support day/range presets, cluster and multi-station selection."],
-  [data.includes('from("cps_cashbook_daily")') && data.includes("isCashbookAdHocVan") && data.includes("approvedRequestNumbers"), "Cashbook Adhoc Van payments must be included without double-counting linked requests."],
+  [data.includes('from("cps_cashbook_daily")') && data.includes("isCashbookAdHocVan") && data.includes("submittedRequestNumbers"), "Cashbook Adhoc Van payments must be included without double-counting linked requests."],
   [data.includes("location.aom") && page.includes("adHocClusterLabel"), "AOM must be the cluster-filter fallback when no Cluster Manager is mapped."],
   [table.includes("day-level activity") && table.includes("setExpanded"), "Station totals must expand into day-level detail without leaving the table."],
   [table.includes("Click a date for reasons and remarks") && table.includes("entry.reason") && table.includes("entry.remark") && data.includes("payment_request_answers"), "Each activity date must expose the recorded reason and remark for its Adhoc entries."],
   [["station", "vanCount", "vanAmount", "daCount", "daAmount", "totalCount", "totalAmount"].every((column) => table.includes(`column="${column}"`)), "Every station-summary column must be sortable."],
   [table.includes("Download Excel") && report.includes("workbookResponse") && report.includes('name: "Reasons and remarks"') && report.includes('hasPermission(authorization, "cps_overview", "access")'), "The scoped Excel report must include reasons and remarks and enforce CPS access."],
-  [page.includes("Linked Cashbook payments are shown but never double-counted") && page.includes("Pending, returned and rejected requests are excluded"), "The counting rule must remain visible to users."]
+  [page.includes("requests still pending approval") && page.includes("Draft, returned, rejected and cancelled requests are excluded"), "The counting rule must remain visible to users."]
 ];
 
 const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);
