@@ -170,11 +170,14 @@ export function OpsRosterPlanner({
   const templateStartRef = useRef(plan?.periodStart ?? blankPeriodStart);
   const preparedPlanIdRef = useRef<string | null>(null);
   const preparingRef = useRef(false);
-  // Set immediately before any router.refresh() that follows an in-component action
-  // (prepare/save/submit/import). Lets the reconciliation effect below tell "the
-  // server round-trip I just caused" apart from "the plan changed under me" so it
-  // doesn't wipe local edit state (dates, upload panel, unsaved cells) on its own refresh.
-  const selfInitiatedRefreshRef = useRef(false);
+  // Counts how many self-triggered navigations/refreshes (router.replace / router.refresh)
+  // are still in flight from an action handler (prepare/save/submit/import). The
+  // reconciliation effect below decrements this on every run while it's positive and
+  // skips the destructive reset for each of those passes — not just the first. A single
+  // boolean isn't enough here: save() fires BOTH router.replace() and router.refresh(),
+  // which can each deliver their own separate prop-update pass, so a flag consumed on
+  // the first pass would leave the second one unguarded and free to reset weekStart.
+  const selfInitiatedRefreshCountRef = useRef(0);
   // Shares one in-flight prepareOpsRoster() call across concurrent callers
   // (right-click opening the picker, then picking an option) so they don't
   // double-prepare and race two router.refresh() calls against each other.
@@ -235,14 +238,16 @@ export function OpsRosterPlanner({
   }, [changeDeadlineHour, cutoffMessage, isRecurring, livePeriodEnd, nowIso, today]);
 
   useEffect(() => {
-    // A router.refresh() we triggered ourselves (prepare/save/submit/import completing)
-    // brings back fresh props reflecting exactly what the action handler already applied
-    // to local state. Re-running the full reset here would just stomp that state back to
-    // stale values (e.g. dates snapping back, the Upload panel disappearing). Reconcile
-    // only the plan id (in case the server assigned a different one than we optimistically
-    // set) and stop — everything else the action handler already set is authoritative.
-    if (selfInitiatedRefreshRef.current) {
-      selfInitiatedRefreshRef.current = false;
+    // A router.refresh()/router.replace() we triggered ourselves (prepare/save/submit/
+    // import completing) brings back fresh props reflecting exactly what the action
+    // handler already applied to local state. Re-running the full reset here would just
+    // stomp that state back to stale values (e.g. dates snapping back, the Upload panel
+    // disappearing). save() fires BOTH router.replace() and router.refresh(), which can
+    // each deliver their own separate prop-update pass — so this is a COUNTER, not a
+    // one-shot flag: every pass while the counter is positive is treated as self-
+    // initiated and decrements it, so all of them are skipped, not just the first.
+    if (selfInitiatedRefreshCountRef.current > 0) {
+      selfInitiatedRefreshCountRef.current -= 1;
       const nextPlanId = plan?.id ?? null;
       if (activePlanIdRef.current !== nextPlanId && nextPlanId) {
         activePlanIdRef.current = nextPlanId;
@@ -265,11 +270,17 @@ export function OpsRosterPlanner({
     setEditingEnabled(editable);
     activePlanIdRef.current = plan?.id ?? null;
     setActivePlanId(plan?.id ?? null);
-    templateStartRef.current = plan?.periodStart ?? blankPeriodStart;
-    setTemplateStart(plan?.periodStart ?? blankPeriodStart);
+    const nextTemplateStart = plan?.periodStart ?? blankPeriodStart;
+    templateStartRef.current = nextTemplateStart;
+    setTemplateStart(nextTemplateStart);
     setLivePeriodEnd(plan?.periodEnd ?? moveIsoDate(plan?.periodStart ?? blankPeriodStart, 6));
     setLiveRecurring(plan?.status === "approved" && plan?.rosterKind === "recurring_weekly");
-    setWeekStart(initialWeekStart);
+    // The view must never sit below the plan's own dated period start — "today's week"
+    // (initialWeekStart) can be earlier than a future-dated draft's templateStart, and
+    // nothing else corrects that (the mirror-image upper-bound clamp against
+    // maxWeekStart already exists as its own effect below; this is the lower-bound
+    // equivalent for the non-recurring case, applied right where templateStart changes).
+    setWeekStart(initialWeekStart < nextTemplateStart ? nextTemplateStart : initialWeekStart);
     preparedPlanIdRef.current = null;
     preparingRef.current = false;
     setIsPreparing(false);
@@ -282,15 +293,22 @@ export function OpsRosterPlanner({
     // `initial` deliberately excluded: it's a useMemo over plan?.entries, which the server
     // rebuilds via .map() on every request even when nothing changed, so it's never
     // referentially stable and would re-arm this effect on every render, defeating the
-    // selfInitiatedRefreshRef guard above. plan?.revisionNo only changes on a real save,
-    // so it's the correct signal for "did the plan's content actually change" — the body
-    // above still reads the freshly-computed `initial` value from this render's closure.
+    // signature guard above. plan?.revisionNo only changes on a real save, so it's the
+    // correct signal for "did the plan's content actually change" — the body above still
+    // reads the freshly-computed `initial` value from this render's closure.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blankPeriodStart, editable, initialWeekStart, plan?.id, plan?.periodEnd, plan?.periodStart, plan?.revisionNo, plan?.rosterKind, plan?.status]);
 
   useEffect(() => {
     if (weekStart > maxWeekStart) setWeekStart(maxWeekStart);
   }, [maxWeekStart, weekStart]);
+
+  // Mirror of the upper-bound clamp above: the view must never sit below the plan's own
+  // dated period start (non-recurring case only — a recurring baseline has no such
+  // floor). Self-heals regardless of which code path last set weekStart or templateStart.
+  useEffect(() => {
+    if (!isRecurring && weekStart < templateStart) setWeekStart(templateStart);
+  }, [isRecurring, templateStart, weekStart]);
 
   const ensureEditing = useCallback(async () => {
     if (editingEnabledRef.current) return true;
@@ -354,7 +372,7 @@ export function OpsRosterPlanner({
       setEditingEnabled(true);
       setDirtyKeys(new Set());
       setMessage({ tone: "success", text: result.message });
-      selfInitiatedRefreshRef.current = true;
+      selfInitiatedRefreshCountRef.current += 1;
       router.refresh();
       return true;
     })();
@@ -410,7 +428,7 @@ export function OpsRosterPlanner({
         }
         setDirtyKeys(new Set());
       }
-      selfInitiatedRefreshRef.current = true;
+      selfInitiatedRefreshCountRef.current += 1;
       router.refresh();
     });
   }, [bulkPeriodMode, bulkRosterMonth, bulkWeekMonday, initialWeekStart, router]);
@@ -579,7 +597,10 @@ export function OpsRosterPlanner({
           preparedPlanIdRef.current = result.planId;
         }
         if (preparedPlanIdRef.current) {
-          selfInitiatedRefreshRef.current = true;
+          // router.replace() and router.refresh() can each deliver their own separate
+          // prop-update pass to the reconciliation effect — count both so neither is
+          // left unguarded (see selfInitiatedRefreshCountRef's declaration above).
+          selfInitiatedRefreshCountRef.current += 2;
           router.replace(`/rostering?station=${encodeURIComponent(stationCode)}`);
           router.refresh();
         }
@@ -594,7 +615,7 @@ export function OpsRosterPlanner({
       const result = await submitOpsRoster(planId);
       setMessage({ tone: result.ok ? "success" : "error", text: result.message });
       if (result.ok) {
-        selfInitiatedRefreshRef.current = true;
+        selfInitiatedRefreshCountRef.current += 1;
         router.refresh();
       }
     });
