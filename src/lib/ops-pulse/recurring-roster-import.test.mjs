@@ -32,14 +32,28 @@ test("month bulk-upload window uses full calendar month bounds", () => {
 });
 
 test("week bulk-upload window is the exact Monday–Sunday week", () => {
-  assert.deepEqual(resolveRosterBulkUploadWindow({ mode: "week", weekStart: "2026-09-03", today: "2026-09-02" }), {
+  assert.deepEqual(resolveRosterBulkUploadWindow({ mode: "week", weekStart: "2026-09-10", today: "2026-09-02" }), {
     mode: "week",
-    label: "week 2026-08-31 → 2026-09-06",
-    periodStart: "2026-08-31",
-    periodEnd: "2026-09-06",
-    writeStart: "2026-08-31",
-    writeEnd: "2026-09-06"
+    label: "week 2026-09-07 → 2026-09-13",
+    periodStart: "2026-09-07",
+    periodEnd: "2026-09-13",
+    writeStart: "2026-09-07",
+    writeEnd: "2026-09-13"
   });
+});
+
+test("week bulk-upload rejects the current or a past week — upcoming only", () => {
+  assert.throws(() => resolveRosterBulkUploadWindow({ mode: "week", weekStart: "2026-09-03", today: "2026-09-02" }), /upcoming week/);
+  assert.throws(() => resolveRosterBulkUploadWindow({ mode: "week", weekStart: "2026-08-20", today: "2026-09-02" }), /upcoming week/);
+});
+
+test("month bulk-upload rejects a month that has already fully passed", () => {
+  assert.throws(() => resolveRosterBulkUploadWindow({ mode: "month", rosterMonth: "2026-08", today: "2026-09-02" }), /current month or an upcoming month/);
+});
+
+test("month bulk-upload allows the current month (remaining days) and future months", () => {
+  assert.equal(resolveRosterBulkUploadWindow({ mode: "month", rosterMonth: "2026-09", today: "2026-09-02" }).label, "2026-09");
+  assert.equal(resolveRosterBulkUploadWindow({ mode: "month", rosterMonth: "2026-10", today: "2026-09-02" }).label, "2026-10");
 });
 
 test("weekday columns expand across every matching date in a month window", () => {

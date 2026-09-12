@@ -307,13 +307,23 @@ function mapPreparedEntries(entries: Array<{ worker_type: string; worker_id: str
   }));
 }
 
-export async function prepareOpsRoster(locationId: string): Promise<ActionResult> {
+export async function prepareOpsRoster(locationId: string, viewWeekStart?: string): Promise<ActionResult> {
   try {
     const authorization = await requirePagePermission("ops_rostering", "add");
     const companyId = requireCompanyId(authorization);
     await assertPlanner(authorization);
     const station = await authorisedStation(companyId, authorization, locationId);
-    const start = rosterMonday(indiaToday());
+    const currentWeek = rosterMonday(indiaToday());
+    // Anchor a freshly-prepared dated draft to whatever upcoming week the caller was
+    // actually viewing, not always "this week" — otherwise a user who navigated several
+    // weeks ahead before their first edit gets yanked back to the current week's 7-day
+    // window as soon as editing starts. Never anchor earlier than the current week
+    // (edits are upcoming-only). Recalling an existing pending-approval plan below keeps
+    // ITS OWN period instead — that plan already has a defined submission window, and
+    // realigning it to an unrelated future week the viewer happened to be scrolled to
+    // would be destructive, not helpful.
+    const requestedStart = viewWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(viewWeekStart) ? rosterMonday(viewWeekStart) : currentWeek;
+    const start = requestedStart < currentWeek ? currentWeek : requestedStart;
     const end = addRosterDays(start, 6);
 
     const open = await db().from("hr_roster_plans")
@@ -349,13 +359,17 @@ export async function prepareOpsRoster(locationId: string): Promise<ActionResult
         .maybeSingle();
       if (recalled.error) throw new Error(recalled.error.message);
       if (!recalled.data) throw new Error("This roster is no longer awaiting approval.");
-      const aligned = await realignOpsDatedDraft(companyId, authorization, recalled.data, start, end, true);
+      // Recalling keeps the plan's OWN already-defined period — it must not be realigned
+      // to whatever future week the viewer's browser happened to be scrolled to.
+      const recallStart = recalled.data.period_start ?? start;
+      const recallEnd = recalled.data.period_end ?? addRosterDays(recallStart, 6);
+      const aligned = await realignOpsDatedDraft(companyId, authorization, recalled.data, recallStart, recallEnd, true);
       refreshRosterViews();
       return {
         ok: true,
         planId: aligned.id,
-        periodStart: start,
-        periodEnd: end,
+        periodStart: recallStart,
+        periodEnd: recallEnd,
         rosterKind: "dated",
         entries: mapPreparedEntries(aligned.hr_roster_entries ?? []),
         message: "Pending approval recalled. Update week offs or shifts, save, then submit for approval again."
@@ -434,7 +448,7 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
     }
     let plan = await loadPlan(companyId, authorization, input.planId);
     if (plan.status === "approved") {
-      plan = await materializeOpsDraftFromApproved(companyId, authorization, plan);
+      plan = await materializeOpsDraftFromApproved(companyId, authorization, plan, input.viewWeekStart);
     }
     if (!["draft", "returned"].includes(plan.status) || !plan.location_id) return { ok: false, message: "This roster is no longer editable." };
     const planId = plan.id;
@@ -512,9 +526,18 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
 async function materializeOpsDraftFromApproved(
   companyId: string,
   authorization: AuthorizationContext,
-  approved: Awaited<ReturnType<typeof loadPlan>>
+  approved: Awaited<ReturnType<typeof loadPlan>>,
+  viewWeekStart?: string
 ) {
   if (!approved.location_id) throw new Error("This roster has no station.");
+  const currentWeek = rosterMonday(indiaToday());
+  // Anchor the new dated draft to whatever upcoming week the caller was actually
+  // editing when Save was pressed directly from the approved/recurring view — not
+  // always "this week" — otherwise a change made on a future week gets rejected as
+  // "outside this roster" because the freshly materialized draft only covers the
+  // current week's 7 days. Never anchor earlier than the current week.
+  const requestedStart = viewWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(viewWeekStart) ? rosterMonday(viewWeekStart) : currentWeek;
+  const anchorStart = requestedStart < currentWeek ? currentWeek : requestedStart;
   const existingOps = await db().from("hr_roster_plans")
     .select("id,name,period_start,period_end,status,location_id,created_by,roster_kind,effective_from,revision_no,supersedes_plan_id,hr_roster_plan_locations(location_id)")
     .eq("company_id", companyId)
@@ -528,14 +551,13 @@ async function materializeOpsDraftFromApproved(
   if (existingOps.error) throw new Error(existingOps.error.message);
   if (existingOps.data) {
     if (existingOps.data.roster_kind === "dated") return existingOps.data;
-    const start = rosterMonday(indiaToday());
-    const end = addRosterDays(start, 6);
-    await realignOpsDatedDraft(companyId, authorization, existingOps.data, start, end, true);
+    const end = addRosterDays(anchorStart, 6);
+    await realignOpsDatedDraft(companyId, authorization, existingOps.data, anchorStart, end, true);
     return loadPlan(companyId, authorization, existingOps.data.id);
   }
 
   const station = await authorisedStation(companyId, authorization, approved.location_id);
-  const start = rosterMonday(indiaToday());
+  const start = anchorStart;
   const end = addRosterDays(start, 6);
   const revision = Number(approved.revision_no ?? 0) + 1;
   const created = await db().from("hr_roster_plans").insert({

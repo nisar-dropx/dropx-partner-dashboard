@@ -76,6 +76,10 @@ export function resolveRosterBulkUploadWindow(input: {
     if (!validIsoDate(raw)) throw new Error("Choose a valid week start date.");
     const periodStart = mondayFor(raw);
     const periodEnd = addIsoDays(periodStart, 6);
+    // Excel upload only ever targets upcoming weeks — the current (in-progress) week
+    // is excluded, matching the client picker's floor (next Monday onward).
+    const minWeekStart = mondayFor(addIsoDays(mondayFor(today), 7));
+    if (periodStart < minWeekStart) throw new Error("Choose an upcoming week — the current week can no longer be uploaded.");
     return {
       mode,
       label: `week ${periodStart} → ${periodEnd}`,
@@ -88,6 +92,9 @@ export function resolveRosterBulkUploadWindow(input: {
 
   const rosterMonth = String(input.rosterMonth ?? today.slice(0, 7)).trim();
   const bounds = monthBoundsFromYm(rosterMonth);
+  // Month upload allows the rest of the current month (today onward) plus any future
+  // month, but never a month that has already fully passed.
+  if (rosterMonth < today.slice(0, 7)) throw new Error("Choose the current month or an upcoming month.");
   return {
     mode,
     label: rosterMonth,

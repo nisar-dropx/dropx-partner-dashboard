@@ -19,7 +19,7 @@ const checks = [
   [navigation.includes('{ code: "ops_rostering", label: "Rostering", href: "/rostering"'), "OpsPulse navigation must expose the Rostering menu."],
   [page.includes('requirePagePermission("ops_rostering", "access")'), "The roster workspace must enforce its dedicated page permission."],
   [actions.includes('from("hr_roster_plans")') && actions.includes('from("hr_roster_entries")'), "OpsPulse must update the canonical People roster, not a duplicate dataset."],
-  [actions.includes("const start = rosterMonday(indiaToday())"), "OpsPulse roster corrections must start in the current week, matching People."],
+  [actions.includes("const currentWeek = rosterMonday(indiaToday())") && actions.includes("requestedStart < currentWeek ? currentWeek : requestedStart"), "OpsPulse roster corrections must never start earlier than the current week, matching People — a viewed future week may anchor the draft, but the current week is always the floor."],
   [actions.includes("rosterSubmissionWindowError") && rosterLibrary.includes("effectiveFrom > currentWeekMonday") && rosterLibrary.includes("minimumFutureRosterMonday"), "Current-week roster corrections must follow the canonical People deadline rule."],
   [page.includes("approvalRequired={Boolean(route?.approvalRequired)}") && planner.includes('approvalRequired ? "Send for approval" : "Apply roster"'), "The submission control must distinguish approval routing from direct apply, matching People."],
   [["OPERATIONS_TL", "OPERATIONS_STM", "OPERATIONS_CLM", "OPERATIONS_AOM", "OPERATIONS_RM", "OPERATIONS_NH"].every((code) => permissions.includes(`'${code}'`)), "Roster defaults must cover the canonical Ops planning and approval roles."],

@@ -12,7 +12,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
-import { CalendarDays, Check, ChevronRight, Clock3, Download, Eraser, GripVertical, PencilLine, Search, Send, Upload, UsersRound } from "lucide-react";
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Download, Eraser, GripVertical, PencilLine, Search, Send, Upload, UsersRound } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { importOpsRosterWorkbook, prepareOpsRoster, saveOpsRosterAssignments, submitOpsRoster } from "@/app/ops-pulse/rostering/actions";
 import type { OpsRosterEntry, OpsRosterHoliday, OpsRosterPerson, OpsRosterPlan, OpsRosterShift } from "@/lib/ops-pulse/rostering";
@@ -157,8 +157,12 @@ export function OpsRosterPlanner({
   const [isImporting, startImporting] = useTransition();
   const [excelFileName, setExcelFileName] = useState<string | null>(null);
   const [bulkPeriodMode, setBulkPeriodMode] = useState<BulkPeriodMode>("week");
+  // Excel upload only ever targets upcoming periods: the week picker's floor is next
+  // Monday (the current week is excluded — matches roster edits being upcoming-only),
+  // and the month picker's floor is the current month (today's remaining days through
+  // month end are still fair game to upload), with future months always available.
   const [bulkRosterMonth, setBulkRosterMonth] = useState(currentIstMonth);
-  const [bulkWeekStart, setBulkWeekStart] = useState(() => mondayOf(today));
+  const [bulkWeekStart, setBulkWeekStart] = useState(() => mondayOf(moveIsoDate(today, 7)));
   const editingEnabledRef = useRef(editable);
   const pendingRecall = plan?.status === "pending_approval" && canStart && !editingEnabled;
   const assignmentsRef = useRef(initial);
@@ -315,7 +319,7 @@ export function OpsRosterPlanner({
       });
       let result: Awaited<ReturnType<typeof prepareOpsRoster>>;
       try {
-        result = await prepareOpsRoster(stationId);
+        result = await prepareOpsRoster(stationId, weekStart);
       } catch {
         preparingRef.current = false;
         setIsPreparing(false);
@@ -329,14 +333,21 @@ export function OpsRosterPlanner({
         return false;
       }
       const preparedAssignments = initialAssignments(result.entries ?? []);
+      const preparedPeriodStart = result.periodStart;
       activePlanIdRef.current = result.planId;
       setActivePlanId(result.planId);
       preparedPlanIdRef.current = result.planId;
-      templateStartRef.current = result.periodStart;
-      setTemplateStart(result.periodStart);
-      setLivePeriodEnd(result.periodEnd ?? moveIsoDate(result.periodStart, 6));
+      templateStartRef.current = preparedPeriodStart;
+      setTemplateStart(preparedPeriodStart);
+      const preparedPeriodEnd = result.periodEnd ?? moveIsoDate(preparedPeriodStart, 6);
+      setLivePeriodEnd(preparedPeriodEnd);
       setLiveRecurring(false);
-      setWeekStart(result.periodStart < initialWeekStart ? initialWeekStart : result.periodStart);
+      // Keep whatever week the user had navigated to — prepareOpsRoster always anchors
+      // the draft's OWN period to the current week server-side, but that's just where the
+      // dated override starts; it must not yank the user's in-progress view back to today.
+      // Only clamp if the current view has become genuinely out of range for the new
+      // (dated, non-recurring) period.
+      setWeekStart((current) => (current < preparedPeriodStart ? preparedPeriodStart : current > preparedPeriodEnd ? preparedPeriodEnd : current));
       assignmentsRef.current = preparedAssignments;
       setAssignments(preparedAssignments);
       editingEnabledRef.current = true;
@@ -353,10 +364,15 @@ export function OpsRosterPlanner({
     } finally {
       ensureEditingPromiseRef.current = null;
     }
-  }, [canStart, initialWeekStart, plan?.status, router, stationId]);
+  }, [canStart, initialWeekStart, plan?.status, router, stationId, weekStart]);
 
   const bulkWeekMonday = useMemo(() => mondayOf(bulkWeekStart || today), [bulkWeekStart, today]);
   const bulkWeekSunday = useMemo(() => moveIsoDate(bulkWeekMonday, 6), [bulkWeekMonday]);
+  // Upload can only ever target upcoming periods — the current (in-progress) week/month
+  // is excluded for the week picker, but the month picker still allows the rest of the
+  // current month (today through month end) since a month covers more than "this week."
+  const minBulkWeekStart = useMemo(() => mondayOf(moveIsoDate(today, 7)), [today]);
+  const minBulkMonth = useMemo(() => currentIstMonth(), []);
 
   const importWorkbook = useCallback((formData: FormData) => {
     if (!activePlanIdRef.current) {
@@ -376,14 +392,18 @@ export function OpsRosterPlanner({
       setExcelFileName(null);
       setMessage({ tone: "success", text: result.message });
       if (result.entries && result.periodStart) {
+        const importedPeriodStart = result.periodStart;
         const next = initialAssignments(result.entries);
         assignmentsRef.current = next;
         setAssignments(next);
-        templateStartRef.current = result.periodStart;
-        setTemplateStart(result.periodStart);
-        setLivePeriodEnd(result.periodEnd ?? moveIsoDate(result.periodStart, 6));
+        templateStartRef.current = importedPeriodStart;
+        setTemplateStart(importedPeriodStart);
+        const importedPeriodEnd = result.periodEnd ?? moveIsoDate(importedPeriodStart, 6);
+        setLivePeriodEnd(importedPeriodEnd);
         setLiveRecurring(false);
-        setWeekStart(result.periodStart < initialWeekStart ? initialWeekStart : result.periodStart);
+        // Same as ensureEditing: preserve the user's current view instead of snapping
+        // back to the imported period's own start, unless the view is now out of range.
+        setWeekStart((current) => (current < importedPeriodStart ? importedPeriodStart : current > importedPeriodEnd ? importedPeriodEnd : current));
         if (result.planId) {
           activePlanIdRef.current = result.planId;
           setActivePlanId(result.planId);
@@ -580,10 +600,11 @@ export function OpsRosterPlanner({
     });
   }
 
-  // Ops can only ever move the roster view forward, to upcoming weeks — never back to
-  // the current or a past week. Past/current-day cells stay non-editable regardless
-  // (see lockReason), but the week picker itself no longer offers backward navigation
-  // at all, since editing only ever applies to upcoming days.
+  // Ops roster edits only ever apply to upcoming days, so the floor for navigation is
+  // the current week (initialWeekStart) — never earlier. Forward is always available;
+  // Back only appears once the user has actually navigated away from the current week,
+  // so they have a way to return to where they started without overshooting into the
+  // past.
   function moveWeekForward() {
     const next = moveIsoDate(weekStart, 7);
     if (isRecurring) {
@@ -593,6 +614,12 @@ export function OpsRosterPlanner({
       if (next > livePeriodEnd) return;
       setWeekStart(next);
     }
+    setSelectedDates(new Set());
+  }
+
+  function moveWeekBack() {
+    const next = moveIsoDate(weekStart, -7);
+    setWeekStart(next < initialWeekStart ? initialWeekStart : next);
     setSelectedDates(new Set());
   }
 
@@ -729,6 +756,7 @@ export function OpsRosterPlanner({
 
     <div className={styles.toolbar}>
       <div className={styles.weekNavigation}>
+        {weekStart > initialWeekStart ? <button type="button" aria-label="Back to current week" onClick={moveWeekBack}><ChevronLeft size={16} /></button> : null}
         <span><CalendarDays size={15} /><strong>{dateLabel(dates[0] ?? weekStart)}</strong> to <strong>{dateLabel(dates[dates.length - 1] ?? dates[0] ?? weekStart)}</strong></span>
         <button type="button" aria-label="Next week" onClick={moveWeekForward} disabled={isRecurring ? weekStart >= maxWeekStart : moveIsoDate(weekStart, 7) > livePeriodEnd}><ChevronRight size={16} /></button>
       </div>
@@ -799,10 +827,14 @@ export function OpsRosterPlanner({
             <input
               type="date"
               value={bulkWeekMonday}
-              onChange={(event) => setBulkWeekStart(mondayOf(event.target.value || today))}
+              min={minBulkWeekStart}
+              onChange={(event) => {
+                const monday = mondayOf(event.target.value || minBulkWeekStart);
+                setBulkWeekStart(monday < minBulkWeekStart ? minBulkWeekStart : monday);
+              }}
               disabled={isImporting}
             />
-            <small>Mon {dateLabel(bulkWeekMonday)} → Sun {dateLabel(bulkWeekSunday)} · that week only</small>
+            <small>Mon {dateLabel(bulkWeekMonday)} → Sun {dateLabel(bulkWeekSunday)} · upcoming week only</small>
           </label>
         ) : (
           <label className={styles.excelPeriodField}>
@@ -810,10 +842,14 @@ export function OpsRosterPlanner({
             <input
               type="month"
               value={bulkRosterMonth}
-              onChange={(event) => setBulkRosterMonth(event.target.value)}
+              min={minBulkMonth}
+              onChange={(event) => {
+                const value = event.target.value || minBulkMonth;
+                setBulkRosterMonth(value < minBulkMonth ? minBulkMonth : value);
+              }}
               disabled={isImporting}
             />
-            <small>Expands Mon–Sun across every day in {bulkRosterMonth}</small>
+            <small>Expands Mon–Sun across every day in {bulkRosterMonth} from today onward · this month or any upcoming month</small>
           </label>
         )}
       </div>
