@@ -120,8 +120,13 @@ export function eddHistoryFacts(history: PackageHistoryEvent[]) {
     const key = `${event.state}:${event.time}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    // Some source histories begin after the original induction. A positively
+    // observed failed visit, station return, then transit also establishes a
+    // new outbound cycle; requiring the missing induction loses real HCRs.
+    const returnRedispatch = attemptTimes.length > 0 && returnedAfterAttemptAt
+      && event.time > returnedAfterAttemptAt;
     const outbound = ["IN_TRANSIT_TO_CUSTOMER", "OUT_FOR_DELIVERY"].includes(event.state)
-      || event.state === "IN_TRANSIT" && Boolean(inductedAt && event.time >= inductedAt);
+      || event.state === "IN_TRANSIT" && Boolean(inductedAt && event.time >= inductedAt || returnRedispatch);
     if (outbound) { dispatchedSinceAttempt = true; returnedAfterAttemptAt = null; }
     const rejected = rejectedStates.has(event.state) || /REJECT|CUSTOMER_REFUSED/.test(event.reason);
     if (rejected) rejectedAt = event.time;

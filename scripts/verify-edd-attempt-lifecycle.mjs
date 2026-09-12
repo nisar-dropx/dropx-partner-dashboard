@@ -41,6 +41,21 @@ assert.equal(hcr.returnedAt,"2026-09-12T12:00:00.000Z");
 assert.deepEqual(facts([...two].reverse()).attemptTimes,facts(two).attemptTimes,"source history is newest-first");
 assert.equal(lifecycle(pkg("RECEIVED",two,{historyComplete:false})).category,"hcr","two positively observed cycles establish a lower bound of two");
 
+// Real source shape: oldest available scan is UNKNOWN, followed by a failed
+// visit, station receipt, another day's outbound scans, and a second failure.
+const noInduction = [event("UNKNOWN","2026-09-10T03:37:00Z"),
+  event("DELIVERY_FAILED","2026-09-10T13:28:00Z"),
+  event("RECEIVED","2026-09-10T13:29:00Z"),
+  event("RECEIVED","2026-09-11T03:56:00Z"),
+  event("IN_TRANSIT","2026-09-11T04:10:00Z"),
+  event("IN_TRANSIT","2026-09-11T04:21:00Z"),
+  event("DELIVERY_FAILED","2026-09-11T16:54:00Z"),
+  event("RECEIVED","2026-09-11T17:05:00Z")];
+assert.equal(lifecycle(pkg("RECEIVED",noInduction)).category,"hcr","return then redispatch establishes a second cycle without the original induction");
+assert.equal(facts(noInduction).attemptTimes.length,2);
+assert.equal(facts(noInduction).returnedAfterAttemptAt,"2026-09-11T17:05:00.000Z");
+assert.equal(facts([event("UNKNOWN","2026-09-10T03:37:00Z"),event("IN_TRANSIT","2026-09-10T04:10:00Z")]).firstDispatchAt,null,"unanchored transit still cannot prove customer dispatch");
+
 for(const state of ["REJECTED","DELIVERY_REJECTED"]) {
   assert.equal(lifecycle(pkg(state,[...two,event(state,"2026-09-12T13:00:00Z")])).category,"rejected");
   assert.equal(facts([event(state,"2026-09-12T13:00:00Z")]).firstAttemptAt,null,"rejections do not become HFR attempts");
