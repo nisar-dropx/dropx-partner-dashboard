@@ -55,6 +55,10 @@ type Props = {
   canAccessProxy: boolean;
   canUndoBypass: boolean;
   canManageActions: boolean;
+  /** Oversight has explicitly re-opened edit access for the original (first-stage) CM/AOM reviewer. */
+  reviewerEditReopened?: boolean;
+  /** This viewer IS the original (first-stage) reviewer for this review. */
+  isOriginalReviewer?: boolean;
   stationLeads: string;
   backlog: PerformanceReviewBacklog;
   pendingExpanded: boolean;
@@ -133,7 +137,7 @@ function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociat
 }
 
 export function PerformanceReviewDesk(props: Props) {
-  const { canAdd, canCompleteStep, canEdit, canEditConnections, canComment, programManager, connections, updates, reviewChain, date, error, items, locations, metrics, notice, previousReviews, review, reviews, selectedLocation, snapshot, sourceBatchId, sourceType, sourceWeek, steps } = props;
+  const { canAdd, canCompleteStep, canEdit, canEditConnections, canComment, programManager, reviewerEditReopened, isOriginalReviewer, connections, updates, reviewChain, date, error, items, locations, metrics, notice, previousReviews, review, reviews, selectedLocation, snapshot, sourceBatchId, sourceType, sourceWeek, steps } = props;
   const selectedCode = selectedLocation.station_code;
   const deliveryAvailable = snapshot.deliveryDataAvailable !== false;
   const deliveryLabel = deliveryAvailable ? snapshot.deliveredCount.toLocaleString("en-IN") : "Data not loaded";
@@ -255,8 +259,8 @@ export function PerformanceReviewDesk(props: Props) {
     {review ? <PerformanceReviewFlow key={`${review.id}-${review.current_step_order}-${review.updated_at}`} steps={selectedSteps} currentOrder={review.current_step_order} stationLeads={props.stationLeads}/> : <section className="performance-review-flow" aria-label="Review workflow">
       {reviewChain.map((step,index)=><div key={`${step.reviewerUserId}-${index}`}><i>{index+1}</i><span>{step.reviewerRole}<small>{step.reviewerName}</small><small>Reviews with {index>0?reviewChain[index-1].reviewerName:props.stationLeads}</small></span></div>)}
     </section>}
-    <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":canEditConnections&&!canComment&&!canEdit?"Station access · update vehicle timings and noon EMD; view the full review":canEdit?"Your review · update RCA, actions, takeaway and station timings":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
-    <PerformanceReviewExceptions key={`${selectedCode}-${date}-${review?.updated_at??"not-started"}`} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy} canAccessBypass={props.canAccessBypass} canAccessProxy={props.canAccessProxy} canUndoBypass={props.canUndoBypass} canStart={canAdd} hasRoute={Boolean(review||reviewChain.length)} routeLabel={reviewChain.map((step)=>`${step.reviewerRole} · ${step.reviewerName}`).join(" → ") || selectedSteps.map((step)=>`${step.reviewer_role} · ${step.reviewer_name}`).join(" → ")}/>
+    <p className="review-access-hint">{programManager?"Program Manager · edit and comment at any stage":isOriginalReviewer&&reviewerEditReopened?"Edit access reopened by oversight · you can update RCA, actions and takeaway again":canEditConnections&&!canComment&&!canEdit?"Station access · update vehicle timings and noon EMD; view the full review":canEdit?"Your review · update RCA, actions, takeaway and station timings":canComment?"Your review · add comments and complete your stage":"View the full review · comments open at your review stage"}</p>
+    <PerformanceReviewExceptions key={`${selectedCode}-${date}-${review?.updated_at??"not-started"}`} review={review} steps={selectedSteps} canBypass={props.canBypass} canProxy={props.canProxy} canAccessBypass={props.canAccessBypass} canAccessProxy={props.canAccessProxy} canUndoBypass={props.canUndoBypass} canStart={canAdd} hasRoute={Boolean(review||reviewChain.length)} routeLabel={reviewChain.map((step)=>`${step.reviewerRole} · ${step.reviewerName}`).join(" → ") || selectedSteps.map((step)=>`${step.reviewer_role} · ${step.reviewer_name}`).join(" → ")} reviewerEditReopened={Boolean(reviewerEditReopened)} firstReviewerName={reviewChain[0]?.reviewerName ?? selectedSteps.find((step)=>visibleReviewStep(step))?.reviewer_name ?? null}/>
 
     <nav className="review-section-nav" aria-label="Jump to review section"><a href="#review-performance">Overview</a><a href="#review-station-updates">Vehicle & EMD</a>{rcaRows.length?<a href="#review-rca">RCA & reasons <b>{rcaRows.length}</b></a>:null}<a href="#review-cost">Cost & COD</a><a href="#review-followups">Actions</a>{review?<a href="#review-discussion">Discussion</a>:null}</nav>
 

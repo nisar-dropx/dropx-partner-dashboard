@@ -54,7 +54,7 @@ export const loadReviewActor = cache(async (companyId: string, userId: string, r
 export async function getReviewAccess(
   authorization: AuthorizationContext,
   stationId: string,
-  review: { status: string; current_step_order: number } | null,
+  review: { status: string; current_step_order: number; reviewer_edit_reopened?: boolean } | null,
   steps: { step_order: number; reviewer_user_id: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[],
   options?: { inScope?: boolean; scorecardImported?: boolean }
 ) {
@@ -85,8 +85,16 @@ export async function getReviewAccess(
     hasProxy: Boolean(current?.proxy_reviewer_user_id),
     higherReviewer: pendingSteps.some(step => step.reviewer_user_id === authorization.userId && step.step_order > (current?.step_order ?? pendingSteps[0]?.step_order ?? 0)),
     currentRole: current?.reviewer_role ?? null,
-    scorecardImported: options?.scorecardImported ?? false
+    scorecardImported: options?.scorecardImported ?? false,
+    reviewerEditReopened: Boolean(review?.reviewer_edit_reopened)
   });
   const routingIssue = reviewRoutingIssue(steps);
-  return { actor, routingIssue, ...capabilities, canComplete: capabilities.canComplete && !routingIssue };
+  return {
+    actor,
+    routingIssue,
+    ...capabilities,
+    canComplete: capabilities.canComplete && !routingIssue,
+    // Exposed so the UI can show "you are the original reviewer" hints (e.g. the reopened-edit-access banner).
+    isOriginalReviewer: Boolean(pendingSteps[0]?.reviewer_user_id && pendingSteps[0].reviewer_user_id === authorization.userId)
+  };
 }

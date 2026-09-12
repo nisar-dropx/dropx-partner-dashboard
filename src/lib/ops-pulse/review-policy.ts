@@ -43,6 +43,8 @@ export function reviewCapabilities(input: {
   hasClusterFilterAccess?: boolean;
   /** Performance scorecard has been imported for this station/date. Reviews and RCA cannot start before this. */
   scorecardImported: boolean;
+  /** Oversight explicitly re-opened edit access for the original (first-stage) CM/AOM reviewer. */
+  reviewerEditReopened?: boolean;
 }) {
   const visible = input.inScope && input.canView;
   const editor = visible && input.canEdit;
@@ -50,14 +52,20 @@ export function reviewCapabilities(input: {
   const canOverride = oversight || input.nationalHead || input.tech;
   const current = Boolean(input.currentReviewerId && input.currentReviewerId === input.userId);
   const first = Boolean(input.firstReviewerId && input.firstReviewerId === input.userId);
+  // Oversight can explicitly hand edit access back to the original CM/AOM reviewer after
+  // editing a review themselves — even once that reviewer is no longer the "current" pending
+  // step. Scoped to editing only; never grants canComplete/canBypass/canProxy, and never
+  // survives a closed review.
+  const reopenedForOriginalReviewer = Boolean(input.reviewerEditReopened) && first && !input.closed;
   return {
     scorecardImported: input.scorecardImported,
+    reviewerEditReopened: Boolean(input.reviewerEditReopened),
     canStart: Boolean(visible && input.scorecardImported && (input.canAdd || input.canEdit) && (canOverride || first || input.higherReviewer)),
     // Station team always; first-stage manager (or their proxy) can enter timings when TL access is missing.
-    canEditConnections: editor && (oversight || input.stationUser || (!input.closed && current && (first || input.currentIsFirst === true))),
-    canEditRca: editor && (oversight || (!input.closed && current && (first || input.currentIsFirst === true))),
+    canEditConnections: editor && (oversight || reopenedForOriginalReviewer || input.stationUser || (!input.closed && current && (first || input.currentIsFirst === true))),
+    canEditRca: editor && (oversight || reopenedForOriginalReviewer || (!input.closed && current && (first || input.currentIsFirst === true))),
     canComment: editor && (oversight || (!input.closed && current)),
-    canManageActions: editor && (oversight || first || (!input.closed && current)),
+    canManageActions: editor && (oversight || reopenedForOriginalReviewer || first || (!input.closed && current)),
     // Oversight uses an explicit, reason-required bypass, never an unassigned approval.
     canComplete: editor && !input.closed && Boolean(input.currentRole) && current,
     // Visibility is separate from availability: every editor sees Proxy; Skip stays oversight-only.
@@ -85,92 +93,61 @@ export function reviewBypassReason(value: string) {
   return reason;
 }
 
-function normalizeClusterPersonName(value: string | null | undefined) {
-  return String(value ?? "").trim().replace(/\s+/g, " ");
-}
-
+/**
+ * Cluster/AOM filter key format is "cm:<personId>" or "aom:<personId>" — keyed by the
+ * People record's stable personId, never by display name. Two different people can share
+ * a name; personId cannot collide, which is exactly the bug this replaced (see
+ * filterLocationsByReviewCluster below for the People-hierarchy-based station match that
+ * consumes this key).
+ */
 export function parseReviewClusterFilterKey(selected: string) {
   const key = selected.trim();
   const match = /^(cm|aom):(.+)$/i.exec(key);
   if (!match) return null;
-  const name = normalizeClusterPersonName(match[2]);
-  if (!name) return null;
-  return { kind: match[1].toLowerCase() as "cm" | "aom", name, value: `${match[1].toLowerCase()}:${name}` };
+  const personId = match[2].trim();
+  if (!personId) return null;
+  return { kind: match[1].toLowerCase() as "cm" | "aom", personId, value: `${match[1].toLowerCase()}:${personId}` };
 }
 
-/** Primary bucket for dropdown options: CM when set; otherwise AOM. */
-export function stationReviewClusterScope(location: {
-  cluster_manager?: string | null;
-  cluster?: string | null;
-  aom?: string | null;
-}) {
-  const cluster = normalizeClusterPersonName(location.cluster_manager || location.cluster);
-  if (cluster) return { value: `cm:${cluster}`, label: cluster, kind: "cm" as const };
-  const aom = normalizeClusterPersonName(location.aom);
-  if (aom) return { value: `aom:${aom}`, label: `${aom} (AOM)`, kind: "aom" as const };
-  return null;
-}
-
-function locationClusterPersonNames(location: {
-  cluster_manager?: string | null;
-  cluster?: string | null;
-  cluster_manager_names?: string[] | null;
-  aom?: string | null;
-  aom_names?: string[] | null;
-}) {
-  const clusterNames = [
-    location.cluster_manager,
-    location.cluster,
-    ...(location.cluster_manager_names ?? [])
-  ].map(normalizeClusterPersonName).filter(Boolean);
-  const aomNames = [
-    location.aom,
-    ...(location.aom_names ?? [])
-  ].map(normalizeClusterPersonName).filter(Boolean);
-  return { clusterNames, aomNames };
-}
-
-export function reviewClusterFilterOptions(locations: {
-  cluster_manager?: string | null;
-  cluster?: string | null;
-  cluster_manager_names?: string[] | null;
-  aom?: string | null;
-  aom_names?: string[] | null;
-}[]) {
+/**
+ * Cluster/AOM filter dropdown options, built directly from the People operational
+ * hierarchy (the same authoritative source approval-workflow-routing.ts's same_cluster
+ * scope already uses) — keyed by personId, not display name, and NOT unioned with any
+ * Ops-login-access-scope data. `hierarchyByLocation` is the `byLocation` map returned by
+ * `loadPeopleOperationalHierarchy` for exactly the stations being offered.
+ */
+export function reviewClusterFilterOptions(hierarchyByLocation: Map<string, {
+  clusterManagers: { personId: string; name: string }[];
+  areaOperationsManagers: { personId: string; name: string }[];
+}>) {
   const options = new Map<string, string>();
-  for (const location of locations) {
-    const { clusterNames, aomNames } = locationClusterPersonNames(location);
-    for (const name of clusterNames) options.set(`cm:${name}`, name);
-    for (const name of aomNames) {
-      if (!clusterNames.includes(name)) options.set(`aom:${name}`, `${name} (AOM)`);
+  for (const hierarchy of hierarchyByLocation.values()) {
+    for (const manager of hierarchy.clusterManagers) options.set(`cm:${manager.personId}`, manager.name);
+    for (const manager of hierarchy.areaOperationsManagers) {
+      if (!options.has(`cm:${manager.personId}`)) options.set(`aom:${manager.personId}`, `${manager.name} (AOM)`);
     }
-    const scope = stationReviewClusterScope(location);
-    if (scope) options.set(scope.value, scope.label);
   }
   return [...options.entries()]
     .map(([value, label]) => ({ value, label }))
     .sort((left, right) => left.label.localeCompare(right.label));
 }
 
-/** Stations where this person appears as CM or AOM in People hierarchy. */
-export function filterLocationsByReviewCluster<T extends {
-  cluster_manager?: string | null;
-  cluster?: string | null;
-  cluster_manager_names?: string[] | null;
-  aom?: string | null;
-  aom_names?: string[] | null;
-}>(locations: T[], selected: string) {
+/** Stations where this personId appears as CM or AOM in the live People operational hierarchy. */
+export function filterLocationsByReviewCluster<T extends { id: string }>(
+  locations: T[],
+  hierarchyByLocation: Map<string, {
+    clusterManagers: { personId: string }[];
+    areaOperationsManagers: { personId: string }[];
+  }>,
+  selected: string
+) {
   const parsed = parseReviewClusterFilterKey(selected);
   if (!parsed) return selected.trim() ? [] : locations;
-  const target = parsed.name.toLowerCase();
   return locations.filter((location) => {
-    const { clusterNames, aomNames } = locationClusterPersonNames(location);
-    if (parsed.kind === "cm") {
-      return clusterNames.some((name) => name.toLowerCase() === target)
-        || aomNames.some((name) => name.toLowerCase() === target);
-    }
-    return aomNames.some((name) => name.toLowerCase() === target)
-      || clusterNames.some((name) => name.toLowerCase() === target);
+    const hierarchy = hierarchyByLocation.get(location.id);
+    if (!hierarchy) return false;
+    return hierarchy.clusterManagers.some((manager) => manager.personId === parsed.personId)
+      || hierarchy.areaOperationsManagers.some((manager) => manager.personId === parsed.personId);
   });
 }
 

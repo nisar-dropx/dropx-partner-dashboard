@@ -35,6 +35,8 @@ export type PerformanceReview = {
   started_at: string;
   closed_at: string | null;
   updated_at: string;
+  /** Oversight re-opened edit access for the original CM/AOM reviewer after editing this review themselves. */
+  reviewer_edit_reopened: boolean;
 };
 
 export type PerformanceReviewCarryover = Pick<PerformanceReview, "id" | "station_code" | "source_date" | "status" | "review_summary" | "closed_at" | "updated_at">;
@@ -289,7 +291,7 @@ export async function loadPerformanceReviewWorkspace(companyId: string, sourceDa
       .select("daily_review_time,weekly_review_time,weekly_review_weekday,stale_after_hours")
       .eq("company_id", companyId).maybeSingle(),
     supabaseAdmin.from("ops_performance_reviews")
-      .select("id,review_type,source_date,report_year,report_week,station_id,station_code,source_type,source_batch_id,status,current_step_order,vehicle_arrival_time,unloading_complete_time,station_clear_time,review_summary,started_at,closed_at,updated_at")
+      .select("id,review_type,source_date,report_year,report_week,station_id,station_code,source_type,source_batch_id,status,current_step_order,vehicle_arrival_time,unloading_complete_time,station_clear_time,review_summary,started_at,closed_at,updated_at,reviewer_edit_reopened")
       .eq("company_id", companyId).eq("review_type", "daily_operations").eq("source_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("ops_performance_reviews")
       .select("id,station_code,source_date,status,review_summary,closed_at,updated_at")

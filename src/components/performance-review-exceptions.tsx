@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { PerformanceReview, PerformanceReviewStep } from "@/lib/ops-pulse/performance-review";
-import { bypassPerformanceReviewLevel, proxyPerformanceReview, undoBypassPerformanceReviewLevel } from "@/app/ops-pulse/performance/actions";
+import { bypassPerformanceReviewLevel, closeReopenedPerformanceReviewAccess, proxyPerformanceReview, reopenPerformanceReviewForOriginalReviewer, undoBypassPerformanceReviewLevel } from "@/app/ops-pulse/performance/actions";
 import { ReviewActionForm } from "@/components/review-action-form";
 
 export function PerformanceReviewExceptions({
@@ -16,6 +16,8 @@ export function PerformanceReviewExceptions({
   canStart,
   hasRoute,
   routeLabel,
+  reviewerEditReopened,
+  firstReviewerName,
 }: {
   review: PerformanceReview | null;
   steps: PerformanceReviewStep[];
@@ -27,6 +29,10 @@ export function PerformanceReviewExceptions({
   canStart: boolean;
   hasRoute: boolean;
   routeLabel?: string;
+  /** Oversight has re-opened edit access for the original CM/AOM reviewer. */
+  reviewerEditReopened?: boolean;
+  /** Display name of the original (first-stage) reviewer, for the reopen button's label. */
+  firstReviewerName?: string | null;
 }) {
   const [mode, setMode] = useState<"proxy" | "skip" | "undo" | null>(null);
   const current =
@@ -98,6 +104,23 @@ export function PerformanceReviewExceptions({
           <button type="button" className="button secondary" disabled={!undoEnabled} onClick={() => setMode(mode === "undo" ? null : "undo")}>
             Undo skip…
           </button>
+        ) : null}
+        {canAccessBypass && review ? (
+          <ReviewActionForm
+            key={reviewerEditReopened ? "close-reopen" : "reopen"}
+            action={reviewerEditReopened ? closeReopenedPerformanceReviewAccess : reopenPerformanceReviewForOriginalReviewer}
+            className="review-reopen-inline-form"
+          >
+            <input type="hidden" name="review_id" value={review.id} />
+            <input type="hidden" name="source_date" value={review.source_date} />
+            <input type="hidden" name="station_code" value={review.station_code} />
+            <input type="hidden" name="review_version" value={review.updated_at} />
+            <button type="submit" className="button secondary">
+              {reviewerEditReopened
+                ? "Revoke reopened edit access"
+                : `Give edit access back to ${firstReviewerName || "CM/AOM"}`}
+            </button>
+          </ReviewActionForm>
         ) : null}
       </div>
       {inactiveReason || (!proxyEnabled && canAccessProxy) || (review?.status === "closed" && skipped.length) ? (

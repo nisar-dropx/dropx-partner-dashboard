@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { managerReviewChain, reviewCapabilities, connectionTimes, stationTimingClocks, discussionFeedUpdates, legacyConnectionsFromReview, reviewRole, noonEmdValue, reviewBypassReason, visibleReviewStep, filterLocationsByReviewCluster, reviewClusterFilterOptions, stationReviewClusterScope } from './review-policy.ts';
+import { managerReviewChain, reviewCapabilities, connectionTimes, stationTimingClocks, discussionFeedUpdates, legacyConnectionsFromReview, reviewRole, noonEmdValue, reviewBypassReason, visibleReviewStep, filterLocationsByReviewCluster, reviewClusterFilterOptions, parseReviewClusterFilterKey } from './review-policy.ts';
 const person=(role,id=role)=>({role,personId:id});
 test('CM to AOM to National Head; excludes station review stage',()=>{
   assert.deepEqual(managerReviewChain(['Team Lead','Cluster Manager','Area Operations Manager','National Head'].map(role=>person(role))).map(p=>p.role),['Cluster Manager','Area Operations Manager','National Head']);
@@ -14,7 +14,20 @@ test('no cluster manager uses actual AOM and deduplicates identities',()=>{
 const base={userId:'tl',owner:false,programManager:false,stationUser:false,inScope:true,canView:true,canAdd:true,canEdit:true,closed:false,firstReviewerId:'cm',currentReviewerId:'cm',currentRole:'Cluster Manager',scorecardImported:true};
 test('station editor can only enter connection timings',()=>{
   const access=reviewCapabilities({...base,stationUser:true});
-  assert.deepEqual(access,{scorecardImported:true,canStart:false,canEditConnections:true,canEditRca:false,canComment:false,canComplete:false,canManageActions:false,canAccessBypass:false,canAccessProxy:true,canBypass:false,canUndoBypass:false,canProxy:false});
+  assert.deepEqual(access,{scorecardImported:true,reviewerEditReopened:false,canStart:false,canEditConnections:true,canEditRca:false,canComment:false,canComplete:false,canManageActions:false,canAccessBypass:false,canAccessProxy:true,canBypass:false,canUndoBypass:false,canProxy:false});
+});
+test('reviewerEditReopened lets the original CM/AOM reviewer edit again after oversight has acted, until the review closes',()=>{
+  const reopened={...base,userId:'cm',currentReviewerId:'other',reviewerEditReopened:true};
+  assert.equal(reviewCapabilities(reopened).canEditRca,true);
+  assert.equal(reviewCapabilities(reopened).canEditConnections,true);
+  assert.equal(reviewCapabilities(reopened).canManageActions,true);
+  // Not the original reviewer — reopening does nothing for them.
+  assert.equal(reviewCapabilities({...reopened,userId:'someone-else'}).canEditRca,false);
+  // Closed review neutralizes the flag even if it is still set true.
+  assert.equal(reviewCapabilities({...reopened,closed:true}).canEditRca,false);
+  // Reopening never grants completion/bypass/proxy authority.
+  assert.equal(reviewCapabilities(reopened).canComplete,false);
+  assert.equal(reviewCapabilities(reopened).canBypass,false);
 });
 test('canStart is blocked until the performance scorecard is imported, even for oversight',()=>{
   assert.equal(reviewCapabilities({...base,owner:true,scorecardImported:false}).canStart,false);
@@ -126,16 +139,25 @@ test('bypass requires reason and explicit skipped stages remain visible',()=>{
   assert.equal(visibleReviewStep({status:'skipped',reviewer_role:'Cluster Manager'}),false);
   assert.equal(visibleReviewStep({status:'skipped',reviewer_role:'Cluster Manager',bypassed_at:'2026-09-04'}),true);
 });
-test('cluster filter matches person on CM or AOM names, not only primary bucket',()=>{
-  const withCm={cluster_manager:'Ravi',cluster:null,cluster_manager_names:['Ravi'],aom:'Asha',aom_names:['Asha']};
-  const aomOnly={cluster_manager:null,cluster:null,cluster_manager_names:[],aom:'Asha',aom_names:['Asha']};
-  const bare={cluster_manager:null,cluster:null,cluster_manager_names:[],aom:null,aom_names:[]};
-  const shared={cluster_manager:'Priya',cluster:null,cluster_manager_names:['Priya','Ravi'],aom:'Asha',aom_names:['Asha']};
-  assert.equal(stationReviewClusterScope(withCm)?.value,'cm:Ravi');
-  assert.equal(stationReviewClusterScope(aomOnly)?.value,'aom:Asha');
-  assert.equal(stationReviewClusterScope(bare),null);
-  const options=reviewClusterFilterOptions([withCm,aomOnly,bare,shared]);
-  assert.deepEqual(options.map((option)=>option.value).sort(),['aom:Asha','cm:Priya','cm:Ravi']);
-  assert.deepEqual(filterLocationsByReviewCluster([withCm,aomOnly,shared], 'aom:Asha').map((row)=>row.aom),['Asha','Asha','Asha']);
-  assert.deepEqual(filterLocationsByReviewCluster([withCm,aomOnly,shared], 'cm:Ravi'),[withCm,shared]);
+test('cluster filter is keyed by personId, not display name, so same-named managers never collide',()=>{
+  const withCm={id:'station-ravi',cluster_manager:'Ravi',aom:'Asha'};
+  const aomOnly={id:'station-asha',cluster_manager:null,aom:'Asha'};
+  const bare={id:'station-bare',cluster_manager:null,aom:null};
+  // A DIFFERENT person who happens to share the display name "Ravi" with ravi-id's CM —
+  // must not be merged into the same option or station list.
+  const sharedName={id:'station-other-ravi',cluster_manager:'Ravi',aom:'Asha'};
+  const hierarchyByLocation = new Map([
+    ['station-ravi', { clusterManagers: [{ personId: 'ravi-id', name: 'Ravi' }], areaOperationsManagers: [{ personId: 'asha-id', name: 'Asha' }] }],
+    ['station-asha', { clusterManagers: [], areaOperationsManagers: [{ personId: 'asha-id', name: 'Asha' }] }],
+    ['station-bare', { clusterManagers: [], areaOperationsManagers: [] }],
+    ['station-other-ravi', { clusterManagers: [{ personId: 'other-ravi-id', name: 'Ravi' }], areaOperationsManagers: [{ personId: 'asha-id', name: 'Asha' }] }]
+  ]);
+  assert.equal(parseReviewClusterFilterKey('cm:ravi-id')?.value,'cm:ravi-id');
+  assert.equal(parseReviewClusterFilterKey('bad'),null);
+  const options=reviewClusterFilterOptions(hierarchyByLocation);
+  assert.deepEqual(options.map((option)=>option.value).sort(),['aom:asha-id','cm:other-ravi-id','cm:ravi-id']);
+  const stations=[withCm,aomOnly,bare,sharedName];
+  assert.deepEqual(filterLocationsByReviewCluster(stations,hierarchyByLocation,'aom:asha-id').map((row)=>row.id).sort(),['station-asha','station-other-ravi','station-ravi']);
+  // Only the station whose CM's personId is 'ravi-id' matches — the same-named 'other-ravi-id' station does not.
+  assert.deepEqual(filterLocationsByReviewCluster(stations,hierarchyByLocation,'cm:ravi-id').map((row)=>row.id),['station-ravi']);
 });

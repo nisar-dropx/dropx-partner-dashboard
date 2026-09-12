@@ -51,7 +51,7 @@ async function context(authorization: AuthorizationContext, data: FormData) {
   const station = await stationForAction(authorization, text(data, "station_code").toUpperCase());
   const date = dateValue(text(data, "source_date"));
   const result = await supabaseAdmin.from("ops_performance_reviews")
-    .select("id,station_id,station_code,source_date,current_step_order,status,updated_at")
+    .select("id,station_id,station_code,source_date,current_step_order,status,updated_at,reviewer_edit_reopened")
     .eq("company_id", companyId).eq("id", text(data, "review_id")).eq("station_id", station.id).eq("source_date", date).maybeSingle();
   if (result.error || !result.data) throw new Error("This review is unavailable. Refresh and try again.");
   const steps = await supabaseAdmin.from("ops_performance_review_steps").select("id,step_order,reviewer_user_id,reviewer_role,status,bypassed_at,proxy_reviewer_user_id")
@@ -283,6 +283,35 @@ export async function undoBypassPerformanceReviewLevel(data: FormData): Promise<
   } catch (error) {
     return failure(error);
   }
+}
+
+/** Oversight hands edit access back to the original (first-stage) CM/AOM reviewer after editing this review themselves. */
+export async function reopenPerformanceReviewForOriginalReviewer(data: FormData): Promise<ReviewActionResult> {
+  const authorization = await requirePagePermission("performance_review", "access");
+  try {
+    const { companyId, review, access } = await context(authorization, data);
+    if (!access.canAccessBypass) throw new Error("Only Program Manager, National Head, Owner, Tech, or Cluster/AOM filter access can reopen edit access.");
+    const result = await supabaseAdmin!.rpc("ops_reopen_reviewer_edit_access", {
+      p_company: companyId, p_actor: authorization.userId, p_review: review.id, p_reopened: true,
+      p_expected_version: text(data, "review_version") || review.updated_at,
+    });
+    rpcError(result.error);
+    return finish("Edit access reopened for the station's review manager.");
+  } catch (error) { return failure(error); }
+}
+
+export async function closeReopenedPerformanceReviewAccess(data: FormData): Promise<ReviewActionResult> {
+  const authorization = await requirePagePermission("performance_review", "access");
+  try {
+    const { companyId, review, access } = await context(authorization, data);
+    if (!access.canAccessBypass) throw new Error("Only Program Manager, National Head, Owner, Tech, or Cluster/AOM filter access can close reopened edit access.");
+    const result = await supabaseAdmin!.rpc("ops_reopen_reviewer_edit_access", {
+      p_company: companyId, p_actor: authorization.userId, p_review: review.id, p_reopened: false,
+      p_expected_version: text(data, "review_version") || review.updated_at,
+    });
+    rpcError(result.error);
+    return finish("Reopened edit access closed.");
+  } catch (error) { return failure(error); }
 }
 
 export async function proxyPerformanceReview(data: FormData): Promise<ReviewActionResult> {
