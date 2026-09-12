@@ -39,6 +39,8 @@ export async function GET(request: Request) {
       "Known EDD Today": row.hasSnapshot ? row.todayTotal : "",
       "Delivered EDD Today": row.hasSnapshot ? row.todayDelivered : "",
       "HFR EDD Today": row.hasSnapshot ? row.todayHfr : "",
+      "HCR EDD Today": row.hasSnapshot ? row.todayHcr : "",
+      "Observed INDUCTED / RECEIVED": row.hasSnapshot ? row.todayObservedAtStation : "",
       "Attempted EDD Today": row.hasSnapshot ? row.todayAttempted : "",
       "History To Verify EDD Today": row.hasSnapshot ? row.todayUnverified : "",
       "Unconfirmed EDD Date": row.hasSnapshot ? row.missingDate : "",

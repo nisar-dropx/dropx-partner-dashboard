@@ -118,14 +118,14 @@ export async function captureReviewEddHistory(): Promise<{ captured: number; dat
       const sourceAt = source?.fetchedAt ?? entry?.fetchedAt ?? null;
       const backlogAt = source?.fetchedAt ?? backlog.get(station.station_code) ?? null;
       const summary = summarizeStationEdd(station.station_code, packages, sourceAt, date);
-      const { todayTotal, todayAtStation, todayOnRoad, todayDelivered, todayHfr, todayAttempted, todayUnverified, todayOther, missingDate, hasSnapshot } = summary;
+      const { todayTotal, todayAtStation, todayOnRoad, todayDelivered, todayHfr, todayHcr, todayObservedAtStation, todayAttempted, todayUnverified, todayOther, missingDate, hasSnapshot } = summary;
       const routeCounts = normalizeReviewRouteCounts(route ? { workDate: String(route.window_from), assigned: route.assigned,
         delivered: route.delivered, returned: route.returned, held: route.held, yetToDispatch: route.yet_to_dispatch } : null, date);
       const row = { company_id: station.company_id, station_id: station.id, station_code: station.station_code, work_date: date,
         captured_slot: new Date(Math.floor(observedAt.getTime() / 300_000) * 300_000).toISOString(), observed_at: observedAt.toISOString(),
         source_at: sourceAt, backlog_at: backlogAt, performance_at: route?.fetched_at ?? null,
-        counts: { todayTotal, todayAtStation, todayOnRoad, todayDelivered, todayHfr, todayAttempted, todayUnverified, todayOther, missingDate,
-          hasSnapshot: hasSnapshot && Boolean(source), captureVersion: 3, captureEveryMinutes: 15, sourceMaxAgeMinutes: 35, ...routeCounts } };
+        counts: { todayTotal, todayAtStation, todayOnRoad, todayDelivered, todayHfr, todayHcr, todayObservedAtStation, todayAttempted, todayUnverified, todayOther, missingDate,
+          hasSnapshot: hasSnapshot && Boolean(source), captureVersion: 4, captureEveryMinutes: 15, sourceMaxAgeMinutes: 35, ...routeCounts } };
       if (!reviewEddSourceFresh({ observedAt: row.observed_at, sourceAt, backlogAt, performanceAt: row.performance_at, counts: row.counts }, date)) staleStations.push(station.station_code);
       return row;
     });

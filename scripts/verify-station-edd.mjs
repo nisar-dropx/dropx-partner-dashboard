@@ -66,7 +66,7 @@ const response = await workbookModule.compressedWorkbookResponse(sheets, "statio
 assert.match(response.headers.get("Content-Disposition"), /station-edd-AWEZ.xlsx/);
 const bytes = Buffer.from(await response.arrayBuffer());
 const parsed = XLSX.read(bytes, { type: "buffer" });
-assert.deepEqual(parsed.SheetNames, ["Summary", "Source Statuses", "At Station EDD Today", "Overdue At Station", "Associates EDD Today", "HFR", "All Snapshot TIDs"]);
+assert.deepEqual(parsed.SheetNames, ["Summary", "Source Statuses", "At Station EDD Today", "Overdue At Station", "Associates EDD Today", "HFR", "Attempt lifecycle", "All Snapshot TIDs"]);
 const atStation = XLSX.utils.sheet_to_json(parsed.Sheets["At Station EDD Today"]);
 assert.equal(atStation.length, 3);
 assert.deepEqual(atStation.map(r => r["Tracking ID"]), ["1", "2", "3"]);

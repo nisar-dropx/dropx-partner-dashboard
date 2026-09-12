@@ -158,6 +158,9 @@ export async function lookupTrackingId(params: {
     try {
       const { rememberEddLookup } = await import("./edd-ledger");
       await rememberEddLookup(actualStationCode, trackingId, found);
+      // Only an already authorized hinted station and existing ledger row.
+      // Preserve the returned route code; do not reassign or duplicate stock.
+      if (hint && hint !== actualStationCode && byStationCode.has(hint)) await rememberEddLookup(hint, trackingId, found);
     } catch { console.error("[edd-lookup] Unable to persist verified tracking observation."); }
   }
 

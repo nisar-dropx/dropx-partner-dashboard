@@ -62,23 +62,23 @@ export function PerformanceEddClearanceCard({ data, stationCode }: { data: { tim
       {view === "edd" ? <>
         {!t.latestFresh && t.lastConfirmed ? <div className="review-operation-summary" role="status">
           <span>Last valid observation — {reviewClock(t.lastConfirmed.observedAt)} IST. Not current.</span>
-          <span>Observed EDD <b>{count(t.lastConfirmed.counts.todayTotal - t.lastConfirmed.counts.todayHfr)}</b></span>
+          <span>Observed EDD <b>{count(t.lastConfirmed.counts.todayTotal - t.lastConfirmed.counts.todayHfr - (t.lastConfirmed.counts.todayHcr ?? 0))}</b></span>
           <span>Pending <b>{count(t.lastConfirmed.counts.todayAtStation)}</b></span>
           <span>On road <b>{count(t.lastConfirmed.counts.todayOnRoad)}</b></span>
           <span>Delivered <b>{count(t.lastConfirmed.counts.todayDelivered)}</b></span>
         </div> : null}
-        <div className="review-operation-summary"><span>Day-start EDD <b>{count(t.dayStart)}</b></span><span>Latest at station <b>{count(t.latestFresh ? t.latest?.counts.todayAtStation : null)}</b></span><span>Awaiting checks <b>{count(t.latestFresh ? t.latest?.counts.todayUnverified : null)}</b></span></div>
-        <p className="review-operation-note">EDD includes only shipments due on the selected date. {t.baselineAt ? `The day-start cohort is frozen at the first valid morning observation (${reviewClock(t.baselineAt)}).` : "A valid 06:00 baseline was not recorded, so no later total is presented as the day-start EDD."} Prior-day HFR is excluded.</p>
+        <div className="review-operation-summary"><span>Day-start EDD <b>{count(t.dayStart)}</b></span><span>Confirmed pending <b>{count(t.latestFresh ? t.latest?.counts.todayAtStation : null)}</b></span><span>Awaiting checks <b>{count(t.latestFresh ? t.latest?.counts.todayUnverified : null)}</b></span></div>
+        <p className="review-operation-note">EDD includes only shipments due on the selected date. {t.baselineAt ? `The day-start cohort is frozen at the first valid morning observation (${reviewClock(t.baselineAt)}).` : "A valid 06:00 baseline was not recorded, so no later total is presented as the day-start EDD."} Prior-day attempt cohorts are excluded. Observed INDUCTED/RECEIVED includes returns and unchecked parcels; only confirmed first-dispatch pending is used for clearance.</p>
         <div className="review-operation-table" role="region" aria-label="EDD half-hour history, scroll for all times and columns" tabIndex={0}>
-          <table><thead><tr><th>Checkpoint</th><th>Day-start EDD</th><th>Observed EDD</th><th>At station</th><th>On road</th><th>Delivered</th><th>Attempted</th><th>Unchecked / other</th><th>Observation / source times</th></tr></thead>
+          <table><thead><tr><th>Checkpoint</th><th>Day-start EDD</th><th>Observed EDD</th><th>Confirmed pending</th><th>Observed INDUCTED / RECEIVED</th><th>On road</th><th>Delivered</th><th>Attempted</th><th>Unchecked / other</th><th>Observation / source times</th></tr></thead>
             <tbody>{t.rows.map(row => { const c = row.state === "Recorded" && row.point?.counts.hasSnapshot ? row.point.counts : null; return <tr key={row.label} className={c ? "" : "review-operation-muted"}>
-              <th scope="row">{row.label}</th><td>{c ? count(row.dayStart) : "—"}</td><td>{c ? count(c.todayTotal - c.todayHfr) : "—"}</td>
-              <td className={c?.todayAtStation ? "review-operation-pending" : ""}>{count(c?.todayAtStation)}</td><td>{count(c?.todayOnRoad)}</td><td>{count(c?.todayDelivered)}</td><td>{count(c?.todayAttempted)}</td>
+              <th scope="row">{row.label}</th><td>{c ? count(row.dayStart) : "—"}</td><td>{c ? count(c.todayTotal - c.todayHfr - (c.todayHcr ?? 0)) : "—"}</td>
+              <td className={c?.todayAtStation ? "review-operation-pending" : ""}>{c && c.todayUnverified > 0 ? `${count(c.todayAtStation)} confirmed` : count(c?.todayAtStation)}</td><td>{count(c?.todayObservedAtStation)}</td><td>{count(c?.todayOnRoad)}</td><td>{count(c?.todayDelivered)}</td><td>{count(c?.todayAttempted)}</td>
               <td>{c ? count(c.todayUnverified + c.todayOther) : "—"}</td><td>{row.point ? <>{reviewClock(row.point.observedAt)}<small>{row.state}</small><small>Stock {reviewClock(row.point.backlogAt)} · outcomes {reviewClock(row.point.performanceAt)}</small></> : row.state}</td>
             </tr>; })}</tbody></table>
         </div>
         <p className="review-operation-note">A missing or stale checkpoint stays marked; a later snapshot never fills it. “Observed clear at” is the first observation in a continuous run of valid checks with no pending, unchecked or undated TIDs, not an exact dispatch scan time.</p>
-        {t.latest ? <p className="review-operation-note">Latest EDD sources: stock {formatDashboardDateTime(t.latest.backlogAt)} · outcomes {formatDashboardDateTime(t.latest.performanceAt)} IST · {count(t.latest.counts.missingDate)} missing EDD dates · {count(t.latest.counts.todayHfr)} prior-day HFR.</p> : null}
+        {t.latest ? <p className="review-operation-note">Latest EDD sources: stock {formatDashboardDateTime(t.latest.backlogAt)} · outcomes {formatDashboardDateTime(t.latest.performanceAt)} IST · {count(t.latest.counts.missingDate)} missing EDD dates · {count(t.latest.counts.todayHfr)} prior-day HFR · {count(t.latest.counts.todayHcr)} prior-day HCR.</p> : null}
       </> : <>
         {routeError ? <p role="alert" className="review-operation-note">{routeError}</p> : null}
         <div className="review-operation-summary"><span>Total out on road <b>{count(route?.routeDispatched)}</b></span><span>Physical at station <b>{count(route?.routeAtStation)}</b></span><span>Still out / held <b>{count(route?.routeOutOnRoad)}</b></span><span>Delivered <b>{count(route?.routeDelivered)}</b></span><span>Returned <b>{count(route?.routeReturned)}</b></span></div>

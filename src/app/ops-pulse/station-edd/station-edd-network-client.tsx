@@ -9,7 +9,7 @@ import { StationEddDownload } from "./station-edd-download";
 import { useEddAutoRefresh } from "./use-edd-auto-refresh";
 import s from "./station-edd.module.css";
 
-const cols = [["todayAtStation", "Pending", "atStation"], ["todayOnRoad", "On road", "onRoad"], ["todayDelivered", "Delivered", "delivered"], ["todayHfr", "HFR", "hfr"], ["todayUnverified", "Needs checks", "unverified"], ["overdueAtStation", "Overdue pending", "atStation"]] as const;
+const cols = [["todayAtStation", "Pending", "atStation"], ["todayOnRoad", "On road", "onRoad"], ["todayDelivered", "Delivered", "delivered"], ["todayHfr", "HFR", "hfr"], ["todayHcr", "HCR", "hcr"], ["todayObservedAtStation", "Observed at station", "all"], ["todayUnverified", "Needs checks", "unverified"], ["overdueAtStation", "Overdue pending", "atStation"]] as const;
 const href = (code: string, position = "atStation", day = "today") => "/edd/" + encodeURIComponent(code) + "/edds?" + new URLSearchParams({ view: "tids", position, day });
 const n = (value: number) => value.toLocaleString("en-IN");
 export function StationEddNetworkClient({ stations, initialNetwork, initialError, initialQuery = {} }: { stations: EddStationOption[]; initialNetwork: StationEddSummary[]; initialError: string | null; initialQuery?: EddQuery }) {

@@ -12,7 +12,7 @@ const moduleFrom = (path, dependencies = {}) => {
 };
 const logic = moduleFrom("src/lib/ops-pulse/review-operations.ts");
 const cohort = moduleFrom("src/lib/ops-pulse/review-edd-cohort.ts", {
-  "./edd-verification": { eddCurrentState: pkg => pkg.state === "DELIVERED" || pkg.verification?.state === "DELIVERED" ? "DELIVERED" : pkg.state }
+  "./edd-verification": { eddDeliveredState: state => ["DELIVERED","CASH_AT_STATION","CASH_IN_ASSOCIATE"].includes(state), eddCurrentState: pkg => pkg.state === "DELIVERED" || pkg.verification?.state === "DELIVERED" ? "DELIVERED" : pkg.state }
 });
 const day = "2026-09-09", time = clock => `${day}T${clock}:00+05:30`;
 const point = (clock, counts = {}, fields = {}) => ({ observedAt: time(clock), sourceAt: time(clock), backlogAt: time(clock), performanceAt: time(clock), counts: {
@@ -112,7 +112,7 @@ assert.equal(capturedRows[0].backlog_at,time("21:06"));
 assert.equal(capturedRows[0].source_at,time("21:06"));
 assert.equal(capturedRows[0].counts.routeDispatched,200,"live worker outcomes win over the older application copy");
 assert.equal(capturedRows[0].performance_at,time("21:07"));
-assert.equal(capturedRows[0].counts.captureVersion,3);
+assert.equal(capturedRows[0].counts.captureVersion,4);
 assert.equal(capturedRows[0].counts.captureEveryMinutes,15);
 
 const quarter = clock => point(clock,{captureEveryMinutes:15,sourceMaxAgeMinutes:35});

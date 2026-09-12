@@ -1,16 +1,27 @@
 import type { EddPackage } from "./edd-worker";
-import { eddCurrentState } from "./edd-verification";
-import { stationEddAssociateKey, stationEddAssociates, stationEddDate, stationEddFreshness, stationEddPackageMatches, stationEddPosition, stationEddSearchMatches, stationEddSelection, type StationEddSummary } from "./station-edd";
+import { eddAttemptLifecycle, eddCurrentState } from "./edd-verification";
+import { isForwardEdd, stationEddAssociateKey, stationEddAssociates, stationEddDate, stationEddFreshness, stationEddPackageMatches, stationEddPosition, stationEddSearchMatches, stationEddSelection, type StationEddSummary } from "./station-edd";
 
 export const EDD_PERIODS = [["today", "EDD today"], ["overdue", "Overdue EDD"], ["pending", "Today + overdue"], ["all", "All observed dates"]] as const;
-export const EDD_POSITIONS = [["atStation", "Pending first dispatch"], ["onRoad", "On road"], ["delivered", "Delivered"], ["hfr", "HFR · previous-day attempt"], ["attempted", "Attempted / returned"], ["unverified", "Needs history check"], ["other", "Other statuses"], ["all", "All positions"]] as const;
+export const EDD_POSITIONS = [["atStation", "Pending first dispatch"], ["onRoad", "On road"], ["delivered", "Delivered"], ["hfr", "HFR · one prior-day attempt"], ["hcr", "HCR · two or more prior attempts"], ["rejected", "Rejected"], ["returningToFc", "In transit to FC"], ["attempted", "Attempted / returned today"], ["unverified", "Needs evidence check"], ["other", "Other statuses"], ["all", "All positions"]] as const;
 export const TID_SORTS = [["trackingId", "Tracking ID"], ["edd", "EDD date"], ["position", "Delivery position"], ["state", "Latest status"], ["associate", "Associate"], ["attempt", "First attempt"], ["city", "City / PIN"], ["checked", "History checked"]] as const;
 export const ASSOCIATE_SORTS = [["name", "Associate"], ["sent", "Sent"], ["delivered", "Delivered"], ["onRoad", "Still on road"], ["attempted", "Attempted / returned"], ["rate", "Delivery rate"]] as const;
 export const ASSOCIATE_FOCUS = [["all", "All associates"], ["outstanding", "Has outstanding deliveries"], ["onRoad", "Has TIDs on road"], ["attempted", "Has attempts / returns"], ["complete", "All sent TIDs delivered"]] as const;
-export const NETWORK_FOCUS = [["all", "All stations"], ["pending", "Has pending first dispatch"], ["onRoad", "Has TIDs on road"], ["hfr", "Has HFR"], ["unverified", "Needs history checks"], ["overdue", "Has overdue pending"], ["missingDate", "Has unconfirmed EDD dates"]] as const;
-export const NETWORK_SORTS = [["stationCode", "Station"], ["todayAtStation", "Pending"], ["todayOnRoad", "On road"], ["todayDelivered", "Delivered"], ["todayHfr", "HFR"], ["todayUnverified", "Needs checks"], ["overdueAtStation", "Overdue pending"], ["fetchedAt", "Latest observation"]] as const;
+export const NETWORK_FOCUS = [["all", "All stations"], ["pending", "Has pending first dispatch"], ["onRoad", "Has TIDs on road"], ["hfr", "Has HFR"], ["hcr", "Has HCR"], ["unverified", "Needs history checks"], ["overdue", "Has overdue pending"], ["missingDate", "Has unconfirmed EDD dates"]] as const;
+export const NETWORK_SORTS = [["stationCode", "Station"], ["todayAtStation", "Pending"], ["todayOnRoad", "On road"], ["todayDelivered", "Delivered"], ["todayHfr", "HFR"], ["todayHcr", "HCR"], ["todayObservedAtStation", "Observed at station"], ["todayUnverified", "Needs checks"], ["overdueAtStation", "Overdue pending"], ["fetchedAt", "Latest observation"]] as const;
 export const STATUS_SORTS = [["state", "Source status"], ["count", "Selected period"], ["total", "All observed dates"]] as const;
 export type EddQuery = Record<string, string>;
+export function selectEddHolds(packages: EddPackage[], filter = "all", query = "", sort = "attempt", direction = "asc") {
+  return [...new Map(packages.map(p=>[p.trackingId,p])).values()].filter(isForwardEdd)
+    .map(pkg=>({pkg,...eddAttemptLifecycle(pkg)})).filter(row=>row.category !== "none" && (filter === "all" || row.category === filter)
+      && `${row.pkg.trackingId} ${row.pkg.driverName || ""} ${row.pkg.driverId || ""} ${row.state}`.toLowerCase().includes(query.trim().toLowerCase()))
+    .sort((a,b)=>{
+      const av=sort === "tid" ? a.pkg.trackingId : sort === "state" ? a.state : a.secondAttemptAt || a.firstAttemptAt || "";
+      const bv=sort === "tid" ? b.pkg.trackingId : sort === "state" ? b.state : b.secondAttemptAt || b.firstAttemptAt || "";
+      if(!av || !bv)return Number(!av)-Number(!bv);
+      return av.localeCompare(bv)*(direction === "desc" ? -1 : 1) || a.pkg.trackingId.localeCompare(b.pkg.trackingId);
+    });
+}
 type Choice = readonly (readonly [string, string])[];
 function choice<T extends Choice>(value: string | null, values: T, fallback: T[number][0]): T[number][0] {
   return values.some(([key]) => key === value) ? value! : fallback;
@@ -84,7 +95,7 @@ export function readNetworkControls(params: URLSearchParams) {
 }
 export function selectEddStations(rows: StationEddSummary[], names: Map<string, string>, controls: ReturnType<typeof readNetworkControls>, now = new Date()) {
   const term = controls.query.toLowerCase().trim();
-  const focusKeys = { pending: "todayAtStation", onRoad: "todayOnRoad", hfr: "todayHfr", unverified: "todayUnverified", overdue: "overdueAtStation", missingDate: "missingDate" } as const;
+  const focusKeys = { pending: "todayAtStation", onRoad: "todayOnRoad", hfr: "todayHfr", hcr: "todayHcr", unverified: "todayUnverified", overdue: "overdueAtStation", missingDate: "missingDate" } as const;
   const filtered = rows.filter(row => {
     const recent = stationEddFreshness(row.fetchedAt, now) === "Recent snapshot";
     return (!term || `${row.stationCode} ${names.get(row.stationCode) || ""}`.toLowerCase().includes(term)) &&

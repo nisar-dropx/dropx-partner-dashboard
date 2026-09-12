@@ -27,6 +27,9 @@ export type EddPackage = {
   verification?: import("./edd-verification").EddVerification | null;
   isAccessPoint?: boolean;
   summaryCheckedAt?: string;
+  /** Actual per-package event clock, only when supplied by the summary source. */
+  stateUpdatedAt?: string | null;
+  observedStationCode?: string;
 };
 
 export type EddStationPayload = {
@@ -132,6 +135,8 @@ function normalizePackage(raw: Record<string, unknown>): EddPackage {
   return {
     trackingId: String(raw.trackingId ?? "").trim(),
     state: raw.state == null ? null : String(raw.state),
+    summaryCheckedAt: typeof raw.summaryCheckedAt === "string" ? raw.summaryCheckedAt : undefined,
+    stateUpdatedAt: typeof raw.stateUpdatedAt === "string" ? raw.stateUpdatedAt : null,
     internalEAD: raw.internalEAD == null ? null : String(raw.internalEAD),
     promisedDeliveryDate: raw.promisedDeliveryDate == null ? null : String(raw.promisedDeliveryDate),
     estimatedArrivalTimeUTC: raw.estimatedArrivalTimeUTC == null ? null : String(raw.estimatedArrivalTimeUTC),

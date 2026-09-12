@@ -9,6 +9,7 @@ type Auth = { cookie: string; x_api_usage_key: string };
 export type EddSourceSummary = {
   trackingId: string; currentPackageState?: string; estimatedArrivalDate?: number;
   promisedDeliveryDate?: number; shipOption?: string;
+  lastUpdatedTime?: number;
 };
 
 export async function eddSourceSession(stationCode: string): Promise<Auth> {

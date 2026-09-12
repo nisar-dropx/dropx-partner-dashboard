@@ -1,9 +1,9 @@
 import type { EddPackage, EddStationPayload } from "@/lib/ops-pulse/edd-worker";
-import { eddCurrentState, eddIstDate, eddPendingEvidenceFresh } from "./edd-verification";
+import { eddAttemptLifecycle, eddCurrentState, eddDeliveredState, eddIstDate, eddPendingEvidenceAt, eddPendingEvidenceFresh } from "./edd-verification";
 
-export type StationEddFilter = "atStation" | "onRoad" | "delivered" | "hfr" | "attempted" | "unverified" | "other" | "all";
+export type StationEddFilter = "atStation" | "onRoad" | "delivered" | "hfr" | "hcr" | "rejected" | "returningToFc" | "attempted" | "unverified" | "other" | "all";
 export type StationEddDay = "today" | "overdue" | "pending" | "all";
-export const STATION_EDD_RULE = "Pending first dispatch = due shipment currently INDUCTED or RECEIVED, with complete history checked within 15 minutes and no dispatch or attempt scans. Older checks move to Needs history check, never a confirmed zero-pendency claim. A prior-day attempt is HFR, even after re-induction. Same-day attempts, on-road and delivered packages are never pending. Driver IDs alone do not prove dispatch. Dates use IST; reverse shipments are excluded. Open views reload recorded observations every minute; source scans can still arrive later.";
+export const STATION_EDD_RULE = "Confirmed pending first dispatch = due shipment currently INDUCTED or RECEIVED, with complete, current history and no dispatch or attempt. Fresh summaries can reuse history only when their per-package event clock is unchanged. Observed at-station status includes returns and unchecked parcels; it is not confirmed first-dispatch pending. HFR is one distinct unsuccessful delivery attempt; HCR is two or more. Rejections are separate. Same-day attempts, on-road, cash collection and delivered packages are never pending. Duplicate scans are not extra attempts. Driver IDs alone do not prove dispatch. Dates use IST; reverse shipments are excluded. Incomplete coverage never certifies zero pendency or clearance.";
 
 const todayFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" });
 export function stationEddToday(now = new Date()) { return todayFormatter.format(now); }
@@ -20,15 +20,19 @@ export function stationEddPosition(pkg: EddPackage, today = stationEddToday()): 
   const state = eddCurrentState(pkg);
   const history = pkg.verification;
   const attemptDay = eddIstDate(history?.firstAttemptAt);
-  if (attemptDay && attemptDay < today) return "hfr";
-  if (state === "DELIVERED") return "delivered";
-  if (["INDUCTED","RECEIVED"].includes(state) && history?.firstDispatchAt && history.rulesVersion !== 2 && !history.firstAttemptAt) return "unverified";
+  const lifecycle = eddAttemptLifecycle(pkg);
+  if (eddDeliveredState(state)) return "delivered";
+  if (pkg.observedStationCode && history?.routeStationCode && pkg.observedStationCode !== history.routeStationCode) return "unverified";
+  if (lifecycle.category === "rejected" || lifecycle.category === "returningToFc") return lifecycle.category;
+  if (attemptDay && attemptDay < today) return lifecycle.category === "hcr" ? "hcr" : lifecycle.category === "hfr" ? "hfr" : "unverified";
+  if (["INDUCTED","RECEIVED"].includes(state) && history?.firstDispatchAt && (history.rulesVersion ?? 0) < 2 && !history.firstAttemptAt) return "unverified";
   if (["IN_TRANSIT_TO_CUSTOMER", "OUT_FOR_DELIVERY"].includes(state) || (state === "IN_TRANSIT" && history?.firstDispatchAt)) return "onRoad";
   if (state === "IN_TRANSIT" && !history?.historyComplete) return "unverified";
   if (["DELIVERY_ATTEMPTED", "DELIVERY_FAILED", "DELIVERY_REJECTED", "REJECTED"].includes(state) || history?.firstAttemptAt || history?.firstDispatchAt) return "attempted";
   if (["INDUCTED", "RECEIVED"].includes(state)) {
-    if (!history?.historyComplete || !eddPendingEvidenceFresh(pkg) || eddIstDate(pkg.verifiedAt) !== today ||
-      (pkg.sourceAt && Date.parse(pkg.verifiedAt || "") < Date.parse(pkg.sourceAt))) return "unverified";
+    const evidenceAt = eddPendingEvidenceAt(pkg);
+    if (!history?.historyComplete || !eddPendingEvidenceFresh(pkg) || eddIstDate(evidenceAt) !== today ||
+      (pkg.sourceAt && Date.parse(evidenceAt || "") < Date.parse(pkg.sourceAt) && evidenceAt !== pkg.summaryCheckedAt)) return "unverified";
     return "atStation";
   }
   return "other";
@@ -56,7 +60,7 @@ export function stationEddSearchMatches(pkg: EddPackage, state = "", query = "")
 export function stationEddSelection(day: unknown, position: unknown) {
   return {
     day: (typeof day === "string" && ["today", "overdue", "pending", "all"].includes(day) ? day : "today") as StationEddDay,
-    position: (typeof position === "string" && ["atStation", "onRoad", "delivered", "hfr", "attempted", "unverified", "other", "all"].includes(position) ? position : "atStation") as StationEddFilter
+    position: (typeof position === "string" && ["atStation", "onRoad", "delivered", "hfr", "hcr", "rejected", "returningToFc", "attempted", "unverified", "other", "all"].includes(position) ? position : "atStation") as StationEddFilter
   };
 }
 
@@ -71,6 +75,8 @@ export type StationEddSummary = {
   todayOther: number;
   todayDelivered: number;
   todayHfr: number;
+  todayHcr: number;
+  todayObservedAtStation: number;
   todayAttempted: number;
   todayUnverified: number;
   historyVerified: number;
@@ -82,7 +88,7 @@ export type StationEddSummary = {
 };
 
 export function summarizeStationEdd(stationCode: string, packages: EddPackage[] | null, fetchedAt: string | null, today = stationEddToday()): StationEddSummary {
-  const summary: StationEddSummary = { stationCode, fetchedAt, today, hasSnapshot: packages !== null, todayTotal: 0, todayAtStation: 0, todayOnRoad: 0, todayOther: 0, todayDelivered: 0, todayHfr: 0, todayAttempted: 0, todayUnverified: 0, historyVerified: 0, overdueAtStation: 0, atStationTotal: 0, excludedReverse: 0, missingDate: 0, statuses: [] };
+  const summary: StationEddSummary = { stationCode, fetchedAt, today, hasSnapshot: packages !== null, todayTotal: 0, todayAtStation: 0, todayOnRoad: 0, todayOther: 0, todayDelivered: 0, todayHfr: 0, todayHcr: 0, todayObservedAtStation: 0, todayAttempted: 0, todayUnverified: 0, historyVerified: 0, overdueAtStation: 0, atStationTotal: 0, excludedReverse: 0, missingDate: 0, statuses: [] };
   const statuses = new Map<string, StationEddSummary["statuses"][number]>();
   const unique = new Map((packages ?? []).filter(p => p.trackingId).map(p => [p.trackingId, p]));
   for (const pkg of unique.values()) {
@@ -102,11 +108,13 @@ export function summarizeStationEdd(stationCode: string, packages: EddPackage[] 
     }
     if (date !== today) continue;
     summary.todayTotal++;
+    if (["INDUCTED", "RECEIVED"].includes(state)) summary.todayObservedAtStation++;
     if (pkg.verification?.historyComplete) summary.historyVerified++;
     if (position === "atStation") summary.todayAtStation++;
     else if (position === "onRoad") summary.todayOnRoad++;
     else if (position === "delivered") summary.todayDelivered++;
     else if (position === "hfr") summary.todayHfr++;
+    else if (position === "hcr") summary.todayHcr++;
     else if (position === "attempted") summary.todayAttempted++;
     else if (position === "unverified") summary.todayUnverified++;
     else summary.todayOther++;
@@ -122,11 +130,16 @@ export function stationEddFreshness(fetchedAt: string | null, now = new Date()) 
 }
 
 export function stationEddPackageRow(pkg: EddPackage, stationCode: string, stationName: string, fetchedAt: string, today: string) {
+  const lifecycle = eddAttemptLifecycle(pkg);
   return {
     "Station Code": stationCode, "Station Name": stationName, "Tracking ID": pkg.trackingId,
     "EDD / EAD": stationEddDate(pkg) ?? "", "Promised Delivery Date": pkg.promisedDeliveryDate ?? "",
     "Internal EAD": pkg.internalEAD ?? "", "Estimated Arrival UTC": pkg.estimatedArrivalTimeUTC ?? "",
     "Raw Status": eddCurrentState(pkg), Position: stationEddPosition(pkg, today),
+    ...(lifecycle.category === "none" ? {} : { "Attempt Classification": lifecycle.category, "Distinct Attempts Observed": lifecycle.observedAttempts,
+    "Attempt Count Complete": lifecycle.complete ? "Yes" : "No — lower bound only",
+    "Second Attempt UTC": lifecycle.secondAttemptAt || "", "Returned After Attempt UTC": lifecycle.returnedAt || "",
+    "Source Route Station": pkg.verification?.routeStationCode || "", "FC Readiness": lifecycle.category === "returningToFc" ? "In transit to FC" : "Not confirmed by source" }),
     "Forward Delivery": isForwardEdd(pkg) ? "Yes" : "No",
     "EDD Today": stationEddDate(pkg) === today ? "Yes" : "No",
     "Driver ID (source)": pkg.driverId ?? "", "Last Scan By": pkg.lastScanBy ?? "",
@@ -151,7 +164,7 @@ export function stationEddReportSheets(payload: EddStationPayload, stationName: 
       "Station Code": payload.stationCode, "Station Name": stationName, "EDD Day (IST)": today,
       "At Station EDD Today": summary.todayAtStation, "Overdue At Station": summary.overdueAtStation,
       "On Road EDD Today": summary.todayOnRoad, "Other Status EDD Today": summary.todayOther,
-      "Known EDD Today": summary.todayTotal, "Delivered EDD Today": summary.todayDelivered, HFR: summary.todayHfr, "Needs History Verification": summary.todayUnverified, "Excluded Reverse Shipments": summary.excludedReverse,
+      "Known EDD Today": summary.todayTotal, "Delivered EDD Today": summary.todayDelivered, HFR: summary.todayHfr, HCR: summary.todayHcr, "Observed INDUCTED / RECEIVED": summary.todayObservedAtStation, "Needs History Verification": summary.todayUnverified, "Excluded Reverse Shipments": summary.excludedReverse,
       "Missing EDD": summary.missingDate, "Snapshot Refreshed UTC": payload.fetchedAt,
       Freshness: stationEddFreshness(payload.fetchedAt), Definition: STATION_EDD_RULE,
       Coverage: "Known EDD cohort from retained backlog, performance outcomes and verified tracking history. Missing-date packages are not assumed to be due today."
@@ -161,6 +174,7 @@ export function stationEddReportSheets(payload: EddStationPayload, stationName: 
     { name: "Overdue At Station", rows: packages.filter(p => stationEddPackageMatches(p, "atStation", "overdue", today)).map(packageRow) },
     { name: "Associates EDD Today", rows: stationEddAssociates(packages, today).map(a => ({ Associate: a.name, "Driver ID": a.id, Sent: a.sent, Delivered: a.delivered, "On Road": a.onRoad, "Attempted or Returned": a.attempted, Other: a.other })) },
     { name: "HFR", rows: packages.filter(p => stationEddPackageMatches(p, "hfr", "pending", today)).map(packageRow) },
+    { name: "Attempt lifecycle", rows: packages.filter(p => isForwardEdd(p) && eddAttemptLifecycle(p).category !== "none").map(packageRow) },
     { name: "All Snapshot TIDs", rows: packages.map(packageRow) }
   ];
 }

@@ -11,7 +11,7 @@ export type ReviewRouteCounts = {
   routeHasSnapshot: boolean;
 };
 export type ReviewRouteSnapshot = ReviewRouteCounts & { observedAt: string; source: "checkpoint" | "daily" };
-export type ReviewEddCountsWithRoute = ReviewEddCounts & Partial<ReviewRouteCounts> & { captureVersion?: number; sourceMaxAgeMinutes?: number; captureEveryMinutes?: number };
+export type ReviewEddCountsWithRoute = ReviewEddCounts & Partial<ReviewRouteCounts> & { todayHcr?: number; todayObservedAtStation?: number; captureVersion?: number; sourceMaxAgeMinutes?: number; captureEveryMinutes?: number };
 export type ReviewEddPoint = { observedAt: string; sourceAt: string | null; backlogAt: string | null; performanceAt: string | null; counts: ReviewEddCountsWithRoute };
 export type ReviewEddTimeline = ReturnType<typeof buildReviewEddTimeline>;
 export type ReviewEddRefreshSource = { source: "stock" | "outcomes"; source_at: string | null; last_error: string | null; next_attempt_at: string; lease_until: string | null };
@@ -72,8 +72,8 @@ export function buildReviewEddTimeline(day: string, input: ReviewEddPoint[], now
   const latest = points.at(-1) ?? null;
   // Never label the first afternoon sample as the 06:00 day-start baseline.
   const baseline = points.find(p => stamp(p.observedAt) < start + 10 * minute && reviewEddSourceFresh(p, day)) ?? null;
-  const dayStart = baseline ? baseline.counts.todayTotal - baseline.counts.todayHfr : null;
-  const validClear = (p: ReviewEddPoint) => reviewEddSourceFresh(p, day) && p.counts.todayTotal > p.counts.todayHfr
+  const dayStart = baseline ? baseline.counts.todayTotal - baseline.counts.todayHfr - (baseline.counts.todayHcr ?? 0) : null;
+  const validClear = (p: ReviewEddPoint) => reviewEddSourceFresh(p, day) && p.counts.todayTotal > p.counts.todayHfr + (p.counts.todayHcr ?? 0)
     && p.counts.todayAtStation === 0 && p.counts.todayUnverified === 0 && p.counts.missingDate === 0 && p.counts.todayOther === 0;
   const captureGap = (p: ReviewEddPoint) => ((p.counts.captureEveryMinutes === 15 ? 15 : 5) + 5) * minute;
   const current = latest && until - stamp(latest.observedAt) <= captureGap(latest);

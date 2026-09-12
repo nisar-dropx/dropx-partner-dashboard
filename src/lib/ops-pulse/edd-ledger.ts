@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { EddPackage, EddStationResult } from "./edd-worker";
-import { eddCurrentState, eddHistoryFacts, eddIstDate, eddNextCheckAt, eddVerificationFromLookup, type EddLookupObservation, type EddVerification } from "./edd-verification";
+import { eddCurrentState, eddHistoryFacts, eddIstDate, eddNextCheckAt, eddVerificationFromLookup, mergeEddVerification, type EddLookupObservation, type EddVerification } from "./edd-verification";
 import type { PackageHistoryEvent } from "./tracking-lookup";
 import { stationEddToday } from "./station-edd";
 import { eddSourceSession, eddSourceSummaries, eddSourceHistory } from "./edd-source";
@@ -10,7 +10,9 @@ import { eddSourceSession, eddSourceSummaries, eddSourceHistory } from "./edd-so
 type LedgerRow = { station_code: string; tracking_id: string; source: EddPackage; source_at: string; verification: EddVerification | null; verified_at: string | null };
 export async function rememberEddLookup(stationCode:string,trackingId:string,body:EddLookupObservation) {
   if (!supabaseAdmin) return;
-  const verification = eddVerificationFromLookup(body);
+  const {data:prior,error:readError}=await supabaseAdmin.from("edd_package_ledger").select("verification").eq("station_code",stationCode).eq("tracking_id",trackingId).maybeSingle();
+  if(readError)throw new Error(readError.message);
+  const verification = mergeEddVerification(prior?.verification,eddVerificationFromLookup(body));
   const now=new Date();
   const {error}=await supabaseAdmin.from("edd_package_ledger").update({verification,verified_at:now.toISOString(),next_check_at:eddNextCheckAt(verification.state,now.getTime())}).eq("station_code",stationCode).eq("tracking_id",trackingId);
   if(error)throw new Error(error.message);
@@ -33,7 +35,7 @@ export async function loadEddLedger(codes: string[]) {
     for (const row of (data ?? []) as LedgerRow[]) {
       if (!codes.includes(row.station_code)) continue;
       const entry = result.get(row.station_code) ?? { packages: [], fetchedAt: row.source_at };
-      const pkg = { ...row.source, trackingId: row.tracking_id, sourceAt: row.source_at, verifiedAt: row.verified_at, verification: row.verification };
+      const pkg = { ...row.source, observedStationCode: row.station_code, trackingId: row.tracking_id, sourceAt: row.source_at, verifiedAt: row.verified_at, verification: row.verification };
       pkg.state = eddCurrentState(pkg);
       pkg.driverName ||= row.verification?.driverName;
       if (row.verified_at && row.verified_at >= row.source_at && row.verification?.driverId) {
@@ -124,7 +126,8 @@ export async function verifyEddBatch(codes?: string[]) {
         const values=observations.map(value=>({trackingId:String(value.trackingId),state:value.currentPackageState||null,
           ead: typeof value.estimatedArrivalDate==="number" ? eddIstDate(new Date(value.estimatedArrivalDate).toISOString()) : null,
           promisedDeliveryDate:typeof value.promisedDeliveryDate==="number" ? eddIstDate(new Date(value.promisedDeliveryDate).toISOString()) : null,
-          shipOption:value.shipOption||null,summaryCheckedAt:observedAt}));
+          shipOption:value.shipOption||null,summaryCheckedAt:observedAt,
+          stateUpdatedAt:typeof value.lastUpdatedTime === "number" && value.lastUpdatedTime > 1e12 && value.lastUpdatedTime <= Date.parse(observedAt) ? new Date(value.lastUpdatedTime).toISOString() : null}));
         const {error:summaryError}=await supabaseAdmin.rpc("edd_apply_summaries",{p_station:code,p_rows:values,p_observed_at:observedAt});
         if(summaryError)throw new Error(summaryError.message);
         enriched+=values.length;
@@ -147,7 +150,7 @@ export async function verifyEddBatch(codes?: string[]) {
               driverName:row.source.driverName||null,driverId:row.source.driverId||null,lastUpdatedAt:row.source_at,
               ...facts,historyComplete:facts.historyComplete&&result.historyComplete};
             const now=new Date();
-            const {error:writeError}=await supabaseAdmin!.from("edd_package_ledger").update({verification,verified_at:now.toISOString(),
+            const {error:writeError}=await supabaseAdmin!.from("edd_package_ledger").update({verification:mergeEddVerification(row.verification,verification),verified_at:now.toISOString(),
               next_check_at:eddNextCheckAt(verification.state,now.getTime())})
               .eq("station_code",row.station_code).eq("tracking_id",row.tracking_id);
             if(writeError)throw new Error(writeError.message);
@@ -159,16 +162,16 @@ export async function verifyEddBatch(codes?: string[]) {
           if (response.status === 429) { failed++; cursor = rows.length; break; }
           if (!response.ok) throw new Error("Tracking source unavailable.");
           const body = await response.json();
-          if (body.status !== "ok" || String(body.stationCode || "").toUpperCase() !== row.station_code || String(body.trackingId || "") !== row.tracking_id || !Array.isArray(body.history)) throw new Error("Tracking identity or history could not be verified.");
+          if (body.status !== "ok" || String(body.trackingId || "") !== row.tracking_id || !Array.isArray(body.history)) throw new Error("Tracking identity or history could not be verified.");
           const history = body.history.filter((e: unknown): e is PackageHistoryEvent => !!e && typeof e === "object" && typeof (e as PackageHistoryEvent).state === "string");
           const facts = eddHistoryFacts(history);
           const verification: EddVerification = { state: body.packageStatus || null,
             edd: eddIstDate(body.estimatedArrivalTime) || eddIstDate(body.promisedDeliveryTime),
-            driverName: body.driverName || null, driverId: body.driverId || null, lastUpdatedAt: body.lastUpdatedTime || null, ...facts,
+            driverName: body.driverName || null, driverId: body.driverId || null, routeStationCode: String(body.stationCode || "").toUpperCase() || null, lastUpdatedAt: body.lastUpdatedTime || null, ...facts,
             // The legacy worker returns at most 20 events without pagination metadata.
             historyComplete: facts.historyComplete && history.length === body.history.length && (body.historyComplete === true || (body.historyComplete == null && history.length < 20)) };
           const now = new Date();
-          const { error: writeError } = await supabaseAdmin!.from("edd_package_ledger").update({ verification, verified_at: now.toISOString(),
+          const { error: writeError } = await supabaseAdmin!.from("edd_package_ledger").update({ verification:mergeEddVerification(row.verification,verification), verified_at: now.toISOString(),
             next_check_at: eddNextCheckAt(verification.state,now.getTime()) })
             .eq("station_code",row.station_code).eq("tracking_id",row.tracking_id);
           if (writeError) throw new Error(writeError.message);

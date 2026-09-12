@@ -3,7 +3,7 @@ import { isStationEddApiDenied, stationEddApiContext } from "@/lib/ops-pulse/sta
 import { loadEddStations } from "@/lib/ops-pulse/edd-stations";
 import { STATION_EDD_RULE, stationEddReportSheets, stationEddToday, stationEddPackageRow, summarizeStationEdd } from "@/lib/ops-pulse/station-edd";
 import { loadVerifiedEddStation } from "@/lib/ops-pulse/edd-ledger";
-import { readEddControls, selectEddAssociates, selectEddStatuses, selectEddTids } from "@/lib/ops-pulse/edd-table-controls";
+import { readEddControls, selectEddHolds, selectEddAssociates, selectEddStatuses, selectEddTids } from "@/lib/ops-pulse/edd-table-controls";
 import { compressedWorkbookResponse } from "@/lib/report-workbook";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +23,11 @@ export async function GET(request: Request) {
     const params = new URL(request.url).searchParams;
     const controls = readEddControls(params);
     const metadata = { Station: stationCode, "EDD Day (IST)": today, Period: controls.day, "Snapshot Refreshed UTC": result.payload.fetchedAt, Definition: STATION_EDD_RULE, "Export scope": "All rows matching these filters; pagination is not applied. Counts can change as the source refreshes." };
+    if (params.get("report") === "holds") {
+      const rows = selectEddHolds(result.payload.packages,params.get("category") || "all",params.get("query") || "",params.get("sort") || "attempt",params.get("direction") || "asc")
+        .map(row=>stationEddPackageRow(row.pkg,stationCode,station.name,result.payload.fetchedAt,today));
+      return await compressedWorkbookResponse([{name:"Attempt lifecycle",rows},{name:"Report Details",rows:[{...metadata,Period:"All observed dates",Category:params.get("category") || "all",Search:params.get("query") || "",Sort:params.get("sort") || "attempt",Direction:params.get("direction") || "asc","Hold rule":"48h start policy unconfirmed. Return and second-attempt timestamps are evidence, not source-confirmed Ready for FC."}]}],`edd-${stationCode}-holds-${today}.xlsx`);
+    }
     if (params.get("report") === "associates") {
       const rows = selectEddAssociates(result.payload.packages, controls, today).map(a => ({ Associate: a.name, "Driver ID": a.id, Sent: a.sent, Delivered: a.delivered, "Still On Road": a.onRoad, "Attempted / Returned": a.attempted, "Delivery Rate (%)": Math.round(a.delivered / a.sent * 10000) / 100 }));
       return await compressedWorkbookResponse([
