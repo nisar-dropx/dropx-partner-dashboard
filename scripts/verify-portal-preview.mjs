@@ -58,6 +58,7 @@ const mocks = {
   "@/lib/position-access": { loadEffectivePositionAccess: async () => ({ roleIds: [], locationScopeIds: [], hasAllLocationAccess: false }) },
   "@/lib/access-surface": { currentAdminAccessSurface: () => "ops" },
   "@/lib/supabase-admin": { supabaseAdmin: admin },
+  "@/lib/access-cutoff": { enforceAccessCutoffIfDue: async () => true },
   "@/lib/supabase-server": { createServerSupabaseClient: () => ({ auth: { getUser: async () => ({ data: { user: tables.profiles.find(p => p.id === actor) } }) } }) },
   "@/lib/people-designation": { loadPeopleDesignations: async (_, ids) => new Map(ids.map(id => [id, { name: id === "owner" ? "Managing Partner" : "Station lead" }])) },
   "@/lib/portal-preview": { getPreviewViewer: async () => actor === "owner" ? tables.profiles[0] : null, selectedPreviewUserId: () => selected, hasPreviewProductAccess: async () => !revoked }
