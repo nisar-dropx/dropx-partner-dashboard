@@ -8,6 +8,7 @@ import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
 import { loadPeopleDesignations } from "@/lib/people-designation";
 import { getPreviewViewer, hasPreviewProductAccess, selectedPreviewUserId } from "@/lib/portal-preview";
+import { enforceAccessCutoffIfDue } from "@/lib/access-cutoff";
 import { TimeoutError, withTimeout } from "@/lib/with-timeout";
 
 const AUTH_TIMEOUT_MS = 10000;
@@ -242,7 +243,11 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     profile = activeEmailMatches.length === 1 ? activeEmailMatches[0] : (masterOwnerMatch && signedInEmail === "nisar@dropxlogistics.com" ? masterOwnerMatch : null);
   }
 
-  if (!profile?.is_active) return null;
+  if (!profile) return null;
+  // Offboarding access lasts through the confirmed last working day, enforced lazily
+  // (no scheduled job) — this is the moment that check runs for dashboard login.
+  const isActive = profile.is_active ? await enforceAccessCutoffIfDue(profile.id) : profile.is_active;
+  if (!isActive) return null;
 
   const viewerProfile = profile;
   const previewViewer = await getPreviewViewer();

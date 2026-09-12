@@ -21,7 +21,7 @@ import { reviewPendingPage } from "@/lib/ops-pulse/review-periods";
 import { loadReviewCod } from "@/lib/ops-pulse/review-cod-data";
 import { getReviewAccess } from "@/lib/ops-pulse/review-access";
 import { filterLocationsByReviewCluster, legacyConnectionsFromReview, reviewClusterFilterOptions } from "@/lib/ops-pulse/review-policy";
-import { loadReviewClusterPersonLocationScope } from "@/lib/ops-pulse/review-cluster-scope";
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { ACTIVE_DAILY_PERFORMANCE_SOURCE, ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL, selectActiveDailyBatchRows, selectStationDailyRow } from "@/lib/performance-source-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -398,24 +398,19 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const trendStationLocation = locationByCode.get(trendStationCode);
   const trendHref = (code: string) => `/performance?view=daily&date=${selectedDate}${stationQuery}&trend=${encodeURIComponent(code)}#daily-trend`;
   const canFilterClusters = hasPermission(authorization, "performance_review_cluster_filter", "access");
-  const clusterOptions = reviewClusterFilterOptions(permittedLocations);
+  // Cluster/AOM filter is keyed by personId and reads the live People operational hierarchy
+  // directly — the same authoritative source approval-workflow-routing.ts's same_cluster
+  // scope already uses — instead of matching stale/collision-prone display-name strings, or
+  // unioning in an Ops-login-access-scope lookup that answers a different question ("what
+  // can this user's account see") than "who actually manages this station." Both caused
+  // stations to appear under the wrong CM.
+  const clusterHierarchy = canFilterClusters
+    ? await loadPeopleOperationalHierarchy(companyId, permittedLocations.map((location) => location.id))
+    : { byLocation: new Map(), error: null };
+  const clusterOptions = reviewClusterFilterOptions(clusterHierarchy.byLocation);
   const requestedCluster = canFilterClusters ? String(searchParams?.cluster ?? "").trim() : "";
   const selectedCluster = requestedCluster && clusterOptions.some((option) => option.value === requestedCluster) ? requestedCluster : "";
-  const hierarchyClusterLocations = filterLocationsByReviewCluster(permittedLocations, selectedCluster);
-  const personScope = selectedCluster
-    ? await loadReviewClusterPersonLocationScope(companyId, selectedCluster)
-    : null;
-  const scopeClusterLocations = !selectedCluster || !personScope
-    ? []
-    : personScope.hasAllLocationAccess
-      ? permittedLocations
-      : permittedLocations.filter((location) => personScope.locationIds.has(location.id));
-  const clusterLocationIds = new Set<string>();
-  const clusterFilteredLocations = [...hierarchyClusterLocations, ...scopeClusterLocations].filter((location) => {
-    if (clusterLocationIds.has(location.id)) return false;
-    clusterLocationIds.add(location.id);
-    return true;
-  });
+  const clusterFilteredLocations = filterLocationsByReviewCluster(permittedLocations, clusterHierarchy.byLocation, selectedCluster);
   const deskLocations = selectedCluster
     ? (clusterFilteredLocations.length ? clusterFilteredLocations : permittedLocations)
     : permittedLocations;
@@ -436,6 +431,12 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
   const operationalResult = selectedReviewLocation
     ? await loadPerformanceOperationalSnapshots(companyId, selectedDate, [selectedReviewLocation])
     : { rows: new Map(), error: "No permitted station is available." };
+  // Two People assignments tie for Cluster Manager at this station — surface it instead of
+  // silently picking one, so a genuinely ambiguous org-chart entry doesn't look like a
+  // wrong-CM bug in the cluster filter.
+  const selectedStationClusterConflict = selectedReviewLocation
+    ? Boolean(clusterHierarchy.byLocation.get(selectedReviewLocation.id)?.hasClusterManagerConflict)
+    : false;
   const selectedReviewRow = selectedReviewLocation
     ? selectStationDailyRow(
       scopedFacts.filter((row) => row.source_type === ACTIVE_DAILY_PERFORMANCE_SOURCE),
@@ -519,6 +520,8 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             canAccessProxy={Boolean(reviewAccess?.canAccessProxy)}
             canUndoBypass={Boolean(reviewAccess?.canUndoBypass)}
             canManageActions={Boolean(reviewAccess?.canManageActions)}
+            reviewerEditReopened={Boolean(reviewAccess?.reviewerEditReopened)}
+            isOriginalReviewer={Boolean(reviewAccess?.isOriginalReviewer)}
             followups={followups}
             stationTargets={stationTargets.rows[0]?.targets ?? emptyStationReviewTargets}
             stationTargetsError={stationTargets.error}
@@ -531,7 +534,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             connections={reviewConnections}
             updates={reviewWorkspace.updates}
             reviewChain={reviewChain}
-            routingIssue={reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "A review manager needs to be assigned in People for this station. Contact HR so Proxy / Skip and RCA can run." : null)}
+            routingIssue={reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "A review manager needs to be assigned in People for this station. Contact HR so Proxy / Skip and RCA can run." : selectedStationClusterConflict ? "Two People assignments are tied for Cluster Manager at this station. Contact HR to resolve the org chart — the Cluster/AOM filter may not reflect the intended manager until then." : null)}
             date={selectedDate}
             error={searchParams?.error || reviewWorkspace.error || operationalResult.error || connectionResult.error || (!selectedReviewRow ? "No Performance Scorecard is imported for this station and date yet. Import it before starting a review or adding RCA — Opening and UTR delay reasons are still available below." : null)}
             items={reviewWorkspace.items}

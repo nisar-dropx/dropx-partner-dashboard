@@ -12,6 +12,7 @@ import {
 import { requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
 import { connectWfhEligible, loadConnectWfhPolicies } from "./connect-wfh-access";
 import { connectBusinessTripEligible, loadConnectBusinessTripPolicies } from "./connect-business-trip-access";
+import { enforceAccessCutoffIfDueForWorker } from "./access-cutoff";
 
 export type ConnectAccount = {
   id: string;
@@ -338,6 +339,23 @@ async function resolveIcSelfServiceByReference(
   mobile: string,
   localMobile: string
 ): Promise<AccountRow | null> {
+  const match = await resolveIcSelfServiceByReferenceUnchecked(companyId, reference, countryCode, mobile, localMobile);
+  // Offboarding access lasts through the confirmed last working day, enforced lazily —
+  // re-check the matched worker's cutoff before returning it as a valid login.
+  if (match && (match.profile_type === "employee" || match.profile_type === "contractor")) {
+    const stillActive = await enforceAccessCutoffIfDueForWorker(match.company_id, match.profile_type, match.id);
+    if (!stillActive) return null;
+  }
+  return match;
+}
+
+async function resolveIcSelfServiceByReferenceUnchecked(
+  companyId: string,
+  reference: string,
+  countryCode: string,
+  mobile: string,
+  localMobile: string
+): Promise<AccountRow | null> {
   if (!supabaseAdmin || !reference) return null;
 
   const references = new Set([reference.toLowerCase()]);
@@ -633,6 +651,19 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     }),
     ...employeeAccounts
   ].filter((account) => account.company_id);
+
+  // Offboarding access lasts through the confirmed last working day, enforced lazily
+  // (no scheduled job) — re-check any employee/contractor account matched above in
+  // case their cutoff has passed since the is_active=true queries ran (this is the
+  // point of enforcement for Connect login, since a stale is_active could otherwise
+  // let a login through past the worker's last day).
+  const cutoffChecks = await Promise.all(accounts.map(async (account) => {
+    if (account.profile_type !== "employee" && account.profile_type !== "contractor") return true;
+    return enforceAccessCutoffIfDueForWorker(account.company_id, account.profile_type, account.id);
+  }));
+  const liveAccounts = accounts.filter((_, index) => cutoffChecks[index]);
+  accounts.length = 0;
+  accounts.push(...liveAccounts);
 
   await enrichAccountsWithIcSelfService(
     profilesResult.data ?? [],

@@ -275,8 +275,14 @@ export function OpsRosterPlanner({
     setSelectedPeople(new Set());
     setSelectedDates(new Set());
     setCellPicker(null);
+    // `initial` deliberately excluded: it's a useMemo over plan?.entries, which the server
+    // rebuilds via .map() on every request even when nothing changed, so it's never
+    // referentially stable and would re-arm this effect on every render, defeating the
+    // selfInitiatedRefreshRef guard above. plan?.revisionNo only changes on a real save,
+    // so it's the correct signal for "did the plan's content actually change" — the body
+    // above still reads the freshly-computed `initial` value from this render's closure.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blankPeriodStart, editable, initial, initialWeekStart, plan?.id, plan?.periodEnd, plan?.periodStart, plan?.rosterKind, plan?.status]);
+  }, [blankPeriodStart, editable, initialWeekStart, plan?.id, plan?.periodEnd, plan?.periodStart, plan?.revisionNo, plan?.rosterKind, plan?.status]);
 
   useEffect(() => {
     if (weekStart > maxWeekStart) setWeekStart(maxWeekStart);
