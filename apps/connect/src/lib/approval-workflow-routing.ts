@@ -262,18 +262,26 @@ export async function resolveConfiguredApprovalWorkflow(input: {
   const maxLevel = input.maxLevel ?? 3;
   const chain = await reportingChain(input.companyId, worker.assignment.id, asOf);
   const designationById = await designationLabels(input.companyId, chain.map((item) => item.designationId ?? "").filter(Boolean));
-  const precheckFinalizeDesignationIds = await hrPrecheckFinalizeDesignations(input.companyId, [
-    route.level_1_designation_id,
-    route.level_2_designation_id ?? ""
-  ].filter(Boolean));
+  // The "requires HR precheck and finalizes" reorder is only for Attendance
+  // Regularization — HR configures this per designation, but the behavior itself is
+  // scoped to this one workflow, not applied universally to WFH/leave/expense/etc.
+  // (Connect never calls this resolver with workflowCode "attendance_regularization"
+  // today, but the guard is here for correctness/future-proofing regardless.)
+  const precheckFinalizeDesignationIds = input.workflowCode === "attendance_regularization"
+    ? await hrPrecheckFinalizeDesignations(input.companyId, [
+      route.level_1_designation_id,
+      route.level_2_designation_id ?? ""
+    ].filter(Boolean))
+    : new Set<string>();
   const excludedPeople = new Set<string>([worker.engagement.person_id]);
   const steps: ConfiguredApprovalStep[] = [];
   let lastChainIndex = -1;
   const peerScopes = new Set<SearchScope>(["same_location", "same_cluster", "same_region"]);
-  // Set once a level-1/level-2 approver flagged "requires_hr_precheck_and_finalizes" resolves.
-  // Its own step is held back until the very end (after an HR review step is spliced in front
-  // of it), and the route's normal level-3/HR-final resolution is skipped entirely — this
-  // designation's step replaces it as the request's true final approval.
+  // Set once a level-1/level-2 approver flagged "requires_hr_precheck_and_finalizes" resolves
+  // (attendance regularization only — see precheckFinalizeDesignationIds above). Its own step
+  // is held back until the very end (after an HR review step is spliced in front of it), and
+  // the route's normal level-3/HR-final resolution is skipped entirely — this designation's
+  // step replaces it as the request's true final approval.
   let deferredFinalStep: ConfiguredApprovalStep | null = null;
   for (const level of [1, 2, 3] as const) {
     if (level > maxLevel) continue;
