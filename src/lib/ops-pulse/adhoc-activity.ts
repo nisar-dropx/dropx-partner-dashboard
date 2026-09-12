@@ -65,6 +65,7 @@ export type AdHocActivityEntry = {
   source: "Payment request" | "Cashbook";
   reference: string;
   category: "Van" | "DA";
+  resourceCategory?: "Van" | "DA" | "Driver";
   amount: number;
   reason: string;
   remark: string;
@@ -371,6 +372,7 @@ export async function loadAdHocActivity(
         source: "Payment request",
         reference: request.request_no || request.id,
         category,
+        resourceCategory: category === "DA" && /DRIVER/.test(normalizedWords(`${head.code} ${head.name}`)) ? "Driver" : category,
         amount: requestAmount,
         reason: requestReason(request),
         remark: requestRemark(request),

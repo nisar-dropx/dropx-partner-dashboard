@@ -3,6 +3,7 @@ import {createClient, type SupabaseClient} from "@supabase/supabase-js";
 import {createHash, timingSafeEqual} from "node:crypto";
 import nodemailer from "nodemailer";
 import {timeoutFetch} from "./timeout-fetch";
+import {loadAdHocMailScope} from "./adhoc-digest-scope";
 
 export type DigestControl = {company_id:string;portal:"people"|"ops";event_key:string;state:string;paused_until:string|null;subject_template:string|null;config:Record<string,unknown>};
 export type DigestMessage = {email:string;name:string;subject:string;html:string;text:string;scope:Record<string,unknown>};
@@ -73,6 +74,14 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
     ]);
     const error=controlResult.error||smtpResult.error||profileResult.error||threadResult.error;
     if(error)throw new Error(error.message);
+    if(delivery.event_key==='adhoc_usage_digest') {
+     const scope=await loadAdHocMailScope(db,delivery.company_id,String(controlResult.data.config.email_domain||""));
+     const recipient=scope.recipients.find(row=>row.email===delivery.recipient_email);
+     const saved=await db.from('portal_digest_deliveries').select('scope_summary').eq('id',delivery.id).single();
+     if(saved.error)throw new Error(saved.error.message);
+     const ids=saved.data.scope_summary?.stationIds;
+     if(!recipient||!Array.isArray(ids)||!ids.length||ids.some((id:string)=>!recipient.stationIds.includes(id)))throw new Error('Recipient ad hoc operations scope changed; notification held.');
+    }
     if(delivery.event_key==='performance_data_updated') {
      const authorized=await db.rpc('portal_ops_data_update_recipients',{p_company_id:delivery.company_id,p_report_date:delivery.report_date});
      if(authorized.error)throw new Error(authorized.error.message);
