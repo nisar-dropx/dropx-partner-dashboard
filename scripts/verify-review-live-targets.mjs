@@ -58,10 +58,10 @@ let checkpointAuth={}, checkpointRecord={observed_at:at("10:00"),counts:{package
   ["002","RECEIVED","atStation","B",at("09:55"),"hcr",false],
   ["003","CASH_AT_STATION","delivered","A",at("09:55"),"none",false]
 ]};
-let checkpointReads=[], checkpointSheets=[];
+let checkpointReads=[], checkpointSheets=[], checkpointAuthUnavailable=false;
 const checkpointDb={from(table){assert.equal(table,"ops_review_edd_observations");const q={select(){return q;},eq(k,v){checkpointReads.push([k,v]);return q;},async maybeSingle(){return{data:checkpointRecord,error:null};}};return q;}};
 const checkpointApi=load("src/app/api/ops-pulse/performance/edd-checkpoint/route.ts",{
-  "@/lib/authorization":{getAuthorization:async()=>checkpointAuth,hasPermission:()=>true},
+  "@/lib/authorization":{getAuthorization:async()=>{if(checkpointAuthUnavailable)throw Error("Sign-in check timed out");return checkpointAuth;},hasPermission:()=>true},
   "@/lib/company-scope":{requireCompanyId:()=>"company"},
   "@/lib/supabase-admin":{supabaseAdmin:checkpointDb},
   "@/lib/ops-pulse/cod":{loadCodLocations:async()=>({locations:[{id:"station",station_code:"GNTF"}]})},
@@ -83,4 +83,10 @@ checkpointRecord={...checkpointRecord,package_details:null};
 assert.equal((await checkpointApi.GET(checkpointRequest({}))).status,409,"old totals are never replaced with current parcel membership");
 checkpointAuth=null;
 assert.equal((await checkpointApi.GET(checkpointRequest({}))).status,403);
+checkpointAuthUnavailable=true;
+checkpointReads=[];
+checkpointResponse=await checkpointApi.GET(checkpointRequest({}));
+assert.equal(checkpointResponse.status,503,"sign-in dependency failure remains a retriable service error, not a data response");
+assert.match((await checkpointResponse.json()).error,/retry/i,"failed authentication lookup still returns readable JSON");
+assert.equal(checkpointReads.length,0,"authentication errors never fall through to checkpoint reads");
 console.log("PASS checkpoint drill-down: exact membership, status-filtered Excel, tenant/station/time scope, invalid input, old snapshot refusal and signed-out denial.");

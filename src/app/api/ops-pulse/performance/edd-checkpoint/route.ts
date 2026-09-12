@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 const headers = { "Cache-Control": "private, no-store" };
 export async function GET(request: Request) {
+  try {
   const auth = await getAuthorization();
   if (!auth || !hasPermission(auth, "performance_review", "access"))
     return Response.json({ error: "Review access required." }, { status: 403, headers });
@@ -18,7 +19,6 @@ export async function GET(request: Request) {
     || !Number.isFinite(Date.parse(day)) || new Date(day).toISOString().slice(0,10) !== day
     || !Number.isFinite(Date.parse(observedAt)) || !["all", "pending", "unmapped", ...EDD_MOVEMENT_GROUPS.map(([key]) => key)].includes(group))
     return Response.json({ error: "Choose a valid checkpoint." }, { status: 400, headers });
-  try {
     if (!supabaseAdmin) throw Error("Database unavailable");
     const companyId = requireCompanyId(auth);
     const scope = await loadCodLocations(companyId, auth.locationScopeIds, auth.hasAllLocationAccess);

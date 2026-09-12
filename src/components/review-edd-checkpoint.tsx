@@ -13,6 +13,7 @@ export function ReviewEddCheckpoint({ station, day, observedAt, group, label, on
   const [query, setQuery] = useState(""), [page, setPage] = useState(1), [statuses, setStatuses] = useState<Set<string>>(new Set());
   const [data, setData] = useState<{ rows: EddCheckpointPackage[]; total: number; statuses: string[] } | null>(null);
   const [error, setError] = useState(""), [loading, setLoading] = useState(true), [tid, setTid] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
   const panel = useRef<HTMLElement>(null);
   const params = new URLSearchParams({ station, date: day, observedAt, group, query, page: String(page), statuses: [...statuses].join(",") });
   const url = "/api/ops-pulse/performance/edd-checkpoint?" + params;
@@ -23,13 +24,14 @@ export function ReviewEddCheckpoint({ station, day, observedAt, group, label, on
     let stopped = false;
     setLoading(true); setError("");
     fetch(url, { cache: "no-store", signal: controller.signal }).then(async response => {
-      const body = await response.json();
+      const body = await response.json().catch(() => ({ error: "Checkpoint details could not be loaded. Please retry." }));
       if (!response.ok) throw Error(body.error || "Unable to load checkpoint");
+      if (!Array.isArray(body.rows) || typeof body.total !== "number") throw Error(body.error || "Checkpoint details could not be loaded. Please retry.");
       if (!stopped) setData(body);
-    }).catch(cause => { if (!stopped) setError(cause instanceof Error ? cause.message : "Unable to load checkpoint"); })
+    }).catch(cause => { if (!stopped) setError(controller.signal.aborted ? "Checkpoint request timed out. Please retry." : cause instanceof Error ? cause.message : "Unable to load checkpoint"); })
       .finally(() => { clearTimeout(timeout); if (!stopped) setLoading(false); });
     return () => { stopped = true; clearTimeout(timeout); controller.abort(); };
-  }, [url]);
+  }, [url, retry]);
   return <section ref={panel} tabIndex={-1} className="review-edd-checkpoint" aria-label="Checkpoint tracking IDs" onKeyDown={event => { if (event.key === "Escape" && !tid) { event.stopPropagation(); onClose(); } }}>
     <header><div><b>{station} · {label} · {reviewClock(observedAt)} IST</b><p>Recorded {day}. Select a tracking ID for its latest tracking history.</p></div><button className="review-details-close" type="button" onClick={onClose}>× Close</button></header>
     <div className="review-edd-checkpoint-controls">
@@ -37,7 +39,7 @@ export function ReviewEddCheckpoint({ station, day, observedAt, group, label, on
       <EddMultiSelect label="Source statuses" options={data?.statuses ?? []} selected={statuses} onChange={next => { setStatuses(next); setPage(1); }}/>
       <StationEddDownload href={url + "&format=xlsx"} label="Download Excel" disabled={loading || !!error || !data?.total}/>
     </div>
-    {error ? <p role="alert">{error}</p> : loading ? <p role="status">Loading tracking IDs…</p> : <>
+    {error ? <div><p role="alert">{error}</p><button type="button" onClick={() => setRetry(value => value + 1)}>Retry checkpoint</button></div> : loading ? <p role="status">Loading tracking IDs…</p> : <>
       <p>{data?.total.toLocaleString("en-IN")} tracking IDs · Status below is the recorded checkpoint status, not a later live scan.</p>
       <div className="review-operation-table" tabIndex={0} role="region" aria-label="Checkpoint package list"><table><thead><tr><th>Tracking ID</th><th>Status at checkpoint</th><th>Associate</th><th>Attempt category</th></tr></thead><tbody>
         {data?.rows.map(row => <tr key={row[0]}><td><button type="button" className="review-edd-number" onClick={() => setTid(row[0])}>{row[0]}</button></td><td>{row[1] || "No current source observation"}</td><td>{row[3] || "—"}</td><td>{row[5] === "none" ? "—" : row[5] === "unknown" ? "History incomplete" : row[5].toUpperCase()}</td></tr>)}
