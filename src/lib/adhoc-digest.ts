@@ -41,7 +41,7 @@ export function buildAdHocMessages(input: {
   date: string; checkedAt: string; stations: AdHocMailStation[];
   activity: AdHocActivityStation[]; recipients: AdHocMailRecipient[]; subjectTemplate: string;
 }): DigestMessage[] {
-  const { date, checkedAt } = input;
+  const { date } = input;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || new Date(`${date}T12:00:00Z`).toISOString().slice(0, 10) !== date) throw new Error("Invalid ad hoc report date.");
   const stationById = new Map(input.stations.filter(isAdHocMailStation).map(station => [station.id, station]));
   const rows = input.activity.flatMap(activity => {
@@ -56,7 +56,6 @@ export function buildAdHocMessages(input: {
   const subject = input.subjectTemplate.replace(/\{\{month\}\}/g, month).replace(/\{\{year\}\}/g, date.slice(0, 4));
   if (!subject || /[\r\n]/.test(subject)) throw new Error("Invalid ad hoc email subject.");
   const labels: Record<Category, string> = { Van: "Ad hoc Van", DA: "Ad hoc DA / WM", Driver: "Ad hoc Driver" };
-  const note = "Counts are usage instances: one approved payment request or an unlinked cashbook entry. Linked cashbook entries are not counted twice. Pending/rejected requests are excluded. MTD covers the report month's first day through the report date. Late approvals appear in subsequent MTD figures.";
   return input.recipients.flatMap(recipient => {
     const included = rows.filter(row => recipient.stationIds.includes(row.station.id));
     if (!included.length) return [];
@@ -65,8 +64,6 @@ export function buildAdHocMessages(input: {
     const grouped = [...new Set(included.map(row => row.region))].sort((a, b) => (regionOrder.get(a) ?? 99) - (regionOrder.get(b) ?? 99))
       .map(region => ({ region, rows: included.filter(row => row.region === region) }));
     const headers = ["Station Code", "Cluster", "Region", "Resource", "Previous day instances", "Previous day amount", "MTD instances", "MTD amount utilized"];
-    const introduction = `Ad hoc usage for ${date}. MTD: ${date.slice(0, 7)}-01 to ${date}. Only your mapped stations with ad hoc van usage on the report date are included.`;
-    const checked = new Date(checkedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
     const sumRows = (reportRows: typeof included, period: "day" | "mtd") => {
       const result = emptyUsage();
       for (const row of reportRows) for (const category of ["Van", "DA", "Driver"] as Category[]) {
@@ -109,10 +106,12 @@ export function buildAdHocMessages(input: {
       const textRows = dataRows.map(row => row.cells.join(" | ")).join("\n");
       return { html, text: `${showRegionBreakup ? `\n${group.region} REGION\n` : "\n"}${headers.join(" | ")}\n${textRows}` };
     });
-    const reportDate = new Date(`${date}T12:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+    const formatDate = (value: string) => new Date(`${value}T12:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+    const reportDate = formatDate(date), mtdStart = formatDate(`${date.slice(0, 7)}-01`);
+    const periodLine = `Previous day: ${reportDate} · MTD: ${mtdStart}–${reportDate}`;
     return [{ email: recipient.email, name: recipient.name, subject,
-      html: `<!doctype html><html><body style="margin:0;padding:0;background:#eef3f4"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef3f4"><tr><td align="center" style="padding:24px 10px"><table role="presentation" width="760" cellspacing="0" cellpadding="0" style="width:100%;max-width:760px;background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 3px 14px rgba(22,52,62,.09)"><tr><td style="background:#173b45;border-top:5px solid #e88a2d;padding:25px 28px;color:#ffffff"><div style="font-size:11px;letter-spacing:1.4px;color:#9ed6cf;font-weight:700">OPSPULSE · DAILY COST CONTROL</div><div style="font-size:25px;font-weight:700;margin-top:6px">Ad hoc usage</div><div style="font-size:13px;color:#d9e8eb;margin-top:5px">Report date: ${escapeHtml(reportDate)}</div></td></tr><tr><td style="padding:26px 28px 30px;font-family:Arial,sans-serif;color:#263746;font-size:14px;line-height:1.55"><p style="margin:0 0 12px">Hello ${escapeHtml(recipient.name)},</p><p style="margin:0 0 20px">${escapeHtml(introduction)}</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>${resourceCards}</tr></table>${tables.map(table => table.html).join("")}<div style="margin-top:22px;padding:13px 15px;background:#f5f8f9;border-left:3px solid #94a9b1;color:#50656d;font-size:12px">${escapeHtml(note)}</div><p style="margin:16px 0 18px;color:#647780;font-size:12px">Data checked at ${escapeHtml(checked)} IST.</p><a href="https://ops.dropxlogistics.com/cps/adhoc-activity?from=${date.slice(0, 7)}-01&amp;to=${date}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;font-weight:700;padding:10px 15px;border-radius:6px">View details in OpsPulse</a></td></tr></table></td></tr></table></body></html>`,
-      text: `Hello ${recipient.name},\n\n${introduction}\n\n${reportCategories.map(category => `${labels[category]} — previous day: ${reportDay[category].count} instances, ${money(reportDay[category].amount)}; MTD: ${reportMtd[category].count} instances, ${money(reportMtd[category].amount)}`).join("\n")}\n${tables.map(table => table.text).join("\n")}\n\n${note}\nData checked at ${checked} IST.`,
+      html: `<!doctype html><html><body style="margin:0;padding:0;background:#eef3f4"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#eef3f4"><tr><td align="center" style="padding:24px 10px"><table role="presentation" width="760" cellspacing="0" cellpadding="0" style="width:100%;max-width:760px;background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 3px 14px rgba(22,52,62,.09)"><tr><td style="background:#173b45;border-top:5px solid #e88a2d;padding:25px 28px;color:#ffffff"><div style="font-size:11px;letter-spacing:1.4px;color:#9ed6cf;font-weight:700">OPSPULSE · DAILY COST CONTROL</div><div style="font-size:25px;font-weight:700;margin-top:6px">Ad hoc usage</div><div style="font-size:13px;color:#d9e8eb;margin-top:5px">${escapeHtml(periodLine)}</div></td></tr><tr><td style="padding:26px 28px 30px;font-family:Arial,sans-serif;color:#263746;font-size:14px;line-height:1.55"><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>${resourceCards}</tr></table>${tables.map(table => table.html).join("")}<div style="margin-top:18px"><a href="https://ops.dropxlogistics.com/cps/adhoc-activity?from=${date.slice(0, 7)}-01&amp;to=${date}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;font-weight:700;padding:10px 15px;border-radius:6px">View details</a></div></td></tr></table></td></tr></table></body></html>`,
+      text: `Ad hoc usage\n${periodLine}\n\n${reportCategories.map(category => `${labels[category]} — previous day: ${reportDay[category].count} instances, ${money(reportDay[category].amount)}; MTD: ${reportMtd[category].count} instances, ${money(reportMtd[category].amount)}`).join("\n")}\n${tables.map(table => table.text).join("\n")}\n\nView details: https://ops.dropxlogistics.com/cps/adhoc-activity?from=${date.slice(0, 7)}-01&to=${date}`,
       scope: { stationIds: included.map(row => row.station.id), reportDate: date, monthFrom: `${date.slice(0, 7)}-01`, requiresVanUsage: true }
     }];
   });

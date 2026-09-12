@@ -79,7 +79,8 @@ test("email separates driver and DA, deduplicates linked cashbook entries, and u
   const [message] = digest.buildAdHocMessages(options);
   assert.deepEqual(message.scope.stationIds, ["a", "flip"]);
   assert.equal(message.subject, "Ad hoc usage | September 2026");
-  assert.match(message.html, /Manager &lt;A&gt;/);
+  assert.match(message.html, /Previous day: 11 Sept 2026 · MTD: 01 Sept 2026–11 Sept 2026/);
+  assert.doesNotMatch(message.html, /Hello |Counts are usage instances|Data checked at/);
   assert.match(message.text, /Ad hoc Driver/);
   assert.match(message.text, /Ad hoc Van — previous day: 2 instances, ₹270.00; MTD: 3 instances, ₹470.00/);
   assert.match(message.text, /Ad hoc DA \/ WM — previous day: 1 instances, ₹60.00; MTD: 1 instances, ₹60.00/);
