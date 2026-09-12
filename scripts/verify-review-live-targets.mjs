@@ -39,29 +39,7 @@ result=cohort.mergeReviewEddCohort([pkg],stock,null);
 assert.equal(verification.eddCurrentState(result[0]),"UNKNOWN","absent TID is not pending by assumption");
 assert.equal(cohort.mergeReviewEddCohort([],stock,out)[0].ead,null,"no invented EDD");
 assert.equal(pkg.state,"INDUCTED","input immutable");
-let calls=[],active=0,maxActive=0;
-const stations=Array.from({length:38},(_,i)=>({stationCode:"S"+String(i).padStart(2,"0"),fetchedAt:at("05:00")}));
-const refresh=load("src/lib/ops-pulse/review-source-refresh.ts",{
-  "./station-edd":{stationEddToday:()=>day},
-  "./edd-worker":{
-    fetchEddNetwork:async()=>({stations}),fetchEddPerformanceNetwork:async()=>({stations}),
-    refreshEddStation:async({stationCode})=>{calls.push("stock:"+stationCode);active++;maxActive=Math.max(maxActive,active);await Promise.resolve();active--;if(stationCode==="S00")throw Error("failure");},
-    refreshEddPerformanceStation:async({stationCode})=>{calls.push("route:"+stationCode);}
-  }
-});
-const selected=new Set();
-for(let i=0;i<5;i++) {
-  const now=new Date(Date.parse(at("06:00"))+i*300000);
-  for(const row of refresh.reviewRefreshCandidates(stations,stations,now)) selected.add(row.stationCode);
-  await refresh.refreshReviewSources(now);
-}
-assert.equal(selected.size,38,"rotation cannot starve stations behind failures");
-assert.equal(calls.length,76,"refresh both sources for every station");
-assert.ok(maxActive<=4);
-calls=[];await refresh.refreshReviewSources(new Date(at("05:29")));assert.equal(calls.length,0);
-let attempts=0,delays=[];
-await refresh.retrySharedLogin(async()=>{if(++attempts===1)throw Error('Another Amazon login is already in progress');return true;},async ms=>{delays.push(ms);});
-assert.equal(attempts,2);assert.deepEqual(delays,[10000],"one delayed retry respects shared login");
+// Durable retry/concurrency tests live in verify-review-source-queue.mjs.
 const endpoint=load("src/app/api/ops-pulse/performance/edd-history/route.ts",{
   "@/lib/authorization":{getAuthorization:async()=>({}),hasPermission:()=>true},
   "@/lib/company-scope":{requireCompanyId:()=>"company"},

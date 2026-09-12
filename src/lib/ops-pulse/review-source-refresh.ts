@@ -1,67 +1,76 @@
-import { fetchEddNetwork, fetchEddPerformanceNetwork, refreshEddStation, refreshEddPerformanceStation } from "./edd-worker";
+import "server-only";
+import { randomUUID } from "node:crypto";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { refreshEddStation, refreshEddPerformanceStation } from "./edd-worker";
 import { stationEddToday } from "./station-edd";
 
-type SourceStation = { stationCode: string; fetchedAt: string | null };
-const loginBusy = (error: unknown) => error instanceof Error && /login is already in progress/i.test(error.message);
-export async function retrySharedLogin<T>(operation: () => Promise<T>, wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))) {
-  try { return await operation(); }
-  catch (error) {
-    if (!loginBusy(error)) throw error;
-    // Respect the upstream lease. No forced login or lock removal; one delayed
-    // retry uses the shared session once the other worker has finished.
-    await wait(10_000);
-    return operation();
-  }
-}
-export function reviewRefreshCandidates(stock: SourceStation[], outcomes: SourceStation[], now = new Date()) {
-  const stocks = new Map(stock.map(row => [row.stationCode, Date.parse(row.fetchedAt || "") || 0]));
-  const routes = new Map(outcomes.map(row => [row.stationCode, Date.parse(row.fetchedAt || "") || 0]));
-  const codes = [...new Set([...stocks.keys(), ...routes.keys()])].sort();
-  // Rotate even when an upstream station is failing, so permanent failures
-  // cannot starve the rest of the network of refreshes.
-  const groups = Math.max(1, Math.ceil(codes.length / 8));
-  const offset = (Math.floor(now.getTime() / 300_000) % groups) * 8;
-  return codes.slice(offset, offset + 8).map(stationCode => ({ stationCode,
-    oldest: Math.min(stocks.get(stationCode) ?? 0, routes.get(stationCode) ?? 0) }))
-    .filter(row => now.getTime() - row.oldest >= 5 * 60_000)
-    .sort((a, b) => a.oldest - b.oldest || a.stationCode.localeCompare(b.stationCode)).slice(0, 8);
+type RefreshJob = { station_code: string; source: "stock" | "outcomes"; lease_token: string };
+export function reviewRefreshError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  if (/login is already in progress/i.test(message)) return "login_busy";
+  if (/502/.test(message)) return "upstream_502";
+  if (/timeout|timed out|abort/i.test(message)) return "timeout";
+  if (/stale source response/i.test(message)) return "stale_response";
+  return "upstream_error";
 }
 
-/** Eight rotating stations per five-minute run covers the 38-station network
- * inside 30 minutes. Four bounded lanes avoid a 38-way source request burst.
- * Start at 05:30 IST to warm both feeds before the 06:00 checkpoint. */
+/** Database-backed queue: all tracked stations, two global HTTP lanes, 15-minute
+ * success cadence, persistent retries and expired-lease recovery. The minute
+ * cron is a recovery tick, NOT a full-network Amazon refresh every minute. */
 export async function refreshReviewSources(now = new Date()) {
   const day = stationEddToday(now);
   if (now.getTime() < Date.parse(`${day}T05:30:00+05:30`)) return { refreshed: 0, skipped: "Before 05:30 IST" };
-  const [stock, outcomes] = await Promise.all([fetchEddNetwork(), fetchEddPerformanceNetwork()]);
-  const candidates = reviewRefreshCandidates(stock.stations, outcomes.stations, now);
+  if (!supabaseAdmin) throw Error("EDD refresh queue database is unavailable.");
+  const db = supabaseAdmin;
   const failedSources: string[] = [];
-  const deadline = Date.now() + 240_000;
-  let cursor = 0, refreshed = 0;
-  await Promise.all(Array.from({ length: 4 }, async () => {
-    while (cursor < candidates.length) {
-      const { stationCode } = candidates[cursor++];
-      if (Date.now() > deadline - 30_000) {
-        failedSources.push(`${stationCode}:refresh-deferred`); continue;
-      }
-      let outcomeOk = false;
+  const deadline = Date.now() + 270_000;
+  let refreshed = 0, attempted = 0;
+  const lanes = await Promise.allSettled(Array.from({ length: 2 }, async () => {
+    // Leave room for the 170s stock request plus saving its result. Unclaimed
+    // jobs remain in Postgres; no location disappears when this process stops.
+    while (Date.now() < deadline - 190_000) {
+      if (stationEddToday(new Date()) !== day) break;
+      const claim = await db.rpc("edd_claim_review_source", { p_token: randomUUID() });
+      if (claim.error) throw Error("EDD refresh queue could not claim work.");
+      const job = (claim.data as RefreshJob[] | null)?.[0];
+      if (!job) break;
+      attempted++;
+      let sourceAt: string | null = null;
+      let failure: ReturnType<typeof reviewRefreshError> | null = null;
       try {
-        // Outcomes first: do not race stock and outcomes for the same login.
-        await retrySharedLogin(() => refreshEddPerformanceStation({ stationCode }));
-        outcomeOk = true;
+        const result = job.source === "stock"
+          ? await refreshEddStation({ stationCode: job.station_code, timeoutMs: 170_000 })
+          : await refreshEddPerformanceStation({ stationCode: job.station_code });
+        const fetched = Date.parse(result.fetchedAt);
+        if (result.stationCode !== job.station_code || !Number.isFinite(fetched) || fetched > Date.now()
+          || Date.now() - fetched > 15 * 60_000 || stationEddToday(new Date(fetched)) !== day
+          || ("window" in result && (result.window.from !== day || result.window.to !== day))) {
+          throw Error("Stale source response");
+        }
+        sourceAt = result.fetchedAt;
       } catch (error) {
-        failedSources.push(`${stationCode}:outcomes`);
-        if (loginBusy(error)) { failedSources.push(`${stationCode}:stock-login-busy`); continue; }
+        failure = reviewRefreshError(error);
+        failedSources.push(`${job.station_code}:${job.source}:${failure}`);
       }
-      try {
-        await retrySharedLogin(() => {
-          const remaining = deadline - Date.now();
-          if (remaining < 1000) throw Error("Refresh deadline reached");
-          return refreshEddStation({ stationCode, timeoutMs: Math.min(110_000, remaining) });
-        });
-        if (outcomeOk) refreshed++;
-      } catch { failedSources.push(`${stationCode}:stock`); }
+      // Only the current lease owner may finish; a late response from an old
+      // invocation cannot erase a newer attempt or its saved source timestamp.
+      const saved = await db.rpc("edd_finish_review_source", { p_station_code: job.station_code,
+        p_source: job.source, p_token: job.lease_token, p_source_at: sourceAt, p_error: failure });
+      if (saved.error || saved.data !== true) throw Error("EDD refresh result was not saved; its lease will recover automatically.");
+      if (!failure) refreshed++;
     }
   }));
-  return { refreshed, attempted: candidates.length, failedSources };
+  const interrupted = lanes.find(result => result.status === "rejected");
+  if (interrupted?.status === "rejected") throw interrupted.reason;
+  const queue = await db.from("ops_review_edd_refresh_jobs").select("station_code,source_at,last_error,next_attempt_at,lease_until");
+  if (queue.error) throw Error("EDD refresh coverage could not be read.");
+  const rows = queue.data ?? [], checkedAt = Date.now();
+  const stations = [...new Set(rows.map(row => row.station_code))];
+  const waitingStations = stations.filter(code => {
+    const feeds = rows.filter(row => row.station_code === code);
+    return feeds.length !== 2 || feeds.some(row => !row.source_at || checkedAt - Date.parse(row.source_at) > 35 * 60_000);
+  });
+  return { refreshed, attempted, failedSources, trackedStations: stations.length,
+    freshStations: stations.length - waitingStations.length, waitingStations,
+    retryingSources: rows.filter(row => row.last_error).length, targetRefreshMinutes: 15 };
 }

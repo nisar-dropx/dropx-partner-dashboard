@@ -82,7 +82,7 @@ const db = { from(table) { const query = { select() { return query; }, eq(key,va
   maybeSingle() { return Promise.resolve({data: table === "edd_performance_daily" ? {date:day,assigned:100,delivered:55,returned:5,held:40,yet_to_dispatch:10,updated_at:time("23:55")} : null,error:fail?{message:"failure"}:null}); }
 }; return query; } };
 const data = moduleFrom("src/lib/ops-pulse/review-operations-data.ts", { "server-only": {}, "@/lib/supabase-admin": {supabaseAdmin: db},
-  "./edd-ledger": {}, "./edd-worker": {}, "./review-edd-cohort": cohort, "./station-edd": {}, "./station-manpower": {}, "./station-opening-punches": {}, "./review-operations": logic });
+  "./edd-ledger": {}, "./edd-worker": {}, "./review-edd-cohort": cohort, "./station-edd": {stationEddToday:()=>"2026-09-12"}, "./station-manpower": {}, "./station-opening-punches": {}, "./review-operations": logic });
 const loaded = await data.loadReviewEddHistory("company-one", "station-one", "GNTF", day);
 assert.deepEqual(requests, [["ops_review_edd_observations","company_id","company-one"],["ops_review_edd_observations","station_id","station-one"],["ops_review_edd_observations","work_date",day],["edd_performance_daily","station_code","GNTF"],["edd_performance_daily","date",day]]);
 assert.equal(loaded.timeline.routeLatest.routeDispatched,100);
@@ -112,7 +112,15 @@ assert.equal(capturedRows[0].backlog_at,time("21:06"));
 assert.equal(capturedRows[0].source_at,time("21:06"));
 assert.equal(capturedRows[0].counts.routeDispatched,200,"live worker outcomes win over the older application copy");
 assert.equal(capturedRows[0].performance_at,time("21:07"));
-assert.equal(capturedRows[0].counts.captureVersion,2);
+assert.equal(capturedRows[0].counts.captureVersion,3);
+assert.equal(capturedRows[0].counts.captureEveryMinutes,15);
+
+const quarter = clock => point(clock,{captureEveryMinutes:15,sourceMaxAgeMinutes:35});
+assert.equal(logic.buildReviewEddTimeline(day,[quarter("10:00"),quarter("10:15")],new Date(time("10:29"))).clearedAt,time("10:00"),"15-minute cadence is not a missing-capture gap");
+assert.equal(logic.buildReviewEddTimeline(day,[quarter("10:00")],new Date(time("10:25"))).latestFresh,false);
+const ageing = quarter("10:15"); ageing.backlogAt=time("09:45");
+assert.equal(logic.buildReviewEddTimeline(day,[ageing],new Date(time("10:25"))).latestFresh,false,"source freshness is checked against now, not just capture time");
+assert.equal(logic.buildReviewEddTimeline(day,[quarter("10:00"),point("10:15",{hasSnapshot:false})],new Date(time("10:16"))).lastConfirmed.observedAt,time("10:00"),"last usable observation survives a failed read without filling missing checkpoints");
 
 let captures = 0;
 const route = moduleFrom("src/app/api/cron/edd-review-history/route.ts", {

@@ -33,6 +33,10 @@ assert.equal(table('Performance scorecard').rows.length,32);assert.ok(table('Per
 assert.equal(table('RCA and reasons').rows.find(r=>r.Type==='Delay reason only')['Corrective action'],'Not required');
 assert.equal(table('EDD checkpoints').rows.length,37);assert.equal(table('EDD checkpoints').rows[0]['Day start EDD'],null);assert.equal(table('EDD checkpoints').rows[0]['At station pending'],null);
 assert.ok(!JSON.stringify(report).includes('MUST NOT APPEAR'));
+const staleData={...data,edd:data.edd.map(r=>({...r,backlog_at:'2026-09-08T01:00:00Z'}))};
+const staleReport=buildReviewReport('2026-09-08','2026-09-08',[{id:'s1',station_code:'TESTA'}],staleData,[],new Date('2026-09-10T12:00:00Z'));
+assert.equal(staleReport.tables.find(t=>t.name==='Review summary').rows[0]['Latest EDD pending'],null);
+assert.ok(staleReport.tables.find(t=>t.name==='EDD checkpoints').rows.every(r=>r['At station pending']===null),'exports suppress stale counts exactly like Review Desk');
 const {reviewReportXlsx,reviewReportPdf}=load('src/lib/ops-pulse/review-report-export.ts');
 const codWorkbook=require('xlsx').read(await reviewReportXlsx(codReport),{type:'buffer'});
 assert.ok(require('xlsx').utils.sheet_to_json(codWorkbook.Sheets['RCA and reasons']).some(r=>r.Reason==='Bank reconciliation pending'&&r.Actual==='₹123.45'));

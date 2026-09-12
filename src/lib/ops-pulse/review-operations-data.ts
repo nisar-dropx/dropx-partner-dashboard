@@ -7,20 +7,25 @@ import { mergeReviewEddCohort } from "./review-edd-cohort";
 import { summarizeStationEdd, stationEddToday } from "./station-edd";
 import { loadOpsStationManpower } from "./station-manpower";
 import { isPeopleDesignation } from "./station-opening-punches";
-import { buildReviewEddTimeline, buildUtrDiscipline, normalizeReviewRouteCounts, reviewEddSourceFresh, type ReviewEddPoint, type ReviewRouteSnapshot } from "./review-operations";
+import { buildReviewEddTimeline, buildUtrDiscipline, normalizeReviewRouteCounts, reviewEddSourceFresh, type ReviewEddPoint, type ReviewRouteSnapshot, type ReviewEddRefreshSource } from "./review-operations";
 
 /** Server components call this only after review permission + station scope resolution. */
 export async function loadReviewEddHistory(companyId: string, stationId: string, stationCode: string, date: string) {
   try {
     if (!supabaseAdmin) throw Error("EDD history is unavailable.");
-    const [result, routeResult] = await Promise.all([
+    const [result, routeResult, collectionResult] = await Promise.all([
       supabaseAdmin.from("ops_review_edd_observations")
         .select("observed_at,source_at,backlog_at,performance_at,counts")
         .eq("company_id", companyId).eq("station_id", stationId).eq("work_date", date)
         .order("observed_at").limit(300),
       supabaseAdmin.from("edd_performance_daily")
         .select("date,assigned,delivered,returned,held,yet_to_dispatch,updated_at")
-        .eq("station_code", stationCode).eq("date", date).maybeSingle()
+        .eq("station_code", stationCode).eq("date", date).maybeSingle(),
+      // Called only after the tenant/station scope gate. Never expose another
+      // location's queue metadata or upstream exception bodies to the browser.
+      date === stationEddToday() ? supabaseAdmin.from("ops_review_edd_refresh_jobs")
+        .select("source,source_at,last_error,next_attempt_at,lease_until").eq("station_code", stationCode).limit(2)
+        : Promise.resolve({ data: [], error: null })
     ]);
     if (result.error) throw Error("EDD history could not be loaded. Please retry.");
     const points: ReviewEddPoint[] = (result.data ?? []).map(row => ({ observedAt: row.observed_at,
@@ -31,6 +36,7 @@ export async function loadReviewEddHistory(companyId: string, stationId: string,
     const routeFinal: ReviewRouteSnapshot | null = routeCounts?.routeHasSnapshot && routeResult.data?.updated_at
       ? { ...routeCounts, observedAt: routeResult.data.updated_at, source: "daily" } : null;
     return { timeline: buildReviewEddTimeline(date, points, new Date(), routeFinal), error: null,
+      collection: (collectionResult.error ? [] : collectionResult.data ?? []) as ReviewEddRefreshSource[],
       routeError: routeResult.error ? "Complete out-on-road totals could not be loaded." : null };
   } catch (error) {
     return { timeline: buildReviewEddTimeline(date, []), error: error instanceof Error ? error.message : "EDD history unavailable.", routeError: null };
@@ -61,7 +67,7 @@ export async function loadReviewUtrDiscipline(companyId: string, station: CodLoc
 }
 
 /** Additive, aggregate-only audit. No source refresh or classification mutations.
- * Private cron captures at five-minute resolution; the UI groups half-hour checkpoints.
+ * Private cron captures every 15 minutes; the UI groups half-hour checkpoints.
  * Historical intervals are NEVER backfilled from today's latest package states. */
 export async function captureReviewEddHistory(): Promise<{ captured: number; date?: string; skipped?: string; fresh?: number; staleStations?: string[]; failedSources?: string[] }> {
   if (!supabaseAdmin) throw Error("EDD history database is unavailable.");
@@ -91,7 +97,7 @@ export async function captureReviewEddHistory(): Promise<{ captured: number; dat
     // the new source package. A worker failure falls back to the ledger with
     // its stored snapshot timestamp, which the freshness gate will suppress.
     const [ledger, liveResults, outcomeResults] = await Promise.all([
-      loadEddLedger(batchCodes),
+      loadEddLedger(batchCodes).catch(() => { failedSources.push(...batchCodes.map(code => `${code}:ledger`)); return new Map(); }),
       Promise.all(batchCodes.map(code => fetchEddStation({ stationCode: code }).catch(() => { failedSources.push(`${code}:stock`); return null; }))),
       Promise.all(batchCodes.map(code => fetchEddPerformanceStation({ stationCode: code }).catch(() => { failedSources.push(`${code}:outcomes`); return null; })))
     ]);
@@ -119,14 +125,14 @@ export async function captureReviewEddHistory(): Promise<{ captured: number; dat
         captured_slot: new Date(Math.floor(observedAt.getTime() / 300_000) * 300_000).toISOString(), observed_at: observedAt.toISOString(),
         source_at: sourceAt, backlog_at: backlogAt, performance_at: route?.fetched_at ?? null,
         counts: { todayTotal, todayAtStation, todayOnRoad, todayDelivered, todayHfr, todayAttempted, todayUnverified, todayOther, missingDate,
-          hasSnapshot: hasSnapshot && Boolean(source), captureVersion: 2, sourceMaxAgeMinutes: 35, ...routeCounts } };
+          hasSnapshot: hasSnapshot && Boolean(source), captureVersion: 3, captureEveryMinutes: 15, sourceMaxAgeMinutes: 35, ...routeCounts } };
       if (!reviewEddSourceFresh({ observedAt: row.observed_at, sourceAt, backlogAt, performanceAt: row.performance_at, counts: row.counts }, date)) staleStations.push(station.station_code);
       return row;
     });
     const result = await db.from("ops_review_edd_observations").upsert(rows,
       { onConflict: "company_id,station_id,work_date,captured_slot", ignoreDuplicates: true });
-    if (result.error) throw Error(`EDD history capture failed: ${result.error.message}`);
-    captured += rows.length;
+    if (result.error) failedSources.push(...batchCodes.map(code => `${code}:history-write`));
+    else captured += rows.length;
   }
-  return { captured, date, fresh: captured - staleStations.length, staleStations, failedSources };
+  return { captured, date, fresh: Math.max(0, captured - staleStations.length), staleStations, failedSources };
 }

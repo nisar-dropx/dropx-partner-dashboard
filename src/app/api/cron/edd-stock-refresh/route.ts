@@ -17,9 +17,9 @@ export async function GET(request: Request) {
   }
   try {
     const run = await refreshReviewSources();
-    if (run.failedSources?.length) console.warn("[edd-source-refresh] degraded", run);
+    if (run.failedSources?.length || run.waitingStations?.length) console.warn("[edd-source-refresh] recovering", run);
     else console.info("[edd-source-refresh] complete", run);
-    return NextResponse.json({ status: run.failedSources?.length ? "degraded" : "ok", run }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({ status: run.failedSources?.length || run.waitingStations?.length ? "recovering" : "ok", run }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     console.error("[edd-source-refresh] failed", error instanceof Error ? error.message : "Unknown error");
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to start the EDD stock refresh." }, { status: 500 });

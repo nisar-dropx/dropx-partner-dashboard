@@ -11,9 +11,10 @@ export type ReviewRouteCounts = {
   routeHasSnapshot: boolean;
 };
 export type ReviewRouteSnapshot = ReviewRouteCounts & { observedAt: string; source: "checkpoint" | "daily" };
-export type ReviewEddCountsWithRoute = ReviewEddCounts & Partial<ReviewRouteCounts> & { captureVersion?: number; sourceMaxAgeMinutes?: number };
+export type ReviewEddCountsWithRoute = ReviewEddCounts & Partial<ReviewRouteCounts> & { captureVersion?: number; sourceMaxAgeMinutes?: number; captureEveryMinutes?: number };
 export type ReviewEddPoint = { observedAt: string; sourceAt: string | null; backlogAt: string | null; performanceAt: string | null; counts: ReviewEddCountsWithRoute };
 export type ReviewEddTimeline = ReturnType<typeof buildReviewEddTimeline>;
+export type ReviewEddRefreshSource = { source: "stock" | "outcomes"; source_at: string | null; last_error: string | null; next_attempt_at: string; lease_until: string | null };
 const minute = 60_000;
 const stamp = (value: string | null) => value ? Date.parse(value) : NaN;
 export function reviewClock(value: string | null) {
@@ -74,30 +75,38 @@ export function buildReviewEddTimeline(day: string, input: ReviewEddPoint[], now
   const dayStart = baseline ? baseline.counts.todayTotal - baseline.counts.todayHfr : null;
   const validClear = (p: ReviewEddPoint) => reviewEddSourceFresh(p, day) && p.counts.todayTotal > p.counts.todayHfr
     && p.counts.todayAtStation === 0 && p.counts.todayUnverified === 0 && p.counts.missingDate === 0 && p.counts.todayOther === 0;
-  const current = latest && until - stamp(latest.observedAt) <= 10 * minute;
+  const captureGap = (p: ReviewEddPoint) => ((p.counts.captureEveryMinutes === 15 ? 15 : 5) + 5) * minute;
+  const current = latest && until - stamp(latest.observedAt) <= captureGap(latest);
   let clearedAt: string | null = null;
   if (latest && current && validClear(latest)) {
     clearedAt = latest.observedAt;
     // A later arrival/pending TID, uncertainty or capture gap resets clearance.
     for (let i = points.length - 2; i >= 0; i--) {
-      if (!validClear(points[i]) || stamp(points[i + 1].observedAt) - stamp(points[i].observedAt) > 10 * minute) break;
+      if (!validClear(points[i]) || stamp(points[i + 1].observedAt) - stamp(points[i].observedAt) > captureGap(points[i])) break;
       clearedAt = points[i].observedAt;
     }
   }
   const latestFresh = latest ? reviewEddSourceFresh(latest, day)
-    && (now.getTime() > end || Boolean(current)) : false;
+    && (now.getTime() > end || (Boolean(current) && [latest.backlogAt, latest.performanceAt]
+      .every(value => now.getTime() - stamp(value) <= (latest.counts.sourceMaxAgeMinutes ?? 90) * minute))) : false;
+  // Keep the last usable observation visible, separately labelled historical.
+  // It never fills an empty checkpoint or certifies clearance now.
+  const lastConfirmed = [...points].reverse().find(p => reviewEddSourceFresh(p, day)) ?? null;
   const summary = !latest ? "History not recorded" : !latest.counts.hasSnapshot ? "Source unavailable" : !latestFresh ? "Source stale" : latest.counts.todayAtStation > 0
     ? `Not cleared · ${latest.counts.todayAtStation.toLocaleString("en-IN")} pending`
-    : clearedAt ? `Cleared by ${reviewClock(clearedAt)}`
+    : clearedAt ? `Observed clear at ${reviewClock(clearedAt)}`
     : latest.counts.todayUnverified > 0 ? `Not confirmed · ${latest.counts.todayUnverified.toLocaleString("en-IN")} unchecked`
     : "Clearance not confirmed";
   const rows = Array.from({ length: 37 }, (_, index) => {
     const target = index === 36 ? end : start + index * 30 * minute;
     const future = target > now.getTime();
-    // Scheduled jobs can start seconds late. Show the actual observation time;
+    // Scheduled jobs can start seconds late. Prefer a valid observation when a
+    // later attempt in this same checkpoint window has a source failure.
+    // Show the actual observation time;
     // do not carry a morning count forward across an unrecorded interval.
     const cutoff = Math.min(target + (index === 36 ? 0 : 5 * minute), until);
-    const point = future ? null : points.filter(p => stamp(p.observedAt) <= cutoff && stamp(p.observedAt) >= target - 5 * minute).at(-1) ?? null;
+    const candidates = future ? [] : points.filter(p => stamp(p.observedAt) <= cutoff && stamp(p.observedAt) >= target - 5 * minute);
+    const point = candidates.filter(p => reviewEddSourceFresh(p, day)).at(-1) ?? candidates.at(-1) ?? null;
     return { label: index === 36 ? "EOD" : new Date(target + 330 * minute).toISOString().slice(11, 16),
       dayStart, point,
       state: future ? "Upcoming" : !point ? "Not recorded" : !reviewEddSourceFresh(point, day) ? "Source stale" : "Recorded",
@@ -108,7 +117,7 @@ export function buildReviewEddTimeline(day: string, input: ReviewEddPoint[], now
   const dayEndPassed = now.getTime() > end;
   const finalUsable = routeFinal?.routeHasSnapshot === true && (dayEndPassed || now.getTime() - stamp(routeFinal.observedAt) <= 90 * minute);
   const routeLatest = latestRoutePoint ? routeSnapshotFromPoint(latestRoutePoint) : finalUsable ? routeFinal : null;
-  return { day, summary, clearedAt, dayStart, baselineAt: baseline?.observedAt ?? null, latest, latestFresh, current: Boolean(current), rows,
+  return { day, summary, clearedAt: latestFresh ? clearedAt : null, dayStart, baselineAt: baseline?.observedAt ?? null, latest, latestFresh, lastConfirmed, current: Boolean(current), rows,
     routeLatest, routeFinal: dayEndPassed ? routeFinal : null, dayEndPassed };
 }
 

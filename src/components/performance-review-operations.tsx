@@ -3,13 +3,13 @@
 
 import { useEffect, useState } from "react";
 import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
-import { reviewClock, type ReviewEddTimeline, type UtrDiscipline } from "@/lib/ops-pulse/review-operations";
+import { reviewClock, type ReviewEddTimeline, type UtrDiscipline, type ReviewEddRefreshSource } from "@/lib/ops-pulse/review-operations";
 import { dashboardDateInputValue, formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { UtrAttendanceDrilldown, UtrRepeatSummary } from "@/components/review-attendance-history";
 
 const count = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("en-IN");
 
-export function PerformanceEddClearanceCard({ data, stationCode }: { data: { timeline: ReviewEddTimeline; error: string | null; routeError?: string | null }; stationCode?: string }) {
+export function PerformanceEddClearanceCard({ data, stationCode }: { data: { timeline: ReviewEddTimeline; error: string | null; routeError?: string | null; collection?: ReviewEddRefreshSource[] }; stationCode?: string }) {
   const [liveData, setLiveData] = useState(data);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const day = data.timeline.day;
@@ -39,7 +39,7 @@ export function PerformanceEddClearanceCard({ data, stationCode }: { data: { tim
     document.addEventListener("visibilitychange", refresh);
     return () => { stopped = true; controller?.abort(); clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
   }, [stationCode, day]);
-  const { timeline: t, error, routeError } = liveData;
+  const { timeline: t, error, routeError, collection = [] } = liveData;
   const [view, setView] = useState<"edd" | "route">("edd");
   const route = t.routeLatest;
   return <ReviewDetails className={`performance-fact-card review-operation-card ${t.latestFresh && t.latest?.counts.todayAtStation ? "late" : ""}`} name="performance-review-fact">
@@ -53,22 +53,31 @@ export function PerformanceEddClearanceCard({ data, stationCode }: { data: { tim
       <header><div><b>Delivery movement · {formatDashboardDate(t.day)}</b><p>Half-hour checkpoints · all times IST</p></div><span className="review-operation-tag">Automatic</span></header>
       {error ? <p role="alert">{error}</p> : null}
       {refreshError ? <p role="status" className="review-operation-note">{refreshError}</p> : null}
+      <p className="review-operation-note">Source refresh target: every 15 minutes · checkpoints: 06:00, 06:30, then every half hour. Temporary source failures retry automatically. Source times can differ between stations; these are observed snapshots, not simultaneous scans.</p>
+      {collection.some(source => source.last_error) ? <p role="status" className="review-operation-note">Retry queued: {collection.filter(source => source.last_error).map(source => `${source.source === "stock" ? "Station stock" : "Delivery outcomes"} (${source.last_error === "login_busy" ? "shared login busy" : source.last_error === "upstream_502" ? "Amazon proxy unavailable" : source.last_error === "timeout" ? "source timed out" : "fresh source unavailable"})`).join(" · ")}. No missing value is treated as zero.</p> : null}
       <div className="review-edd-view-switch" role="tablist" aria-label="Delivery movement view">
         <button type="button" role="tab" aria-selected={view === "edd"} onClick={() => setView("edd")}>EDD due today</button>
         <button type="button" role="tab" aria-selected={view === "route"} onClick={() => setView("route")}>All out on road</button>
       </div>
       {view === "edd" ? <>
+        {!t.latestFresh && t.lastConfirmed ? <div className="review-operation-summary" role="status">
+          <span>Last valid observation — {reviewClock(t.lastConfirmed.observedAt)} IST. Not current.</span>
+          <span>Observed EDD <b>{count(t.lastConfirmed.counts.todayTotal - t.lastConfirmed.counts.todayHfr)}</b></span>
+          <span>Pending <b>{count(t.lastConfirmed.counts.todayAtStation)}</b></span>
+          <span>On road <b>{count(t.lastConfirmed.counts.todayOnRoad)}</b></span>
+          <span>Delivered <b>{count(t.lastConfirmed.counts.todayDelivered)}</b></span>
+        </div> : null}
         <div className="review-operation-summary"><span>Day-start EDD <b>{count(t.dayStart)}</b></span><span>Latest at station <b>{count(t.latestFresh ? t.latest?.counts.todayAtStation : null)}</b></span><span>Awaiting checks <b>{count(t.latestFresh ? t.latest?.counts.todayUnverified : null)}</b></span></div>
         <p className="review-operation-note">EDD includes only shipments due on the selected date. {t.baselineAt ? `The day-start cohort is frozen at the first valid morning observation (${reviewClock(t.baselineAt)}).` : "A valid 06:00 baseline was not recorded, so no later total is presented as the day-start EDD."} Prior-day HFR is excluded.</p>
         <div className="review-operation-table" role="region" aria-label="EDD half-hour history, scroll for all times and columns" tabIndex={0}>
-          <table><thead><tr><th>Checkpoint</th><th>Day-start EDD</th><th>Observed EDD</th><th>At station</th><th>On road</th><th>Delivered</th><th>Attempted</th><th>Unchecked / other</th><th>Observation</th></tr></thead>
+          <table><thead><tr><th>Checkpoint</th><th>Day-start EDD</th><th>Observed EDD</th><th>At station</th><th>On road</th><th>Delivered</th><th>Attempted</th><th>Unchecked / other</th><th>Observation / source times</th></tr></thead>
             <tbody>{t.rows.map(row => { const c = row.state === "Recorded" && row.point?.counts.hasSnapshot ? row.point.counts : null; return <tr key={row.label} className={c ? "" : "review-operation-muted"}>
               <th scope="row">{row.label}</th><td>{c ? count(row.dayStart) : "—"}</td><td>{c ? count(c.todayTotal - c.todayHfr) : "—"}</td>
               <td className={c?.todayAtStation ? "review-operation-pending" : ""}>{count(c?.todayAtStation)}</td><td>{count(c?.todayOnRoad)}</td><td>{count(c?.todayDelivered)}</td><td>{count(c?.todayAttempted)}</td>
-              <td>{c ? count(c.todayUnverified + c.todayOther) : "—"}</td><td>{row.point ? <>{reviewClock(row.point.observedAt)}<small>{row.state}</small></> : row.state}</td>
+              <td>{c ? count(c.todayUnverified + c.todayOther) : "—"}</td><td>{row.point ? <>{reviewClock(row.point.observedAt)}<small>{row.state}</small><small>Stock {reviewClock(row.point.backlogAt)} · outcomes {reviewClock(row.point.performanceAt)}</small></> : row.state}</td>
             </tr>; })}</tbody></table>
         </div>
-        <p className="review-operation-note">Stale stock or outcome snapshots are suppressed instead of displaying mismatched figures. “Cleared by” requires a fresh, uninterrupted zero-at-station run with no unchecked or undated TIDs.</p>
+        <p className="review-operation-note">A missing or stale checkpoint stays marked; a later snapshot never fills it. “Observed clear at” is the first observation in a continuous run of valid checks with no pending, unchecked or undated TIDs, not an exact dispatch scan time.</p>
         {t.latest ? <p className="review-operation-note">Latest EDD sources: stock {formatDashboardDateTime(t.latest.backlogAt)} · outcomes {formatDashboardDateTime(t.latest.performanceAt)} IST · {count(t.latest.counts.missingDate)} missing EDD dates · {count(t.latest.counts.todayHfr)} prior-day HFR.</p> : null}
       </> : <>
         {routeError ? <p role="alert" className="review-operation-note">{routeError}</p> : null}
