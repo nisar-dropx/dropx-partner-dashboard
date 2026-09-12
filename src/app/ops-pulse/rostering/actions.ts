@@ -115,7 +115,7 @@ async function authorisedStation(companyId: string, authorization: Authorization
 
 async function loadPlan(companyId: string, authorization: AuthorizationContext, planId: string) {
   const result = await db().from("hr_roster_plans")
-    .select("id,name,period_start,period_end,status,location_id,created_by,roster_kind,effective_from,revision_no,supersedes_plan_id,hr_roster_plan_locations(location_id)")
+    .select("id,name,period_start,period_end,status,location_id,created_by,submitted_by,roster_kind,effective_from,revision_no,supersedes_plan_id,hr_roster_plan_locations(location_id)")
     .eq("company_id", companyId)
     .eq("id", planId)
     .maybeSingle();
@@ -561,7 +561,7 @@ async function materializeOpsDraftFromApproved(
   const requestedStart = viewWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(viewWeekStart) ? rosterMonday(viewWeekStart) : currentWeek;
   const anchorStart = requestedStart < currentWeek ? currentWeek : requestedStart;
   const existingOps = await db().from("hr_roster_plans")
-    .select("id,name,period_start,period_end,status,location_id,created_by,roster_kind,effective_from,revision_no,supersedes_plan_id,hr_roster_plan_locations(location_id)")
+    .select("id,name,period_start,period_end,status,location_id,created_by,submitted_by,roster_kind,effective_from,revision_no,supersedes_plan_id,hr_roster_plan_locations(location_id)")
     .eq("company_id", companyId)
     .eq("location_id", approved.location_id)
     .in("roster_kind", ["dated", "recurring_weekly"])
@@ -595,7 +595,7 @@ async function materializeOpsDraftFromApproved(
     created_by: authorization.userId,
     updated_by: authorization.userId,
     planning_channel: "ops"
-  }).select("id,name,period_start,period_end,status,location_id,created_by,roster_kind,effective_from,revision_no,supersedes_plan_id").single();
+  }).select("id,name,period_start,period_end,status,location_id,created_by,submitted_by,roster_kind,effective_from,revision_no,supersedes_plan_id").single();
   if (created.error || !created.data) throw new Error(created.error?.message ?? "The Ops roster draft could not be created.");
 
   const linked = await db().from("hr_roster_plan_locations").insert({ company_id: companyId, plan_id: created.data.id, location_id: approved.location_id });
@@ -971,10 +971,29 @@ export async function decideOpsRoster(input: { planId: string; stepId: string; d
     if (stepResult.error) throw new Error(stepResult.error.message);
     const step = stepResult.data;
     if (!step || step.status !== "pending") return { ok: false, message: "This approval is no longer pending." };
-    const authorised = isCompanyOwner(authorization) || step.approver_user_id === authorization.userId || (step.stage_type === "hr" && !step.approver_user_id && canApproveOpsRosterHr(authorization));
-    if (!authorised) return { ok: false, message: "This approval belongs to another approver." };
     const plan = await loadPlan(companyId, authorization, input.planId);
     if (plan.status !== "pending_approval") return { ok: false, message: "This roster is no longer awaiting approval." };
+    // The HR stage is an open slot (no single resolved approver — anyone holding an
+    // HR/People approval permission may act on it, via canApproveOpsRosterHr). Unlike a
+    // named manager-chain step, that open slot has no structural guarantee the acting
+    // user isn't also the person who submitted this roster for approval — someone who
+    // both plans a station's roster and holds an HR role could otherwise approve their
+    // own submission at this stage. The manager-chain stage doesn't need this check: its
+    // candidates are already built with the submitter stripped out (see
+    // locationRosterApprovalChain), so any approver_user_id assigned there is guaranteed
+    // to be someone other than the submitter.
+    const isOpenHrSlot = step.stage_type === "hr" && !step.approver_user_id;
+    const authorised = isCompanyOwner(authorization)
+      || step.approver_user_id === authorization.userId
+      || (isOpenHrSlot && canApproveOpsRosterHr(authorization) && plan.submitted_by !== authorization.userId);
+    if (!authorised) {
+      return {
+        ok: false,
+        message: isOpenHrSlot && plan.submitted_by === authorization.userId
+          ? "You submitted this roster — another HR approver must decide it."
+          : "This approval belongs to another approver."
+      };
+    }
     const now = new Date().toISOString();
     const decided = await db().from("hr_roster_approval_steps").update({
       status: input.decision,
