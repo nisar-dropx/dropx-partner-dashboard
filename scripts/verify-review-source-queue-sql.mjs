@@ -14,6 +14,7 @@ try {
   await db.exec(readFileSync(new URL('../supabase/migrations/20260912092525_review_edd_durable_source_refresh.sql',import.meta.url),'utf8'));
   await db.exec(readFileSync(new URL('../supabase/migrations/20260912094856_review_edd_refresh_completion_recovery.sql',import.meta.url),'utf8'));
   await db.exec(readFileSync(new URL('../supabase/migrations/20260912110718_review_edd_refresh_reuse_source_clock.sql',import.meta.url),'utf8'));
+  await db.exec(readFileSync(new URL('../supabase/migrations/20260912113257_review_edd_refresh_oldest_source_priority.sql',import.meta.url),'utf8'));
   const claim=async()=> (await db.query('select * from edd_claim_review_source($1)',[randomUUID()])).rows;
   const finish=async(job,error=null,token=job.lease_token)=>(await db.query('select edd_finish_review_source($1,$2,$3,$4,$5) as saved',[job.station_code,job.source,token,error?null:new Date().toISOString(),error])).rows[0].saved;
   await db.exec('set role service_role');
@@ -57,6 +58,21 @@ try {
   await db.query('select edd_finish_review_source($1,$2,$3,$4,$5)',args);
   const duplicate=(await db.query('select next_attempt_at from ops_review_edd_refresh_jobs where station_code=$1 and source=$2',[a.station_code,a.source])).rows[0];
   assert.deepEqual(duplicate.next_attempt_at,reused.next_attempt_at,'repeat acknowledgement cannot slide the cadence');
+  // A recently eligible failed/stale feed wins over an earlier-due usable feed.
+  await db.exec("update ops_review_edd_refresh_jobs set next_attempt_at=now()+interval '1 hour',lease_token=null,lease_until=null");
+  await db.query("update ops_review_edd_refresh_jobs set source_at=now()-interval '10 minutes',next_attempt_at=now()-interval '20 minutes' where station_code=$1 and source=$2",[a.station_code,a.source]);
+  await db.query("update ops_review_edd_refresh_jobs set source_at=now()-interval '1 hour',next_attempt_at=now()-interval '1 second' where station_code=$1 and source=$2",[b.station_code,b.source]);
+  const oldest=(await claim())[0];
+  assert.equal(oldest.station_code,b.station_code,'oldest source wins regardless of earlier eligibility of fresh data');
+  assert.equal(await finish(oldest,'upstream_502'),true);
+  const usable=(await claim())[0];
+  assert.equal(usable.station_code,a.station_code,'failed oldest feed honors cooldown and cannot monopolize the lanes');
+  assert.equal(await finish(usable),true);
+  await db.query("update ops_review_edd_refresh_jobs set source_at=null,next_attempt_at=now()-interval '1 second' where station_code=$1 and source=$2",[a.station_code,a.source]);
+  await db.query("update ops_review_edd_refresh_jobs set next_attempt_at=now()-interval '1 second' where station_code=$1 and source=$2",[b.station_code,b.source]);
+  const missing=(await claim())[0];
+  assert.equal(missing.station_code,a.station_code,'never-collected data is prioritized');
+  assert.equal(await finish(missing),true);
   for(const role of ['anon','authenticated']){
     await db.exec('reset role; set role '+role);
     await assert.rejects(()=>claim(),/permission denied/);

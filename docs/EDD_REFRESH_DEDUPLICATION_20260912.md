@@ -27,3 +27,9 @@ Deploy the source-clock migration before this client. Tests:
 
 This reduces redundant requests. It does not promise upstream availability,
 invent historical checkpoints, or turn unverified zero-pending into clearance.
+
+Eligible jobs are now ordered by their oldest saved source time (never-collected
+feeds first), then previous attempt time. Retry backoff is still an eligibility
+gate, and global concurrency remains two. This prevents a station whose retry
+became eligible recently from sitting behind earlier-due refreshes of usable
+data. Regression tests cover oldest-first selection, cooldown, and missing data.
