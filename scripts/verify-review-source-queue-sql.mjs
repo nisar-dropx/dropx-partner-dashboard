@@ -13,6 +13,7 @@ try {
     grant select on edd_station_snapshots,edd_performance_snapshots to service_role;`);
   await db.exec(readFileSync(new URL('../supabase/migrations/20260912092525_review_edd_durable_source_refresh.sql',import.meta.url),'utf8'));
   await db.exec(readFileSync(new URL('../supabase/migrations/20260912094856_review_edd_refresh_completion_recovery.sql',import.meta.url),'utf8'));
+  await db.exec(readFileSync(new URL('../supabase/migrations/20260912110718_review_edd_refresh_reuse_source_clock.sql',import.meta.url),'utf8'));
   const claim=async()=> (await db.query('select * from edd_claim_review_source($1)',[randomUUID()])).rows;
   const finish=async(job,error=null,token=job.lease_token)=>(await db.query('select edd_finish_review_source($1,$2,$3,$4,$5) as saved',[job.station_code,job.source,token,error?null:new Date().toISOString(),error])).rows[0].saved;
   await db.exec('set role service_role');
@@ -43,6 +44,19 @@ try {
   const retained=(await db.query('select * from ops_review_edd_refresh_jobs where station_code=$1 and source=$2',[a.station_code,a.source])).rows[0];
   assert.deepEqual(retained.source_at,done.source_at,'failed refresh retains previous successful source');
   assert.deepEqual(retained.last_success_at,done.last_success_at);
+  // Reusing a 12-minute-old snapshot must be due in ~3 minutes, not 15.
+  await db.query("update ops_review_edd_refresh_jobs set next_attempt_at=now()-interval '1 second' where station_code=$1 and source=$2",[a.station_code,a.source]);
+  const cachedJob=(await claim())[0], originalAt=new Date(Date.now()-12*60000).toISOString();
+  const args=[cachedJob.station_code,cachedJob.source,cachedJob.lease_token,originalAt,null];
+  assert.equal((await db.query('select edd_finish_review_source($1,$2,$3,$4,$5) as saved',args)).rows[0].saved,true);
+  const reused=(await db.query('select * from ops_review_edd_refresh_jobs where station_code=$1 and source=$2',[a.station_code,a.source])).rows[0];
+  const exactSource=(await db.query('select source_at=$3::timestamptz as exact from ops_review_edd_refresh_jobs where station_code=$1 and source=$2',[a.station_code,a.source,originalAt])).rows[0].exact;
+  assert.equal(exactSource,true,'source observation time is never rewritten as now');
+  assert.ok(Date.parse(reused.next_attempt_at)-Date.now()<4*60000);
+  assert.ok(Date.parse(reused.next_attempt_at)-Date.now()>2*60000);
+  await db.query('select edd_finish_review_source($1,$2,$3,$4,$5)',args);
+  const duplicate=(await db.query('select next_attempt_at from ops_review_edd_refresh_jobs where station_code=$1 and source=$2',[a.station_code,a.source])).rows[0];
+  assert.deepEqual(duplicate.next_attempt_at,reused.next_attempt_at,'repeat acknowledgement cannot slide the cadence');
   for(const role of ['anon','authenticated']){
     await db.exec('reset role; set role '+role);
     await assert.rejects(()=>claim(),/permission denied/);

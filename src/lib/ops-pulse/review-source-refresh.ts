@@ -1,17 +1,31 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { refreshEddStation, refreshEddPerformanceStation } from "./edd-worker";
+import { fetchEddStation, fetchEddPerformanceStation, refreshEddStation, refreshEddPerformanceStation,
+  type EddStationPayload, type EddPerformancePayload } from "./edd-worker";
 import { stationEddToday } from "./station-edd";
 
 type RefreshJob = { station_code: string; source: "stock" | "outcomes"; lease_token: string };
 export function reviewRefreshError(error: unknown) {
+  const code = error && typeof error === "object" && "code" in error ? error.code : null;
+  if (code === "SESSION_UNAVAILABLE" || code === "LOGIN_IN_PROGRESS") return "login_busy";
   const message = error instanceof Error ? error.message : "";
   if (/login is already in progress/i.test(message)) return "login_busy";
   if (/502/.test(message)) return "upstream_502";
   if (/timeout|timed out|abort/i.test(message)) return "timeout";
   if (/stale source response/i.test(message)) return "stale_response";
   return "upstream_error";
+}
+
+export function freshReviewSource(job: Pick<RefreshJob, "station_code" | "source">, day: string,
+  result: EddStationPayload | EddPerformancePayload, now = Date.now()) {
+  const fetched = Date.parse(result.fetchedAt);
+  // Stock is a multi-month backlog; outcomes must be the selected-day cohort.
+  const correctDay = job.source === "stock"
+    ? "todayYmd" in result && result.todayYmd === day
+    : result.window.from === day && result.window.to === day;
+  return result.stationCode === job.station_code && Number.isFinite(fetched) && fetched <= now
+    && now - fetched <= 15 * 60_000 && stationEddToday(new Date(fetched)) === day && correctDay;
 }
 
 /** Database-backed queue: all tracked stations, two global HTTP lanes, 15-minute
@@ -36,7 +50,7 @@ export async function refreshReviewSources(now = new Date()) {
   }
   const failedSources: string[] = [];
   const deadline = Date.now() + 270_000;
-  let refreshed = 0, attempted = 0;
+  let refreshed = 0, attempted = 0, reusedSnapshots = 0;
   const lanes = await Promise.allSettled(Array.from({ length: 2 }, async () => {
     // Leave room for bounded database retries and the 170s stock request. Unclaimed
     // jobs remain in Postgres; no location disappears when this process stops.
@@ -50,20 +64,23 @@ export async function refreshReviewSources(now = new Date()) {
       let sourceAt: string | null = null;
       let failure: ReturnType<typeof reviewRefreshError> | null = null;
       try {
-        const result = job.source === "stock"
+        // Other worker sweeps may already have updated this feed. Read their
+        // authoritative snapshot before spending another Amazon/login request.
+        // A cache-read outage is bounded and falls back to a real refresh.
+        const cached = await (job.source === "stock"
+          ? fetchEddStation({ stationCode: job.station_code, timeoutMs: 5_000 })
+          : fetchEddPerformanceStation({ stationCode: job.station_code, timeoutMs: 5_000 }))
+          .catch(() => null);
+        const reusable = cached?.status === "ok" && freshReviewSource(job, day, cached.payload);
+        const result = reusable ? cached.payload : job.source === "stock"
           ? await refreshEddStation({ stationCode: job.station_code, timeoutMs: 170_000 })
           : await refreshEddPerformanceStation({ stationCode: job.station_code });
-        const fetched = Date.parse(result.fetchedAt);
-        // Stock intentionally includes overdue/future backlog. Its window is
-        // NOT today's outcome cohort; only todayYmd identifies the stock day.
-        const correctDay = job.source === "stock"
-          ? "todayYmd" in result && result.todayYmd === day
-          : result.window.from === day && result.window.to === day;
-        if (result.stationCode !== job.station_code || !Number.isFinite(fetched) || fetched > Date.now()
-          || Date.now() - fetched > 15 * 60_000 || stationEddToday(new Date(fetched)) !== day
-          || !correctDay) {
+        if (!freshReviewSource(job, day, result)) {
           throw Error("Stale source response");
         }
+        if (reusable) reusedSnapshots++;
+        // Keep the actual observation time. The completion RPC schedules the
+        // next attempt from this time, not from when a cached row was read.
         sourceAt = result.fetchedAt;
       } catch (error) {
         failure = reviewRefreshError(error);
@@ -90,7 +107,7 @@ export async function refreshReviewSources(now = new Date()) {
     const feeds = rows.filter(row => row.station_code === code);
     return feeds.length !== 2 || feeds.some(row => !row.source_at || checkedAt - Date.parse(row.source_at) > 35 * 60_000);
   });
-  return { refreshed, attempted, failedSources, trackedStations: stations.length,
+  return { refreshed, attempted, reusedSnapshots, failedSources, trackedStations: stations.length,
     freshStations: stations.length - waitingStations.length, waitingStations,
     retryingSources: rows.filter(row => row.last_error).length, targetRefreshMinutes: 15 };
 }

@@ -196,7 +196,7 @@ async function readJson(response: Response): Promise<Record<string, unknown>> {
  * too slow for a page load, so this only ever reads what the daily cron or
  * a manual "Refresh live" (see refreshEddStation) last saved.
  */
-export async function fetchEddStation(params: { stationCode: string }): Promise<EddStationResult> {
+export async function fetchEddStation(params: { stationCode: string; timeoutMs?: number }): Promise<EddStationResult> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
     throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
@@ -210,7 +210,7 @@ export async function fetchEddStation(params: { stationCode: string }): Promise<
     method: "GET",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
     cache: "no-store",
-    signal: AbortSignal.timeout(20000)
+    signal: AbortSignal.timeout(params.timeoutMs ?? 20000)
   });
   const raw = await readJson(response);
 
@@ -449,7 +449,7 @@ function normalizePerformancePayload(raw: Record<string, unknown>, stationCode: 
 }
 
 /** Reads today's cached performance snapshot for a station — instant, no live Amazon calls. Kept current by the 15-minute sweep and refreshEddPerformanceStation. */
-export async function fetchEddPerformanceStation(params: { stationCode: string }): Promise<EddPerformanceResult> {
+export async function fetchEddPerformanceStation(params: { stationCode: string; timeoutMs?: number }): Promise<EddPerformanceResult> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
     throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
@@ -463,7 +463,7 @@ export async function fetchEddPerformanceStation(params: { stationCode: string }
     method: "GET",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
     cache: "no-store",
-    signal: AbortSignal.timeout(20000)
+    signal: AbortSignal.timeout(params.timeoutMs ?? 20000)
   });
   const raw = await readJson(response);
 

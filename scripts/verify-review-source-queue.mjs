@@ -9,6 +9,7 @@ const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new 
 // Shared backing state survives loading another module / cron invocation.
 const jobs=Array.from({length:38},(_,i)=>['stock','outcomes'].map(source=>({station_code:'S'+i,source,due:true,lease_token:null,source_at:null,last_error:null}))).flat();
 let active=0, peak=0, mode='fail', finishes=0, claimLoss=0, finishLoss=0;
+let cacheMode='missing', cacheAt=null, livePulls=0;
 const db={
   async rpc(name,args){
     if(name==='edd_claim_review_source'){
@@ -33,6 +34,7 @@ const db={
   from(){return {select:async()=>({data:jobs,error:null})};}
 };
 async function fetchSource({stationCode},feed){
+  livePulls++;
   active++;peak=Math.max(peak,active);
   await new Promise(resolve=>setTimeout(resolve,1));active--;
   if(mode==='fail'&&stationCode==='S0')throw Error('Amazon proxy call failed: 502');
@@ -41,10 +43,22 @@ async function fetchSource({stationCode},feed){
     todayYmd:mode==='wrong_day'?'2000-01-01':day,
     window:{from:feed==='stock'||mode==='wrong_day'?'2000-01-01':day,to:day}};
 }
+async function fetchCached({stationCode,timeoutMs},feed){
+  assert.equal(timeoutMs,5000,'optional cache read cannot consume a full refresh lane');
+  if(cacheMode==='error')throw Error('cache unavailable');
+  if(cacheMode==='missing')return {status:'no_snapshot',stationCode};
+  return {status:'ok',payload:{
+    stationCode:cacheMode==='wrong_station'?'WRONG':stationCode,
+    fetchedAt:cacheAt,
+    todayYmd:cacheMode==='wrong_day'?'2000-01-01':day,
+    window:{from:feed==='stock'||cacheMode==='wrong_day'?'2000-01-01':day,to:day}
+  }};
+}
 function load(){
   const exports={};
   const deps={'server-only':{},'@/lib/supabase-admin':{supabaseAdmin:db},'./station-edd':{stationEddToday:()=>day},
-    './edd-worker':{refreshEddStation:p=>fetchSource(p,'stock'),refreshEddPerformanceStation:p=>fetchSource(p,'outcomes')}};
+    './edd-worker':{fetchEddStation:p=>fetchCached(p,'stock'),fetchEddPerformanceStation:p=>fetchCached(p,'outcomes'),
+      refreshEddStation:p=>fetchSource(p,'stock'),refreshEddPerformanceStation:p=>fetchSource(p,'outcomes')}};
   new Function('require','exports',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(key=>deps[key]??require(key),exports);
   return exports;
 }
@@ -74,6 +88,24 @@ const loginRun=await load().refreshReviewSources(start);
 assert.equal(loginRun.attempted,2,'stop each lane when shared login is busy, leaving other stations queued');
 assert.equal(load().reviewRefreshError(Error('Another login is already in progress')),'login_busy');
 assert.equal(load().reviewRefreshError(Error('operation timed out')),'timeout');
+assert.equal(load().reviewRefreshError(Object.assign(Error('Session not ready'),{code:'SESSION_UNAVAILABLE'})),'login_busy');
+for(const j of jobs)j.due=false;
+mode='ok';cacheMode='fresh';cacheAt=new Date(Date.now()-12*60000).toISOString();
+jobs[0].due=true;jobs[1].due=true;
+const beforeReuse=livePulls;
+const reused=await load().refreshReviewSources(start);
+assert.equal(reused.reusedSnapshots,2);assert.equal(livePulls,beforeReuse,'fresh snapshots must not trigger duplicate Amazon pulls');
+assert.equal(jobs[0].source_at,cacheAt,'cached source keeps its actual timestamp, not now');
+for(const scenario of ['wrong_station','wrong_day','stale','future','invalid_time','error']){
+  cacheMode=scenario;cacheAt=scenario==='stale'?new Date(Date.now()-16*60000).toISOString()
+    :scenario==='future'?new Date(Date.now()+60000).toISOString()
+    :scenario==='invalid_time'?'not-a-time':new Date().toISOString();
+  jobs[0].due=true;jobs[1].due=true;
+  const beforePull=livePulls;
+  const outcome=await load().refreshReviewSources(start);
+  assert.equal(livePulls-beforePull,2,scenario+' cache must use real refresh');
+  assert.equal(outcome.reusedSnapshots,0);
+}
 const before=finishes;await load().refreshReviewSources(new Date(day+'T05:29:00+05:30'));assert.equal(finishes,before);
 const migration=read('supabase/migrations/20260912092525_review_edd_durable_source_refresh.sql');
 for(const term of ['security invoker','enable row level security','from public, anon, authenticated','for update skip locked','j.lease_token = p_token',"interval '15 minutes'",'least(300','pg_advisory_xact_lock'])assert.ok(migration.includes(term),term);
