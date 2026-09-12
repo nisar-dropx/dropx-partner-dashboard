@@ -46,7 +46,10 @@ const dependencies = {
   "next/cache": { revalidatePath() {} }, "@/lib/authorization": { requirePagePermission: async () => authorization },
   "@/lib/company-scope": { requireCompanyId: () => "company1" }, "@/lib/supabase-admin": { supabaseAdmin: db },
   "@/lib/ops-pulse/performance-review": {}, "@/lib/ops-pulse/review-policy": {},
-  "@/lib/ops-pulse/review-access": { getReviewAccess: async () => ({ canEditRca: allowRca, canComplete: allowComplete, canComment: allowComplete, actor: { label: "AOM" } }) },
+  "@/lib/ops-pulse/review-access": {
+    isScorecardImported: async () => true,
+    getReviewAccess: async () => ({ scorecardImported: true, canEditRca: allowRca, canComplete: allowComplete, canComment: allowComplete, actor: { label: "AOM" } })
+  },
   "@/lib/ops-pulse/review-discipline-rca": logic,
   "@/lib/ops-pulse/review-cod-rca": codLogic,
   "@/lib/ops-pulse/review-cod-rca-data": { loadCodRca: async () => [] },
