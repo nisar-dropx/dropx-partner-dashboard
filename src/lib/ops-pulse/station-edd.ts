@@ -16,7 +16,7 @@ export function stationEddDate(pkg: EddPackage): string | null {
   return null;
 }
 
-export function stationEddPosition(pkg: EddPackage, today = stationEddToday()): StationEddFilter {
+export function stationEddPosition(pkg: EddPackage, today = stationEddToday(), now = Date.now()): StationEddFilter {
   const state = eddCurrentState(pkg);
   const history = pkg.verification;
   const attemptDay = eddIstDate(history?.firstAttemptAt);
@@ -30,8 +30,8 @@ export function stationEddPosition(pkg: EddPackage, today = stationEddToday()): 
   if (state === "IN_TRANSIT" && !history?.historyComplete) return "unverified";
   if (["DELIVERY_ATTEMPTED", "DELIVERY_FAILED", "DELIVERY_REJECTED", "REJECTED"].includes(state) || history?.firstAttemptAt || history?.firstDispatchAt) return "attempted";
   if (["INDUCTED", "RECEIVED"].includes(state)) {
-    const evidenceAt = eddPendingEvidenceAt(pkg);
-    if (!history?.historyComplete || !eddPendingEvidenceFresh(pkg) || eddIstDate(evidenceAt) !== today ||
+    const evidenceAt = eddPendingEvidenceAt(pkg, now);
+    if (!history?.historyComplete || !eddPendingEvidenceFresh(pkg, now) || eddIstDate(evidenceAt) !== today ||
       (pkg.sourceAt && Date.parse(evidenceAt || "") < Date.parse(pkg.sourceAt) && evidenceAt !== pkg.summaryCheckedAt)) return "unverified";
     return "atStation";
   }
@@ -87,7 +87,7 @@ export type StationEddSummary = {
   statuses: Array<{ state: string; today: number; overdue: number; total: number }>;
 };
 
-export function summarizeStationEdd(stationCode: string, packages: EddPackage[] | null, fetchedAt: string | null, today = stationEddToday()): StationEddSummary {
+export function summarizeStationEdd(stationCode: string, packages: EddPackage[] | null, fetchedAt: string | null, today = stationEddToday(), now = Date.now()): StationEddSummary {
   const summary: StationEddSummary = { stationCode, fetchedAt, today, hasSnapshot: packages !== null, todayTotal: 0, todayAtStation: 0, todayOnRoad: 0, todayOther: 0, todayDelivered: 0, todayHfr: 0, todayHcr: 0, todayObservedAtStation: 0, todayAttempted: 0, todayUnverified: 0, historyVerified: 0, overdueAtStation: 0, atStationTotal: 0, excludedReverse: 0, missingDate: 0, statuses: [] };
   const statuses = new Map<string, StationEddSummary["statuses"][number]>();
   const unique = new Map((packages ?? []).filter(p => p.trackingId).map(p => [p.trackingId, p]));
@@ -101,7 +101,7 @@ export function summarizeStationEdd(stationCode: string, packages: EddPackage[] 
     if (date && date < today) status.overdue++;
     if (!date) summary.missingDate++;
     statuses.set(state, status);
-    const position = stationEddPosition(pkg, today);
+    const position = stationEddPosition(pkg, today, now);
     if (position === "atStation") {
       summary.atStationTotal++;
       if (date && date < today) summary.overdueAtStation++;

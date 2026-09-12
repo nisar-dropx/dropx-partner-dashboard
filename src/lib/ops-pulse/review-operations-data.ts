@@ -4,6 +4,7 @@ import type { CodLocationRow } from "./cod";
 import { loadEddLedger } from "./edd-ledger";
 import { fetchEddStation, fetchEddPerformanceStation } from "./edd-worker";
 import { mergeReviewEddCohort } from "./review-edd-cohort";
+import { captureEddMovement } from "./edd-movement";
 import { summarizeStationEdd, stationEddToday } from "./station-edd";
 import { loadOpsStationManpower } from "./station-manpower";
 import { isPeopleDesignation } from "./station-opening-punches";
@@ -66,7 +67,7 @@ export async function loadReviewUtrDiscipline(companyId: string, station: CodLoc
   }
 }
 
-/** Additive, aggregate-only audit. No source refresh or classification mutations.
+/** Additive checkpoint audit. Totals and their package membership save together.
  * Private cron captures every 15 minutes; the UI groups half-hour checkpoints.
  * Historical intervals are NEVER backfilled from today's latest package states. */
 export async function captureReviewEddHistory(): Promise<{ captured: number; date?: string; skipped?: string; fresh?: number; staleStations?: string[]; failedSources?: string[] }> {
@@ -117,15 +118,18 @@ export async function captureReviewEddHistory(): Promise<{ captured: number; dat
         held: outcome.held, yet_to_dispatch: outcome.yetToDispatch } : performance.get(station.station_code);
       const sourceAt = source?.fetchedAt ?? entry?.fetchedAt ?? null;
       const backlogAt = source?.fetchedAt ?? backlog.get(station.station_code) ?? null;
-      const summary = summarizeStationEdd(station.station_code, packages, sourceAt, date);
+      const summary = summarizeStationEdd(station.station_code, packages, sourceAt, date, observedAt.getTime());
+      const captured = captureEddMovement(packages ?? [], date, observedAt.getTime());
       const { todayTotal, todayAtStation, todayOnRoad, todayDelivered, todayHfr, todayHcr, todayObservedAtStation, todayAttempted, todayUnverified, todayOther, missingDate, hasSnapshot } = summary;
       const routeCounts = normalizeReviewRouteCounts(route ? { workDate: String(route.window_from), assigned: route.assigned,
         delivered: route.delivered, returned: route.returned, held: route.held, yetToDispatch: route.yet_to_dispatch } : null, date);
       const row = { company_id: station.company_id, station_id: station.id, station_code: station.station_code, work_date: date,
         captured_slot: new Date(Math.floor(observedAt.getTime() / 300_000) * 300_000).toISOString(), observed_at: observedAt.toISOString(),
         source_at: sourceAt, backlog_at: backlogAt, performance_at: route?.fetched_at ?? null,
+        package_details: captured.details,
         counts: { todayTotal, todayAtStation, todayOnRoad, todayDelivered, todayHfr, todayHcr, todayObservedAtStation, todayAttempted, todayUnverified, todayOther, missingDate,
-          hasSnapshot: hasSnapshot && Boolean(source), captureVersion: 4, captureEveryMinutes: 15, sourceMaxAgeMinutes: 35, ...routeCounts } };
+          movement: captured.movement, packageDetailsRecorded: true,
+          hasSnapshot: hasSnapshot && Boolean(source), captureVersion: 5, captureEveryMinutes: 15, sourceMaxAgeMinutes: 35, ...routeCounts } };
       if (!reviewEddSourceFresh({ observedAt: row.observed_at, sourceAt, backlogAt, performanceAt: row.performance_at, counts: row.counts }, date)) staleStations.push(station.station_code);
       return row;
     });

@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { EddPackage, EddStationResult } from "./edd-worker";
-import { eddCurrentState, eddHistoryFacts, eddIstDate, eddNextCheckAt, eddVerificationFromLookup, mergeEddVerification, type EddLookupObservation, type EddVerification } from "./edd-verification";
+import { eddCanReuseHistory, eddCurrentState, eddHistoryFacts, eddIstDate, eddNextCheckAt, eddVerificationFromLookup, mergeEddVerification, type EddLookupObservation, type EddVerification } from "./edd-verification";
 import type { PackageHistoryEvent } from "./tracking-lookup";
 import { stationEddToday } from "./station-edd";
 import { eddSourceSession, eddSourceSummaries, eddSourceHistory } from "./edd-source";
@@ -91,7 +91,7 @@ export async function verifyEddBatch(codes?: string[]) {
   for(const group of groups)group.sort((a,b)=>Number(!["INDUCTED","RECEIVED"].includes(a.source.state||""))-Number(!["INDUCTED","RECEIVED"].includes(b.source.state||"")));
   const fairRows=Array.from({length:Math.max(0,...groups.map(g=>g.length))},(_,i)=>groups.flatMap(group=>group[i]?[group[i]]:[])).flat();
   rows.splice(0,rows.length,...fairRows);
-  let verified = 0, failed = 0, cursor = 0, enriched = 0, enrichmentFailed = 0;
+  let verified = 0, reused = 0, failed = 0, cursor = 0, enriched = 0, enrichmentFailed = 0;
   const deadline = Date.now()+80000;
   const sessions = new Map<string, Awaited<ReturnType<typeof eddSourceSession>> | null>();
   const freshSummaries = new Set<string>();
@@ -127,7 +127,9 @@ export async function verifyEddBatch(codes?: string[]) {
           ead: typeof value.estimatedArrivalDate==="number" ? eddIstDate(new Date(value.estimatedArrivalDate).toISOString()) : null,
           promisedDeliveryDate:typeof value.promisedDeliveryDate==="number" ? eddIstDate(new Date(value.promisedDeliveryDate).toISOString()) : null,
           shipOption:value.shipOption||null,summaryCheckedAt:observedAt,
-          stateUpdatedAt:typeof value.lastUpdatedTime === "number" && value.lastUpdatedTime > 1e12 && value.lastUpdatedTime <= Date.parse(observedAt) ? new Date(value.lastUpdatedTime).toISOString() : null}));
+          // Empty string deliberately invalidates any older event clock. The
+          // summary RPC strips nulls, which would otherwise retain old proof.
+          stateUpdatedAt:typeof value.lastUpdatedTime === "number" && value.lastUpdatedTime > 1e12 && value.lastUpdatedTime <= Date.parse(observedAt) ? new Date(value.lastUpdatedTime).toISOString() : ""}));
         const {error:summaryError}=await supabaseAdmin.rpc("edd_apply_summaries",{p_station:code,p_rows:values,p_observed_at:observedAt});
         if(summaryError)throw new Error(summaryError.message);
         enriched+=values.length;
@@ -141,6 +143,13 @@ export async function verifyEddBatch(codes?: string[]) {
       while (cursor < rows.length && Date.now() < deadline) {
         const row = rows[cursor++];
         try {
+          if (eddCanReuseHistory({ ...row.source, verification: row.verification, verifiedAt: row.verified_at })) {
+            const { error: reuseError } = await supabaseAdmin!.from("edd_package_ledger")
+              .update({ next_check_at: eddNextCheckAt(row.source.state) })
+              .eq("station_code", row.station_code).eq("tracking_id", row.tracking_id);
+            if (reuseError) throw new Error(reuseError.message);
+            reused++; continue; // Do not stamp a new history read that did not happen.
+          }
           const auth=sessions.get(row.station_code);
           if(auth && freshSummaries.has(`${row.station_code}:${row.tracking_id}`)) {
             const result=await eddSourceHistory(row.tracking_id,auth);
@@ -179,7 +188,7 @@ export async function verifyEddBatch(codes?: string[]) {
         } catch { failed++; }
       }
     }));
-    return { verified, failed, enriched, enrichmentFailed, paginationKeys:[...paginationKeys], checked: verified+failed, busy: rows.length === 0 };
+    return { verified, reused, failed, enriched, enrichmentFailed, paginationKeys:[...paginationKeys], checked: verified+reused+failed, busy: rows.length === 0 };
   } finally {
     await supabaseAdmin.from("edd_verification_lease").update({ expires_at: new Date().toISOString(), token: null }).eq("id",1).eq("token",token);
   }

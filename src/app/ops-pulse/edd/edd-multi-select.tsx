@@ -44,16 +44,17 @@ export function EddMultiSelect({
       : `${selected.size} ${label.toLowerCase()} selected`;
 
   return (
-    <div className="edd-multiselect" ref={containerRef}>
-      <button type="button" className="edd-filter-select edd-multiselect-trigger" onClick={() => setOpen((current) => !current)}>
+    <div className="edd-multiselect" ref={containerRef} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); setOpen(false); containerRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); } }}>
+      <button type="button" aria-label={label} aria-expanded={open} className="edd-filter-select edd-multiselect-trigger" onClick={() => setOpen((current) => !current)}>
         <span>{summary}</span>
         <ChevronDown size={14} />
       </button>
       {open ? (
-        <div className="edd-multiselect-panel" role="listbox" aria-label={label}>
+        <div className="edd-multiselect-panel" role="group" aria-label={label}>
           <div className="edd-multiselect-actions">
             <button type="button" onClick={() => onChange(new Set())} disabled={!selected.size}>Clear</button>
             <button type="button" onClick={() => onChange(new Set(options))} disabled={selected.size === options.length}>Select all</button>
+            <button type="button" onClick={() => setOpen(false)}>× Close</button>
           </div>
           {options.map((option) => (
             <label key={option} className="edd-multiselect-option">

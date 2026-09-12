@@ -1,4 +1,5 @@
 import type { StationEddSummary } from "./station-edd";
+import type { EddMovement } from "./edd-movement";
 import type { OpsStationManpowerPerson } from "./station-manpower";
 
 export type ReviewEddCounts = Pick<StationEddSummary, "todayTotal" | "todayAtStation" | "todayOnRoad" | "todayDelivered" | "todayHfr" | "todayAttempted" | "todayUnverified" | "todayOther" | "missingDate" | "hasSnapshot">;
@@ -11,7 +12,7 @@ export type ReviewRouteCounts = {
   routeHasSnapshot: boolean;
 };
 export type ReviewRouteSnapshot = ReviewRouteCounts & { observedAt: string; source: "checkpoint" | "daily" };
-export type ReviewEddCountsWithRoute = ReviewEddCounts & Partial<ReviewRouteCounts> & { todayHcr?: number; todayObservedAtStation?: number; captureVersion?: number; sourceMaxAgeMinutes?: number; captureEveryMinutes?: number };
+export type ReviewEddCountsWithRoute = ReviewEddCounts & Partial<ReviewRouteCounts> & { movement?: EddMovement; packageDetailsRecorded?: boolean; todayHcr?: number; todayObservedAtStation?: number; captureVersion?: number; sourceMaxAgeMinutes?: number; captureEveryMinutes?: number };
 export type ReviewEddPoint = { observedAt: string; sourceAt: string | null; backlogAt: string | null; performanceAt: string | null; counts: ReviewEddCountsWithRoute };
 export type ReviewEddTimeline = ReturnType<typeof buildReviewEddTimeline>;
 export type ReviewEddRefreshSource = { source: "stock" | "outcomes"; source_at: string | null; last_error: string | null; next_attempt_at: string; lease_until: string | null };
@@ -117,7 +118,7 @@ export function buildReviewEddTimeline(day: string, input: ReviewEddPoint[], now
   const dayEndPassed = now.getTime() > end;
   const finalUsable = routeFinal?.routeHasSnapshot === true && (dayEndPassed || now.getTime() - stamp(routeFinal.observedAt) <= 90 * minute);
   const routeLatest = latestRoutePoint ? routeSnapshotFromPoint(latestRoutePoint) : finalUsable ? routeFinal : null;
-  return { day, summary, clearedAt: latestFresh ? clearedAt : null, dayStart, baselineAt: baseline?.observedAt ?? null, latest, latestFresh, lastConfirmed, current: Boolean(current), rows,
+  return { day, summary, clearedAt: latestFresh ? clearedAt : null, dayStart, dayStartAll: baseline?.counts.todayTotal ?? null, baselinePoint: baseline, baselineAt: baseline?.observedAt ?? null, latest, latestFresh, lastConfirmed, current: Boolean(current), rows,
     routeLatest, routeFinal: dayEndPassed ? routeFinal : null, dayEndPassed };
 }
 

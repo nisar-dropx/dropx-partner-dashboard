@@ -11,7 +11,7 @@ class EddTestDate extends Date { constructor(...args) { super(...(args.length ? 
 const verification = {};
 new Function("require","exports","Date",transpile(readFileSync(new URL("../src/lib/ops-pulse/edd-verification.ts",import.meta.url),"utf8")))(()=>({}),verification,EddTestDate);
 const edd = {};
-new Function("require","exports",transpile(source))(()=>verification,edd);
+new Function("require","exports","Date",transpile(source))(()=>verification,edd,EddTestDate);
 const today = "2026-09-09";
 const pkg = (trackingId, state, values = {}) => ({ trackingId, state, ead: today, bucket: "future", packageType: "Delivery", driverId: "", verifiedAt:today+"T10:00:00Z", verification:{ state, historyComplete:true, firstAttemptAt:null, firstDispatchAt:null }, ...values });
 const packages = [
@@ -251,11 +251,12 @@ denied = false;
 const networkReportModule = {};
 const networkReportMocks = {
   ...reportMocks,
+  "@/lib/ops-pulse/edd-verification": verification,
   "@/lib/ops-pulse/edd-stations": { loadEddStations: async () => [{ code: "KTUO", name: "Kothamangalam" }, { code: "AWEZ", name: "Kalady" }] },
   "@/lib/ops-pulse/station-edd-data": { loadStationEddNetwork: async (codes, callback) => {
-    assert.deepEqual(codes, ["KTUO", "AWEZ"], "report loader gets only authorized station codes");
+    assert.ok(codes.every(code => ["KTUO", "AWEZ"].includes(code)), "report loader gets only authorized station codes");
     for (const code of codes) callback?.(code, controlPackages, today + "T10:00:00Z", today);
-    return sampleStations;
+    return sampleStations.filter(row => codes.includes(row.stationCode));
   } }
 };
 new Function("require", "exports", transpile(readFileSync(new URL("../src/app/api/ops-pulse/station-edd/network/report/route.ts", import.meta.url), "utf8")))(name => networkReportMocks[name] || routeRequire(name), networkReportModule);
@@ -265,6 +266,17 @@ const networkFilteredBook = XLSX.read(Buffer.from(await networkFilteredResponse.
 assert.deepEqual(XLSX.utils.sheet_to_json(networkFilteredBook.Sheets["Station EDD"]).map(r => r["Station Code"]), ["KTUO"]);
 assert.ok(XLSX.utils.sheet_to_json(networkFilteredBook.Sheets["Pending TIDs"]).every(r => r["Station Code"] === "KTUO"));
 assert.equal(XLSX.utils.sheet_to_json(networkFilteredBook.Sheets["Pending TIDs"]).length, testSummary.todayAtStation);
+const selectedStatusResponse = await networkReportModule.GET(new Request("https://example.test/api?report=statuses&day=today&stations=KTUO,AWEZ&statuses=INDUCTED,DELIVERED"));
+assert.equal(selectedStatusResponse.status,200);
+const selectedStatusBook = XLSX.read(Buffer.from(await selectedStatusResponse.arrayBuffer()), {type:"buffer"});
+const selectedStatusRows = XLSX.utils.sheet_to_json(selectedStatusBook.Sheets["Selected status TIDs"]);
+assert.ok(selectedStatusRows.length>0);
+assert.ok(selectedStatusRows.every(row => ["INDUCTED","DELIVERED"].includes(row["Raw Status"])));
+assert.equal(new Set(selectedStatusRows.map(row=>row["Station Code"])).size,2,"multiple selected stations share one workbook");
+assert.equal((await networkReportModule.GET(new Request("https://example.test/api?report=statuses&stations=NOT_ALLOWED"))).status,403);
+const singleStatusResponse=await networkReportModule.GET(new Request("https://example.test/api?report=statuses&day=today&stations=KTUO&statuses=INDUCTED"));
+const singleStatusBook=XLSX.read(Buffer.from(await singleStatusResponse.arrayBuffer()),{type:"buffer"});
+assert.ok(XLSX.utils.sheet_to_json(singleStatusBook.Sheets["Selected status TIDs"]).every(row=>row["Station Code"]==="KTUO"));
 denied = true;
 assert.equal((await networkReportModule.GET(new Request("https://example.test/api?report=pending"))).status, 403);
 console.log("PASS Network export: station search/workload filters apply to summaries and TID sheets without expanding access.");

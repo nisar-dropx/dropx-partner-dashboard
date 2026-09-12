@@ -23,6 +23,7 @@ export type EddPackage = {
   /** EDD-only ledger enrichment; never used by legacy Ageing/Performance. */
   driverName?: string | null;
   sourceAt?: string;
+  sourceMissing?: boolean;
   verifiedAt?: string | null;
   verification?: import("./edd-verification").EddVerification | null;
   isAccessPoint?: boolean;

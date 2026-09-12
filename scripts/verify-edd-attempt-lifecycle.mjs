@@ -77,18 +77,21 @@ const merged=exports.mergeEddVerification(pkg("RECEIVED",two).verification,pkg("
 assert.equal(merged.attemptTimes.length,2,"partial read must retain two positively established attempts");
 assert.equal(merged.historyComplete,false,"partial read cannot certify fresh pending");
 const station={};
-new Function("require","exports",compile(readFileSync(new URL("../src/lib/ops-pulse/station-edd.ts",import.meta.url),"utf8")))(()=>exports,station);
+new Function("require","exports","Date",compile(readFileSync(new URL("../src/lib/ops-pulse/station-edd.ts",import.meta.url),"utf8")))(()=>exports,station,Clock);
 for(const state of ["CASH_AT_STATION","CASH_IN_ASSOCIATE","DELIVERED"]){
   assert.equal(station.stationEddPosition(pkg(state,two),"2026-09-12"),"delivered","cash status is a delivery outcome, even with older attempts");
 }
 assert.equal(station.stationEddPosition(pkg("RECEIVED",two),"2026-09-12"),"hcr");
 assert.equal(station.stationEddPosition(pkg("RECEIVED",reasonRejected),"2026-09-12"),"rejected");
 assert.equal(station.stationEddPosition({...pkg("INDUCTED",[]),observedStationCode:"A",verification:{...pkg("INDUCTED",[]).verification,routeStationCode:"B"}},"2026-09-12"),"unverified","route mismatch never silently moves a parcel or certifies station pending");
-const noAttempts={state:"INDUCTED",ead:"2026-09-12",verifiedAt:"2026-09-12T14:00:00Z",sourceAt:"2026-09-12T14:04:30Z",summaryCheckedAt:"2026-09-12T14:04:00Z",stateUpdatedAt:"2026-09-12T13:59:00Z",verification:{state:"INDUCTED",historyComplete:true,latestEventAt:"2026-09-12T13:59:00Z",firstDispatchAt:null,firstAttemptAt:null}};
+const noAttempts={state:"INDUCTED",ead:"2026-09-12",verifiedAt:"2026-09-12T14:00:00Z",sourceAt:"2026-09-12T14:04:30Z",summaryCheckedAt:"2026-09-12T14:04:00Z",stateUpdatedAt:"2026-09-12T13:59:00Z",verification:{state:"INDUCTED",rulesVersion:3,historyComplete:true,latestEventAt:"2026-09-12T13:59:00Z",firstDispatchAt:null,firstAttemptAt:null}};
 assert.equal(station.stationEddPosition(noAttempts,"2026-09-12"),"atStation","unchanged per-package event can reuse complete history across a batch refresh");
 assert.equal(station.stationEddPosition({...noAttempts,stateUpdatedAt:"2026-09-12T14:03:00Z"},"2026-09-12"),"unverified","new event must invalidate negative history");
 assert.equal(station.stationEddPosition({...noAttempts,stateUpdatedAt:null},"2026-09-12"),"unverified","same label alone cannot prove no intervening attempt");
 assert.equal(exports.eddPendingEvidenceFresh(noAttempts,Date.parse("2026-09-12T14:20:00Z")),false,"unchanged evidence still expires");
+assert.equal(exports.eddCanReuseHistory(noAttempts),true);
+for(const change of [{stateUpdatedAt:""},{state:"RECEIVED"},{summaryCheckedAt:"2026-09-12T14:06:00Z"},{verification:{...noAttempts.verification,rulesVersion:2}},{verification:{...noAttempts.verification,historyComplete:false}}])
+  assert.equal(exports.eddCanReuseHistory({...noAttempts,...change}),false,"missing, changed, future or incomplete evidence never skips history");
 const summary=station.summarizeStationEdd("A",[{...noAttempts,trackingId:"1"},{...noAttempts,trackingId:"2",verification:null}],noAttempts.sourceAt,"2026-09-12");
 assert.equal(summary.todayObservedAtStation,2);
 assert.equal(summary.todayAtStation,1);
@@ -103,4 +106,24 @@ new Function("require","exports",compile(readFileSync(new URL("../src/lib/ops-pu
 const holds=[{...pkg("RECEIVED",one),trackingId:"1"},{...pkg("RECEIVED",two),trackingId:"2"},{...cash}];
 assert.deepEqual(controls.selectEddHolds(holds,"hcr").map(r=>r.pkg.trackingId),["2"],"shared hold selector powers UI and workbook with the same filters");
 assert.equal(controls.selectEddHolds(holds,"all","cash").length,0,"delivered parcels are excluded from active holds");
+const movement={};
+new Function("require","exports","Date",compile(readFileSync(new URL("../src/lib/ops-pulse/edd-movement.ts",import.meta.url),"utf8")))(name=>name==="./station-edd"?station:exports,movement,Clock);
+const snapshot = movement.captureEddMovement([
+  {...noAttempts,trackingId:"pending"},{...noAttempts,trackingId:"not-checked",verification:null},
+  {...pkg("RECEIVED",two),ead:"2026-09-12",trackingId:"hcr"},
+  {...cash,trackingId:"cash"},{...cash,trackingId:"cash"},
+  {...noAttempts,trackingId:"held",state:"HELD",verification:null},
+  {...noAttempts,trackingId:"road",state:"IN_TRANSIT_TO_CUSTOMER",verification:null},
+  {...noAttempts,trackingId:"inbound",state:"MANIFESTED",verification:null},
+  {...noAttempts,trackingId:"unknown",state:"NEW_SOURCE_STATE",verification:null}
+],"2026-09-12");
+assert.equal(snapshot.movement.total,8);
+assert.equal(snapshot.movement.atStation,3,"physical source stock includes unchecked and HCR returns");
+assert.equal(snapshot.movement.pending,1,"only fresh pending excludes HCR and history gaps");
+assert.equal(snapshot.movement.delivered,1,"cash delivered, deduplicated");
+assert.equal(snapshot.movement.unmapped,1,"new source label remains auditable, never silently reassigned");
+assert.equal(snapshot.movement.total,snapshot.movement.atStation+snapshot.movement.onRoad+snapshot.movement.delivered+snapshot.movement.exceptions+snapshot.movement.transit+snapshot.movement.unmapped);
+for(const [group] of movement.EDD_MOVEMENT_GROUPS) assert.equal(movement.selectEddCheckpointPackages(snapshot.details,group).length,snapshot.movement[group],"click membership equals exact checkpoint count");
+assert.equal(movement.selectEddCheckpointPackages(snapshot.details,"pending").length,1);
+assert.equal(movement.eddCheckpointExportRows(movement.selectEddCheckpointPackages(snapshot.details,"atStation"),"A","2026-09-12","2026-09-12T14:05:00Z").length,3);
 console.log("PASS attempt lifecycle and classification: duplicate scans, one/two attempts, rejection reasons, delivery/cash, partial-history preservation, FC transit, source clocks, station mismatch, coverage and hold filters.");

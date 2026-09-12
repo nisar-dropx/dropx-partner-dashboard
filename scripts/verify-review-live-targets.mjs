@@ -51,3 +51,36 @@ assert.equal((await endpoint.GET(request("GNTF",day))).status,200);
 assert.equal((await endpoint.GET(request("OTHER",day))).status,403);
 assert.equal((await endpoint.GET(request("GNTF","2026-02-31"))).status,400);
 console.log("PASS live review: master-only thresholds, unit/mapping/override safeguards, delivered cohort, absent-TID uncertainty, fair bounded refresh and scoped polling.");
+
+const checkpointMovement=load("src/lib/ops-pulse/edd-movement.ts",{"./edd-verification":verification,"./station-edd":{}});
+let checkpointAuth={}, checkpointRecord={observed_at:at("10:00"),counts:{packageDetailsRecorded:true,movement:{total:3}},package_details:[
+  ["001","INDUCTED","atStation","A",at("09:55"),"none",true],
+  ["002","RECEIVED","atStation","B",at("09:55"),"hcr",false],
+  ["003","CASH_AT_STATION","delivered","A",at("09:55"),"none",false]
+]};
+let checkpointReads=[], checkpointSheets=[];
+const checkpointDb={from(table){assert.equal(table,"ops_review_edd_observations");const q={select(){return q;},eq(k,v){checkpointReads.push([k,v]);return q;},async maybeSingle(){return{data:checkpointRecord,error:null};}};return q;}};
+const checkpointApi=load("src/app/api/ops-pulse/performance/edd-checkpoint/route.ts",{
+  "@/lib/authorization":{getAuthorization:async()=>checkpointAuth,hasPermission:()=>true},
+  "@/lib/company-scope":{requireCompanyId:()=>"company"},
+  "@/lib/supabase-admin":{supabaseAdmin:checkpointDb},
+  "@/lib/ops-pulse/cod":{loadCodLocations:async()=>({locations:[{id:"station",station_code:"GNTF"}]})},
+  "@/lib/ops-pulse/edd-movement":checkpointMovement,
+  "@/lib/report-workbook":{compressedWorkbookResponse:async sheets=>{checkpointSheets=sheets;return new Response("xlsx");}}
+});
+const checkpointRequest=extra=>new Request("https://ops.dropxlogistics.com/api/ops-pulse/performance/edd-checkpoint?"+new URLSearchParams({station:"GNTF",date:day,observedAt:at("10:00"),group:"atStation",...extra}));
+let checkpointResponse=await checkpointApi.GET(checkpointRequest({}));
+assert.equal(checkpointResponse.status,200);
+assert.equal((await checkpointResponse.json()).total,2);
+assert.deepEqual(checkpointReads,[["company_id","company"],["station_id","station"],["work_date",day],["observed_at",new Date(at("10:00")).toISOString()]],"historical details are bound to tenant, station, date AND exact observation");
+await checkpointApi.GET(checkpointRequest({format:"xlsx",statuses:"INDUCTED"}));
+assert.equal(checkpointSheets[0].rows.length,1);
+assert.equal(checkpointSheets[0].rows[0]["Tracking ID"],"001","Excel retains tracking IDs as text and uses the same status filter");
+assert.equal((await checkpointApi.GET(checkpointRequest({station:"OTHER"}))).status,403);
+assert.equal((await checkpointApi.GET(checkpointRequest({date:"2026-02-31"}))).status,400);
+assert.equal((await checkpointApi.GET(checkpointRequest({group:"unapproved"}))).status,400);
+checkpointRecord={...checkpointRecord,package_details:null};
+assert.equal((await checkpointApi.GET(checkpointRequest({}))).status,409,"old totals are never replaced with current parcel membership");
+checkpointAuth=null;
+assert.equal((await checkpointApi.GET(checkpointRequest({}))).status,403);
+console.log("PASS checkpoint drill-down: exact membership, status-filtered Excel, tenant/station/time scope, invalid input, old snapshot refusal and signed-out denial.");

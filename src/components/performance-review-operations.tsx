@@ -6,6 +6,9 @@ import { ReviewDetails, ReviewDetailsClose } from "@/components/review-details";
 import { reviewClock, type ReviewEddTimeline, type UtrDiscipline, type ReviewEddRefreshSource } from "@/lib/ops-pulse/review-operations";
 import { dashboardDateInputValue, formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { UtrAttendanceDrilldown, UtrRepeatSummary } from "@/components/review-attendance-history";
+import { ReviewEddCheckpoint } from "./review-edd-checkpoint";
+import { EDD_MOVEMENT_GROUPS } from "@/lib/ops-pulse/edd-movement";
+import type { ReviewEddPoint } from "@/lib/ops-pulse/review-operations";
 
 const count = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("en-IN");
 
@@ -41,11 +44,21 @@ export function PerformanceEddClearanceCard({ data, stationCode }: { data: { tim
   }, [stationCode, day]);
   const { timeline: t, error, routeError, collection = [] } = liveData;
   const [view, setView] = useState<"edd" | "route">("edd");
+  const [checkpoint, setCheckpoint] = useState<{ observedAt: string; group: string; label: string } | null>(null);
+  useEffect(() => { setCheckpoint(null); }, [stationCode, day]);
+  function number(value: number | null | undefined, point: ReviewEddPoint | null | undefined, group: string, label: string) {
+    if (value == null) return "—";
+    return stationCode && point?.counts.packageDetailsRecorded ? <button type="button" className="review-edd-number"
+      aria-label={`${label}: ${count(value)} tracking IDs at ${reviewClock(point.observedAt)}`}
+      onClick={() => setCheckpoint({ observedAt: point.observedAt, group, label })}>{count(value)}</button>
+      : <span title="This older checkpoint recorded totals only; tracking IDs were not saved.">{count(value)}</span>;
+  }
+  const latest = t.latestFresh ? t.latest : null;
   const route = t.routeLatest;
   return <ReviewDetails className={`performance-fact-card review-operation-card ${t.latestFresh && t.latest?.counts.todayAtStation ? "late" : ""}`} name="performance-review-fact">
     <summary aria-label="EDD and out-on-road movement — view half-hour history">
       <span>EDD / OUT-ON-ROAD</span>
-      <strong>{error ? "Data unavailable" : t.summary}</strong>
+      <strong>{error ? "Data unavailable" : latest?.counts.movement ? `${count(latest.counts.movement.atStation)} at station · ${count(latest.counts.movement.delivered)} delivered` : t.summary}</strong>
       <small>{t.latest ? `Observed ${reviewClock(t.latest.observedAt)} IST${t.current ? "" : " · capture gap"}` : "06:00–EOD history"}</small>
     </summary>
     <div className="review-operation-popover">
@@ -67,18 +80,27 @@ export function PerformanceEddClearanceCard({ data, stationCode }: { data: { tim
           <span>On road <b>{count(t.lastConfirmed.counts.todayOnRoad)}</b></span>
           <span>Delivered <b>{count(t.lastConfirmed.counts.todayDelivered)}</b></span>
         </div> : null}
-        <div className="review-operation-summary"><span>Day-start EDD <b>{count(t.dayStart)}</b></span><span>Confirmed pending <b>{count(t.latestFresh ? t.latest?.counts.todayAtStation : null)}</b></span><span>Awaiting checks <b>{count(t.latestFresh ? t.latest?.counts.todayUnverified : null)}</b></span></div>
-        <p className="review-operation-note">EDD includes only shipments due on the selected date. {t.baselineAt ? `The day-start cohort is frozen at the first valid morning observation (${reviewClock(t.baselineAt)}).` : "A valid 06:00 baseline was not recorded, so no later total is presented as the day-start EDD."} Prior-day attempt cohorts are excluded. Observed INDUCTED/RECEIVED includes returns and unchecked parcels; only confirmed first-dispatch pending is used for clearance.</p>
+        <div className="review-operation-summary"><span>Day-start EDD <b>{number(t.dayStartAll, t.baselinePoint, "all", "Day-start EDD")}</b></span><span>EDD now <b>{number(latest?.counts.todayTotal, latest, "all", "All EDDs")}</b></span><span>At station <b>{number(latest?.counts.movement?.atStation ?? latest?.counts.todayObservedAtStation, latest, "atStation", "At station")}</b></span><span>Delivered <b>{number(latest?.counts.movement?.delivered ?? latest?.counts.todayDelivered, latest, "delivered", "Delivered")}</b></span></div>
+        {latest && (latest.counts.todayUnverified > 0 || latest.counts.movement?.unmapped) ? <p role="status" className="review-operation-note">Source/history reconciliation is incomplete. Actual station stock stays visible; fresh pending and clearance are provisional. Details below.</p> : null}
+        <p className="review-operation-note">Click a number for its recorded tracking IDs and Excel download. At station = INDUCTED / RECEIVED, including returned parcels; it does not mean every parcel is fresh EDD pending. All groups cover shipments with the selected EDD date, including earlier attempts and completed deliveries. {t.baselineAt ? `Day-start stays fixed from ${reviewClock(t.baselineAt)}.` : "The morning baseline was not recorded; a later count is never substituted."}</p>
         <div className="review-operation-table" role="region" aria-label="EDD half-hour history, scroll for all times and columns" tabIndex={0}>
-          <table><thead><tr><th>Checkpoint</th><th>Day-start EDD</th><th>Observed EDD</th><th>Confirmed pending</th><th>Observed INDUCTED / RECEIVED</th><th>On road</th><th>Delivered</th><th>Attempted</th><th>Unchecked / other</th><th>Observation / source times</th></tr></thead>
+          <table><thead><tr><th>Checkpoint</th><th>Day-start EDD</th><th>EDD total</th>{EDD_MOVEMENT_GROUPS.map(([key,label]) => <th key={key}>{label}</th>)}<th>Observation</th></tr></thead>
             <tbody>{t.rows.map(row => { const c = row.state === "Recorded" && row.point?.counts.hasSnapshot ? row.point.counts : null; return <tr key={row.label} className={c ? "" : "review-operation-muted"}>
-              <th scope="row">{row.label}</th><td>{c ? count(row.dayStart) : "—"}</td><td>{c ? count(c.todayTotal - c.todayHfr - (c.todayHcr ?? 0)) : "—"}</td>
-              <td className={c?.todayAtStation ? "review-operation-pending" : ""}>{c && c.todayUnverified > 0 ? `${count(c.todayAtStation)} confirmed` : count(c?.todayAtStation)}</td><td>{count(c?.todayObservedAtStation)}</td><td>{count(c?.todayOnRoad)}</td><td>{count(c?.todayDelivered)}</td><td>{count(c?.todayAttempted)}</td>
-              <td>{c ? count(c.todayUnverified + c.todayOther) : "—"}</td><td>{row.point ? <>{reviewClock(row.point.observedAt)}<small>{row.state}</small><small>Stock {reviewClock(row.point.backlogAt)} · outcomes {reviewClock(row.point.performanceAt)}</small></> : row.state}</td>
+              <th scope="row">{row.label}</th><td>{c ? number(t.dayStartAll, t.baselinePoint, "all", "Day-start EDD") : "—"}</td><td>{number(c?.todayTotal, row.point, "all", "All EDDs")}</td>
+              {EDD_MOVEMENT_GROUPS.map(([key,label]) => <td key={key}>{number(c?.movement?.[key] ?? (key === "atStation" ? c?.todayObservedAtStation : key === "onRoad" ? c?.todayOnRoad : key === "delivered" ? c?.todayDelivered : null), row.point, key, label)}</td>)}
+              <td>{row.point ? <>{reviewClock(row.point.observedAt)}<small>{row.state}{c && !c.packageDetailsRecorded ? " · totals only" : ""}</small><small>Stock {reviewClock(row.point.backlogAt)} · outcomes {reviewClock(row.point.performanceAt)}</small>{c?.movement?.unmapped ? <small>{number(c.movement.unmapped, row.point, "unmapped", "Source status exceptions")} source status exceptions</small> : null}</> : row.state}</td>
             </tr>; })}</tbody></table>
         </div>
-        <p className="review-operation-note">A missing or stale checkpoint stays marked; a later snapshot never fills it. “Observed clear at” is the first observation in a continuous run of valid checks with no pending, unchecked or undated TIDs, not an exact dispatch scan time.</p>
-        {t.latest ? <p className="review-operation-note">Latest EDD sources: stock {formatDashboardDateTime(t.latest.backlogAt)} · outcomes {formatDashboardDateTime(t.latest.performanceAt)} IST · {count(t.latest.counts.missingDate)} missing EDD dates · {count(t.latest.counts.todayHfr)} prior-day HFR · {count(t.latest.counts.todayHcr)} prior-day HCR.</p> : null}
+        {checkpoint && stationCode ? <ReviewEddCheckpoint key={`${stationCode}:${day}:${checkpoint.observedAt}:${checkpoint.group}`} station={stationCode} day={day} {...checkpoint} onClose={() => setCheckpoint(null)}/> : null}
+        <ReviewDetails className="review-edd-explanation"><summary>Pending, returns and source details</summary><ReviewDetailsClose label="Close EDD definitions"/>
+          <div className="review-operation-summary"><span>Fresh EDD pending <b>{number(latest?.counts.todayAtStation, latest, "pending", "Pending")}</b></span><span>HFR <b>{count(latest?.counts.todayHfr)}</b></span><span>HCR <b>{count(latest?.counts.todayHcr)}</b></span></div>
+          <p className="review-operation-note">Fresh pending excludes every known previous dispatch or attempt. HFR/HCR parcels remain in their actual current source movement group, never in fresh pending. CASH_IN_ASSOCIATE and CASH_AT_STATION count as delivered. Inbound / returns includes manifested, inter-station, return-to-station and return-to-FC movements; generic transit is on road only with customer dispatch evidence.</p>
+          {latest && (latest.counts.todayUnverified || latest.counts.missingDate) ? <p role="status" className="review-operation-note">Data quality: {count(latest.counts.todayUnverified)} parcels need history or station reconciliation; {count(latest.counts.missingDate)} have no EDD date. These are not shipment statuses. Station stock stays visible, but fresh pending and clearance cannot be certified complete yet.</p> : null}
+          <p className="review-operation-note">{t.summary}. Missing checkpoints and old tracking-ID lists cannot be reconstructed from current statuses.</p>
+          {latest?.counts.movement ? <div className="review-operation-table"><table><thead><tr><th>Actual source status</th><th>Tracking IDs</th></tr></thead><tbody>{latest.counts.movement.statuses.map(row => <tr key={row.status}><td>{row.status}</td><td>{count(row.count)}</td></tr>)}</tbody></table></div> : null}
+          {t.latest ? <p className="review-operation-note">Latest EDD sources: stock {formatDashboardDateTime(t.latest.backlogAt)} · outcomes {formatDashboardDateTime(t.latest.performanceAt)} IST.</p> : null}
+        </ReviewDetails>
+        <p className="review-operation-note"><a href="/edd/edds">Multi-station / multi-status Excel exports →</a></p>
       </> : <>
         {routeError ? <p role="alert" className="review-operation-note">{routeError}</p> : null}
         <div className="review-operation-summary"><span>Total out on road <b>{count(route?.routeDispatched)}</b></span><span>Physical at station <b>{count(route?.routeAtStation)}</b></span><span>Still out / held <b>{count(route?.routeOutOnRoad)}</b></span><span>Delivered <b>{count(route?.routeDelivered)}</b></span><span>Returned <b>{count(route?.routeReturned)}</b></span></div>

@@ -145,10 +145,11 @@ export async function reviewReportPdf(report: ReviewReport) {
         selected.forEach(row => paragraph(`${row.Metric}  |  ${row.Actual == null ? "Not recorded" : `${(Number(row.Actual) * 100).toFixed(1)}%`}  |  Target ${row.Target == null ? "Reference" : `${(Number(row.Target) * 100).toFixed(1)}%`}  |  ${row.Result}`, 8));
         paragraph(`Source uploaded: ${selected[0]["Source uploaded IST"]}`, 8, muted);
       } else if (table.name === "EDD checkpoints") {
-        paragraph("Time | Day start | Pending | On road | Delivered | HFR | HCR | Attempted | Unchecked | Other", 8, muted);
+        paragraph("Time | Day start | EDD total | At station | On road | Delivered | Attempted/rejected/held | Inbound/returns", 8, muted);
         selected.forEach(row => {
-          const keys = ["Checkpoint IST", "Day start EDD", "At station pending", "On road", "Delivered", "HFR", "HCR", "Attempted", "Unverified", "Other"];
+          const keys = ["Checkpoint IST", "Day start EDD", "EDD total", "At station (source)", "On road (source)", "Delivered (source)", "Attempted rejected held (source)", "Inbound returns (source)"];
           paragraph(keys.map(k => row[k] ?? "—").join(" | ") + ` · ${row.Coverage} · ${row["Observed IST"] || "No observation"}`, 8);
+          if (Number(row.Unverified) > 0 || Number(row.Other) > 0) paragraph(`Coverage note: ${row.Unverified || 0} need history/station reconciliation. Source detail: ${row["Source status breakdown"] || "Not recorded"}.`, 7, muted);
         });
       } else selected.forEach(row => fields(row, table.columns.filter(c => c !== "Date" && c !== "Station")));
     }

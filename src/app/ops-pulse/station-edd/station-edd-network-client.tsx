@@ -7,6 +7,7 @@ import { NETWORK_FOCUS, NETWORK_SORTS, readNetworkControls, selectEddStations, t
 import { Field, ResetFilters, SortHeader, TableSearch, useEddQuery } from "./edd-table-ui";
 import { StationEddDownload } from "./station-edd-download";
 import { useEddAutoRefresh } from "./use-edd-auto-refresh";
+import { EddMultiSelect } from "../edd/edd-multi-select";
 import s from "./station-edd.module.css";
 
 const cols = [["todayAtStation", "Pending", "atStation"], ["todayOnRoad", "On road", "onRoad"], ["todayDelivered", "Delivered", "delivered"], ["todayHfr", "HFR", "hfr"], ["todayHcr", "HCR", "hcr"], ["todayObservedAtStation", "Observed at station", "all"], ["todayUnverified", "Needs checks", "unverified"], ["overdueAtStation", "Overdue pending", "atStation"]] as const;
@@ -20,13 +21,18 @@ export function StationEddNetworkClient({ stations, initialNetwork, initialError
   const [error, setError] = useState(initialError);
   const [message, setMessage] = useState("");
   const [period, setPeriod] = useState("today");
+  const [exportStations, setExportStations] = useState<Set<string>>(new Set());
+  const [exportStatuses, setExportStatuses] = useState<Set<string>>(new Set(["INDUCTED", "RECEIVED"]));
+  const [exportMode, setExportMode] = useState("pending");
   const requestVersion = useRef(0);
   const names = useMemo(() => new Map(stations.map(v => [v.code, v.name])), [stations]);
   const filtered = useMemo(() => selectEddStations(rows, names, controls), [rows, names, controls]);
   const sum = (key: typeof cols[number][0] | "todayTotal" | "missingDate") => filtered.reduce((value, row) => value + row[key], 0);
   const reportQuery = new URLSearchParams(query);
   const networkReport = "/api/ops-pulse/station-edd/network/report?" + reportQuery;
-  const pendingReport = "/api/ops-pulse/station-edd/network/report?" + new URLSearchParams({ ...query, report: "pending", day: period });
+  const pendingReport = "/api/ops-pulse/station-edd/network/report?" + new URLSearchParams({ ...query, report: exportMode, day: period, stations: [...exportStations].join(","), statuses: [...exportStatuses].join(",") });
+  const exportCount = filtered.filter(row => !exportStations.size || exportStations.has(row.stationCode)).length;
+  const statusOptions = [...new Set(rows.flatMap(row => row.statuses.map(status => status.state)))].sort();
   function sort(column: string) { update({ sort: column, direction: controls.sort === column && controls.direction === "desc" ? "asc" : "desc" }); }
   async function reload(verify = false, quiet = false) {
     const version = ++requestVersion.current;
@@ -69,7 +75,12 @@ export function StationEddNetworkClient({ stations, initialNetwork, initialError
         {filtered.map(row => <tr key={row.stationCode}><td><a className={s.stationLink} href={href(row.stationCode)}><span className={s.stationIcon}><MapPin size={17}/></span><span><strong>{row.stationCode}</strong><small>{names.get(row.stationCode)}</small></span></a></td>{cols.map(([key, label, position]) => <td className={s.numeric} key={key}>{row.hasSnapshot ? <a className={key === "todayAtStation" ? s.pendingNumber : s.numberLink} href={href(row.stationCode, position, key === "overdueAtStation" ? "overdue" : "today")} aria-label={row.stationCode + " " + label + ": " + row[key] + " TIDs"}>{key === "todayAtStation" && !row[key] && row.todayUnverified ? "Checking" : n(row[key])}</a> : <span className={s.muted}>—</span>}</td>)}<td><span className={s.timestamp}>{row.fetchedAt ? new Date(row.fetchedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "No records"}</span><small className={stationEddFreshness(row.fetchedAt) === "Recent snapshot" ? s.fresh : s.stale}>{!row.hasSnapshot ? "Not yet observed" : stationEddFreshness(row.fetchedAt) === "Recent snapshot" ? "Recent observations" : "Older observations"}</small></td><td><a className={s.iconButton} aria-label={"Open " + row.stationCode + " details"} href={href(row.stationCode)}><ArrowRight size={18}/></a></td></tr>)}
       </tbody></table></div>
       {!filtered.length ? <div className={s.empty}><strong>No stations match these filters.</strong><p>Reset the filters to return to all authorized locations.</p><ResetFilters onClick={() => update({}, true)}/></div> : null}
-      <div className={s.downloadBar}><div><strong>Download pending tracking IDs</strong><p>Uses the {filtered.length} stations matching the filters above—not hidden or excluded stations.</p></div><div className={s.actions}><Field label="Pending export period"><select className={s.select} value={period} onChange={e => setPeriod(e.target.value)}><option value="today">EDD today</option><option value="overdue">Overdue EDD</option><option value="pending">Today + overdue</option></select></Field><StationEddDownload href={pendingReport} label="Export pending TIDs" disabled={!filtered.length}/></div></div>
+      <div className={s.downloadBar}><div><strong>Download tracking IDs · {exportCount} stations</strong><p>Choose multiple stations and source statuses for one Excel. Pending excludes known previous dispatch / attempts; source-status exports include the selected parcels with their attempt classification.</p></div><div className={s.actions}>
+        <EddMultiSelect label="Export stations" options={stations.map(station => station.code)} selected={exportStations} onChange={setExportStations}/>
+        <Field label="Export selection"><select className={s.select} value={exportMode} onChange={e => setExportMode(e.target.value)}><option value="pending">Pending</option><option value="statuses">Choose source statuses</option></select></Field>
+        {exportMode === "statuses" ? <EddMultiSelect label="Export source statuses" options={statusOptions} selected={exportStatuses} onChange={setExportStatuses}/> : null}
+        <Field label="Pending export period"><select className={s.select} value={period} onChange={e => setPeriod(e.target.value)}><option value="today">EDD today</option><option value="overdue">Overdue EDD</option><option value="pending">Today + overdue</option></select></Field><StationEddDownload href={pendingReport} label={exportMode === "pending" ? "Export pending TIDs" : "Export selected statuses"} disabled={!exportCount}/>
+      </div></div>
       <div className={s.footer}>All {filtered.length} matching stations shown. Exports use the same station filters and sort order. Timestamps are IST.</div>
     </section>
     <div className={s.coverageCompact}><ShieldCheck size={18}/><div><strong>{n(sum("todayUnverified"))} TIDs need history checks · {n(sum("missingDate"))} records have unconfirmed EDD dates</strong><span>For the selected stations. Neither group is assumed to be confirmed pending.</span><details><summary>Counting rules and data coverage</summary><p>{STATION_EDD_RULE}</p><p>Only records seen within seven days are retained. Totals describe the known observed EDD cohort. A recent station observation does not mean every parcel has been refreshed.</p></details></div></div>

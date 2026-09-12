@@ -82,7 +82,7 @@ const db = { from(table) { const query = { select() { return query; }, eq(key,va
   maybeSingle() { return Promise.resolve({data: table === "edd_performance_daily" ? {date:day,assigned:100,delivered:55,returned:5,held:40,yet_to_dispatch:10,updated_at:time("23:55")} : null,error:fail?{message:"failure"}:null}); }
 }; return query; } };
 const data = moduleFrom("src/lib/ops-pulse/review-operations-data.ts", { "server-only": {}, "@/lib/supabase-admin": {supabaseAdmin: db},
-  "./edd-ledger": {}, "./edd-worker": {}, "./review-edd-cohort": cohort, "./station-edd": {stationEddToday:()=>"2026-09-12"}, "./station-manpower": {}, "./station-opening-punches": {}, "./review-operations": logic });
+  "./edd-ledger": {}, "./edd-worker": {}, "./edd-movement": {}, "./review-edd-cohort": cohort, "./station-edd": {stationEddToday:()=>"2026-09-12"}, "./station-manpower": {}, "./station-opening-punches": {}, "./review-operations": logic });
 const loaded = await data.loadReviewEddHistory("company-one", "station-one", "GNTF", day);
 assert.deepEqual(requests, [["ops_review_edd_observations","company_id","company-one"],["ops_review_edd_observations","station_id","station-one"],["ops_review_edd_observations","work_date",day],["edd_performance_daily","station_code","GNTF"],["edd_performance_daily","date",day]]);
 assert.equal(loaded.timeline.routeLatest.routeDispatched,100);
@@ -100,6 +100,7 @@ const captureDb = { from(table) {
 const captureData = moduleFrom("src/lib/ops-pulse/review-operations-data.ts", { "server-only": {}, "@/lib/supabase-admin": {supabaseAdmin:captureDb},
   "./edd-ledger": { loadEddLedger: async codes => { captureEvents.push(`load:${codes.join(",")}`); return new Map([["GNTF",{packages:[],fetchedAt:time("12:51")}]]); } },
   "./review-edd-cohort": cohort,
+  "./edd-movement": { captureEddMovement: () => ({ movement: { total:0 }, details: [] }) },
   "./edd-worker": {
     fetchEddStation: async ({stationCode}) => { captureEvents.push(`worker:${stationCode}`); return {status:"ok",payload:{stationCode,fetchedAt:time("21:06"),packages:[]}}; },
     fetchEddPerformanceStation: async ({stationCode}) => ({status:"ok",payload:{stationCode,window:{from:day,to:day},fetchedAt:time("21:07"),assigned:200,delivered:155,returned:5,held:40,yetToDispatch:10,packages:[]}})
@@ -112,7 +113,9 @@ assert.equal(capturedRows[0].backlog_at,time("21:06"));
 assert.equal(capturedRows[0].source_at,time("21:06"));
 assert.equal(capturedRows[0].counts.routeDispatched,200,"live worker outcomes win over the older application copy");
 assert.equal(capturedRows[0].performance_at,time("21:07"));
-assert.equal(capturedRows[0].counts.captureVersion,4);
+assert.equal(capturedRows[0].counts.captureVersion,5);
+assert.equal(capturedRows[0].counts.packageDetailsRecorded,true);
+assert.deepEqual(capturedRows[0].package_details,[],"counts and checkpoint membership are saved in the same atomic insert");
 assert.equal(capturedRows[0].counts.captureEveryMinutes,15);
 
 const quarter = clock => point(clock,{captureEveryMinutes:15,sourceMaxAgeMinutes:35});

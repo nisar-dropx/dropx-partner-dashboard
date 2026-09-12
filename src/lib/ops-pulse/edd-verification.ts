@@ -21,18 +21,22 @@ export type VerifiedEddPackage = EddPackage & {
 };
 export const EDD_PENDING_MAX_AGE_MS = 15 * 60 * 1000;
 export function eddPendingEvidenceFresh(pkg: VerifiedEddPackage, now = Date.now()) {
-  const checked = Date.parse(eddPendingEvidenceAt(pkg) || "");
+  const checked = Date.parse(eddPendingEvidenceAt(pkg, now) || "");
   return Number.isFinite(checked) && checked <= now && now - checked <= EDD_PENDING_MAX_AGE_MS;
 }
 /** Only reuse complete history when a fresh per-package summary proves the
  * same last event. An unchanged label or a new batch timestamp is not proof. */
-export function eddPendingEvidenceAt(pkg: VerifiedEddPackage) {
+export function eddPendingEvidenceAt(pkg: VerifiedEddPackage, now = Date.now()) {
+  return eddCanReuseHistory(pkg, now) ? pkg.summaryCheckedAt : pkg.verifiedAt;
+}
+export function eddCanReuseHistory(pkg: VerifiedEddPackage, now = Date.now()) {
   const history = pkg.verification;
   const summaryAt = Date.parse(pkg.summaryCheckedAt || ""), eventAt = Date.parse(pkg.stateUpdatedAt || "");
-  const historyEventAt = Date.parse(history?.latestEventAt || history?.lastUpdatedAt || "");
-  if (history?.historyComplete && history.state === pkg.state && Number.isFinite(eventAt)
-    && eventAt === historyEventAt && summaryAt >= Date.parse(pkg.verifiedAt || "")) return pkg.summaryCheckedAt;
-  return pkg.verifiedAt;
+  const historyEventAt = Date.parse(history?.latestEventAt || "");
+  return Boolean(history?.rulesVersion === 3 && history.historyComplete && history.state === pkg.state
+    && Number.isFinite(eventAt) && eventAt <= summaryAt && eventAt === historyEventAt
+    && summaryAt >= Date.parse(pkg.verifiedAt || "") && summaryAt <= now
+    && now - summaryAt <= EDD_PENDING_MAX_AGE_MS);
 }
 export function eddNextCheckAt(state: string | null, now = Date.now()) {
   const status = (state || "").trim().toUpperCase();
