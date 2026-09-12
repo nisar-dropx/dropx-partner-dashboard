@@ -8,35 +8,43 @@ const source=read('src/lib/ops-pulse/review-source-refresh.ts');
 const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new Date());
 // Shared backing state survives loading another module / cron invocation.
 const jobs=Array.from({length:38},(_,i)=>['stock','outcomes'].map(source=>({station_code:'S'+i,source,due:true,lease_token:null,source_at:null,last_error:null}))).flat();
-let active=0, peak=0, mode='fail', finishes=0;
+let active=0, peak=0, mode='fail', finishes=0, claimLoss=0, finishLoss=0;
 const db={
   async rpc(name,args){
     if(name==='edd_claim_review_source'){
+      const existing=jobs.find(j=>j.lease_token===args.p_token);
+      if(existing)return {data:[{...existing}],error:null};
       if(jobs.filter(j=>j.lease_token).length>=2)return {data:[],error:null};
       const job=jobs.find(j=>j.due&&!j.lease_token&&!jobs.some(other=>other.station_code===j.station_code&&other.lease_token));
       if(!job)return {data:[],error:null};
       job.lease_token=args.p_token;
+      if(claimLoss-->0)return {data:null,error:{code:'57014'}};
       return {data:[{...job}],error:null};
     }
     const j=jobs.find(j=>j.station_code===args.p_station_code&&j.source===args.p_source);
+    if(j.completed_token===args.p_token)return {data:true,error:null};
     assert.equal(j.lease_token,args.p_token);
-    j.due=false;j.lease_token=null;j.last_error=args.p_error;
+    j.due=false;j.lease_token=null;j.last_error=args.p_error;j.completed_token=args.p_token;
     if(!args.p_error)j.source_at=args.p_source_at;
     finishes++;
+    if(finishLoss-->0)return {data:null,error:{code:'57014'}};
     return {data:true,error:null};
   },
   from(){return {select:async()=>({data:jobs,error:null})};}
 };
-async function fetchSource({stationCode}){
+async function fetchSource({stationCode},feed){
   active++;peak=Math.max(peak,active);
   await new Promise(resolve=>setTimeout(resolve,1));active--;
   if(mode==='fail'&&stationCode==='S0')throw Error('Amazon proxy call failed: 502');
-  return {stationCode,fetchedAt:mode==='stale'?new Date(Date.now()-3600000).toISOString():new Date().toISOString()};
+  if(mode==='login_busy')throw Error('Another Amazon login is already in progress');
+  return {stationCode,fetchedAt:mode==='stale'?new Date(Date.now()-3600000).toISOString():new Date().toISOString(),
+    todayYmd:mode==='wrong_day'?'2000-01-01':day,
+    window:{from:feed==='stock'||mode==='wrong_day'?'2000-01-01':day,to:day}};
 }
 function load(){
   const exports={};
   const deps={'server-only':{},'@/lib/supabase-admin':{supabaseAdmin:db},'./station-edd':{stationEddToday:()=>day},
-    './edd-worker':{refreshEddStation:fetchSource,refreshEddPerformanceStation:fetchSource}};
+    './edd-worker':{refreshEddStation:p=>fetchSource(p,'stock'),refreshEddPerformanceStation:p=>fetchSource(p,'outcomes')}};
   new Function('require','exports',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(key=>deps[key]??require(key),exports);
   return exports;
 }
@@ -53,6 +61,17 @@ const valid=jobs[0].source_at;jobs[0].due=true;mode='stale';
 await load().refreshReviewSources(start);
 assert.equal(jobs[0].source_at,valid,'stale success responses cannot erase a verified source');
 assert.equal(jobs[0].last_error,'stale_response');
+mode='wrong_day';jobs[0].due=true;jobs[1].due=true;
+await load().refreshReviewSources(start);
+assert.equal(jobs[0].last_error,'stale_response','stock day must be today even though its backlog window spans months');
+assert.equal(jobs[1].last_error,'stale_response','outcome window must be today');
+mode='ok';jobs[0].due=true;jobs[1].due=true;claimLoss=1;finishLoss=1;
+const beforeRetry=finishes;
+const retried=await load().refreshReviewSources(start);
+assert.equal(retried.refreshed,2);assert.equal(finishes-beforeRetry,2,'ambiguous commits must not duplicate work or failures');
+mode='login_busy';for(const j of jobs)j.due=true;
+const loginRun=await load().refreshReviewSources(start);
+assert.equal(loginRun.attempted,2,'stop each lane when shared login is busy, leaving other stations queued');
 assert.equal(load().reviewRefreshError(Error('Another login is already in progress')),'login_busy');
 assert.equal(load().reviewRefreshError(Error('operation timed out')),'timeout');
 const before=finishes;await load().refreshReviewSources(new Date(day+'T05:29:00+05:30'));assert.equal(finishes,before);
