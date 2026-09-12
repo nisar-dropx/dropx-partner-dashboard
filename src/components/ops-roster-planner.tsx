@@ -371,12 +371,17 @@ export function OpsRosterPlanner({
     const preparedPeriodEnd = result.periodEnd ?? moveIsoDate(preparedPeriodStart, 6);
     setLivePeriodEnd(preparedPeriodEnd);
     setLiveRecurring(false);
-    // Keep whatever week the user had navigated to — prepareOpsRoster always anchors
-    // the draft's OWN period to the requested week server-side, but that's just where
-    // the dated override starts; it must not yank the user's in-progress view back to
-    // today. Only clamp if the current view has become genuinely out of range for the
-    // new (dated, non-recurring) period.
-    setWeekStart((current) => (current < preparedPeriodStart ? preparedPeriodStart : current > preparedPeriodEnd ? preparedPeriodEnd : current));
+    // Snap the view to the week that was actually requested (targetWeekStart), which is
+    // also exactly what the server anchored the dated draft to (preparedPeriodStart).
+    // This is always correct for every caller: ensureEditing passes the week already
+    // being viewed (so this is a no-op for the view), while moveWeekForward/Back pass
+    // the adjacent week they're re-anchoring the draft to (so the view must follow the
+    // draft there). A "preserve current weekStart, only clamp if out of range" approach
+    // was tried here before and was wrong: when moveWeekBack re-anchors a shorter/older
+    // window, the stale (still-forward) weekStart could clamp down to preparedPeriodEnd
+    // itself — a single Sunday rather than the new window's Monday — collapsing the
+    // visible range to one day ("13 Sep to 13 Sep").
+    setWeekStart(preparedPeriodStart);
     assignmentsRef.current = preparedAssignments;
     setAssignments(preparedAssignments);
     editingEnabledRef.current = true;
