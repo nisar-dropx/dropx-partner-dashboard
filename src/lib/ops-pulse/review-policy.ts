@@ -39,15 +39,20 @@ export function reviewCapabilities(input: {
   firstReviewerId: string | null;
   currentReviewerId: string | null;
   currentRole: string | null;
+  /** Cluster/AOM filter permission — higher managers with this can edit any station's review, not just their own. */
+  hasClusterFilterAccess?: boolean;
+  /** Performance scorecard has been imported for this station/date. Reviews and RCA cannot start before this. */
+  scorecardImported: boolean;
 }) {
   const visible = input.inScope && input.canView;
   const editor = visible && input.canEdit;
-  const oversight = input.owner || input.programManager;
+  const oversight = input.owner || input.programManager || Boolean(input.hasClusterFilterAccess);
   const canOverride = oversight || input.nationalHead || input.tech;
   const current = Boolean(input.currentReviewerId && input.currentReviewerId === input.userId);
   const first = Boolean(input.firstReviewerId && input.firstReviewerId === input.userId);
   return {
-    canStart: Boolean(visible && (input.canAdd || input.canEdit) && (canOverride || first || input.higherReviewer)),
+    scorecardImported: input.scorecardImported,
+    canStart: Boolean(visible && input.scorecardImported && (input.canAdd || input.canEdit) && (canOverride || first || input.higherReviewer)),
     // Station team always; first-stage manager (or their proxy) can enter timings when TL access is missing.
     canEditConnections: editor && (oversight || input.stationUser || (!input.closed && current && (first || input.currentIsFirst === true))),
     canEditRca: editor && (oversight || (!input.closed && current && (first || input.currentIsFirst === true))),

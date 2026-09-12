@@ -206,26 +206,43 @@ export async function createConnectWfhRequest(input: {
   let routeName = "Reporting manager";
   const skipManagerChain = Boolean(access.context.assignment.is_top_level)
     || isManagingPartnerDesignation(access.designation);
+  // True when the resolved chain already includes its own HR review step (an approver in
+  // the chain is flagged "requires HR precheck and finalizes" — see approval-workflow-routing.ts).
+  // When true, hr_decide_wfh_manager closes the request as approved once the chain is
+  // exhausted, instead of routing to the legacy separate pending_hr / HR-finalization stage.
+  let routeIncludesHrStep = false;
 
   if (!skipManagerChain) {
+    // maxLevel: 3 (not 2) so a route where a level-1/level-2 approver is flagged
+    // "requires_hr_precheck_and_finalizes" can resolve its spliced-in HR review step,
+    // which piggybacks on the route's level-3/hr_final_* config. Routes that don't use the
+    // flag never populate hr_final_required, so this is a no-op for the common case.
+    // allowMissingApprovers degrades gracefully to the legacy pending_hr hand-off instead
+    // of hard-failing when no route is configured for this designation — matching how
+    // business trip/expense already behave.
     const configured = await resolveConfiguredApprovalWorkflow({
       companyId: input.companyId,
       workflowCode: "work_from_home",
       workerId: input.workerId,
       workerType: input.workerType,
       asOf: today,
-      maxLevel: 2
+      maxLevel: 3,
+      allowMissingApprovers: true
     });
-    if (!configured?.steps.length) {
-      throw new Error("No WFH approval route is configured for your designation. Contact HR.");
+    if (configured?.steps.length) {
+      routeName = configured.routeName;
+      steps = configured.steps.map((step) => ({
+        step_name: step.step_name,
+        approver_user_id: step.approver_user_id,
+        approver_person_id: step.approver_person_id,
+        approver_name: step.approver_name
+      }));
+      // Either the reordered "HR review" step (Business-Head-style precheck) or a plain
+      // "HR final approval" step (ordinary level-3 HR final) both mean the chain itself
+      // now carries HR's review — in both cases exhausting the chain should close the
+      // request directly instead of falling back to the legacy pending_hr hand-off.
+      routeIncludesHrStep = steps.some((step) => step.step_name === "HR review" || step.step_name === "HR final approval");
     }
-    routeName = configured.routeName;
-    steps = configured.steps.map((step) => ({
-      step_name: step.step_name,
-      approver_user_id: step.approver_user_id,
-      approver_person_id: step.approver_person_id,
-      approver_name: step.approver_name
-    }));
   } else {
     routeName = "Managing partner / top-level";
   }
@@ -251,7 +268,8 @@ export async function createConnectWfhRequest(input: {
     requested_by: requesterUserId,
     manager_user_id: first?.approver_user_id ?? null,
     manager_person_id: first?.approver_person_id ?? null,
-    manager_name: first?.approver_name ?? null
+    manager_name: first?.approver_name ?? null,
+    route_includes_hr_step: routeIncludesHrStep
   }).select("id").single();
   if (insertResult.error) throw new Error(insertResult.error.message);
   const requestId = insertResult.data.id as string;

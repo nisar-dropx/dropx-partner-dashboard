@@ -2,7 +2,22 @@ import "server-only";
 import { cache } from "react";
 import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { ACTIVE_DAILY_PERFORMANCE_SOURCE } from "@/lib/ops-pulse/performance-source-policy";
 import { reviewCapabilities, reviewRole, reviewRoutingIssue } from "@/lib/ops-pulse/review-policy";
+
+/** Has the Performance Scorecard (Hawkeye daily) been imported for this station/date? Reviews and RCA are blocked until it has. */
+export async function isScorecardImported(companyId: string, stationCode: string, sourceDate: string) {
+  if (!supabaseAdmin || !stationCode || !sourceDate) return false;
+  const result = await supabaseAdmin.from("report_metric_facts")
+    .select("id", { head: true, count: "exact" })
+    .eq("company_id", companyId)
+    .eq("station_code", stationCode)
+    .eq("report_date", sourceDate)
+    .eq("source_type", ACTIVE_DAILY_PERFORMANCE_SOURCE)
+    .limit(1);
+  if (result.error) return false;
+  return Boolean(result.count);
+}
 
 export const loadReviewActor = cache(async (companyId: string, userId: string, roleCode: string | null, roleName: string | null) => {
   if (!supabaseAdmin) throw new Error("Review access is unavailable.");
@@ -41,13 +56,16 @@ export async function getReviewAccess(
   stationId: string,
   review: { status: string; current_step_order: number } | null,
   steps: { step_order: number; reviewer_user_id: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[],
-  options?: { inScope?: boolean }
+  options?: { inScope?: boolean; scorecardImported?: boolean }
 ) {
   const actor = await loadReviewActor(authorization.companyId!, authorization.userId, authorization.roleCode, authorization.roleName);
   const pendingSteps = steps.filter((step) => step.status !== "skipped" && ["cluster","aom","national"].includes(reviewRole(step.reviewer_role))).sort((a, b) => a.step_order - b.step_order);
   const current = pendingSteps.find((step) => step.step_order === review?.current_step_order && step.status === "pending");
   // Review Desk already filtered the station into permittedLocations — trust that over a second scope check.
   const inScope = options?.inScope ?? (authorization.hasAllLocationAccess || authorization.locationScopeIds.includes(stationId));
+  // Anyone with the Cluster/AOM filter permission gets the same oversight-level edit rights as
+  // Program Manager/Owner — they can already see every station in scope, so editing should follow.
+  const hasClusterFilterAccess = hasPermission(authorization, "performance_review_cluster_filter", "access");
   const capabilities = reviewCapabilities({
     userId: authorization.userId,
     owner: isCompanyOwner(authorization) || /managing[ _]partner/i.test(`${authorization.roleCode} ${authorization.roleName}`),
@@ -55,6 +73,7 @@ export async function getReviewAccess(
     nationalHead: actor.nationalHead,
     tech: actor.tech,
     stationUser: actor.stationUser,
+    hasClusterFilterAccess,
     inScope,
     canView: hasPermission(authorization, "performance_review", "access"),
     canAdd: hasPermission(authorization, "performance_review", "add"),
@@ -65,7 +84,8 @@ export async function getReviewAccess(
     currentIsFirst: current?.step_order === pendingSteps[0]?.step_order,
     hasProxy: Boolean(current?.proxy_reviewer_user_id),
     higherReviewer: pendingSteps.some(step => step.reviewer_user_id === authorization.userId && step.step_order > (current?.step_order ?? pendingSteps[0]?.step_order ?? 0)),
-    currentRole: current?.reviewer_role ?? null
+    currentRole: current?.reviewer_role ?? null,
+    scorecardImported: options?.scorecardImported ?? false
   });
   const routingIssue = reviewRoutingIssue(steps);
   return { actor, routingIssue, ...capabilities, canComplete: capabilities.canComplete && !routingIssue };

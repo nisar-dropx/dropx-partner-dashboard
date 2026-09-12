@@ -489,7 +489,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     : legacyConnectionsFromReview(selectedReview);
   const reviewAccess = selectedReviewLocation && view === "reviews" ? await getReviewAccess(authorization,selectedReviewLocation.id,selectedReview,
     selectedReview ? reviewWorkspace.steps.filter(step=>step.review_id===selectedReview.id) : reviewChain.map((step,index)=>({step_order:index+1,reviewer_user_id:step.reviewerUserId,reviewer_role:step.reviewerRole,status:"pending"})),
-    { inScope: true }) : null;
+    { inScope: true, scorecardImported: Boolean(selectedReviewRow) }) : null;
   const reviewOperations = await reviewOperationsPromise;
 
   return (
@@ -533,7 +533,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
             reviewChain={reviewChain}
             routingIssue={reviewAccess?.routingIssue ?? (!reviewChain.length && !selectedReview ? "A review manager needs to be assigned in People for this station. Contact HR so Proxy / Skip and RCA can run." : null)}
             date={selectedDate}
-            error={searchParams?.error || reviewWorkspace.error || operationalResult.error || connectionResult.error || (!selectedReviewRow ? "No Amazon performance metrics are loaded for this date. Opening and UTR delay reasons are still available below." : null)}
+            error={searchParams?.error || reviewWorkspace.error || operationalResult.error || connectionResult.error || (!selectedReviewRow ? "No Performance Scorecard is imported for this station and date yet. Import it before starting a review or adding RCA — Opening and UTR delay reasons are still available below." : null)}
             items={reviewWorkspace.items}
             locations={deskLocations}
             reviewClusters={canFilterClusters ? clusterOptions : []}
