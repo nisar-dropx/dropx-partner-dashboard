@@ -113,6 +113,21 @@ async function hrPrecheckFinalizeDesignations(companyId: string, designationIds:
   return new Set((result.data ?? []).map((item) => item.id as string));
 }
 
+// Which workflow(s) the "requires HR precheck and finalizes" designation flag applies to
+// is admin-configurable from the Approval Workflow Master (hr_approval_workflow_catalog.
+// applies_hr_precheck_finalize_flag), not hardcoded to a specific workflow name in code.
+async function workflowAppliesHrPrecheckFinalizeFlag(companyId: string, workflowCode: string) {
+  const result = await db().rpc("hr_workflow_applies_hr_precheck_finalize_flag", {
+    p_company_id: companyId,
+    p_workflow_code: workflowCode
+  });
+  if (result.error) {
+    if (/does not exist|schema cache/i.test(result.error.message)) return false;
+    throw new Error(result.error.message);
+  }
+  return Boolean(result.data);
+}
+
 function chainCandidates(
   chain: Candidate[],
   searchScope: SearchScope,
@@ -262,12 +277,12 @@ export async function resolveConfiguredApprovalWorkflow(input: {
   const maxLevel = input.maxLevel ?? 3;
   const chain = await reportingChain(input.companyId, worker.assignment.id, asOf);
   const designationById = await designationLabels(input.companyId, chain.map((item) => item.designationId ?? "").filter(Boolean));
-  // The "requires HR precheck and finalizes" reorder is only for Attendance
-  // Regularization — HR configures this per designation, but the behavior itself is
-  // scoped to this one workflow, not applied universally to WFH/leave/expense/etc.
-  // (Connect never calls this resolver with workflowCode "attendance_regularization"
-  // today, but the guard is here for correctness/future-proofing regardless.)
-  const precheckFinalizeDesignationIds = input.workflowCode === "attendance_regularization"
+  // Which workflow(s) the "requires HR precheck and finalizes" reorder applies to is
+  // admin-configurable from the Approval Workflow Master (per-workflow, not hardcoded
+  // to any specific workflow name) — see hr_workflow_applies_hr_precheck_finalize_flag.
+  // Connect will honour this for any workflow it calls this resolver with, present or
+  // future, without needing a code change here.
+  const precheckFinalizeDesignationIds = (await workflowAppliesHrPrecheckFinalizeFlag(input.companyId, input.workflowCode))
     ? await hrPrecheckFinalizeDesignations(input.companyId, [
       route.level_1_designation_id,
       route.level_2_designation_id ?? ""

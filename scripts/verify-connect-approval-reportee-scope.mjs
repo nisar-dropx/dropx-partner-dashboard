@@ -46,7 +46,7 @@ const checks = [
       && approvals.includes("matchesReportee: () => true")
       && approvals.includes("listConnectWfhHrApprovals(account, matchesReportee)")
       && approvals.includes("connectReporteeMatches(reportees, profileType, profileId)"),
-    "leave and WFH manager queues are assignee-scoped; WFH/Site Visit HR finalization follows selected reportees"
+    "leave and WFH manager queues are assignee-scoped; WFH/Business Trip HR finalization follows selected reportees"
   ],
   [
     reimbursements.includes('.in("approver_user_id", userIds)')

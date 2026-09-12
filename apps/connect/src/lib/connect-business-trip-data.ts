@@ -323,7 +323,7 @@ export async function createConnectBusinessTripRequest(input: {
       await notifyApproverMobile({
         companyId: input.companyId,
         recipientUserId: firstApprover,
-        eventCode: "SITE_VISIT_APPROVAL_REQUIRED",
+        eventCode: "BUSINESS_TRIP_APPROVAL_REQUIRED",
         title: "Business trip needs approval",
         body: `${identity.workerName || "Team member"} requested a business trip (${input.fromDate} – ${input.toDate}). Open Approval Inbox.`,
         route: "approvals",
@@ -462,7 +462,7 @@ export async function decideConnectBusinessTripApproval(input: {
       await notifyApproverMobile({
         companyId: input.companyId,
         recipientUserId: next.data.approver_user_id,
-        eventCode: "SITE_VISIT_APPROVAL_REQUIRED",
+        eventCode: "BUSINESS_TRIP_APPROVAL_REQUIRED",
         title: "Business trip needs approval",
         body: `${request.data?.worker_name || "Team member"} requested a business trip (${request.data?.start_date ?? ""} – ${request.data?.end_date ?? ""}). Open Approval Inbox.`,
         route: "approvals",
