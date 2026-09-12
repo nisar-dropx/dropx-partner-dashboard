@@ -10,7 +10,9 @@ const mod={exports:{}};
 const mocks={
  'next/server':{NextRequest,NextResponse},
  '@supabase/supabase-js':{createClient:()=>({auth:{getUser:async()=>({data:{user:signedIn?{id:'test-user'}:null}})}})},
- '@/lib/people/surface':{isPeopleHostName:()=>false,isPeoplePortalPath:()=>false}
+ '@/lib/people/surface':{isPeopleHostName:()=>false,isPeoplePortalPath:()=>false},
+ '@/lib/timeout-fetch':{timeoutFetch:()=>fetch},
+ '@/lib/with-timeout':{TimeoutError:class extends Error{},withTimeout:promise=>promise}
 };
 new Function('require','module','exports',js)(id=>{assert.ok(id in mocks);return mocks[id];},mod,mod.exports);
 const request=path=>new NextRequest('https://ops.dropxlogistics.com'+path,{headers:{host:'ops.dropxlogistics.com'}});
