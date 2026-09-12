@@ -56,6 +56,15 @@ type ActionResult = {
   periodEnd?: string;
   rosterKind?: string;
   entries?: PreparedRosterEntry[];
+  /**
+   * True when this call actually wrote to hr_roster_plans (recalled a pending-approval
+   * plan, or realigned/reused an existing open draft) — the server has something new to
+   * tell other viewers, so a follow-up router.refresh() is worthwhile. False when the
+   * result is purely computed in-memory from the approved baseline (no draft exists yet):
+   * nothing changed server-side, so there is nothing for a refresh to reconcile, and the
+   * caller's own local optimistic state is already the complete, correct picture.
+   */
+  persisted?: boolean;
 } | { ok: false; message: string };
 
 function db() {
@@ -372,7 +381,8 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
         periodEnd: recallEnd,
         rosterKind: "dated",
         entries: mapPreparedEntries(aligned.hr_roster_entries ?? []),
-        message: "Pending approval recalled. Update week offs or shifts, save, then submit for approval again."
+        message: "Pending approval recalled. Update week offs or shifts, save, then submit for approval again.",
+        persisted: true
       };
     }
 
@@ -392,7 +402,8 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
         periodEnd: end,
         rosterKind: "dated",
         entries: mapPreparedEntries(aligned.hr_roster_entries ?? []),
-        message: "The open roster change is ready."
+        message: "The open roster change is ready.",
+        persisted: true
       };
     }
 
@@ -431,7 +442,11 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
       periodEnd: end,
       rosterKind: "dated",
       entries: projected,
-      message: "Showing the current approved roster. Save a change to start an Ops draft for approval."
+      message: "Showing the current approved roster. Save a change to start an Ops draft for approval.",
+      // Nothing was written to hr_roster_plans — this is the approved baseline projected
+      // in-memory. The caller's local optimistic state is already complete and correct;
+      // no follow-up refresh is needed (there is nothing new for the server to say).
+      persisted: false
     };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "The roster change could not be prepared." };
@@ -517,7 +532,14 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
       if (removed.error) throw new Error(removed.error.message);
     }
     refreshRosterViews();
-    return { ok: true, planId, message: `${unique.size} roster ${unique.size === 1 ? "change" : "changes"} saved.` };
+    return {
+      ok: true,
+      planId,
+      periodStart: plan.period_start,
+      periodEnd: plan.period_end,
+      rosterKind: plan.roster_kind ?? "dated",
+      message: `${unique.size} roster ${unique.size === 1 ? "change" : "changes"} saved.`
+    };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Roster changes could not be saved." };
   }

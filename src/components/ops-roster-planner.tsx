@@ -93,6 +93,16 @@ function initialAssignments(entries: Array<OpsRosterEntry | PreparedEntry>) {
     { dayType: entry.dayType, shiftId: entry.shiftId, notes: entry.notes } satisfies RosterAssignmentValue
   ]));
 }
+/**
+ * Identity of "what the server's plan looks like," for recognizing an action's own
+ * expected result regardless of how many render passes it takes to arrive. Deliberately
+ * limited to fields every action result reliably knows (id/period/kind) — status and
+ * revisionNo are excluded because action results don't always carry them precisely, and
+ * guessing wrong there would reintroduce exactly the kind of mismatch this replaces.
+ */
+function planShape(source: { id?: string | null; periodStart?: string | null; periodEnd?: string | null; rosterKind?: string | null } | null) {
+  return JSON.stringify([source?.id ?? null, source?.periodStart ?? null, source?.periodEnd ?? null, source?.rosterKind ?? null]);
+}
 
 export function OpsRosterPlanner({
   stationId,
@@ -170,14 +180,18 @@ export function OpsRosterPlanner({
   const templateStartRef = useRef(plan?.periodStart ?? blankPeriodStart);
   const preparedPlanIdRef = useRef<string | null>(null);
   const preparingRef = useRef(false);
-  // Counts how many self-triggered navigations/refreshes (router.replace / router.refresh)
-  // are still in flight from an action handler (prepare/save/submit/import). The
-  // reconciliation effect below decrements this on every run while it's positive and
-  // skips the destructive reset for each of those passes — not just the first. A single
-  // boolean isn't enough here: save() fires BOTH router.replace() and router.refresh(),
-  // which can each deliver their own separate prop-update pass, so a flag consumed on
-  // the first pass would leave the second one unguarded and free to reset weekStart.
-  const selfInitiatedRefreshCountRef = useRef(0);
+  // Records the plan "shape" (id/status/period/revision/kind) that an action handler
+  // (prepare/save/submit/import) already expects the server to confirm, set right before
+  // it calls router.refresh()/router.replace(). The reconciliation effect below compares
+  // every incoming `plan` against this — NOT a one-shot flag or a pass counter — because
+  // a single logical action can trigger more than one prop-update pass (save() fires both
+  // router.replace() and router.refresh(), and a bare router.refresh() is not guaranteed
+  // to map 1:1 to exactly one effect run either), and there is no reliable way to predict
+  // how many passes will actually arrive. Comparing against the expected shape instead
+  // works no matter how many (or how few) passes show up: every pass matching the
+  // recorded shape is skipped, and it stops mattering once a genuinely different plan
+  // state arrives (a real external change, or the action's own confirmed result).
+  const expectedPlanShapeRef = useRef<string | null>(null);
   // Shares one in-flight prepareOpsRoster() call across concurrent callers
   // (right-click opening the picker, then picking an option) so they don't
   // double-prepare and race two router.refresh() calls against each other.
@@ -242,12 +256,14 @@ export function OpsRosterPlanner({
     // import completing) brings back fresh props reflecting exactly what the action
     // handler already applied to local state. Re-running the full reset here would just
     // stomp that state back to stale values (e.g. dates snapping back, the Upload panel
-    // disappearing). save() fires BOTH router.replace() and router.refresh(), which can
-    // each deliver their own separate prop-update pass — so this is a COUNTER, not a
-    // one-shot flag: every pass while the counter is positive is treated as self-
-    // initiated and decrements it, so all of them are skipped, not just the first.
-    if (selfInitiatedRefreshCountRef.current > 0) {
-      selfInitiatedRefreshCountRef.current -= 1;
+    // disappearing, editing mode reverting). Compare against the SHAPE the action handler
+    // already recorded as expected — not a pass count — because a single logical action
+    // can trigger an unpredictable number of prop-update passes (save() fires both
+    // router.replace() and router.refresh(); a bare router.refresh() alone is also not
+    // guaranteed to map to exactly one pass). Every pass whose incoming plan matches the
+    // expected shape is skipped, however many of them show up; it naturally stops
+    // mattering once a genuinely different plan state arrives.
+    if (expectedPlanShapeRef.current !== null && expectedPlanShapeRef.current === planShape(plan)) {
       const nextPlanId = plan?.id ?? null;
       if (activePlanIdRef.current !== nextPlanId && nextPlanId) {
         activePlanIdRef.current = nextPlanId;
@@ -255,6 +271,10 @@ export function OpsRosterPlanner({
       }
       return;
     }
+    // Whatever expectation was recorded no longer matches — either no action is in
+    // flight, or the server came back with something other than what was expected
+    // (e.g. someone else changed the plan first). Either way, stop comparing against it.
+    expectedPlanShapeRef.current = null;
     // Genuine external change (station switch remounts anyway via the page's key, so this
     // path is for the plan mutating for a reason other than our own in-flight action — e.g.
     // another user/process editing the same station). Don't discard unsaved local edits;
@@ -372,8 +392,20 @@ export function OpsRosterPlanner({
       setEditingEnabled(true);
       setDirtyKeys(new Set());
       setMessage({ tone: "success", text: result.message });
-      selfInitiatedRefreshCountRef.current += 1;
-      router.refresh();
+      // Only refresh when the server actually persisted something (recalled a pending
+      // approval, or realigned an existing open draft) — in the common "no draft yet"
+      // case, prepareOpsRoster computes everything in-memory from the approved baseline
+      // without writing to hr_roster_plans, so the server has nothing new to report.
+      // Refreshing anyway would re-fetch a plan whose status is still "approved" (no
+      // draft exists), and since `editable` is derived from that status, a later
+      // reconciliation pass would see editable=false and revert the very editing mode
+      // this call just turned on — a guaranteed eventual revert, not a rare race, for as
+      // long as this branch never persists a row. Skipping the refresh here removes that
+      // failure mode entirely: local state is already the complete, correct picture.
+      if (result.persisted) {
+        expectedPlanShapeRef.current = planShape({ id: result.planId, periodStart: preparedPeriodStart, periodEnd: preparedPeriodEnd, rosterKind: result.rosterKind ?? "dated" });
+        router.refresh();
+      }
       return true;
     })();
     ensureEditingPromiseRef.current = promise;
@@ -427,8 +459,8 @@ export function OpsRosterPlanner({
           setActivePlanId(result.planId);
         }
         setDirtyKeys(new Set());
+        expectedPlanShapeRef.current = planShape({ id: result.planId ?? activePlanIdRef.current, periodStart: importedPeriodStart, periodEnd: importedPeriodEnd, rosterKind: result.rosterKind ?? "dated" });
       }
-      selfInitiatedRefreshCountRef.current += 1;
       router.refresh();
     });
   }, [bulkPeriodMode, bulkRosterMonth, bulkWeekMonday, initialWeekStart, router]);
@@ -597,10 +629,12 @@ export function OpsRosterPlanner({
           preparedPlanIdRef.current = result.planId;
         }
         if (preparedPlanIdRef.current) {
-          // router.replace() and router.refresh() can each deliver their own separate
-          // prop-update pass to the reconciliation effect — count both so neither is
-          // left unguarded (see selfInitiatedRefreshCountRef's declaration above).
-          selfInitiatedRefreshCountRef.current += 2;
+          expectedPlanShapeRef.current = planShape({
+            id: result.planId ?? planId,
+            periodStart: result.periodStart ?? templateStart,
+            periodEnd: result.periodEnd ?? livePeriodEnd,
+            rosterKind: result.rosterKind ?? "dated"
+          });
           router.replace(`/rostering?station=${encodeURIComponent(stationCode)}`);
           router.refresh();
         }
@@ -614,10 +648,11 @@ export function OpsRosterPlanner({
     startSaving(async () => {
       const result = await submitOpsRoster(planId);
       setMessage({ tone: result.ok ? "success" : "error", text: result.message });
-      if (result.ok) {
-        selfInitiatedRefreshCountRef.current += 1;
-        router.refresh();
-      }
+      // No expected-shape guard here on purpose: submitting genuinely ends this editing
+      // session (the plan moves to pending_approval, or is published and disappears from
+      // the open set) — the resulting full reset to the fresh server state is the correct
+      // behavior, not something to protect local state from.
+      if (result.ok) router.refresh();
     });
   }
 
