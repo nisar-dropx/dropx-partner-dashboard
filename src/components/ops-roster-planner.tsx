@@ -12,7 +12,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Download, Eraser, GripVertical, PencilLine, Search, Send, Upload, UsersRound } from "lucide-react";
+import { CalendarDays, Check, ChevronRight, Clock3, Download, Eraser, GripVertical, PencilLine, Search, Send, Upload, UsersRound } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { importOpsRosterWorkbook, prepareOpsRoster, saveOpsRosterAssignments, submitOpsRoster } from "@/app/ops-pulse/rostering/actions";
 import type { OpsRosterEntry, OpsRosterHoliday, OpsRosterPerson, OpsRosterPlan, OpsRosterShift } from "@/lib/ops-pulse/rostering";
@@ -580,13 +580,19 @@ export function OpsRosterPlanner({
     });
   }
 
-  function moveWeek(offset: number) {
-    const next = moveIsoDate(weekStart, offset);
-    if (next < initialWeekStart) setWeekStart(initialWeekStart);
-    else if (isRecurring && next > maxWeekStart) setWeekStart(maxWeekStart);
-    else if (!isRecurring && next > livePeriodEnd) return;
-    else if (!isRecurring && moveIsoDate(next, 6) < templateStart) return;
-    else setWeekStart(next);
+  // Ops can only ever move the roster view forward, to upcoming weeks — never back to
+  // the current or a past week. Past/current-day cells stay non-editable regardless
+  // (see lockReason), but the week picker itself no longer offers backward navigation
+  // at all, since editing only ever applies to upcoming days.
+  function moveWeekForward() {
+    const next = moveIsoDate(weekStart, 7);
+    if (isRecurring) {
+      if (next > maxWeekStart) return;
+      setWeekStart(next);
+    } else {
+      if (next > livePeriodEnd) return;
+      setWeekStart(next);
+    }
     setSelectedDates(new Set());
   }
 
@@ -723,9 +729,8 @@ export function OpsRosterPlanner({
 
     <div className={styles.toolbar}>
       <div className={styles.weekNavigation}>
-        <button type="button" aria-label="Previous week" onClick={() => moveWeek(-7)} disabled={weekStart <= initialWeekStart || (!isRecurring && weekStart <= templateStart)}><ChevronLeft size={16} /></button>
         <span><CalendarDays size={15} /><strong>{dateLabel(dates[0] ?? weekStart)}</strong> to <strong>{dateLabel(dates[dates.length - 1] ?? dates[0] ?? weekStart)}</strong></span>
-        <button type="button" aria-label="Next week" onClick={() => moveWeek(7)} disabled={isRecurring ? weekStart >= maxWeekStart : (dates[dates.length - 1] ?? weekStart) >= livePeriodEnd}><ChevronRight size={16} /></button>
+        <button type="button" aria-label="Next week" onClick={moveWeekForward} disabled={isRecurring ? weekStart >= maxWeekStart : moveIsoDate(weekStart, 7) > livePeriodEnd}><ChevronRight size={16} /></button>
       </div>
       <label className={styles.search}><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search person, ID or designation" /></label>
       <select aria-label="People type" value={workerType} onChange={(event) => setWorkerType(event.target.value)}><option value="all">Employees & contractors</option><option value="employee">Employees</option><option value="contractor">Independent contractors</option></select>
