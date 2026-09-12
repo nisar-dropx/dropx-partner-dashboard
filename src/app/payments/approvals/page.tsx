@@ -10,6 +10,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { getPaymentApprovalEligibility } from "@/lib/payment-approval-scope";
 import { paymentApprovalAmount } from "@/lib/payment-approval-amount";
+import { paymentShipmentCount } from "@/lib/payment-shipment-count";
 import {
   matchesPaymentApprovalFacets,
   paymentApprovalDateKey,
@@ -372,6 +373,7 @@ export default async function PaymentApprovalsPage({
     ...answer,
     payment_head_questions: firstRelation(answer.payment_head_questions)
   }));
+  const shipmentCount = paymentShipmentCount(answers);
   const logs = detailData?.[1].logs ?? [];
   const currentApprovalCycle = Number(selectedRequest?.approval_cycle) || 1;
   const isResubmitted = selectedRequest ? isResubmittedPaymentStage(selectedRequest) : false;
@@ -535,6 +537,7 @@ export default async function PaymentApprovalsPage({
                 <label>Payment Head<input className="field" readOnly value={selectedRequest.payment_heads?.name ?? "-"} /></label>
                 <label>{selectedAmount?.isEstimated ? "Estimated Amount" : "Amount"}<input className="field" readOnly value={selectedAmount?.text ?? "-"} /></label>
                 <label>Status<input className="field" readOnly value={paymentStatusLabel(selectedRequest)} /></label>
+                {shipmentCount !== null ? <label>Number of Shipments<input className="field" readOnly value={shipmentCount.toLocaleString("en-IN")} /></label> : null}
                 <label>Payment Method<input className="field" readOnly value={selectedRequest.payment_mode === "upi_payment" ? "UPI Payment" : selectedRequest.payment_mode === "online_payment" ? "Online Payment" : "Bank Transfer"} /></label>
                 {hasDisplayValue(selectedRequest.account_holder_name) ? <label>Acc Holder Name<input className="field" readOnly value={selectedRequest.account_holder_name ?? "-"} /></label> : null}
                 {selectedRequest.payment_mode === "upi_payment" && hasDisplayValue(selectedRequest.payment_reference) ? <label>UPI ID<input className="field" readOnly value={selectedRequest.payment_reference ?? "-"} /></label> : null}
