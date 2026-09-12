@@ -1,7 +1,7 @@
 import type { EddPackage, EddStationPayload } from "@/lib/ops-pulse/edd-worker";
 import { eddAttemptLifecycle, eddCurrentState, eddDeliveredState, eddIstDate, eddPendingEvidenceAt, eddPendingEvidenceFresh } from "./edd-verification";
 
-export type StationEddFilter = "atStation" | "onRoad" | "delivered" | "hfr" | "hcr" | "rejected" | "returningToFc" | "attempted" | "unverified" | "other" | "all";
+export type StationEddFilter = "atStation" | "observedAtStation" | "onRoad" | "delivered" | "hfr" | "hcr" | "rejected" | "returningToFc" | "attempted" | "unverified" | "other" | "all";
 export type StationEddDay = "today" | "overdue" | "pending" | "all";
 export const STATION_EDD_RULE = "Confirmed pending first dispatch = due shipment currently INDUCTED or RECEIVED, with complete, current history and no dispatch or attempt. Fresh summaries can reuse history only when their per-package event clock is unchanged. Observed at-station status includes returns and unchecked parcels; it is not confirmed first-dispatch pending. HFR is one distinct unsuccessful delivery attempt; HCR is two or more. Rejections are separate. Same-day attempts, on-road, cash collection and delivered packages are never pending. Duplicate scans are not extra attempts. Driver IDs alone do not prove dispatch. Dates use IST; reverse shipments are excluded. Incomplete coverage never certifies zero pendency or clearance.";
 
@@ -48,6 +48,7 @@ export function stationEddPackageMatches(pkg: EddPackage, filter: StationEddFilt
   if (day === "today" && date !== today) return false;
   if (day === "overdue" && (!date || date >= today)) return false;
   if (day === "pending" && (!date || date > today)) return false;
+  if (filter === "observedAtStation") return ["INDUCTED", "RECEIVED"].includes(eddCurrentState(pkg));
   return filter === "all" || stationEddPosition(pkg, today) === filter;
 }
 
@@ -60,7 +61,7 @@ export function stationEddSearchMatches(pkg: EddPackage, state = "", query = "")
 export function stationEddSelection(day: unknown, position: unknown) {
   return {
     day: (typeof day === "string" && ["today", "overdue", "pending", "all"].includes(day) ? day : "today") as StationEddDay,
-    position: (typeof position === "string" && ["atStation", "onRoad", "delivered", "hfr", "hcr", "rejected", "returningToFc", "attempted", "unverified", "other", "all"].includes(position) ? position : "atStation") as StationEddFilter
+    position: (typeof position === "string" && ["atStation", "observedAtStation", "onRoad", "delivered", "hfr", "hcr", "rejected", "returningToFc", "attempted", "unverified", "other", "all"].includes(position) ? position : "atStation") as StationEddFilter
   };
 }
 

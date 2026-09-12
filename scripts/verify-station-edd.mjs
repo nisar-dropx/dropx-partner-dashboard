@@ -51,6 +51,21 @@ assert.equal(edd.stationEddSearchMatches(packages[1], "INDUCTED", " RETAINED-ID 
 assert.equal(edd.stationEddSearchMatches(packages[1], "RECEIVED", ""), false);
 assert.deepEqual(edd.stationEddSelection(["overdue"], ["all"]), { day: "today", position: "atStation" });
 assert.deepEqual(edd.stationEddSelection("overdue", "onRoad"), { day: "overdue", position: "onRoad" });
+assert.deepEqual(edd.stationEddSelection("today", "observedAtStation"), { day: "today", position: "observedAtStation" });
+const physicalStock = [
+  pkg("fresh", "INDUCTED"),
+  pkg("unchecked", "INDUCTED", { verification: null, verifiedAt: null }),
+  pkg("returned", "RECEIVED", { verification: { state: "RECEIVED", historyComplete: true, firstAttemptAt: "2026-09-08T09:00:00Z" } }),
+  pkg("cash", "CASH_AT_STATION"),
+  pkg("road", "IN_TRANSIT_TO_CUSTOMER"),
+  pkg("reverse", "RECEIVED", { packageType: "CReturns" }),
+  pkg("tomorrow", "INDUCTED", { ead: "2026-09-10" }),
+  pkg("undated", "RECEIVED", { ead: null })
+];
+const stockSelection = physicalStock.filter(p => edd.stationEddPackageMatches(p, "observedAtStation", "today", today));
+assert.deepEqual(stockSelection.map(p=>p.trackingId), ["fresh", "unchecked", "returned"]);
+assert.equal(stockSelection.length, edd.summarizeStationEdd("ERSE", physicalStock, "2026-09-09T10:05:00Z", today).todayObservedAtStation, "at-station click membership matches its source stock count");
+assert.deepEqual(physicalStock.filter(p=>edd.stationEddPackageMatches(p, "atStation", "today", today)).map(p=>p.trackingId), ["fresh"], "physical stock selection does not weaken first-dispatch pending evidence");
 assert.equal(edd.stationEddDate(pkg("x", "INDUCTED", { ead: "2026-02-30", internalEAD: today })), today);
 assert.equal(edd.stationEddToday(new Date("2026-09-08T18:29:59Z")), "2026-09-08");
 assert.equal(edd.stationEddToday(new Date("2026-09-08T18:30:00Z")), today);
