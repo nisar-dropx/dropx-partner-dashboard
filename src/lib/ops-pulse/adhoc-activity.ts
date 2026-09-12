@@ -351,7 +351,7 @@ export async function loadAdHocActivity(
   const byId = new Map(stationRows.map((station) => [station.id, station]));
   const byCode = new Map(stationRows.map((station) => [station.code, station]));
   const daysByStation = new Map<string, Map<string, AdHocActivityDay>>();
-  const approvedRequestNumbers = new Set<string>();
+  const submittedRequestNumbers = new Set<string>();
 
   for (const request of requests) {
     if (!isSubmittedAdHocUsage(request)) continue;
@@ -362,7 +362,7 @@ export async function loadAdHocActivity(
     const station = request.location_id ? byId.get(request.location_id)
       : byCode.get(normalized(request.station_code || request.location_code));
     if (!station || !request.work_date) continue;
-    if (request.request_no) approvedRequestNumbers.add(normalizedWords(request.request_no));
+    if (request.request_no) submittedRequestNumbers.add(normalizedWords(request.request_no));
     const requestAmount = amount(request.amount_approved ?? request.amount ?? request.amount_requested);
     const category = adHocCategory(head);
     const stationDays = daysByStation.get(station.id) ?? new Map<string, AdHocActivityDay>();
@@ -413,7 +413,7 @@ export async function loadAdHocActivity(
     day.cashbookVanAmount += cashbookAmount;
 
     const linkedRequest = cashbookRequestReference(cashbook);
-    const countedInTotal = !linkedRequest || !approvedRequestNumbers.has(linkedRequest);
+    const countedInTotal = !linkedRequest || !submittedRequestNumbers.has(linkedRequest);
     if (countedInTotal) {
       station.vanCount += 1;
       station.vanAmount += cashbookAmount;
