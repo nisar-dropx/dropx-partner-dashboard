@@ -473,11 +473,20 @@ async function loadLatestExitCase(context: WorkerContext) {
 async function serializeCase(row: Record<string, any>) {
   const [{ data: tasks }, { data: documents }, { data: events }, { data: approvals }] = await Promise.all([
     db().from("hr_exit_tasks").select("id, category, name, due_date, status, is_required").eq("case_id", row.id).order("created_at"),
-    db().from("hr_exit_documents").select("id, document_type, file_name, status, generated_at, storage_path").eq("case_id", row.id).neq("status", "void").order("generated_at", { ascending: false }),
+    db().from("hr_exit_documents").select("id, document_type, file_name, status, generated_at, storage_path, template_id").eq("case_id", row.id).neq("status", "void").order("generated_at", { ascending: false }),
     db().from("hr_exit_events").select("id, event_code, title, actor_name, created_at, details").eq("case_id", row.id).order("created_at"),
     db().from("hr_exit_approvals").select("id, step_order, step_name, approver_role, approver_source, hierarchy_level, approver_role_id, assigned_user_id, status, comments, acted_at, created_at, hr_roles(name)").eq("case_id", row.id).order("step_order")
   ]);
+  // New documents (template_id set, storage_path null) are generated on demand —
+  // point at the same regenerate-on-download route the main Documents page uses,
+  // rather than a Storage signed URL, since nothing is uploaded any more. Only a
+  // historical document that still has a stored PDF (predating this change) uses
+  // the old signed-URL path, for as long as that object still exists.
   const safeDocuments = await Promise.all((documents ?? []).map(async (document) => {
+    if (document.template_id) {
+      const downloadUrl = `/api/connect/documents/exit/${document.id}?${new URLSearchParams({ accountId: row.worker_type === "contractor" ? String(row.contractor_id ?? "") : String(row.employee_id ?? ""), profileType: row.worker_type === "contractor" ? "contractor" : "employee" })}`;
+      return { id: document.id, type: document.document_type, name: document.file_name, status: document.status, generatedAt: document.generated_at, downloadUrl };
+    }
     if (!document.storage_path) return { id: document.id, type: document.document_type, name: document.file_name, status: document.status, generatedAt: document.generated_at, downloadUrl: "" };
     const { data } = await db().storage.from("hr-exit-documents").createSignedUrl(document.storage_path, 15 * 60);
     return { id: document.id, type: document.document_type, name: document.file_name, status: document.status, generatedAt: document.generated_at, downloadUrl: data?.signedUrl ?? "" };

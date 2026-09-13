@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     const profileType = clean(url.searchParams.get("profileType"));
     if (profileType !== "employee" && profileType !== "contractor") throw new Error("Documents are available for employees and independent contractors.");
     const account = await requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
-    const [pay, issued, types, requests] = await Promise.all([
+    const [pay, issued, exit, types, requests] = await Promise.all([
       supabaseAdmin.from("hr_pay_documents")
         .select("id,document_type,document_number,period_label,period_start,period_end,published_at")
         .eq("company_id", account.companyId).eq("worker_type", profileType).eq("worker_id", account.id)
@@ -22,6 +22,14 @@ export async function GET(request: Request) {
         .select("id,document_type,title,document_date,expires_on,file_name,mime_type,file_size,published_at")
         .eq("company_id", account.companyId).eq("worker_type", profileType).eq("worker_id", account.id)
         .is("revoked_at", null).order("published_at", { ascending: false }),
+      // Relieving letters, experience certificates and other exit documents —
+      // generated on demand (see connect-exit-document.ts), never stored.
+      supabaseAdmin.from("hr_exit_documents")
+        .select("id,document_type,file_name,generated_at,status,hr_exit_cases!inner(worker_type,employee_id,contractor_id)")
+        .eq("company_id", account.companyId).neq("status", "void")
+        .eq("hr_exit_cases.worker_type", profileType)
+        .eq(profileType === "employee" ? "hr_exit_cases.employee_id" : "hr_exit_cases.contractor_id", account.id)
+        .order("generated_at", { ascending: false }),
       supabaseAdmin.from("hr_document_request_types")
         .select("id,code,name,description,instructions,sla_days,issued_document_type")
         .eq("company_id", account.companyId).eq("is_active", true).eq("is_requestable", true)
@@ -31,7 +39,7 @@ export async function GET(request: Request) {
         .eq("company_id", account.companyId).eq("worker_type", profileType).eq("worker_id", account.id)
         .order("requested_at", { ascending: false }).limit(50)
     ]);
-    if (pay.error || issued.error || types.error || requests.error) throw new Error(pay.error?.message ?? issued.error?.message ?? types.error?.message ?? requests.error?.message ?? "Unable to load documents.");
+    if (pay.error || issued.error || exit.error || types.error || requests.error) throw new Error(pay.error?.message ?? issued.error?.message ?? exit.error?.message ?? types.error?.message ?? requests.error?.message ?? "Unable to load documents.");
     const query = (kind: string, id: string) => `/api/connect/documents/${kind}/${id}?${new URLSearchParams({ accountId: account.id, profileType })}`;
     const documents = [
       ...(pay.data ?? []).map((row) => ({
@@ -43,6 +51,11 @@ export async function GET(request: Request) {
         id: row.id, kind: "issued", category: row.document_type.replaceAll("_", " "), title: row.title,
         subtitle: row.document_date ? `Dated ${row.document_date}` : "Issued by People & Culture", fileName: row.file_name,
         publishedAt: row.published_at, expiresOn: row.expires_on, downloadUrl: query("issued", row.id)
+      })),
+      ...(exit.data ?? []).map((row) => ({
+        id: row.id, kind: "exit", category: String(row.document_type).replaceAll("_", " "), title: String(row.document_type).replaceAll("_", " "),
+        subtitle: "Offboarding document", fileName: row.file_name,
+        publishedAt: row.generated_at, expiresOn: null, downloadUrl: query("exit", row.id)
       }))
     ].sort((left, right) => Date.parse(right.publishedAt) - Date.parse(left.publishedAt));
     return NextResponse.json({
