@@ -127,7 +127,12 @@ export default async function RawPunchesPage({ searchParams = {} }: { searchPara
           .from("biometric_raw_events")
           .select("id, device_id, device_serial, terminal_id, trans_id, enrolment_id, employee_code, payload, punch_time, received_at, event_type, source_ip, worker_status, created_at", { count: "exact" })
           .eq("company_id", companyId)
-          .eq("event_type", "TimeLog")
+          // Case-insensitive: event_type is stored verbatim from whatever the
+          // middleware/device sync sends, and a device-history-sync payload
+          // can use different casing than a live punch payload (the punch
+          // webhook's own device-heartbeat check already treats this as
+          // untrustworthy and uses .ilike for the same reason).
+          .ilike("event_type", "TimeLog")
           .order("punch_time", { ascending: false, nullsFirst: false })
           .order("created_at", { ascending: false })
           .order("id", { ascending: false });

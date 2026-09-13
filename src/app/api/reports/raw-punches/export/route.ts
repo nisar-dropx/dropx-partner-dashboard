@@ -115,7 +115,8 @@ export async function GET(request: NextRequest) {
           includeCount ? { count: "exact" } : undefined
         )
         .eq("company_id", companyId)
-        .eq("event_type", "TimeLog")
+        // Case-insensitive: see the matching comment in reports/raw-punches/page.tsx.
+        .ilike("event_type", "TimeLog")
         .lte("created_at", exportCutoff)
         .order("punch_time", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false })
