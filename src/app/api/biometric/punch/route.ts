@@ -74,6 +74,43 @@ function bearerToken(request: NextRequest) {
   return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
 }
 
+/**
+ * biometric_enrolments.status is set to "Inactive" the moment an offboarding
+ * profile save runs (People edit-page -> syncEmployeeBiometricEnrolment/
+ * syncContractorBiometricEnrolment), which can happen well before the worker's
+ * confirmed last working day (LWD) — the same "cut off too early" problem the
+ * clearance-aware access-cutoff model (hr_exit_cases.access_cutoff_at) already
+ * solves for web/app login. Without this check, a punch during that gap is
+ * captured into attendance_punches but never materialized into attendance_daily
+ * (see the `!active` early-return below), silently losing attendance for days the
+ * worker genuinely worked. This looks up whether the worker still has an open
+ * exit case whose confirmed LWD (end of day, IST) hasn't passed yet — if so, the
+ * punch counts as active regardless of what biometric_enrolments.status says.
+ * Scoped to employee/contractor only, since hr_exit_cases only models those two
+ * worker types (field_executive/vendor/worker profile types are unaffected and
+ * keep relying solely on biometric_enrolments.status, unchanged).
+ */
+async function isWithinConfirmedLastWorkingDay(companyId: string, profileType: string | null, employeeId: string | null, contractorId: string | null) {
+  if (!supabaseAdmin) return false;
+  const workerType = profileType === "employee" ? "employee" : profileType === "contractor" ? "contractor" : null;
+  const workerId = workerType === "employee" ? employeeId : workerType === "contractor" ? contractorId : null;
+  if (!workerType || !workerId) return false;
+  const result = await supabaseAdmin
+    .from("hr_exit_cases")
+    .select("access_cutoff_at")
+    .eq("company_id", companyId)
+    .eq("worker_type", workerType)
+    .eq(workerType === "employee" ? "employee_id" : "contractor_id", workerId)
+    .not("status", "in", '("closed","rejected","withdrawn","cancelled")')
+    .order("submitted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (result.error || !result.data) return false;
+  // No confirmed cutoff yet, or it's still in the future: this worker's LWD
+  // hasn't passed, so their attendance should keep counting.
+  return !result.data.access_cutoff_at || Date.parse(result.data.access_cutoff_at) > Date.now();
+}
+
 function clean(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -665,7 +702,8 @@ export async function POST(request: NextRequest) {
 
     const canonicalEnrolmentId = cleanEnrolmentId(enrolment.enrolment_id) || enrolment.enrolment_id;
     const enrolmentVariants = enrolmentIdCandidates(canonicalEnrolmentId);
-    const active = enrolment.status === "Active";
+    const active = enrolment.status === "Active"
+      || await isWithinConfirmedLastWorkingDay(device.company_id, enrolment.profile_type, enrolment.employee_id, enrolment.account_id);
     const punchDate = await resolveAttendanceWorkDate({
       accountId: enrolment.account_id,
       companyId: device.company_id,
