@@ -166,11 +166,14 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
 
   const exitCase = data?.exitCase;
   const canStart = !exitCase || ["rejected", "withdrawn", "cancelled", "settled"].includes(exitCase.status);
+  // Once HR/manager approval is fully complete, the exit is only waiting on clearance
+  // — the worker can no longer back out of it themselves from here; only HR (in HRMS)
+  // can revert an approved offboarding.
   const canWithdraw = Boolean(
     data?.flow === "people" &&
     exitCase &&
     data.policy.withdrawal_allowed &&
-    !["withdrawal_requested", "documents_ready", "closed", "rejected", "withdrawn", "cancelled"].includes(exitCase.status)
+    !["approved", "notice_period", "clearance", "ready_to_close", "withdrawal_requested", "documents_ready", "closed", "rejected", "withdrawn", "cancelled"].includes(exitCase.status)
   );
   const minDate = todayInIndia();
   const suggestedDate = addDaysToDateOnly(minDate, data?.policy.resignation_notice_days ?? 0);

@@ -578,10 +578,15 @@ export async function POST(request: Request) {
       if (policyResult.error || caseResult.error) throw new Error(policyResult.error?.message ?? caseResult.error?.message ?? "Unable to load exit request.");
       if (!policyResult.data?.withdrawal_allowed) throw new Error("Withdrawal requests are disabled by company policy.");
       const exitCase = caseResult.data;
-      if (!exitCase || ["documents_ready", "closed", "withdrawal_requested"].includes(exitCase.status)) {
+      // Once the case is fully approved and moves into notice/clearance, the worker can
+      // no longer withdraw it themselves — only HR can revert an approved offboarding,
+      // from HRMS.
+      if (!exitCase || ["approved", "notice_period", "clearance", "ready_to_close", "documents_ready", "closed", "withdrawal_requested"].includes(exitCase.status)) {
         throw new Error(exitCase?.status === "withdrawal_requested"
           ? "A withdrawal request is already waiting for the first approving manager."
-          : "This exit request can no longer be withdrawn.");
+          : ["approved", "notice_period", "clearance", "ready_to_close", "documents_ready", "closed"].includes(exitCase?.status ?? "")
+            ? "This exit request is already approved and can no longer be withdrawn. Contact HR if this needs to change."
+            : "This exit request can no longer be withdrawn.");
       }
       const now = new Date().toISOString();
       const approvedSteps = await db().from("hr_exit_approvals")
