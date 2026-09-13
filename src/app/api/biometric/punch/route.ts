@@ -97,7 +97,7 @@ async function isWithinConfirmedLastWorkingDay(companyId: string, profileType: s
   if (!workerType || !workerId) return false;
   const result = await supabaseAdmin
     .from("hr_exit_cases")
-    .select("access_cutoff_at")
+    .select("access_cutoff_at, approved_last_working_date, effective_date, requested_last_working_date")
     .eq("company_id", companyId)
     .eq("worker_type", workerType)
     .eq(workerType === "employee" ? "employee_id" : "contractor_id", workerId)
@@ -106,9 +106,26 @@ async function isWithinConfirmedLastWorkingDay(companyId: string, profileType: s
     .limit(1)
     .maybeSingle();
   if (result.error || !result.data) return false;
-  // No confirmed cutoff yet, or it's still in the future: this worker's LWD
-  // hasn't passed, so their attendance should keep counting.
-  return !result.data.access_cutoff_at || Date.parse(result.data.access_cutoff_at) > Date.now();
+  // access_cutoff_at is the authoritative cutoff once it's set (applyAccessCutoffForExitCase
+  // sets it whenever a case reaches approved/notice_period/clearance with a known last
+  // working date) — but a case can end up in one of those statuses with access_cutoff_at
+  // still null if that confirmation step was ever skipped (a data-integrity gap, not
+  // something this webhook can fix). Falling back to the same
+  // approved_last_working_date/effective_date/requested_last_working_date chain used
+  // elsewhere in this codebase means a genuinely open, in-progress exit still protects
+  // the worker's pre-LWD attendance even when access_cutoff_at itself is missing.
+  if (result.data.access_cutoff_at) return Date.parse(result.data.access_cutoff_at) > Date.now();
+  const lastWorkingDate = result.data.approved_last_working_date ?? result.data.effective_date ?? result.data.requested_last_working_date;
+  // No confirmed date of any kind yet: this worker's LWD hasn't passed, so their
+  // attendance should keep counting.
+  if (!lastWorkingDate) return true;
+  // Mirrors dropx-hrms's computeAccessCutoff (worker-lifecycle.ts) — end of the last
+  // working date, IST, expressed as 18:30 UTC on that same calendar date — since this
+  // is a fallback for access_cutoff_at itself being unexpectedly missing, not something
+  // this webhook can import cross-repo.
+  const [year, month, day] = lastWorkingDate.split("-").map(Number);
+  const cutoffUtcMillis = Date.UTC(year, month - 1, day, 18, 30, 0);
+  return cutoffUtcMillis > Date.now();
 }
 
 function clean(value: unknown) {
