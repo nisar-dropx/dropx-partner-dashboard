@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, ClipboardList, FileText, MapPin, Plus, ReceiptText, RotateCcw, Search, Trash2, Upload, X } from "lucide-react";
+import { Check, ChevronDown, ClipboardList, Download, FileText, MapPin, Plus, ReceiptText, RotateCcw, Search, Trash2, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { todayInIndia } from "@/lib/india-date";
 import {
@@ -18,7 +18,7 @@ import { expensePolicyMessage, type ExpensePolicyQuote } from "@/lib/reimburseme
 
 type Category = { id: string; code: string; name: string; description?: string | null; receipt_required: boolean; receipt_threshold: number; per_item_limit?: number | null; per_day_limit?: number | null };
 type Station = { id: string; code: string; name: string; region?: string | null; cluster?: string | null };
-type ExpenseItem = { id: string; categoryId: string; expenseDate: string; merchant: string; description: string; amount: string };
+type ExpenseItem = { id: string; categoryId: string; expenseDate: string; merchant: string; description: string; amount: string; quantity: string };
 type PreRequest = {
   id: string; request_no: string; purpose: string; purpose_code?: string | null; purpose_label?: string | null;
   estimated_amount?: number | null; trip_from?: string | null; trip_to?: string | null; notes?: string | null;
@@ -36,6 +36,7 @@ type Claim = {
   payment?: { request_no: string; status: string; approval_status?: string | null; utr_cin?: string | null; bank_status?: string | null; bank_processing_remarks?: string | null; processed_at?: string | null } | null;
 };
 type Payload = {
+  policyDocument?: { id: string; title: string; version_label: string; effective_from: string } | null;
   categories: Category[];
   stations: Station[];
   payout: { ready: boolean; message?: string | null };
@@ -44,7 +45,7 @@ type Payload = {
 };
 
 function uid() { return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`; }
-function newItem(): ExpenseItem { return { id: uid(), categoryId: "", expenseDate: todayInIndia(), merchant: "", description: "", amount: "" }; }
+function newItem(): ExpenseItem { return { id: uid(), categoryId: "", expenseDate: todayInIndia(), merchant: "", description: "", amount: "", quantity: "" }; }
 function money(value: number | string | null | undefined) { return `₹${Number(value ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
 function dateTime(value: string) { return new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }); }
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
@@ -100,12 +101,12 @@ export function ConnectReimbursements({ account, active = true }: { account: App
   useEffect(() => { void load(); }, [load]);
 
   const quoteInput = JSON.stringify(tab === "claims"
-    ? items.filter(item => item.categoryId && item.expenseDate).map(item => ({ id: item.id, categoryId: item.categoryId, expenseDate: item.expenseDate, amount: Number(item.amount) > 0 ? Number(item.amount) : 0.01 }))
+    ? items.filter(item => item.categoryId && item.expenseDate).map(item => ({ id: item.id, categoryId: item.categoryId, expenseDate: item.expenseDate, amount: Number(item.amount) > 0 ? Number(item.amount) : 0.01, quantity: item.quantity ? Number(item.quantity) : null }))
     : (data?.categories ?? []).map(head => ({ id: head.id, categoryId: head.id, expenseDate: tripFrom || todayInIndia(), amount: 0.01 })));
   useEffect(() => {
     const controller = new AbortController();
-    setPolicyQuotes([]); setPolicyError("");
-    if (quoteInput === "[]") { setPolicyLoading(false); return; }
+    setPolicyError("");
+    if (quoteInput === "[]") { setPolicyQuotes([]); setPolicyLoading(false); return; }
     setPolicyLoading(true);
     const timer = setTimeout(async () => {
       try {
@@ -307,6 +308,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
       expenseDate: item.expense_date,
       merchant: item.merchant ?? "",
       description: item.description,
+      quantity: item.finance_policy_snapshot?.quantity ? String(item.finance_policy_snapshot.quantity) : "",
       amount: String(item.amount)
     })));
     setReceipts([]);
@@ -321,6 +323,13 @@ export function ConnectReimbursements({ account, active = true }: { account: App
       <h1>Expense requests</h1>
       <p>Get prior approval before any business visit or expense. After approval, submit the actual claim with bills.</p>
     </header>
+    {data?.policyDocument ? <section className="dx-expense-card" aria-label="Business travel policy">
+      <div className="dx-expense-card-head"><div><h2>{data.policyDocument.title}</h2><p className="dx-expense-help">{data.policyDocument.version_label} · Effective {data.policyDocument.effective_from} · Published by Finance</p></div></div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <a className="dx-small-action" href={`/api/connect/reimbursements?kind=policy_document&accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`} target="_blank" rel="noopener noreferrer"><FileText /> View policy</a>
+        <a className="dx-small-action" href={`/api/connect/reimbursements?kind=policy_document&download=1&accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`}><Download /> Download PDF</a>
+      </div>
+    </section> : null}
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
     {data && !data.payout.ready ? <div className="dx-alert warning">{data.payout.message} You can still raise a request; bank details are required before claim submission.</div> : null}
@@ -442,7 +451,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
                     const rule = policyQuotes.find(line => line.id === entry.key);
                     if (policyLoading) return "Checking Finance policy…";
                     if (!rule) return "Policy check unavailable";
-                    return rule.limit_amount == null ? "Designation limit not configured" : `${money(rule.limit_amount)} ${rule.limit_basis === "per_day" ? "per day / hotel night" : "per item"} · ${rule.excess_action === "cap" ? "Maximum payment capped" : "Excess needs special approval"}`;
+                    return rule.limit_amount == null ? "Designation limit not configured" : `${money(rule.limit_amount)} ${rule.limit_basis === "per_day" ? "per day / hotel night" : rule.limit_basis === "per_km" ? "per kilometre" : "per item"} · ${rule.excess_action === "cap" ? "Maximum payment capped" : "Excess needs special approval"}`;
                   })()}</small>
                 </label>
               ))}
@@ -570,6 +579,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
                 <label>Category<select onChange={(event) => changeItem(item.id, { categoryId: event.target.value })} required value={item.categoryId}><option value="">Select</option>{data?.categories.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select></label>
                 <label>Date<input onChange={(event) => changeItem(item.id, { expenseDate: event.target.value })} required type="date" value={item.expenseDate} /></label>
                 <label>Amount<input min="0.01" onChange={(event) => changeItem(item.id, { amount: event.target.value })} required step="0.01" type="number" value={item.amount} /></label>
+                {policyQuotes.find(line => line.id === item.id && line.category_id === item.categoryId)?.limit_basis === "per_km" ? <label>Distance (km)<input min="0.001" max="100000" step="0.001" type="number" inputMode="decimal" required value={item.quantity} onChange={event => changeItem(item.id, { quantity: event.target.value })} /></label> : null}
                 <label>Merchant<input maxLength={160} onChange={(event) => changeItem(item.id, { merchant: event.target.value })} placeholder="Vendor / hotel" value={item.merchant} /></label>
                 <label className="wide">Description<input maxLength={500} onChange={(event) => changeItem(item.id, { description: event.target.value })} placeholder="What was this expense for?" required value={item.description} /></label>
               </div>

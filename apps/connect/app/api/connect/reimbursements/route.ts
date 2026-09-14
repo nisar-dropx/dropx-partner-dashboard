@@ -195,6 +195,16 @@ async function claimPayload(account: ConnectAccount) {
 export async function GET(request: Request) {
   try {
     const account = await selectedAccount(request, undefined, true);
+    const currentPolicy = await db().from("finance_reimbursement_documents").select("id,title,version_label,effective_from,storage_path,file_name").eq("company_id", account.companyId).eq("is_current", true).maybeSingle();
+    if (currentPolicy.error) throw new Error("Unable to load the current Finance policy.");
+    if (new URL(request.url).searchParams.get("kind") === "policy_document") {
+      if (!currentPolicy.data) return NextResponse.json({ error: "No policy has been published." }, { status: 404 });
+      const download = new URL(request.url).searchParams.get("download") === "1";
+      const signed = await db().storage.from("finance-reimbursement-policies").createSignedUrl(currentPolicy.data.storage_path, 120, download ? { download: currentPolicy.data.file_name } : undefined);
+      if (signed.error || !signed.data) throw new Error("Unable to open the policy PDF.");
+      return new Response(null, { status: 302, headers: { Location: signed.data.signedUrl, "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" } });
+    }
+    const policyDocument = currentPolicy.data ? { id: currentPolicy.data.id, title: currentPolicy.data.title, version_label: currentPolicy.data.version_label, effective_from: currentPolicy.data.effective_from } : null;
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     if (account.profileType === "user") {
       const actorUserIds = await resolveConnectActorUserIds(account);
@@ -210,19 +220,20 @@ export async function GET(request: Request) {
         preRequests: [],
         approvals,
         preRequestApprovals,
+        policyDocument,
         scope
       }, { headers: { "Cache-Control": "private, no-store" } });
     }
     const payload = await claimPayload(account);
-    return NextResponse.json({ ...payload, scope }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({ ...payload, scope, policyDocument }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to load reimbursements.") }, { status: 400 });
   }
 }
 
-type InputItem = { id: string; categoryId: string; expenseDate: string; merchant: string; description: string; amount: number };
+type InputItem = { id: string; categoryId: string; expenseDate: string; merchant: string; description: string; amount: number; quantity?: number | null };
 
-async function quotePolicy(account: ConnectAccount, items: Pick<InputItem, "id" | "categoryId" | "expenseDate" | "amount">[], claimId?: string) {
+async function quotePolicy(account: ConnectAccount, items: Pick<InputItem, "id" | "categoryId" | "expenseDate" | "amount" | "quantity">[], claimId?: string) {
   const identity = await expenseIdentity(account);
   if (claimId) {
     const own = await db().from("hr_expense_claims").select("id").eq("company_id", account.companyId).eq("claimant_person_id", identity.personId).eq("id", claimId).maybeSingle();
@@ -230,7 +241,7 @@ async function quotePolicy(account: ConnectAccount, items: Pick<InputItem, "id" 
   }
   const result = await db().rpc("finance_quote_reimbursement", {
     p_company: account.companyId, p_person: identity.personId, p_claim: claimId || null,
-    p_items: items.map(item => ({ id: item.id, category_id: item.categoryId, expense_date: item.expenseDate, amount: item.amount }))
+    p_items: items.map(item => ({ id: item.id, category_id: item.categoryId, expense_date: item.expenseDate, amount: item.amount, quantity: item.quantity || null }))
   });
   if (result.error) throw new Error(result.error.message);
   return (result.data ?? []) as ExpensePolicyQuote[];
@@ -394,6 +405,7 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
       expenseDate: clean(item.expenseDate),
       merchant: clean(item.merchant).slice(0, 160),
       description: clean(item.description).slice(0, 500),
+      quantity: item.quantity ? Number(item.quantity) : null,
       amount: Number(item.amount)
     }));
 
@@ -423,6 +435,7 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
     const approval = await resolveExpenseApprovers(account, total);
     const categories = await expenseCategoriesForPolicy(account, approval.policy.id);
     const policyQuote = await quotePolicy(account, items, existingClaimId || undefined);
+    if (policyQuote.some(line => line.quantity_required)) throw new Error("Enter distance in kilometres for mileage expenses.");
     if (policyQuote.reduce((sum, line) => sum + Number(line.eligible_amount), 0) <= 0) throw new Error("The daily policy allowance is already used. No payable amount remains for this claim.");
     const quoteById = new Map(policyQuote.map(line => [line.id, line]));
     const categoryById = new Map(categories.map((category) => [category.id, category]));
@@ -494,6 +507,7 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
         merchant: item.merchant,
         description: item.description,
         amount: item.amount,
+        quantity: item.quantity,
         sort_order: (index + 1) * 10
       })),
       p_steps: approval.steps
