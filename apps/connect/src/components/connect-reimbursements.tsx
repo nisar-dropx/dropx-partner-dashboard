@@ -451,7 +451,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
                     const rule = policyQuotes.find(line => line.id === entry.key);
                     if (policyLoading) return "Checking Finance policy…";
                     if (!rule) return "Policy check unavailable";
-                    return rule.limit_amount == null ? "Designation limit not configured" : `${money(rule.limit_amount)} ${rule.limit_basis === "per_day" ? "per day / hotel night" : rule.limit_basis === "per_km" ? "per kilometre" : "per item"} · ${rule.excess_action === "cap" ? "Maximum payment capped" : "Excess needs special approval"}`;
+                    return rule.expense_allowed === false ? "Not eligible under Finance policy" : rule.limit_amount == null ? "Designation limit not configured" : `${money(rule.limit_amount)} ${rule.limit_basis === "per_day" ? "per day / hotel night" : rule.limit_basis === "per_km" ? "per kilometre" : "per item"} · ${rule.excess_action === "cap" ? "Maximum payment capped" : "Excess needs special approval"}`;
                   })()}</small>
                 </label>
               ))}

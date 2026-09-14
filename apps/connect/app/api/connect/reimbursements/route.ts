@@ -435,6 +435,7 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
     const approval = await resolveExpenseApprovers(account, total);
     const categories = await expenseCategoriesForPolicy(account, approval.policy.id);
     const policyQuote = await quotePolicy(account, items, existingClaimId || undefined);
+    if (policyQuote.some(line => line.expense_allowed === false)) throw new Error("This expense head is not eligible for your designation under the Finance policy.");
     if (policyQuote.some(line => line.quantity_required)) throw new Error("Enter distance in kilometres for mileage expenses.");
     if (policyQuote.reduce((sum, line) => sum + Number(line.eligible_amount), 0) <= 0) throw new Error("The daily policy allowance is already used. No payable amount remains for this claim.");
     const quoteById = new Map(policyQuote.map(line => [line.id, line]));
