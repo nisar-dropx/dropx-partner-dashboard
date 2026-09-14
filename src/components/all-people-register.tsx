@@ -260,7 +260,7 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
             {visibleRows.map((row) => (
               <tr key={`${row.categoryCode}:${row.id}`}>
                 <td><strong>{row.code}</strong></td><td>{row.biometricId}</td><td><strong>{row.fullName}</strong></td>
-                <td>{row.category}</td><td>{row.mobile}</td><td>{row.email}</td><td>{row.location}</td><td>{row.model}</td><td>{row.provider}</td><td>{row.model}</td><td>{row.provider}</td><td>{row.designation}</td>
+                <td>{row.category}</td><td>{row.mobile}</td><td>{row.email}</td><td>{row.location}</td><td>{row.model}</td><td>{row.provider}</td><td>{row.designation}</td>
                 <td><StatusPill status={row.status} /></td>
                 <td><AllPeopleActionMenu row={row} /></td>
               </tr>
