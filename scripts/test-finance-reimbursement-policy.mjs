@@ -29,6 +29,7 @@ await db.exec(readFileSync(new URL('../supabase/migrations/20260914162411_financ
 await db.exec(`create function hr_submit_expense_claim(p_items jsonb) returns void language plpgsql as $$ declare v_item jsonb; begin for v_item in select * from jsonb_array_elements(p_items) loop insert into hr_expense_items(id,description, amount, sort_order) values ((v_item->>'id')::uuid,'fixture',(v_item->>'amount')::numeric,1); end loop; end $$;
 create function hr_resubmit_expense_claim(p_items jsonb) returns void language plpgsql as $$ declare v_item jsonb; begin for v_item in select * from jsonb_array_elements(p_items) loop insert into hr_expense_items(id,description,amount,sort_order) values ((v_item->>'id')::uuid,'fixture',(v_item->>'amount')::numeric,1); end loop; end $$;`);
 await db.exec(readFileSync(new URL('../supabase/migrations/20260914165600_finance_reimbursement_policy_documents.sql', import.meta.url), 'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20260914170512_finance_reimbursement_eligibility.sql', import.meta.url), 'utf8'));
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const company=id(1), actor=id(2), person=id(3), designation=id(4), head=id(5), engagement=id(6), approver=id(7);
 await db.query(`insert into companies values ($1),($2)`,[company,id(100)]);
@@ -116,6 +117,9 @@ for(const [rpc,n] of [['hr_submit_expense_claim',72],['hr_resubmit_expense_claim
  await db.query(`select ${rpc}($1)`,[JSON.stringify([{id:id(n),amount:120,quantity:40}])]);
  assert.equal(Number((await db.query('select quantity from hr_expense_items where id=$1',[id(n)])).rows[0].quantity),40);
 }
+await save({...rule,limit_basis:'not_allowed',permissible_amount:0,effective_from:'2026-09-22'});
+assert.equal((await quote([item(75,100,'2026-09-22')]))[0].expense_allowed,false);
+await assert.rejects(claim(76,[item(77,100,'2026-09-22')]),/not eligible/);
 const doc={id:id(80),title:'Fixture travel policy',version_label:'1',effective_from:'2026-01-01',file_name:'policy.pdf',storage_path:`${company}/${id(80)}.pdf`,file_size:100,sha256:'a'.repeat(64)};
 async function publish(d,expected=null){return db.query('select finance_publish_reimbursement_document($1,$2,$3,$4)',[company,actor,expected,JSON.stringify(d)]);}
 await assert.rejects(publish(doc),/not found/);
@@ -129,6 +133,8 @@ assert.equal((await db.query('select id from finance_reimbursement_documents whe
 assert.equal((await db.query('select count(*)::int as n from finance_reimbursement_documents')).rows[0].n,2);
 await db.exec('set role anon');
 await assert.rejects(db.query('select * from finance_reimbursement_limits'),/permission denied/);
+await assert.rejects(db.query('select * from finance_reimbursement_documents'),/permission denied/);
+await assert.rejects(publish(doc),/permission denied/);
 await assert.rejects(db.query('select finance_quote_reimbursement($1,$2,$3)',[company,person,'[]']),/permission denied/);
 await db.exec('reset role');
 await db.close();

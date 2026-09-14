@@ -32,6 +32,7 @@ export function ReimbursementMaster({
     row: MasterRow | null;
   } | null>(null);
   const [excessAction, setExcessAction] = useState("cap");
+  const [limitBasis, setLimitBasis] = useState("per_day");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -42,7 +43,7 @@ export function ReimbursementMaster({
     const trap = (event: KeyboardEvent) => {
       if (event.key !== "Tab") return;
       const elements = dialogRef.current?.querySelectorAll<HTMLElement>(
-        "button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href]",
+        "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]",
       );
       if (!elements?.length) return;
       const first = elements[0],
@@ -88,6 +89,7 @@ export function ReimbursementMaster({
   function open(kind: string, row: MasterRow | null) {
     setEditor({ kind, row });
     setExcessAction(String(row?.excess_action ?? "cap"));
+    setLimitBasis(String(row?.limit_basis ?? "per_day"));
     setError("");
     setNotice("");
   }
@@ -100,6 +102,11 @@ export function ReimbursementMaster({
     input.expected_updated_at = editor.row?.updated_at ?? null;
     input.is_active = form.get("is_active") === "on";
     input.receipt_required = form.get("receipt_required") === "on";
+    if (editor.kind === "limit" && form.get("limit_basis") === "not_allowed") {
+      input.permissible_amount = 0;
+      input.excess_action = "cap";
+      input.special_approver_user_id = null;
+    }
     setBusy(true);
     setError("");
     try {
@@ -195,19 +202,27 @@ export function ReimbursementMaster({
                       <td>{label(find("designations", row.designation_id))}</td>
                       <td>{label(find("heads", row.category_id))}</td>
                       <td>
-                        <strong>{money(row.permissible_amount)}</strong>
+                        <strong>
+                          {row.limit_basis === "not_allowed"
+                            ? "Not eligible"
+                            : money(row.permissible_amount)}
+                        </strong>
                         <small>
-                          {row.limit_basis === "per_day"
-                            ? "per day / night"
-                            : row.limit_basis === "per_km"
-                              ? "per kilometre"
-                              : "per expense item"}
+                          {row.limit_basis === "not_allowed"
+                            ? "Not reimbursable for this designation"
+                            : row.limit_basis === "per_day"
+                              ? "per day / night"
+                              : row.limit_basis === "per_km"
+                                ? "per kilometre"
+                                : "per expense item"}
                         </small>
                       </td>
                       <td>
-                        {row.excess_action === "cap"
-                          ? "Pay up to limit"
-                          : "Special approval"}
+                        {row.limit_basis === "not_allowed"
+                          ? "Not reimbursable"
+                          : row.excess_action === "cap"
+                            ? "Pay up to limit"
+                            : "Special approval"}
                         {row.excess_action === "special_approval" ? (
                           <small>
                             {label(
@@ -438,6 +453,7 @@ export function ReimbursementMaster({
                       min="0.01"
                       step="0.01"
                       max="9999999999"
+                      disabled={limitBasis === "not_allowed"}
                       defaultValue={String(
                         editor.row?.permissible_amount ?? "",
                       )}
@@ -448,9 +464,12 @@ export function ReimbursementMaster({
                     Applies per
                     <select
                       name="limit_basis"
-                      defaultValue={String(
-                        editor.row?.limit_basis ?? "per_day",
-                      )}
+                      value={limitBasis}
+                      onChange={(e) => {
+                        setLimitBasis(e.target.value);
+                        if (e.target.value === "not_allowed")
+                          setExcessAction("cap");
+                      }}
                     >
                       <option value="per_day">
                         Day / hotel night (expense date)
@@ -459,6 +478,7 @@ export function ReimbursementMaster({
                       <option value="per_km">
                         Kilometre (distance required)
                       </option>
+                      <option value="not_allowed">Not eligible</option>
                     </select>
                   </label>
                   <label className="wide">
@@ -475,6 +495,7 @@ export function ReimbursementMaster({
                     <select
                       name="excess_action"
                       value={excessAction}
+                      disabled={limitBasis === "not_allowed"}
                       onChange={(e) => setExcessAction(e.target.value)}
                     >
                       <option value="cap">Pay only up to limit</option>
