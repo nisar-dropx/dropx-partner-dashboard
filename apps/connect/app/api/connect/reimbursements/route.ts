@@ -23,6 +23,7 @@ import { notifyExpenseUser, dismissExpenseApprovalNotifications } from "../../..
 import { normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
 import { mergeExpenseReceiptsToPdf } from "../../../../src/lib/merge-expense-receipts";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
+import { approvalJourneySummary, loadApprovalJourneySteps } from "../../../../src/lib/connect-approval-journey";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -49,12 +50,12 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>,
 async function approvalPayload(companyId: string, userIds: string[]) {
   if (!userIds.length) return [];
   const result = await db().from("hr_expense_approval_steps")
-    .select("id,claim_id,step_order,step_name,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
+    .select("id,claim_id,step_order,step_name,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
     .eq("company_id", companyId).in("approver_user_id", userIds).eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
   // Claim steps are assigned explicitly (RM / finance head). Do not require org-chart reportee scope —
   // finance L2 is often outside the claimant's reporting tree.
-  return Promise.all((result.data ?? []).flatMap((step) => {
+  const rows = await Promise.all((result.data ?? []).flatMap((step) => {
     const claim = relation(step.hr_expense_claims);
     if (!claim) return [];
     const employee = relation(claim.employees);
@@ -70,6 +71,14 @@ async function approvalPayload(companyId: string, userIds: string[]) {
       }
     }))()];
   }));
+  const journeys = await loadApprovalJourneySteps(companyId, rows.map((row) => row.claim.id), {
+    table: "hr_expense_approval_steps", parentColumn: "claim_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["decided_by", "approver_user_id"], actedAtColumn: "decided_at", noteColumn: "decision_note"
+  });
+  return rows.map((row) => ({
+    ...row,
+    journey: approvalJourneySummary(row.claim.submitted_at, row.claim.requesterName, row.step_name, journeys.get(row.claim.id) ?? [])
+  }));
 }
 
 async function preRequestApprovalPayload(companyId: string, userIds: string[]) {
@@ -78,7 +87,7 @@ async function preRequestApprovalPayload(companyId: string, userIds: string[]) {
     .select("id,request_id,assignee_role,status,hr_expense_claim_requests(id,request_no,purpose,estimated_amount,trip_from,trip_to,notes,status,created_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id))")
     .eq("company_id", companyId).in("approver_user_id", userIds).eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
-  return (result.data ?? []).flatMap((row) => {
+  const rows = (result.data ?? []).flatMap((row) => {
     const request = relation(row.hr_expense_claim_requests);
     if (!request || request.status !== "pending") return [];
     const employee = relation(request.employees);
@@ -96,6 +105,14 @@ async function preRequestApprovalPayload(companyId: string, userIds: string[]) {
       }
     }];
   });
+  const journeys = await loadApprovalJourneySteps(companyId, rows.map((row) => row.request_id), {
+    table: "hr_expense_claim_request_assignees", parentColumn: "request_id", orderColumn: "created_at", labelColumn: "assignee_role",
+    actorColumns: ["approver_user_id"], actedAtColumn: "decided_at", noteColumn: "decision_note"
+  });
+  return rows.map((row) => ({
+    ...row,
+    journey: approvalJourneySummary(row.request.created_at, row.request.requesterName, row.assignee_role, journeys.get(row.request_id) ?? [])
+  }));
 }
 
 async function claimPayload(account: ConnectAccount) {

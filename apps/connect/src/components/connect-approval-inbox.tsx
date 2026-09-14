@@ -8,6 +8,23 @@ import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
 import { userFacingError } from "@/lib/user-facing-error";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
 
+type ApprovalJourney = {
+  submittedAt: string | null;
+  submittedBy: string;
+  currentStep: string;
+  approvedCount: number;
+  totalSteps: number;
+  steps: Array<{
+    id: string;
+    order: number;
+    label: string;
+    status: string;
+    actorName: string | null;
+    actedAt: string | null;
+    note: string | null;
+  }>;
+};
+
 type ExpenseItem = {
   id: string;
   expense_date: string;
@@ -25,11 +42,13 @@ type ReimbursementApproval = {
     claim_no: string;
     purpose: string;
     total_claimed: number;
+    submitted_at?: string | null;
     requesterName: string;
     requesterCode: string;
     hr_expense_items?: ExpenseItem[];
     attachments?: Attachment[];
   };
+  journey?: ApprovalJourney;
 };
 
 type PreRequestApproval = {
@@ -48,6 +67,7 @@ type PreRequestApproval = {
     requesterName: string;
     requesterCode: string;
   };
+  journey?: ApprovalJourney;
 };
 
 type LeaveApproval = {
@@ -63,6 +83,8 @@ type LeaveApproval = {
   requesterName: string;
   requesterCode: string;
   profileType: "employee" | "contractor";
+  requestedAt?: string | null;
+  journey?: ApprovalJourney;
 };
 
 type WfhApproval = {
@@ -81,6 +103,9 @@ type WfhApproval = {
   managerName?: string | null;
   managerNote?: string | null;
   queue?: "manager" | "hr";
+  requestedAt?: string | null;
+  managerDecidedAt?: string | null;
+  journey?: ApprovalJourney;
 };
 
 type LocationSupportPackage = {
@@ -96,6 +121,7 @@ type LocationSupportPackage = {
   workerName: string;
   workerCode: string | null;
   profileType: "employee" | "contractor";
+  journey?: ApprovalJourney;
 };
 
 type AttendanceApproval = {
@@ -116,6 +142,7 @@ type AttendanceApproval = {
   evidenceUrl: string | null;
   createdAt: string;
   queue?: "manager" | "hr";
+  journey?: ApprovalJourney;
 };
 
 type RosterApproval = {
@@ -131,6 +158,27 @@ type RosterApproval = {
   periodEnd: string;
   revision: number;
   rowCount: number;
+  submittedAt?: string | null;
+  preview: {
+    status: "ready" | "unavailable";
+    baselineRevision: number | null;
+    changedCells: number | null;
+    affectedPeople: number | null;
+    days: Array<{ weekday: number; date: string; working: number; weeklyOff: number }>;
+    people: Array<{
+      workerId: string;
+      workerType: string;
+      name: string;
+      code: string;
+      changes: Array<{
+        weekday: number;
+        date: string;
+        before: { kind: "shift" | "weekly_off" | "not_rostered"; label: string; shiftCode: string | null };
+        after: { kind: "shift" | "weekly_off" | "not_rostered"; label: string; shiftCode: string | null };
+      }>;
+    }>;
+  };
+  journey?: ApprovalJourney;
 };
 
 type RosterSwapApproval = {
@@ -147,6 +195,7 @@ type RosterSwapApproval = {
   partnerShift: { id: string; name: string; code: string; start_time: string; end_time: string } | null;
   requesterNote: string | null;
   partnerNote: string | null;
+  journey?: ApprovalJourney;
 };
 
 type ReturnedRoster = {
@@ -173,6 +222,7 @@ type ExitApproval = {
   requestedLastWorkingDate: string;
   reason: string;
   submittedAt: string | null;
+  journey?: ApprovalJourney;
 };
 
 type ExitWithdrawalApproval = {
@@ -185,6 +235,7 @@ type ExitWithdrawalApproval = {
   requestedLastWorkingDate: string;
   reason: string;
   requestedAt: string | null;
+  journey?: ApprovalJourney;
 };
 
 type ApprovalSection = "time-off" | "wfh" | "business-trip" | "attendance" | "rosters" | "location-integrity" | "reimbursements" | "exits";
@@ -289,7 +340,8 @@ function ApprovalToolbar({
   onApprove,
   showReturn = true,
   approveLabel = "Approve",
-  rejectLabel = "Reject"
+  rejectLabel = "Reject",
+  approveDisabled = false
 }: {
   saving: boolean;
   onReturn?: () => void;
@@ -298,6 +350,7 @@ function ApprovalToolbar({
   showReturn?: boolean;
   approveLabel?: string;
   rejectLabel?: string;
+  approveDisabled?: boolean;
 }) {
   return (
     <div className={`dx-approval-toolbar${showReturn ? "" : " duo"}`}>
@@ -309,7 +362,7 @@ function ApprovalToolbar({
       <button className="toolbar-reject" disabled={saving} onClick={onReject} type="button">
         <X />{rejectLabel}
       </button>
-      <button className="toolbar-approve" disabled={saving} onClick={onApprove} type="button">
+      <button className="toolbar-approve" disabled={saving || approveDisabled} onClick={onApprove} type="button">
         <Check />{approveLabel}
       </button>
     </div>
@@ -348,7 +401,7 @@ function ApprovalRow({
         </div>
       </button>
       <div className="dx-approval-row-actions">
-        <button aria-label="View more" className="dx-approval-row-view" onClick={onReview} title="View more" type="button">
+        <button aria-label="Review details" className="dx-approval-row-view" onClick={onReview} title="Review details" type="button">
           <Eye />
         </button>
         {onApprove ? (
@@ -361,10 +414,10 @@ function ApprovalRow({
   );
 }
 
-function ApprovalModal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+function ApprovalModal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   return (
     <div className="dx-approval-modal-backdrop" onClick={onClose}>
-      <div className="dx-approval-modal" onClick={(event) => event.stopPropagation()}>
+      <div className={`dx-approval-modal${wide ? " dx-approval-modal-wide" : ""}`} onClick={(event) => event.stopPropagation()}>
         <div className="dx-approval-modal-head">
           <h3>{title}</h3>
           <button aria-label="Close" onClick={onClose} type="button"><X /></button>
@@ -372,6 +425,121 @@ function ApprovalModal({ title, onClose, children }: { title: string; onClose: (
         <div className="dx-approval-modal-body">{children}</div>
       </div>
     </div>
+  );
+}
+
+function journeyStatus(status: string) {
+  if (status === "pending") return "Current";
+  if (["waiting", "queued"].includes(status)) return "Upcoming";
+  return statusLabel(status);
+}
+
+function ApprovalJourneyCell({
+  journey,
+  submittedAt,
+  submittedBy,
+  currentStep
+}: {
+  journey?: ApprovalJourney;
+  submittedAt?: string | null;
+  submittedBy: string;
+  currentStep: string;
+}) {
+  const value = journey ?? { submittedAt: submittedAt ?? null, submittedBy, currentStep, approvedCount: 0, totalSteps: 1, steps: [] };
+  return (
+    <details className="dx-approval-journey">
+      <summary>
+        <span><Clock3 /><span><small>Journey · {dateTime(value.submittedAt)}</small><strong>{value.currentStep}</strong></span></span>
+        <span><b>{value.approvedCount ? `${value.approvedCount} approved` : "New request"}</b><ChevronDown /></span>
+      </summary>
+      <div className="dx-approval-journey-body">
+        <div className="dx-approval-journey-step submitted">
+          <i><Check /></i>
+          <span><strong>Submitted</strong><small>{value.submittedBy}</small></span>
+          <time>{dateTime(value.submittedAt)}</time>
+        </div>
+        {value.steps.map((step) => (
+          <div className={`dx-approval-journey-step status-${step.status}`} key={step.id}>
+            <i>{step.status === "approved" ? <Check /> : step.status === "rejected" ? <X /> : <Clock3 />}</i>
+            <span>
+              <strong>{statusLabel(step.label)}</strong>
+              <small>{step.actorName || (step.status === "pending" ? "Awaiting assigned approver" : "No approver assigned")}{step.note ? ` · ${step.note}` : ""}</small>
+            </span>
+            <time><b>{journeyStatus(step.status)}</b>{step.actedAt ? dateTime(step.actedAt) : ""}</time>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+const rosterDayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function RosterAssignment({ value, side }: {
+  value: RosterApproval["preview"]["people"][number]["changes"][number]["before"];
+  side: "before" | "after";
+}) {
+  return (
+    <span className={`dx-roster-assignment ${value.kind} ${side}`}>
+      <strong>{value.label}</strong>
+      {value.shiftCode ? <small>{value.shiftCode}</small> : null}
+    </span>
+  );
+}
+
+function RosterApprovalPreview({ approval }: { approval: RosterApproval }) {
+  const preview = approval.preview;
+  if (!preview || preview.status !== "ready") {
+    return (
+      <div className="dx-roster-preview-unavailable" role="alert">
+        <strong>Roster comparison unavailable</strong>
+        <span>Reload this approval before approving. You can still return or reject it with a note.</span>
+      </div>
+    );
+  }
+  return (
+    <section className="dx-roster-preview" aria-label="Updated roster comparison">
+      <header>
+        <div>
+          <small>Updated roster</small>
+          <strong>{preview.changedCells} changed day{preview.changedCells === 1 ? "" : "s"} · {preview.affectedPeople} {preview.affectedPeople === 1 ? "person" : "people"}</strong>
+        </div>
+        <span>{preview.baselineRevision ? `Compared with Rev ${preview.baselineRevision}` : "New roster"}</span>
+      </header>
+      <div className="dx-roster-coverage" aria-label="Proposed daily staffing">
+        {preview.days.map((day) => (
+          <div key={day.weekday}>
+            <strong>{rosterDayLabels[day.weekday - 1]}</strong>
+            <span>{day.working} working</span>
+            <small>{day.weeklyOff} off</small>
+          </div>
+        ))}
+      </div>
+      {preview.people.length ? (
+        <div className="dx-roster-change-list">
+          {preview.people.map((person) => (
+            <article key={`${person.workerType}:${person.workerId}`}>
+              <header>
+                <div><strong>{person.name}</strong><small>{person.code}</small></div>
+                <span>{person.changes.length} change{person.changes.length === 1 ? "" : "s"}</span>
+              </header>
+              <div className="dx-roster-person-changes">
+                {person.changes.map((change) => (
+                  <div key={change.weekday}>
+                    <time dateTime={change.date}><strong>{rosterDayLabels[change.weekday - 1]}</strong><small>{displayDate(change.date).slice(0, 5)}</small></time>
+                    <RosterAssignment side="before" value={change.before} />
+                    <span className="dx-roster-change-arrow" aria-label="changed to">→</span>
+                    <RosterAssignment side="after" value={change.after} />
+                  </div>
+                ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className="dx-roster-no-changes"><Check /><span><strong>No assignment differences</strong><small>The submitted pattern matches the previous approved revision.</small></span></div>
+      )}
+    </section>
   );
 }
 
@@ -753,7 +921,6 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
         key={attendanceKey(approval, queue)}
         meta={`${approval.workerCode || "—"} · ${profileLabel(approval.profileType)}`}
         name={approval.workerName}
-        onApprove={() => void act(() => decideAttendance(approval.requestId, "approved", queue))}
         onReview={() => setActiveKey(attendanceKey(approval, queue))}
         saving={saving}
       />
@@ -805,6 +972,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
         ) : (
           <p className="dx-approval-inline-note warn">Proof missing — approval will be blocked until evidence is available.</p>
         )}
+        <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.createdAt} submittedBy={approval.workerName} currentStep={approval.stepName} />
         <ApprovalNote
           id={approval.requestId}
           notes={notes}
@@ -915,7 +1083,6 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={approval.id}
               meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
               name={approval.requesterName}
-              onApprove={() => void act(() => decideLeave(approval.requestId, "approved"))}
               onReview={() => setActiveKey(`time-off:${approval.id}`)}
               saving={saving}
             />
@@ -938,6 +1105,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   <div><dt>Dates</dt><dd>{displayDate(approval.startDate)}{approval.endDate !== approval.startDate ? ` – ${displayDate(approval.endDate)}` : ""}</dd></div>
                   <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
                 </dl>
+                <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.requestedAt} submittedBy={approval.requesterName} currentStep={approval.stepName} />
                 <ApprovalNote id={approval.requestId} notes={notes} onChange={(value) => setNote(approval.requestId, value)} placeholder="Note for worker (optional)" />
                 <ApprovalToolbar
                   onApprove={() => void act(() => decideLeave(approval.requestId, "approved"))}
@@ -966,7 +1134,6 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   key={approval.id}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
                   name={approval.requesterName}
-                  onApprove={() => void act(() => decideWfh(approval.requestId, "approved", "manager"))}
                   onReview={() => setActiveKey(`wfh:manager:${approval.id}`)}
                   saving={saving}
                 />
@@ -986,7 +1153,6 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   key={`hr:${approval.id}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
                   name={approval.requesterName}
-                  onApprove={() => void act(() => decideWfh(approval.requestId, "approved", "hr"))}
                   onReview={() => setActiveKey(`wfh:hr:${approval.id}`)}
                   saving={saving}
                 />
@@ -1015,6 +1181,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
                   {queue === "hr" && approval.managerName ? <div><dt>Manager</dt><dd>{approval.managerName}{approval.managerNote ? ` · ${approval.managerNote}` : ""}</dd></div> : null}
                 </dl>
+                <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.requestedAt} submittedBy={approval.requesterName} currentStep={approval.stepName} />
                 <ApprovalNote id={`wfh:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`wfh:${approval.requestId}`, value)} placeholder="Note for worker (required when returning)" />
                 {queue === "hr" ? (
                   <ApprovalToolbar
@@ -1052,7 +1219,6 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   key={approval.id}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
                   name={approval.requesterName}
-                  onApprove={() => void act(() => decideBusinessTrip(approval.requestId, "approved", "manager"))}
                   onReview={() => setActiveKey(`business-trip:manager:${approval.id}`)}
                   saving={saving}
                 />
@@ -1072,7 +1238,6 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   key={`hr:${approval.id}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
                   name={approval.requesterName}
-                  onApprove={() => void act(() => decideBusinessTrip(approval.requestId, "approved", "hr"))}
                   onReview={() => setActiveKey(`business-trip:hr:${approval.id}`)}
                   saving={saving}
                 />
@@ -1101,6 +1266,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
                   {queue === "hr" && approval.managerName ? <div><dt>Manager</dt><dd>{approval.managerName}{approval.managerNote ? ` · ${approval.managerNote}` : ""}</dd></div> : null}
                 </dl>
+                <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.requestedAt} submittedBy={approval.requesterName} currentStep={approval.stepName} />
                 <ApprovalNote id={`business-trip:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`business-trip:${approval.requestId}`, value)} placeholder="Note for worker (required when returning)" />
                 {queue === "hr" ? (
                   <ApprovalToolbar
@@ -1166,7 +1332,6 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={`swap:${approval.id}`}
               meta={`${approval.requesterCode || "—"} ↔ ${approval.partnerCode || "—"}`}
               name={`${approval.requesterName} ↔ ${approval.partnerName}`}
-              onApprove={() => void act(() => decideRosterSwap(approval.id, "approved"))}
               onReview={() => setActiveKey(`roster-swap:${approval.id}`)}
               saving={saving}
             />
@@ -1176,9 +1341,8 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               badge={<span className="dx-approval-badge">Rev {approval.revision}</span>}
               eyebrow={`${approval.stationCode} · ${rosterStageLabel(approval.stageType)}`}
               key={approval.id}
-              meta={`${approval.rowCount} roster cell${approval.rowCount === 1 ? "" : "s"} · Step ${approval.stageNumber}`}
+              meta={approval.preview?.status === "ready" ? `${approval.preview.changedCells} changed day${approval.preview.changedCells === 1 ? "" : "s"} · ${approval.preview.affectedPeople} ${approval.preview.affectedPeople === 1 ? "person" : "people"} · Step ${approval.stageNumber}` : `${approval.rowCount} roster cell${approval.rowCount === 1 ? "" : "s"} · Step ${approval.stageNumber}`}
               name={approval.name || `${approval.stationName || approval.stationCode} weekly roster`}
-              onApprove={() => void act(() => decideRoster(approval, "approved"))}
               onReview={() => setActiveKey(`roster:${approval.id}`)}
               saving={saving}
             />
@@ -1215,6 +1379,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   {approval.requesterNote ? <div><dt>Requester note</dt><dd>{approval.requesterNote}</dd></div> : null}
                   {approval.partnerNote ? <div><dt>Partner note</dt><dd>{approval.partnerNote}</dd></div> : null}
                 </dl>
+                <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.requestedAt} submittedBy={approval.requesterName} currentStep="Manager approval" />
                 <ApprovalNote id={approval.id} notes={notes} onChange={(value) => setNote(approval.id, value)} placeholder="Note for colleagues (optional)" />
                 <ApprovalToolbar
                   onApprove={() => void act(() => decideRosterSwap(approval.id, "approved"))}
@@ -1230,7 +1395,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
             const approval = rosterId ? rosterApprovals.find((item) => item.id === rosterId) : undefined;
             if (!approval) return null;
             return (
-              <ApprovalModal onClose={closeModal} title={approval.name || `${approval.stationName || approval.stationCode} weekly roster`}>
+              <ApprovalModal onClose={closeModal} title={approval.name || `${approval.stationName || approval.stationCode} weekly roster`} wide>
                 <ApprovalHead
                   badge={<span className="dx-approval-badge">Rev {approval.revision}</span>}
                   eyebrow={`${approval.stationCode} · ${rosterStageLabel(approval.stageType)}`}
@@ -1242,6 +1407,8 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   <div><dt>Effective week</dt><dd>{displayDate(approval.effectiveFrom)} – {displayDate(approval.periodEnd)}</dd></div>
                   <div><dt>Pattern</dt><dd>Recurring Monday–Sunday roster change</dd></div>
                 </dl>
+                <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.submittedAt} submittedBy={approval.journey?.submittedBy || "Roster owner"} currentStep={rosterStageLabel(approval.stageType)} />
+                <RosterApprovalPreview approval={approval} />
                 <ApprovalNote
                   id={approval.id}
                   notes={notes}
@@ -1252,6 +1419,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   onApprove={() => void act(() => decideRoster(approval, "approved"))}
                   onReject={() => void act(() => decideRoster(approval, "rejected"))}
                   onReturn={() => void act(() => decideRoster(approval, "returned"))}
+                  approveDisabled={!approval.preview || approval.preview.status !== "ready"}
                   saving={saving}
                 />
               </ApprovalModal>
@@ -1303,7 +1471,6 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={item.id}
               meta={`${item.workerCode || "—"} · ${profileLabel(item.profileType)}`}
               name={item.workerName}
-              onApprove={() => void act(() => decideSupportPackage(item.id, "approved"))}
               onReview={() => setActiveKey(`location:${item.id}`)}
               saving={saving}
             />
@@ -1344,6 +1511,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                     </div>
                   </div>
                 </div>
+                <ApprovalJourneyCell journey={item.journey} submittedAt={item.receivedAt} submittedBy={item.workerName} currentStep="Location review" />
                 <ApprovalNote id={item.id} notes={notes} onChange={(value) => setNote(item.id, value)} placeholder="Note for worker (optional)" />
                 <ApprovalToolbar
                   onApprove={() => void act(() => decideSupportPackage(item.id, "approved"))}
@@ -1366,7 +1534,6 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={`pre-${approval.id}`}
               meta={approval.request.requesterCode || "—"}
               name={approval.request.requesterName}
-              onApprove={() => void act(() => decidePreRequest(approval.request.id, "approved"))}
               onReview={() => setActiveKey(`reimbursement-pre:${approval.request.id}`)}
               saving={saving}
             />
@@ -1378,7 +1545,6 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={approval.id}
               meta={approval.claim.purpose}
               name={approval.claim.requesterName}
-              onApprove={() => void act(() => decideReimbursement(approval.claim.id, "approved"))}
               onReview={() => setActiveKey(`reimbursement-claim:${approval.claim.id}`)}
               saving={saving}
             />
@@ -1405,6 +1571,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   ) : null}
                   {approval.request.notes ? <div><dt>Notes</dt><dd>{approval.request.notes}</dd></div> : null}
                 </dl>
+                <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.request.created_at} submittedBy={approval.request.requesterName} currentStep={statusLabel(approval.assignee_role)} />
                 <ApprovalNote id={`pre:${approval.request.id}`} notes={notes} onChange={(value) => setNote(`pre:${approval.request.id}`, value)} placeholder="Required when rejecting" />
                 <ApprovalToolbar
                   onApprove={() => void act(() => decidePreRequest(approval.request.id, "approved"))}
@@ -1449,6 +1616,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                     </div>
                   ))}
                 </dl>
+                <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.claim.submitted_at} submittedBy={approval.claim.requesterName} currentStep={approval.step_name} />
                 <ApprovalNote id={approval.claim.id} notes={notes} onChange={(value) => setNote(approval.claim.id, value)} placeholder="Required when returning or rejecting" />
                 <ApprovalToolbar
                   onApprove={() => void act(() => decideReimbursement(approval.claim.id, "approved"))}
@@ -1472,7 +1640,6 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
               name={approval.requesterName}
               approveLabel="Accept withdrawal"
-              onApprove={() => void act(() => decideExitWithdrawal(approval.caseId, "approved"))}
               onReview={() => setActiveKey(`exit-withdraw:${approval.caseId}`)}
               saving={saving}
             />
@@ -1484,7 +1651,6 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               key={approval.id}
               meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
               name={approval.requesterName}
-              onApprove={() => void act(() => decideExit(approval.id, "approved"))}
               onReview={() => setActiveKey(`exit:${approval.id}`)}
               saving={saving}
             />
@@ -1509,6 +1675,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   <div><dt>Exit reason</dt><dd>{approval.reason}</dd></div>
                   <div><dt>Requested</dt><dd>{dateTime(approval.requestedAt)}</dd></div>
                 </dl>
+                <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.requestedAt} submittedBy={approval.requesterName} currentStep="Withdrawal review" />
                 <ApprovalNote id={`exit-withdraw:${approval.caseId}`} notes={notes} onChange={(value) => setNote(`exit-withdraw:${approval.caseId}`, value)} placeholder="Required when keeping the exit open" />
                 <ApprovalToolbar
                   approveLabel="Accept withdrawal"
@@ -1538,6 +1705,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
                   <div><dt>Submitted</dt><dd>{dateTime(approval.submittedAt)}</dd></div>
                 </dl>
+                <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.submittedAt} submittedBy={approval.requesterName} currentStep={approval.stepName} />
                 <ApprovalNote id={`exit:${approval.id}`} notes={notes} onChange={(value) => setNote(`exit:${approval.id}`, value)} placeholder="Required when rejecting" />
                 <ApprovalToolbar
                   onApprove={() => void act(() => decideExit(approval.id, "approved"))}

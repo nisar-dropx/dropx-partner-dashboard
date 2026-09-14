@@ -15,6 +15,7 @@ import {
 } from "./connect-business-trip-access";
 import { notifyApproverMobile } from "./approver-mobile-notifications";
 import { supabaseAdmin } from "./supabase-admin";
+import { approvalJourneySummary, loadApprovalJourneySteps } from "./connect-approval-journey";
 
 export type BusinessTripWorkerType = "employee" | "contractor";
 
@@ -398,13 +399,13 @@ export async function listConnectBusinessTripApprovals(input: {
   const steps = stepResult.data ?? [];
   if (!steps.length) return [];
   const requestResult = await db().from("hr_business_trip_requests")
-    .select("id,request_no,profile_type,profile_id,worker_code,worker_name,start_date,end_date,reason,status")
+    .select("id,request_no,profile_type,profile_id,worker_code,worker_name,start_date,end_date,reason,status,requested_at")
     .eq("company_id", input.companyId)
     .eq("status", "pending_manager")
     .in("id", steps.map((step) => step.request_id));
   if (requestResult.error) throw new Error(requestResult.error.message);
   const stepByRequest = new Map(steps.map((step) => [step.request_id, step]));
-  return (requestResult.data ?? []).flatMap((request) => {
+  const rows = (requestResult.data ?? []).flatMap((request) => {
     if (!input.matchesReportee(String(request.profile_type), request.profile_id as string | null)) return [];
     const step = stepByRequest.get(request.id);
     if (!step) return [];
@@ -420,9 +421,15 @@ export async function listConnectBusinessTripApprovals(input: {
       reason: request.reason,
       requesterName: request.worker_name,
       requesterCode: request.worker_code ?? "",
-      profileType: request.profile_type
+      profileType: request.profile_type,
+      requestedAt: request.requested_at
     }];
   });
+  const journeys = await loadApprovalJourneySteps(input.companyId, rows.map((row) => row.requestId), {
+    table: "hr_business_trip_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["approver_user_id"], actorNameColumn: "approver_name", actedAtColumn: "decided_at", noteColumn: "decision_note"
+  });
+  return rows.map((row) => ({ ...row, journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? []) }));
 }
 
 export async function decideConnectBusinessTripApproval(input: {
@@ -504,7 +511,7 @@ export async function listConnectBusinessTripHrApprovals(
     throw new Error(result.error.message);
   }
 
-  return (result.data ?? []).flatMap((request) => {
+  const rows = (result.data ?? []).flatMap((request) => {
     if (!connectWorkforceMatches(access, String(request.profile_type), String(request.profile_id))) return [];
     if (!matchesReportee(String(request.profile_type), request.profile_id as string | null)) return [];
     return [{
@@ -522,9 +529,16 @@ export async function listConnectBusinessTripHrApprovals(
       profileType: request.profile_type,
       managerName: request.manager_name,
       managerNote: request.manager_note,
+      managerDecidedAt: request.manager_decided_at,
+      requestedAt: request.requested_at,
       queue: "hr" as const
     }];
   });
+  const journeys = await loadApprovalJourneySteps(account.companyId, rows.map((row) => row.requestId), {
+    table: "hr_business_trip_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["approver_user_id"], actorNameColumn: "approver_name", actedAtColumn: "decided_at", noteColumn: "decision_note"
+  });
+  return rows.map((row) => ({ ...row, journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? []) }));
 }
 
 export async function decideConnectBusinessTripHrApproval(input: {

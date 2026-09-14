@@ -15,8 +15,33 @@ import { supabaseAdmin } from "./supabase-admin";
 import type { ConnectAccount } from "./connect-auth";
 import { connectApproverIdentity } from "./connect-expense-data";
 import { userFacingError } from "./user-facing-error";
+import { approvalJourneySummary, loadApprovalJourneySteps } from "./connect-approval-journey";
 
 type Decision = "approved" | "returned" | "rejected";
+
+type RosterPreviewAssignment = {
+  kind: "shift" | "weekly_off" | "not_rostered";
+  label: string;
+  shiftCode: string | null;
+};
+
+type RosterApprovalRow = {
+  id: string;
+  planId: string;
+  stepId: string | null;
+  stageType: string;
+  stageNumber: number;
+  name: string;
+  stationCode: string;
+  stationName: string;
+  effectiveFrom: string;
+  periodEnd: string;
+  revision: number;
+  rowCount: number;
+  baselinePlanId: string | null;
+  submittedAt: string | null;
+  submittedById: string | null;
+};
 
 function db() {
   if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
@@ -141,7 +166,7 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount, _r
   if (requestsResult.error) throw new Error(requestsResult.error.message);
   // Explicit step assignment — show regardless of reporting-tree toggle.
   const requestById = new Map((requestsResult.data ?? []).map((request) => [request.id, request]));
-  return Promise.all(steps.flatMap((step) => {
+  const rows = await Promise.all(steps.flatMap((step) => {
     const request = requestById.get(step.request_id);
     return request ? [{ step, request }] : [];
   }).map(async ({ step, request }) => ({
@@ -163,6 +188,11 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount, _r
     createdAt: request.created_at,
     queue: "manager" as const
   })));
+  const journeys = await loadApprovalJourneySteps(account.companyId, rows.map((row) => row.requestId), {
+    table: "attendance_regularization_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["approver_user_id"], actedAtColumn: "decided_at", noteColumn: "decision_note"
+  });
+  return rows.map((row) => ({ ...row, journey: approvalJourneySummary(row.createdAt, row.workerName, row.stepName, journeys.get(row.requestId) ?? []) }));
 }
 
 export async function listConnectAttendanceHrApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
@@ -198,7 +228,7 @@ export async function listConnectAttendanceHrApprovals(account: ConnectAccount, 
     if (!(stepsResult.data ?? []).length) filtered.push(request);
   }
 
-  return Promise.all(filtered.map(async (request) => ({
+  const approvalRows = await Promise.all(filtered.map(async (request) => ({
     id: request.id,
     requestId: request.id,
     stepName: "HR finalization",
@@ -217,6 +247,11 @@ export async function listConnectAttendanceHrApprovals(account: ConnectAccount, 
     createdAt: request.created_at,
     queue: "hr" as const
   })));
+  const journeys = await loadApprovalJourneySteps(account.companyId, approvalRows.map((row) => row.requestId), {
+    table: "attendance_regularization_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["approver_user_id"], actedAtColumn: "decided_at", noteColumn: "decision_note"
+  });
+  return approvalRows.map((row) => ({ ...row, journey: approvalJourneySummary(row.createdAt, row.workerName, row.stepName, journeys.get(row.requestId) ?? []) }));
 }
 
 export async function decideConnectAttendanceHrApproval(
@@ -348,13 +383,129 @@ async function canApproveUnassignedRosterHr(account: ConnectAccount) {
   return canConnectFinalizeAttendance(account.companyId, userId);
 }
 
+function rosterIsoWeekday(date: string) {
+  return new Date(`${date}T12:00:00Z`).getUTCDay() || 7;
+}
+
+function rosterDateForWeekday(effectiveFrom: string, weekday: number) {
+  const date = new Date(`${effectiveFrom}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + weekday - rosterIsoWeekday(effectiveFrom));
+  return date.toISOString().slice(0, 10);
+}
+
+function rosterClock(value: string | null | undefined) {
+  const match = String(value ?? "").match(/^(\d{1,2}):(\d{2})/);
+  return match ? `${String(Number(match[1])).padStart(2, "0")}:${match[2]}` : "";
+}
+
+function rosterApprovalStageName(stageType: string) {
+  if (stageType === "level_1") return "Level 1 approval";
+  if (stageType === "level_2") return "Level 2 approval";
+  if (stageType === "hr") return "HR approval";
+  return "Roster approval";
+}
+
+async function addRosterApprovalPreviews(companyId: string, approvals: RosterApprovalRow[]) {
+  if (!approvals.length) return approvals.map(({ baselinePlanId: _baselinePlanId, ...approval }) => approval);
+  try {
+    const baselineIds = [...new Set(approvals.map((approval) => approval.baselinePlanId).filter((id): id is string => Boolean(id)))];
+    const planIds = [...new Set([...approvals.map((approval) => approval.planId), ...baselineIds])];
+    const entriesResult = await db().from("hr_roster_entries")
+      .select("plan_id,worker_type,worker_id,roster_date,day_type,shift_id,hr_shifts!hr_roster_entries_shift_id_fkey(code,name,start_time,end_time)")
+      .eq("company_id", companyId).in("plan_id", planIds).limit(25000);
+    if (entriesResult.error) throw new Error(entriesResult.error.message);
+    const entries = entriesResult.data ?? [];
+    const employeeIds = [...new Set(entries.filter((entry) => entry.worker_type === "employee").map((entry) => entry.worker_id))];
+    const contractorIds = [...new Set(entries.filter((entry) => entry.worker_type === "contractor").map((entry) => entry.worker_id))];
+    const [employeesResult, contractorsResult, baselinePlansResult] = await Promise.all([
+      employeeIds.length ? db().from("employees").select("id,full_name,employee_code").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
+      contractorIds.length ? db().from("contractors").select("id,full_name,dropx_id").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [], error: null }),
+      baselineIds.length ? db().from("hr_roster_plans").select("id,revision_no").eq("company_id", companyId).in("id", baselineIds) : Promise.resolve({ data: [], error: null })
+    ]);
+    const queryError = employeesResult.error || contractorsResult.error || baselinePlansResult.error;
+    if (queryError) throw new Error(queryError.message);
+    const people = new Map<string, { name: string; code: string }>();
+    for (const person of employeesResult.data ?? []) people.set(`employee:${person.id}`, { name: person.full_name, code: person.employee_code ?? "" });
+    for (const person of contractorsResult.data ?? []) people.set(`contractor:${person.id}`, { name: person.full_name, code: person.dropx_id ?? "" });
+    const baselineRevisions = new Map((baselinePlansResult.data ?? []).map((plan) => [plan.id, plan.revision_no ?? null]));
+    const assignment = (entry: typeof entries[number] | undefined): RosterPreviewAssignment => {
+      if (!entry) return { kind: "not_rostered", label: "Not rostered", shiftCode: null };
+      if (entry.day_type === "weekly_off") return { kind: "weekly_off", label: "Weekly off", shiftCode: null };
+      const shift = one(entry.hr_shifts);
+      if (!shift) return { kind: "shift", label: "Shift not assigned", shiftCode: null };
+      const start = rosterClock(shift.start_time), end = rosterClock(shift.end_time);
+      return { kind: "shift", label: start && end ? `${start}–${end}` : shift.name || shift.code || "Shift", shiftCode: shift.code ?? null };
+    };
+    const sameAssignment = (before: typeof entries[number] | undefined, after: typeof entries[number] | undefined) =>
+      Boolean(before && after && before.day_type === after.day_type && (before.shift_id ?? null) === (after.shift_id ?? null));
+
+    return approvals.map(({ baselinePlanId, ...approval }) => {
+      const currentEntries = entries.filter((entry) => entry.plan_id === approval.planId);
+      const baselineEntries = baselinePlanId ? entries.filter((entry) => entry.plan_id === baselinePlanId) : [];
+      const currentByKey = new Map(currentEntries.map((entry) => [`${entry.worker_type}:${entry.worker_id}:${rosterIsoWeekday(entry.roster_date)}`, entry]));
+      const baselineByKey = new Map(baselineEntries.map((entry) => [`${entry.worker_type}:${entry.worker_id}:${rosterIsoWeekday(entry.roster_date)}`, entry]));
+      const keys = [...new Set([...currentByKey.keys(), ...baselineByKey.keys()])];
+      const changes = keys.flatMap((key) => {
+        const before = baselineByKey.get(key), after = currentByKey.get(key);
+        if (sameAssignment(before, after)) return [];
+        const [workerType, workerId] = key.split(":");
+        const weekday = rosterIsoWeekday(after?.roster_date ?? before!.roster_date);
+        return [{ workerType, workerId, weekday, date: rosterDateForWeekday(approval.effectiveFrom, weekday), before: assignment(before), after: assignment(after) }];
+      });
+      const grouped = new Map<string, typeof changes>();
+      for (const change of changes) {
+        const key = `${change.workerType}:${change.workerId}`;
+        grouped.set(key, [...(grouped.get(key) ?? []), change]);
+      }
+      const peopleChanges = [...grouped.entries()].map(([key, personChanges]) => {
+        const [workerType, workerId] = key.split(":");
+        const person = people.get(key);
+        return {
+          workerId,
+          workerType,
+          name: person?.name ?? (workerType === "employee" ? "Former employee" : "Former contractor"),
+          code: person?.code || "Record removed",
+          changes: personChanges.sort((left, right) => left.weekday - right.weekday).map(({ workerType: _workerType, workerId: _workerId, ...change }) => change)
+        };
+      }).sort((left, right) => left.name.localeCompare(right.name) || left.code.localeCompare(right.code));
+      const days = Array.from({ length: 7 }, (_, index) => {
+        const weekday = index + 1;
+        const dayEntries = currentEntries.filter((entry) => rosterIsoWeekday(entry.roster_date) === weekday);
+        return {
+          weekday,
+          date: rosterDateForWeekday(approval.effectiveFrom, weekday),
+          working: dayEntries.filter((entry) => entry.day_type === "working").length,
+          weeklyOff: dayEntries.filter((entry) => entry.day_type === "weekly_off").length
+        };
+      });
+      return {
+        ...approval,
+        preview: {
+          status: "ready" as const,
+          baselineRevision: baselinePlanId ? baselineRevisions.get(baselinePlanId) ?? null : null,
+          changedCells: changes.length,
+          affectedPeople: peopleChanges.length,
+          people: peopleChanges,
+          days
+        }
+      };
+    });
+  } catch (error) {
+    console.error("Roster approval preview unavailable", error instanceof Error ? error.message : "Unknown error");
+    return approvals.map(({ baselinePlanId: _baselinePlanId, ...approval }) => ({
+      ...approval,
+      preview: { status: "unavailable" as const, baselineRevision: null, changedCells: null, affectedPeople: null, people: [], days: [] }
+    }));
+  }
+}
+
 export async function listConnectRosterApprovals(account: ConnectAccount) {
   const actorUserIds = await approverUserIds(account);
   if (!actorUserIds.length) return [];
   const actorIdSet = new Set(actorUserIds);
   const [stepsResult, canApproveHr] = await Promise.all([
     db().from("hr_roster_approval_steps")
-      .select("id,plan_id,stage_no,stage_type,approver_user_id,status,hr_roster_plans!inner(id,name,location_id,period_start,period_end,status,roster_kind,effective_from,revision_no,submitted_at,stations!hr_roster_plans_location_id_fkey(station_code,station_name),hr_roster_entries(id))")
+      .select("id,plan_id,stage_no,stage_type,approver_user_id,status,hr_roster_plans!inner(id,name,location_id,period_start,period_end,status,roster_kind,effective_from,revision_no,supersedes_plan_id,submitted_at,submitted_by,stations!hr_roster_plans_location_id_fkey(station_code,station_name),hr_roster_entries(id))")
       .eq("company_id", account.companyId).eq("status", "pending").order("created_at"),
     canApproveUnassignedRosterHr(account)
   ]);
@@ -375,19 +526,44 @@ export async function listConnectRosterApprovals(account: ConnectAccount) {
       effectiveFrom: plan.effective_from ?? plan.period_start,
       periodEnd: plan.period_end,
       revision: plan.revision_no ?? 1,
-      rowCount: plan.hr_roster_entries?.length ?? 0
+      rowCount: plan.hr_roster_entries?.length ?? 0,
+      baselinePlanId: plan.supersedes_plan_id ?? null,
+      submittedAt: plan.submitted_at ?? null,
+      submittedById: plan.submitted_by ?? null
     }] : [];
   });
   const legacyResult = await db().from("hr_roster_plans")
-    .select("id,name,location_id,period_start,period_end,status,roster_kind,effective_from,revision_no,stations!hr_roster_plans_location_id_fkey(station_code,station_name),hr_roster_entries(id)")
+    .select("id,name,location_id,period_start,period_end,status,roster_kind,effective_from,revision_no,supersedes_plan_id,submitted_at,submitted_by,stations!hr_roster_plans_location_id_fkey(station_code,station_name),hr_roster_entries(id)")
     .eq("company_id", account.companyId).in("approver_user_id", actorUserIds).eq("status", "pending_approval").order("submitted_at");
   if (legacyResult.error) throw new Error(legacyResult.error.message);
   const stagedPlanIds = new Set(rows.map((row) => row.planId));
-  return [...rows, ...(legacyResult.data ?? []).flatMap((plan) => {
+  const approvals: RosterApprovalRow[] = [...rows, ...(legacyResult.data ?? []).flatMap((plan) => {
     if (stagedPlanIds.has(plan.id)) return [];
     const station = one(plan.stations);
-    return [{ id: `legacy:${plan.id}`, planId: plan.id, stepId: null, stageType: "level_1", stageNumber: 1, name: plan.name, stationCode: station?.station_code ?? "—", stationName: station?.station_name ?? "", effectiveFrom: plan.effective_from ?? plan.period_start, periodEnd: plan.period_end, revision: plan.revision_no ?? 1, rowCount: plan.hr_roster_entries?.length ?? 0 }];
+    return [{ id: `legacy:${plan.id}`, planId: plan.id, stepId: null, stageType: "level_1", stageNumber: 1, name: plan.name, stationCode: station?.station_code ?? "—", stationName: station?.station_name ?? "", effectiveFrom: plan.effective_from ?? plan.period_start, periodEnd: plan.period_end, revision: plan.revision_no ?? 1, rowCount: plan.hr_roster_entries?.length ?? 0, baselinePlanId: plan.supersedes_plan_id ?? null, submittedAt: plan.submitted_at ?? null, submittedById: plan.submitted_by ?? null }];
   })];
+  const [previewed, journeySteps, submittersResult] = await Promise.all([
+    addRosterApprovalPreviews(account.companyId, approvals),
+    loadApprovalJourneySteps(account.companyId, approvals.map((approval) => approval.planId), {
+      table: "hr_roster_approval_steps", parentColumn: "plan_id", orderColumn: "stage_no", labelColumn: "stage_type",
+      actorColumns: ["decided_by", "approver_user_id"], actedAtColumn: "decided_at", noteColumn: "decision_note"
+    }),
+    (() => {
+      const ids = [...new Set(approvals.map((approval) => approval.submittedById).filter((id): id is string => Boolean(id)))];
+      return ids.length ? db().from("profiles").select("id,full_name,email").eq("company_id", account.companyId).in("id", ids) : Promise.resolve({ data: [], error: null });
+    })()
+  ]);
+  if (submittersResult.error) throw new Error(submittersResult.error.message);
+  const submitters = new Map((submittersResult.data ?? []).map((profile) => [profile.id, profile.full_name || profile.email || "Roster planner"]));
+  return previewed.map((approval) => ({
+    ...approval,
+    journey: approvalJourneySummary(
+      approval.submittedAt,
+      approval.submittedById ? submitters.get(approval.submittedById) ?? "Roster planner" : "Roster planner",
+      rosterApprovalStageName(approval.stageType),
+      journeySteps.get(approval.planId) ?? []
+    )
+  }));
 }
 
 export async function decideConnectRosterApproval(account: ConnectAccount, planIdValue: unknown, stepIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
@@ -493,7 +669,7 @@ export async function listConnectExitApprovals(account: ConnectAccount) {
   if (casesResult.error || allStepsResult.error) throw new Error(casesResult.error?.message ?? allStepsResult.error?.message ?? "Exit approvals could not be loaded.");
   const caseById = new Map((casesResult.data ?? []).map((item) => [item.id, item]));
   const allSteps = allStepsResult.data ?? [];
-  return candidates.flatMap((step) => {
+  const rows = candidates.flatMap((step) => {
     const exitCase = caseById.get(step.case_id);
     const blocked = allSteps.some((item) => item.case_id === step.case_id && item.is_required && item.step_order < step.step_order && item.status !== "approved");
     if (!exitCase || blocked || ["rejected", "closed", "cancelled", "withdrawn", "withdrawal_requested"].includes(exitCase.status)) return [];
@@ -513,6 +689,11 @@ export async function listConnectExitApprovals(account: ConnectAccount) {
       submittedAt: exitCase.submitted_at
     }];
   });
+  const journeys = await loadApprovalJourneySteps(account.companyId, rows.map((row) => row.caseId), {
+    table: "hr_exit_approvals", parentColumn: "case_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["acted_by", "assigned_user_id"], actedAtColumn: "acted_at", noteColumn: "comments"
+  });
+  return rows.map((row) => ({ ...row, journey: approvalJourneySummary(row.submittedAt, row.requesterName, row.stepName, journeys.get(row.caseId) ?? []) }));
 }
 
 export async function decideConnectExitApproval(account: ConnectAccount, approvalIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
@@ -589,7 +770,7 @@ export async function listConnectExitWithdrawalApprovals(account: ConnectAccount
         const reviewer = step.acted_by ?? step.assigned_user_id;
         if (reviewer) firstApprover.set(step.case_id, reviewer);
       }
-      return rows.flatMap((exitCase) => {
+      const approvals = rows.flatMap((exitCase) => {
         if (firstApprover.get(exitCase.id) !== actorUserId) return [];
         const employee = one(exitCase.employees);
         const contractor = one(exitCase.contractors);
@@ -605,10 +786,15 @@ export async function listConnectExitWithdrawalApprovals(account: ConnectAccount
           requestedAt: exitCase.submitted_at
         }];
       });
+      const journeys = await loadApprovalJourneySteps(account.companyId, approvals.map((row) => row.caseId), {
+        table: "hr_exit_approvals", parentColumn: "case_id", orderColumn: "step_order", labelColumn: "step_name",
+        actorColumns: ["acted_by", "assigned_user_id"], actedAtColumn: "acted_at", noteColumn: "comments"
+      });
+      return approvals.map((row) => ({ ...row, journey: approvalJourneySummary(row.requestedAt, row.requesterName, "Withdrawal review", journeys.get(row.caseId) ?? []) }));
     }
     throw new Error(casesResult.error.message);
   }
-  return (casesResult.data ?? []).map((exitCase) => {
+  const approvals = (casesResult.data ?? []).map((exitCase) => {
     const employee = one(exitCase.employees);
     const contractor = one(exitCase.contractors);
     return {
@@ -623,6 +809,11 @@ export async function listConnectExitWithdrawalApprovals(account: ConnectAccount
       requestedAt: exitCase.withdrawal_requested_at ?? exitCase.submitted_at
     };
   });
+  const journeys = await loadApprovalJourneySteps(account.companyId, approvals.map((row) => row.caseId), {
+    table: "hr_exit_approvals", parentColumn: "case_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["acted_by", "assigned_user_id"], actedAtColumn: "acted_at", noteColumn: "comments"
+  });
+  return approvals.map((row) => ({ ...row, journey: approvalJourneySummary(row.requestedAt, row.requesterName, "Withdrawal review", journeys.get(row.caseId) ?? []) }));
 }
 
 export async function decideConnectExitWithdrawal(account: ConnectAccount, caseIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
@@ -712,7 +903,7 @@ export async function listConnectRosterSwapApprovals(account: ConnectAccount, re
   const actorUserIds = await approverUserIds(account);
   if (!actorUserIds.length) return [];
   const result = await db().from("hr_roster_swap_requests")
-    .select("id,roster_date,status,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,requester_day_type,partner_day_type,requester_shift_id,partner_shift_id,requester_note,partner_note,requested_at")
+    .select("id,roster_date,status,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,requester_day_type,partner_day_type,requester_shift_id,partner_shift_id,requester_note,partner_note,requested_at,partner_decided_at,manager_decided_at")
     .eq("company_id", account.companyId)
     .in("approver_user_id", actorUserIds)
     .eq("status", "pending_manager")
@@ -747,7 +938,19 @@ export async function listConnectRosterSwapApprovals(account: ConnectAccount, re
       requesterShift,
       partnerShift,
       requesterNote: row.requester_note,
-      partnerNote: row.partner_note
+      partnerNote: row.partner_note,
+      journey: approvalJourneySummary(row.requested_at, requester.name, "Manager approval", [
+        {
+          id: `${row.id}:partner`, order: 1, label: "Partner confirmation",
+          status: row.partner_decided_at ? "approved" : "pending", actorName: partner.name,
+          actedAt: row.partner_decided_at, note: row.partner_note
+        },
+        {
+          id: `${row.id}:manager`, order: 2, label: "Manager approval",
+          status: row.manager_decided_at ? row.status : "pending", actorName: account.name ?? "Assigned manager",
+          actedAt: row.manager_decided_at, note: null
+        }
+      ])
     };
   }));
 }

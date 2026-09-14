@@ -8,6 +8,7 @@ import { decideConnectWfhApproval, decideConnectWfhHrApproval, listConnectWfhApp
 import { decideConnectBusinessTripApproval, decideConnectBusinessTripHrApproval, listConnectBusinessTripApprovals, listConnectBusinessTripHrApprovals } from "../../../../src/lib/connect-business-trip-data";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
+import { approvalJourneySummary, loadApprovalJourneySteps } from "../../../../src/lib/connect-approval-journey";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -43,14 +44,14 @@ async function listLeaveApprovals(account: ConnectAccount) {
   const steps = stepResult.data ?? [];
   if (!steps.length) return [];
   const requestResult = await db().from("hr_leave_requests")
-    .select("id,employee_id,contractor_id,start_date,end_date,days,reason,status,hr_leave_types(name,code),employees(full_name,employee_code),contractors(full_name,dropx_id)")
+    .select("id,employee_id,contractor_id,start_date,end_date,days,reason,status,requested_at,hr_leave_types(name,code),employees(full_name,employee_code),contractors(full_name,dropx_id)")
     .eq("company_id", account.companyId)
     .eq("status", "pending")
     .in("id", steps.map((step) => step.request_id));
   if (requestResult.error) throw new Error(requestResult.error.message);
   const stepByRequest = new Map(steps.map((step) => [step.request_id, step]));
   // Steps are assigned explicitly — do not hide them behind reportee-scope filters.
-  return (requestResult.data ?? []).flatMap((request) => {
+  const rows = (requestResult.data ?? []).flatMap((request) => {
     const step = stepByRequest.get(request.id);
     if (!step) return [];
     const employee = relation(request.employees);
@@ -68,9 +69,18 @@ async function listLeaveApprovals(account: ConnectAccount) {
       reason: request.reason,
       requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
       requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
-      profileType: request.contractor_id ? "contractor" as const : "employee" as const
+      profileType: request.contractor_id ? "contractor" as const : "employee" as const,
+      requestedAt: request.requested_at
     }];
   });
+  const journeys = await loadApprovalJourneySteps(account.companyId, rows.map((row) => row.requestId), {
+    table: "hr_leave_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["approver_user_id"], actedAtColumn: "decided_at", noteColumn: "decision_note"
+  });
+  return rows.map((row) => ({
+    ...row,
+    journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? [])
+  }));
 }
 
 export async function GET(request: Request) {
