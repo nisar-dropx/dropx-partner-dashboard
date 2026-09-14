@@ -24,6 +24,7 @@ import { normalizeConnectReporteeScope } from "../../../../src/lib/connect-repor
 import { mergeExpenseReceiptsToPdf } from "../../../../src/lib/merge-expense-receipts";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { approvalJourneySummary, loadApprovalJourneySteps } from "../../../../src/lib/connect-approval-journey";
+import type { ExpensePolicyQuote } from "../../../../src/lib/reimbursement-policy";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -50,7 +51,7 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>,
 async function approvalPayload(companyId: string, userIds: string[]) {
   if (!userIds.length) return [];
   const result = await db().from("hr_expense_approval_steps")
-    .select("id,claim_id,step_order,step_name,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
+    .select("id,claim_id,step_order,step_name,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
     .eq("company_id", companyId).in("approver_user_id", userIds).eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
   // Claim steps are assigned explicitly (RM / finance head). Do not require org-chart reportee scope —
@@ -122,7 +123,7 @@ async function claimPayload(account: ConnectAccount) {
     activeExpenseCategories(account),
     expensePayoutReadiness(account),
     db().from("hr_expense_claims")
-      .select("id,claim_no,claim_request_id,purpose,trip_from,trip_to,total_claimed,total_approved,status,current_step,submitted_at,created_at,return_reason,rejection_reason,payment_request_id,hr_expense_items(id,expense_date,merchant,description,amount,approved_amount,reviewer_note,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path),hr_expense_approval_steps(id,step_order,step_name,approver_user_id,status,decision_note,decided_by,decided_at),hr_expense_events(id,event_type,from_status,to_status,actor_name,actor_role,comments,metadata,created_at),payment_requests(request_no,status,approval_status,utr_cin,bank_status,bank_processing_remarks,processing_started_at,processed_at)")
+      .select("id,claim_no,claim_request_id,purpose,trip_from,trip_to,total_claimed,total_approved,status,current_step,submitted_at,created_at,return_reason,rejection_reason,payment_request_id,hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,approved_amount,reviewer_note,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path),hr_expense_approval_steps(id,step_order,step_name,approver_user_id,status,decision_note,decided_by,decided_at),hr_expense_events(id,event_type,from_status,to_status,actor_name,actor_role,comments,metadata,created_at),payment_requests(request_no,status,approval_status,utr_cin,bank_status,bank_processing_remarks,processing_started_at,processed_at)")
       .eq("company_id", account.companyId).eq(workerColumn, account.id).order("created_at", { ascending: false }).limit(50),
     db().from("hr_expense_claim_requests")
       .select("id,request_no,purpose,purpose_code,estimated_amount,trip_from,trip_to,notes,visit_station_ids,expected_expenses,status,decision_note,decided_at,consumed_claim_id,created_at,hr_expense_claim_request_assignees(id,assignee_role,approver_user_id,status,decision_note,decided_at)")
@@ -221,6 +222,20 @@ export async function GET(request: Request) {
 
 type InputItem = { id: string; categoryId: string; expenseDate: string; merchant: string; description: string; amount: number };
 
+async function quotePolicy(account: ConnectAccount, items: Pick<InputItem, "id" | "categoryId" | "expenseDate" | "amount">[], claimId?: string) {
+  const identity = await expenseIdentity(account);
+  if (claimId) {
+    const own = await db().from("hr_expense_claims").select("id").eq("company_id", account.companyId).eq("claimant_person_id", identity.personId).eq("id", claimId).maybeSingle();
+    if (own.error || !own.data) throw new Error("Your claim was not found.");
+  }
+  const result = await db().rpc("finance_quote_reimbursement", {
+    p_company: account.companyId, p_person: identity.personId, p_claim: claimId || null,
+    p_items: items.map(item => ({ id: item.id, category_id: item.categoryId, expense_date: item.expenseDate, amount: item.amount }))
+  });
+  if (result.error) throw new Error(result.error.message);
+  return (result.data ?? []) as ExpensePolicyQuote[];
+}
+
 async function submitPreRequest(form: FormData, account: ConnectAccount) {
   const purposeCode = clean(form.get("purposeCode"));
   const notes = clean(form.get("notes"));
@@ -236,6 +251,11 @@ async function submitPreRequest(form: FormData, account: ConnectAccount) {
     throw new Error("Select at least one visiting station or location.");
   }
   const expectedExpenses = normalizeExpectedExpenses(JSON.parse(clean(form.get("expectedExpenses")) || "{}"));
+  const allowedHeads = await activeExpenseCategories(account);
+  const legacyKeys = new Set(["travel", "stay", "local_conveyance", "food_da", "other"]);
+  if (Object.entries(expectedExpenses).some(([key, amount]) => amount > 0 && !legacyKeys.has(key) && !allowedHeads.some(head => head.id === key))) {
+    throw new Error("One of the reimbursement heads is no longer active. Refresh the form.");
+  }
   const breakdownTotal = sumExpectedExpenses(expectedExpenses);
 
   if (!isExpensePurposeCode(purposeCode)) throw new Error("Select a visit purpose.");
@@ -402,15 +422,18 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
     const total = items.reduce((sum, item) => sum + item.amount, 0);
     const approval = await resolveExpenseApprovers(account, total);
     const categories = await expenseCategoriesForPolicy(account, approval.policy.id);
+    const policyQuote = await quotePolicy(account, items, existingClaimId || undefined);
+    if (policyQuote.reduce((sum, line) => sum + Number(line.eligible_amount), 0) <= 0) throw new Error("The daily policy allowance is already used. No payable amount remains for this claim.");
+    const quoteById = new Map(policyQuote.map(line => [line.id, line]));
     const categoryById = new Map(categories.map((category) => [category.id, category]));
     const dailyTotals = new Map<string, number>();
     for (const item of items) {
       const category = categoryById.get(item.categoryId);
       if (!category) throw new Error("This expense category is not allowed by the matching reimbursement policy.");
-      if (category.per_item_limit != null && item.amount > Number(category.per_item_limit)) throw new Error(`${category.name} exceeds the configured per-item limit.`);
+      if (!quoteById.get(item.id)?.rule_id && category.per_item_limit != null && item.amount > Number(category.per_item_limit)) throw new Error(`${category.name} exceeds the configured per-item limit.`);
       const dayKey = `${item.categoryId}:${item.expenseDate}`;
       dailyTotals.set(dayKey, (dailyTotals.get(dayKey) ?? 0) + item.amount);
-      if (category.per_day_limit != null && Number(dailyTotals.get(dayKey)) > Number(category.per_day_limit)) throw new Error(`${category.name} exceeds the configured daily limit.`);
+      if (!quoteById.get(item.id)?.rule_id && category.per_day_limit != null && Number(dailyTotals.get(dayKey)) > Number(category.per_day_limit)) throw new Error(`${category.name} exceeds the configured daily limit.`);
       const receiptNeeded = category.receipt_required && item.amount >= Number(category.receipt_threshold ?? 0);
       if (receiptNeeded && !receiptFiles.length) throw new Error(`Receipt is required for ${category.name}.`);
     }
@@ -504,7 +527,11 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
     if (attachmentResult.error) throw new Error(attachmentResult.error.message);
     if (isResubmit && priorPaths.length) await db().storage.from("hr-expense-receipts").remove(priorPaths);
 
-    if (approval.directToPayment) {
+    // Database policy evaluation may append an excess-approval step, even for top-level claimants.
+    const pendingSteps = await db().from("hr_expense_approval_steps").select("approver_user_id,step_order")
+      .eq("company_id", account.companyId).eq("claim_id", claimId).eq("status", "pending").order("step_order");
+    if (pendingSteps.error) throw new Error(pendingSteps.error.message);
+    if (approval.directToPayment && !pendingSteps.data?.length) {
       const actorUserId = approval.identity.userId;
       if (!actorUserId) throw new Error("A linked People login is required to send this claim to Payments.");
       const paymentRpc = await db().rpc("hr_expense_claim_send_to_payment", {
@@ -520,7 +547,7 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
       });
     }
 
-    const firstApprover = approval.steps[0];
+    const firstApprover = pendingSteps.data?.[0];
     if (!firstApprover) throw new Error("No approval step is configured.");
     const notification = await notifyExpenseUser({
       companyId: account.companyId,
@@ -550,6 +577,11 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const account = await selectedAccount(request, { accountId: form.get("accountId"), profileType: form.get("profileType") });
     const kind = clean(form.get("kind")).toLowerCase() || "claim";
+    if (kind === "policy_quote") {
+      const items = JSON.parse(clean(form.get("items")) || "[]");
+      if (!Array.isArray(items) || items.length > 50) throw new Error("Invalid expense lines.");
+      return NextResponse.json({ quotes: await quotePolicy(account, items, clean(form.get("claimId")) || undefined) }, { headers: { "Cache-Control": "private, no-store" } });
+    }
     if (kind === "pre_request") return await submitPreRequest(form, account);
     return await submitClaim(form, account);
   } catch (error) {

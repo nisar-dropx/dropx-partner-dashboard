@@ -19,8 +19,8 @@ export const EXPECTED_EXPENSE_KEYS = [
   { key: "other", label: "Other" }
 ] as const;
 
-export type ExpectedExpenseKey = (typeof EXPECTED_EXPENSE_KEYS)[number]["key"];
-export type ExpectedExpenses = Record<ExpectedExpenseKey, number>;
+export type ExpectedExpenseKey = string;
+export type ExpectedExpenses = Record<string, number>;
 
 export function emptyExpectedExpenses(): ExpectedExpenses {
   return {
@@ -38,15 +38,16 @@ export function purposeLabel(code: string | null | undefined, fallback = "") {
 }
 
 export function sumExpectedExpenses(value: Partial<Record<string, number>> | null | undefined) {
-  return EXPECTED_EXPENSE_KEYS.reduce((sum, entry) => sum + (Number(value?.[entry.key]) || 0), 0);
+  return Object.values(value ?? {}).reduce<number>((sum, amount) => sum + (Number(amount) || 0), 0);
 }
 
 export function normalizeExpectedExpenses(value: unknown): ExpectedExpenses {
   const source = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  const next = emptyExpectedExpenses();
-  for (const entry of EXPECTED_EXPENSE_KEYS) {
-    const amount = Number(source[entry.key] ?? 0);
-    next[entry.key] = Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) / 100 : 0;
+  const next: ExpectedExpenses = {};
+  for (const [key, value] of Object.entries(source).slice(0, 100)) {
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(key)) continue;
+    const amount = Number(value);
+    next[key] = Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) / 100 : 0;
   }
   return next;
 }

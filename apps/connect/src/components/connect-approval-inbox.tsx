@@ -7,6 +7,7 @@ import { ConnectAttachmentViewer } from "./connect-attachment-viewer";
 import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
 import { userFacingError } from "@/lib/user-facing-error";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
+import { expensePolicyMessage, type ExpensePolicyQuote } from "@/lib/reimbursement-policy";
 
 type ApprovalJourney = {
   submittedAt: string | null;
@@ -29,6 +30,7 @@ type ExpenseItem = {
   id: string;
   expense_date: string;
   amount: number;
+  finance_policy_snapshot?: ExpensePolicyQuote | null;
   hr_expense_categories?: { name: string } | Array<{ name: string }> | null;
 };
 
@@ -1600,6 +1602,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                       <dt>{first(item.hr_expense_categories)?.name ?? "Expense"}</dt>
                       <dd>
                         {item.expense_date} · {money(item.amount)}
+                        {item.finance_policy_snapshot ? <small>{expensePolicyMessage(item.finance_policy_snapshot)}</small> : null}
                       </dd>
                     </div>
                   ))}
@@ -1617,7 +1620,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   ))}
                 </dl>
                 <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.claim.submitted_at} submittedBy={approval.claim.requesterName} currentStep={approval.step_name} />
-                <ApprovalNote id={approval.claim.id} notes={notes} onChange={(value) => setNote(approval.claim.id, value)} placeholder="Required when returning or rejecting" />
+                <ApprovalNote id={approval.claim.id} notes={notes} onChange={(value) => setNote(approval.claim.id, value)} placeholder={approval.step_name.includes("Policy excess") ? "Required: reason for approving this excess" : "Required when returning or rejecting"} />
                 <ApprovalToolbar
                   onApprove={() => void act(() => decideReimbursement(approval.claim.id, "approved"))}
                   onReject={() => void act(() => decideReimbursement(approval.claim.id, "rejected"))}

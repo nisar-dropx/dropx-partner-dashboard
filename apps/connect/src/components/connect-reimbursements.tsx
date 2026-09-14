@@ -14,6 +14,7 @@ import {
 } from "@/lib/expense-request-form";
 import type { AppAccount } from "./connect-profile-app";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
+import { expensePolicyMessage, type ExpensePolicyQuote } from "@/lib/reimbursement-policy";
 
 type Category = { id: string; code: string; name: string; description?: string | null; receipt_required: boolean; receipt_threshold: number; per_item_limit?: number | null; per_day_limit?: number | null };
 type Station = { id: string; code: string; name: string; region?: string | null; cluster?: string | null };
@@ -28,7 +29,7 @@ type PreRequest = {
 type Claim = {
   id: string; claim_no: string; claim_request_id?: string | null; purpose: string; trip_from?: string | null; trip_to?: string | null; total_claimed: number; total_approved?: number | null; status: string; return_reason?: string | null; rejection_reason?: string | null;
   submitted_at?: string | null; created_at?: string;
-  items: Array<{ id: string; expense_date: string; merchant?: string | null; description: string; amount: number; approved_amount?: number | null; hr_expense_categories?: { id: string; name: string; code: string } | Array<{ id: string; name: string; code: string }> | null }>;
+  items: Array<{ id: string; expense_date: string; merchant?: string | null; description: string; amount: number; approved_amount?: number | null; finance_policy_snapshot?: ExpensePolicyQuote | null; hr_expense_categories?: { id: string; name: string; code: string } | Array<{ id: string; name: string; code: string }> | null }>;
   steps: Array<{ id: string; step_order: number; step_name: string; status: string; approver_name?: string | null; decision_note?: string | null; decided_at?: string | null }>;
   events: Array<{ id: string; event_type: string; actor_name?: string | null; actor_role?: string | null; comments?: string | null; created_at: string; metadata?: Record<string, unknown> }>;
   attachments: Array<{ id: string; item_id?: string | null; file_name: string; content_type?: string | null; url?: string | null }>;
@@ -74,6 +75,9 @@ export function ConnectReimbursements({ account, active = true }: { account: App
   const [editingClaimId, setEditingClaimId] = useState<string | null>(null);
   const [withdrawTarget, setWithdrawTarget] = useState<{ kind: "pre_request" | "claim"; id: string } | null>(null);
   const [withdrawReason, setWithdrawReason] = useState("");
+  const [policyQuotes, setPolicyQuotes] = useState<ExpensePolicyQuote[]>([]);
+  const [policyLoading, setPolicyLoading] = useState(false);
+  const [policyError, setPolicyError] = useState("");
 
   const load = useCallback(async (background = false) => {
     if (!background) setLoading(true);
@@ -94,6 +98,30 @@ export function ConnectReimbursements({ account, active = true }: { account: App
   setReload(() => load(true));
 
   useEffect(() => { void load(); }, [load]);
+
+  const quoteInput = JSON.stringify(tab === "claims"
+    ? items.filter(item => item.categoryId && item.expenseDate).map(item => ({ id: item.id, categoryId: item.categoryId, expenseDate: item.expenseDate, amount: Number(item.amount) > 0 ? Number(item.amount) : 0.01 }))
+    : (data?.categories ?? []).map(head => ({ id: head.id, categoryId: head.id, expenseDate: tripFrom || todayInIndia(), amount: 0.01 })));
+  useEffect(() => {
+    const controller = new AbortController();
+    setPolicyQuotes([]); setPolicyError("");
+    if (quoteInput === "[]") { setPolicyLoading(false); return; }
+    setPolicyLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const form = new FormData();
+        form.set("kind", "policy_quote"); form.set("accountId", account.id); form.set("profileType", account.profileType);
+        form.set("items", quoteInput);
+        if (editingClaimId && tab === "claims") form.set("claimId", editingClaimId);
+        const response = await fetch("/api/connect/reimbursements", { method: "POST", body: form, signal: controller.signal });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Policy check unavailable.");
+        if (!controller.signal.aborted) setPolicyQuotes(payload.quotes ?? []);
+      } catch (error) { if (!controller.signal.aborted) setPolicyError(error instanceof Error ? error.message : "Policy check unavailable."); }
+      finally { if (!controller.signal.aborted) setPolicyLoading(false); }
+    }, 350);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [account.id, account.profileType, quoteInput, editingClaimId, tab]);
 
   const claimableRequests = useMemo(
     () => (data?.preRequests ?? []).filter((request) => request.status === "approved" && !request.consumed_claim_id),
@@ -398,7 +426,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
               <strong>{money(estimatedTotal)}</strong>
             </header>
             <div className="dx-expense-breakdown-grid">
-              {EXPECTED_EXPENSE_KEYS.map((entry) => (
+              {(data?.categories ?? []).map((head) => ({ key: head.id, label: head.name })).map((entry) => (
                 <label key={entry.key}>
                   {entry.label}
                   <input
@@ -410,9 +438,17 @@ export function ConnectReimbursements({ account, active = true }: { account: App
                     type="number"
                     value={amountInput(expectedExpenses[entry.key])}
                   />
+                  <small>{(() => {
+                    const rule = policyQuotes.find(line => line.id === entry.key);
+                    if (policyLoading) return "Checking Finance policy…";
+                    if (!rule) return "Policy check unavailable";
+                    return rule.limit_amount == null ? "Designation limit not configured" : `${money(rule.limit_amount)} ${rule.limit_basis === "per_day" ? "per day / hotel night" : "per item"} · ${rule.excess_action === "cap" ? "Maximum payment capped" : "Excess needs special approval"}`;
+                  })()}</small>
                 </label>
               ))}
             </div>
+            <p className="dx-expense-help">Heads and rates come from Finance. These are trip estimates; final limits are checked against each expense date and other claims when you submit receipts.</p>
+            {policyError ? <p role="alert" className="dx-alert warning">{policyError}</p> : null}
             <div className="dx-expense-total-row">
               <span>Total estimated amount</span>
               <b>{money(estimatedTotal)}</b>
@@ -452,7 +488,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
                 </div>
                 {request.expected_expenses ? (
                   <div className="dx-expense-mini-breakdown">
-                    {EXPECTED_EXPENSE_KEYS.filter((entry) => Number(request.expected_expenses?.[entry.key] ?? 0) > 0).map((entry) => (
+                    {Object.keys(request.expected_expenses).map(key => ({ key, label: data?.categories.find(head => head.id === key)?.name ?? EXPECTED_EXPENSE_KEYS.find(entry => entry.key === key)?.label ?? "Expense head (archived)" })).filter((entry) => Number(request.expected_expenses?.[entry.key] ?? 0) > 0).map((entry) => (
                       <span key={entry.key}><small>{entry.label}</small><b>{money(request.expected_expenses?.[entry.key])}</b></span>
                     ))}
                   </div>
@@ -518,7 +554,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
         </section>
         <section className="dx-expense-card">
           <header>
-            <div><h2>Expense lines</h2><p>Add every bill on this claim.</p></div>
+            <div><h2>Expense lines</h2><p>Add every bill. For multi-night hotel bills, enter one dated line per night.</p></div>
             <button className="dx-small-action" onClick={() => setItems((current) => [...current, newItem()])} type="button"><Plus /> Add line</button>
           </header>
           <div className="dx-expense-lines">{items.map((item, index) => {
@@ -537,8 +573,11 @@ export function ConnectReimbursements({ account, active = true }: { account: App
                 <label>Merchant<input maxLength={160} onChange={(event) => changeItem(item.id, { merchant: event.target.value })} placeholder="Vendor / hotel" value={item.merchant} /></label>
                 <label className="wide">Description<input maxLength={500} onChange={(event) => changeItem(item.id, { description: event.target.value })} placeholder="What was this expense for?" required value={item.description} /></label>
               </div>
+              {category ? <p role="status" className="dx-expense-help">{policyLoading ? "Checking Finance policy…" : policyQuotes.find(line => line.id === item.id) ? expensePolicyMessage(policyQuotes.find(line => line.id === item.id)!) : "Policy check unavailable. Submission will be checked by the server."}</p> : null}
             </article>;
           })}</div>
+          {policyError ? <p role="alert" className="dx-alert warning">{policyError}</p> : null}
+          {policyQuotes.some(line => line.excess_amount > 0) ? <p className="dx-alert warning">Bill total {money(total)} · Maximum payable {money(policyQuotes.reduce((sum,line)=>sum+Number(line.eligible_amount),0))}{policyQuotes.some(line => line.special_approver_user_id) ? " subject to special approval. Your full bill amount is retained." : ". The excess will not be reimbursed."}</p> : null}
         </section>
         <section className="dx-expense-card">
           <h2>Receipts</h2>
@@ -568,6 +607,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
               <span>
                 <strong>{first(item.hr_expense_categories)?.name ?? "Expense"}</strong>
                 <small>{item.expense_date} · {item.merchant || item.description}</small>
+                {item.finance_policy_snapshot ? <small>{expensePolicyMessage(item.finance_policy_snapshot)}</small> : null}
               </span>
               <b>{money(item.approved_amount ?? item.amount)}</b>
             </div>)}
