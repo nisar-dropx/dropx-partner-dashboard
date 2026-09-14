@@ -23,6 +23,10 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/cron/location-samples-retention",
+      "schedule": "15 6 * * *"
+    },
+    {
       "path": "/api/cron/ops-pulse-portal-checks",
       "schedule": "* * * * *"
     },
