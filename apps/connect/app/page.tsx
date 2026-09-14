@@ -1,4 +1,5 @@
 import { ConnectLoginFlow } from "@/components/connect-login-flow";
+import { Suspense } from "react";
 
 export const metadata = {
   title: {
@@ -10,7 +11,7 @@ export default function DropXConnectPage() {
   return (
     <main className="connect-page dx-web-page">
       <section className="connect-shell" aria-label="DropX One">
-        <ConnectLoginFlow />
+        <Suspense><ConnectLoginFlow /></Suspense>
       </section>
     </main>
   );
