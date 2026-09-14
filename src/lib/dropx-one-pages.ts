@@ -4,12 +4,12 @@ export const dropxOnePageOptions = [
   { value: "documents", label: "Documents" },
   { value: "approvals", label: "Approval Inbox" },
   { value: "advances", label: "Advances" },
+  { value: "earnings", label: "My Earnings" },
   { value: "reimbursements", label: "Reimbursements" },
   { value: "attendance", label: "Attendance" },
   { value: "roster", label: "Roster" },
   { value: "leave", label: "Leave" },
   { value: "wfh", label: "Work from home" },
-  { value: "business_trip", label: "Business trip" },
   { value: "performance", label: "Performance" },
   { value: "settings", label: "Settings" }
 ] as const;
