@@ -8,8 +8,8 @@ const POLL_MS = 60 * 1000;
 type CapacitorLike = {
   isNativePlatform?: () => boolean;
   getPlatform?: () => string;
-  registerPlugin?: (name: string) => DropxOnePlugin;
   Plugins?: {
+    DropxOne?: DropxOnePlugin;
     PushNotifications?: PushNotificationsPlugin;
     StatusBar?: {
       setOverlaysWebView?: (options: { overlay: boolean }) => Promise<void>;
@@ -52,13 +52,12 @@ function isNativeApp() {
 }
 
 function dropxOnePlugin(): DropxOnePlugin | null {
+  // Capacitor.registerPlugin is a build-time helper exported by the @capacitor/core
+  // npm package, not a method on the runtime window.Capacitor bridge object — calling
+  // it here always returned null, silently skipping every native call below. An
+  // already-registered native plugin is reachable at runtime via Capacitor.Plugins.
   const cap = capacitor();
-  if (!cap?.registerPlugin) return null;
-  try {
-    return cap.registerPlugin("DropxOne");
-  } catch {
-    return null;
-  }
+  return cap?.Plugins?.DropxOne ?? null;
 }
 
 function pushPlugin(): PushNotificationsPlugin | null {
