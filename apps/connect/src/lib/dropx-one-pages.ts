@@ -4,12 +4,12 @@ export const dropxOnePageCodes = [
   "documents",
   "approvals",
   "advances",
+  "earnings",
   "reimbursements",
   "attendance",
   "roster",
   "leave",
   "wfh",
-  "business_trip",
   "performance",
   "settings"
 ] as const;
