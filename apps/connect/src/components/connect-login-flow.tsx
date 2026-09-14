@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { usePathname, useRouter } from "next/navigation";
 import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, ClipboardList, CreditCard, Files, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
@@ -24,6 +25,16 @@ import { requiredDropxOnePageCodes, type DropxOnePageCode } from "@/lib/dropx-on
 import { userFacingError } from "@/lib/user-facing-error";
 
 type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "approvals" | "requests" | "payments" | "advances" | "earnings" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "performance" | "settings";
+const routeForStep: Partial<Record<Step, string>> = {
+  accounts: "/accounts", dashboard: "/dashboard", profile: "/profile", documents: "/documents",
+  approvals: "/approvals", requests: "/requests", advances: "/advances", earnings: "/earnings",
+  reimbursements: "/reimbursements", attendance: "/attendance", roster: "/roster", leave: "/leave",
+  wfh: "/leave/wfh", performance: "/performance", settings: "/settings"
+};
+function stepFromPath(pathname: string): Step | null {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  return (Object.entries(routeForStep).find(([, route]) => route === path)?.[0] as Step | undefined) ?? null;
+}
 type ConnectNotification = {
   id: string;
   title: string;
@@ -80,6 +91,8 @@ function Loader({ text }: { text: string }) {
 }
 
 export function ConnectLoginFlow() {
+  const router = useRouter();
+  const pathname = usePathname();
   const [step, setStep] = useState<Step>("mobile");
   const [checking, setChecking] = useState(true);
   const [countryCode, setCountryCode] = useState("91");
@@ -114,7 +127,7 @@ export function ConnectLoginFlow() {
     else localStorage.removeItem(defaultKeyName);
     const selected = serverDefault ?? (rows.length === 1 ? rows[0] : null);
     setAccounts(rows); setDefaultKey(saved); setAccount(selected); setAvatar(selected?.profilePhotoUrl || "");
-    setStep(selected ? landingPage(selected) : "accounts");
+    setStep(selected ? (stepFromPath(pathname) ?? landingPage(selected)) : "accounts");
   }
   useEffect(() => {
     fetch("/api/connect/auth/session").then((r) => r.json()).then((payload) => {
@@ -129,13 +142,6 @@ export function ConnectLoginFlow() {
       }
     }).finally(() => setChecking(false));
   }, []);
-  useEffect(() => {
-    const onPop = () => {
-      if (account && step !== landingPage(account)) setStep(landingPage(account));
-    };
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, [account, step]);
   useEffect(() => {
     setNotificationMenu(false);
     setNotifications([]);
@@ -410,7 +416,9 @@ export function ConnectLoginFlow() {
     finally { setPending(false); }
   }
   function choose(next: AppAccount) {
-    setAccount(next); setAvatar(next.profilePhotoUrl || ""); setDrawer(false); setStep(landingPage(next));
+    const destination = landingPage(next);
+    setAccount(next); setAvatar(next.profilePhotoUrl || ""); setDrawer(false); setStep(destination);
+    router.push(routeForStep[destination] ?? "/accounts");
   }
   function open(next: Step) {
     setDrawer(false); setProfileMenu(false);
@@ -418,37 +426,57 @@ export function ConnectLoginFlow() {
     if (next === "wfh") {
       if (!account || !showWfhInLeave(account)) return;
       setLeaveSection("wfh");
-      next = "leave";
     } else if (next === "leave") {
       setLeaveSection("leave");
     }
     if (!account) {
       setStep("accounts");
+      if (pathname !== "/accounts") router.replace("/accounts");
       return;
     }
     if (!active(account) && next !== "profile" && next !== "settings") {
       setStep("profile");
+      if (pathname !== "/profile") router.replace("/profile");
       return;
     }
-    if (next === "dashboard" && !allowed(account, "dashboard")) return;
-    if (next === "attendance" && !allowed(account, "attendance")) return;
-    if (next === "roster" && !allowed(account, "roster")) return;
-    if (next === "leave" && !showLeaveNav(account)) return;
-    if (next === "performance" && !allowed(account, "performance")) return;
-    if (next === "profile" && !allowed(account, "profile")) return;
-    if (next === "settings" && !allowed(account, "settings")) return;
-    if (next === "documents" && (!allowed(account, "documents") || !peopleSelfService(account))) return;
-    if (next === "requests" && !peopleSelfService(account)) return;
-    if (next === "approvals" && !canViewApprovals(account, hasReportees)) return;
-    if (next === "advances" && (!allowed(account, "advances") || !sharedSelfService(account))) return;
-    if (next === "earnings" && (!allowed(account, "earnings") || !isWorkforceWorkspace(account))) return;
-    if (next === "reimbursements" && (!allowed(account, "reimbursements") || !peopleSelfService(account))) return;
+    const permitted =
+      (next !== "dashboard" || allowed(account, "dashboard")) &&
+      (next !== "attendance" || allowed(account, "attendance")) &&
+      (next !== "roster" || allowed(account, "roster")) &&
+      (next !== "leave" || showLeaveNav(account)) &&
+      (next !== "wfh" || showWfhInLeave(account)) &&
+      (next !== "performance" || allowed(account, "performance")) &&
+      (next !== "profile" || allowed(account, "profile")) &&
+      (next !== "settings" || allowed(account, "settings")) &&
+      (next !== "documents" || (allowed(account, "documents") && peopleSelfService(account))) &&
+      (next !== "requests" || peopleSelfService(account)) &&
+      (next !== "approvals" || canViewApprovals(account, hasReportees)) &&
+      (next !== "advances" || (allowed(account, "advances") && sharedSelfService(account))) &&
+      (next !== "earnings" || (allowed(account, "earnings") && isWorkforceWorkspace(account))) &&
+      (next !== "reimbursements" || (allowed(account, "reimbursements") && peopleSelfService(account)));
+    if (!permitted) {
+      const destination = landingPage(account);
+      setStep(destination);
+      if (pathname !== routeForStep[destination]) router.replace(routeForStep[destination] ?? "/accounts");
+      return;
+    }
     if (next === "profile" && isManagerAccount(account)) {
       setStep("settings");
+      if (pathname !== "/settings") router.replace("/settings");
       return;
     }
     setStep(next);
+    const destination = routeForStep[next];
+    if (destination && pathname !== destination) router.push(destination);
   }
+
+  useEffect(() => {
+    const requested = stepFromPath(pathname);
+    if (account && requested) open(requested);
+  // URL changes must always be checked through open(), which applies the
+  // current designation/category master access before rendering a screen.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, account?.id, account?.profileType, hasReportees]);
 
   async function profileSubmitted() {
     const response = await fetch("/api/connect/auth/session", { cache: "no-store" });
@@ -459,7 +487,9 @@ export function ConnectLoginFlow() {
     setAccounts(rows);
     setAccount(refreshed);
     setAvatar(refreshed?.profilePhotoUrl || "");
-    setStep(refreshed ? landingPage(refreshed) : "accounts");
+    const destination = refreshed ? landingPage(refreshed) : "accounts";
+    setStep(destination);
+    router.replace(routeForStep[destination] ?? "/accounts");
   }
 
   const loggedIn = ["accounts","dashboard","profile","documents","approvals","requests","payments","advances","earnings","reimbursements","attendance","roster","leave","lop","wfh","performance","settings"].includes(step);
