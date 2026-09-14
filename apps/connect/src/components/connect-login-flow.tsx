@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, ClipboardList, CreditCard, Files, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
@@ -93,6 +93,8 @@ function Loader({ text }: { text: string }) {
 export function ConnectLoginFlow() {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const selectedAccountKey = searchParams.get("account") ?? "";
   const [step, setStep] = useState<Step>("mobile");
   const [checking, setChecking] = useState(true);
   const [countryCode, setCountryCode] = useState("91");
@@ -125,7 +127,9 @@ export function ConnectLoginFlow() {
     const saved = serverDefault ? accountKey(serverDefault) : "";
     if (saved) localStorage.setItem(defaultKeyName, saved);
     else localStorage.removeItem(defaultKeyName);
-    const selected = serverDefault ?? (rows.length === 1 ? rows[0] : null);
+    // A routed page carries the selected profile, so switching accounts never
+    // falls back to the default account on reload or direct navigation.
+    const selected = rows.find((row) => accountKey(row) === selectedAccountKey) ?? serverDefault ?? (rows.length === 1 ? rows[0] : null);
     setAccounts(rows); setDefaultKey(saved); setAccount(selected); setAvatar(selected?.profilePhotoUrl || "");
     setStep(selected ? (stepFromPath(pathname) ?? landingPage(selected)) : "accounts");
   }
@@ -142,6 +146,14 @@ export function ConnectLoginFlow() {
       }
     }).finally(() => setChecking(false));
   }, []);
+  useEffect(() => {
+    if (!selectedAccountKey || !accounts.length) return;
+    const requested = accounts.find((row) => accountKey(row) === selectedAccountKey);
+    if (requested && (!account || accountKey(account) !== accountKey(requested))) {
+      setAccount(requested);
+      setAvatar(requested.profilePhotoUrl || "");
+    }
+  }, [account, accounts, selectedAccountKey]);
   useEffect(() => {
     setNotificationMenu(false);
     setNotifications([]);
@@ -418,7 +430,11 @@ export function ConnectLoginFlow() {
   function choose(next: AppAccount) {
     const destination = landingPage(next);
     setAccount(next); setAvatar(next.profilePhotoUrl || ""); setDrawer(false); setStep(destination);
-    router.push(routeForStep[destination] ?? "/accounts");
+    router.push(urlFor(destination, next));
+  }
+  function urlFor(next: Step, targetAccount = account) {
+    const route = routeForStep[next] ?? "/accounts";
+    return targetAccount ? `${route}?account=${encodeURIComponent(accountKey(targetAccount))}` : route;
   }
   function open(next: Step) {
     setDrawer(false); setProfileMenu(false);
@@ -436,7 +452,7 @@ export function ConnectLoginFlow() {
     }
     if (!active(account) && next !== "profile" && next !== "settings") {
       setStep("profile");
-      if (pathname !== "/profile") router.replace("/profile");
+      if (pathname !== "/profile") router.replace(urlFor("profile"));
       return;
     }
     const permitted =
@@ -457,17 +473,17 @@ export function ConnectLoginFlow() {
     if (!permitted) {
       const destination = landingPage(account);
       setStep(destination);
-      if (pathname !== routeForStep[destination]) router.replace(routeForStep[destination] ?? "/accounts");
+      if (pathname !== routeForStep[destination]) router.replace(urlFor(destination));
       return;
     }
     if (next === "profile" && isManagerAccount(account)) {
       setStep("settings");
-      if (pathname !== "/settings") router.replace("/settings");
+      if (pathname !== "/settings") router.replace(urlFor("settings"));
       return;
     }
     setStep(next);
     const destination = routeForStep[next];
-    if (destination && pathname !== destination) router.push(destination);
+    if (destination && pathname !== destination) router.push(urlFor(next));
   }
 
   useEffect(() => {
@@ -489,7 +505,7 @@ export function ConnectLoginFlow() {
     setAvatar(refreshed?.profilePhotoUrl || "");
     const destination = refreshed ? landingPage(refreshed) : "accounts";
     setStep(destination);
-    router.replace(routeForStep[destination] ?? "/accounts");
+    router.replace(urlFor(destination, refreshed));
   }
 
   const loggedIn = ["accounts","dashboard","profile","documents","approvals","requests","payments","advances","earnings","reimbursements","attendance","roster","leave","lop","wfh","performance","settings"].includes(step);
