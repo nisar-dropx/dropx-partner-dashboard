@@ -7,6 +7,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { isFinanceHostName } from "@/lib/finance/surface";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { ReimbursementMaster, type MasterRow } from "./reimbursement-master";
+import { PolicyDocument } from "./policy-document";
 import "./reimbursements.css";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +25,11 @@ export default async function ReimbursementsPage() {
   const queries = [
     ["heads", "hr_expense_categories", "*"],
     ["limits", "finance_reimbursement_limits", "*"],
+    [
+      "documents",
+      "finance_reimbursement_documents",
+      "id,title,version_label,effective_from,is_current,uploaded_at",
+    ],
     ["designations", "designations", "id,code,name,is_active"],
     ["approvers", "profiles", "id,full_name,is_active"],
     [
@@ -64,6 +70,13 @@ export default async function ReimbursementsPage() {
         eyebrow="Finance · Master"
         title="Reimbursement heads & limits"
         subtitle="One source for DropX One requests, claims and policy exceptions. People supplies the employee designation; Finance controls the expense rules."
+      />
+      <PolicyDocument
+        documents={data.documents ?? []}
+        canAdd={writable && hasPermission(auth, "master_payment_heads", "add")}
+        canEdit={
+          writable && hasPermission(auth, "master_payment_heads", "edit")
+        }
       />
       <ReimbursementMaster
         data={data}

@@ -199,7 +199,9 @@ export function ReimbursementMaster({
                         <small>
                           {row.limit_basis === "per_day"
                             ? "per day / night"
-                            : "per expense item"}
+                            : row.limit_basis === "per_km"
+                              ? "per kilometre"
+                              : "per expense item"}
                         </small>
                       </td>
                       <td>
@@ -454,7 +456,19 @@ export function ReimbursementMaster({
                         Day / hotel night (expense date)
                       </option>
                       <option value="per_item">Expense item</option>
+                      <option value="per_km">
+                        Kilometre (distance required)
+                      </option>
                     </select>
+                  </label>
+                  <label className="wide">
+                    Policy conditions / source note
+                    <textarea
+                      name="policy_note"
+                      maxLength={1000}
+                      defaultValue={String(editor.row?.policy_note ?? "")}
+                      rows={2}
+                    />
                   </label>
                   <label>
                     When amount exceeds limit

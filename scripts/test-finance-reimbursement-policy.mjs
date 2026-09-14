@@ -6,12 +6,15 @@ import { PGlite } from '@electric-sql/pglite';
 const db = new PGlite();
 await db.exec(`
 create role anon; create role authenticated; create role service_role bypassrls;
+create schema storage;
+create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
+create table storage.objects(bucket_id text,name text);
 create table companies(id uuid primary key);
 create table profiles(id uuid primary key, company_id uuid, full_name text, is_active boolean);
 create table designations(id uuid primary key,company_id uuid,is_active boolean);
 create table hr_expense_categories(id uuid primary key default gen_random_uuid(),company_id uuid,code text,name text,description text,receipt_required boolean,receipt_threshold numeric,per_item_limit numeric,per_day_limit numeric,is_active boolean default true,created_by uuid,updated_by uuid,updated_at timestamptz default now());
 create table hr_expense_policies(id uuid primary key,company_id uuid,payment_head_id uuid,updated_by uuid,updated_at timestamptz default now());
-create table hr_expense_items(id uuid primary key,company_id uuid,claim_id uuid,category_id uuid,expense_date date,amount numeric,approved_amount numeric,sort_order int);
+create table hr_expense_items(id uuid primary key,company_id uuid,claim_id uuid,category_id uuid,expense_date date,amount numeric,approved_amount numeric,sort_order int,merchant text,description text);
 create table hr_expense_claims(id uuid primary key,company_id uuid,claimant_person_id uuid,claimant_user_id uuid,total_claimed numeric,total_approved numeric,status text,current_step int,payment_request_id uuid);
 create table hr_expense_approval_steps(id uuid primary key default gen_random_uuid(),company_id uuid,claim_id uuid,step_order int,step_name text,approver_user_id uuid,status text,decision_note text);
 create table hr_expense_events(id uuid primary key default gen_random_uuid(),company_id uuid,claim_id uuid,event_type text,metadata jsonb);
@@ -22,6 +25,10 @@ create table payment_heads(id uuid primary key,company_id uuid,is_active boolean
 create table payment_requests(id uuid primary key default gen_random_uuid(),company_id uuid,source_id uuid,source_type text,amount numeric,amount_requested numeric,details jsonb);
 `);
 await db.exec(readFileSync(new URL('../supabase/migrations/20260914162411_finance_reimbursement_limits.sql', import.meta.url), 'utf8'));
+// Both original submission-format variants must preserve mileage quantity after migration.
+await db.exec(`create function hr_submit_expense_claim(p_items jsonb) returns void language plpgsql as $$ declare v_item jsonb; begin for v_item in select * from jsonb_array_elements(p_items) loop insert into hr_expense_items(id,description, amount, sort_order) values ((v_item->>'id')::uuid,'fixture',(v_item->>'amount')::numeric,1); end loop; end $$;
+create function hr_resubmit_expense_claim(p_items jsonb) returns void language plpgsql as $$ declare v_item jsonb; begin for v_item in select * from jsonb_array_elements(p_items) loop insert into hr_expense_items(id,description,amount,sort_order) values ((v_item->>'id')::uuid,'fixture',(v_item->>'amount')::numeric,1); end loop; end $$;`);
+await db.exec(readFileSync(new URL('../supabase/migrations/20260914165600_finance_reimbursement_policy_documents.sql', import.meta.url), 'utf8'));
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const company=id(1), actor=id(2), person=id(3), designation=id(4), head=id(5), engagement=id(6), approver=id(7);
 await db.query(`insert into companies values ($1),($2)`,[company,id(100)]);
@@ -50,7 +57,7 @@ async function claim(n,items,withManager=false) {
   await db.exec('begin');
   try {
     await db.query(`insert into hr_expense_claims(id,company_id,claimant_person_id,claimant_user_id,total_claimed,status) values($1,$2,$3,$4,$5,'pending_approval')`,[claimId,company,person,actor,items.reduce((s,i)=>s+i.amount,0)]);
-    for (const [index,i] of items.entries()) await db.query('insert into hr_expense_items(id,company_id,claim_id,category_id,expense_date,amount,sort_order) values($1,$2,$3,$4,$5,$6,$7)',[i.id,company,claimId,i.category_id,i.expense_date,i.amount,index]);
+    for (const [index,i] of items.entries()) await db.query('insert into hr_expense_items(id,company_id,claim_id,category_id,expense_date,amount,sort_order,quantity) values($1,$2,$3,$4,$5,$6,$7,$8)',[i.id,company,claimId,i.category_id,i.expense_date,i.amount,index,i.quantity??null]);
     if(withManager) await db.query(`insert into hr_expense_approval_steps(company_id,claim_id,step_order,step_name,approver_user_id,status) values($1,$2,1,'Manager',$3,'pending')`,[company,claimId,approver]);
     await db.query(`insert into hr_expense_events(company_id,claim_id,event_type) values($1,$2,'submitted')`,[company,claimId]);
     await db.exec('commit'); return claimId;
@@ -97,6 +104,29 @@ assert.equal((await quote([item(63,1200,'2026-08-31')]))[0].limit_amount,null,'f
 const inactiveHead=await save({code:'PARKING',name:'Parking',receipt_required:false,receipt_threshold:0,is_active:false},'head');
 assert.equal((await db.query('select is_active from hr_expense_categories where id=$1',[inactiveHead])).rows[0].is_active,false);
 await assert.rejects(quote([{...item(64,100),category_id:inactiveHead}]),/inactive/);
+await save({...rule,limit_basis:'per_km',permissible_amount:3.25,effective_from:'2026-09-21',policy_note:'Fixture mileage rate'});
+q=await quote([{...item(65,500,'2026-09-21'),quantity:100.5}]);
+assert.equal(q[0].eligible_amount,326.63); assert.equal(q[0].policy_note,'Fixture mileage rate');
+assert.equal((await quote([item(66,500,'2026-09-21')]))[0].quantity_required,true);
+await assert.rejects(claim(67,[item(68,500,'2026-09-21')]),/distance/);
+await assert.rejects(quote([{...item(69,500,'2026-09-21'),quantity:-1}]),/distance/);
+const mileageClaim=await claim(70,[{...item(71,500,'2026-09-21'),quantity:100.5}]);
+assert.equal(Number((await db.query('select finance_policy_snapshot from hr_expense_items where claim_id=$1',[mileageClaim])).rows[0].finance_policy_snapshot.eligible_amount),326.63);
+for(const [rpc,n] of [['hr_submit_expense_claim',72],['hr_resubmit_expense_claim',73]]) {
+ await db.query(`select ${rpc}($1)`,[JSON.stringify([{id:id(n),amount:120,quantity:40}])]);
+ assert.equal(Number((await db.query('select quantity from hr_expense_items where id=$1',[id(n)])).rows[0].quantity),40);
+}
+const doc={id:id(80),title:'Fixture travel policy',version_label:'1',effective_from:'2026-01-01',file_name:'policy.pdf',storage_path:`${company}/${id(80)}.pdf`,file_size:100,sha256:'a'.repeat(64)};
+async function publish(d,expected=null){return db.query('select finance_publish_reimbursement_document($1,$2,$3,$4)',[company,actor,expected,JSON.stringify(d)]);}
+await assert.rejects(publish(doc),/not found/);
+await db.query('insert into storage.objects values($1,$2)',['finance-reimbursement-policies',doc.storage_path]);
+await publish(doc); await publish(doc);
+const doc2={...doc,id:id(81),version_label:'2',storage_path:`${company}/${id(81)}.pdf`};
+await db.query('insert into storage.objects values($1,$2)',['finance-reimbursement-policies',doc2.storage_path]);
+await assert.rejects(publish(doc2),/changed/);
+await publish(doc2,doc.id);
+assert.equal((await db.query('select id from finance_reimbursement_documents where is_current')).rows[0].id,doc2.id);
+assert.equal((await db.query('select count(*)::int as n from finance_reimbursement_documents')).rows[0].n,2);
 await db.exec('set role anon');
 await assert.rejects(db.query('select * from finance_reimbursement_limits'),/permission denied/);
 await assert.rejects(db.query('select finance_quote_reimbursement($1,$2,$3)',[company,person,'[]']),/permission denied/);
