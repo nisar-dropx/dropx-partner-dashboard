@@ -23,7 +23,14 @@ export const LOCATION_TRACKING_MS = 9 * 60 * 60 * 1000;
 export const SHIFT_REMINDER_MS = [9.5 * 60 * 60 * 1000, 10 * 60 * 60 * 1000] as const;
 /** Biometric punch must match a phone GPS sample within this lookback. */
 export const BIOMETRIC_SAMPLE_WINDOW_MS = 20 * 60 * 1000;
-export const HEARTBEAT_MIN_INTERVAL_MS = 2 * 60 * 1000;
+// This is the compliance heartbeat's floor — it exists to catch "left the site for too long,"
+// not to animate a live map (see /api/connect/attendance/live-position for that, which is
+// cheap enough to call every ~30s instead). Raised from 2min to 10min: at scale (1000+
+// workers over a 9h shift) the old 2min floor meant ~270 of these expensive, history-scanning
+// calls per worker per day; 10min cuts that to ~54 without weakening the actual fraud check,
+// since a worker being outside their station gets flagged (OUTSIDE_CONTINUOUS_MS = 30min
+// continuous) well before this coarser sampling could miss it.
+export const HEARTBEAT_MIN_INTERVAL_MS = 10 * 60 * 1000;
 
 export type GeofenceStatus = "inside" | "outside" | "unknown";
 

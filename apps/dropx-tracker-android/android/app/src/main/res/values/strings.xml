@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">DropX One</string>
+    <string name="title_activity_main">DropX One</string>
+    <string name="package_name">com.dropxlogistics.onetracker</string>
+    <string name="custom_url_scheme">com.dropxlogistics.onetracker</string>
+</resources>
