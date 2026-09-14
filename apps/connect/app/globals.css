@@ -14738,11 +14738,7 @@ html.native-app .dx-app-install {
   }
 
   .dx-mobile-nav {
-    right: 7px;
-    bottom: calc(7px + env(safe-area-inset-bottom));
-    left: 7px;
     min-height: 63px;
-    border-radius: 20px;
   }
 
   .dx-mobile-nav button {
