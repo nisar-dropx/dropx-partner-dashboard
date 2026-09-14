@@ -122,6 +122,13 @@ export function ConnectLoginFlow() {
   const [hasReportees, setHasReportees] = useState(false);
   const lastLoggedScreen = useRef("");
 
+  // A scroll position left over from one screen (e.g. a focused input's scrollIntoView
+  // during login) can otherwise carry into the next screen and render content under the
+  // sticky header. Cheap and safe regardless of how panels for each step actually render.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [step]);
+
   function route(rows: AppAccount[]) {
     const serverDefault = rows.find((row) => row.isDefault);
     const saved = serverDefault ? accountKey(serverDefault) : "";

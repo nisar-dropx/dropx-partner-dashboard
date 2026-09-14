@@ -469,7 +469,17 @@ a {
 }
 
 html.native-app {
-  --dx-safe-top: max(env(safe-area-inset-top), 28px);
+  /* The wrapping native app (see apps/dropx-tracker-android) keeps the WebView below the
+     real status bar AND above the real navigation bar (not edge-to-edge on either side) and
+     lets Android reserve that space itself — always the correct height on every device, no
+     guessing needed here. So neither the header nor the bottom nav need any extra padding
+     of their own for this; they should render exactly as they do on a plain browser.
+     NOTE: this block was silently reverted once already by an unrelated merge (a feature
+     branch built on a stale copy of this file overwrote this whole region without a git
+     conflict). If this comment is gone again, that's what happened — check `git log -S
+     "dx-safe-top: 0px" -- apps/connect/app/globals.css` to find the culprit commit. */
+  --dx-safe-top: 0px;
+  --dx-safe-bottom: 0px;
 }
 
 html.native-app .dx-header {
@@ -495,8 +505,30 @@ html.native-app .dx-auth {
   padding-top: max(42px, calc(var(--dx-safe-top) + 32px)) !important;
 }
 
-html.native-app .dx-mobile-nav {
-  padding-bottom: max(10px, env(safe-area-inset-bottom));
+/* .dx-mobile-nav's own padding-bottom (base rule) already reads --dx-safe-bottom, which is
+   0px for html.native-app (see above) and env(safe-area-inset-bottom) everywhere else —
+   nothing further needed here. */
+
+/* Off-white notification panel — matches the app's own warm cream surfaces used elsewhere
+   (.dx-web-page's #fbf8f3 background) instead of the stark white the base rule used. Only
+   color/background/border-color are overridden here; position, size and structure stay
+   exactly as they are in the base .dx-notification-pop rule. */
+.dx-notification-pop {
+  background: #fbf8f3;
+  border-color: #e6e1da;
+}
+
+.dx-notification-pop > header {
+  border-bottom-color: #eeeae4;
+}
+
+.dx-notification-list > button {
+  background: #fbf8f3;
+  border-bottom-color: #f0ece7;
+}
+
+.dx-notification-list > button.unread {
+  background: #f5ecd9;
 }
 
 .deletion-page {
@@ -13327,20 +13359,21 @@ html.native-app .dx-app-install {
 .dx-mobile-nav {
   position: fixed;
   z-index: 55;
-  right: 12px;
-  bottom: calc(10px + env(safe-area-inset-bottom));
-  left: 12px;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   align-items: stretch;
   justify-content: space-between;
-  min-height: 66px;
-  padding: 7px;
+  min-height: 58px;
+  padding: 8px 6px calc(12px + var(--dx-safe-bottom, env(safe-area-inset-bottom)));
   gap: 2px;
-  border: 1px solid rgba(255, 255, 255, .92);
-  border-radius: 22px;
-  background: rgba(250, 251, 255, .9);
-  box-shadow: 0 18px 48px rgba(20, 27, 52, .19), inset 0 1px 0 #fff;
-  backdrop-filter: blur(25px) saturate(180%);
+  border: 0;
+  border-top: 1px solid #e8e4df;
+  border-radius: 0;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 -10px 26px rgba(20, 27, 52, .08);
+  backdrop-filter: blur(20px) saturate(180%);
 }
 
 .dx-mobile-nav button {
@@ -14817,11 +14850,7 @@ html.native-app .dx-app-install {
   }
 
   .dx-mobile-nav {
-    right: 7px;
-    bottom: calc(7px + env(safe-area-inset-bottom));
-    left: 7px;
     min-height: 63px;
-    border-radius: 20px;
   }
 
   .dx-mobile-nav button {
