@@ -18597,3 +18597,10 @@ img.dx-selfie-live {
   .dx-case-hero .dx-case-status { justify-self: start; }
   .dx-evidence-picker { align-items: flex-start; flex-direction: column; }
 }
+.dx-time-off-attachment { display:grid; gap:.55rem; min-width:0; padding:.8rem; border:1px solid #e4e7ec; border-radius:12px; }
+.dx-time-off-attachment label { min-width:0; }
+.dx-time-off-attachment label span,.dx-time-off-attachment small { color:#667085; font-size:.8rem; }
+.dx-time-off-attachment input { max-width:100%; min-width:0; box-sizing:border-box; }
+.dx-time-off-attachment > div { display:flex; flex-wrap:wrap; gap:.6rem; align-items:center; }
+.dx-time-off-attachment > div > span { overflow-wrap:anywhere; }
+.dx-time-off-attachment button { border:0; background:transparent; text-decoration:underline; color:#b54708; cursor:pointer; min-height:36px; }

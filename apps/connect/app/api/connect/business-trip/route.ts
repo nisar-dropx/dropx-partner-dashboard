@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readTimeOffRequest, withTimeOffAttachment } from "@/lib/connect-time-off-attachments";
 import { userFacingError } from "@/lib/user-facing-error";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import {
@@ -39,16 +40,18 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as Record<string, unknown>;
+    const {body,file} = await readTimeOffRequest(request);
     const { account, workerType: type } = await accountFromRequest(new URL(request.url), body);
-    const result = await createConnectBusinessTripRequest({
+    const result = await withTimeOffAttachment(account.companyId, "business-trip", file, (requestId,attachment)=>createConnectBusinessTripRequest({
+      requestId,
+      attachment,
       companyId: account.companyId,
       workerId: account.id,
       workerType: type,
       fromDate: clean(body.fromDate),
       toDate: clean(body.toDate),
       reason: clean(body.reason)
-    });
+    }));
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to submit business trip.") }, { status: 400 });

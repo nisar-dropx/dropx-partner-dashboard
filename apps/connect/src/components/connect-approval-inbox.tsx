@@ -4,6 +4,7 @@ import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectAttachmentViewer } from "./connect-attachment-viewer";
+import { TimeOffAttachmentLink, type TimeOffAttachment } from "./time-off-attachment";
 import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
 import { userFacingError } from "@/lib/user-facing-error";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
@@ -90,6 +91,7 @@ type LeaveApproval = {
 };
 
 type WfhApproval = {
+  attachment?: TimeOffAttachment | null;
   id: string;
   requestId: string;
   requestNo: string;
@@ -1184,6 +1186,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   {queue === "hr" && approval.managerName ? <div><dt>Manager</dt><dd>{approval.managerName}{approval.managerNote ? ` · ${approval.managerNote}` : ""}</dd></div> : null}
                 </dl>
                 <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.requestedAt} submittedBy={approval.requesterName} currentStep={approval.stepName} />
+                <TimeOffAttachmentLink attachment={approval.attachment} />
                 <ApprovalNote id={`wfh:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`wfh:${approval.requestId}`, value)} placeholder="Note for worker (required when returning)" />
                 {queue === "hr" ? (
                   <ApprovalToolbar
@@ -1269,6 +1272,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                   {queue === "hr" && approval.managerName ? <div><dt>Manager</dt><dd>{approval.managerName}{approval.managerNote ? ` · ${approval.managerNote}` : ""}</dd></div> : null}
                 </dl>
                 <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.requestedAt} submittedBy={approval.requesterName} currentStep={approval.stepName} />
+                <TimeOffAttachmentLink attachment={approval.attachment} />
                 <ApprovalNote id={`business-trip:${approval.requestId}`} notes={notes} onChange={(value) => setNote(`business-trip:${approval.requestId}`, value)} placeholder="Note for worker (required when returning)" />
                 {queue === "hr" ? (
                   <ApprovalToolbar

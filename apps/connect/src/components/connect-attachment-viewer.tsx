@@ -3,7 +3,7 @@
 import { Download, ExternalLink, X } from "lucide-react";
 import { useEffect, useState, useTransition, type ReactNode } from "react";
 
-export type ConnectAttachmentFile = { label: string; url: string; fileName?: string };
+export type ConnectAttachmentFile = { label: string; url: string; fileName?: string; mimeType?: string };
 
 function fileNameFromUrl(url: string, fallback: string) {
   try {
@@ -94,7 +94,7 @@ export function ConnectAttachmentViewer({
               ) : null}
               <div className="dx-attachment-preview">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img alt={current.label} src={current.url} />
+                {current.mimeType==="application/pdf" ? <iframe title={current.label} src={current.url} style={{width:"100%",height:"min(65vh,700px)",border:0}} /> : <img alt={current.label} src={current.url} />}
               </div>
             </div>
             <div className="dx-attachment-modal-foot">

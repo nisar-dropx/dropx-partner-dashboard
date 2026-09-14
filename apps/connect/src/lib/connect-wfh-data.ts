@@ -1,4 +1,5 @@
 import "server-only";
+import { loadTimeOffAttachments, type TimeOffAttachmentFields } from "./connect-time-off-attachments";
 
 import { isManagingPartnerDesignation, isWfhHardBlockedDesignation } from "./approval-designation-labels";
 import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
@@ -126,6 +127,7 @@ export async function listConnectWfhRequests(companyId: string, workerId: string
     .order("requested_at", { ascending: false })
     .limit(50);
   if (result.error) throw new Error(result.error.message);
+  const attachments=await loadTimeOffAttachments(companyId,"wfh",(result.data??[]).map(row=>row.id));
   return {
     policy: {
       enabled: access.policy.is_enabled,
@@ -134,6 +136,7 @@ export async function listConnectWfhRequests(companyId: string, workerId: string
       requiresHrFinalization: access.policy.requires_hr_finalization
     },
     requests: (result.data ?? []).map((request) => ({
+      attachment: attachments.get(request.id) ?? null,
       id: request.id,
       requestNo: request.request_no,
       fromDate: request.start_date,
@@ -156,6 +159,8 @@ export async function listConnectWfhRequests(companyId: string, workerId: string
 }
 
 export async function createConnectWfhRequest(input: {
+  requestId: string;
+  attachment?: TimeOffAttachmentFields;
   companyId: string;
   workerId: string;
   workerType: WfhWorkerType;
@@ -241,6 +246,8 @@ export async function createConnectWfhRequest(input: {
   const first = steps[0] ?? null;
   const status = first ? "pending_manager" : "pending_hr";
   const insertResult = await db().from("hr_wfh_requests").insert({
+    id: input.requestId,
+    ...input.attachment,
     company_id: input.companyId,
     request_no: requestNo,
     profile_type: input.workerType,
@@ -394,7 +401,8 @@ export async function listConnectWfhApprovals(input: {
     table: "hr_wfh_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
     actorColumns: ["approver_user_id"], actorNameColumn: "approver_name", actedAtColumn: "decided_at", noteColumn: "decision_note"
   });
-  return rows.map((row) => ({ ...row, journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? []) }));
+  const attachments=await loadTimeOffAttachments(input.companyId,"wfh",rows.map(row=>row.requestId));
+  return rows.map((row) => ({ ...row, attachment: attachments.get(row.requestId) ?? null, journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? []) }));
 }
 
 export async function decideConnectWfhApproval(input: {
@@ -503,7 +511,8 @@ export async function listConnectWfhHrApprovals(
     table: "hr_wfh_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
     actorColumns: ["approver_user_id"], actorNameColumn: "approver_name", actedAtColumn: "decided_at", noteColumn: "decision_note"
   });
-  return rows.map((row) => ({ ...row, journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? []) }));
+  const attachments=await loadTimeOffAttachments(account.companyId,"wfh",rows.map(row=>row.requestId));
+  return rows.map((row) => ({ ...row, attachment: attachments.get(row.requestId) ?? null, journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? []) }));
 }
 
 export async function decideConnectWfhHrApproval(input: {

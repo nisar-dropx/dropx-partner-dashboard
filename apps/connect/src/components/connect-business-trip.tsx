@@ -3,6 +3,7 @@
 import { CalendarDays, Clock3, MapPinned, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { AppAccount } from "./connect-profile-app";
+import { OptionalTimeOffAttachment, TimeOffAttachmentLink, type TimeOffAttachment } from "./time-off-attachment";
 
 type BusinessTripTab = "request" | "history";
 type BusinessTripRequest = {
@@ -17,6 +18,7 @@ type BusinessTripRequest = {
   managerNote?: string | null;
   hrNote?: string | null;
   hrReviewerName?: string | null;
+  attachment?: TimeOffAttachment | null;
 };
 type BusinessTripData = {
   policy: { enabled: boolean; maxRequestDays: number; allowBackdated: boolean; requiresHrFinalization: boolean };
@@ -59,6 +61,7 @@ export function ConnectBusinessTrip({
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [reason, setReason] = useState("");
+  const [attachment,setAttachment] = useState<File|null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -68,6 +71,7 @@ export function ConnectBusinessTrip({
     setFromDate("");
     setToDate("");
     setReason("");
+    setAttachment(null);
   }, []);
 
   const loadBusinessTrip = useCallback(async () => {
@@ -103,16 +107,12 @@ export function ConnectBusinessTrip({
     setError("");
     setNotice("");
     try {
+      const form = new FormData();
+      Object.entries({accountId:account.id,profileType:account.profileType,fromDate,toDate,reason}).forEach(([key,value])=>form.set(key,value));
+      if(attachment) form.set("attachment",attachment);
       const response = await fetch("/api/connect/business-trip", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: account.id,
-          profileType: account.profileType,
-          fromDate,
-          toDate,
-          reason
-        })
+        body: form
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to submit business trip.");
@@ -186,6 +186,7 @@ export function ConnectBusinessTrip({
           </div>
           <label>Reason<textarea onChange={(event) => setReason(event.target.value)} placeholder="Why do you need a business trip?" rows={3} value={reason} /></label>
           <p className="dx-wfh-date-hint">Peer approvals are skipped. Your reporting manager reviews first; if none, it goes to HR.</p>
+          <OptionalTimeOffAttachment value={attachment} onChange={setAttachment} disabled={submitting} />
           <div className="dx-leave-actions">
             <button className="dx-save" disabled={submitting || !fromDate || !toDate || reason.trim().length < 3 || requestedDays > maxDays} type="submit">
               {submitting ? "Saving…" : "Submit request"}
@@ -202,6 +203,7 @@ export function ConnectBusinessTrip({
               </header>
               <p><CalendarDays />{displayDate(request.fromDate)} – {displayDate(request.toDate)} · {request.days} day(s)</p>
               <p>{request.reason}</p>
+              <TimeOffAttachmentLink attachment={request.attachment} />
               {request.managerNote ? <p>Manager: {request.managerNote}</p> : null}
               {request.hrNote ? <p>HR: {request.hrNote}</p> : null}
               {["pending_manager", "returned"].includes(request.status) ? (

@@ -1,4 +1,5 @@
 import "server-only";
+import { loadTimeOffAttachments, type TimeOffAttachmentFields } from "./connect-time-off-attachments";
 
 import { isManagingPartnerDesignation, isWfhHardBlockedDesignation } from "./approval-designation-labels";
 import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
@@ -182,6 +183,7 @@ export async function listConnectBusinessTripRequests(companyId: string, workerI
     }
     throw new Error(result.error.message);
   }
+  const attachments=await loadTimeOffAttachments(companyId,"business-trip",(result.data??[]).map(row=>row.id));
   return {
     policy: {
       enabled: access.policy.is_enabled,
@@ -190,6 +192,7 @@ export async function listConnectBusinessTripRequests(companyId: string, workerI
       requiresHrFinalization: access.policy.requires_hr_finalization
     },
     requests: (result.data ?? []).map((request) => ({
+      attachment: attachments.get(request.id) ?? null,
       id: request.id,
       requestNo: request.request_no,
       fromDate: request.start_date,
@@ -212,6 +215,8 @@ export async function listConnectBusinessTripRequests(companyId: string, workerI
 }
 
 export async function createConnectBusinessTripRequest(input: {
+  requestId: string;
+  attachment?: TimeOffAttachmentFields;
   companyId: string;
   workerId: string;
   workerType: BusinessTripWorkerType;
@@ -281,6 +286,8 @@ export async function createConnectBusinessTripRequest(input: {
   const first = steps[0] ?? null;
   const status = first ? "pending_manager" : "pending_hr";
   const insertResult = await db().from("hr_business_trip_requests").insert({
+    id: input.requestId,
+    ...input.attachment,
     company_id: input.companyId,
     request_no: requestNo,
     profile_type: input.workerType,
@@ -429,7 +436,8 @@ export async function listConnectBusinessTripApprovals(input: {
     table: "hr_business_trip_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
     actorColumns: ["approver_user_id"], actorNameColumn: "approver_name", actedAtColumn: "decided_at", noteColumn: "decision_note"
   });
-  return rows.map((row) => ({ ...row, journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? []) }));
+  const attachments=await loadTimeOffAttachments(input.companyId,"business-trip",rows.map(row=>row.requestId));
+  return rows.map((row) => ({ ...row, attachment: attachments.get(row.requestId) ?? null, journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? []) }));
 }
 
 export async function decideConnectBusinessTripApproval(input: {
@@ -538,7 +546,8 @@ export async function listConnectBusinessTripHrApprovals(
     table: "hr_business_trip_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
     actorColumns: ["approver_user_id"], actorNameColumn: "approver_name", actedAtColumn: "decided_at", noteColumn: "decision_note"
   });
-  return rows.map((row) => ({ ...row, journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? []) }));
+  const attachments=await loadTimeOffAttachments(account.companyId,"business-trip",rows.map(row=>row.requestId));
+  return rows.map((row) => ({ ...row, attachment: attachments.get(row.requestId) ?? null, journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? []) }));
 }
 
 export async function decideConnectBusinessTripHrApproval(input: {
