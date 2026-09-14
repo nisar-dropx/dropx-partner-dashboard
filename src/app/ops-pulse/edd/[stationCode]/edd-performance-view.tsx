@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, BookOpen, CalendarDays, Download, Loader2, RefreshCw, Users } from "lucide-react";
 import { PendingLink } from "@/components/pending-link";
 import { formatCiaDisplayDate } from "@/lib/ops-pulse/cia-types";
@@ -12,6 +12,12 @@ import { EddPerformanceLedger } from "./edd-performance-ledger";
 
 type FetchOutcome = { status: "ok"; payload: EddPerformancePayload } | { status: "no_snapshot" };
 type PerformanceView = "associate" | "date" | "ledger";
+
+/** What the server component can hand down as a first-paint seed: the worker's own result shape, plus an error case for a failed server-side fetch. */
+export type EddPerformanceInitialOutcome =
+  | { status: "ok"; payload: EddPerformancePayload }
+  | { status: "no_snapshot"; stationCode: string }
+  | { status: "error"; error: string };
 
 async function fetchPerformance(stationCode: string): Promise<FetchOutcome> {
   const url = new URL("/api/ops-pulse/edd/performance", window.location.origin);
@@ -98,42 +104,50 @@ function formatFetchedAt(value: string) {
  * (By associate / By date / Day-wise ledger) so the detail a manager
  * actually digs into isn't all flattened onto one screen at once.
  */
-export function EddPerformanceView({ stationCode }: { stationCode: string }) {
-  const [payload, setPayload] = useState<EddPerformancePayload | null>(null);
-  const [noSnapshot, setNoSnapshot] = useState(false);
+export function EddPerformanceView({ stationCode, initialOutcome }: { stationCode: string; initialOutcome?: EddPerformanceInitialOutcome | null }) {
+  const [payload, setPayload] = useState<EddPerformancePayload | null>(initialOutcome?.status === "ok" ? initialOutcome.payload : null);
+  const [noSnapshot, setNoSnapshot] = useState(initialOutcome?.status === "no_snapshot");
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialOutcome?.status === "error" ? initialOutcome.error : null);
   const [networkAvg, setNetworkAvg] = useState<number | null>(null);
   const [dailyRows, setDailyRows] = useState<EddPerformanceDailyRow[]>([]);
   const [view, setView] = useState<PerformanceView>("associate");
   const [backfillStatus, setBackfillStatus] = useState<"idle" | "starting" | "running" | "error">("idle");
   const [backfillError, setBackfillError] = useState<string | null>(null);
+  const seededStationRef = useRef<string | null>(initialOutcome ? stationCode : null);
 
   useEffect(() => {
     if (!stationCode) return;
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetchPerformance(stationCode)
-      .then((outcome) => {
-        if (cancelled) return;
-        if (outcome.status === "no_snapshot") {
+    // Server component already fetched this station's snapshot for first
+    // paint (see the page's initialOutcome prop) — skip the redundant
+    // client-side fetch that would otherwise re-request the same data.
+    const alreadySeeded = seededStationRef.current === stationCode;
+    seededStationRef.current = null;
+    if (!alreadySeeded) {
+      setLoading(true);
+      setError(null);
+      fetchPerformance(stationCode)
+        .then((outcome) => {
+          if (cancelled) return;
+          if (outcome.status === "no_snapshot") {
+            setPayload(null);
+            setNoSnapshot(true);
+          } else {
+            setPayload(outcome.payload);
+            setNoSnapshot(false);
+          }
+        })
+        .catch((err) => {
+          if (cancelled) return;
           setPayload(null);
-          setNoSnapshot(true);
-        } else {
-          setPayload(outcome.payload);
-          setNoSnapshot(false);
-        }
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setPayload(null);
-        setError(err instanceof Error ? err.message : "Unable to load the performance report.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+          setError(err instanceof Error ? err.message : "Unable to load the performance report.");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }
     void fetchNetworkAverage().then((avg) => {
       if (!cancelled) setNetworkAvg(avg);
     });
@@ -193,7 +207,7 @@ export function EddPerformanceView({ stationCode }: { stationCode: string }) {
     <>
       <section className="panel">
         <div className="panel-body edd-toolbar">
-          <PendingLink className="edd-back-link" href="/edd/performance">
+          <PendingLink className="edd-back-link" href="/edd/performance" refresh={false}>
             <ArrowLeft size={14} /> All stations
           </PendingLink>
 

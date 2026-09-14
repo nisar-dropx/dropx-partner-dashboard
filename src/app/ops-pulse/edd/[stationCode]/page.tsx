@@ -3,8 +3,9 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { requireCompanyId } from "@/lib/company-scope";
 import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
-import { fetchEddAllowedStations, isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
+import { fetchEddAllowedStations, fetchEddStation, isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
 import { loadCodLocations, loadCodStationSettings } from "@/lib/ops-pulse/cod";
+import type { EddClientInitialOutcome } from "./edd-client";
 import { EddStationSectionTabs } from "./edd-station-section-tabs";
 import { EddClient } from "./edd-client";
 
@@ -51,6 +52,19 @@ export default async function EddStationPage({
     }
   }
   const authorized = allowedCodes.has(stationCode) && workerAllowed;
+
+  // Fetch the station's snapshot server-side, same as the network list pages
+  // do, so this page shows data on first paint instead of an empty shell
+  // followed by a client-side fetch. EddClient still owns the "Refresh live"
+  // action and re-fetches client-side for that.
+  let initialOutcome: EddClientInitialOutcome | null = null;
+  if (workerConfigured && stationCode && authorized) {
+    try {
+      initialOutcome = await fetchEddStation({ stationCode });
+    } catch (err) {
+      initialOutcome = { status: "error", error: err instanceof Error ? err.message : "Unable to load the EDD dashboard." };
+    }
+  }
   const stationName = String(location?.station_name ?? "").trim();
   const placeBits = [location?.city, location?.state].filter(Boolean).join(", ");
 
@@ -94,7 +108,7 @@ export default async function EddStationPage({
         ) : (
           <>
             <EddStationSectionTabs stationCode={stationCode} active="ageing" />
-            <EddClient stationCode={stationCode} />
+            <EddClient stationCode={stationCode} initialOutcome={initialOutcome} />
           </>
         )}
       </div>

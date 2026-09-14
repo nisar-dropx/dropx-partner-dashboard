@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Download, Loader2, RefreshCw, Search } from "lucide-react";
 import { PendingLink } from "@/components/pending-link";
 import { addDaysYmd, formatCiaDisplayDate, todayIstYmd } from "@/lib/ops-pulse/cia-types";
@@ -80,6 +80,12 @@ function compareValues(a: string | number, b: string | number, dir: SortDir) {
 
 type FetchOutcome = { status: "ok"; payload: EddStationPayload } | { status: "no_snapshot" };
 
+/** What the server component can hand down as a first-paint seed: the worker's own result shape, plus an error case for a failed server-side fetch. */
+export type EddClientInitialOutcome =
+  | { status: "ok"; payload: EddStationPayload }
+  | { status: "no_snapshot"; stationCode: string }
+  | { status: "error"; error: string };
+
 async function fetchEddClient(stationCode: string): Promise<FetchOutcome> {
   const url = new URL("/api/ops-pulse/edd", window.location.origin);
   url.searchParams.set("stationCode", stationCode);
@@ -118,12 +124,12 @@ async function refreshEddClient(stationCode: string): Promise<EddStationPayload>
   return raw as unknown as EddStationPayload;
 }
 
-export function EddClient({ stationCode }: { stationCode: string }) {
-  const [payload, setPayload] = useState<EddStationPayload | null>(null);
-  const [noSnapshot, setNoSnapshot] = useState(false);
+export function EddClient({ stationCode, initialOutcome }: { stationCode: string; initialOutcome?: EddClientInitialOutcome | null }) {
+  const [payload, setPayload] = useState<EddStationPayload | null>(initialOutcome?.status === "ok" ? initialOutcome.payload : null);
+  const [noSnapshot, setNoSnapshot] = useState(initialOutcome?.status === "no_snapshot");
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialOutcome?.status === "error" ? initialOutcome.error : null);
   const [activeBucket, setActiveBucket] = useState<EddBucketKey | null>(null);
   const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
@@ -134,9 +140,17 @@ export function EddClient({ stationCode }: { stationCode: string }) {
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[0]);
   const [page, setPage] = useState(1);
   const [openTrackingId, setOpenTrackingId] = useState<string | null>(null);
+  const seededStationRef = useRef<string | null>(initialOutcome ? stationCode : null);
 
   useEffect(() => {
     if (!stationCode) return;
+    // Server component already fetched this station's snapshot for first
+    // paint (see the page's initialOutcome prop) — skip the redundant
+    // client-side fetch that would otherwise re-request the same data.
+    if (seededStationRef.current === stationCode) {
+      seededStationRef.current = null;
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -277,7 +291,7 @@ export function EddClient({ stationCode }: { stationCode: string }) {
     <>
       <section className="panel">
         <div className="panel-body edd-toolbar">
-          <PendingLink className="edd-back-link" href="/edd">
+          <PendingLink className="edd-back-link" href="/edd" refresh={false}>
             <ArrowLeft size={14} /> All stations
           </PendingLink>
 

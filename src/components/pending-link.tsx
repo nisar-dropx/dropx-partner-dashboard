@@ -13,6 +13,14 @@ type PendingLinkProps = {
   scroll?: boolean;
   title?: string;
   "aria-label"?: string;
+  /**
+   * Defaults to true to preserve the searchParams-only-navigation fix below.
+   * Set to false for a plain full-page navigation back to a route whose
+   * content genuinely hasn't changed (e.g. a "back to list" link) so the
+   * destination can be served from the client Router Cache instead of
+   * forcing a fresh server render every time.
+   */
+  refresh?: boolean;
 };
 
 export function PendingLink({
@@ -21,6 +29,7 @@ export function PendingLink({
   className,
   disableWhenCurrent = false,
   href,
+  refresh = true,
   scroll,
   title
 }: PendingLinkProps) {
@@ -55,7 +64,10 @@ export function PendingLink({
     // visible). That shows the URL updating with no modal until a manual
     // refresh. router.refresh() forces a fresh server render right after
     // the push so the new searchParams-derived content always appears.
-    router.refresh();
+    // Callers that know their destination's content can't have changed
+    // (e.g. a "back to list" link) pass refresh={false} to skip this and
+    // let the client Router Cache serve the previous render instantly.
+    if (refresh) router.refresh();
   }
 
   return (
