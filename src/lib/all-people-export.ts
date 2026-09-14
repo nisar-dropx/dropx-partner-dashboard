@@ -8,6 +8,8 @@ export const allPeopleExportColumns = [
   { key: "email", label: "Email" },
   { key: "dateOfJoin", label: "Date of join" },
   { key: "location", label: "Location" },
+  { key: "model", label: "Model" },
+  { key: "provider", label: "Provider" },
   { key: "designation", label: "Designation" },
   { key: "status", label: "Status" },
   { key: "active", label: "Active" },

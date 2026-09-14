@@ -17,7 +17,7 @@ function dateText(value: unknown) {
   }).format(date).replace(",", "");
 }
 
-function exportValues(row: Record<string, unknown>, location: string, status: string, designation: string): AllPeopleExportValues {
+function exportValues(row: Record<string, unknown>, location: string, model: string, provider: string, status: string, designation: string): AllPeopleExportValues {
   const values = Object.fromEntries(allPeopleExportColumns.map(({ key }) => [key, ""])) as AllPeopleExportValues;
   values.dropxId = String(row.dropx_id ?? "");
   values.biometricId = String(row.biometric_id ?? "");
@@ -27,7 +27,7 @@ function exportValues(row: Record<string, unknown>, location: string, status: st
   values.mobileNumber = String(row.mobile ?? "");
   values.email = String(row.email ?? "");
   values.dateOfJoin = dateText(row.date_of_join);
-  values.location = location;
+  values.location = location; values.model = model; values.provider = provider;
   values.designation = designation;
   values.status = status;
   values.active = row.is_active === false || row.deleted_at ? "No" : "Yes";
@@ -46,7 +46,7 @@ export async function loadCanonicalWorkforcePeople(
 
   const result = await supabaseAdmin
     .from("workforce")
-    .select("id, source_profile_type, source_profile_id, full_name, date_of_join, location_id, designation_id, dropx_id, biometric_id, mobile_country_code, mobile, email, onboarding_status, is_active, deleted_at, created_at, updated_at, stations (station_code), designations (code, name)")
+    .select("id, source_profile_type, source_profile_id, full_name, date_of_join, location_id, designation_id, dropx_id, biometric_id, mobile_country_code, mobile, email, onboarding_status, is_active, deleted_at, created_at, updated_at, stations (station_code, providers (name), location_models (code, name)), designations (code, name)")
     .eq("company_id", companyId)
     .order("full_name");
   if (result.error) return { rows: [], error: result.error.message };
@@ -61,9 +61,9 @@ export async function loadCanonicalWorkforcePeople(
       return true;
     })
     .map((row) => {
-      const station = first(row.stations as { station_code?: string } | Array<{ station_code?: string }> | null);
+      const station = first(row.stations as { station_code?: string; providers?: { name?: string } | Array<{ name?: string }> | null; location_models?: { code?: string; name?: string } | Array<{ code?: string; name?: string }> | null } | Array<{ station_code?: string; providers?: { name?: string } | Array<{ name?: string }> | null; location_models?: { code?: string; name?: string } | Array<{ code?: string; name?: string }> | null }> | null);
       const designationRecord = first(row.designations as { code?: string; name?: string } | Array<{ code?: string; name?: string }> | null);
-      const location = String(station?.station_code ?? "-");
+      const location = String(station?.station_code ?? "-"); const modelRecord = first(station?.location_models); const model = String(modelRecord?.code ?? modelRecord?.name ?? "-"); const provider = String(first(station?.providers)?.name ?? "-");
       const designation = String(designationRecord?.name ?? designationRecord?.code ?? "-").trim() || "-";
       const active = row.is_active !== false && !row.deleted_at;
       const onboardingStatus = String(row.onboarding_status ?? "").trim().replaceAll("_", " ");
@@ -81,13 +81,12 @@ export async function loadCanonicalWorkforcePeople(
         fullName: String(row.full_name ?? "-"),
         mobile: String(row.mobile ?? "-") || "-",
         email: String(row.email ?? "-") || "-",
-        location,
-        designation,
+        location, model, provider, designation,
         status,
         viewHref: actions.canView ? `/workforce?view=${encodeURIComponent(String(row.id))}` : undefined,
         editHref: actions.canEdit ? `/workforce?edit=${encodeURIComponent(String(row.id))}` : undefined,
         canEdit: actions.canEdit,
-        exportValues: exportValues(row, location, status, designation)
+        exportValues: exportValues(row, location, model, provider, status, designation)
       } satisfies AllPeopleRow;
     });
 
