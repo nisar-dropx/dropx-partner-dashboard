@@ -81,7 +81,7 @@ function buildExportValues(
   codeField: string,
   category: string,
   location: string,
-  designation: string,
+  model: string, provider: string, designation: string,
   status: string,
   employee: boolean
 ): AllPeopleExportValues {
