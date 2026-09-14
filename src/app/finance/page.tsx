@@ -103,6 +103,7 @@ export default async function FinanceDashboardPage() {
     { code: "finance_revenue", label: "Business Performance", href: "/finance/business?tab=revenue" },
     { code: "finance_pnl", label: "Profit & Loss", href: "/finance/business?tab=pnl" },
     { code: "master_payment_heads", label: "Payment heads", href: "/master/payment-heads" },
+    { code: "master_payment_heads", label: "Reimbursement heads & limits", href: "/master/reimbursements" },
     { code: "payment_methods", label: "Payment methods", href: "/master/payment-methods" },
     { code: "master_payment_banks", label: "Payment banks", href: "/master/payment-banks" },
     { code: "payment_settings", label: "Finance settings", href: "/settings/payments" },

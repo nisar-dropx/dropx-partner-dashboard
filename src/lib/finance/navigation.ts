@@ -28,6 +28,7 @@ export const financeNavItems: NavItem[] = [
       { code: "payment_methods", label: "Payment Methods", href: "/master/payment-methods" },
       { code: "master_payment_banks", label: "Payment Banks", href: "/master/payment-banks" },
       { code: "master_payment_heads", label: "Payment Heads", href: "/master/payment-heads" },
+      { code: "master_payment_heads", label: "Reimbursements", href: "/master/reimbursements" },
       { code: "master_contacts", label: "Contacts", href: "/master/contacts" }
     ]
   },
