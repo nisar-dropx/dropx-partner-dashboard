@@ -482,10 +482,12 @@ a {
 
 html.native-app {
   /* The wrapping native app (see apps/dropx-tracker-android) keeps the WebView below the
-     real status bar (not edge-to-edge) and lets Android reserve that space itself — always
-     the correct height on every device, no guessing needed here. So the header needs zero
-     extra top padding of its own; it should render exactly as it does on a plain browser. */
+     real status bar AND above the real navigation bar (not edge-to-edge on either side) and
+     lets Android reserve that space itself — always the correct height on every device, no
+     guessing needed here. So neither the header nor the bottom nav need any extra padding
+     of their own for this; they should render exactly as they do on a plain browser. */
   --dx-safe-top: 0px;
+  --dx-safe-bottom: 0px;
 }
 
 html.native-app .dx-header {
@@ -511,9 +513,61 @@ html.native-app .dx-auth {
   padding-top: max(42px, calc(var(--dx-safe-top) + 32px)) !important;
 }
 
-/* .dx-mobile-nav's own padding-bottom (base rule) already reads --dx-safe-bottom, which
-   MainActivity injects with the real inset on Android — nothing native-app-specific needed
-   here anymore. */
+/* .dx-mobile-nav's own padding-bottom (base rule) already reads --dx-safe-bottom, which is
+   0px for html.native-app (see above) and env(safe-area-inset-bottom) everywhere else —
+   nothing further needed here. */
+
+/* Dark notification panel — the plain white dropdown read poorly against the dark accent
+   palette used elsewhere (attendance hero card, profile header). Only color/background/
+   border-color are overridden here; position, size and structure stay exactly as they are
+   in the base .dx-notification-pop rule above. */
+.dx-notification-pop {
+  background: #1b2233;
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+.dx-notification-pop > header {
+  border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.dx-notification-pop > header strong {
+  color: #fff;
+}
+
+.dx-notification-pop > header button {
+  color: #ff8a80;
+}
+
+.dx-notification-pop > header button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dx-notification-list > button {
+  background: #1b2233;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.dx-notification-list > button.unread {
+  background: rgba(247, 145, 42, 0.14);
+}
+
+.dx-notification-list i {
+  background: rgba(221, 107, 20, 0.22);
+  color: #ffa257;
+}
+
+.dx-notification-list em {
+  color: #d7d2c9;
+}
+
+.dx-notification-list small {
+  color: #9a958c;
+}
+
+.dx-notification-empty {
+  color: #a6a099;
+}
 
 .deletion-page {
   min-height: 100vh;
