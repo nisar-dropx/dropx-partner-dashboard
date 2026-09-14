@@ -490,48 +490,51 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     }
   }
 
-  function prepareSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-    setNotice("");
+  function submissionError() {
     const dateOfBirthError = enabled.has("date_of_birth")
       ? minimumAgeError(values.dateOfBirth)
       : null;
-    if (dateOfBirthError) {
-      setError(dateOfBirthError);
-      return;
-    }
+    if (dateOfBirthError) return dateOfBirthError;
+
     for (const [field, rule] of Object.entries(profileInputRules)) {
       if (!enabled.has(field)) continue;
       if (field === "pf_uan" && pfAnswer !== "yes") continue;
       const valueKey = fieldValueKeys[field] ?? field.replace(/_([a-z])/g, (_, character) => character.toUpperCase());
       const value = values[valueKey] ?? "";
-      if (value && !rule.pattern.test(value)) {
-        setError(rule.message);
-        return;
-      }
+      if (value && !rule.pattern.test(value)) return rule.message;
     }
+
     const mandatory = [
       ...(enabled.has("pan_number") ? ["pan"] : []),
-      ...(enabled.has("pan_number") && enabled.has("aadhaar_number") && attempted("pan") && !currentCheck("pan")?.blockSubmit ? ["pan_aadhaar"] : []),
+      ...(enabled.has("pan_number") && enabled.has("aadhaar_number") ? ["pan_aadhaar"] : []),
       ...(enabled.has("bank_account_no") && enabled.has("ifsc") ? ["bank"] : []),
       ...(pfAnswer === "yes" && enabled.has("pf_uan") && (executive || profile?.statutoryApplicability?.includes("pf")) ? ["pf_uan"] : []),
       ...(enabled.has("driving_license_no") ? ["dl"] : []),
       ...(enabled.has("vehicle_reg_no") ? ["vehicle"] : [])
     ];
     if (mandatory.some((kind) => !attempted(kind))) {
-      setError("Complete every applicable verification before saving.");
-      return;
+      return "Complete every applicable verification before saving.";
     }
+
     const blockedCheck = ["pan", "pan_aadhaar", "dl", "pf_uan"]
       .map((kind) => currentCheck(kind))
       .find((item) => item?.blockSubmit);
     if (blockedCheck) {
-      setError(blockedCheck.message || "A required identity verification did not match. Registration cannot be submitted.");
-      return;
+      return blockedCheck.message || "A required identity verification did not match.";
     }
     if (profile?.agreement && !agreementAccepted) {
-      setError(`Accept ${profile.agreement.title} before submitting registration.`);
+      return `Accept ${profile.agreement.title} before submitting registration.`;
+    }
+    return "";
+  }
+
+  function prepareSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    const validationError = submissionError();
+    if (validationError) {
+      setError(validationError);
       return;
     }
     setConfirmationOpen(true);
@@ -539,6 +542,12 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
 
   async function submitProfile() {
     if (!formRef.current || saving) return;
+    const validationError = submissionError();
+    if (validationError) {
+      setError(validationError);
+      setConfirmationOpen(false);
+      return;
+    }
     setSaving(true);
     setError("");
     setNotice("");

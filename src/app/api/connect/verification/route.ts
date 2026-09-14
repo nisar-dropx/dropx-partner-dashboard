@@ -324,14 +324,14 @@ export async function POST(request: NextRequest) {
         "PAN Aadhaar link verification failed.";
       const result = {
         verified,
-        manualReview: !verified,
+        // Only LINK-002 is eligible for review. Other provider failures must
+        // remain a blocking error, rather than being presented as a warning.
+        manualReview: reviewRequired,
         blockSubmit: !verified && !reviewRequired,
         inputKey: inputKey([pan, aadhar]),
-        message: verified
-          ? providerMessage
-          : reviewRequired
-            ? `${providerMessage} Profile will be sent for review.`
-            : `${providerMessage} Registration cannot be submitted.`
+        // This is shown directly in DropX One. Keep it exactly as supplied by
+        // the provider; submission handling supplies no extra wording.
+        message: providerMessage
       };
       return verifiedResponse(result);
     }
