@@ -16,6 +16,8 @@ export type AllPeopleRow = {
   mobile: string;
   email: string;
   location: string;
+  model: string;
+  provider: string;
   designation: string;
   status: string;
   viewHref?: string;
@@ -172,7 +174,7 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
       if (locations.length && !locations.includes(row.location)) return false;
       if (designations.length && !designations.includes(row.designation)) return false;
       if (statuses.length && !statuses.includes(row.status)) return false;
-      return !term || `${row.code} ${row.biometricId} ${row.fullName} ${row.mobile} ${row.email} ${row.location} ${row.designation} ${row.category}`.toLowerCase().includes(term);
+      return !term || `${row.code} ${row.biometricId} ${row.fullName} ${row.mobile} ${row.email} ${row.location} ${row.model} ${row.provider} ${row.designation} ${row.category}`.toLowerCase().includes(term);
     });
   }, [categories, designations, locations, rows, search, statuses]);
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / rowsPerPage));
@@ -253,17 +255,17 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
       </div>
       <div className="table-wrap field-executive-table-wrap employee-table-wrap all-people-table-wrap">
         <table>
-          <thead><tr><th>DropX ID</th><th>Biometric ID</th><th>Full name</th><th>Category</th><th>Mobile</th><th>Email</th><th>Location</th><th>Designation</th><th>Status</th><th>Action</th></tr></thead>
+          <thead><tr><th>DropX ID</th><th>Biometric ID</th><th>Full name</th><th>Category</th><th>Mobile</th><th>Email</th><th>Location</th><th>Model</th><th>Provider</th><th>Designation</th><th>Status</th><th>Action</th></tr></thead>
           <tbody>
             {visibleRows.map((row) => (
               <tr key={`${row.categoryCode}:${row.id}`}>
                 <td><strong>{row.code}</strong></td><td>{row.biometricId}</td><td><strong>{row.fullName}</strong></td>
-                <td>{row.category}</td><td>{row.mobile}</td><td>{row.email}</td><td>{row.location}</td><td>{row.designation}</td>
+                <td>{row.category}</td><td>{row.mobile}</td><td>{row.email}</td><td>{row.location}</td><td>{row.model}</td><td>{row.provider}</td><td>{row.model}</td><td>{row.provider}</td><td>{row.designation}</td>
                 <td><StatusPill status={row.status} /></td>
                 <td><AllPeopleActionMenu row={row} /></td>
               </tr>
             ))}
-            {!filteredRows.length ? <tr><td className="empty-cell" colSpan={10}>No people match the selected filters.</td></tr> : null}
+            {!filteredRows.length ? <tr><td className="empty-cell" colSpan={12}>No people match the selected filters.</td></tr> : null}
           </tbody>
         </table>
       </div>
