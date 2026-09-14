@@ -130,6 +130,11 @@ export function ConnectLoginFlow() {
   const [visitedSteps, setVisitedSteps] = useState<Set<Step>>(() => new Set());
   useEffect(() => {
     setVisitedSteps((current) => (current.has(step) ? current : new Set(current).add(step)));
+    // Screens stay mounted (hidden, not unmounted) and share one page scroll position —
+    // switching tabs doesn't naturally reset it, so a scroll left over from one screen
+    // (e.g. a focused input's scrollIntoView during login) carries into the next one and
+    // renders under the sticky header until the user manually scrolls back up.
+    window.scrollTo(0, 0);
   }, [step]);
 
   function route(rows: AppAccount[]) {
