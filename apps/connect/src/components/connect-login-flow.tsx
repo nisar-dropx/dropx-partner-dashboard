@@ -94,7 +94,7 @@ export function ConnectLoginFlow() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const selectedAccountKey = searchParams.get("account") ?? "";
+  const selectedAccountId = searchParams.get("id")?.trim().toLowerCase() ?? "";
   const [step, setStep] = useState<Step>("mobile");
   const [checking, setChecking] = useState(true);
   const [countryCode, setCountryCode] = useState("91");
@@ -127,9 +127,9 @@ export function ConnectLoginFlow() {
     const saved = serverDefault ? accountKey(serverDefault) : "";
     if (saved) localStorage.setItem(defaultKeyName, saved);
     else localStorage.removeItem(defaultKeyName);
-    // A routed page carries the selected profile, so switching accounts never
-    // falls back to the default account on reload or direct navigation.
-    const selected = rows.find((row) => accountKey(row) === selectedAccountKey) ?? serverDefault ?? (rows.length === 1 ? rows[0] : null);
+    // A routed page carries the readable DropX/employee ID, so switching
+    // accounts never falls back to the default account on reload.
+    const selected = rows.find((row) => String(row.reference || row.id).trim().toLowerCase() === selectedAccountId) ?? serverDefault ?? (rows.length === 1 ? rows[0] : null);
     setAccounts(rows); setDefaultKey(saved); setAccount(selected); setAvatar(selected?.profilePhotoUrl || "");
     setStep(selected ? (stepFromPath(pathname) ?? landingPage(selected)) : "accounts");
   }
@@ -147,13 +147,13 @@ export function ConnectLoginFlow() {
     }).finally(() => setChecking(false));
   }, []);
   useEffect(() => {
-    if (!selectedAccountKey || !accounts.length) return;
-    const requested = accounts.find((row) => accountKey(row) === selectedAccountKey);
+    if (!selectedAccountId || !accounts.length) return;
+    const requested = accounts.find((row) => String(row.reference || row.id).trim().toLowerCase() === selectedAccountId);
     if (requested && (!account || accountKey(account) !== accountKey(requested))) {
       setAccount(requested);
       setAvatar(requested.profilePhotoUrl || "");
     }
-  }, [account, accounts, selectedAccountKey]);
+  }, [account, accounts, selectedAccountId]);
   useEffect(() => {
     setNotificationMenu(false);
     setNotifications([]);
@@ -434,7 +434,8 @@ export function ConnectLoginFlow() {
   }
   function urlFor(next: Step, targetAccount = account) {
     const route = routeForStep[next] ?? "/accounts";
-    return targetAccount ? `${route}?account=${encodeURIComponent(accountKey(targetAccount))}` : route;
+    const id = targetAccount?.reference || targetAccount?.id;
+    return id ? `${route}?id=${encodeURIComponent(id)}` : route;
   }
   function open(next: Step) {
     setDrawer(false); setProfileMenu(false);
