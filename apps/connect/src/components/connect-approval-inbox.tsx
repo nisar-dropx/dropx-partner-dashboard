@@ -35,6 +35,9 @@ type ExpenseItem = {
   id: string;
   expense_date: string;
   amount: number;
+  merchant?: string | null;
+  description?: string | null;
+  approved_amount?: number | null;
   finance_policy_snapshot?: ExpensePolicyQuote | null;
   hr_expense_categories?: { name: string } | Array<{ name: string }> | null;
 };
@@ -44,6 +47,7 @@ type Attachment = { id: string; item_id?: string | null; file_name: string; url?
 type ReimbursementApproval = {
   id: string;
   step_name: string;
+  stage_code?: "manager" | "policy_exception" | "finance" | null;
   claim: {
     id: string;
     claim_no: string;
@@ -56,6 +60,24 @@ type ReimbursementApproval = {
     attachments?: Attachment[];
   };
   journey?: ApprovalJourney;
+};
+
+type ReimbursementOversightSummary = {
+  id: string;
+  claim_no: string;
+  purpose: string;
+  total_claimed: number;
+  total_approved?: number | null;
+  status: string;
+  submitted_at?: string | null;
+  requesterName: string;
+  requesterCode: string;
+};
+
+type ReimbursementOversightDetail = ReimbursementOversightSummary & {
+  items: ExpenseItem[];
+  attachments: Attachment[];
+  steps: Array<{ id: string; step_order: number; step_name: string; stage_code?: string | null; status: string; decision_note?: string | null; decided_at?: string | null; approver_name: string }>;
 };
 
 type PreRequestApproval = {
@@ -257,6 +279,13 @@ function dateTime(value: string | null) {
 }
 function statusLabel(status: string) {
   return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+function expensePolicyState(quote?: ExpensePolicyQuote | null) {
+  if (!quote || quote.limit_amount == null) return { label: "Policy not configured", tone: "neutral" };
+  if (quote.expense_allowed === false) return { label: "Not allowed", tone: "danger" };
+  if (quote.excess_amount <= 0) return { label: "Within policy", tone: "success" };
+  if (quote.excess_action === "cap") return { label: "Capped to policy", tone: "warning" };
+  return { label: "Exception approval", tone: "danger" };
 }
 function profileLabel(profileType: "employee" | "contractor") {
   return profileType === "contractor" ? "Contractor" : "Employee";
@@ -560,6 +589,9 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
   const [payAdvanceApprovals, setPayAdvanceApprovals] = useState<PayAdvanceApproval[]>([]);
   const [payAdvanceError, setPayAdvanceError] = useState("");
   const [payAdvanceTerms, setPayAdvanceTerms] = useState<Record<string, { amount: string; installments: string }>>({});
+  const [expenseOversight, setExpenseOversight] = useState<ReimbursementOversightSummary[]>([]);
+  const [expenseOversightDetail, setExpenseOversightDetail] = useState<ReimbursementOversightDetail | null>(null);
+  const [expenseOversightLoadingId, setExpenseOversightLoadingId] = useState<string | null>(null);
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
   const [wfhApprovals, setWfhApprovals] = useState<WfhApproval[]>([]);
   const [wfhHrApprovals, setWfhHrApprovals] = useState<WfhApproval[]>([]);
@@ -582,7 +614,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
   const [othersOpen, setOthersOpen] = useState(false);
   const othersRef = useRef<HTMLDivElement | null>(null);
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  function closeModal() { setActiveKey(null); }
+  function closeModal() { setActiveKey(null); setExpenseOversightDetail(null); }
   async function act(fn: () => Promise<void>) { await fn(); closeModal(); }
 
   useEffect(() => {
@@ -625,6 +657,8 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
       const nextPreRequests = reimbursementPayload.preRequestApprovals ?? [];
       setReimbursements(nextClaims);
       setPreRequestApprovals(nextPreRequests);
+      const actionableClaimIds = new Set(nextClaims.map((entry: ReimbursementApproval) => entry.claim.id));
+      setExpenseOversight((reimbursementPayload.expenseOversight ?? []).filter((entry: ReimbursementOversightSummary) => !actionableClaimIds.has(entry.id)));
       setLeaveApprovals(leavePayload.leaveApprovals ?? []);
       setWfhApprovals(leavePayload.wfhApprovals ?? []);
       setWfhHrApprovals(leavePayload.wfhHrApprovals ?? []);
@@ -678,6 +712,29 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
       setNotice(payload.notice); closeModal(); await load();
     } catch (reason) { setPayAdvanceError(userFacingError(reason, "Unable to record the pay advance decision.")); }
     finally { setSaving(false); }
+  }
+
+  async function openExpenseOversight(claimId: string) {
+    setExpenseOversightLoadingId(claimId);
+    setExpenseOversightDetail(null);
+    setError("");
+    try {
+      const query = new URLSearchParams({
+        kind: "oversight_claim",
+        claimId,
+        accountId: account.id,
+        profileType: account.profileType
+      });
+      const response = await fetch(`/api/connect/reimbursements?${query}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to load reimbursement details.");
+      setExpenseOversightDetail(payload.claim);
+      setActiveKey(`reimbursement-oversight:${claimId}`);
+    } catch (reason) {
+      setError(userFacingError(reason, "Unable to load reimbursement details."));
+    } finally {
+      setExpenseOversightLoadingId(null);
+    }
   }
 
   async function decideReimbursement(claimId: string, action: "approved" | "returned" | "rejected") {
@@ -1641,7 +1698,21 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               saving={saving}
             />
           ))}
-          {!preRequestApprovals.length && !reimbursements.length ? (
+          {expenseOversight.length ? <section className="dx-expense-oversight">
+            <header><span><strong>Organisation reimbursement visibility</strong><small>Read-only access · approval is available only when you are the assigned reporting-manager layer.</small></span><em>{expenseOversight.length} recent</em></header>
+            <div>
+              {expenseOversight.map((claim) => <ApprovalRow
+                badge={<span className="dx-approval-badge">{money(claim.total_approved ?? claim.total_claimed)}</span>}
+                eyebrow={`${claim.claim_no} · ${statusLabel(claim.status)}`}
+                key={`oversight-${claim.id}`}
+                meta={`${claim.requesterCode || "—"} · ${claim.purpose}`}
+                name={claim.requesterName}
+                onReview={() => void openExpenseOversight(claim.id)}
+                saving={saving || expenseOversightLoadingId === claim.id}
+              />)}
+            </div>
+          </section> : null}
+          {!preRequestApprovals.length && !reimbursements.length && !expenseOversight.length ? (
             <div className="dx-empty"><Clock3 /><strong>No reimbursements waiting</strong><small>No reimbursement requests or claims are assigned to you right now.</small></div>
           ) : null}
           {(() => {
@@ -1678,24 +1749,47 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
             const id = activeKey?.match(/^reimbursement-claim:(.+)$/)?.[1];
             const approval = id ? reimbursements.find((entry) => entry.claim.id === id) : undefined;
             if (!approval) return null;
+            const financeReview = approval.stage_code === "finance" || approval.step_name === "Finance approval";
+            const items = approval.claim.hr_expense_items ?? [];
+            const payableTotal = items.reduce((sum, item) => sum + Number(item.finance_policy_snapshot?.eligible_amount ?? item.amount), 0);
+            const cappedCount = items.filter((item) => item.finance_policy_snapshot?.excess_action === "cap" && Number(item.finance_policy_snapshot.excess_amount) > 0).length;
+            const exceptionCount = items.filter((item) => item.finance_policy_snapshot?.excess_action === "special_approval" && Number(item.finance_policy_snapshot.excess_amount) > 0).length;
             return (
-              <ApprovalModal onClose={closeModal} title={approval.claim.requesterName}>
+              <ApprovalModal onClose={closeModal} title={approval.claim.requesterName} wide={financeReview}>
                 <ApprovalHead
                   badge={<span className="dx-approval-badge">{money(approval.claim.total_claimed)}</span>}
                   eyebrow={`${approval.claim.claim_no} · Claim · ${approval.step_name}`}
                   meta={approval.claim.purpose}
                   name={approval.claim.requesterName}
                 />
-                <dl className="dx-approval-facts">
-                  {approval.claim.hr_expense_items?.map((item) => (
-                    <div key={item.id}>
-                      <dt>{first(item.hr_expense_categories)?.name ?? "Expense"}</dt>
-                      <dd>
-                        {item.expense_date} · {money(item.amount)}
-                        {item.finance_policy_snapshot ? <small>{expensePolicyMessage(item.finance_policy_snapshot)}</small> : null}
-                      </dd>
-                    </div>
+                {financeReview ? <section className="dx-finance-review">
+                  <header>
+                    <span><small>Claimed</small><strong>{money(approval.claim.total_claimed)}</strong></span>
+                    <span><small>Policy payable</small><strong>{money(payableTotal)}</strong></span>
+                    <span className={cappedCount ? "warning" : ""}><small>Capped lines</small><strong>{cappedCount}</strong></span>
+                    <span className={exceptionCount ? "danger" : ""}><small>Exceptions</small><strong>{exceptionCount}</strong></span>
+                  </header>
+                  <div className="dx-finance-review-table" role="table" aria-label="Finance policy review by expense head">
+                    <div className="head" role="row"><span>Expense head</span><span>Claimed</span><span>Policy rule</span><span>Payable</span><span>Assessment</span></div>
+                    {items.map((item) => {
+                      const quote = item.finance_policy_snapshot;
+                      const state = expensePolicyState(quote);
+                      return <div className="row" key={item.id} role="row">
+                        <span><b>{first(item.hr_expense_categories)?.name ?? "Expense"}</b><small>{displayDate(item.expense_date)}{item.merchant ? ` · ${item.merchant}` : ""}</small>{item.description ? <small>{item.description}</small> : null}</span>
+                        <span data-label="Claimed">{money(item.amount)}</span>
+                        <span data-label="Policy rule">{quote?.limit_amount == null ? "Not set" : `${money(quote.limit_amount)} ${quote.limit_basis === "per_day" ? "/ day" : quote.limit_basis === "per_km" ? "/ km" : "/ item"}`}</span>
+                        <span data-label="Payable"><b>{money(quote?.eligible_amount ?? item.amount)}</b></span>
+                        <span data-label="Assessment"><em className={state.tone}>{state.label}</em>{quote?.policy_note ? <small title={quote.policy_note}>{quote.policy_note}</small> : null}</span>
+                      </div>;
+                    })}
+                  </div>
+                  <p>Finance must verify the receipt, expense head, business-policy limit, eligible payable amount, and exception status before deciding.</p>
+                </section> : <dl className="dx-approval-facts">
+                  {items.map((item) => (
+                    <div key={item.id}><dt>{first(item.hr_expense_categories)?.name ?? "Expense"}</dt><dd>{item.expense_date} · {money(item.amount)}{item.finance_policy_snapshot ? <small>{expensePolicyMessage(item.finance_policy_snapshot)}</small> : null}</dd></div>
                   ))}
+                </dl>}
+                <dl className="dx-approval-facts">
                   {approval.claim.attachments?.filter((attachment) => attachment.url).map((attachment) => (
                     <div key={attachment.id}>
                       <dt>Receipt pack</dt>
@@ -1710,7 +1804,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                   ))}
                 </dl>
                 <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.claim.submitted_at} submittedBy={approval.claim.requesterName} currentStep={approval.step_name} />
-                <ApprovalNote id={approval.claim.id} notes={notes} onChange={(value) => setNote(approval.claim.id, value)} placeholder={approval.step_name.includes("Policy excess") ? "Required: reason for approving this excess" : "Required when returning or rejecting"} />
+                <ApprovalNote id={approval.claim.id} notes={notes} onChange={(value) => setNote(approval.claim.id, value)} placeholder={financeReview && exceptionCount ? "Required: record the policy-exception decision" : approval.step_name.includes("Policy excess") ? "Required: reason for approving this excess" : "Required when returning or rejecting"} />
                 <ApprovalToolbar
                   onApprove={() => void act(() => decideReimbursement(approval.claim.id, "approved"))}
                   onReject={() => void act(() => decideReimbursement(approval.claim.id, "rejected"))}
@@ -1719,6 +1813,29 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                 />
               </ApprovalModal>
             );
+          })()}
+          {(() => {
+            const claimId = activeKey?.match(/^reimbursement-oversight:(.+)$/)?.[1];
+            const claim = claimId && expenseOversightDetail?.id === claimId ? expenseOversightDetail : null;
+            if (!claim) return null;
+            return <ApprovalModal onClose={closeModal} title={claim.requesterName} wide>
+              <ApprovalHead
+                badge={<span className="dx-approval-badge">{money(claim.total_approved ?? claim.total_claimed)}</span>}
+                eyebrow={`${claim.claim_no} · Read-only visibility`}
+                meta={`${claim.requesterCode || "—"} · ${claim.purpose}`}
+                name={claim.requesterName}
+              />
+              <div className="dx-oversight-status"><span><small>Status</small><strong>{statusLabel(claim.status)}</strong></span><span><small>Submitted</small><strong>{dateTime(claim.submitted_at ?? null)}</strong></span><span><small>Claimed</small><strong>{money(claim.total_claimed)}</strong></span><span><small>Approved / payable</small><strong>{claim.total_approved == null ? "Pending" : money(claim.total_approved)}</strong></span></div>
+              <dl className="dx-approval-facts">
+                {claim.items.map((item) => <div key={item.id}><dt>{first(item.hr_expense_categories)?.name ?? "Expense"}</dt><dd>{displayDate(item.expense_date)} · {money(item.amount)}{item.finance_policy_snapshot ? <small>{expensePolicyMessage(item.finance_policy_snapshot)}</small> : null}</dd></div>)}
+                {claim.attachments.filter((attachment) => attachment.url).map((attachment) => <div key={attachment.id}><dt>Receipt</dt><dd><ConnectAttachmentViewer files={[{ label: attachment.file_name || "Receipt", url: attachment.url as string, fileName: attachment.file_name }]} title={`${claim.requesterName} · ${attachment.file_name || "Receipt"}`} trigger={<><FileText />{attachment.file_name}</>} /></dd></div>)}
+              </dl>
+              <section className="dx-oversight-route">
+                <h3>Approval route</h3>
+                {claim.steps.map((step) => <div key={step.id}><i className={`status-${step.status}`}>{step.status === "approved" ? <Check /> : <Clock3 />}</i><span><strong>{step.approver_name} · {step.step_name}</strong><small>{statusLabel(step.status)}{step.decided_at ? ` · ${dateTime(step.decided_at)}` : ""}{step.decision_note ? ` · ${step.decision_note}` : ""}</small></span></div>)}
+              </section>
+              <p className="dx-approval-inline-note">Visibility does not make you an approver. Actions remain available only to the person assigned to the current step.</p>
+            </ApprovalModal>;
           })()}
         </div>
       ) : null}

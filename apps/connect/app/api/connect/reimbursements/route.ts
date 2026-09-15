@@ -5,6 +5,7 @@ import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/
 import { resolveConnectActorUserId, resolveConnectActorUserIds } from "../../../../src/lib/connect-approver-identity";
 import {
   activeExpenseCategories,
+  connectApproverIdentity,
   expenseCategoriesForPolicy,
   expenseIdentity,
   expensePayoutReadiness,
@@ -52,7 +53,7 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>,
 async function approvalPayload(companyId: string, userIds: string[]) {
   if (!userIds.length) return [];
   const result = await db().from("hr_expense_approval_steps")
-    .select("id,claim_id,step_order,step_name,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
+    .select("id,claim_id,step_order,step_name,stage_code,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
     .eq("company_id", companyId).in("approver_user_id", userIds).eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
   // Claim steps are assigned explicitly (RM / finance head). Do not require org-chart reportee scope —
@@ -115,6 +116,77 @@ async function preRequestApprovalPayload(companyId: string, userIds: string[]) {
     ...row,
     journey: approvalJourneySummary(row.request.created_at, row.request.requesterName, row.assignee_role, journeys.get(row.request_id) ?? [])
   }));
+}
+
+async function hasOrganizationExpenseVisibility(account: ConnectAccount) {
+  if (account.profileType !== "user") return false;
+  const identity = await connectApproverIdentity(account);
+  if (identity.assignment.is_top_level) return true;
+  if (!identity.assignment.designation_id) return false;
+  const designation = await db().from("designations").select("code,name")
+    .eq("company_id", account.companyId).eq("id", identity.assignment.designation_id).maybeSingle();
+  if (designation.error) throw new Error(designation.error.message);
+  const code = String(designation.data?.code ?? "").toUpperCase().replaceAll("-", "_");
+  const name = String(designation.data?.name ?? "").toLowerCase();
+  return ["MP", "MANAGING_PARTNER"].includes(code) || name.includes("managing partner");
+}
+
+async function expenseOversightSummary(account: ConnectAccount) {
+  if (!await hasOrganizationExpenseVisibility(account)) return [];
+  const result = await db().from("hr_expense_claims")
+    .select("id,claim_no,purpose,total_claimed,total_approved,status,current_step,submitted_at,created_at,employees(full_name,employee_code),contractors(full_name,dropx_id)")
+    .eq("company_id", account.companyId).order("created_at", { ascending: false }).limit(100);
+  if (result.error) throw new Error(result.error.message);
+  return (result.data ?? []).map((claim) => {
+    const employee = relation(claim.employees);
+    const contractor = relation(claim.contractors);
+    return {
+      id: claim.id,
+      claim_no: claim.claim_no,
+      purpose: claim.purpose,
+      total_claimed: claim.total_claimed,
+      total_approved: claim.total_approved,
+      status: claim.status,
+      current_step: claim.current_step,
+      submitted_at: claim.submitted_at ?? claim.created_at,
+      requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
+      requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? ""
+    };
+  });
+}
+
+async function expenseOversightDetail(account: ConnectAccount, claimId: string) {
+  if (!await hasOrganizationExpenseVisibility(account)) throw new Error("Organisation-wide reimbursement visibility is not available for this account.");
+  const result = await db().from("hr_expense_claims")
+    .select("id,claim_no,purpose,total_claimed,total_approved,status,current_step,submitted_at,created_at,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,approved_amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path),hr_expense_approval_steps(id,step_order,step_name,stage_code,approver_user_id,status,decision_note,decided_at)")
+    .eq("company_id", account.companyId).eq("id", claimId).maybeSingle();
+  if (result.error || !result.data) throw new Error(result.error?.message ?? "Reimbursement claim was not found.");
+  const claim = result.data;
+  const employee = relation(claim.employees);
+  const contractor = relation(claim.contractors);
+  const userIds = [...new Set((claim.hr_expense_approval_steps ?? []).map((step) => step.approver_user_id).filter(Boolean))];
+  const profiles = userIds.length
+    ? await db().from("profiles").select("id,full_name").eq("company_id", account.companyId).in("id", userIds)
+    : { data: [], error: null };
+  if (profiles.error) throw new Error(profiles.error.message);
+  const nameByUser = new Map((profiles.data ?? []).map((profile) => [profile.id, profile.full_name || "Approver"]));
+  return {
+    id: claim.id,
+    claim_no: claim.claim_no,
+    purpose: claim.purpose,
+    total_claimed: claim.total_claimed,
+    total_approved: claim.total_approved,
+    status: claim.status,
+    submitted_at: claim.submitted_at ?? claim.created_at,
+    requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
+    requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
+    items: claim.hr_expense_items ?? [],
+    attachments: await signedAttachments(claim.hr_expense_attachments),
+    steps: [...(claim.hr_expense_approval_steps ?? [])].sort((left, right) => left.step_order - right.step_order).map((step) => ({
+      ...step,
+      approver_name: nameByUser.get(step.approver_user_id) ?? "Approver"
+    }))
+  };
 }
 
 async function claimPayload(account: ConnectAccount) {
@@ -193,12 +265,79 @@ async function claimPayload(account: ConnectAccount) {
   return { categories, stations, payout, claims, preRequests, approvals, preRequestApprovals };
 }
 
+async function expenseApprovalGuidePayload(account: ConnectAccount) {
+  if (!expenseWorkerType(account.profileType)) throw new Error("Select your employee or contractor profile to view your approval route.");
+  const direct = await isDirectExpenseRequester(account);
+  let requestApproval: { label: string; approverName: string; detail: string };
+  if (direct.direct) {
+    requestApproval = {
+      label: "Prior expense request",
+      approverName: "Automatically approved",
+      detail: "Your top-level assignment has no reporting manager. Prior approval is recorded automatically before claim submission."
+    };
+  } else {
+    const requestRoute = await resolveExpenseClaimRequestAssignees(account);
+    const manager = requestRoute.assignees[0];
+    const profile = await db().from("profiles").select("full_name")
+      .eq("company_id", account.companyId).eq("id", manager.approver_user_id).maybeSingle();
+    if (profile.error) throw new Error(profile.error.message);
+    requestApproval = {
+      label: "Prior expense request",
+      approverName: profile.data?.full_name || "Your reporting manager",
+      detail: "Obtain this approval before booking, travelling, purchasing, or incurring the expense."
+    };
+  }
+
+  const claimRoute = await resolveExpenseApprovers(account, 1);
+  const financeIndex = claimRoute.steps.findIndex((step) => step.step_name === "Finance approval");
+  const claimSteps = claimRoute.steps.map((step, index) => ({
+    order: index + 1,
+    kind: index === financeIndex ? "finance" : "manager",
+    label: step.step_name,
+    approverName: step.approver_name || "Configured approver",
+    detail: index === financeIndex
+      ? "Finance verifies every expense head, receipt, policy limit, eligible amount, and any exception. Approve, return, or reject are available."
+      : index === 0
+        ? "First reporting-manager review."
+        : "Second reporting-manager review, when another active manager exists above the first."
+  }));
+  claimSteps.splice(Math.max(financeIndex, 0), 0, {
+    order: 0,
+    kind: "conditional",
+    label: "Policy exception approval (conditional)",
+    approverName: "Configured in Finance policy",
+    detail: "Appears only when an expense exceeds a rule configured for special approval. Capped rules do not add an approval; their payable amount is reduced automatically."
+  });
+  const orderedClaimSteps = claimSteps.map((step, index) => ({ ...step, order: index + 1 }));
+  return {
+    requestApproval,
+    claimSteps: orderedClaimSteps,
+    payment: {
+      label: "Payment Processing",
+      approverName: "Finance payment team",
+      detail: "The payment task is created only after the final Finance approval, using the policy-eligible amount. Payment status and UTR remain trackable here."
+    }
+  };
+}
+
 export async function GET(request: Request) {
   try {
     const account = await selectedAccount(request, undefined, true);
+    const url = new URL(request.url);
+    const kind = url.searchParams.get("kind");
+    if (kind === "approval_guide") {
+      const guide = await expenseApprovalGuidePayload(account);
+      return NextResponse.json({ guide }, { headers: { "Cache-Control": "private, no-store" } });
+    }
+    if (kind === "oversight_claim") {
+      const claimId = clean(url.searchParams.get("claimId"));
+      if (!claimId) throw new Error("Select a reimbursement claim.");
+      const claim = await expenseOversightDetail(account, claimId);
+      return NextResponse.json({ claim }, { headers: { "Cache-Control": "private, no-store" } });
+    }
     const currentPolicy = await db().from("finance_reimbursement_documents").select("id,title,version_label,effective_from,storage_path,file_name").eq("company_id", account.companyId).eq("is_current", true).maybeSingle();
     if (currentPolicy.error) throw new Error("Unable to load the current Finance policy.");
-    if (new URL(request.url).searchParams.get("kind") === "policy_document") {
+    if (kind === "policy_document") {
       if (!currentPolicy.data) return NextResponse.json({ error: "No policy has been published." }, { status: 404 });
       const download = new URL(request.url).searchParams.get("download") === "1";
       const signed = await db().storage.from("finance-reimbursement-policies").createSignedUrl(currentPolicy.data.storage_path, 120, download ? { download: currentPolicy.data.file_name } : undefined);
@@ -206,12 +345,13 @@ export async function GET(request: Request) {
       return new Response(null, { status: 302, headers: { Location: signed.data.signedUrl, "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" } });
     }
     const policyDocument = currentPolicy.data ? { id: currentPolicy.data.id, title: currentPolicy.data.title, version_label: currentPolicy.data.version_label, effective_from: currentPolicy.data.effective_from } : null;
-    const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
+    const scope = normalizeConnectReporteeScope(url.searchParams.get("reporteeScope"));
     if (account.profileType === "user") {
       const actorUserIds = await resolveConnectActorUserIds(account);
-      const [approvals, preRequestApprovals] = await Promise.all([
+      const [approvals, preRequestApprovals, expenseOversight] = await Promise.all([
         approvalPayload(account.companyId, actorUserIds),
-        preRequestApprovalPayload(account.companyId, actorUserIds)
+        preRequestApprovalPayload(account.companyId, actorUserIds),
+        expenseOversightSummary(account)
       ]);
       return NextResponse.json({
         categories: [],
@@ -221,6 +361,7 @@ export async function GET(request: Request) {
         preRequests: [],
         approvals,
         preRequestApprovals,
+        expenseOversight,
         policyDocument,
         scope
       }, { headers: { "Cache-Control": "private, no-store" } });
@@ -233,6 +374,58 @@ export async function GET(request: Request) {
 }
 
 type InputItem = { id: string; categoryId: string; expenseDate: string; merchant: string; description: string; amount: number; quantity?: number | null };
+
+type ClaimApprovalStep = Awaited<ReturnType<typeof resolveExpenseApprovers>>["steps"][number];
+
+async function withPolicyExceptionApprovers(
+  account: ConnectAccount,
+  steps: ClaimApprovalStep[],
+  quotes: ExpensePolicyQuote[]
+) {
+  const specialUserIds = [...new Set(quotes
+    .filter((quote) => quote.excess_amount > 0 && quote.excess_action === "special_approval")
+    .map((quote) => quote.special_approver_user_id)
+    .filter((userId): userId is string => Boolean(userId)))];
+  const newUserIds = specialUserIds.filter((userId) => !steps.some((step) => step.approver_user_id === userId));
+  if (!newUserIds.length) return steps;
+  if (newUserIds.includes((await expenseIdentity(account)).userId ?? "")) {
+    throw new Error("A policy exception approver cannot approve their own reimbursement claim. Update the Finance policy.");
+  }
+  const [profiles, links] = await Promise.all([
+    db().from("profiles").select("id,full_name,is_active").eq("company_id", account.companyId).in("id", newUserIds),
+    db().from("hr_user_person_links").select("user_id,person_id,status").eq("company_id", account.companyId).in("user_id", newUserIds)
+  ]);
+  if (profiles.error) throw new Error(profiles.error.message);
+  if (links.error) throw new Error(links.error.message);
+  const profileByUser = new Map((profiles.data ?? []).map((profile) => [profile.id, profile]));
+  const personByUser = new Map((links.data ?? []).filter((link) => link.status === "active").map((link) => [link.user_id, link.person_id]));
+  const exceptionSteps = newUserIds.map((userId) => {
+    const profile = profileByUser.get(userId);
+    const personId = personByUser.get(userId);
+    if (!profile?.is_active || !personId) {
+      throw new Error("A Finance policy exception approver does not have an active One/People identity.");
+    }
+    return {
+      step_order: 0,
+      step_name: "Business policy exception approval",
+      approver_user_id: userId,
+      approver_person_id: personId,
+      approver_name: profile.full_name || "Policy exception approver",
+      route_id: null,
+      resolved_via: "policy_exception" as const,
+      original_approver_person_id: null,
+      fallback_reason: "Claim exceeds the configured Finance policy limit",
+      stage_code: "policy_exception" as const
+    } satisfies ClaimApprovalStep;
+  });
+  const financeIndex = steps.findIndex((step) => step.step_name === "Finance approval");
+  if (financeIndex < 0) throw new Error("A final Finance approval step is required before Payment Processing.");
+  return [
+    ...steps.slice(0, financeIndex),
+    ...exceptionSteps,
+    ...steps.slice(financeIndex)
+  ].map((step, index) => ({ ...step, step_order: index + 1 }));
+}
 
 async function quotePolicy(account: ConnectAccount, items: Pick<InputItem, "id" | "categoryId" | "expenseDate" | "amount" | "quantity">[], claimId?: string) {
   const identity = await expenseIdentity(account);
@@ -437,6 +630,7 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
     if (policyQuote.some(line => line.quantity_required)) throw new Error("Enter distance in kilometres for mileage expenses.");
     if (policyQuote.reduce((sum, line) => sum + Number(line.eligible_amount), 0) <= 0) throw new Error("The daily policy allowance is already used. No payable amount remains for this claim.");
     const quoteById = new Map(policyQuote.map(line => [line.id, line]));
+    approval.steps = await withPolicyExceptionApprovers(account, approval.steps, policyQuote);
     const categoryById = new Map(categories.map((category) => [category.id, category]));
     const dailyTotals = new Map<string, number>();
     for (const item of items) {
@@ -507,6 +701,7 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
         description: item.description,
         amount: item.amount,
         quantity: item.quantity,
+        finance_policy_snapshot: quoteById.get(item.id) ?? null,
         sort_order: (index + 1) * 10
       })),
       p_steps: approval.steps
@@ -540,26 +735,10 @@ async function submitClaim(form: FormData, account: ConnectAccount) {
     if (attachmentResult.error) throw new Error(attachmentResult.error.message);
     if (isResubmit && priorPaths.length) await db().storage.from("hr-expense-receipts").remove(priorPaths);
 
-    // Database policy evaluation may append an excess-approval step, even for top-level claimants.
+    // The submitted route already includes any configured policy-exception approver and always ends in Finance.
     const pendingSteps = await db().from("hr_expense_approval_steps").select("approver_user_id,step_order")
       .eq("company_id", account.companyId).eq("claim_id", claimId).eq("status", "pending").order("step_order");
     if (pendingSteps.error) throw new Error(pendingSteps.error.message);
-    if (approval.directToPayment && !pendingSteps.data?.length) {
-      const actorUserId = approval.identity.userId;
-      if (!actorUserId) throw new Error("A linked People login is required to send this claim to Payments.");
-      const paymentRpc = await db().rpc("hr_expense_claim_send_to_payment", {
-        p_company_id: account.companyId,
-        p_claim_id: claimId,
-        p_actor_user_id: actorUserId
-      });
-      if (paymentRpc.error) throw new Error(paymentRpc.error.message);
-      return NextResponse.json({
-        ok: true,
-        claimId,
-        notice: "Claim submitted and sent to Payments for finance processing."
-      });
-    }
-
     const firstApprover = pendingSteps.data?.[0];
     if (!firstApprover) throw new Error("No approval step is configured.");
     const notification = await notifyExpenseUser({

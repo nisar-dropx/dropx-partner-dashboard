@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Check, ChevronDown, ClipboardList, Download, FileText, MapPin, Plus, ReceiptText, RotateCcw, Search, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, CircleDollarSign, CircleHelp, ClipboardList, Download, FileText, MapPin, Plus, ReceiptText, RotateCcw, Search, ShieldCheck, Trash2, Upload, UserRoundCheck, WalletCards, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { todayInIndia } from "@/lib/india-date";
 import {
@@ -15,6 +15,7 @@ import {
   sumExpectedExpenses
 } from "@/lib/expense-request-form";
 import type { AppAccount } from "./connect-profile-app";
+import { ConnectDialog } from "./connect-dialog";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
 import { expensePolicyMessage, type ExpensePolicyQuote } from "@/lib/reimbursement-policy";
 
@@ -44,6 +45,11 @@ type Payload = {
   payout: { ready: boolean; message?: string | null };
   claims: Claim[];
   preRequests: PreRequest[];
+};
+type ApprovalGuide = {
+  requestApproval: { label: string; approverName: string; detail: string };
+  claimSteps: Array<{ order: number; kind: "manager" | "conditional" | "finance"; label: string; approverName: string; detail: string }>;
+  payment: { label: string; approverName: string; detail: string };
 };
 
 function uid() { return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`; }
@@ -81,6 +87,9 @@ export function ConnectReimbursements({ account, active = true }: { account: App
   const [policyQuotes, setPolicyQuotes] = useState<ExpensePolicyQuote[]>([]);
   const [policyLoading, setPolicyLoading] = useState(false);
   const [policyError, setPolicyError] = useState("");
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guide, setGuide] = useState<ApprovalGuide | null>(null);
+  const [guideLoading, setGuideLoading] = useState(false);
 
   const load = useCallback(async (background = false) => {
     if (!background) setLoading(true);
@@ -214,6 +223,29 @@ export function ConnectReimbursements({ account, active = true }: { account: App
     setWithdrawReason("");
   }
 
+  async function openApprovalGuide() {
+    setGuideOpen(true);
+    if (guide || guideLoading) return;
+    setGuideLoading(true);
+    setError("");
+    try {
+      const query = new URLSearchParams({
+        kind: "approval_guide",
+        accountId: account.id,
+        profileType: account.profileType
+      });
+      const response = await fetch(`/api/connect/reimbursements?${query}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to load your approval route.");
+      setGuide(payload.guide ?? null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to load your approval route.");
+      setGuideOpen(false);
+    } finally {
+      setGuideLoading(false);
+    }
+  }
+
   async function confirmWithdraw(event: FormEvent) {
     event.preventDefault();
     if (!withdrawTarget) return;
@@ -326,6 +358,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
       <small>Payments</small>
       <h1>Expense requests</h1>
       <p>Obtain manager approval before incurring any business expense. Submit the actual reimbursement claim with bills only after the approved expense occurs.</p>
+      <button className="dx-expense-guide-trigger" onClick={() => void openApprovalGuide()} type="button"><CircleHelp /> How approvals work for me</button>
     </header>
     {data?.policyDocument ? <section className="dx-expense-card" aria-label="Business travel policy">
       <div className="dx-expense-card-head"><div><h2>{data.policyDocument.title}</h2><p className="dx-expense-help">{data.policyDocument.version_label} · Effective {data.policyDocument.effective_from} · Published by Finance</p></div></div>
@@ -697,6 +730,33 @@ export function ConnectReimbursements({ account, active = true }: { account: App
           </button>
         </form>
       </div>
+    ) : null}
+
+    {guideOpen ? (
+      <ConnectDialog className="dx-expense-guide-dialog" eyebrow="Your configured route" onClose={() => setGuideOpen(false)} title="How expense approvals work">
+        {guideLoading ? <div className="dx-loader"><span /><small>Resolving your approvers…</small></div> : null}
+        {guide ? <div className="dx-expense-guide">
+          <p className="dx-expense-guide-intro">This is your current route from People reporting lines and Finance policy. It is resolved live when you submit.</p>
+          <section>
+            <header><UserRoundCheck /><span><small>Before spending</small><strong>{guide.requestApproval.label}</strong></span></header>
+            <div><b>{guide.requestApproval.approverName}</b><p>{guide.requestApproval.detail}</p></div>
+          </section>
+          <section>
+            <header><ShieldCheck /><span><small>After the expense</small><strong>Reimbursement claim</strong></span></header>
+            <ol>
+              {guide.claimSteps.map((step) => <li className={step.kind} key={`${step.kind}-${step.order}-${step.approverName}`}>
+                <i>{step.order}</i>
+                <span><small>{step.label}</small><b>{step.approverName}</b><p>{step.detail}</p></span>
+              </li>)}
+            </ol>
+          </section>
+          <section className="payment">
+            <header><WalletCards /><span><small>Released only by Finance</small><strong>{guide.payment.label}</strong></span></header>
+            <div><b>{guide.payment.approverName}</b><p>{guide.payment.detail}</p></div>
+          </section>
+          <aside><CircleDollarSign /><span><strong>What Finance checks</strong><small>Every expense head, receipt, claimed amount, applicable limit, payable amount, and policy exception—before the claim can enter Payment Processing.</small></span></aside>
+        </div> : null}
+      </ConnectDialog>
     ) : null}
   </section>;
 }

@@ -267,6 +267,10 @@ export async function resolveConfiguredApprovalWorkflow(input: {
   maxLevel?: 1 | 2 | 3;
   /** Skip peer same_location/cluster/region scopes and use the reporting chain only. */
   reportingChainOnly?: boolean;
+  /** Limit reporting-chain enforcement to these configured levels. Level 3 may then resolve a functional owner such as Finance. */
+  reportingChainMaxLevel?: 1 | 2 | 3;
+  /** Override the generic level-3 label when the configured final owner is not HR. */
+  level3StepName?: string;
   /** When true, missing manager levels are skipped instead of throwing (caller may send to HR). */
   allowMissingApprovers?: boolean;
 }): Promise<{ routeName: string; steps: ConfiguredApprovalStep[]; routeId: string } | null> {
@@ -310,7 +314,10 @@ export async function resolveConfiguredApprovalWorkflow(input: {
     const configuredScope = level === 1 ? route.level_1_search_scope : level === 2 ? route.level_2_search_scope : route.hr_final_search_scope;
     const fallbackMode = level === 1 ? route.level_1_fallback_mode : level === 2 ? route.level_2_fallback_mode : route.hr_final_fallback_mode;
     const fallbackPersonId = level === 1 ? route.level_1_fallback_person_id : level === 2 ? route.level_2_fallback_person_id : route.hr_final_fallback_person_id;
-    const forceChain = Boolean(input.reportingChainOnly) && (peerScopes.has(configuredScope) || level <= 2);
+    const reportingChainMaxLevel = input.reportingChainMaxLevel ?? 3;
+    const forceChain = Boolean(input.reportingChainOnly)
+      && level <= reportingChainMaxLevel
+      && (peerScopes.has(configuredScope) || level <= 2);
     const searchScope: SearchScope = forceChain
       ? (level === 1 ? "immediate_reporting_manager" : "reporting_chain")
       : configuredScope;
@@ -348,7 +355,7 @@ export async function resolveConfiguredApprovalWorkflow(input: {
       if (input.allowMissingApprovers) continue;
       throw new Error(`${level === 3 ? "HR final" : `Level ${level}`} approval is not available for this request. Contact HR.`);
     }
-    if (level === 3) resolved.step.step_name = "HR final approval";
+    if (level === 3) resolved.step.step_name = input.level3StepName ?? "HR final approval";
     else if (forceChain && level === 1) resolved.step.step_name = "Reporting manager approval";
     else if (forceChain) resolved.step.step_name = "Next reporting manager approval";
     excludedPeople.add(resolved.candidate.personId);
@@ -397,4 +404,3 @@ export async function resolveConfiguredApprovalWorkflow(input: {
   if (deferredFinalStep) steps.push(deferredFinalStep);
   return { routeName: route.route_name, steps, routeId: route.id };
 }
-

@@ -15635,6 +15635,414 @@ html.native-app .dx-app-install {
   line-height: 1.5;
 }
 
+.dx-expense-guide-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  margin-top: 10px;
+  padding: 8px 11px;
+  color: #344054;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, .06);
+}
+
+.dx-expense-guide-trigger svg {
+  width: 15px;
+  height: 15px;
+  color: #e65f14;
+}
+
+.dx-expense-guide-dialog .dx-dialog-surface {
+  width: min(680px, calc(100vw - 24px));
+}
+
+.dx-expense-guide {
+  display: grid;
+  gap: 12px;
+}
+
+.dx-expense-guide-intro {
+  margin: 0;
+  color: #667085;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.dx-expense-guide > section {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.dx-expense-guide > section.payment {
+  border-color: #b9e6fe;
+  background: #f0f9ff;
+}
+
+.dx-expense-guide section > header {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+}
+
+.dx-expense-guide section > header > svg {
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  color: #c94f0d;
+  background: #fff1e8;
+  border-radius: 8px;
+}
+
+.dx-expense-guide section > header span,
+.dx-expense-guide section > div {
+  display: grid;
+  gap: 2px;
+}
+
+.dx-expense-guide section small,
+.dx-expense-guide li small {
+  color: #667085;
+  font-size: 9px;
+}
+
+.dx-expense-guide section strong,
+.dx-expense-guide section b {
+  color: #101828;
+  font-size: 12px;
+}
+
+.dx-expense-guide section p,
+.dx-expense-guide li p {
+  margin: 1px 0 0;
+  color: #667085;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.dx-expense-guide ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dx-expense-guide li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 9px;
+  background: #f8fafc;
+  border-radius: 9px;
+}
+
+.dx-expense-guide li > i {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: #344054;
+  background: #fff;
+  border: 1px solid #d0d5dd;
+  border-radius: 99px;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.dx-expense-guide li > span {
+  display: grid;
+  gap: 2px;
+}
+
+.dx-expense-guide li.conditional {
+  background: #fffaeb;
+}
+
+.dx-expense-guide li.finance {
+  background: #ecfdf3;
+}
+
+.dx-expense-guide > aside {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 9px;
+  padding: 11px 12px;
+  color: #175cd3;
+  background: #eff8ff;
+  border: 1px solid #b2ddff;
+  border-radius: 10px;
+}
+
+.dx-expense-guide > aside svg {
+  width: 18px;
+}
+
+.dx-expense-guide > aside span {
+  display: grid;
+  gap: 2px;
+}
+
+.dx-expense-guide > aside strong {
+  color: #1849a9;
+  font-size: 11px;
+}
+
+.dx-expense-guide > aside small {
+  color: #175cd3;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.dx-finance-review {
+  display: grid;
+  gap: 10px;
+}
+
+.dx-finance-review > header {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dx-finance-review > header span {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+  background: #f8fafc;
+  border: 1px solid #eaecf0;
+  border-radius: 9px;
+}
+
+.dx-finance-review > header span.warning {
+  background: #fffaeb;
+  border-color: #fedf89;
+}
+
+.dx-finance-review > header span.danger {
+  background: #fff1f3;
+  border-color: #fda4af;
+}
+
+.dx-finance-review > header small {
+  color: #667085;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.dx-finance-review > header strong {
+  color: #101828;
+  font-size: 15px;
+}
+
+.dx-finance-review-table {
+  overflow: hidden;
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+}
+
+.dx-finance-review-table > div {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.35fr) .65fr .8fr .65fr minmax(150px, 1.2fr);
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+}
+
+.dx-finance-review-table > .head {
+  color: #667085;
+  background: #f8fafc;
+  font-size: 8px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.dx-finance-review-table > .row {
+  color: #344054;
+  border-top: 1px solid #eaecf0;
+  font-size: 10px;
+}
+
+.dx-finance-review-table .row > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dx-finance-review-table b {
+  color: #101828;
+  font-size: 10px;
+}
+
+.dx-finance-review-table small {
+  overflow: hidden;
+  color: #667085;
+  font-size: 8px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dx-finance-review-table em {
+  width: max-content;
+  padding: 3px 6px;
+  color: #475467;
+  background: #f2f4f7;
+  border-radius: 99px;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.dx-finance-review-table em.success { color: #067647; background: #ecfdf3; }
+.dx-finance-review-table em.warning { color: #b54708; background: #fffaeb; }
+.dx-finance-review-table em.danger { color: #b42318; background: #fff1f3; }
+
+.dx-finance-review > p {
+  margin: 0;
+  padding: 9px 10px;
+  color: #175cd3;
+  background: #eff8ff;
+  border-radius: 8px;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.dx-expense-oversight {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid #e4e7ec;
+}
+
+.dx-expense-oversight > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+}
+
+.dx-expense-oversight > header span {
+  display: grid;
+  gap: 2px;
+}
+
+.dx-expense-oversight > header strong {
+  color: #344054;
+  font-size: 12px;
+}
+
+.dx-expense-oversight > header small {
+  color: #667085;
+  font-size: 9px;
+}
+
+.dx-expense-oversight > header em {
+  padding: 4px 7px;
+  color: #475467;
+  background: #f2f4f7;
+  border-radius: 99px;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.dx-expense-oversight > div {
+  display: grid;
+  gap: 8px;
+}
+
+.dx-oversight-status {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dx-oversight-status span {
+  display: grid;
+  gap: 2px;
+  padding: 9px;
+  background: #f8fafc;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+}
+
+.dx-oversight-status small {
+  color: #667085;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.dx-oversight-status strong {
+  color: #101828;
+  font-size: 10px;
+}
+
+.dx-oversight-route {
+  display: grid;
+  gap: 8px;
+}
+
+.dx-oversight-route h3 {
+  margin: 0;
+  color: #344054;
+  font-size: 11px;
+}
+
+.dx-oversight-route > div {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.dx-oversight-route i {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: #667085;
+  background: #f2f4f7;
+  border-radius: 99px;
+}
+
+.dx-oversight-route i.status-approved { color: #067647; background: #ecfdf3; }
+.dx-oversight-route i.status-rejected,
+.dx-oversight-route i.status-returned { color: #b42318; background: #fff1f3; }
+.dx-oversight-route svg { width: 11px; }
+.dx-oversight-route span { display: grid; gap: 1px; }
+.dx-oversight-route strong { color: #344054; font-size: 10px; }
+.dx-oversight-route small { color: #667085; font-size: 8px; }
+
+@media (max-width: 720px) {
+  .dx-finance-review > header { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dx-finance-review-table > .head { display: none; }
+  .dx-finance-review-table > .row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dx-finance-review-table > .row > span:first-child { grid-column: 1 / -1; }
+  .dx-finance-review-table > .row > span:not(:first-child)::before {
+    color: #98a2b3;
+    content: attr(data-label);
+    font-size: 7px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .dx-oversight-status { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .dx-expense-request-hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

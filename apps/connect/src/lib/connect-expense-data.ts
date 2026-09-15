@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isBusinessOrNationalHeadDesignation, isManagingPartnerDesignation } from "./approval-designation-labels";
+import { isManagingPartnerDesignation } from "./approval-designation-labels";
 import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
 import { resolveConnectApproverUserId } from "./connect-approver-identity";
 import { supabaseAdmin } from "./supabase-admin";
@@ -110,47 +110,13 @@ type ExpenseApprovalStepDraft = {
   step_name: string;
   approver_user_id: string;
   approver_person_id: string;
+  approver_name?: string;
+  route_id?: string | null;
+  resolved_via?: "configured_designation" | "delegation" | "fallback" | "policy_exception";
+  original_approver_person_id?: string | null;
+  fallback_reason?: string | null;
+  stage_code?: "manager" | "policy_exception" | "finance";
 };
-
-async function designationForPerson(companyId: string, personId: string, asOf: string) {
-  const engagement = await db().from("hr_engagements").select("id,status")
-    .eq("company_id", companyId).eq("person_id", personId).eq("status", "active")
-    .limit(1).maybeSingle();
-  if (engagement.error || !engagement.data) return null;
-  const assignment = await db().from("hr_work_assignments").select("designation_id")
-    .eq("company_id", companyId).eq("engagement_id", engagement.data.id).eq("is_primary", true)
-    .lte("effective_from", asOf).or(`effective_to.is.null,effective_to.gte.${asOf}`)
-    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
-  if (assignment.error || !assignment.data?.designation_id) return null;
-  const designation = await db().from("designations").select("code,name")
-    .eq("company_id", companyId).eq("id", assignment.data.designation_id).maybeSingle();
-  if (designation.error || !designation.data) return null;
-  return { code: designation.data.code as string | null, name: String(designation.data.name ?? "") };
-}
-
-/**
- * When L1 is National Head / Business Head (e.g. Abdul), Managing Partner L2
- * (e.g. Jamsheer) is not required — NH/BH approval is final before Payments.
- */
-async function trimReimbursementStepsAfterBusinessHead(
-  companyId: string,
-  asOf: string,
-  steps: ExpenseApprovalStepDraft[]
-): Promise<ExpenseApprovalStepDraft[]> {
-  if (steps.length < 2) return steps;
-  const l1Designation = await designationForPerson(companyId, steps[0].approver_person_id, asOf);
-  if (!isBusinessOrNationalHeadDesignation(l1Designation)) return steps;
-
-  const kept: ExpenseApprovalStepDraft[] = [steps[0]];
-  for (const step of steps.slice(1)) {
-    const designation = await designationForPerson(companyId, step.approver_person_id, asOf);
-    const looksLikeManagingPartner = isManagingPartnerDesignation(designation)
-      || step.step_name.toLowerCase().includes("managing partner");
-    if (looksLikeManagingPartner) continue;
-    kept.push(step);
-  }
-  return kept.map((step, index) => ({ ...step, step_order: index + 1 }));
-}
 
 /** Top-level / Managing Partner requesters approve their own request trail. */
 export async function isDirectExpenseRequester(account: ConnectAccount) {
@@ -175,84 +141,46 @@ export async function isDirectExpenseRequester(account: ConnectAccount) {
 
 export async function resolveExpenseApprovers(account: ConnectAccount, amount: number) {
   const { identity, policy } = await resolveExpensePolicy(account, amount);
-  if (identity.assignment.is_top_level) {
-    return { identity, policy, steps: [] as ExpenseApprovalStepDraft[], directToPayment: true as const };
-  }
-  if (identity.assignment.designation_id) {
-    const designation = await db().from("designations").select("code,name")
-      .eq("company_id", account.companyId).eq("id", identity.assignment.designation_id).maybeSingle();
-    if (designation.error) throw new Error(designation.error.message);
-    const label = designation.data
-      ? { code: designation.data.code as string | null, name: String(designation.data.name ?? "") }
-      : null;
-    if (isManagingPartnerDesignation(label)) {
-      return { identity, policy, steps: [] as ExpenseApprovalStepDraft[], directToPayment: true as const };
-    }
-  }
+  const directRequester = await isDirectExpenseRequester(account);
 
   const configured = await resolveConfiguredApprovalWorkflow({
     companyId: account.companyId,
     workflowCode: "reimbursement",
     workerId: identity.workerId,
     workerType: identity.workerType,
-    asOf: identity.today
+    asOf: identity.today,
+    maxLevel: 3,
+    reportingChainOnly: true,
+    reportingChainMaxLevel: 2,
+    level3StepName: "Finance approval",
+    // A short hierarchy is valid for senior leaders. Finance remains mandatory below.
+    allowMissingApprovers: true
   });
-  if (configured) {
-    const configuredSteps = configured.steps.map((step, index) => ({
-      step_order: index + 1,
-      step_name: step.step_name,
-      approver_user_id: step.approver_user_id,
-      approver_person_id: step.approver_person_id
-    }));
-    return {
-      identity,
-      policy,
-      steps: await trimReimbursementStepsAfterBusinessHead(account.companyId, identity.today, configuredSteps),
-      directToPayment: false as const
-    };
-  }
+  if (!configured) throw new Error("The reimbursement approval route is not configured for your designation. Contact HR.");
 
-  // Default claim chain: walk the reporting line for policy.manager_levels
-  // (typically RM then Managing Partner). Finance processing begins after manager approval.
-  const steps: ExpenseApprovalStepDraft[] = [];
-  const seen = new Set<string>([identity.personId]);
-  let subjectAssignmentId = identity.assignment.id;
-  for (let level = 1; level <= policy.manager_levels; level += 1) {
-    const relationship = await db().from("hr_reporting_relationships").select("manager_assignment_id")
-      .eq("company_id", account.companyId).eq("subject_assignment_id", subjectAssignmentId)
-      .eq("relationship_type", "solid_line").eq("is_primary", true)
-      .lte("effective_from", identity.today).or(`effective_to.is.null,effective_to.gte.${identity.today}`)
-      .order("effective_from", { ascending: false }).limit(1).maybeSingle();
-    if (relationship.error) throw new Error(relationship.error.message);
-    if (!relationship.data) {
-      if (policy.allow_short_manager_chain && steps.length > 0) break;
-      throw new Error(`Reporting manager level ${level} is not configured for this reimbursement policy.`);
-    }
-    const assignment = await db().from("hr_work_assignments").select("id,engagement_id,position_title")
-      .eq("company_id", account.companyId).eq("id", relationship.data.manager_assignment_id).maybeSingle();
-    if (assignment.error || !assignment.data) throw new Error(`Reporting manager level ${level} is not active.`);
-    const engagement = await db().from("hr_engagements").select("person_id,status")
-      .eq("company_id", account.companyId).eq("id", assignment.data.engagement_id).maybeSingle();
-    if (engagement.error || !engagement.data || engagement.data.status !== "active") throw new Error(`Reporting manager level ${level} is not active.`);
-    if (seen.has(engagement.data.person_id)) throw new Error("The reporting hierarchy contains a cycle.");
-    seen.add(engagement.data.person_id);
-    const approverUserId = await resolveConnectApproverUserId(account.companyId, engagement.data.person_id);
-    if (!approverUserId) {
-      throw new Error(`${assignment.data.position_title} does not have an active One/People login.`);
-    }
-    steps.push({
-      step_order: level,
-      step_name: `${assignment.data.position_title} approval`,
-      approver_user_id: approverUserId,
-      approver_person_id: engagement.data.person_id
-    });
-    subjectAssignmentId = assignment.data.id;
+  const steps: ExpenseApprovalStepDraft[] = configured.steps.map((step, index) => ({
+    step_order: index + 1,
+    step_name: step.step_name,
+    approver_user_id: step.approver_user_id,
+    approver_person_id: step.approver_person_id,
+    approver_name: step.approver_name,
+    route_id: step.route_id,
+    resolved_via: step.resolved_via,
+    original_approver_person_id: step.original_approver_person_id,
+    fallback_reason: step.fallback_reason,
+    stage_code: step.step_name === "Finance approval" ? "finance" : "manager"
+  }));
+  const financeIndex = steps.findIndex((step) => step.step_name === "Finance approval");
+  if (financeIndex < 0) {
+    throw new Error("A final Finance approver is not configured for this reimbursement route. Contact HR.");
   }
-  if (!steps.length) throw new Error("No reporting manager is configured. Configure a reporting line or policy fallback before submission.");
+  if (!directRequester.direct && financeIndex === 0) {
+    throw new Error("No reporting manager is configured. Configure the reporting hierarchy before submitting a claim.");
+  }
   return {
     identity,
     policy,
-    steps: await trimReimbursementStepsAfterBusinessHead(account.companyId, identity.today, steps),
+    steps,
     directToPayment: false as const
   };
 }
