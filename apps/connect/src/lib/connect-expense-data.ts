@@ -329,125 +329,12 @@ async function resolveImmediateReportingManager(account: ConnectAccount, identit
   };
 }
 
-async function personIdForUser(companyId: string, userId: string) {
-  const link = await db().from("hr_user_person_links").select("person_id,status")
-    .eq("company_id", companyId).eq("user_id", userId).maybeSingle();
-  if (link.error) throw new Error(link.error.message);
-  return link.data?.status === "active" ? link.data.person_id : null;
-}
-
-/** Collect every finance / owner login that may approve a pre-request (first decision wins). */
-async function resolveFinanceHeadAssignees(account: ConnectAccount, excludeUserIds: Set<string>): Promise<ExpenseClaimRequestAssignee[]> {
-  const found = new Map<string, ExpenseClaimRequestAssignee>();
-  const add = async (userId: string, personId: string | null) => {
-    if (!userId || excludeUserIds.has(userId) || found.has(userId)) return;
-    found.set(userId, {
-      assignee_role: "finance_head",
-      approver_user_id: userId,
-      approver_person_id: personId ?? await personIdForUser(account.companyId, userId)
-    });
-  };
-
-  const head = await db().from("payment_heads")
-    .select("payment_process_role_ids")
-    .eq("company_id", account.companyId)
-    .eq("code", "EMPLOYEE_REIMBURSEMENT")
-    .eq("is_active", true)
-    .maybeSingle();
-  if (head.error) throw new Error(head.error.message);
-  const roleIds = [...(head.data?.payment_process_role_ids ?? [])].filter(Boolean);
-
-  const ownerRoles = await db().from("user_roles")
-    .select("id")
-    .eq("company_id", account.companyId)
-    .eq("is_active", true)
-    .in("code", ["OWNER", "OWNER_BREAK_GLASS", "PAYROLL_APPROVER"]);
-  if (ownerRoles.error) throw new Error(ownerRoles.error.message);
-  roleIds.push(...(ownerRoles.data ?? []).map((role) => role.id));
-
-  if (roleIds.length) {
-    const profiles = await db().from("profiles")
-      .select("id")
-      .eq("company_id", account.companyId)
-      .eq("is_active", true)
-      .in("role_id", [...new Set(roleIds)])
-      .order("created_at")
-      .limit(40);
-    if (profiles.error) throw new Error(profiles.error.message);
-    for (const profile of profiles.data ?? []) await add(profile.id, null);
-  }
-
-  const today = indiaToday();
-  const financeDesignations = await db().from("designations")
-    .select("id")
-    .eq("company_id", account.companyId)
-    .eq("is_active", true)
-    .or("code.ilike.%FINMGR%,code.ilike.%FINANCE%,name.ilike.%finance manager%,name.ilike.%finance head%");
-  if (financeDesignations.error) throw new Error(financeDesignations.error.message);
-  const designationIds = (financeDesignations.data ?? []).map((row) => row.id);
-  if (designationIds.length) {
-    const assignments = await db().from("hr_work_assignments")
-      .select("id,engagement_id")
-      .eq("company_id", account.companyId)
-      .eq("is_primary", true)
-      .in("designation_id", designationIds)
-      .lte("effective_from", today)
-      .or(`effective_to.is.null,effective_to.gte.${today}`)
-      .order("effective_from", { ascending: false })
-      .limit(40);
-    if (assignments.error) throw new Error(assignments.error.message);
-    for (const assignment of assignments.data ?? []) {
-      const engagement = await db().from("hr_engagements").select("person_id,status")
-        .eq("company_id", account.companyId).eq("id", assignment.engagement_id).maybeSingle();
-      if (engagement.error) throw new Error(engagement.error.message);
-      if (!engagement.data || engagement.data.status !== "active") continue;
-      const approverUserId = await resolveConnectApproverUserId(account.companyId, engagement.data.person_id);
-      if (!approverUserId) continue;
-      await add(approverUserId, engagement.data.person_id);
-    }
-  }
-
-  return [...found.values()];
-}
-
-async function excludePortalUserIdsForPerson(companyId: string, personId: string | null | undefined, exclude: Set<string>) {
-  if (!personId) return;
-  const links = await db().from("hr_user_person_links").select("user_id,status")
-    .eq("company_id", companyId).eq("person_id", personId).eq("status", "active");
-  if (links.error && !/does not exist|schema cache/i.test(links.error.message)) {
-    throw new Error(links.error.message);
-  }
-  for (const row of links.data ?? []) {
-    if (row.user_id) exclude.add(row.user_id);
-  }
-}
-
-/** Single-layer multi-assignee: reporting manager and/or finance owners (first decision wins). */
+/** Expense pre-requests require only the requester's immediate reporting manager. */
 export async function resolveExpenseClaimRequestAssignees(account: ConnectAccount) {
   const identity = await expenseIdentity(account);
-  const { resolveConnectActorUserIds } = await import("./connect-approver-identity");
-  const exclude = new Set<string>(await resolveConnectActorUserIds(account));
-  if (identity.userId) exclude.add(identity.userId);
-  await excludePortalUserIdsForPerson(account.companyId, identity.personId, exclude);
-
-  const assignees: ExpenseClaimRequestAssignee[] = [];
   const manager = await resolveImmediateReportingManager(account, identity);
-  if (manager) {
-    assignees.push(manager);
-    exclude.add(manager.approver_user_id);
-    await excludePortalUserIdsForPerson(account.companyId, manager.approver_person_id, exclude);
+  if (!manager) {
+    throw new Error("Configure an active reporting manager with a One/People login before requesting expense approval.");
   }
-
-  const financeAssignees = await resolveFinanceHeadAssignees(account, exclude);
-  // One row per portal user — unique(company_id, request_id, approver_user_id).
-  const byUser = new Map<string, ExpenseClaimRequestAssignee>();
-  for (const assignee of [...assignees, ...financeAssignees]) {
-    if (!assignee.approver_user_id || byUser.has(assignee.approver_user_id)) continue;
-    byUser.set(assignee.approver_user_id, assignee);
-  }
-  const uniqueAssignees = [...byUser.values()];
-  if (!uniqueAssignees.length) {
-    throw new Error("Configure a reporting manager or finance payment processor before requesting reimbursement approval.");
-  }
-  return { identity, assignees: uniqueAssignees };
+  return { identity, assignees: [manager] };
 }
