@@ -509,10 +509,17 @@ html.native-app .dx-auth {
    0px for html.native-app (see above) and env(safe-area-inset-bottom) everywhere else —
    nothing further needed here. */
 
-/* Off-white notification panel, per explicit user-specified hex (#f6f0fa) — not the app's
-   usual warm-cream --dx-safe tokens, a deliberate one-off for this panel only. */
+/* Off-white notification panel, per explicit user-specified hex (#e8dcf2) — not the app's
+   usual warm-cream --dx-safe tokens, a deliberate one-off for this panel only.
+   !important is deliberate here: this file has a later, higher-source-order minified rule
+   (search "dx-notification-pop{position:absolute" — currently around line 9022) that also
+   sets background on the exact same selector and, being later in the cascade, silently won
+   over a plain (non-!important) declaration here even though this block reads first in the
+   file. That's what shipped an unchanged gray panel to production last time despite this
+   rule looking correct. !important guarantees this specific color always wins regardless of
+   where else in this large, drifted file .dx-notification-pop's background gets set. */
 .dx-notification-pop {
-  background: #f6f0fa;
+  background: #e8dcf2 !important;
   border-color: #efe9de;
 }
 
@@ -521,7 +528,7 @@ html.native-app .dx-auth {
 }
 
 .dx-notification-list > button {
-  background: #f6f0fa;
+  background: #e8dcf2 !important;
   border-bottom-color: #f5f0e6;
 }
 
