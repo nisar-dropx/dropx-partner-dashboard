@@ -213,7 +213,7 @@ export async function resolveExpenseApprovers(account: ConnectAccount, amount: n
   }
 
   // Default claim chain: walk the reporting line for policy.manager_levels
-  // (typically RM then Managing Partner). Finance owners stay on the pre-request only.
+  // (typically RM then Managing Partner). Finance processing begins after manager approval.
   const steps: ExpenseApprovalStepDraft[] = [];
   const seen = new Set<string>([identity.personId]);
   let subjectAssignmentId = identity.assignment.id;

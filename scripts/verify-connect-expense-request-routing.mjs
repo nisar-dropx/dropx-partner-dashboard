@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = readFileSync(resolve(root, "apps/connect/src/lib/connect-expense-data.ts"), "utf8");
 const migration = readFileSync(resolve(root, "supabase/migrations/20260915074438_expense_pre_request_manager_only.sql"), "utf8");
+const expenseUi = readFileSync(resolve(root, "apps/connect/src/components/connect-reimbursements.tsx"), "utf8");
 
 const start = source.indexOf("export async function resolveExpenseClaimRequestAssignees");
 const next = source.indexOf("\nexport ", start + 1);
@@ -15,7 +16,9 @@ const checks = [
   [resolver.includes("assignees: [manager]"), "the reporting manager is the only pre-request assignee"],
   [!source.includes("resolveFinanceHeadAssignees"), "finance and owner roles are not collected for expense pre-requests"],
   [!resolver.includes("payment_heads") && !resolver.includes("OWNER"), "pre-request routing does not bypass configured claim approvals"],
-  [migration.includes("assignee_role = 'finance_head'") && migration.includes("assignee_role = 'reporting_manager'"), "existing parallel finance assignees are skipped only when a manager remains pending"]
+  [migration.includes("assignee_role = 'finance_head'") && migration.includes("assignee_role = 'reporting_manager'"), "existing parallel finance assignees are skipped only when a manager remains pending"],
+  [expenseUi.includes("Approval is required before spending"), "the expense request screen clearly requires approval before spending"],
+  [expenseUi.includes("Do not raise an expense request after the expense has already been incurred."), "the expense request screen warns against after-the-fact requests"]
 ];
 
 const failed = checks.filter(([ok]) => !ok);
