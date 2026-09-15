@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ClipboardCheck, Clock3, DoorOpen, Eye, FileText, Home, LocateFixed, MapPin, MapPinned, RotateCcw, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ChevronRight, ClipboardCheck, Clock3, DoorOpen, Eye, FileText, Home, LocateFixed, MapPin, MapPinned, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { ConnectDialog } from "./connect-dialog";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectAttachmentViewer } from "./connect-attachment-viewer";
 import { TimeOffAttachmentLink, type TimeOffAttachment } from "./time-off-attachment";
@@ -327,13 +328,17 @@ function ApprovalNote({
   placeholder: string;
 }) {
   return (
-    <textarea
-      className="dx-approval-note-input"
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={placeholder}
-      rows={2}
-      value={notes[id] ?? ""}
-    />
+    <label className="dx-approval-note-field">
+      <span>Review note</span>
+      <textarea
+        aria-label="Review note"
+        className="dx-approval-note-input"
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        rows={2}
+        value={notes[id] ?? ""}
+      />
+    </label>
   );
 }
 
@@ -395,41 +400,36 @@ function ApprovalRow({
   return (
     <div className="dx-approval-row">
       <button className="dx-approval-row-info" onClick={onReview} type="button">
+        <span aria-hidden="true" className="dx-approval-avatar">{name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("") || "?"}</span>
         <div className="dx-approval-row-main">
           <div className="dx-approval-row-top">
             <p className="dx-approval-row-eyebrow">{eyebrow}</p>
-            {badge}
           </div>
           <strong>{name}</strong>
           <p className="dx-approval-row-meta">{meta}</p>
         </div>
       </button>
-      <div className="dx-approval-row-actions">
-        <button aria-label="Review details" className="dx-approval-row-view" onClick={onReview} title="Review details" type="button">
-          <Eye />
-        </button>
-        {onApprove ? (
-          <button aria-label={approveLabel} className="dx-approval-row-approve" disabled={saving} onClick={onApprove} title={approveLabel} type="button">
-            <Check /><span>{approveLabel}</span>
+      <div className="dx-approval-row-footer">
+        <span className="dx-approval-row-badge">{badge}</span>
+        <div className="dx-approval-row-actions">
+          <button aria-label="Review details" className="dx-approval-row-view" onClick={onReview} title="Review details" type="button">
+            <span>Review</span><ChevronRight />
           </button>
-        ) : null}
+          {onApprove ? (
+            <button aria-label={approveLabel} className="dx-approval-row-approve" disabled={saving} onClick={onApprove} title={approveLabel} type="button">
+              <Check /><span>{approveLabel}</span>
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   );
 }
 
 function ApprovalModal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
-  return (
-    <div className="dx-approval-modal-backdrop" onClick={onClose}>
-      <div className={`dx-approval-modal${wide ? " dx-approval-modal-wide" : ""}`} onClick={(event) => event.stopPropagation()}>
-        <div className="dx-approval-modal-head">
-          <h3>{title}</h3>
-          <button aria-label="Close" onClick={onClose} type="button"><X /></button>
-        </div>
-        <div className="dx-approval-modal-body">{children}</div>
-      </div>
-    </div>
-  );
+  return <ConnectDialog className={`dx-approval-modal${wide ? " dx-approval-modal-wide" : ""}`} eyebrow={`Approval inbox · ${title}`} onClose={onClose} title="Review request">
+    <div className="dx-approval-modal-body">{children}</div>
+  </ConnectDialog>;
 }
 
 function journeyStatus(status: string) {
@@ -586,9 +586,16 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
         setOthersOpen(false);
       }
     }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOthersOpen(false);
+      othersRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    };
+    document.addEventListener("keydown", onKeyDown);
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("touchstart", onPointerDown);
     return () => {
+      document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("touchstart", onPointerDown);
     };
@@ -890,18 +897,19 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
   const wfhCount = wfhApprovals.length + wfhHrApprovals.length;
   const scopeName = reporteeScope === "immediate" ? "immediate reportees" : "entire reporting team";
   const othersCount = leaveApprovals.length + reimbursementCount + wfhCount + businessTripCount + exitCount;
+  const pendingCount = attendanceCount + rosterCount + supportPackages.length + othersCount;
   const othersActive = section === "time-off" || section === "reimbursements" || section === "wfh" || section === "business-trip" || section === "exits";
   const othersLabel = section === "time-off"
     ? "Time off"
     : section === "reimbursements"
-      ? "Reimbursements"
+      ? "Expenses"
       : section === "wfh"
         ? "WFH"
         : section === "business-trip"
           ? "Business trip"
           : section === "exits"
             ? "Exits"
-            : "Others";
+            : "More";
 
   function selectSection(next: ApprovalSection) {
     setSection(next);
@@ -1004,10 +1012,16 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
 
   return (
     <section className="dx-approval-inbox">
-      <header className="dx-page-intro">
-        <small>Manager workspace</small>
-        <h1>Approval inbox</h1>
-        <p>Assigned approval steps plus HR attendance/WFH/Business trip finalization for people in the selected reporting scope.</p>
+      <header className="dx-approval-header">
+        <div className="dx-page-intro">
+          <small>Team requests</small>
+          <h1>Approval inbox</h1>
+          <p>Review requests, check the details, and keep your team moving.</p>
+        </div>
+        <div className="dx-approval-header-actions">
+          <span className="dx-approval-pending"><span aria-hidden="true" />{loading ? "Updating inbox" : `${pendingCount} awaiting review`}</span>
+          <button aria-label="Refresh approvals" className="dx-approval-refresh" disabled={loading || saving} onClick={() => void load()} type="button"><RotateCcw /></button>
+        </div>
       </header>
       <div className="dx-approval-scope">
         <div aria-label="Choose reportee view" className="dx-approval-scope-switch" role="group">
@@ -1029,21 +1043,21 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
           </button>
         </div>
         <p>{reporteeScope === "immediate"
-          ? "Shows direct reportees only for location checks and HR finalization. Assigned manager steps still appear when you are the named approver."
-          : "Shows your full reporting tree for location checks and HR finalization. Assigned manager steps still appear when you are the named approver."}</p>
+          ? "Direct reports, plus requests assigned to you."
+          : "Your full reporting team, plus requests assigned to you."}</p>
       </div>
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
       <nav aria-label="Approval sections" className="dx-approval-tabs">
         <div className="dx-approval-tabs-primary">
-          <button className={section === "attendance" ? "active" : ""} onClick={() => selectSection("attendance")} type="button">
-            Attendance<span>{attendanceCount}</span>
+          <button aria-pressed={section === "attendance"} className={section === "attendance" ? "active" : ""} onClick={() => selectSection("attendance")} type="button">
+            <CalendarClock />Attendance<span>{attendanceCount}</span>
           </button>
-          <button className={section === "rosters" ? "active" : ""} onClick={() => selectSection("rosters")} type="button">
-            Rosters<span>{rosterCount}</span>
+          <button aria-pressed={section === "rosters"} className={section === "rosters" ? "active" : ""} onClick={() => selectSection("rosters")} type="button">
+            <CalendarDays />Rosters<span>{rosterCount}</span>
           </button>
-          <button className={section === "location-integrity" ? "active" : ""} onClick={() => selectSection("location-integrity")} type="button">
-            Location<span>{supportPackages.length}</span>
+          <button aria-pressed={section === "location-integrity"} className={section === "location-integrity" ? "active" : ""} onClick={() => selectSection("location-integrity")} type="button">
+            <MapPin />Location<span>{supportPackages.length}</span>
           </button>
           <div className={`dx-approval-others${othersOpen ? " open" : ""}`} ref={othersRef}>
             <button
@@ -1052,23 +1066,23 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               onClick={() => setOthersOpen((current) => !current)}
               type="button"
             >
-              {othersLabel}<span>{othersCount}</span><ChevronDown />
+              <span className="dx-approval-other-label">{othersLabel}</span><span>{othersCount}</span><ChevronDown />
             </button>
             {othersOpen ? (
-              <div className="dx-approval-others-menu" role="menu">
-                <button className={section === "time-off" ? "active" : ""} onClick={() => selectSection("time-off")} type="button">
+              <div aria-label="More approval categories" className="dx-approval-others-menu" role="group">
+                <button aria-pressed={section === "time-off"} className={section === "time-off" ? "active" : ""} onClick={() => selectSection("time-off")} type="button">
                   Time off<span>{leaveApprovals.length}</span>
                 </button>
-                <button className={section === "reimbursements" ? "active" : ""} onClick={() => selectSection("reimbursements")} type="button">
+                <button aria-pressed={section === "reimbursements"} className={section === "reimbursements" ? "active" : ""} onClick={() => selectSection("reimbursements")} type="button">
                   Reimbursements<span>{reimbursementCount}</span>
                 </button>
-                <button className={section === "wfh" ? "active" : ""} onClick={() => selectSection("wfh")} type="button">
+                <button aria-pressed={section === "wfh"} className={section === "wfh" ? "active" : ""} onClick={() => selectSection("wfh")} type="button">
                   WFH<span>{wfhCount}</span>
                 </button>
-                <button className={section === "business-trip" ? "active" : ""} onClick={() => selectSection("business-trip")} type="button">
+                <button aria-pressed={section === "business-trip"} className={section === "business-trip" ? "active" : ""} onClick={() => selectSection("business-trip")} type="button">
                   Business trip<span>{businessTripCount}</span>
                 </button>
-                <button className={section === "exits" ? "active" : ""} onClick={() => selectSection("exits")} type="button">
+                <button aria-pressed={section === "exits"} className={section === "exits" ? "active" : ""} onClick={() => selectSection("exits")} type="button">
                   Exits<span>{exitCount}</span>
                 </button>
               </div>
@@ -1726,7 +1740,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
         </div>
       ) : null}
 
-      <p className="dx-approval-footnote"><ClipboardCheck /> Assigned steps for your One account, plus HR attendance/WFH finalization when you have People attendance.approve scope. Location checks still follow the reporting-tree toggle above.</p>
+      <p className="dx-approval-footnote"><ClipboardCheck /> Only requests you are authorised to review appear here. Open a request to see the details and approval history.</p>
     </section>
   );
 }

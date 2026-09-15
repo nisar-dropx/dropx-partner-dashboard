@@ -1,7 +1,9 @@
 "use client";
 
-import { Download, ExternalLink, X } from "lucide-react";
-import { useEffect, useState, useTransition, type ReactNode } from "react";
+import { Download, ExternalLink } from "lucide-react";
+import { useState, useTransition, type ReactNode } from "react";
+
+import { ConnectDialog } from "./connect-dialog";
 
 export type ConnectAttachmentFile = { label: string; url: string; fileName?: string; mimeType?: string };
 
@@ -47,13 +49,6 @@ export function ConnectAttachmentViewer({
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [isDownloading, startDownload] = useTransition();
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
-
   if (!files.length) return null;
   const current = files[active] ?? files[0];
   const downloadName = current.fileName || fileNameFromUrl(current.url, `${current.label.replace(/\s+/g, "-").toLowerCase()}.jpg`);
@@ -72,39 +67,30 @@ export function ConnectAttachmentViewer({
         {trigger}
       </button>
       {open ? (
-        <div className="dx-attachment-modal-backdrop" onClick={() => setOpen(false)}>
-          <div className="dx-attachment-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="dx-attachment-modal-head">
-              <div>
-                <p className="dx-approval-row-eyebrow">Private attachment</p>
-                <h3>{title}</h3>
+        <ConnectDialog className="dx-attachment-modal" eyebrow="Private attachment" onClose={() => setOpen(false)} title={title}>
+          <div className="dx-attachment-modal-body">
+            {downloadError ? <div className="dx-alert error">{downloadError}</div> : null}
+            {files.length > 1 ? (
+              <div className="dx-attachment-tabs" role="tablist">
+                {files.map((file, index) => (
+                  <button aria-selected={index === active} className={index === active ? "active" : ""} key={`${file.label}:${index}`} onClick={() => setActive(index)} role="tab" type="button">
+                    {file.label}
+                  </button>
+                ))}
               </div>
-              <button aria-label="Close" onClick={() => setOpen(false)} type="button"><X /></button>
-            </div>
-            <div className="dx-attachment-modal-body">
-              {downloadError ? <div className="dx-alert error">{downloadError}</div> : null}
-              {files.length > 1 ? (
-                <div className="dx-attachment-tabs" role="tablist">
-                  {files.map((file, index) => (
-                    <button aria-selected={index === active} className={index === active ? "active" : ""} key={`${file.label}:${index}`} onClick={() => setActive(index)} role="tab" type="button">
-                      {file.label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              <div className="dx-attachment-preview">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                {current.mimeType==="application/pdf" ? <iframe title={current.label} src={current.url} style={{width:"100%",height:"min(65vh,700px)",border:0}} /> : <img alt={current.label} src={current.url} />}
-              </div>
-            </div>
-            <div className="dx-attachment-modal-foot">
-              <a className="dx-attachment-open" href={current.url} rel="noreferrer" target="_blank"><ExternalLink />Open full size</a>
-              <button className="dx-attachment-download" disabled={isDownloading} onClick={onDownload} type="button">
-                <Download />{isDownloading ? "Downloading…" : "Download"}
-              </button>
+            ) : null}
+            <div className="dx-attachment-preview">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              {current.mimeType==="application/pdf" ? <iframe title={current.label} src={current.url} style={{width:"100%",height:"min(65vh,700px)",border:0}} /> : <img alt={current.label} src={current.url} />}
             </div>
           </div>
-        </div>
+          <div className="dx-attachment-modal-foot">
+            <a className="dx-attachment-open" href={current.url} rel="noreferrer" target="_blank"><ExternalLink />Open full size</a>
+            <button className="dx-attachment-download" disabled={isDownloading} onClick={onDownload} type="button">
+              <Download />{isDownloading ? "Downloading…" : "Download"}
+            </button>
+          </div>
+        </ConnectDialog>
       ) : null}
     </>
   );

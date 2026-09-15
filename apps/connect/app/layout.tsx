@@ -4,6 +4,7 @@ import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import { ConnectAppBootstrap } from "@/components/connect-app-bootstrap";
 import "./globals.css";
+import "./approval-inbox.css";
 
 export const metadata: Metadata = {
   title: {
