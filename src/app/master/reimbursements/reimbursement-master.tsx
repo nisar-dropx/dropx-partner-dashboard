@@ -102,6 +102,7 @@ export function ReimbursementMaster({
     input.expected_updated_at = editor.row?.updated_at ?? null;
     input.is_active = form.get("is_active") === "on";
     input.receipt_required = form.get("receipt_required") === "on";
+    if (editor.kind === "head") input.show_in_expense_requests = form.get("show_in_expense_requests") === "on";
     if (editor.kind === "limit" && form.get("limit_basis") === "not_allowed") {
       input.permissible_amount = 0;
       input.excess_action = "cap";
@@ -187,7 +188,7 @@ export function ReimbursementMaster({
                       "Action",
                     ]
                   : tab === "heads"
-                    ? ["Expense head", "Receipt", "Status", "Action"]
+                    ? ["Expense head", "Expense requests", "Receipt", "Status", "Action"]
                     : ["Policy", "Payment head", "Action"]
                 ).map((h) => (
                   <th key={h}>{h}</th>
@@ -239,6 +240,9 @@ export function ReimbursementMaster({
                       <td>
                         <strong>{label(row)}</strong>
                         <small>{String(row.code)}</small>
+                      </td>
+                      <td>
+                        {row.show_in_expense_requests ? "Shown" : "Hidden"}
                       </td>
                       <td>
                         {row.receipt_required
@@ -383,6 +387,15 @@ export function ReimbursementMaster({
                       required
                     />
                   </label>
+                  <label className="rm-check">
+                    <input
+                      name="show_in_expense_requests"
+                      type="checkbox"
+                      defaultChecked={editor.row ? editor.row.show_in_expense_requests === true : true}
+                    />
+                    Show in expense requests
+                  </label>
+                  <p className="rm-note wide">Choose whether employees can include this head in trip estimates. Active heads remain available for receipt claims.</p>
                   <label className="rm-check">
                     <input
                       name="receipt_required"
