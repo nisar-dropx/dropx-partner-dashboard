@@ -1,8 +1,13 @@
 package com.dropxlogistics.onetracker.location;
 
 import android.Manifest;
+import android.app.AlertDialog;
+import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
+import android.provider.Settings;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -51,16 +56,48 @@ public class DropxOnePlugin extends Plugin {
     // Only asked once per install regardless of grant/deny — Android itself refuses to
     // re-prompt after a real denial anyway, and re-asking every login would be a nag.
     if (!TrackingPrefs.hasRequestedInitialLocationPermission(getContext())) {
-      TrackingPrefs.setRequestedInitialLocationPermission(getContext(), true);
-      if (getPermissionState("location") != PermissionState.GRANTED) {
-        requestPermissionForAlias("location", call, "initialLocationPermissionCallback");
-        return;
-      }
-      requestInitialBackgroundPermissionIfNeeded(call);
+      showConsentThenRequestInitialPermission(call);
       return;
     }
 
     call.resolve();
+  }
+
+  /**
+   * A plain OS permission dialog with no context beforehand isn't enough for something
+   * tracking a worker's location for their employer — shown once, before the very first
+   * permission prompt this device ever sees, and gated by the SAME "already asked" flag as
+   * the permission request itself (so it can never show more than once regardless of what
+   * the worker chooses).
+   */
+  private void showConsentThenRequestInitialPermission(PluginCall call) {
+    Context activity = getActivity();
+    if (activity == null) {
+      // No foreground activity to attach a dialog to (e.g. a background relaunch) — fall
+      // back to requesting permission directly rather than silently doing nothing forever.
+      requestInitialLocationPermission(call);
+      return;
+    }
+
+    new AlertDialog.Builder(activity)
+      .setTitle("Location while you're on duty")
+      .setMessage(
+        "DropX One shares your location with your employer while you're clocked in, for " +
+        "attendance and dispatch purposes. It keeps running in the background during your " +
+        "shift, even if you close the app, and stops when you're off the clock."
+      )
+      .setCancelable(false)
+      .setPositiveButton("I Understand, Continue", (dialog, which) -> requestInitialLocationPermission(call))
+      .show();
+  }
+
+  private void requestInitialLocationPermission(PluginCall call) {
+    TrackingPrefs.setRequestedInitialLocationPermission(getContext(), true);
+    if (getPermissionState("location") != PermissionState.GRANTED) {
+      requestPermissionForAlias("location", call, "initialLocationPermissionCallback");
+      return;
+    }
+    requestInitialBackgroundPermissionIfNeeded(call);
   }
 
   @PermissionCallback
@@ -123,7 +160,34 @@ public class DropxOnePlugin extends Plugin {
       getContext().startService(intent);
     }
     TrackingPrefs.setRunning(getContext(), true);
+    maybeRequestBatteryOptimizationExemption();
     call.resolve();
+  }
+
+  /**
+   * OEM battery managers (Samsung/Xiaomi especially) can kill a foreground service that's
+   * otherwise perfectly correct, regardless of the notification/START_STICKY/etc. Asked once
+   * per install, right after tracking first actually starts — not on every launch, and not
+   * before there's a real reason to ask.
+   */
+  private void maybeRequestBatteryOptimizationExemption() {
+    if (TrackingPrefs.hasRequestedBatteryExemption(getContext())) return;
+    TrackingPrefs.setRequestedBatteryExemption(getContext(), true);
+
+    PowerManager powerManager = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+    if (powerManager == null || powerManager.isIgnoringBatteryOptimizations(getContext().getPackageName())) {
+      return;
+    }
+
+    Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+    intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    try {
+      getContext().startActivity(intent);
+    } catch (Exception e) {
+      // Some OEM builds don't support this intent at all — tracking still works, it's just
+      // more exposed to that OEM's own battery management killing it.
+    }
   }
 
   @PluginMethod

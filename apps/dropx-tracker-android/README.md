@@ -54,9 +54,30 @@ cd android
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Signing/release for a Play Store or self-hosted APK build isn't set up yet — mirror
-`apps/dropx-one-android`'s pattern (release keystore kept outside git, its own release-metadata
-file + `public/downloads/*.apk` entry in `apps/connect`) when that's needed.
+## Signing a release build
+
+```sh
+cp android/keystore.properties.example android/keystore.properties
+# edit keystore.properties, filling in the real storePassword/keyPassword
+cd android
+./gradlew assembleRelease
+```
+
+The real keystore lives at `production/private/dropx-tracker-android/dropx-tracker-release.keystore`
+— outside any git repo (`production/` itself has no `.git`), matching `apps/dropx-one-android`'s
+convention. `keystore.properties` (gitignored) holds its password; `keystore.properties.example`
+(committed) documents the shape for anyone setting up a new machine to build releases. **Back
+the keystore + password up somewhere durable** (a password manager, a second secure location) —
+if it's ever lost, this app can never be updated again under `com.dropxlogistics.onetracker`
+without every device uninstalling and reinstalling fresh.
+
+Distribution today is self-hosted, following `apps/dropx-one-android`'s pattern: build the
+signed APK above, then wire up an equivalent of that app's `dropx-one-release.ts` +
+`/api/app-release` + `public/downloads/*.apk` in `apps/connect` when you're ready to publish a
+download link. A Play Store release is a separate, mostly non-code effort (developer account,
+public privacy policy URL, Data Safety form disclosing location collection, and a Permissions
+Declaration justifying background location for a workforce-tracking app — Play's strictest
+review tier).
 
 ## Push notifications: disabled until you add a Firebase project
 
@@ -93,11 +114,51 @@ new package name — a `google-services.json` is tied to one specific package na
 
 ## Safe-area / layout notes
 
-`--dx-safe-top` / `--dx-safe-bottom` are injected by `MainActivity.java` on every page load
-(window insets are dispatched once at launch and again on real changes like rotation, but
-*not* on WebView navigation — so it has to be re-applied via a `WebViewListener.onPageLoaded`
-hook, not just the one-time insets callback). If the header or bottom nav ever look wrong on a
-new device, check `adb shell settings get secure location_mode` isn't the issue (unrelated) and
-inspect these two custom properties via `chrome://inspect` (or `adb forward` to the
-`webview_devtools_remote_<pid>` socket) rather than guessing — that's how the original gap/clip
-bugs here were actually diagnosed.
+`MainActivity.java` keeps the WebView non-edge-to-edge (`WindowCompat.setDecorFitsSystemWindows`)
+so Android reserves the real status-bar and nav-bar space itself — always correct on every
+device, no per-device measuring needed. To match, `globals.css`'s `html.native-app` block sets
+both `--dx-safe-top` and `--dx-safe-bottom` to `0px`, so the header/bottom-nav don't *also* add
+padding on top of that native reservation (the double-reservation bug this replaced). That CSS
+block has been silently reverted once already by an unrelated feature merge built on a stale
+copy of the file (a block-move, not a line conflict, so git didn't flag it) — if the header/nav
+ever look wrong again, check `git log -S "dx-safe-top: 0px" -- apps/connect/app/globals.css`
+before assuming it's a new bug. Diagnose via `chrome://inspect` (or `adb forward` to the
+`webview_devtools_remote_<pid>` socket) — that's how the original gap/clip bugs here were
+actually found, not by guessing.
+
+## Changing the app icon / splash screen later
+
+Both were generated from `apps/connect/public/app-icons/icon-512.png` (the plain square mark)
+and `icon-maskable-512.png` (the same mark with adaptive-icon safe-zone padding baked in) — the
+same source files the website's own PWA manifest uses, so updating the brand mark there and
+regenerating from it keeps everything consistent. To swap in a different image instead, point
+these two source paths at whatever new PNG you want (a 512×512 square works for both if you
+don't have a maskable variant) and rerun:
+
+```js
+// scripts/gen-icons.mjs (write once, keep for reuse — not currently checked in)
+import sharp from "sharp";
+const SRC_ICON = "<path to your 512x512 square logo>";
+const SRC_MASKABLE = "<path to a maskable variant, or reuse SRC_ICON>";
+const RES = "android/app/src/main/res";
+const densities = [
+  { dir: "mipmap-mdpi", legacy: 48, fg: 108 },
+  { dir: "mipmap-hdpi", legacy: 72, fg: 162 },
+  { dir: "mipmap-xhdpi", legacy: 96, fg: 216 },
+  { dir: "mipmap-xxhdpi", legacy: 144, fg: 324 },
+  { dir: "mipmap-xxxhdpi", legacy: 192, fg: 432 }
+];
+for (const d of densities) {
+  await sharp(SRC_ICON).resize(d.legacy, d.legacy).png().toFile(`${RES}/${d.dir}/ic_launcher.png`);
+  await sharp(SRC_ICON).resize(d.legacy, d.legacy).png().toFile(`${RES}/${d.dir}/ic_launcher_round.png`);
+  await sharp(SRC_MASKABLE).resize(d.fg, d.fg).png().toFile(`${RES}/${d.dir}/ic_launcher_foreground.png`);
+}
+```
+
+For the splash screen (`android/app/src/main/res/drawable*/splash.png`, 11 files across
+densities/orientations — sizes are whatever's already there, `sharp`'s `.metadata()` will tell
+you), composite your logo centered over a plain white canvas at each of those exact
+width/height pairs. `android/app/src/main/res/values/ic_launcher_background.xml`'s single color
+value is the adaptive-icon background — currently white; change that one line for a different
+background color without touching any image. After regenerating, `./gradlew assembleDebug` (or
+`assembleRelease`) and reinstall to see it.
