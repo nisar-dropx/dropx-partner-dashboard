@@ -1,13 +1,15 @@
 import type { AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-// "helpers" was never a real table -- the generated table for this workforce category is
-// "workers" (see scripts/workforce_category_tables_v1.sql). Every call here silently queried a
-// nonexistent table; results.some(error) then made loadPeopleExceptionCount return 0 for the
-// WHOLE snapshot (not just the workers slice), since one source failing aborts the entire
-// count -- so this badge has been permanently 0 for every company since it was added.
+// "helpers" is correct here -- the "worker" profile type's real table is "helpers", not
+// "workers" (see src/lib/workforce-profiles.ts's nonEmployeeProfileConfigs: route "/workers",
+// pageCode "workers", but table: "helpers"). A prior pass here "fixed" this to "workers" based
+// on an unrelated repo's script naming without checking this repo's own source of truth --
+// reverted after that "fix" itself failed applying a migration against the real database
+// ("relation public.workers does not exist"). "helpers" is what every other live
+// .from(...) call site in this app already queries.
 const SOURCES = [
-  ["employees", "employee"], ["workforce", "workforce"], ["contractors", "contractor"], ["vendors", "vendor"], ["workers", "worker"]
+  ["employees", "employee"], ["workforce", "workforce"], ["contractors", "contractor"], ["vendors", "vendor"], ["helpers", "worker"]
 ] as const;
 type Profile = { id: string; statutory_applicability: string[] | null; pf_uan: string | null; esi_no: string | null; driving_license_exp_date: string | null; vehicle_reg_no: string | null; vehicle_reg_exp_date: string | null; vehicle_insurance_exp_date: string | null; vehicle_pollution_exp_date: string | null; updated_at: string | null };
 type Issue = { type: string; id: string; rule: string; updated: string };

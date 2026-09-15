@@ -158,12 +158,14 @@ async function loadPeopleReviewCount(authorization: AuthorizationContext) {
     { table: "workforce", statusColumn: "onboarding_status" },
     { table: "contractors", statusColumn: "onboarding_status" },
     { table: "vendors", statusColumn: "onboarding_status" },
-    // Was "helpers" -- no such table exists (the generated table for this workforce category
-    // is "workers"; see scripts/workforce_category_tables_v1.sql). That meant every call here
-    // silently queried a nonexistent table and the resulting error was swallowed by the
-    // `result.error ? 0 : ...` fallback below, so workers' under-review count never
-    // contributed to this badge at all.
-    { table: "workers", statusColumn: "onboarding_status" }
+    // "helpers" is correct here -- the "worker" profile type's real table is "helpers", not
+    // "workers" (see src/lib/workforce-profiles.ts's nonEmployeeProfileConfigs: route
+    // "/workers", pageCode "workers", but table: "helpers"). A prior pass here "fixed" this to
+    // "workers" based on an unrelated repo's script naming without checking this repo's own
+    // source of truth -- reverted after confirming "helpers" is right (it's what every other
+    // live .from(...) call site in this app already queries, and "workers" itself does not
+    // exist as a table).
+    { table: "helpers", statusColumn: "onboarding_status" }
   ];
   const results = await Promise.all(sources.map(async ({ table, statusColumn }) => {
     let query = supabaseAdmin!
