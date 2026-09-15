@@ -23,13 +23,26 @@ export type ExpectedExpenseKey = string;
 export type ExpectedExpenses = Record<string, number>;
 
 export function emptyExpectedExpenses(): ExpectedExpenses {
-  return {
-    travel: 0,
-    stay: 0,
-    local_conveyance: 0,
-    food_da: 0,
-    other: 0
-  };
+  return {};
+}
+
+export type RequestExpenseCategory = { id: string; show_in_expense_requests: boolean };
+
+export function requestExpenseCategories<T extends RequestExpenseCategory>(categories: T[]): T[] {
+  return categories.filter(category => category.show_in_expense_requests === true);
+}
+
+export function requestExpenseAmounts(value: ExpectedExpenses, categories: RequestExpenseCategory[]): ExpectedExpenses {
+  return Object.fromEntries(requestExpenseCategories(categories)
+    .filter(category => Number(value[category.id]) > 0)
+    .map(category => [category.id, value[category.id]]));
+}
+
+export function validateRequestExpenseAmounts(value: ExpectedExpenses, categories: RequestExpenseCategory[]) {
+  const allowed = new Set(requestExpenseCategories(categories).map(category => category.id));
+  if (Object.entries(value).some(([key, amount]) => amount > 0 && !allowed.has(key))) {
+    throw new Error("Expense categories have changed. Refresh the form and review your estimates.");
+  }
 }
 
 export function purposeLabel(code: string | null | undefined, fallback = "") {
