@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, ClipboardList, Download, FileText, MapPin, Plus, ReceiptText, RotateCcw, Search, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ClipboardList, Download, FileText, MapPin, Plus, ReceiptText, RotateCcw, Search, Trash2, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { todayInIndia } from "@/lib/india-date";
 import {
@@ -321,7 +321,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
     <header className="dx-page-intro">
       <small>Payments</small>
       <h1>Expense requests</h1>
-      <p>Get prior approval before any business visit or expense. After approval, submit the actual claim with bills.</p>
+      <p>Obtain manager approval before incurring any business expense. Submit the actual reimbursement claim with bills only after the approved expense occurs.</p>
     </header>
     {data?.policyDocument ? <section className="dx-expense-card" aria-label="Business travel policy">
       <div className="dx-expense-card-head"><div><h2>{data.policyDocument.title}</h2><p className="dx-expense-help">{data.policyDocument.version_label} · Effective {data.policyDocument.effective_from} · Published by Finance</p></div></div>
@@ -347,12 +347,19 @@ export function ConnectReimbursements({ account, active = true }: { account: App
 
     {!loading && tab === "requests" ? <>
       <form className="dx-expense-form" onSubmit={submitRequest}>
+        <aside className="dx-expense-prior-approval-notice" role="note">
+          <AlertTriangle aria-hidden="true" />
+          <span>
+            <strong>Approval is required before spending</strong>
+            <small>Submit this request and obtain manager approval before booking, travelling, purchasing, or incurring any expense. Do not raise an expense request after the expense has already been incurred.</small>
+          </span>
+        </aside>
         <section className="dx-expense-card dx-expense-request-card">
           <div className="dx-expense-request-hero">
             <span>
               <small>Prior approval</small>
               <h2>New expense request</h2>
-              <p>Tell us the visit purpose, stations, dates, and expected spend before anything is incurred.</p>
+              <p>Submit the planned visit and estimated spend for manager approval before booking, travelling, purchasing, or spending.</p>
             </span>
             <em>{money(estimatedTotal)}</em>
           </div>
