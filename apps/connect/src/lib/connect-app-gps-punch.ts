@@ -92,6 +92,7 @@ async function loadStationGeofence(locationId: string | null | undefined) {
     .from("stations")
     .select("id, station_code, station_name, latitude, longitude, geofence_radius_m")
     .eq("id", locationId)
+    .eq("is_active", true)
     .maybeSingle();
   if (result.error || !result.data) return null;
   return {
