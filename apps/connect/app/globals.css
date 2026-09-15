@@ -509,11 +509,10 @@ html.native-app .dx-auth {
    0px for html.native-app (see above) and env(safe-area-inset-bottom) everywhere else —
    nothing further needed here. */
 
-/* Barely-off-white notification panel — #fbf8f3 (the app's usual warm-cream surface color)
-   read as dull/grayish here against a bright phone screen, so this is a much lighter touch
-   of the same warmth instead of matching that token exactly. */
+/* Off-white notification panel, per explicit user-specified hex (#f6f0fa) — not the app's
+   usual warm-cream --dx-safe tokens, a deliberate one-off for this panel only. */
 .dx-notification-pop {
-  background: #fffdf9;
+  background: #f6f0fa;
   border-color: #efe9de;
 }
 
@@ -522,7 +521,7 @@ html.native-app .dx-auth {
 }
 
 .dx-notification-list > button {
-  background: #fffdf9;
+  background: #f6f0fa;
   border-bottom-color: #f5f0e6;
 }
 
