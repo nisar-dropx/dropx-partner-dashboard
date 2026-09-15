@@ -9,6 +9,7 @@ import { decideConnectBusinessTripApproval, decideConnectBusinessTripHrApproval,
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { userFacingError } from "../../../../src/lib/user-facing-error";
 import { approvalJourneySummary, loadApprovalJourneySteps } from "../../../../src/lib/connect-approval-journey";
+import { listConnectPayAdvanceApprovals, decideConnectPayAdvanceApproval } from "../../../../src/lib/connect-pay-advance-approval-data";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -91,7 +92,7 @@ export async function GET(request: Request) {
     const approverUserIds = await resolveConnectActorUserIds(account);
     const matchesReportee = (profileType: string, profileId: string | null) =>
       connectReporteeMatches(reportees, profileType, profileId);
-    const [leaveApprovals, wfhApprovals, wfhHrApprovals, businessTripApprovals, businessTripHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals] = await Promise.all([
+    const [leaveApprovals, wfhApprovals, wfhHrApprovals, businessTripApprovals, businessTripHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals, payAdvanceApprovals] = await Promise.all([
       listLeaveApprovals(account),
       approverUserIds.length
         ? listConnectWfhApprovals({
@@ -117,7 +118,8 @@ export async function GET(request: Request) {
       listConnectRosterSwapApprovals(account, reportees),
       listConnectReturnedRosters(account),
       listConnectExitApprovals(account),
-      listConnectExitWithdrawalApprovals(account)
+      listConnectExitWithdrawalApprovals(account),
+      listConnectPayAdvanceApprovals(account)
     ]);
     return NextResponse.json({
       scope,
@@ -133,7 +135,8 @@ export async function GET(request: Request) {
       rosterSwapApprovals,
       returnedRosters,
       exitApprovals,
-      exitWithdrawalApprovals
+      exitWithdrawalApprovals,
+      payAdvanceApprovals
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return NextResponse.json({ error: userFacingError(error, "Unable to load approvals.") }, { status: 400 });
@@ -144,6 +147,11 @@ export async function PATCH(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
     const account = await selectedAccount(request, body);
+    const payAdvanceRequestId = clean(body.payAdvanceRequestId);
+    if (payAdvanceRequestId) {
+      await decideConnectPayAdvanceApproval(account, payAdvanceRequestId, body.decision, body.note, body.approvedAmount, body.approvedInstallments);
+      return NextResponse.json({ notice: "Pay advance decision recorded." });
+    }
     const reviewId = clean(body.reviewId);
     if (reviewId) {
       const decision = clean(body.decision);

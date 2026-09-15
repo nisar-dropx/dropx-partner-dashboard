@@ -3,7 +3,7 @@ import { notifyApproverMobile, notifyApproversMobile } from "./approver-mobile-n
 import { todayInIndia } from "./india-date";
 import { supabaseAdmin } from "./supabase-admin";
 
-function fill(template: string, values: Record<string, string>) { return template.replace(/{{\s*([a-z0-9_]+)\s*}}/gi, (_, key: string) => values[key] ?? ""); }
+function fill(template: string, values: Record<string, string>) { return template.replaceAll("Open People > Approval Inbox to review it.", `Open DropX One → Approval Inbox → More → Exits to review it: ${process.env.ONE_APP_URL?.replace(/\/$/, "") || "https://one.dropxlogistics.com"}/approvals?section=exits`).replace(/{{\s*([a-z0-9_]+)\s*}}/gi, (_, key: string) => values[key] ?? ""); }
 
 type EmployeeExitNotice = { companyId: string; caseId: string; employee: { employee_code: string | null; full_name: string; email: string | null }; requestedDate: string };
 
@@ -60,7 +60,7 @@ export async function notifyExitWithdrawalReviewer(input: {
     `${input.employeeName} has requested to withdraw resignation ${caseNumber || ""}.`.replace(/\s+/g, " ").trim(),
     requestedDate ? `Requested last working date: ${requestedDate}.` : "",
     "",
-    "Open People → Approval inbox → Resign withdrawal to accept the withdrawal or keep the exit open.",
+    `Open DropX One → Approval Inbox → More → Exits to review the withdrawal: ${process.env.ONE_APP_URL?.replace(/\/$/, "") || "https://one.dropxlogistics.com"}/approvals?section=exits`,
     "",
     "— DropX One"
   ].filter(Boolean).join("\n");

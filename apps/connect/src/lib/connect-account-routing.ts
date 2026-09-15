@@ -32,11 +32,11 @@ export function resolveConnectRouteAccount<T extends RoutableAccount>(
     (accounts.length === 1 ? accounts[0] : null);
 }
 
-export function connectAccountRoute(route: string, account?: RoutableAccount | null) {
-  if (!account) return route;
-  const query = new URLSearchParams({
+export function connectAccountRoute(route: string, account?: RoutableAccount | null, approvalSection?: string | null) {
+  const query = new URLSearchParams(account ? {
     id: account.reference || account.id,
     account: connectAccountKey(account)
-  });
-  return `${route}?${query}`;
+  } : {});
+  if (route === "/approvals" && approvalSection) query.set("section", approvalSection);
+  return query.size ? `${route}?${query}` : route;
 }

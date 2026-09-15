@@ -494,6 +494,8 @@ body:has(.dx-dialog[open]) { overflow: hidden; }
 .dx-approval-time-grid small { font-size: 11px; }
 .dx-approval-inline-note { font-size: 12px; line-height: 1.6; }
 .dx-approval-note-field { display: grid; gap: 8px; color: #52627b; font-size: 12px; font-weight: 550; }
+.dx-approval-finance-terms { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.dx-approval-finance-terms input { min-width: 0; width: 100%; min-height: 42px; padding: 10px 12px; border: 1px solid #dbe3ee; border-radius: 9px; background: #fff; color: #172033; font: inherit; }
 .dx-approval-note-input { min-height: 88px; padding: 12px; font: inherit; font-size: 13px; }
 .dx-approval-toolbar { position: sticky; z-index: 1; bottom: -24px; margin: 0 -26px -24px; padding: 16px 26px 24px; border-top: 1px solid #e9edf3; background: #fff; }
 .dx-approval-toolbar button { min-height: 44px; }

@@ -4,7 +4,7 @@ import { supabaseAdmin } from "./supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database is unavailable."); return supabaseAdmin; }
 function one<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
-function fill(template: string, values: Record<string,string>) { return template.replace(/{{\s*([a-z0-9_]+)\s*}}/gi,(_,key:string)=>values[key]??""); }
+function fill(template: string, values: Record<string,string>) { return template.replaceAll("Review this request in People:", "Review this request in DropX One:").replace(/{{\s*([a-z0-9_]+)\s*}}/gi,(_,key:string)=>values[key]??""); }
 function emails(values:Array<string|null|undefined>){return [...new Set(values.map((value)=>String(value??"").trim().toLowerCase()).filter(Boolean))];}
 
 export async function notifyConnectLeaveSubmitted(input:{companyId:string;requestId:string}) {
@@ -32,7 +32,7 @@ export async function notifyConnectLeaveSubmitted(input:{companyId:string;reques
   });
   if(!template?.is_enabled)return {status:"skipped" as const};
   const to=emails([profile.data?.email]);
-  const values={employee_name:employee?.full_name??contractor?.full_name??"Team member",worker_code:employee?.employee_code??contractor?.dropx_id??"",leave_name:leaveType?.name??"time off",leave_code:leaveType?.code??"",start_date:request.start_date,end_date:request.end_date,days:String(request.days),reason:request.reason,approver_name:profile.data?.full_name??"Manager",next_approver_name:"",reviewer_note:"",approval_url:`${process.env.PEOPLE_APP_URL?.replace(/\/$/,"")||"https://people.dropxlogistics.com"}/approvals`};
+  const values={employee_name:employee?.full_name??contractor?.full_name??"Team member",worker_code:employee?.employee_code??contractor?.dropx_id??"",leave_name:leaveType?.name??"time off",leave_code:leaveType?.code??"",start_date:request.start_date,end_date:request.end_date,days:String(request.days),reason:request.reason,approver_name:profile.data?.full_name??"Manager",next_approver_name:"",reviewer_note:"",approval_url:`${process.env.ONE_APP_URL?.replace(/\/$/,"")||"https://one.dropxlogistics.com"}/approvals?section=time-off`};
   const subject=fill(template.subject_template,values);const body=fill(template.body_template,values);
   const key=`APPROVAL_REQUIRED:${step.id}`;
   const claim=await database.from("hr_leave_notification_log").insert({company_id:input.companyId,request_id:input.requestId,approval_step_id:step.id,notification_key:key,event_code:"APPROVAL_REQUIRED",to_emails:to,subject,status:"sending"}).select("id").single();
@@ -107,7 +107,7 @@ export async function notifyConnectLeaveWorkflow(input: { companyId: string; req
     reviewer_note: request.reviewer_note ?? "No reviewer note",
     approver_name: approver?.full_name ?? "Your manager",
     next_approver_name: approvalOwner?.full_name ?? "the next manager",
-    approval_url: `${process.env.ONE_APP_URL?.replace(/\/$/, "") || "https://one.dropxlogistics.com"}/approvals`
+    approval_url: `${process.env.ONE_APP_URL?.replace(/\/$/, "") || "https://one.dropxlogistics.com"}/approvals?section=time-off`
   };
   const subject = fill(template.subject_template, values);
   const body = fill(template.body_template, values);

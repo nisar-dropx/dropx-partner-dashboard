@@ -24,6 +24,7 @@ import { countryCodeOptions } from "@/lib/country-codes";
 import { requiredDropxOnePageCodes, type DropxOnePageCode } from "@/lib/dropx-one-pages";
 import { userFacingError } from "@/lib/user-facing-error";
 import { connectAccountKey as accountKey, connectAccountRoute, resolveConnectRouteAccount } from "@/lib/connect-account-routing";
+import { connectApprovalSection } from "@/lib/connect-approval-links";
 import { leaveRouteState, readConnectSessionResponse, resolveApprovalAccess, type ReporteeCheck } from "@/lib/connect-navigation-state";
 
 type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "approvals" | "requests" | "payments" | "advances" | "earnings" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "performance" | "settings";
@@ -114,6 +115,8 @@ export function ConnectLoginFlow() {
   const searchParams = useSearchParams();
   const selectedAccountId = searchParams.get("id")?.trim().toLowerCase() ?? "";
   const selectedAccountKey = searchParams.get("account") ?? "";
+  const requestedApprovalSection = connectApprovalSection(searchParams.get("section"));
+  const pendingApprovalSection = useRef(pathname === "/approvals" ? requestedApprovalSection : null);
   const [step, setStep] = useState<Step>("mobile");
   const [checking, setChecking] = useState(true);
   const [sessionError, setSessionError] = useState("");
@@ -489,13 +492,14 @@ export function ConnectLoginFlow() {
     finally { setPending(false); }
   }
   function choose(next: AppAccount) {
-    const destination = landingPage(next);
+    const destination = pendingApprovalSection.current ? "approvals" : landingPage(next);
     setAccount(next); setAvatar(next.profilePhotoUrl || ""); setDrawer(false); setStep(destination);
     router.push(urlFor(destination, next));
+    pendingApprovalSection.current = null;
   }
   function urlFor(next: Step, targetAccount = account) {
     const route = routeForStep[next] ?? "/accounts";
-    return connectAccountRoute(route, targetAccount);
+    return connectAccountRoute(route, targetAccount, requestedApprovalSection ?? pendingApprovalSection.current);
   }
   function open(next: Step) {
     setDrawer(false); setProfileMenu(false);
@@ -711,7 +715,7 @@ export function ConnectLoginFlow() {
       {step === "profile" && account && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "documents" && account && peopleSelfService(account) && allowed(account, "documents") ? <ConnectDocuments account={account} /> : null}
       {step === "requests" && account && peopleSelfService(account) ? <ConnectMyRequests account={account} /> : null}
-      {step === "approvals" && account && approvalAccess === "allowed" ? <ConnectApprovalInbox account={account} /> : null}
+      {step === "approvals" && account && approvalAccess === "allowed" ? <ConnectApprovalInbox account={account} initialSection={requestedApprovalSection} /> : null}
       {step === "approvals" && account && approvalAccess === "loading" ? <div role="status"><Loader text="Checking approval access..." /></div> : null}
       {step === "approvals" && account && approvalAccess === "error" ? <section className="dx-setting-card">
         <div role="alert">Unable to check approval access. Please retry.</div>

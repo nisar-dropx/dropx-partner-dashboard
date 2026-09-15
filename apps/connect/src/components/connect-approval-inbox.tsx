@@ -1,5 +1,8 @@
 "use client";
 
+import type { ConnectApprovalSection } from "@/lib/connect-approval-links";
+import type { PayAdvanceApproval } from "@/lib/connect-pay-advance-approval";
+
 import { ArrowLeftRight, CalendarClock, CalendarDays, Camera, Check, ChevronDown, ChevronRight, ClipboardCheck, Clock3, DoorOpen, Eye, FileText, Home, LocateFixed, MapPin, MapPinned, RotateCcw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ConnectDialog } from "./connect-dialog";
@@ -243,7 +246,7 @@ type ExitWithdrawalApproval = {
   journey?: ApprovalJourney;
 };
 
-type ApprovalSection = "time-off" | "wfh" | "business-trip" | "attendance" | "rosters" | "location-integrity" | "reimbursements" | "exits";
+type ApprovalSection = ConnectApprovalSection;
 type ReporteeScope = "immediate" | "team";
 
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value; }
@@ -547,12 +550,16 @@ function RosterApprovalPreview({ approval }: { approval: RosterApproval }) {
   );
 }
 
-export function ConnectApprovalInbox({ account, active = true }: { account: AppAccount; active?: boolean }) {
+export function ConnectApprovalInbox({ account, active = true, initialSection }: { account: AppAccount; active?: boolean; initialSection?: ApprovalSection | null }) {
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
-  const [section, setSection] = useState<ApprovalSection>("time-off");
+  const [section, setSection] = useState<ApprovalSection>(initialSection ?? "time-off");
+  useEffect(() => { if (initialSection) setSection(initialSection); }, [initialSection]);
   const [reporteeScope, setReporteeScope] = useState<ReporteeScope>("immediate");
   const [reimbursements, setReimbursements] = useState<ReimbursementApproval[]>([]);
   const [preRequestApprovals, setPreRequestApprovals] = useState<PreRequestApproval[]>([]);
+  const [payAdvanceApprovals, setPayAdvanceApprovals] = useState<PayAdvanceApproval[]>([]);
+  const [payAdvanceError, setPayAdvanceError] = useState("");
+  const [payAdvanceTerms, setPayAdvanceTerms] = useState<Record<string, { amount: string; installments: string }>>({});
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
   const [wfhApprovals, setWfhApprovals] = useState<WfhApproval[]>([]);
   const [wfhHrApprovals, setWfhHrApprovals] = useState<WfhApproval[]>([]);
@@ -630,9 +637,10 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
       setReturnedRosters(leavePayload.returnedRosters ?? []);
       setExitApprovals(leavePayload.exitApprovals ?? []);
       setExitWithdrawalApprovals(leavePayload.exitWithdrawalApprovals ?? []);
+      setPayAdvanceApprovals(leavePayload.payAdvanceApprovals ?? []);
       setSupportPackages(leavePayload.locationSupportPackages ?? []);
       setSection((current) => {
-        if (current === "time-off" && !(leavePayload.leaveApprovals ?? []).length) {
+        if (!initialSection && current === "time-off" && !(leavePayload.leaveApprovals ?? []).length) {
           if (nextClaims.length || nextPreRequests.length) return "reimbursements";
           if ((leavePayload.attendanceApprovals ?? []).length || (leavePayload.attendanceHrApprovals ?? []).length) return "attendance";
           if ((leavePayload.rosterSwapApprovals ?? []).length || (leavePayload.rosterApprovals ?? []).length) return "rosters";
@@ -640,18 +648,36 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
           if ((leavePayload.locationSupportPackages ?? []).length) return "location-integrity";
           if ((leavePayload.wfhApprovals ?? []).length || (leavePayload.wfhHrApprovals ?? []).length) return "wfh";
           if ((leavePayload.businessTripApprovals ?? []).length || (leavePayload.businessTripHrApprovals ?? []).length) return "business-trip";
+          if ((leavePayload.payAdvanceApprovals ?? []).length) return "pay-advances";
         }
         return current;
       });
     } catch (reason) { setError(userFacingError(reason, "Unable to load approvals.")); }
     finally { if (!background) setLoading(false); markLoaded(); }
-  }, [account.id, account.profileType, reporteeScope, markLoaded]);
+  }, [account.id, account.profileType, reporteeScope, markLoaded, initialSection]);
   setReload(() => load(true));
 
   useEffect(() => { void load(); }, [load]);
 
   function setNote(id: string, value: string) {
     setNotes((current) => ({ ...current, [id]: value }));
+  }
+
+  async function decidePayAdvance(approval: PayAdvanceApproval, decision: "approved" | "rejected") {
+    setSaving(true); setPayAdvanceError("");
+    try {
+      const response = await fetch("/api/connect/approvals", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: account.id, profileType: account.profileType,
+          payAdvanceRequestId: approval.requestId, decision, note: notes[approval.id] ?? "",
+          approvedAmount: payAdvanceTerms[approval.id]?.amount ?? approval.approvedAmount ?? approval.requestedAmount,
+          approvedInstallments: payAdvanceTerms[approval.id]?.installments ?? approval.installments })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to record the pay advance decision.");
+      setNotice(payload.notice); closeModal(); await load();
+    } catch (reason) { setPayAdvanceError(userFacingError(reason, "Unable to record the pay advance decision.")); }
+    finally { setSaving(false); }
   }
 
   async function decideReimbursement(claimId: string, action: "approved" | "returned" | "rejected") {
@@ -896,9 +922,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
   const businessTripCount = businessTripApprovals.length + businessTripHrApprovals.length;
   const wfhCount = wfhApprovals.length + wfhHrApprovals.length;
   const scopeName = reporteeScope === "immediate" ? "immediate reportees" : "entire reporting team";
-  const othersCount = leaveApprovals.length + reimbursementCount + wfhCount + businessTripCount + exitCount;
+  const othersCount = leaveApprovals.length + reimbursementCount + wfhCount + businessTripCount + exitCount + payAdvanceApprovals.length;
   const pendingCount = attendanceCount + rosterCount + supportPackages.length + othersCount;
-  const othersActive = section === "time-off" || section === "reimbursements" || section === "wfh" || section === "business-trip" || section === "exits";
+  const othersActive = section === "time-off" || section === "reimbursements" || section === "wfh" || section === "business-trip" || section === "exits" || section === "pay-advances";
   const othersLabel = section === "time-off"
     ? "Time off"
     : section === "reimbursements"
@@ -909,7 +935,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
           ? "Business trip"
           : section === "exits"
             ? "Exits"
-            : "More";
+            : section === "pay-advances" ? "Pay advances" : "More";
 
   function selectSection(next: ApprovalSection) {
     setSection(next);
@@ -1084,6 +1110,9 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                 </button>
                 <button aria-pressed={section === "exits"} className={section === "exits" ? "active" : ""} onClick={() => selectSection("exits")} type="button">
                   Exits<span>{exitCount}</span>
+                </button>
+                <button aria-pressed={section === "pay-advances"} className={section === "pay-advances" ? "active" : ""} onClick={() => selectSection("pay-advances")} type="button">
+                  Pay advances<span>{payAdvanceApprovals.length}</span>
                 </button>
               </div>
             ) : null}
@@ -1541,6 +1570,49 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
                 />
               </ApprovalModal>
             );
+          })()}
+        </div>
+      ) : null}
+
+      {!loading && section === "pay-advances" ? (
+        <div className="dx-approval-list">
+          {payAdvanceApprovals.map(approval => <ApprovalRow key={approval.id}
+            badge={<span className="dx-approval-badge">{money(approval.requestedAmount)}</span>}
+            eyebrow={`${approval.requestNumber} · ${approval.stepName}`} name={approval.workerName}
+            meta={approval.workerCode || "Pay advance"} saving={saving}
+            onReview={() => { setPayAdvanceError(""); setActiveKey(`pay-advance:${approval.id}`); }} />)}
+          {!payAdvanceApprovals.length ? <div className="dx-empty"><Clock3 /><strong>No pay advances waiting</strong><small>No pay advance approval steps are assigned to you right now.</small></div> : null}
+          {(() => {
+            const approval = payAdvanceApprovals.find(item => activeKey === `pay-advance:${item.id}`);
+            if (!approval) return null;
+            return <ApprovalModal onClose={closeModal} title={approval.workerName}>
+              <ApprovalHead eyebrow={`Pay advance · ${approval.stepName}`} name={approval.workerName}
+                meta={`${approval.requestNumber} · ${approval.workerCode}`} badge={<span className="dx-approval-badge">{money(approval.requestedAmount)}</span>} />
+              <dl className="dx-approval-facts">
+                <div><dt>Requested amount</dt><dd>{money(approval.requestedAmount)}</dd></div>
+                {approval.approvedAmount != null ? <div><dt>Amount from previous review</dt><dd>{money(approval.approvedAmount)}</dd></div> : null}
+                <div><dt>Recovery</dt><dd>{statusLabel(approval.recoveryMode)}{approval.recoveryMode === "installments" ? ` · ${approval.installments} installments` : ""}</dd></div>
+                {approval.neededBy ? <div><dt>Needed by</dt><dd>{displayDate(approval.neededBy)}</dd></div> : null}
+                <div><dt>Reason</dt><dd>{approval.reason}</dd></div>
+              </dl>
+              {approval.stepType === "finance" ? <div className="dx-approval-finance-terms">
+                <label className="dx-approval-note-field">Approved amount
+                  <input aria-label="Approved amount" type="number" min="0.01" step="0.01" max={approval.requestedAmount}
+                    value={payAdvanceTerms[approval.id]?.amount ?? approval.approvedAmount ?? approval.requestedAmount}
+                    onChange={event => setPayAdvanceTerms(current => ({ ...current, [approval.id]: { amount: event.target.value, installments: current[approval.id]?.installments ?? String(approval.installments) } }))} />
+                </label>
+                <label className="dx-approval-note-field">Recovery installments
+                  <input aria-label="Recovery installments" type="number" min="1" max="12" step="1"
+                    value={payAdvanceTerms[approval.id]?.installments ?? approval.installments}
+                    onChange={event => setPayAdvanceTerms(current => ({ ...current, [approval.id]: { amount: current[approval.id]?.amount ?? String(approval.approvedAmount ?? approval.requestedAmount), installments: event.target.value } }))} />
+                </label>
+              </div> : null}
+              <ApprovalNote id={approval.id} notes={notes} onChange={value => setNote(approval.id, value)} placeholder="Add a reason when rejecting" />
+              {payAdvanceError ? <p className="dx-error" role="alert">{payAdvanceError}</p> : null}
+              <ApprovalToolbar saving={saving} showReturn={false}
+                onApprove={() => void decidePayAdvance(approval, "approved")}
+                onReject={() => void decidePayAdvance(approval, "rejected")} />
+            </ApprovalModal>;
           })()}
         </div>
       ) : null}
