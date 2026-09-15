@@ -24,6 +24,7 @@ import { countryCodeOptions } from "@/lib/country-codes";
 import { requiredDropxOnePageCodes, type DropxOnePageCode } from "@/lib/dropx-one-pages";
 import { userFacingError } from "@/lib/user-facing-error";
 import { connectAccountKey as accountKey, connectAccountRoute, resolveConnectRouteAccount } from "@/lib/connect-account-routing";
+import { leaveRouteState, readConnectSessionResponse, resolveApprovalAccess, type ReporteeCheck } from "@/lib/connect-navigation-state";
 
 type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "approvals" | "requests" | "payments" | "advances" | "earnings" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "performance" | "settings";
 const routeForStep: Partial<Record<Step, string>> = {
@@ -61,11 +62,6 @@ const allowed = (account: AppAccount | null, page: DropxOnePageCode) =>
   requiredDropxOnePageCodes.includes(page) ||
   (page === "performance" && (account?.profileType === "employee" || account?.profileType === "contractor")) ||
   (account?.pageAccess ?? defaultPageAccess).includes(page);
-const canViewApprovals = (account: AppAccount | null, hasReportees: boolean) => Boolean(
-  account &&
-  !isWorkforceWorkspace(account) &&
-  (isManagerAccount(account) || hasReportees || (account.pageAccess?.includes("approvals") ?? false))
-);
 const showLeaveNav = (account: AppAccount | null) => Boolean(
   account &&
   active(account) &&
@@ -90,13 +86,7 @@ function Loader({ text }: { text: string }) {
   return <div className="dx-loader fullscreen"><span />{text ? <small>{text}</small> : null}</div>;
 }
 
-// Suspense fallback for the two page.tsx routes that render <ConnectLoginFlow/>. Every tab
-// switch is a real navigation (open() calls router.push/replace to a new URL, not just a state
-// change), and with no fallback, React showed nothing at all for one frame before the
-// destination screen's own skeleton painted -- a blank flash sandwiched between two things that
-// each looked fine alone. This mimics the app shell (header + bottom nav) so that frame reads as
-// part of the transition instead of a blank page. Deliberately static markup, no data/props --
-// it must never depend on anything that could itself suspend.
+// Static fallback while the persistent workspace layout initializes.
 export function ConnectShellFallback() {
   return (
     <div className="dx-app">
@@ -126,6 +116,8 @@ export function ConnectLoginFlow() {
   const selectedAccountKey = searchParams.get("account") ?? "";
   const [step, setStep] = useState<Step>("mobile");
   const [checking, setChecking] = useState(true);
+  const [sessionError, setSessionError] = useState("");
+  const [sessionAttempt, setSessionAttempt] = useState(0);
   const [countryCode, setCountryCode] = useState("91");
   const [mobile, setMobile] = useState("");
   const [pin, setPin] = useState("");
@@ -148,7 +140,9 @@ export function ConnectLoginFlow() {
   const [avatar, setAvatar] = useState("");
   const [leaveSection, setLeaveSection] = useState<"leave" | "wfh">("leave");
   const [lockedAccounts, setLockedAccounts] = useState<AppAccount[]>([]);
-  const [hasReportees, setHasReportees] = useState(false);
+  const [reporteeCheck, setReporteeCheck] = useState<ReporteeCheck | null>(null);
+  const [reporteeAttempt, setReporteeAttempt] = useState(0);
+  const approvalAccess = resolveApprovalAccess(account, isWorkforceWorkspace(account), reporteeCheck);
   const lastLoggedScreen = useRef("");
 
   // A scroll position left over from one screen (e.g. a focused input's scrollIntoView
@@ -165,21 +159,46 @@ export function ConnectLoginFlow() {
     else localStorage.removeItem(defaultKeyName);
     const selected = resolveConnectRouteAccount(rows, selectedAccountKey, selectedAccountId);
     setAccounts(rows); setDefaultKey(saved); setAccount(selected); setAvatar(selected?.profilePhotoUrl || "");
-    setStep(selected ? (stepFromPath(pathname) ?? landingPage(selected)) : "accounts");
+    const destination = selected ? (stepFromPath(pathname) ?? landingPage(selected)) : "accounts";
+    if (destination === "wfh" || destination === "leave") setLeaveSection(leaveRouteState(destination).section);
+    setStep(destination === "wfh" ? "leave" : destination);
   }
   useEffect(() => {
-    fetch("/api/connect/auth/session").then((r) => r.json()).then((payload) => {
-      if (payload.authenticated) {
-        const rows = payload.accounts ?? [];
-        setCountryCode(String(payload.countryCode || "91"));
-        setMobile(String(payload.mobile || ""));
-        if (localStorage.getItem(biometricKey) === "true" && localStorage.getItem(credentialKey)) {
-          setLockedAccounts(rows);
-          setStep("unlock");
-        } else route(rows);
-      }
-    }).finally(() => setChecking(false));
-  }, []);
+    const controller = new AbortController();
+    let cancelled = false;
+    const timeout = window.setTimeout(() => controller.abort(), 30000);
+    setChecking(true);
+    setSessionError("");
+    fetch("/api/connect/auth/session", { cache: "no-store", signal: controller.signal })
+      .then((response) => readConnectSessionResponse<{
+        authenticated: boolean; accounts?: AppAccount[]; countryCode?: string; mobile?: string; error?: string;
+      }>(response))
+      .then((payload) => {
+        if (cancelled) return;
+        if (payload.authenticated) {
+          const rows = payload.accounts ?? [];
+          setCountryCode(String(payload.countryCode || "91"));
+          setMobile(String(payload.mobile || ""));
+          if (localStorage.getItem(biometricKey) === "true" && localStorage.getItem(credentialKey)) {
+            setLockedAccounts(rows);
+            setStep("unlock");
+          } else route(rows);
+        } else {
+          setAccounts([]);
+          setAccount(null);
+          setStep("mobile");
+          setError(payload.error || "");
+        }
+      })
+      .catch(() => { if (!cancelled) setSessionError("Unable to load your workspace. Please retry."); })
+      .finally(() => {
+        window.clearTimeout(timeout);
+        if (!cancelled) setChecking(false);
+      });
+    return () => { cancelled = true; window.clearTimeout(timeout); controller.abort(); };
+    // Load once per workspace visit, or when the user retries a failed check.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionAttempt]);
   useEffect(() => {
     if ((!selectedAccountKey && !selectedAccountId) || !accounts.length) return;
     const requested = resolveConnectRouteAccount(accounts, selectedAccountKey, selectedAccountId);
@@ -196,15 +215,22 @@ export function ConnectLoginFlow() {
     if (account) void loadNotifications(false);
   }, [account?.id, account?.profileType]);
   useEffect(() => {
-    setHasReportees(false);
-    if (!account || isWorkforceWorkspace(account)) return;
+    if (!account || isWorkforceWorkspace(account) || isManagerAccount(account) || account.pageAccess?.includes("approvals")) return;
+    const key = accountKey(account);
+    const controller = new AbortController();
     let cancelled = false;
-    fetch(`/api/connect/approver-status?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`)
-      .then((response) => response.json())
-      .then((payload) => { if (!cancelled) setHasReportees(Boolean(payload?.hasReportees)); })
-      .catch(() => { if (!cancelled) setHasReportees(false); });
-    return () => { cancelled = true; };
-  }, [account?.id, account?.profileType]);
+    const timeout = window.setTimeout(() => controller.abort(), 30000);
+    setReporteeCheck({ accountKey: key, status: "loading" });
+    fetch(`/api/connect/approver-status?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok || typeof payload?.hasReportees !== "boolean") throw new Error("Unable to check approval access.");
+        if (!cancelled) setReporteeCheck({ accountKey: key, status: "ready", hasReportees: payload.hasReportees });
+      })
+      .catch(() => { if (!cancelled) setReporteeCheck({ accountKey: key, status: "error" }); })
+      .finally(() => window.clearTimeout(timeout));
+    return () => { cancelled = true; window.clearTimeout(timeout); controller.abort(); };
+  }, [account?.id, account?.companyId, account?.profileType, account?.workspace, account?.pageAccess, reporteeAttempt]);
   useEffect(() => {
     if (!account || ["mobile", "pin", "otp", "createPin", "unlock", "accounts"].includes(step)) return;
     const key = `${account.profileType}:${account.id}:${step}`;
@@ -475,7 +501,6 @@ export function ConnectLoginFlow() {
     setDrawer(false); setProfileMenu(false);
     if (next === "lop") next = "leave";
     if (next === "wfh") {
-      if (!account || !showWfhInLeave(account)) return;
       setLeaveSection("wfh");
     } else if (next === "leave") {
       setLeaveSection("leave");
@@ -501,7 +526,7 @@ export function ConnectLoginFlow() {
       (next !== "settings" || allowed(account, "settings")) &&
       (next !== "documents" || (allowed(account, "documents") && peopleSelfService(account))) &&
       (next !== "requests" || peopleSelfService(account)) &&
-      (next !== "approvals" || canViewApprovals(account, hasReportees)) &&
+      (next !== "approvals" || approvalAccess !== "denied") &&
       (next !== "advances" || (allowed(account, "advances") && sharedSelfService(account))) &&
       (next !== "earnings" || (allowed(account, "earnings") && isWorkforceWorkspace(account))) &&
       (next !== "reimbursements" || (allowed(account, "reimbursements") && peopleSelfService(account)));
@@ -516,7 +541,7 @@ export function ConnectLoginFlow() {
       if (pathname !== "/settings") router.replace(urlFor("settings"));
       return;
     }
-    setStep(next);
+    setStep(next === "wfh" ? leaveRouteState(next).screen : next);
     const destination = routeForStep[next];
     if (destination && pathname !== destination) router.push(urlFor(next));
   }
@@ -529,7 +554,7 @@ export function ConnectLoginFlow() {
   // URL changes must always be checked through open(), which applies the
   // current designation/category master access before rendering a screen.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, selectedAccountKey, selectedAccountId, account?.id, account?.profileType, hasReportees]);
+  }, [pathname, selectedAccountKey, selectedAccountId, account?.id, account?.companyId, account?.profileType, pathname === "/approvals" ? approvalAccess : null]);
 
   async function profileSubmitted() {
     const response = await fetch("/api/connect/auth/session", { cache: "no-store" });
@@ -565,7 +590,12 @@ export function ConnectLoginFlow() {
     performance: "Performance",
     settings: "Settings"
   };
-  if (checking) return <div className="dx-auth"><Loader text="" /></div>;
+  if (checking) return <ConnectShellFallback />;
+  if (sessionError) return <div className="dx-auth"><section className="dx-auth-panel">
+    <header><small>DropX One</small><h2>Workspace unavailable</h2></header>
+    <p role="alert">{sessionError}</p>
+    <button onClick={() => setSessionAttempt((attempt) => attempt + 1)}>Retry workspace</button>
+  </section></div>;
 
   return <div className={`dx-app ${loggedIn ? "logged-in" : ""}`}>
     {loggedIn && account ? <aside className="dx-desktop-nav" aria-label="DropX One navigation">
@@ -587,7 +617,7 @@ export function ConnectLoginFlow() {
         {!isManagerAccount(account) && allowed(account, "profile") ? <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />My Profile</button> : null}
         {peopleSelfService(account) && allowed(account, "documents") ? <button aria-current={step === "documents" ? "page" : undefined} className={step === "documents" ? "active" : ""} onClick={() => open("documents")}><Files />Documents</button> : null}
         {peopleSelfService(account) ? <button aria-current={step === "requests" ? "page" : undefined} className={step === "requests" ? "active" : ""} onClick={() => open("requests")}><ClipboardList />My Requests</button> : null}
-        {canViewApprovals(account, hasReportees) ? <button aria-current={step === "approvals" ? "page" : undefined} className={step === "approvals" ? "active" : ""} onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox</button> : null}
+        {(approvalAccess === "allowed") ? <button aria-current={step === "approvals" ? "page" : undefined} className={step === "approvals" ? "active" : ""} onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox</button> : null}
         {sharedSelfService(account) && (allowed(account, "advances") || (isWorkforceWorkspace(account) && allowed(account, "earnings")) || (peopleSelfService(account) && allowed(account, "reimbursements"))) ? <button aria-expanded={paymentsExpanded} className={`payments-toggle${step === "advances" || step === "earnings" || step === "reimbursements" ? " active" : ""}${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard /><span>Payments</span><ChevronRight /></button> : null}
         {sharedSelfService(account) && allowed(account, "advances") && paymentsExpanded ? <button aria-current={step === "advances" ? "page" : undefined} className={`desktop-subitem${step === "advances" ? " active" : ""}`} onClick={() => open("advances")}><IndianRupee />Advances</button> : null}
         {isWorkforceWorkspace(account) && allowed(account, "earnings") && paymentsExpanded ? <button aria-current={step === "earnings" ? "page" : undefined} className={`desktop-subitem${step === "earnings" ? " active" : ""}`} onClick={() => open("earnings")}><IndianRupee />My Earnings</button> : null}
@@ -632,7 +662,7 @@ export function ConnectLoginFlow() {
         {!isManagerAccount(account) && allowed(account, "profile") ? <button onClick={() => open("profile")}><UserRound />My Profile<ChevronRight /></button> : null}
         {peopleSelfService(account) && allowed(account, "documents") ? <button onClick={() => open("documents")}><Files />Documents<ChevronRight /></button> : null}
         {peopleSelfService(account) ? <button onClick={() => open("requests")}><ClipboardList />My Requests<ChevronRight /></button> : null}
-        {canViewApprovals(account, hasReportees) ? <button onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox<ChevronRight /></button> : null}
+        {(approvalAccess === "allowed") ? <button onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox<ChevronRight /></button> : null}
         {sharedSelfService(account) && (allowed(account, "advances") || (isWorkforceWorkspace(account) && allowed(account, "earnings")) || (peopleSelfService(account) && allowed(account, "reimbursements"))) ? <button aria-expanded={paymentsExpanded} className={`payments-toggle${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard />Payments<ChevronRight /></button> : null}
         {sharedSelfService(account) && allowed(account, "advances") && paymentsExpanded ? <button className="subitem" onClick={() => open("advances")}><span />Advances<ChevronRight /></button> : null}
         {isWorkforceWorkspace(account) && allowed(account, "earnings") && paymentsExpanded ? <button className="subitem" onClick={() => open("earnings")}><span />My Earnings<ChevronRight /></button> : null}
@@ -668,7 +698,7 @@ export function ConnectLoginFlow() {
         <footer><ShieldCheck /><span>Protected workspace access</span></footer>
         <ConnectAppInstallCard />
       </section>
-    </div> : <main className="dx-content" data-screen={step}>
+    </div> : <main className="dx-content" data-screen={step} key={account ? accountKey(account) : "accounts"}>
       {notice ? <div className="dx-alert success">{notice}<button onClick={() => setNotice("")}><X /></button></div> : null}
       {error ? <div className="dx-alert error">{error}<button onClick={() => setError("")}><X /></button></div> : null}
       {step === "accounts" ? <section className="dx-accounts">{accounts.map((row) => <button className={isWorkforceWorkspace(row) ? "workforce" : "people"} key={accountKey(row)} onClick={() => choose(row)}><i>{row.profilePhotoUrl ? <img alt="" src={row.profilePhotoUrl} /> : <UsersRound />}</i><span><strong>{row.name || row.reference}</strong><em>{row.role || "-"}</em><small>{row.companyName || "-"}{row.reference ? ` · ${row.reference}` : ""}</small></span><ChevronRight /></button>)}</section> : null}
@@ -681,7 +711,12 @@ export function ConnectLoginFlow() {
       {step === "profile" && account && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "documents" && account && peopleSelfService(account) && allowed(account, "documents") ? <ConnectDocuments account={account} /> : null}
       {step === "requests" && account && peopleSelfService(account) ? <ConnectMyRequests account={account} /> : null}
-      {step === "approvals" && account && canViewApprovals(account, hasReportees) ? <ConnectApprovalInbox account={account} /> : null}
+      {step === "approvals" && account && approvalAccess === "allowed" ? <ConnectApprovalInbox account={account} /> : null}
+      {step === "approvals" && account && approvalAccess === "loading" ? <div role="status"><Loader text="Checking approval access..." /></div> : null}
+      {step === "approvals" && account && approvalAccess === "error" ? <section className="dx-setting-card">
+        <div role="alert">Unable to check approval access. Please retry.</div>
+        <button onClick={() => setReporteeAttempt((attempt) => attempt + 1)}>Retry approval access</button>
+      </section> : null}
       {step === "advances" && account && sharedSelfService(account) && allowed(account, "advances") ? <ConnectAdvances account={account} /> : null}
       {step === "earnings" && account && isWorkforceWorkspace(account) && allowed(account, "earnings") ? <ConnectMyEarnings account={account} /> : null}
       {step === "reimbursements" && account && peopleSelfService(account) && allowed(account, "reimbursements") ? <ConnectReimbursements account={account} /> : null}
@@ -693,7 +728,7 @@ export function ConnectLoginFlow() {
       {step === "settings" && account && allowed(account, "settings") ? <section className="dx-settings">
         <header className="dx-page-intro"><small>Personalisation</small><h1>Settings</h1><p>Control sign-in and the account you open first.</p></header>
         <div className="dx-settings-grid">
-          <section className="dx-setting-card"><i><SwitchCamera /></i><span><strong>Default account</strong><small>Choose the workspace shown after sign in.</small></span><label><span className="sr-only">Default account</span><select disabled={pending} value={defaultKey} onChange={(e) => saveDefaultAccount(e.target.value)}><option value="">Ask me every time</option>{accounts.map((row) => <option key={accountKey(row)} value={accountKey(row)}>{row.companyName} - {row.reference || row.name}</option>)}</select></label></section>
+          <section className="dx-setting-card"><i><SwitchCamera /></i><span><strong>Default account</strong><small>Choose the workspace shown after sign in.</small></span><label><span className="sr-only">Default account</span><select disabled={pending} value={defaultKey} onChange={(e) => saveDefaultAccount(e.target.value)}><option value="">Ask me every time</option>{accounts.map((row) => <option key={accountKey(row)} value={accountKey(row)}>{row.role || row.profileType} · {row.workspaceLabel || (isWorkforceWorkspace(row) ? "Workforce workspace" : "People workspace")} · {row.companyName} - {row.reference || row.name}</option>)}</select></label></section>
           <section className="dx-setting-card"><i><Fingerprint /></i><span><strong>Biometric login</strong><small>Use Face ID or device security on this device.</small></span><label className="toggle"><span>Enable biometric login</span><input aria-label="Enable biometric login" defaultChecked={localStorage.getItem(biometricKey) === "true"} onChange={(e) => enrollBiometric(e.target.checked)} type="checkbox" /></label></section>
           <section className="dx-setting-card security"><i><LockKeyhole /></i><span><strong>App PIN</strong><small>Change your six-digit sign-in PIN securely.</small></span><button onClick={resetPin}>Change PIN <ChevronRight /></button></section>
         </div>

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { loadConnectReporteeAccess } from "../../../../src/lib/connect-reportee-scope";
 
+export const dynamic = "force-dynamic";
+
 function clean(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -27,8 +29,11 @@ export async function GET(request: Request) {
     const reportees = await loadConnectReporteeAccess(account, "team");
     return NextResponse.json({ hasReportees: reportees.assignmentIds.size > 0 }, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
-    // Fail closed: if reporting-tree membership can't be resolved, don't show
-    // an approver surface that would just fail to load anything useful.
-    return NextResponse.json({ hasReportees: false });
+    // An unavailable check must not be interpreted as a confirmed loss of access.
+    console.error("[connect/approver-status] Unable to resolve reporting access.");
+    return NextResponse.json({ error: "Unable to check approval access. Please retry." }, {
+      status: 503,
+      headers: { "Cache-Control": "private, no-store" }
+    });
   }
 }
