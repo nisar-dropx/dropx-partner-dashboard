@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = readFileSync(resolve(root, "apps/connect/src/lib/connect-expense-data.ts"), "utf8");
-const migration = readFileSync(resolve(root, "supabase/migrations/20260915133000_expense_pre_request_manager_only.sql"), "utf8");
+const migration = readFileSync(resolve(root, "supabase/migrations/20260915074438_expense_pre_request_manager_only.sql"), "utf8");
 
 const start = source.indexOf("export async function resolveExpenseClaimRequestAssignees");
 const next = source.indexOf("\nexport ", start + 1);
