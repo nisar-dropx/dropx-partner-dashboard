@@ -1,8 +1,13 @@
 import type { AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
+// "helpers" was never a real table -- the generated table for this workforce category is
+// "workers" (see scripts/workforce_category_tables_v1.sql). Every call here silently queried a
+// nonexistent table; results.some(error) then made loadPeopleExceptionCount return 0 for the
+// WHOLE snapshot (not just the workers slice), since one source failing aborts the entire
+// count -- so this badge has been permanently 0 for every company since it was added.
 const SOURCES = [
-  ["employees", "employee"], ["workforce", "workforce"], ["contractors", "contractor"], ["vendors", "vendor"], ["helpers", "worker"]
+  ["employees", "employee"], ["workforce", "workforce"], ["contractors", "contractor"], ["vendors", "vendor"], ["workers", "worker"]
 ] as const;
 type Profile = { id: string; statutory_applicability: string[] | null; pf_uan: string | null; esi_no: string | null; driving_license_exp_date: string | null; vehicle_reg_no: string | null; vehicle_reg_exp_date: string | null; vehicle_insurance_exp_date: string | null; vehicle_pollution_exp_date: string | null; updated_at: string | null };
 type Issue = { type: string; id: string; rule: string; updated: string };
