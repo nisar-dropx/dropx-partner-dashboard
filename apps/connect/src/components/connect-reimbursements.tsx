@@ -10,13 +10,15 @@ import {
   type ExpectedExpenseKey,
   type ExpectedExpenses,
   purposeLabel,
+  requestExpenseCategories,
+  requestExpenseAmounts,
   sumExpectedExpenses
 } from "@/lib/expense-request-form";
 import type { AppAccount } from "./connect-profile-app";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
 import { expensePolicyMessage, type ExpensePolicyQuote } from "@/lib/reimbursement-policy";
 
-type Category = { id: string; code: string; name: string; description?: string | null; receipt_required: boolean; receipt_threshold: number; per_item_limit?: number | null; per_day_limit?: number | null };
+type Category = { id: string; code: string; name: string; show_in_expense_requests: boolean; description?: string | null; receipt_required: boolean; receipt_threshold: number; per_item_limit?: number | null; per_day_limit?: number | null };
 type Station = { id: string; code: string; name: string; region?: string | null; cluster?: string | null };
 type ExpenseItem = { id: string; categoryId: string; expenseDate: string; merchant: string; description: string; amount: string; quantity: string };
 type PreRequest = {
@@ -102,7 +104,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
 
   const quoteInput = JSON.stringify(tab === "claims"
     ? items.filter(item => item.categoryId && item.expenseDate).map(item => ({ id: item.id, categoryId: item.categoryId, expenseDate: item.expenseDate, amount: Number(item.amount) > 0 ? Number(item.amount) : 0.01, quantity: item.quantity ? Number(item.quantity) : null }))
-    : (data?.categories ?? []).map(head => ({ id: head.id, categoryId: head.id, expenseDate: tripFrom || todayInIndia(), amount: 0.01 })));
+    : []);
   useEffect(() => {
     const controller = new AbortController();
     setPolicyError("");
@@ -133,7 +135,9 @@ export function ConnectReimbursements({ account, active = true }: { account: App
     () => claimableRequests.find((request) => request.id === selectedRequestId) ?? null,
     [claimableRequests, selectedRequestId]
   );
-  const estimatedTotal = useMemo(() => sumExpectedExpenses(expectedExpenses), [expectedExpenses]);
+  const estimateCategories = useMemo(() => requestExpenseCategories(data?.categories ?? []), [data?.categories]);
+  const visibleExpectedExpenses = useMemo(() => requestExpenseAmounts(expectedExpenses, estimateCategories), [expectedExpenses, estimateCategories]);
+  const estimatedTotal = useMemo(() => sumExpectedExpenses(visibleExpectedExpenses), [visibleExpectedExpenses]);
   const selectedStations = useMemo(
     () => (data?.stations ?? []).filter((station) => selectedStationIds.includes(station.id)),
     [data?.stations, selectedStationIds]
@@ -259,7 +263,7 @@ export function ConnectReimbursements({ account, active = true }: { account: App
       form.set("tripFrom", tripFrom);
       form.set("tripTo", tripTo);
       form.set("visitStationIds", JSON.stringify(selectedStationIds));
-      form.set("expectedExpenses", JSON.stringify(expectedExpenses));
+      form.set("expectedExpenses", JSON.stringify(visibleExpectedExpenses));
       const response = await fetch("/api/connect/reimbursements", { method: "POST", body: form });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to submit request.");
@@ -430,12 +434,11 @@ export function ConnectReimbursements({ account, active = true }: { account: App
             <header>
               <div>
                 <h3>Expected expense</h3>
-                <p>Enter estimates by category. Total updates automatically.</p>
+                <p>Enter estimated amounts (₹).</p>
               </div>
-              <strong>{money(estimatedTotal)}</strong>
             </header>
             <div className="dx-expense-breakdown-grid">
-              {(data?.categories ?? []).map((head) => ({ key: head.id, label: head.name })).map((entry) => (
+              {estimateCategories.map((head) => ({ key: head.id, label: head.name })).map((entry) => (
                 <label key={entry.key}>
                   {entry.label}
                   <input
@@ -447,17 +450,10 @@ export function ConnectReimbursements({ account, active = true }: { account: App
                     type="number"
                     value={amountInput(expectedExpenses[entry.key])}
                   />
-                  <small>{(() => {
-                    const rule = policyQuotes.find(line => line.id === entry.key);
-                    if (policyLoading) return "Checking Finance policy…";
-                    if (!rule) return "Policy check unavailable";
-                    return rule.expense_allowed === false ? "Not eligible under Finance policy" : rule.limit_amount == null ? "Designation limit not configured" : `${money(rule.limit_amount)} ${rule.limit_basis === "per_day" ? "per day / hotel night" : rule.limit_basis === "per_km" ? "per kilometre" : "per item"} · ${rule.excess_action === "cap" ? "Maximum payment capped" : "Excess needs special approval"}`;
-                  })()}</small>
                 </label>
               ))}
             </div>
-            <p className="dx-expense-help">Heads and rates come from Finance. These are trip estimates; final limits are checked against each expense date and other claims when you submit receipts.</p>
-            {policyError ? <p role="alert" className="dx-alert warning">{policyError}</p> : null}
+            {!estimateCategories.length ? <p className="dx-expense-help">No expense categories are available. Contact Finance.</p> : null}
             <div className="dx-expense-total-row">
               <span>Total estimated amount</span>
               <b>{money(estimatedTotal)}</b>

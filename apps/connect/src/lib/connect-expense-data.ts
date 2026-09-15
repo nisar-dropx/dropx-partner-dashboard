@@ -259,7 +259,7 @@ export async function resolveExpenseApprovers(account: ConnectAccount, amount: n
 
 export async function activeExpenseCategories(account: ConnectAccount) {
   const result = await db().from("hr_expense_categories")
-    .select("id,code,name,description,receipt_required,receipt_threshold,per_item_limit,per_day_limit,sort_order")
+    .select("id,code,name,description,receipt_required,receipt_threshold,per_item_limit,per_day_limit,sort_order,show_in_expense_requests")
     .eq("company_id", account.companyId).eq("is_active", true).order("sort_order").order("name");
   if (result.error) throw new Error(result.error.message);
   return result.data ?? [];

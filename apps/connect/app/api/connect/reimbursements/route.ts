@@ -16,6 +16,7 @@ import {
 import {
   isExpensePurposeCode,
   normalizeExpectedExpenses,
+  validateRequestExpenseAmounts,
   purposeLabel,
   sumExpectedExpenses
 } from "../../../../src/lib/expense-request-form";
@@ -263,10 +264,7 @@ async function submitPreRequest(form: FormData, account: ConnectAccount) {
   }
   const expectedExpenses = normalizeExpectedExpenses(JSON.parse(clean(form.get("expectedExpenses")) || "{}"));
   const allowedHeads = await activeExpenseCategories(account);
-  const legacyKeys = new Set(["travel", "stay", "local_conveyance", "food_da", "other"]);
-  if (Object.entries(expectedExpenses).some(([key, amount]) => amount > 0 && !legacyKeys.has(key) && !allowedHeads.some(head => head.id === key))) {
-    throw new Error("One of the reimbursement heads is no longer active. Refresh the form.");
-  }
+  validateRequestExpenseAmounts(expectedExpenses, allowedHeads);
   const breakdownTotal = sumExpectedExpenses(expectedExpenses);
 
   if (!isExpensePurposeCode(purposeCode)) throw new Error("Select a visit purpose.");
