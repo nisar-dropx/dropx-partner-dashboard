@@ -23,6 +23,7 @@ import { AppAccount, ConnectProfileApp } from "./connect-profile-app";
 import { countryCodeOptions } from "@/lib/country-codes";
 import { requiredDropxOnePageCodes, type DropxOnePageCode } from "@/lib/dropx-one-pages";
 import { userFacingError } from "@/lib/user-facing-error";
+import { connectAccountKey as accountKey, connectAccountRoute, resolveConnectRouteAccount } from "@/lib/connect-account-routing";
 
 type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "approvals" | "requests" | "payments" | "advances" | "earnings" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "performance" | "settings";
 const routeForStep: Partial<Record<Step, string>> = {
@@ -46,7 +47,6 @@ type ConnectNotification = {
 const defaultKeyName = "dropx_connect_default_account";
 const biometricKey = "dropx_connect_biometric";
 const credentialKey = "dropx_connect_passkey_id";
-const accountKey = (account: AppAccount) => `${account.profileType}:${account.companyId}:${account.id}`;
 const accountIdentity = (account?: AppAccount | null) =>
   [account?.reference, account?.biometricId].filter(Boolean).join(" | ");
 const active = (account?: AppAccount | null) => account?.status?.toLowerCase() === "active";
@@ -95,6 +95,7 @@ export function ConnectLoginFlow() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const selectedAccountId = searchParams.get("id")?.trim().toLowerCase() ?? "";
+  const selectedAccountKey = searchParams.get("account") ?? "";
   const [step, setStep] = useState<Step>("mobile");
   const [checking, setChecking] = useState(true);
   const [countryCode, setCountryCode] = useState("91");
@@ -134,9 +135,7 @@ export function ConnectLoginFlow() {
     const saved = serverDefault ? accountKey(serverDefault) : "";
     if (saved) localStorage.setItem(defaultKeyName, saved);
     else localStorage.removeItem(defaultKeyName);
-    // A routed page carries the readable DropX/employee ID, so switching
-    // accounts never falls back to the default account on reload.
-    const selected = rows.find((row) => String(row.reference || row.id).trim().toLowerCase() === selectedAccountId) ?? serverDefault ?? (rows.length === 1 ? rows[0] : null);
+    const selected = resolveConnectRouteAccount(rows, selectedAccountKey, selectedAccountId);
     setAccounts(rows); setDefaultKey(saved); setAccount(selected); setAvatar(selected?.profilePhotoUrl || "");
     setStep(selected ? (stepFromPath(pathname) ?? landingPage(selected)) : "accounts");
   }
@@ -154,13 +153,14 @@ export function ConnectLoginFlow() {
     }).finally(() => setChecking(false));
   }, []);
   useEffect(() => {
-    if (!selectedAccountId || !accounts.length) return;
-    const requested = accounts.find((row) => String(row.reference || row.id).trim().toLowerCase() === selectedAccountId);
-    if (requested && (!account || accountKey(account) !== accountKey(requested))) {
-      setAccount(requested);
-      setAvatar(requested.profilePhotoUrl || "");
-    }
-  }, [account, accounts, selectedAccountId]);
+    if ((!selectedAccountKey && !selectedAccountId) || !accounts.length) return;
+    const requested = resolveConnectRouteAccount(accounts, selectedAccountKey, selectedAccountId);
+    setAccount(requested);
+    setAvatar(requested?.profilePhotoUrl || "");
+    if (!requested) setStep("accounts");
+    // Synchronize when the URL/session changes, not when choose() updates the
+    // account before router.push has committed its new URL.
+  }, [accounts, selectedAccountKey, selectedAccountId]);
   useEffect(() => {
     setNotificationMenu(false);
     setNotifications([]);
@@ -441,8 +441,7 @@ export function ConnectLoginFlow() {
   }
   function urlFor(next: Step, targetAccount = account) {
     const route = routeForStep[next] ?? "/accounts";
-    const id = targetAccount?.reference || targetAccount?.id;
-    return id ? `${route}?id=${encodeURIComponent(id)}` : route;
+    return connectAccountRoute(route, targetAccount);
   }
   function open(next: Step) {
     setDrawer(false); setProfileMenu(false);
@@ -496,11 +495,13 @@ export function ConnectLoginFlow() {
 
   useEffect(() => {
     const requested = stepFromPath(pathname);
+    const routeAccount = resolveConnectRouteAccount(accounts, selectedAccountKey, selectedAccountId);
+    if ((selectedAccountKey || selectedAccountId) && (!routeAccount || !account || accountKey(routeAccount) !== accountKey(account))) return;
     if (account && requested) open(requested);
   // URL changes must always be checked through open(), which applies the
   // current designation/category master access before rendering a screen.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, account?.id, account?.profileType, hasReportees]);
+  }, [pathname, selectedAccountKey, selectedAccountId, account?.id, account?.profileType, hasReportees]);
 
   async function profileSubmitted() {
     const response = await fetch("/api/connect/auth/session", { cache: "no-store" });
