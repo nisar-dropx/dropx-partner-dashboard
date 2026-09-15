@@ -9,10 +9,17 @@
         <item name="colorAccent">@color/colorAccent</item>
     </style>
 
+    <!-- android:statusBarColor mirrors colorPrimaryDark (white) explicitly, and
+         android:windowLightStatusBar makes the time/signal/battery icons dark so they're
+         actually visible against it. MainActivity.java's setAppearanceLightStatusBars(true)
+         call does the same thing at runtime, but only after onCreate() runs; declaring it here
+         too means it's correct immediately, not just after that first frame. -->
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <item name="android:statusBarColor">@color/colorPrimaryDark</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 
 
