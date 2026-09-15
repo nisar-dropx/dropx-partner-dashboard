@@ -17,6 +17,7 @@ final class TrackingPrefs {
   private static final String KEY_ENABLED = "locationTrackingEnabled";
   private static final String KEY_RUNNING = "trackingRunning";
   private static final String KEY_REQUESTED_INITIAL_PERMISSION = "requestedInitialLocationPermission";
+  private static final String KEY_REQUESTED_BATTERY_EXEMPTION = "requestedBatteryExemption";
 
   private TrackingPrefs() {}
 
@@ -63,5 +64,13 @@ final class TrackingPrefs {
 
   static void setRequestedInitialLocationPermission(Context context, boolean requested) {
     prefs(context).edit().putBoolean(KEY_REQUESTED_INITIAL_PERMISSION, requested).apply();
+  }
+
+  static boolean hasRequestedBatteryExemption(Context context) {
+    return prefs(context).getBoolean(KEY_REQUESTED_BATTERY_EXEMPTION, false);
+  }
+
+  static void setRequestedBatteryExemption(Context context, boolean requested) {
+    prefs(context).edit().putBoolean(KEY_REQUESTED_BATTERY_EXEMPTION, requested).apply();
   }
 }
