@@ -152,26 +152,81 @@ built. Written down here so the exact steps aren't re-derived from scratch later
 
 ### Google Play Store path
 
-More process than code — this app's Play readiness (signing, versioning, icon/branding,
-minification) is already done; what's left is entirely account/policy work:
+**Decision already made: update the existing live "DropX One" listing (package
+`com.team.dropxlogistics`, published by a colleague under the developer name "Helixcer",
+100+ installs, last updated Aug 5 2026) rather than publish this app as a new, separate
+listing.** That keeps the current Play Store URL, install count, and reviews, but has one hard
+consequence worth stating plainly: **a Play Store app's package name (`applicationId`) can
+never be changed once published.** This app was built as `com.dropxlogistics.onetracker` — to
+become an update to the existing listing, it has to be rebuilt with `applicationId
+"com.team.dropxlogistics"` in `android/app/build.gradle`, **signed with that same listing's
+original upload key** (not the `dropx-tracker-release.keystore` this repo generated), and given
+a `versionCode` higher than whatever the currently-published version already has. None of that
+is optional — Play rejects an upload whose package name or signing certificate doesn't match
+the existing listing, with no override.
 
-1. **Play Console developer account** (one-time, per Google account/organization, has a
-   registration fee).
-2. **A public privacy policy URL** — required for any app requesting location, must describe
-   what's collected (background location while clocked in) and why. Doesn't need to be
-   complex, but it must be a real, publicly reachable page, not a placeholder.
-3. **Data Safety form** (inside Play Console) — discloses that location data is collected,
-   who it's shared with (nobody outside the company), and whether it's used for anything
-   beyond the stated purpose.
-4. **Permissions Declaration for background location** — Play's strictest review tier.
-   Google requires a specific justification for `ACCESS_BACKGROUND_LOCATION` and may ask for
-   a short screen-recording demonstrating the core feature that needs it. A workforce
-   attendance/dispatch app tracking during a clocked-in shift is a legitimate, commonly
-   approved use case, but expect a review round-trip (days, occasionally a rejection-and-
-   resubmit cycle) rather than instant approval.
-5. Once approved: `applicationId`/package name is locked in forever for that Play listing —
-   double-check `com.dropxlogistics.onetracker` is the final choice before the first
-   submission.
+**What to ask your colleague for, concretely** (his laptop crash is exactly why this needs to be
+asked now, before it's needed under time pressure):
+
+1. **The original upload keystore file** (a `.jks` or `.keystore` file) used to sign the
+   currently-published "DropX One" build, plus its store password, key alias, and key password.
+   Without this exact file, Play Store permanently refuses any future update to this listing —
+   there is no recovery path from Google if it's genuinely lost (this is why this repo's own new
+   keystore is backed up outside git, per the note above — the same discipline matters here).
+   If he genuinely cannot recover it (laptop crash, no backup), the fallback is Play App
+   Signing's *upload key reset* request, which Google requires supporting evidence for and
+   which is not fast or guaranteed to succeed — worth asking him to check this file exists
+   *before* assuming it needs a reset.
+2. **Play Console access** — either he adds you (or the account you'll use going forward) as a
+   user with Release Manager/Admin access on that developer account (Play Console → Users and
+   permissions), or he does the upload himself once you hand him the signed AAB/APK built below.
+   Google's own account-transfer process (moving the whole app to a different Play Console
+   account entirely) is a separate, slower, more involved option — only worth it if he's leaving
+   the company/project entirely, not for a routine handoff.
+3. **Whether Play App Signing is enabled** for this listing (Play Console → your app → Setup →
+   App integrity → App signing). If it is (Google's default for anything published after ~2021),
+   Google holds the real signing key and only needs the *upload* key to match — meaningfully
+   lowers the stakes if the original upload key genuinely can't be recovered, since Play App
+   Signing supports a formal upload-key-reset flow in that case. If it's *not* enabled, the
+   original keystore is the only thing standing between "can still update this app" and
+   "permanently orphaned listing," so confirm this either way.
+4. **The current live `versionCode`** (Play Console → your app → Release → Production, or ask
+   him directly) so this app's `android/app/build.gradle` can be set higher than it, per Play's
+   requirement that every new upload strictly increases `versionCode`.
+
+**Then, to actually publish the update:**
+
+1. In this repo, change `apps/dropx-tracker-android/android/app/build.gradle`:
+   `applicationId "com.team.dropxlogistics"` (replacing `com.dropxlogistics.onetracker`), and
+   `versionCode` set higher than the value from step 4 above.
+2. Re-sign using the recovered original keystore (update `keystore.properties` to point at that
+   file instead of `dropx-tracker-release.keystore`, and swap in its real
+   password/alias/keyPassword) — **do not use this repo's own generated keystore for this
+   listing**, only for `com.dropxlogistics.onetracker` if it's ever published as its own separate
+   app later.
+3. `./gradlew bundleRelease` (Play Store submissions want an `.aab` App Bundle, not the `.apk`
+   this repo builds for the self-hosted download link — same signing config, different Gradle
+   task) and upload the resulting `.aab` in Play Console → Release → Production → Create new
+   release.
+4. **Play Console account/policy items still needed regardless of who uploads:**
+   - **A public privacy policy URL** — required for any app requesting location, must describe
+     what's collected (background location while clocked in) and why. Doesn't need to be
+     complex, but must be a real, publicly reachable page, not a placeholder. Check whether the
+     existing listing already has one on file (Play Console → your app → Store presence → Store
+     listing) before writing a new one.
+   - **Data Safety form** (inside Play Console) — discloses that location data is collected,
+     who it's shared with (nobody outside the company), and whether it's used for anything
+     beyond the stated purpose. The existing listing already has one filled in for whatever the
+     old app collected; it needs updating now that background location tracking is a new/changed
+     data type this app collects that the old one may not have.
+   - **Permissions Declaration for background location** — Play's strictest review tier.
+     Google requires a specific justification for `ACCESS_BACKGROUND_LOCATION` and may ask for
+     a short screen-recording demonstrating the core feature that needs it. A workforce
+     attendance/dispatch app tracking during a clocked-in shift is a legitimate, commonly
+     approved use case, but expect a review round-trip (days, occasionally a rejection-and-
+     resubmit cycle) rather than instant approval — and since this update introduces background
+     location where the old app may not have had it, expect this specific review to trigger even
+     though the listing itself already exists.
 
 ## Changing the app icon / splash screen later
 
@@ -209,3 +264,85 @@ width/height pairs. `android/app/src/main/res/values/ic_launcher_background.xml`
 value is the adaptive-icon background — currently white; change that one line for a different
 background color without touching any image. After regenerating, `./gradlew assembleDebug` (or
 `assembleRelease`) and reinstall to see it.
+
+## Building an iOS app from this same Capacitor project
+
+Not started — there is no `ios/` platform folder yet, and building/signing/installing one needs
+things a Windows machine structurally cannot provide. Written down here so the steps aren't
+re-derived later, and so this can be handed to whoever has a Mac.
+
+### What's required (all Apple-side, unavoidable)
+
+1. **A Mac.** Xcode — the only tool that can build, sign, or run an iOS app — only runs on
+   macOS. There's no Windows equivalent, no cross-compile path, and no way around this even for
+   just testing on a real iPhone. If you or your colleague don't own one, a cloud Mac rental
+   (e.g. MacinCloud, community "Mac in the cloud" services) or a friend's Mac for a single
+   afternoon is enough to do the one-time setup below.
+2. **An Apple Developer Program account** — $99/year, enrolled at
+   <https://developer.apple.com/programs/enroll/>, tied to an Apple ID. Required for anything
+   beyond the iOS Simulator: installing on a real iPhone, TestFlight, or App Store submission
+   all need this. (There's a free-tier "Xcode without a paid account" path that can run the app
+   on your own iPhone for 7 days at a time via a personal signing certificate — fine for a quick
+   look, useless for giving the app to anyone else or for the App Store.)
+3. **Xcode** (free, from the Mac App Store) installed on that Mac.
+
+### Steps, once a Mac is available
+
+```sh
+# From this folder (apps/dropx-tracker-android), on the Mac:
+npm install
+npm install @capacitor/ios@6
+npx cap add ios
+npx cap sync ios
+npx cap open ios   # opens Xcode
+```
+
+In Xcode:
+
+1. Select the project in the sidebar → the app target → **Signing & Capabilities** tab → sign in
+   with the Apple ID tied to the Developer Program membership, and let Xcode auto-manage the
+   signing certificate/provisioning profile.
+2. Bundle identifier must be set to exactly `com.dropxlogistics.onetracker` (matching the
+   Android `applicationId` in `android/app/build.gradle`) — Xcode pre-fills something generic by
+   default; change it under the target's **General** tab.
+3. Location permissions: iOS needs its own permission strings in `Info.plist`
+   (`NSLocationWhenInUseUsageDescription` and, for background tracking specifically,
+   `NSLocationAlwaysAndWhenInUseUsageDescription`) plus the `UIBackgroundModes` → `location`
+   capability checked in **Signing & Capabilities**. Capacitor's `@capacitor/geolocation` plugin
+   docs cover the exact keys; this app's own background-location plugin
+   (`DropxOnePlugin`/`LocationTrackingService`) is Android-only Java today and would need an
+   equivalent Swift/Objective-C implementation for background tracking to work on iOS at all —
+   that's real native code to write, not just a config change, and is the biggest remaining gap
+   before an iOS build does what the Android app does.
+4. **Icon and splash**: Xcode's asset catalog (`Assets.xcassets`) needs iOS-shaped icon sizes
+   (a single 1024×1024 App Store icon, sized down automatically) — different generation than the
+   Android density buckets above; regenerate from the same source logo with a tool like
+   `@capacitor/assets` (`npx @capacitor/assets generate`) rather than reusing the Android PNGs
+   directly.
+5. **Run on a real iPhone**: plug the iPhone into the Mac via cable (or use wireless debugging),
+   select it as the run target in Xcode's toolbar, and press Run — this installs a signed debug
+   build directly, no App Store needed for your own test device once it's registered under the
+   Developer account.
+
+### Distribution once it builds
+
+- **TestFlight** (Apple's beta-testing service, included in the Developer Program): upload a
+  build via Xcode → **Product → Archive → Distribute App → TestFlight**, then invite testers by
+  email — they install a real TestFlight app from the App Store and get your build through that,
+  no cable needed. This is the iOS equivalent of the self-hosted APK download link this app
+  already has on Android, and the natural first step before a public App Store listing.
+- **App Store**: same Archive/Distribute flow, choosing "App Store Connect" instead of
+  TestFlight, then filling in the listing (screenshots, description, privacy details — see the
+  Google Play section above for the same category of information, Apple's forms ask for
+  equivalent things under App Store Connect's own "App Privacy" section) and submitting for
+  Apple's review (typically 1–3 days, sometimes longer for a background-location app — expect
+  Apple to ask the same kind of justification question Google Play's Permissions Declaration
+  does).
+
+Sideloading without TestFlight or the App Store (installing an `.ipa` file directly, the rough
+equivalent of the self-hosted Android APK) is possible but far more restricted than Android:
+either it's limited to devices registered under your Developer account (max 100 per year, added
+one at a time in the portal) via **Ad Hoc** distribution, or it needs an **Enterprise** Apple
+Developer Program ($299/year, requires D-U-N-S business verification, and is meant for internal
+company-only distribution, not general public download) — there's no equivalent of "just host
+the file and let anyone download and install it" the way Android allows.
