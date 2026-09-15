@@ -1,4 +1,4 @@
-import { ConnectLoginFlow } from "@/components/connect-login-flow";
+import { ConnectLoginFlow, ConnectShellFallback } from "@/components/connect-login-flow";
 import { Suspense } from "react";
 
 export const metadata = {
@@ -7,11 +7,13 @@ export const metadata = {
   }
 };
 
+// See app/[...screen]/page.tsx's comment -- same fallback, so the very first load (this route)
+// and every later tab switch (that route) look consistent instead of only one of them being fixed.
 export default function DropXConnectPage() {
   return (
     <main className="connect-page dx-web-page">
       <section className="connect-shell" aria-label="DropX One">
-        <Suspense><ConnectLoginFlow /></Suspense>
+        <Suspense fallback={<ConnectShellFallback />}><ConnectLoginFlow /></Suspense>
       </section>
     </main>
   );

@@ -90,6 +90,34 @@ function Loader({ text }: { text: string }) {
   return <div className="dx-loader fullscreen"><span />{text ? <small>{text}</small> : null}</div>;
 }
 
+// Suspense fallback for the two page.tsx routes that render <ConnectLoginFlow/>. Every tab
+// switch is a real navigation (open() calls router.push/replace to a new URL, not just a state
+// change), and with no fallback, React showed nothing at all for one frame before the
+// destination screen's own skeleton painted -- a blank flash sandwiched between two things that
+// each looked fine alone. This mimics the app shell (header + bottom nav) so that frame reads as
+// part of the transition instead of a blank page. Deliberately static markup, no data/props --
+// it must never depend on anything that could itself suspend.
+export function ConnectShellFallback() {
+  return (
+    <div className="dx-app">
+      <header className="dx-header">
+        <button aria-hidden disabled><Menu /></button>
+        <span />
+        <span />
+        <button aria-hidden disabled><Bell /></button>
+        <span className="avatar" />
+      </header>
+      <div className="dx-loader fullscreen"><span /></div>
+      <nav className="dx-mobile-nav" aria-hidden>
+        <button disabled><Home /><span>Home</span></button>
+        <button disabled><Fingerprint /><span>Attendance</span></button>
+        <button disabled><ArrowLeftRight /><span>Roster</span></button>
+        <button disabled><Target /><span>Performance</span></button>
+      </nav>
+    </div>
+  );
+}
+
 export function ConnectLoginFlow() {
   const router = useRouter();
   const pathname = usePathname();
