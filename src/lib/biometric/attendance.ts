@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "../supabase-admin";
+import { wfhCreditState, wfhCreditLabel, type WfhCreditState } from "../wfh-attendance-credit";
 import { formatShiftClock, preferActiveRosterRow, preferActiveRosterRowsByKey, type RosterPlanPreference } from "../roster-plan-preference";
 import {
   buildWeeklyRosterIndex,
@@ -42,6 +43,7 @@ export type AttendanceReportRow = {
   earlyOutMinutes: number;
   remark: string;
   workMode: "onsite" | "wfh";
+  wfhCreditState?: WfhCreditState | null;
   deviceSerial: string;
   labels: Record<string, string>;
 };
@@ -81,6 +83,9 @@ type DailyRow = {
   status: string | null;
   remark: string | null;
   work_mode: string | null;
+  wfh_scheduled_start_at?: string | null;
+  wfh_scheduled_end_at?: string | null;
+  wfh_credit_finalized_at?: string | null;
   employee_id: string | null;
   field_executive_id: string | null;
   location_id: string | null;
@@ -144,6 +149,9 @@ function normalizeDailyRows(rows: Partial<DailyRow>[]): DailyRow[] {
     status: row.status ?? "P",
     remark: row.remark ?? null,
     work_mode: row.work_mode ?? "onsite",
+    wfh_scheduled_start_at: row.wfh_scheduled_start_at ?? null,
+    wfh_scheduled_end_at: row.wfh_scheduled_end_at ?? null,
+    wfh_credit_finalized_at: row.wfh_credit_finalized_at ?? null,
     employee_id: row.employee_id ?? null,
     field_executive_id: row.field_executive_id ?? null,
     location_id: row.location_id ?? null,
@@ -1213,6 +1221,9 @@ export async function loadAttendanceReportRows({
     status,
     remark,
     work_mode,
+    wfh_scheduled_start_at,
+    wfh_scheduled_end_at,
+    wfh_credit_finalized_at,
     employee_id,
     field_executive_id,
     location_id,
@@ -1464,7 +1475,8 @@ export async function loadAttendanceReportRows({
     const effectivePunchCount = regularized
       ? Math.max(storedPunchCount, 2)
       : Math.max(storedPunchCount, punches.length);
-    const effectiveWorkMinutes = punchSummary
+    const creditState = wfhCreditState({ ...row, in_time: effectiveInTime, out_time: effectiveOutTime, punch_count: effectivePunchCount });
+    const effectiveWorkMinutes = creditState && creditState !== "credited" ? 0 : punchSummary
       ? punchSummary.workMinutes
       : Number(row.work_minutes ?? 0);
     const effectiveRemark = punchSummary && punchTimes.length >= 2
@@ -1485,7 +1497,7 @@ export async function loadAttendanceReportRows({
       rules: scheduleContext.rules,
       shift: schedule.shift
     });
-    const attendanceStatus = attendanceDayStatus({
+    const attendanceStatus = creditState ? wfhCreditLabel(creditState) : attendanceDayStatus({
       dayType: schedule.dayType,
       punchCount: effectivePunchCount,
       rules: scheduleContext.rules,
@@ -1504,8 +1516,8 @@ export async function loadAttendanceReportRows({
       shiftName: schedule.shift?.name ?? schedule.shift?.code ?? (schedule.dayType !== "unassigned" && schedule.dayType !== "working" ? schedule.dayType.replaceAll("_", " ") : "Unassigned"),
       shiftCode: schedule.shift?.code ?? "",
       shiftSource: schedule.source,
-      scheduledStart: formatClock(schedule.shift?.start_time),
-      scheduledEnd: formatClock(schedule.shift?.end_time),
+      scheduledStart: formatClock(schedule.shift?.start_time) === "--:--" && creditState ? formatTime(row.wfh_scheduled_start_at ?? null) : formatClock(schedule.shift?.start_time),
+      scheduledEnd: formatClock(schedule.shift?.end_time) === "--:--" && creditState ? formatTime(row.wfh_scheduled_end_at ?? null) : formatClock(schedule.shift?.end_time),
       scheduledMinutes,
       punchDate: row.punch_date,
       inTime: formatTime(effectiveInTime),
@@ -1513,7 +1525,8 @@ export async function loadAttendanceReportRows({
       punchTimes: punches.map((punch) => formatTime(punch.punch_time)),
       workHours: formatDuration(effectiveWorkMinutes),
       punchCount: effectivePunchCount,
-      status: row.status ?? "P",
+      status: creditState ? (creditState === "credited" ? "P" : "PENDING") : row.status ?? "P",
+      wfhCreditState: creditState,
       attendanceStatus,
       lateMinutes: variance.lateMinutes,
       earlyOutMinutes: variance.earlyOutMinutes,

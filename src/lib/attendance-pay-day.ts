@@ -56,6 +56,7 @@ export function resolveAttendancePayDayType(input: {
     : input.isPaidLeave === false;
   const hasLeaveType = Boolean(input.leaveType?.attendance_code) || input.isPaidLeave != null;
 
+  if (status === "PENDING") return "no_record";
   if (workMode === "wfh" || /work from home|\bwfh\b/.test(label)) return "present_wfh";
   if (hasLeaveType && configuredUnpaid) return "unpaid_leave";
   if (hasLeaveType && configuredPaid) return "paid_leave";

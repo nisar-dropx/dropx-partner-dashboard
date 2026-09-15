@@ -174,6 +174,18 @@ export function attendanceDayInsight(
     && (row.punchCount < 2 || !row.outTime || /single|missing/.test(remark));
   const needsPolicyReview = state.includes("needs review");
   const payDayType = resolvePayDayType(row);
+  if (row.workMode === "wfh" && row.status === "PENDING") {
+    return {
+      calendarClass: /upcoming/i.test(label) ? "off" : "on-shift",
+      detail: "WFH is approved. Attendance credit is applied after the scheduled shift ends; no punch times are generated.",
+      headline: label,
+      label,
+      issues: [],
+      needsRegularization: false,
+      payDayType: "no_record",
+      tone: "blue"
+    };
+  }
 
   const issues: AttendanceIssue[] = [];
   if (lateMinutes > 0) {
@@ -222,7 +234,7 @@ export function attendanceDayInsight(
   if (payDayType === "present_wfh" || row.workMode === "wfh" || /work from home|\bwfh\b/.test(state) || /work from home|\bwfh\b/.test(remark)) {
     return {
       calendarClass: "paid-leave",
-      detail: "Approved work from home. Present · WFH is recorded as paid working time.",
+      detail: "Approved WFH attendance credit. This is policy credit, not a recorded punch-in or punch-out.",
       headline: "Present · WFH",
       issues: [],
       label: "Present · WFH",

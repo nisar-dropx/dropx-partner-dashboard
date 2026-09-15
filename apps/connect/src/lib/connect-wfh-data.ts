@@ -568,7 +568,7 @@ export async function decideConnectWfhHrApproval(input: {
   const payload = result.data as { appliedDates?: string[]; skippedDates?: unknown[] } | null;
   if (input.decision === "approved") {
     return {
-      notice: `WFH approved: ${payload?.appliedDates?.length ?? 0} working day(s) marked Present · WFH; ${payload?.skippedDates?.length ?? 0} date(s) skipped.`
+      notice: `WFH approved: ${payload?.appliedDates?.length ?? 0} working day(s) approved for WFH credit after shift end; ${payload?.skippedDates?.length ?? 0} date(s) skipped.`
     };
   }
   return { notice: `WFH request ${input.decision}.` };

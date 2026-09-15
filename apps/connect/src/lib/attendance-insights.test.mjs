@@ -27,6 +27,17 @@ test("uses the canonical People day status", () => {
   assert.equal(attendanceDayInsight(row({ attendanceStatus: "Absent", status: "A" })).calendarClass, "absent");
 });
 
+test("WFH approval is not a full day or missing-punch warning before finalization", () => {
+  for (const label of ["WFH approved · Upcoming", "WFH approved · Day in progress", "WFH approved · Finalizing"]) {
+    const insight = attendanceDayInsight(row({ workMode: "wfh", status: "PENDING", attendanceStatus: label,
+      inTime: "", outTime: "", workHours: "00:00", punchCount: 0 }));
+    assert.equal(insight.label, label);
+    assert.equal(insight.payDayType, "no_record");
+    assert.equal(insight.needsRegularization, false);
+    assert.deepEqual(insight.issues, []);
+  }
+});
+
 test("keeps an open current workday out of needs-review until punch-out", () => {
   const insight = attendanceDayInsight(row({
     attendanceStatus: "Needs Review",

@@ -463,12 +463,12 @@ export function ConnectDashboard({
       <header><div><small>Today</small><h2>Attendance</h2></div><Pill text={todayStatus} tone={statusTone} /></header>
       {today?.scheduledStart && today.scheduledStart !== "--:--" ? <p className="dx-dashboard-shift-expectation">
         <CalendarClock />
-        <span><strong>Report by {today.scheduledStart}</strong><small>{today.shiftName || "Rostered shift"} · {today.scheduledStart}–{today.scheduledEnd}</small></span>
+        <span><strong>{today.workMode === "wfh" ? "Scheduled start" : "Report by"} {today.scheduledStart}</strong><small>{today.shiftName || "Rostered shift"} · {today.scheduledStart}–{today.scheduledEnd}</small></span>
       </p> : null}
       <div className="dx-dashboard-metrics">
         <Metric icon={<LogIn />} label="In" value={today?.inTime || "--:--"} tone="green" />
         <Metric icon={<LogOut />} label="Out" value={today?.outTime || "--:--"} tone="red" />
-        <Metric icon={<Clock3 />} label="Work" value={today?.workHours || "00:00"} tone="orange" />
+        <Metric icon={<Clock3 />} label={today?.workMode === "wfh" && !today?.punchCount ? "WFH credit" : "Work"} value={today?.workHours || "00:00"} tone="orange" />
         <Metric icon={<Fingerprint />} label="Punches" value={today?.punchCount || 0} tone="purple" />
       </div>
       {today && todayNudge ? <button className={`dx-dashboard-attendance-nudge ${todayNudge.tone}`} onClick={onAttendance}>

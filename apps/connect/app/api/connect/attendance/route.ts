@@ -81,18 +81,18 @@ export async function GET(request: NextRequest) {
     })).filter((row) => Boolean(enrolmentId) && cleanEnrolmentId(row.enrolmentId) === enrolmentId);
 
     const present = rows.filter((row) => row.status === "P").length;
-    const fullDay = rows.filter((row) => row.attendanceStatus === "Full Day").length;
+    const fullDay = rows.filter((row) => row.attendanceStatus === "Full Day" || row.wfhCreditState === "credited").length;
     const halfDay = rows.filter((row) => row.attendanceStatus === "Half Day").length;
     const absent = rows.filter((row) => row.attendanceStatus === "Absent").length;
     const needsReview = rows.filter((row) => row.attendanceStatus === "Needs Review").length;
     const lateIn = rows.filter((row) => row.lateMinutes > 0).length;
     const earlyOut = rows.filter((row) => row.earlyOutMinutes > 0).length;
-    const misPunch = rows.filter((row) =>
+    const misPunch = rows.filter((row) => row.workMode !== "wfh" && (
       row.punchCount < 2 ||
       !row.outTime ||
       row.remark.toLowerCase().includes("single") ||
       row.remark.toLowerCase().includes("missing")
-    ).length;
+    )).length;
 
     const requestsResult = await supabaseAdmin
       .from("attendance_regularization_requests")

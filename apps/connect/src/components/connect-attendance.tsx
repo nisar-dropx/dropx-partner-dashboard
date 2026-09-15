@@ -193,7 +193,7 @@ function minutes(value: string) {
 
 function attendanceLabel(row: Row | undefined) {
   if (!row) return "No record";
-  if (row.workMode === "wfh") return "Present · WFH";
+  if (row.workMode === "wfh") return row.attendanceStatus || "WFH approved";
   if (row.workMode === "business_trip") return "Present · Business trip";
   if (row.statusLabel) return row.statusLabel;
   if (row.attendanceStatus) return row.attendanceStatus;
@@ -488,7 +488,7 @@ export function ConnectAttendance({ account, active = true }: { account: Account
               });
               return <button key={row.date} onClick={() => openDayDetails(row)}>
                 <header><strong>{row.date.split("-").reverse().join("/")}</strong><em className={insight.calendarClass}>{insight.label}</em></header>
-                <span><small>IN</small>{row.inTime || "--:--"}</span><span><small>OUT</small>{row.outTime || "--:--"}</span><span><small>HRS</small>{row.workHours || "00:00"}</span>
+                <span><small>IN</small>{row.inTime || "--:--"}</span><span><small>OUT</small>{row.outTime || "--:--"}</span><span><small>{row.workMode === "wfh" && !row.punchCount ? "CREDIT" : "HRS"}</small>{row.workHours || "00:00"}</span>
                 {nudge ? <p className={`dx-attendance-list-issue ${nudge.tone}`}>{nudge.headline} · {nudge.detail}</p> : null}
               </button>;
             }) : <div className="dx-empty"><CalendarDays /><strong>No records this month</strong><small>Attendance days will appear here once you punch in.</small></div>}
@@ -502,8 +502,8 @@ export function ConnectAttendance({ account, active = true }: { account: Account
         </div>
         {tab === "calendar" && selected && selectedInsight ? <div className="dx-selected-day" id="attendance-day-details" ref={selectedDayRef} tabIndex={-1}>
           <header><div><CalendarDays /><strong>{selected.date.split("-").reverse().join("/")}</strong></div><em className={selectedInsight.calendarClass}>{selectedInsight.label}</em></header>
-          {selected.scheduledStart && selected.scheduledStart !== "--:--" ? <p className="dx-attendance-shift"><Clock3 /> <strong>Report by {selected.scheduledStart}</strong> · {selected.shiftName || "Shift"} {selected.scheduledStart}–{selected.scheduledEnd} <small>{selected.shiftSource}</small></p> : null}
-          <div><span><LogIn /><small>IN</small><strong>{selected.inTime || "--:--"}</strong></span><span><LogOut /><small>OUT</small><strong>{selected.outTime || "--:--"}</strong></span><span><Clock3 /><small>WORK</small><strong>{selected.workHours || "00:00"}</strong></span><span><Fingerprint /><small>PUNCHES</small><strong>{selected.punchCount}</strong></span></div>
+          {selected.scheduledStart && selected.scheduledStart !== "--:--" ? <p className="dx-attendance-shift"><Clock3 /> <strong>{selected.workMode === "wfh" ? "Scheduled start" : "Report by"} {selected.scheduledStart}</strong> · {selected.shiftName || "Shift"} {selected.scheduledStart}–{selected.scheduledEnd} <small>{selected.shiftSource}</small></p> : null}
+          <div><span><LogIn /><small>IN</small><strong>{selected.inTime || "--:--"}</strong></span><span><LogOut /><small>OUT</small><strong>{selected.outTime || "--:--"}</strong></span><span><Clock3 /><small>{selected.workMode === "wfh" && !selected.punchCount ? "WFH CREDIT" : "WORK"}</small><strong>{selected.workHours || "00:00"}</strong></span><span><Fingerprint /><small>PUNCHES</small><strong>{selected.punchCount}</strong></span></div>
           {showSelectedOutcome || selectedTimingIssues.length ? <section className={`dx-attendance-day-insight compact ${selectedInsight.tone}`}>
             {showSelectedOutcome ? <p className="dx-attendance-detail-row"><strong>{selectedInsight.headline}</strong><small>{selectedInsight.detail}</small></p> : null}
             {selectedTimingIssues.map((issue) => <p className="dx-attendance-detail-row" key={issue.code}><strong>{issue.label}</strong><small>{issue.message}</small></p>)}

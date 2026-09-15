@@ -41,7 +41,7 @@ function statusLabel(status: string) {
   switch (status) {
     case "pending_manager": return "Pending manager";
     case "pending_hr": return "Pending HR";
-    case "approved": return "Approved · Present WFH";
+    case "approved": return "Approved · WFH";
     case "returned": return "Returned";
     case "rejected": return "Rejected";
     case "cancelled": return "Withdrawn";
@@ -224,7 +224,7 @@ export function ConnectWfh({
       <header className="dx-page-intro">
         <small>Attendance</small>
         <h1>Work from home</h1>
-        <p>Request a date range. After manager approval, HR marks working days Present · WFH.</p>
+        <p>Request a date range. After final approval, attendance credit is applied after each working shift ends. No punch times are generated.</p>
       </header>
       {body}
     </section>

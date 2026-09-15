@@ -1167,7 +1167,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               {wfhHrApprovals.map((approval) => (
                 <ApprovalRow
                   badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
-                  eyebrow={`${approval.requestNo} · Present · WFH`}
+                  eyebrow={`${approval.requestNo} · WFH request`}
                   key={`hr:${approval.id}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
                   name={approval.requesterName}
@@ -1190,7 +1190,7 @@ export function ConnectApprovalInbox({ account, active = true }: { account: AppA
               <ApprovalModal onClose={closeModal} title={approval.requesterName}>
                 <ApprovalHead
                   badge={<span className="dx-approval-badge">{approval.days} day{approval.days === 1 ? "" : "s"}</span>}
-                  eyebrow={queue === "hr" ? `${approval.requestNo} · Present · WFH` : `${approval.requestNo} · ${approval.stepName}`}
+                  eyebrow={queue === "hr" ? `${approval.requestNo} · WFH request` : `${approval.requestNo} · ${approval.stepName}`}
                   meta={`${approval.requesterCode || "—"} · ${profileLabel(approval.profileType)}`}
                   name={approval.requesterName}
                 />
