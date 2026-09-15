@@ -226,7 +226,7 @@ export async function expensePayoutReadiness(account: ConnectAccount) {
 }
 
 export type ExpenseClaimRequestAssignee = {
-  assignee_role: "reporting_manager" | "finance_head";
+  assignee_role: "reporting_manager" | "finance_head" | "managing_partner";
   approver_user_id: string;
   approver_person_id: string | null;
 };
@@ -257,12 +257,82 @@ async function resolveImmediateReportingManager(account: ConnectAccount, identit
   };
 }
 
-/** Expense pre-requests require only the requester's immediate reporting manager. */
+async function resolveCompanyDesignationApprover(
+  companyId: string,
+  today: string,
+  role: "finance_head" | "managing_partner",
+  matches: (label: { code: string | null; name: string }) => boolean,
+  excludePersonId: string
+): Promise<ExpenseClaimRequestAssignee | null> {
+  const designations = await db().from("designations").select("id,code,name")
+    .eq("company_id", companyId).eq("is_active", true);
+  if (designations.error) throw new Error(designations.error.message);
+  const designationIds = (designations.data ?? [])
+    .filter((designation) => matches({ code: designation.code, name: String(designation.name ?? "") }))
+    .map((designation) => designation.id);
+  if (!designationIds.length) return null;
+
+  const assignment = await db().from("hr_work_assignments").select("engagement_id")
+    .eq("company_id", companyId).in("designation_id", designationIds).eq("is_primary", true)
+    .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`)
+    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+  if (assignment.error || !assignment.data) return null;
+
+  const engagement = await db().from("hr_engagements").select("person_id,status")
+    .eq("company_id", companyId).eq("id", assignment.data.engagement_id).maybeSingle();
+  if (engagement.error || !engagement.data || engagement.data.status !== "active") return null;
+  if (engagement.data.person_id === excludePersonId) return null;
+
+  const approverUserId = await resolveConnectApproverUserId(companyId, engagement.data.person_id);
+  if (!approverUserId) return null;
+  return { assignee_role: role, approver_user_id: approverUserId, approver_person_id: engagement.data.person_id };
+}
+
+async function resolveFinanceHeadApprover(account: ConnectAccount, identity: Awaited<ReturnType<typeof expenseIdentity>>) {
+  const configured = await resolveConfiguredApprovalWorkflow({
+    companyId: account.companyId,
+    workflowCode: "reimbursement",
+    workerId: identity.workerId,
+    workerType: identity.workerType,
+    asOf: identity.today,
+    maxLevel: 3,
+    reportingChainOnly: true,
+    reportingChainMaxLevel: 2,
+    level3StepName: "Finance approval",
+    allowMissingApprovers: true
+  });
+  const financeStep = configured?.steps.find((step) => step.step_name === "Finance approval");
+  if (!financeStep || financeStep.approver_person_id === identity.personId) return null;
+  return {
+    assignee_role: "finance_head" as const,
+    approver_user_id: financeStep.approver_user_id,
+    approver_person_id: financeStep.approver_person_id
+  };
+}
+
+/**
+ * Expense pre-requests can be approved by any one of the requester's immediate
+ * reporting manager, the company Finance Head, or the Managing Partner
+ * (first decision wins - hr_decide_expense_claim_request skips the remaining
+ * pending assignees once one of them decides). Only the reporting manager is
+ * emailed; Finance Head/Managing Partner remain eligible without being notified.
+ */
 export async function resolveExpenseClaimRequestAssignees(account: ConnectAccount) {
   const identity = await expenseIdentity(account);
   const manager = await resolveImmediateReportingManager(account, identity);
   if (!manager) {
     throw new Error("Configure an active reporting manager with a One/People login before requesting expense approval.");
   }
-  return { identity, assignees: [manager] };
+  const [financeHead, managingPartner] = await Promise.all([
+    resolveFinanceHeadApprover(account, identity),
+    resolveCompanyDesignationApprover(account.companyId, identity.today, "managing_partner", isManagingPartnerDesignation, identity.personId)
+  ]);
+  const seenPersonIds = new Set([manager.approver_person_id]);
+  const assignees = [manager];
+  for (const candidate of [financeHead, managingPartner]) {
+    if (!candidate || !candidate.approver_person_id || seenPersonIds.has(candidate.approver_person_id)) continue;
+    seenPersonIds.add(candidate.approver_person_id);
+    assignees.push(candidate);
+  }
+  return { identity, assignees };
 }

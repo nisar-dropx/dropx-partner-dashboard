@@ -74,6 +74,17 @@ type ReimbursementOversightSummary = {
   requesterCode: string;
 };
 
+type PreRequestOversightSummary = {
+  id: string;
+  request_no: string;
+  purpose: string;
+  estimated_amount?: number | null;
+  status: string;
+  created_at: string;
+  requesterName: string;
+  requesterCode: string;
+};
+
 type ReimbursementOversightDetail = ReimbursementOversightSummary & {
   items: ExpenseItem[];
   attachments: Attachment[];
@@ -418,35 +429,44 @@ function ApprovalRow({
   onReview,
   onApprove,
   approveLabel = "Approve",
-  saving
+  saving,
+  readOnly = false
 }: {
   eyebrow: string;
   name: string;
   meta: string;
   badge: ReactNode;
-  onReview: () => void;
+  onReview?: () => void;
   onApprove?: () => void;
   approveLabel?: string;
   saving: boolean;
+  readOnly?: boolean;
 }) {
+  const info = (
+    <>
+      <span aria-hidden="true" className="dx-approval-avatar">{name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("") || "?"}</span>
+      <div className="dx-approval-row-main">
+        <div className="dx-approval-row-top">
+          <p className="dx-approval-row-eyebrow">{eyebrow}</p>
+        </div>
+        <strong>{name}</strong>
+        <p className="dx-approval-row-meta">{meta}</p>
+      </div>
+    </>
+  );
   return (
     <div className="dx-approval-row">
-      <button className="dx-approval-row-info" onClick={onReview} type="button">
-        <span aria-hidden="true" className="dx-approval-avatar">{name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("") || "?"}</span>
-        <div className="dx-approval-row-main">
-          <div className="dx-approval-row-top">
-            <p className="dx-approval-row-eyebrow">{eyebrow}</p>
-          </div>
-          <strong>{name}</strong>
-          <p className="dx-approval-row-meta">{meta}</p>
-        </div>
-      </button>
+      {readOnly || !onReview ? <div className="dx-approval-row-info">{info}</div> : (
+        <button className="dx-approval-row-info" onClick={onReview} type="button">{info}</button>
+      )}
       <div className="dx-approval-row-footer">
         <span className="dx-approval-row-badge">{badge}</span>
         <div className="dx-approval-row-actions">
-          <button aria-label="Review details" className="dx-approval-row-view" onClick={onReview} title="Review details" type="button">
-            <span>Review</span><ChevronRight />
-          </button>
+          {readOnly || !onReview ? null : (
+            <button aria-label="Review details" className="dx-approval-row-view" onClick={onReview} title="Review details" type="button">
+              <span>Review</span><ChevronRight />
+            </button>
+          )}
           {onApprove ? (
             <button aria-label={approveLabel} className="dx-approval-row-approve" disabled={saving} onClick={onApprove} title={approveLabel} type="button">
               <Check /><span>{approveLabel}</span>
@@ -464,8 +484,8 @@ function ApprovalModal({ title, onClose, children, wide = false }: { title: stri
   </ConnectDialog>;
 }
 
-function journeyStatus(status: string) {
-  if (status === "pending") return "Current";
+function journeyStatus(status: string, isCurrent: boolean) {
+  if (status === "pending") return isCurrent ? "Current" : "Upcoming";
   if (["waiting", "queued"].includes(status)) return "Upcoming";
   return statusLabel(status);
 }
@@ -494,16 +514,22 @@ function ApprovalJourneyCell({
           <span><strong>Submitted</strong><small>{value.submittedBy}</small></span>
           <time>{dateTime(value.submittedAt)}</time>
         </div>
-        {value.steps.map((step) => (
-          <div className={`dx-approval-journey-step status-${step.status}`} key={step.id}>
-            <i>{step.status === "approved" ? <Check /> : step.status === "rejected" ? <X /> : <Clock3 />}</i>
-            <span>
-              <strong>{statusLabel(step.label)}</strong>
-              <small>{step.actorName || (step.status === "pending" ? "Awaiting assigned approver" : "No approver assigned")}{step.note ? ` · ${step.note}` : ""}</small>
-            </span>
-            <time><b>{journeyStatus(step.status)}</b>{step.actedAt ? dateTime(step.actedAt) : ""}</time>
-          </div>
-        ))}
+        {(() => {
+          const firstPendingIndex = value.steps.findIndex((step) => step.status === "pending");
+          return value.steps.map((step, index) => {
+            const isCurrent = step.status === "pending" && index === firstPendingIndex;
+            return (
+              <div className={`dx-approval-journey-step status-${step.status}${isCurrent ? " is-current" : ""}`} key={step.id}>
+                <i>{step.status === "approved" ? <Check /> : step.status === "rejected" ? <X /> : <Clock3 />}</i>
+                <span>
+                  <strong>{statusLabel(step.label)}</strong>
+                  <small>{step.actorName || (step.status === "pending" ? "Awaiting assigned approver" : "No approver assigned")}{step.note ? ` · ${step.note}` : ""}</small>
+                </span>
+                <time><b>{journeyStatus(step.status, isCurrent)}</b>{step.actedAt ? dateTime(step.actedAt) : ""}</time>
+              </div>
+            );
+          });
+        })()}
       </div>
     </details>
   );
@@ -590,6 +616,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
   const [payAdvanceError, setPayAdvanceError] = useState("");
   const [payAdvanceTerms, setPayAdvanceTerms] = useState<Record<string, { amount: string; installments: string }>>({});
   const [expenseOversight, setExpenseOversight] = useState<ReimbursementOversightSummary[]>([]);
+  const [preRequestOversight, setPreRequestOversight] = useState<PreRequestOversightSummary[]>([]);
   const [expenseOversightDetail, setExpenseOversightDetail] = useState<ReimbursementOversightDetail | null>(null);
   const [expenseOversightLoadingId, setExpenseOversightLoadingId] = useState<string | null>(null);
   const [leaveApprovals, setLeaveApprovals] = useState<LeaveApproval[]>([]);
@@ -659,6 +686,8 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
       setPreRequestApprovals(nextPreRequests);
       const actionableClaimIds = new Set(nextClaims.map((entry: ReimbursementApproval) => entry.claim.id));
       setExpenseOversight((reimbursementPayload.expenseOversight ?? []).filter((entry: ReimbursementOversightSummary) => !actionableClaimIds.has(entry.id)));
+      const actionablePreRequestIds = new Set(nextPreRequests.map((entry: PreRequestApproval) => entry.request.id));
+      setPreRequestOversight((reimbursementPayload.preRequestOversight ?? []).filter((entry: PreRequestOversightSummary) => !actionablePreRequestIds.has(entry.id)));
       setLeaveApprovals(leavePayload.leaveApprovals ?? []);
       setWfhApprovals(leavePayload.wfhApprovals ?? []);
       setWfhHrApprovals(leavePayload.wfhHrApprovals ?? []);
@@ -1712,7 +1741,21 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               />)}
             </div>
           </section> : null}
-          {!preRequestApprovals.length && !reimbursements.length && !expenseOversight.length ? (
+          {preRequestOversight.length ? <section className="dx-expense-oversight">
+            <header><span><strong>All team · pre-request visibility</strong><small>Read-only here · approval happens only when you are this requester's reporting manager.</small></span><em>{preRequestOversight.length} recent</em></header>
+            <div>
+              {preRequestOversight.map((request) => <ApprovalRow
+                badge={<span className="dx-approval-badge">{request.estimated_amount != null ? money(request.estimated_amount) : "Request"}</span>}
+                eyebrow={`${request.request_no} · Pre-request · ${statusLabel(request.status)}`}
+                key={`pre-oversight-${request.id}`}
+                meta={`${request.requesterCode || "—"} · ${request.purpose}`}
+                name={request.requesterName}
+                readOnly
+                saving={saving}
+              />)}
+            </div>
+          </section> : null}
+          {!preRequestApprovals.length && !reimbursements.length && !expenseOversight.length && !preRequestOversight.length ? (
             <div className="dx-empty"><Clock3 /><strong>No reimbursements waiting</strong><small>No reimbursement requests or claims are assigned to you right now.</small></div>
           ) : null}
           {(() => {

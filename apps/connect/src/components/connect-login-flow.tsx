@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, ClipboardList, CreditCard, Files, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
+import dynamic from "next/dynamic";
+import { ArrowLeftRight, Bell, CalendarDays, CheckCheck, ChevronRight, ClipboardCheck, ClipboardList, CreditCard, Files, Fingerprint, Gauge, Home, IndianRupee, LockKeyhole, LogOut, Menu, MessageCircleMore, ReceiptText, Settings, ShieldCheck, Sparkles, SwitchCamera, Target, UserRound, UsersRound, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ConnectAttendance } from "./connect-attendance";
 import { AttendanceLocationMonitor } from "./attendance-location-monitor";
@@ -27,9 +28,10 @@ import { connectAccountKey as accountKey, connectAccountRoute, resolveConnectRou
 import { connectApprovalSection } from "@/lib/connect-approval-links";
 import { leaveRouteState, readConnectSessionResponse, resolveApprovalAccess, type ReporteeCheck } from "@/lib/connect-navigation-state";
 
-type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "approvals" | "requests" | "payments" | "advances" | "earnings" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "performance" | "settings";
+type Step = "mobile" | "pin" | "otp" | "createPin" | "unlock" | "accounts" | "dashboard" | "profile" | "documents" | "connect" | "approvals" | "requests" | "payments" | "advances" | "earnings" | "reimbursements" | "attendance" | "roster" | "leave" | "lop" | "wfh" | "performance" | "settings";
 const routeForStep: Partial<Record<Step, string>> = {
   accounts: "/accounts", dashboard: "/dashboard", profile: "/profile", documents: "/documents",
+  connect: "/connect",
   approvals: "/approvals", requests: "/requests", advances: "/advances", earnings: "/earnings",
   reimbursements: "/reimbursements", attendance: "/attendance", roster: "/roster", leave: "/leave",
   wfh: "/leave/wfh", performance: "/performance", settings: "/settings"
@@ -86,6 +88,11 @@ function landingPage(account: AppAccount): Step {
 function Loader({ text }: { text: string }) {
   return <div className="dx-loader fullscreen"><span />{text ? <small>{text}</small> : null}</div>;
 }
+
+const ConnectCommunicationCenter = dynamic(
+  () => import("./connect-communication-center").then((module) => module.ConnectCommunicationCenter),
+  { loading: () => <Loader text="Opening Connect…" /> }
+);
 
 // Static fallback while the persistent workspace layout initializes.
 export function ConnectShellFallback() {
@@ -373,8 +380,8 @@ export function ConnectLoginFlow() {
         setUnreadNotifications((count) => Math.max(0, count - 1));
       }
     }
-    const destination = notification.route as Step | null | undefined;
-    if (destination && ["dashboard", "profile", "documents", "approvals", "requests", "advances", "earnings", "reimbursements", "attendance", "roster", "leave", "lop", "wfh", "performance", "settings"].includes(destination)) {
+    const destination = (notification.route === "communication_center" ? "connect" : notification.route) as Step | null | undefined;
+    if (destination && ["dashboard", "profile", "documents", "connect", "approvals", "requests", "advances", "earnings", "reimbursements", "attendance", "roster", "leave", "lop", "wfh", "performance", "settings"].includes(destination)) {
       setNotificationMenu(false);
       open(destination);
     } else if (destination) {
@@ -574,12 +581,13 @@ export function ConnectLoginFlow() {
     router.replace(urlFor(destination, refreshed));
   }
 
-  const loggedIn = ["accounts","dashboard","profile","documents","approvals","requests","payments","advances","earnings","reimbursements","attendance","roster","leave","lop","wfh","performance","settings"].includes(step);
+  const loggedIn = ["accounts","dashboard","profile","documents","connect","approvals","requests","payments","advances","earnings","reimbursements","attendance","roster","leave","lop","wfh","performance","settings"].includes(step);
   const screenLabel: Partial<Record<Step, string>> = {
     accounts: "Accounts",
     dashboard: "Today",
     profile: "My profile",
     documents: "Documents",
+    connect: "Connect",
     approvals: "Approvals",
     requests: "My requests",
     payments: "Payments",
@@ -620,6 +628,7 @@ export function ConnectLoginFlow() {
         {allowed(account, "dashboard") ? <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Gauge />Dashboard</button> : null}
         {!isManagerAccount(account) && allowed(account, "profile") ? <button aria-current={step === "profile" ? "page" : undefined} className={step === "profile" ? "active" : ""} onClick={() => open("profile")}><UserRound />My Profile</button> : null}
         {peopleSelfService(account) && allowed(account, "documents") ? <button aria-current={step === "documents" ? "page" : undefined} className={step === "documents" ? "active" : ""} onClick={() => open("documents")}><Files />Documents</button> : null}
+        <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore />Connect</button>
         {peopleSelfService(account) ? <button aria-current={step === "requests" ? "page" : undefined} className={step === "requests" ? "active" : ""} onClick={() => open("requests")}><ClipboardList />My Requests</button> : null}
         {(approvalAccess === "allowed") ? <button aria-current={step === "approvals" ? "page" : undefined} className={step === "approvals" ? "active" : ""} onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox</button> : null}
         {sharedSelfService(account) && (allowed(account, "advances") || (isWorkforceWorkspace(account) && allowed(account, "earnings")) || (peopleSelfService(account) && allowed(account, "reimbursements"))) ? <button aria-expanded={paymentsExpanded} className={`payments-toggle${step === "advances" || step === "earnings" || step === "reimbursements" ? " active" : ""}${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard /><span>Payments</span><ChevronRight /></button> : null}
@@ -665,6 +674,7 @@ export function ConnectLoginFlow() {
         {allowed(account, "dashboard") ? <button onClick={() => open("dashboard")}><Gauge />Dashboard<ChevronRight /></button> : null}
         {!isManagerAccount(account) && allowed(account, "profile") ? <button onClick={() => open("profile")}><UserRound />My Profile<ChevronRight /></button> : null}
         {peopleSelfService(account) && allowed(account, "documents") ? <button onClick={() => open("documents")}><Files />Documents<ChevronRight /></button> : null}
+        <button onClick={() => open("connect")}><MessageCircleMore />Connect<ChevronRight /></button>
         {peopleSelfService(account) ? <button onClick={() => open("requests")}><ClipboardList />My Requests<ChevronRight /></button> : null}
         {(approvalAccess === "allowed") ? <button onClick={() => open("approvals")}><ClipboardCheck />Approval Inbox<ChevronRight /></button> : null}
         {sharedSelfService(account) && (allowed(account, "advances") || (isWorkforceWorkspace(account) && allowed(account, "earnings")) || (peopleSelfService(account) && allowed(account, "reimbursements"))) ? <button aria-expanded={paymentsExpanded} className={`payments-toggle${paymentsExpanded ? " expanded" : ""}`} onClick={() => setPaymentsExpanded((expanded) => !expanded)}><CreditCard />Payments<ChevronRight /></button> : null}
@@ -714,6 +724,7 @@ export function ConnectLoginFlow() {
       {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onLeave={() => open("leave")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRoster={() => open("roster")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
       {step === "profile" && account && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "documents" && account && peopleSelfService(account) && allowed(account, "documents") ? <ConnectDocuments account={account} /> : null}
+      {step === "connect" && account ? <ConnectCommunicationCenter account={account} /> : null}
       {step === "requests" && account && peopleSelfService(account) ? <ConnectMyRequests account={account} /> : null}
       {step === "approvals" && account && approvalAccess === "allowed" ? <ConnectApprovalInbox account={account} initialSection={requestedApprovalSection} /> : null}
       {step === "approvals" && account && approvalAccess === "loading" ? <div role="status"><Loader text="Checking approval access..." /></div> : null}
@@ -743,6 +754,7 @@ export function ConnectLoginFlow() {
       {isWorkforceWorkspace(account) && allowed(account, "advances") ? <button aria-current={step === "advances" ? "page" : undefined} className={step === "advances" ? "active" : ""} onClick={() => open("advances")}><IndianRupee /><span>Advances</span></button> : null}
       {allowed(account, "attendance") ? <button aria-current={step === "attendance" ? "page" : undefined} className={step === "attendance" ? "active" : ""} onClick={() => open("attendance")}><Fingerprint /><span>Attendance</span></button> : null}
       {allowed(account, "roster") ? <button aria-current={step === "roster" ? "page" : undefined} className={step === "roster" ? "active" : ""} onClick={() => open("roster")}><ArrowLeftRight /><span>Roster</span></button> : null}
+      <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore /><span>Connect</span></button>
       {allowed(account, "performance") ? <button aria-current={step === "performance" ? "page" : undefined} className={step === "performance" ? "active" : ""} onClick={() => open("performance")}><Target /><span>Performance</span></button> : null}
     </nav> : null}
   </div>;

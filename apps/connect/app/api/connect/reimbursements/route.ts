@@ -84,15 +84,34 @@ async function approvalPayload(companyId: string, userIds: string[]) {
   }));
 }
 
+/**
+ * A pre-request assigned to a Finance Head/Managing Partner (an org-wide fallback
+ * approver, not the requester's direct manager) belongs in "My Team" only when that
+ * same viewer is ALSO the requester's reporting_manager for this specific request -
+ * otherwise it belongs in the broader "All Team" oversight view instead.
+ */
 async function preRequestApprovalPayload(companyId: string, userIds: string[]) {
   if (!userIds.length) return [];
   const result = await db().from("hr_expense_claim_request_assignees")
-    .select("id,request_id,assignee_role,status,hr_expense_claim_requests(id,request_no,purpose,estimated_amount,trip_from,trip_to,notes,status,created_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id))")
+    .select("id,request_id,assignee_role,status,approver_user_id,hr_expense_claim_requests(id,request_no,purpose,estimated_amount,trip_from,trip_to,notes,status,created_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id))")
     .eq("company_id", companyId).in("approver_user_id", userIds).eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
+  const userIdSet = new Set(userIds);
+  const reportingManagerUserIdsByRequest = new Map<string, Set<string>>();
+  for (const row of result.data ?? []) {
+    if (row.assignee_role !== "reporting_manager") continue;
+    const set = reportingManagerUserIdsByRequest.get(row.request_id) ?? new Set<string>();
+    set.add(row.approver_user_id);
+    reportingManagerUserIdsByRequest.set(row.request_id, set);
+  }
   const rows = (result.data ?? []).flatMap((row) => {
     const request = relation(row.hr_expense_claim_requests);
     if (!request || request.status !== "pending") return [];
+    if (row.assignee_role !== "reporting_manager") {
+      const managers = reportingManagerUserIdsByRequest.get(row.request_id);
+      const viewerIsManagerHere = managers ? [...managers].some((managerId) => userIdSet.has(managerId)) : false;
+      if (!viewerIsManagerHere) return [];
+    }
     const employee = relation(request.employees);
     const contractor = relation(request.contractors);
     return [{
@@ -116,6 +135,32 @@ async function preRequestApprovalPayload(companyId: string, userIds: string[]) {
     ...row,
     journey: approvalJourneySummary(row.request.created_at, row.request.requesterName, row.assignee_role, journeys.get(row.request_id) ?? [])
   }));
+}
+
+/** All-team view of pending pre-requests for Finance Head/Managing Partner viewers who are not the requester's direct reporting manager. */
+async function preRequestOversightSummary(account: ConnectAccount) {
+  if (!await hasOrganizationExpenseVisibility(account)) return [];
+  const result = await db().from("hr_expense_claim_requests")
+    .select("id,request_no,purpose,estimated_amount,trip_from,trip_to,status,created_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_claim_request_assignees(assignee_role,status,approver_user_id)")
+    .eq("company_id", account.companyId).eq("status", "pending").order("created_at", { ascending: false }).limit(100);
+  if (result.error) throw new Error(result.error.message);
+  return (result.data ?? []).map((request) => {
+    const employee = relation(request.employees);
+    const contractor = relation(request.contractors);
+    const assignees = request.hr_expense_claim_request_assignees ?? [];
+    return {
+      id: request.id,
+      request_no: request.request_no,
+      purpose: request.purpose,
+      estimated_amount: request.estimated_amount,
+      trip_from: request.trip_from,
+      trip_to: request.trip_to,
+      status: assignees.find((assignee) => assignee.status === "pending")?.assignee_role ?? "pending",
+      created_at: request.created_at,
+      requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
+      requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? ""
+    };
+  });
 }
 
 async function hasOrganizationExpenseVisibility(account: ConnectAccount) {
@@ -265,6 +310,7 @@ async function claimPayload(account: ConnectAccount) {
   return { categories, stations, payout, claims, preRequests, approvals, preRequestApprovals };
 }
 
+
 async function expenseApprovalGuidePayload(account: ConnectAccount) {
   if (!expenseWorkerType(account.profileType)) throw new Error("Select your employee or contractor profile to view your approval route.");
   const direct = await isDirectExpenseRequester(account);
@@ -348,10 +394,11 @@ export async function GET(request: Request) {
     const scope = normalizeConnectReporteeScope(url.searchParams.get("reporteeScope"));
     if (account.profileType === "user") {
       const actorUserIds = await resolveConnectActorUserIds(account);
-      const [approvals, preRequestApprovals, expenseOversight] = await Promise.all([
+      const [approvals, preRequestApprovals, expenseOversight, preRequestOversight] = await Promise.all([
         approvalPayload(account.companyId, actorUserIds),
         preRequestApprovalPayload(account.companyId, actorUserIds),
-        expenseOversightSummary(account)
+        expenseOversightSummary(account),
+        preRequestOversightSummary(account)
       ]);
       return NextResponse.json({
         categories: [],
@@ -362,6 +409,7 @@ export async function GET(request: Request) {
         approvals,
         preRequestApprovals,
         expenseOversight,
+        preRequestOversight,
         policyDocument,
         scope
       }, { headers: { "Cache-Control": "private, no-store" } });
@@ -552,7 +600,10 @@ async function submitPreRequest(form: FormData, account: ConnectAccount) {
   if (rpc.error) throw new Error(rpc.error.message);
 
   const estimateLabel = `Rs ${estimatedAmount.toLocaleString("en-IN")}`;
-  await Promise.all(assignees.map((assignee) => notifyExpenseUser({
+  // Finance Head and Managing Partner are eligible to approve in parallel, but only the
+  // reporting manager is notified - the other two are a fallback, not the expected approver.
+  const notifiedAssignees = assignees.filter((assignee) => assignee.assignee_role === "reporting_manager");
+  await Promise.all(notifiedAssignees.map((assignee) => notifyExpenseUser({
     companyId: account.companyId,
     claimRequestId: requestId,
     recipientUserId: assignee.approver_user_id,
