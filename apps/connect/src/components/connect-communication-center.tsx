@@ -217,7 +217,7 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
         body: JSON.stringify({
           accountId: account.id,
           profileType: account.profileType,
-          forwardMessageId,
+          forwardMessageId: forwardingMessageId,
           forwardEmail: forwardEmail.trim()
         })
       });
