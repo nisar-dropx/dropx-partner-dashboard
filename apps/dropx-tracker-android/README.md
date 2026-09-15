@@ -126,6 +126,53 @@ before assuming it's a new bug. Diagnose via `chrome://inspect` (or `adb forward
 `webview_devtools_remote_<pid>` socket) — that's how the original gap/clip bugs here were
 actually found, not by guessing.
 
+## Later, with company credentials: Firebase and Google Play
+
+Not started — both need real accounts/credentials that weren't available when this app was
+built. Written down here so the exact steps aren't re-derived from scratch later.
+
+### Firebase project → unlocks push notifications + crash reporting
+
+1. Create a Firebase project at <https://console.firebase.google.com> (or add this app to an
+   existing DropX Logistics Firebase project, if one already exists for another product).
+2. Add an Android app inside it with package name **`com.dropxlogistics.onetracker`** — must
+   match exactly, or push tokens/crash reports won't resolve to this app.
+3. Download the generated `google-services.json`, place it at
+   `android/app/google-services.json` (that exact path — `app/build.gradle` already has a
+   `try { file('google-services.json')... }` block that auto-applies the Google Services
+   Gradle plugin only when the file exists; no `build.gradle` edit needed).
+4. For push notifications: `npm install @capacitor/push-notifications@6 && npx cap sync android`,
+   then rebuild. This plugin was deliberately removed earlier (see the section below) because
+   calling `PushNotifications.register()` without a Firebase project crashes the whole app —
+   safe to re-add once `google-services.json` is real.
+5. For crash reporting: `npm install @capacitor/firebase-crashlytics` (or the equivalent Capacitor
+   Community plugin — there's no first-party Capacitor Crashlytics plugin as of writing) and
+   initialize it in `MainActivity.onCreate()`. Nothing else in this app depends on this, so it
+   can be added independently of push notifications.
+
+### Google Play Store path
+
+More process than code — this app's Play readiness (signing, versioning, icon/branding,
+minification) is already done; what's left is entirely account/policy work:
+
+1. **Play Console developer account** (one-time, per Google account/organization, has a
+   registration fee).
+2. **A public privacy policy URL** — required for any app requesting location, must describe
+   what's collected (background location while clocked in) and why. Doesn't need to be
+   complex, but it must be a real, publicly reachable page, not a placeholder.
+3. **Data Safety form** (inside Play Console) — discloses that location data is collected,
+   who it's shared with (nobody outside the company), and whether it's used for anything
+   beyond the stated purpose.
+4. **Permissions Declaration for background location** — Play's strictest review tier.
+   Google requires a specific justification for `ACCESS_BACKGROUND_LOCATION` and may ask for
+   a short screen-recording demonstrating the core feature that needs it. A workforce
+   attendance/dispatch app tracking during a clocked-in shift is a legitimate, commonly
+   approved use case, but expect a review round-trip (days, occasionally a rejection-and-
+   resubmit cycle) rather than instant approval.
+5. Once approved: `applicationId`/package name is locked in forever for that Play listing —
+   double-check `com.dropxlogistics.onetracker` is the final choice before the first
+   submission.
+
 ## Changing the app icon / splash screen later
 
 Both were generated from `apps/connect/public/app-icons/icon-512.png` (the plain square mark)
