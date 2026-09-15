@@ -509,26 +509,25 @@ html.native-app .dx-auth {
    0px for html.native-app (see above) and env(safe-area-inset-bottom) everywhere else —
    nothing further needed here. */
 
-/* Off-white notification panel — matches the app's own warm cream surfaces used elsewhere
-   (.dx-web-page's #fbf8f3 background) instead of the stark white the base rule used. Only
-   color/background/border-color are overridden here; position, size and structure stay
-   exactly as they are in the base .dx-notification-pop rule. */
+/* Barely-off-white notification panel — #fbf8f3 (the app's usual warm-cream surface color)
+   read as dull/grayish here against a bright phone screen, so this is a much lighter touch
+   of the same warmth instead of matching that token exactly. */
 .dx-notification-pop {
-  background: #fbf8f3;
-  border-color: #e6e1da;
+  background: #fffdf9;
+  border-color: #efe9de;
 }
 
 .dx-notification-pop > header {
-  border-bottom-color: #eeeae4;
+  border-bottom-color: #f2ece1;
 }
 
 .dx-notification-list > button {
-  background: #fbf8f3;
-  border-bottom-color: #f0ece7;
+  background: #fffdf9;
+  border-bottom-color: #f5f0e6;
 }
 
 .dx-notification-list > button.unread {
-  background: #f5ecd9;
+  background: #fff3de;
 }
 
 .deletion-page {
