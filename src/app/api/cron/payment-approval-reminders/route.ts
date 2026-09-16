@@ -27,23 +27,36 @@ export async function GET(request: Request) {
   if (!supabaseAdmin) return NextResponse.json({ error: "Supabase service role key is not configured." }, { status: 500 });
 
   const [paymentDue, advanceDue] = await Promise.all([
-    supabaseAdmin.from("payment_requests").select("id, company_id").not("email_next_reminder_at", "is", null).lte("email_next_reminder_at", new Date().toISOString()).limit(50),
-    supabaseAdmin.from("payment_advance_requests").select("id, company_id").not("email_next_reminder_at", "is", null).lte("email_next_reminder_at", new Date().toISOString()).limit(50)
+    supabaseAdmin.from("payment_requests").select("id, company_id").not("email_next_reminder_at", "is", null).lte("email_next_reminder_at", new Date().toISOString()).limit(20),
+    supabaseAdmin.from("payment_advance_requests").select("id, company_id").not("email_next_reminder_at", "is", null).lte("email_next_reminder_at", new Date().toISOString()).limit(20)
   ]);
   if (paymentDue.error || advanceDue.error) {
     return NextResponse.json({ error: paymentDue.error?.message ?? advanceDue.error?.message }, { status: 500 });
   }
 
+  // Interleave the two tables (rather than draining payment_requests before
+  // ever starting payment_advance_requests) so a large batch on one table
+  // can never starve the other within this function's time budget - if the
+  // budget runs out, both tables have made partial progress, not just one.
+  const queue: Array<{ kind: "payment" | "advance"; companyId: string; requestId: string }> = [];
+  const payments = paymentDue.data ?? [];
+  const advances = advanceDue.data ?? [];
+  const maxLength = Math.max(payments.length, advances.length);
+  for (let index = 0; index < maxLength; index += 1) {
+    if (payments[index]) queue.push({ kind: "payment", companyId: payments[index].company_id, requestId: payments[index].id });
+    if (advances[index]) queue.push({ kind: "advance", companyId: advances[index].company_id, requestId: advances[index].id });
+  }
+
   let sent = 0;
   let skipped = 0;
-  for (const row of paymentDue.data ?? []) {
-    const result = await sendPaymentApprovalReminder(row.company_id, row.id);
-    if (result.sent) sent += 1; else skipped += 1;
-  }
-  for (const row of advanceDue.data ?? []) {
-    const result = await sendPaymentAdvanceReminder(row.company_id, row.id);
+  const deadline = Date.now() + 45_000; // Leave headroom under maxDuration for the response itself.
+  for (const item of queue) {
+    if (Date.now() > deadline) break;
+    const result = item.kind === "payment"
+      ? await sendPaymentApprovalReminder(item.companyId, item.requestId)
+      : await sendPaymentAdvanceReminder(item.companyId, item.requestId);
     if (result.sent) sent += 1; else skipped += 1;
   }
 
-  return NextResponse.json({ sent, skipped, total: (paymentDue.data?.length ?? 0) + (advanceDue.data?.length ?? 0) });
+  return NextResponse.json({ sent, skipped, queued: queue.length, total: payments.length + advances.length });
 }
