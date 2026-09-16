@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isManagingPartnerDesignation } from "@/lib/approval-designation-labels";
 import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
 import { createAppNotification } from "@/lib/app-notifications";
+import { sendPaymentAdvanceRequestNotification } from "@/lib/payment-advance-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
 
@@ -164,6 +165,7 @@ export async function POST(request: NextRequest) {
       sourceKey: String(result.data.id),
       variables: { amount: amount.toLocaleString("en-IN", { maximumFractionDigits: 2 }) }
     });
+    if (!directApprove) await sendPaymentAdvanceRequestNotification(account.companyId, String(result.data.id));
     return NextResponse.json({
       ok: true,
       request: result.data,

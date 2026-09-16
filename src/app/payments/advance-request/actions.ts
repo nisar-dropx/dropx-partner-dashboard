@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { createAppNotification } from "@/lib/app-notifications";
+import { sendPaymentAdvanceDecisionNotification } from "@/lib/payment-advance-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 function value(formData: FormData, key: string) {
@@ -60,6 +61,7 @@ async function decideAdvanceRequest(formData: FormData, decision: "approved" | "
       remarks: comment
     }
   });
+  await sendPaymentAdvanceDecisionNotification(companyId, requestId, decision);
 
   revalidatePath("/payments/advance-request");
   finish({ notice: `Advance request ${decision}.` });
