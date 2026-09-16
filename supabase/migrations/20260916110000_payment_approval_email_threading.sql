@@ -29,3 +29,5 @@ create index if not exists payment_requests_email_due_idx
 create index if not exists payment_advance_requests_email_due_idx
   on public.payment_advance_requests (email_next_reminder_at)
   where email_next_reminder_at is not null;
+
+notify pgrst, 'reload schema';
