@@ -195,6 +195,19 @@ async function processCompany(company: CompanyRow, today: string) {
       continue;
     }
 
+    const priorSend = await supabaseAdmin
+      .from("fleet_document_notification_logs")
+      .select("message_id, root_message_id")
+      .eq("company_id", company.id)
+      .eq("fleet_vehicle_document_id", document.id)
+      .eq("status", "sent")
+      .not("message_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const lastMessageId = priorSend.data?.message_id ?? null;
+    const rootMessageId = priorSend.data?.root_message_id ?? lastMessageId;
+
     const vehicle = vehicles.get(document.vehicle_no);
     const station = vehicle?.station_code ? stations.get(vehicle.station_code) : null;
     const recipientMap: RecipientMap = {
@@ -233,7 +246,13 @@ async function processCompany(company: CompanyRow, today: string) {
 
     try {
       if (!toRecipients.length) throw new Error("No recipients found.");
-      await sendEmail({ body, cc: finalCcRecipients, companyId: company.id, subject, to: toRecipients });
+      const threadMessageId = `<dropx.fleet-document.${document.id}.${reminder.key}@partner.dropxlogistics.com>`;
+      const result = await sendEmail({
+        body, cc: finalCcRecipients, companyId: company.id, subject, to: toRecipients,
+        messageId: threadMessageId,
+        inReplyTo: lastMessageId ?? undefined,
+        references: lastMessageId ? [...new Set([rootMessageId, lastMessageId].filter((id): id is string => Boolean(id)))] : undefined
+      });
       await supabaseAdmin.from("fleet_document_notification_logs").insert({
         company_id: company.id,
         fleet_vehicle_document_id: document.id,
@@ -242,7 +261,9 @@ async function processCompany(company: CompanyRow, today: string) {
         recipients: toRecipients,
         cc_recipients: finalCcRecipients,
         subject,
-        status: "sent"
+        status: "sent",
+        message_id: result.messageId ?? threadMessageId,
+        root_message_id: rootMessageId ?? result.messageId ?? threadMessageId
       });
       sent += 1;
     } catch (error) {
