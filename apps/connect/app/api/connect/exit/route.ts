@@ -257,6 +257,38 @@ async function requesterDesignation(context: WorkerContext): Promise<Designation
   return null;
 }
 
+/** Same resolution path as requesterDesignation, but returns the raw designation_id (used to scope exit task templates). */
+async function requesterDesignationId(context: WorkerContext): Promise<string | null> {
+  const sourceColumn = context.workerType === "contractor" ? "contractor_id" : "employee_id";
+  const today = todayInIndia();
+  const { data: engagement } = await db().from("hr_engagements")
+    .select("id")
+    .eq("company_id", context.account.companyId)
+    .eq(sourceColumn, context.workerId)
+    .eq("status", "active")
+    .order("start_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (engagement) {
+    const { data: assignment } = await db().from("hr_work_assignments")
+      .select("designation_id")
+      .eq("company_id", context.account.companyId)
+      .eq("engagement_id", engagement.id)
+      .eq("is_primary", true)
+      .lte("effective_from", today)
+      .or(`effective_to.is.null,effective_to.gte.${today}`)
+      .order("effective_from", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (assignment?.designation_id) return assignment.designation_id as string;
+  }
+  if (context.workerType === "employee") {
+    const { data } = await db().from("employees").select("designation_id").eq("company_id", context.account.companyId).eq("id", context.workerId).maybeSingle();
+    if (data?.designation_id) return data.designation_id as string;
+  }
+  return null;
+}
+
 function isHrWorkflowStep(step: { code?: string | null; name?: string | null; approver_role?: string | null; approver_source?: string | null }) {
   const code = String(step.code ?? "").toUpperCase();
   const role = String(step.approver_role ?? "").toUpperCase();
@@ -756,15 +788,47 @@ export async function POST(request: Request) {
       });
     }
     if (policyResult.data?.auto_create_tasks !== false) {
-      const { data: templates } = await db().from("hr_exit_task_templates").select("*").eq("company_id", context.account.companyId).eq("is_active", true).in("scenario", ["resignation", "all"]).order("display_order");
-      if (templates?.length) {
+      const { data: allTemplates } = await db().from("hr_exit_task_templates").select("*").eq("company_id", context.account.companyId).eq("is_active", true).in("scenario", ["resignation", "all"]).order("display_order");
+      const requesterDesignationIdValue = await requesterDesignationId(context);
+      const templates = (allTemplates ?? []).filter((template) => {
+        const scoped = (template.applies_to_designation_ids ?? []) as string[];
+        if (!scoped.length) return true;
+        return Boolean(requesterDesignationIdValue && scoped.includes(requesterDesignationIdValue));
+      });
+      if (templates.length) {
         const rows = await Promise.all(templates.map(async (template) => {
           const due = new Date(`${requestedDate}T00:00:00Z`);
           due.setUTCDate(due.getUTCDate() + template.due_offset_days);
           return { company_id: context.account.companyId, case_id: exitCase.id, template_id: template.id, category: template.category, code: template.code, name: template.name, instructions: template.instructions, owner_role: template.owner_role, owner_user_id: template.owner_role === "EMPLOYEE" ? null : await taskOwnerUser(context, template.owner_role), due_date: due.toISOString().slice(0, 10), is_required: template.is_required };
         }));
-        const inserted = await db().from("hr_exit_tasks").insert(rows);
+        const inserted = await db().from("hr_exit_tasks").insert(rows).select("id, template_id");
         if (inserted.error) throw new Error(inserted.error.message);
+
+        const templateIds = templates.map((template) => template.id);
+        const { data: requirements, error: requirementError } = await db()
+          .from("hr_exit_task_template_approval_requirements")
+          .select("template_id, approval_level_id, hr_exit_task_approval_levels(sequence_order)")
+          .in("template_id", templateIds);
+        if (requirementError) throw new Error(requirementError.message);
+        const approvalRows = (inserted.data ?? []).flatMap((task) => {
+          const taskRequirements = (requirements ?? []).filter((requirement) => requirement.template_id === task.template_id);
+          return taskRequirements.map((requirement) => {
+            const level = Array.isArray(requirement.hr_exit_task_approval_levels)
+              ? requirement.hr_exit_task_approval_levels[0]
+              : requirement.hr_exit_task_approval_levels;
+            return {
+              company_id: context.account.companyId,
+              task_id: task.id,
+              approval_level_id: requirement.approval_level_id,
+              sequence_order: level?.sequence_order ?? 0,
+              status: "pending" as const
+            };
+          });
+        });
+        if (approvalRows.length) {
+          const insertedApprovals = await db().from("hr_exit_task_approvals").insert(approvalRows);
+          if (insertedApprovals.error) throw new Error(insertedApprovals.error.message);
+        }
       }
     }
     await db().from("hr_exit_events").insert({ company_id: context.account.companyId, case_id: exitCase.id, event_code: "CASE_SUBMITTED", title: "Resignation submitted", actor_name: context.account.name ?? context.worker.full_name, details: { requested_last_working_date: requestedDate } });
