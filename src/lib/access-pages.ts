@@ -36,6 +36,7 @@ export const accessPages = [
   { code: "ops_reports", name: "Ops Reports", sort_order: 84 },
   { code: "ops_attendance_reports", name: "Attendance Reports", sort_order: 85 },
   { code: "ops_unplanned_leaves", name: "Attendance · Unplanned Leaves (read-only)", sort_order: 85 },
+  { code: "ops_offboarding_checklist", name: "Team Ops · Offboarding Checklist", sort_order: 85 },
   { code: "ops_rostering", name: "Rostering", sort_order: 85 },
   { code: "service_network", name: "Network Planning", sort_order: 92 },
   { code: "service_network_master", name: "Network Planning Master", sort_order: 93 },
