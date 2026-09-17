@@ -42,6 +42,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
   const [purpose, setPurpose] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [withdrawingId, setWithdrawingId] = useState("");
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
 
   const load = useCallback(async (background = false) => {
@@ -104,6 +105,28 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
     }
   }
 
+  async function withdraw(requestId: string) {
+    if (withdrawingId) return;
+    setWithdrawingId(requestId);
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/connect/advances", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: account.id, profileType: account.profileType, requestId })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to withdraw advance request.");
+      setNotice(payload.notice || "Advance request withdrawn.");
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to withdraw advance request.");
+    } finally {
+      setWithdrawingId("");
+    }
+  }
+
   return (
     <section className="dx-advances">
       <header className="dx-page-intro dx-advance-intro">
@@ -160,6 +183,16 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
                   <dd>{formatWhen(row.updated_at)}</dd>
                 </div>
               </dl>
+              {["submitted", "in_review"].includes(row.status) ? (
+                <button
+                  className="dx-advance-withdraw"
+                  disabled={withdrawingId === row.id}
+                  onClick={() => void withdraw(row.id)}
+                  type="button"
+                >
+                  {withdrawingId === row.id ? "Withdrawing…" : "Withdraw request"}
+                </button>
+              ) : null}
             </article>
           ))}
         </div>

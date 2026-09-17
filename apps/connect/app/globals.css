@@ -10204,6 +10204,8 @@ body {
 .dx-advance-list dl div { display: grid; grid-template-columns: 120px 1fr; gap: 12px; }
 .dx-advance-list dt { color: #737373; }
 .dx-advance-list dd { margin: 0; text-align: right; }
+.dx-advance-withdraw { margin-top: 14px; padding: 9px 14px; width: 100%; color: #b42318; border: 1px solid #fda29b; border-radius: 10px; background: #fff5f5; font-size: 13px; font-weight: 750; }
+.dx-advance-withdraw:disabled { opacity: .6; }
 .dx-advance-empty { min-height: 270px; display: grid; place-items: center; align-content: center; gap: 8px; color: #737373; text-align: center; }
 .dx-advance-empty svg { width: 42px; height: 42px; color: #ca426c; }
 .dx-advance-empty strong { color: #202124; }

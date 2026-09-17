@@ -108,9 +108,6 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
   const [files, setFiles] = useState<File[]>([]);
   const [reply, setReply] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
-  const [forwardingMessageId, setForwardingMessageId] = useState("");
-  const [forwardEmail, setForwardEmail] = useState("");
-  const [forwarding, setForwarding] = useState(false);
 
   const query = useMemo(
     () => new URLSearchParams({ accountId: account.id, profileType: account.profileType }),
@@ -205,33 +202,6 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
     }
   }
 
-  async function forwardMessage(event: FormEvent) {
-    event.preventDefault();
-    if (!forwardingMessageId || !forwardEmail.trim()) return;
-    setForwarding(true);
-    setError("");
-    try {
-      const response = await fetch("/api/connect/communication-center", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: account.id,
-          profileType: account.profileType,
-          forwardMessageId: forwardingMessageId,
-          forwardEmail: forwardEmail.trim()
-        })
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Unable to forward this message.");
-      setForwardingMessageId("");
-      setForwardEmail("");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to forward this message.");
-    } finally {
-      setForwarding(false);
-    }
-  }
-
   async function openAttachment(id: string) {
     setError("");
     try {
@@ -292,24 +262,6 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
           <span>{message.author_kind === "reporter" ? "You" : "People & Culture"}</span>
           <p>{message.body}</p>
           <small>{shortDate(message.created_at)}</small>
-          {forwardingMessageId === message.id ? (
-            <form className="dx-message-forward" onSubmit={forwardMessage}>
-              <input
-                aria-label="Forward to email address"
-                onChange={(event) => setForwardEmail(event.target.value)}
-                placeholder="name@example.com"
-                required
-                type="email"
-                value={forwardEmail}
-              />
-              <button disabled={forwarding} type="submit">{forwarding ? <LoaderCircle /> : <Send />}Send</button>
-              <button onClick={() => { setForwardingMessageId(""); setForwardEmail(""); }} type="button">Cancel</button>
-            </form>
-          ) : (
-            <button className="dx-message-forward-trigger" onClick={() => { setForwardingMessageId(message.id); setForwardEmail(""); }} type="button">
-              Forward to email
-            </button>
-          )}
         </article>)}
       </div>
       {selectedCase.attachments?.length ? <div className="dx-evidence-list"><strong>Attachments</strong>{selectedCase.attachments.map((file) => <button key={file.id} onClick={() => void openAttachment(file.id)}><FileText /><span>{file.original_name}<small>{readableSize(file.file_size)}</small></span><ChevronRight /></button>)}</div> : null}

@@ -9,9 +9,6 @@ import {
   validateCommunicationSubmission,
   type CommunicationChannel
 } from "@/lib/communication-center";
-import { sendConnectEmail } from "@/lib/connect-email";
-
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const evidenceBucket = "communication-evidence";
 const allowedTypes = new Set([
@@ -388,39 +385,8 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
-    const forwardMessageId = String(body.forwardMessageId ?? "");
-    if (forwardMessageId) {
-      const forwardEmail = String(body.forwardEmail ?? "").trim().toLowerCase();
-      if (!emailPattern.test(forwardEmail)) throw new Error("Enter a valid email address.");
-      const messageResult = await supabaseAdmin.from("communication_case_messages")
-        .select("id,case_id,author_kind,body,created_at,visibility")
-        .eq("company_id", account.companyId)
-        .eq("id", forwardMessageId)
-        .eq("visibility", "reporter")
-        .maybeSingle();
-      if (messageResult.error) throw messageResult.error;
-      if (!messageResult.data) throw new Error("Message is not available to forward.");
-      if (!(await ownsCase(account.companyId, account.profileType, account.id, messageResult.data.case_id))) {
-        return NextResponse.json({ error: "Case access denied." }, { status: 403 });
-      }
-      const caseInfo = await supabaseAdmin.from("communication_cases")
-        .select("case_number,subject").eq("company_id", account.companyId).eq("id", messageResult.data.case_id).single();
-      if (caseInfo.error) throw caseInfo.error;
-      const sender = messageResult.data.author_kind === "reporter" ? (account.name || "You") : "People & Culture";
-      await sendConnectEmail({
-        companyId: account.companyId,
-        to: [forwardEmail],
-        subject: `Forwarded: ${caseInfo.data.case_number} · ${caseInfo.data.subject}`,
-        body: `${sender} wrote on ${new Date(messageResult.data.created_at).toLocaleString("en-IN")}:\n\n${messageResult.data.body}\n\n— Forwarded from DropX One Connect by ${account.name || "a team member"}.`
-      });
-      await supabaseAdmin.from("communication_case_events").insert({
-        case_id: messageResult.data.case_id,
-        company_id: account.companyId,
-        event_type: "message_forwarded",
-        note: `Message forwarded to ${forwardEmail} by ${account.name || account.reference || "a team member"}.`
-      });
-      return NextResponse.json({ ok: true });
-    }
+    // Forwarding a message to an external email is HRMS-only (People & Culture's
+    // /communications console); Connect intentionally has no forward capability.
 
     const caseId = String(body.caseId ?? "");
     const message = cleanCommunicationText(body.message, 3000);

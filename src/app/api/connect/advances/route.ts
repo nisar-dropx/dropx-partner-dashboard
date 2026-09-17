@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isManagingPartnerDesignation } from "@/lib/approval-designation-labels";
 import { connectSessionCookieName, normalizeConnectMobile } from "@/lib/connect-auth";
 import { createAppNotification } from "@/lib/app-notifications";
-import { sendPaymentAdvanceRequestNotification } from "@/lib/payment-advance-email-notifications";
+import { sendPaymentAdvanceRequestNotification, sendPaymentAdvanceWithdrawalNotification } from "@/lib/payment-advance-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
 
@@ -150,6 +150,7 @@ export async function POST(request: NextRequest) {
         designation: account.designation || null,
         amount,
         purpose,
+        source_app: "one_app",
         status: directApprove ? "approved" : "submitted",
         approved_amount: directApprove ? amount : null,
         decision_comment: directApprove ? "Auto-approved for managing partner / top-level assignment." : null
@@ -173,6 +174,44 @@ export async function POST(request: NextRequest) {
     }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to submit advance request.";
+    return NextResponse.json({ error: message }, { status: statusCode(message) });
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const body = await request.json() as { accountId?: unknown; profileType?: unknown; requestId?: unknown };
+    const account = await resolveAccount(String(body.accountId ?? ""), String(body.profileType ?? ""));
+    const requestId = String(body.requestId ?? "").trim();
+    if (!requestId) throw new Error("Advance request is required.");
+
+    const result = await supabaseAdmin
+      .from("payment_advance_requests")
+      .update({ status: "cancelled", updated_at: new Date().toISOString() })
+      .eq("company_id", account.companyId)
+      .eq("profile_type", account.profileType)
+      .eq("account_id", account.accountId)
+      .eq("id", requestId)
+      .in("status", ["submitted", "in_review"])
+      .select("id, amount")
+      .maybeSingle();
+    if (result.error) throw new Error(result.error.message);
+    if (!result.data) throw new Error("This request has already been decided and can no longer be withdrawn.");
+
+    await createAppNotification({
+      accountId: account.accountId,
+      companyId: account.companyId,
+      eventCode: "advance_request_withdrawn",
+      profileType: account.profileType,
+      sourceKey: requestId,
+      variables: { amount: Number(result.data.amount ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 }) }
+    });
+    await sendPaymentAdvanceWithdrawalNotification(account.companyId, requestId);
+
+    return NextResponse.json({ ok: true, notice: "Advance request withdrawn." });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to withdraw advance request.";
     return NextResponse.json({ error: message }, { status: statusCode(message) });
   }
 }
