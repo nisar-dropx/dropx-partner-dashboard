@@ -8,6 +8,7 @@ import { canActOnPaymentRequest } from "@/lib/payment-approval-scope";
 import { sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
+import { advanceApproval, loadApprovalSteps } from "@/lib/payment-approval-steps";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -374,7 +375,7 @@ export async function approvePaymentRequest(formData: FormData) {
   const comments = clean(formData.get("comments"));
   const { data: request, error } = await supabaseAdmin
     .from("payment_requests")
-    .select("id, location_id, requested_by, status, approval_status, approval_cycle, current_step_order, current_approver_user_id, current_approver_role_id, current_approver_role_ids, final_approval_role_id, final_approval_role_ids")
+    .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, current_step_order, current_approver_user_id, current_approver_role_id, current_approver_role_ids, final_approval_role_id, final_approval_role_ids")
     .eq("id", requestId)
     .eq("company_id", companyId)
     .single();
@@ -401,47 +402,106 @@ export async function approvePaymentRequest(formData: FormData) {
     comments
   }, companyId);
 
-  const finalRoleIds = (request.final_approval_role_ids?.length ? request.final_approval_role_ids : request.final_approval_role_id ? [request.final_approval_role_id] : []) as string[];
-  if (!ownerCanFinalize && !finalRoleIds.length) throw new Error("Final approval role is not configured for this payment request.");
+  const steps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id) : [];
+  const storedStepOrder = Number(request.current_step_order) || 1;
 
-  const actorRoleId = authorization.roleId ?? request.current_approver_role_id ?? null;
-  const actorCanFinalize = await isFinalRoleOrAbove(companyId, actorRoleId, finalRoleIds);
-  const storedStepOrder = Number(request.current_step_order);
-  const legacyStatus = String(request.approval_status || request.status || "").trim().toUpperCase();
-  const currentStepOrder = storedStepOrder > 0
-    ? storedStepOrder
-    : legacyStatus.endsWith("_APPROVED") ? 2 : 1;
-  const isFinalApproval = ownerCanFinalize || currentStepOrder >= 2 || actorCanFinalize;
-
-  if (isFinalApproval) {
-    await updatePaymentRequest(request.id, companyId, {
+  if (steps.length) {
+    if (ownerCanFinalize) {
+      await updatePaymentRequest(request.id, companyId, {
         status: "approved",
         approval_status: "FINAL_APPROVED",
-        current_step_order: 2,
         current_approver_user_id: null,
         current_approver_role_id: null,
         current_approver_role_ids: [],
         updated_at: new Date().toISOString()
       });
+    } else {
+      const advance = await advanceApproval(companyId, steps, storedStepOrder, request.location_id);
+      if (advance.done) {
+        await updatePaymentRequest(request.id, companyId, {
+          status: "approved",
+          approval_status: "FINAL_APPROVED",
+          current_step_order: storedStepOrder,
+          current_approver_user_id: null,
+          current_approver_role_id: null,
+          current_approver_role_ids: [],
+          updated_at: new Date().toISOString()
+        });
+      } else if (advance.noApproverConfigured) {
+        await updatePaymentRequest(request.id, companyId, {
+          status: `${roleCode}_APPROVED`,
+          approval_status: "NO_APPROVER_CONFIGURED",
+          current_step_order: advance.nextStepOrder,
+          current_approver_user_id: null,
+          current_approver_role_id: null,
+          current_approver_role_ids: [],
+          updated_at: new Date().toISOString()
+        });
+      } else {
+        const target = advance.approver!;
+        await updatePaymentRequest(request.id, companyId, {
+          status: `${roleCode}_APPROVED`,
+          approval_status: `${roleCode}_APPROVED`,
+          current_step_order: advance.nextStepOrder,
+          current_approver_user_id: target.userId,
+          current_approver_role_id: target.roleId,
+          current_approver_role_ids: [target.roleId],
+          updated_at: new Date().toISOString()
+        }, {
+          status: "pending",
+          approval_status: `${roleCode}_APPROVED`,
+          current_step_order: advance.nextStepOrder,
+          current_approver_user_id: target.userId,
+          current_approver_role_id: target.roleId,
+          current_approver_role_ids: [target.roleId],
+          updated_at: new Date().toISOString()
+        });
+      }
+    }
   } else {
-    const target = await nextApprover(companyId, finalRoleIds, request.location_id);
-    await updatePaymentRequest(request.id, companyId, {
-        status: `${roleCode}_APPROVED`,
-        approval_status: `${roleCode}_APPROVED`,
-        current_step_order: 2,
-        current_approver_user_id: target.userId,
-        current_approver_role_id: target.roleId,
-        current_approver_role_ids: finalRoleIds,
-        updated_at: new Date().toISOString()
-      }, {
-        status: "pending",
-        approval_status: `${roleCode}_APPROVED`,
-        current_step_order: 2,
-        current_approver_user_id: target.userId,
-        current_approver_role_id: target.roleId,
-        current_approver_role_ids: finalRoleIds,
-        updated_at: new Date().toISOString()
-      });
+    // No steps configured yet for this payment head (pre-backfill or a brand
+    // new head) - fall back to the legacy flat-array two-phase behavior.
+    const finalRoleIds = (request.final_approval_role_ids?.length ? request.final_approval_role_ids : request.final_approval_role_id ? [request.final_approval_role_id] : []) as string[];
+    if (!ownerCanFinalize && !finalRoleIds.length) throw new Error("Final approval role is not configured for this payment request.");
+
+    const actorRoleId = authorization.roleId ?? request.current_approver_role_id ?? null;
+    const actorCanFinalize = await isFinalRoleOrAbove(companyId, actorRoleId, finalRoleIds);
+    const legacyStatus = String(request.approval_status || request.status || "").trim().toUpperCase();
+    const currentStepOrder = storedStepOrder > 0
+      ? storedStepOrder
+      : legacyStatus.endsWith("_APPROVED") ? 2 : 1;
+    const isFinalApproval = ownerCanFinalize || currentStepOrder >= 2 || actorCanFinalize;
+
+    if (isFinalApproval) {
+      await updatePaymentRequest(request.id, companyId, {
+          status: "approved",
+          approval_status: "FINAL_APPROVED",
+          current_step_order: 2,
+          current_approver_user_id: null,
+          current_approver_role_id: null,
+          current_approver_role_ids: [],
+          updated_at: new Date().toISOString()
+        });
+    } else {
+      const target = await nextApprover(companyId, finalRoleIds, request.location_id);
+      await updatePaymentRequest(request.id, companyId, {
+          status: `${roleCode}_APPROVED`,
+          approval_status: `${roleCode}_APPROVED`,
+          current_step_order: 2,
+          current_approver_user_id: target.userId,
+          current_approver_role_id: target.roleId,
+          current_approver_role_ids: finalRoleIds,
+          updated_at: new Date().toISOString()
+        }, {
+          status: "pending",
+          approval_status: `${roleCode}_APPROVED`,
+          current_step_order: 2,
+          current_approver_user_id: target.userId,
+          current_approver_role_id: target.roleId,
+          current_approver_role_ids: finalRoleIds,
+          updated_at: new Date().toISOString()
+        });
+    }
   }
 
   revalidatePath("/payments/approvals");
