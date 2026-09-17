@@ -99,6 +99,61 @@ async function isApproverAvailable(companyId: string, userId: string) {
 }
 
 /**
+ * hr_approval_delegations (HRMS) is auto-populated when a manager's business
+ * trip or leave request is finally approved, pointing at their own reporting
+ * manager for the trip/leave dates - workflow-agnostic, so it also governs
+ * payment approvals here, not just HRMS's own workflows. Substitutes the
+ * delegate for a resolved approver when one applies today; falls through to
+ * the original approver unchanged if there's no HRMS identity link, no
+ * delegation row, or the lookup errors (e.g. this company has no HRMS data).
+ */
+async function redirectThroughDelegation(companyId: string, target: { userId: string; roleId: string }): Promise<{ userId: string; roleId: string }> {
+  if (!supabaseAdmin) return target;
+  const today = new Date().toISOString().slice(0, 10);
+
+  const link = await supabaseAdmin
+    .from("hr_user_person_links")
+    .select("person_id")
+    .eq("company_id", companyId)
+    .eq("user_id", target.userId)
+    .eq("status", "active")
+    .maybeSingle();
+  if (link.error || !link.data?.person_id) return target;
+
+  const delegation = await supabaseAdmin
+    .from("hr_approval_delegations")
+    .select("delegate_person_id")
+    .eq("company_id", companyId)
+    .eq("approver_person_id", link.data.person_id)
+    .eq("is_active", true)
+    .lte("effective_from", today)
+    .gte("effective_to", today)
+    .is("workflow_code", null)
+    .maybeSingle();
+  if (delegation.error || !delegation.data?.delegate_person_id) return target;
+
+  const delegateLink = await supabaseAdmin
+    .from("hr_user_person_links")
+    .select("user_id")
+    .eq("company_id", companyId)
+    .eq("person_id", delegation.data.delegate_person_id)
+    .eq("status", "active")
+    .maybeSingle();
+  if (delegateLink.error || !delegateLink.data?.user_id) return target;
+
+  const delegateProfile = await supabaseAdmin
+    .from("profiles")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("id", delegateLink.data.user_id)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (delegateProfile.error || !delegateProfile.data?.id) return target;
+
+  return { userId: delegateProfile.data.id, roleId: target.roleId };
+}
+
+/**
  * Resolves the first available, active approver for one step: tries each
  * candidate role in the step's configured order, and within a role, prefers
  * an org_positions-based assignment (acting cover first) before falling back
@@ -111,7 +166,7 @@ export async function resolveStepApprover(companyId: string, step: ApprovalStepR
   for (const candidate of step.candidates) {
     const scopedLocationId = candidate.scope === "company" ? null : locationId;
     const positionApprover = await findPositionApprover(companyId, [candidate.role_id], scopedLocationId);
-    if (positionApprover && await isApproverAvailable(companyId, positionApprover.userId)) return positionApprover;
+    if (positionApprover && await isApproverAvailable(companyId, positionApprover.userId)) return redirectThroughDelegation(companyId, positionApprover);
 
     const userIds = await candidateUserIds(companyId, candidate.role_id, candidate.scope, locationId);
     if (!userIds.length) continue;
@@ -126,7 +181,7 @@ export async function resolveStepApprover(companyId: string, step: ApprovalStepR
     if (profiles.error) throw new Error(profiles.error.message);
 
     for (const profile of profiles.data ?? []) {
-      if (await isApproverAvailable(companyId, profile.id)) return { userId: profile.id, roleId: candidate.role_id };
+      if (await isApproverAvailable(companyId, profile.id)) return redirectThroughDelegation(companyId, { userId: profile.id, roleId: candidate.role_id });
     }
   }
 
