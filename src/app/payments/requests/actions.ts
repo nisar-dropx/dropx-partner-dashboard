@@ -12,7 +12,7 @@ import { normalizePaymentModes, paymentModeLabel, type PaymentMode } from "@/lib
 import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 import { validatePaymentQuestionDate } from "@/lib/payment-question-date-rules";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { findPositionApprover } from "@/lib/position-access";
+import { findPositionApprover, roleIdsWithPageEditAccess } from "@/lib/position-access";
 import { insertPaymentApprovalLog } from "../approvals/actions";
 
 function clean(value: FormDataEntryValue | null) {
@@ -136,6 +136,14 @@ async function nextPaymentRequestNo(companyId: string) {
 async function approverForRoles(companyId: string, roleIds: string[], label: string, locationId?: string | null): Promise<ApproverTarget> {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
   if (!roleIds.length) throw new Error(`${label} is not configured.`);
+
+  // Only route/notify roles that can actually click Approve on this page -
+  // otherwise we hand the request to someone Settings > Roles blocks from
+  // acting on it, and they bounce off /unauthorized when they try.
+  const editableRoleIds = await roleIdsWithPageEditAccess(companyId, roleIds, "payment_approvals");
+  const approvableRoleIds = roleIds.filter((roleId) => editableRoleIds.has(roleId));
+  if (!approvableRoleIds.length) throw new Error(`No role assigned to ${label} has approval permission. Check Settings > Roles.`);
+  roleIds = approvableRoleIds;
 
   const positionApprover = await findPositionApprover(companyId, roleIds, locationId);
   if (positionApprover) return positionApprover;
@@ -1010,7 +1018,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
 
     const { data: existingAnswers, error: existingAnswersError } = await admin
       .from("payment_request_answers")
-      .select("id, question_id, file_name")
+      .select("id, question_id, file_name, file_path")
       .eq("company_id", companyId)
       .eq("payment_request_id", request.id);
     if (existingAnswersError) throw new Error(existingAnswersError.message);
@@ -1036,6 +1044,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
           const path = `${companyId}/${request.id}/${questionId}/${Date.now()}-${safeFileName(file.name)}`;
           const { error: uploadError } = await admin.storage.from("payment-request-documents").upload(path, file, { upsert: false });
           if (uploadError) throw new Error(uploadError.message);
+          if (existingAnswer?.file_path) await admin.storage.from("payment-request-documents").remove([existingAnswer.file_path]);
           answerPayload.answer_value = file.name;
           answerPayload.file_path = path;
           answerPayload.file_name = file.name;
@@ -1252,7 +1261,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
 
     const { data: existingAnswers } = await admin
       .from("payment_request_answers")
-      .select("id, question_id, file_name")
+      .select("id, question_id, file_name, file_path")
       .eq("company_id", companyId)
       .eq("payment_request_id", request.id);
     const existingAnswerByQuestionId = new Map((existingAnswers ?? []).map((answer) => [answer.question_id, answer]));
@@ -1279,6 +1288,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
             const path = `${companyId}/${request.id}/${questionId}/${Date.now()}-${safeFileName(file.name)}`;
             const { error: uploadError } = await admin.storage.from("payment-request-documents").upload(path, file, { upsert: false });
             if (uploadError) throw new Error(uploadError.message);
+            if (existingAnswer?.file_path) await admin.storage.from("payment-request-documents").remove([existingAnswer.file_path]);
             answerPayload.answer_value = file.name;
             answerPayload.file_path = path;
             answerPayload.file_name = file.name;

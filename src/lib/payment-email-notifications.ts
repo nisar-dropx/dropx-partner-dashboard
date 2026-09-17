@@ -1,6 +1,68 @@
 import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
+import { approvalEmailCard } from "@/lib/approval-email-card";
+
+const PAYMENT_APPROVALS_URL = "https://ops.dropxlogistics.com/payments/approvals";
+
+function paymentEmailHtml(eventType: PaymentEmailEventType, values: Record<string, string>, reminderNumber?: number) {
+  const heading = `${values.request_no} · ${values.requester_name}`;
+  const infoValue = `${values.amount} · ${values.location_code}`;
+  const isReminder = Boolean(reminderNumber);
+  if (eventType === "payment_approve") {
+    return approvalEmailCard({
+      eyebrow: "PAYMENT APPROVED",
+      heading,
+      introduction: `This payment request was approved by ${values.action_by}.${values.remarks_note}`,
+      infoLabel: values.payment_head,
+      infoValue,
+      ctaLabel: "Open in Ops",
+      ctaUrl: PAYMENT_APPROVALS_URL,
+      steps: []
+    });
+  }
+  if (eventType === "payment_return") {
+    return approvalEmailCard({
+      eyebrow: "PAYMENT RETURNED",
+      heading,
+      introduction: `This payment request was returned by ${values.action_by} for correction.${values.remarks_note}`,
+      infoLabel: values.payment_head,
+      infoValue,
+      ctaLabel: "Open in Ops",
+      ctaUrl: PAYMENT_APPROVALS_URL,
+      steps: []
+    });
+  }
+  if (eventType === "payment_reject") {
+    return approvalEmailCard({
+      eyebrow: "PAYMENT REJECTED",
+      heading,
+      introduction: `This payment request was rejected by ${values.action_by}.${values.remarks_note}`,
+      infoLabel: values.payment_head,
+      infoValue,
+      ctaLabel: "Open in Ops",
+      ctaUrl: PAYMENT_APPROVALS_URL,
+      steps: []
+    });
+  }
+  return approvalEmailCard({
+    eyebrow: isReminder ? `REMINDER ${reminderNumber}` : "APPROVAL REQUIRED",
+    heading,
+    introduction: isReminder
+      ? `Reminder ${reminderNumber}: this payment request is still waiting for a decision. Please review it and respond.`
+      : "This payment request is waiting for a decision.",
+    infoLabel: values.payment_head,
+    infoValue,
+    ctaLabel: "Open in Ops",
+    ctaUrl: PAYMENT_APPROVALS_URL,
+    steps: [
+      `Open Ops: ${PAYMENT_APPROVALS_URL}`,
+      "Find the payment request in the approvals list.",
+      "Review the amount, payment head and location, then Approve, Return or Reject."
+    ],
+    footer: isReminder ? "Reminders are sent every 90 minutes until this request is approved, returned or rejected." : undefined
+  });
+}
 
 export type PaymentEmailEventType = "payment_request" | "payment_approve" | "payment_return" | "payment_reject";
 
@@ -28,75 +90,26 @@ const defaultTemplates: Record<PaymentEmailEventType, Pick<TemplateRow, "subject
   payment_request: {
     to_recipients: ["location_manager", "final_approver", "payment_processor"],
     cc_recipients: ["requester"],
-    subject_template: "[{{location_code}}] Payment request {{request_no}} from {{requester_name}} — pending approval",
-    body_template: `Dear Team,
-
-A new payment request is pending approval.
-
-Request No: {{request_no}}
-Location: {{location_code}}
-Payment Head: {{payment_head}}
-Amount: {{amount}}
-Requested By: {{requester_name}}
-Status: {{status}}
-
-Regards,
-DropX Payments System`
+    subject_template: "Payment approval required · {{request_no}}",
+    body_template: "{{requester_name}} requested {{amount}} for {{payment_head}} at {{location_code}}. Open Ops or DropX One to approve or reject."
   },
   payment_approve: {
     to_recipients: ["initial:current_approver", "final:requester"],
     cc_recipients: ["initial:requester", "initial:location_manager", "initial:payment_processor", "final:location_manager", "final:final_approver", "final:payment_processor"],
-    subject_template: "[{{location_code}}] Payment request {{request_no}} from {{requester_name}} — approved",
-    body_template: `Dear Team,
-
-The following payment request has been approved.
-
-Request No: {{request_no}}
-Location: {{location_code}}
-Payment Head: {{payment_head}}
-Amount: {{amount}}
-Approved By: {{action_by}}
-Status: {{status}}
-Remarks: {{remarks}}
-
-Regards,
-DropX Payments System`
+    subject_template: "Payment approved · {{request_no}}",
+    body_template: "{{request_no}} for {{amount}} ({{payment_head}}, {{location_code}}) was approved by {{action_by}}.{{remarks_note}}"
   },
   payment_return: {
     to_recipients: ["requester"],
     cc_recipients: ["location_manager", "current_approver", "final_approver", "payment_processor"],
-    subject_template: "[{{location_code}}] Payment request {{request_no}} from {{requester_name}} — returned",
-    body_template: `Dear Team,
-
-The following payment request has been returned.
-
-Request No: {{request_no}}
-Location: {{location_code}}
-Payment Head: {{payment_head}}
-Amount: {{amount}}
-Returned By: {{action_by}}
-Return Remarks: {{remarks}}
-
-Regards,
-DropX Payments System`
+    subject_template: "Payment returned · {{request_no}}",
+    body_template: "{{request_no}} for {{amount}} ({{payment_head}}, {{location_code}}) was returned by {{action_by}} for correction.{{remarks_note}}"
   },
   payment_reject: {
     to_recipients: ["requester"],
     cc_recipients: ["location_manager", "current_approver", "final_approver", "payment_processor"],
-    subject_template: "[{{location_code}}] Payment request {{request_no}} from {{requester_name}} — rejected",
-    body_template: `Dear Team,
-
-The following payment request has been rejected.
-
-Request No: {{request_no}}
-Location: {{location_code}}
-Payment Head: {{payment_head}}
-Amount: {{amount}}
-Rejected By: {{action_by}}
-Reject Remarks: {{remarks}}
-
-Regards,
-DropX Payments System`
+    subject_template: "Payment rejected · {{request_no}}",
+    body_template: "{{request_no}} for {{amount}} ({{payment_head}}, {{location_code}}) was rejected by {{action_by}}.{{remarks_note}}"
   }
 };
 
@@ -428,6 +441,7 @@ export async function sendPaymentNotification({
       location_code: clean(request.location_code || locationResult.data?.station_code || "-"),
       payment_head: clean(paymentHead?.name || paymentHead?.code || "-"),
       remarks: clean(remarks || "-"),
+      remarks_note: clean(remarks) ? ` Remarks: ${clean(remarks)}` : "",
       request_no: clean(request.request_no || "-"),
       requester_name: clean(requester?.full_name || requester?.email || "-"),
       status: clean(request.approval_status || request.status || "-")
@@ -478,6 +492,7 @@ export async function sendPaymentNotification({
     const rootMessageId = request.email_root_message_id ?? null;
     const result = await sendEmail({
       body: render(bodyTemplate, values),
+      html: paymentEmailHtml(eventType, values),
       cc,
       companyId,
       subject: render(subjectTemplate, values),
@@ -578,6 +593,7 @@ export async function sendPaymentApprovalReminder(companyId: string, requestId: 
     const rootMessageId = request.email_root_message_id ?? null;
     const result = await sendEmail({
       body, cc, companyId, subject, to,
+      html: paymentEmailHtml("payment_request", values, reminderNumber),
       messageId,
       inReplyTo: lastMessageId ?? undefined,
       references: lastMessageId ? [...new Set([rootMessageId, lastMessageId].filter((id): id is string => Boolean(id)))] : undefined

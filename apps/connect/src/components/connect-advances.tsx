@@ -121,7 +121,11 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
       setNotice(payload.notice || "Advance request withdrawn.");
       await load();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to withdraw advance request.");
+      const message = reason instanceof Error ? reason.message : "Unable to withdraw advance request.";
+      setError(message);
+      // The request was likely actioned elsewhere between page load and this click;
+      // refresh so the stale row's status/withdraw button catch up instead of staying stuck.
+      if (message.includes("already been decided")) await load(true);
     } finally {
       setWithdrawingId("");
     }

@@ -1,5 +1,8 @@
 import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { approvalEmailCard } from "@/lib/approval-email-card";
+
+const PAYMENT_APPROVALS_URL = "https://ops.dropxlogistics.com/payments/approvals";
 
 export type PaymentAdvanceEmailResult =
   | { sent: true; cc: string[]; to: string[] }
@@ -68,34 +71,58 @@ function buildSubjectBody(request: AdvanceRequestRow, companyName: string, kind:
   const location = clean(request.station_code || "-");
   const requester = clean(request.requester_name || request.account_code || "Team member");
   const amount = request.amount == null ? "-" : `Rs ${Number(request.amount).toLocaleString("en-IN")}`;
-  const lines = [
-    `Request: ${request.account_code ?? request.id}`,
-    `Location: ${location}`,
-    `Requested By: ${requester}`,
-    `Amount: ${amount}`,
-    `Purpose: ${clean(request.purpose || "-")}`,
-    `Status: ${clean(request.status)}`,
-    `Source: ${sourceAppLabels[request.source_app ?? ""] ?? "One App"}`
-  ];
-  if (kind === "approved") lines.push(`Approved Amount: ${request.approved_amount == null ? "-" : `Rs ${Number(request.approved_amount).toLocaleString("en-IN")}`}`);
-  if (kind === "rejected" || kind === "approved") lines.push(`Remarks: ${clean(request.decision_comment || "-")}`);
-  const subjectSuffix = kind === "submitted" ? "pending approval"
+  const purpose = clean(request.purpose || "-");
+  const requestLabel = clean(request.account_code ?? request.id);
+  const source = sourceAppLabels[request.source_app ?? ""] ?? "One App";
+  const remarksNote = kind === "approved" || kind === "rejected"
+    ? (clean(request.decision_comment) ? ` Remarks: ${clean(request.decision_comment)}.` : "")
+    : "";
+
+  const subjectSuffix = kind === "submitted" ? "approval required"
     : kind === "reminder" ? "still pending approval"
     : kind === "approved" ? "approved"
     : kind === "withdrawn" ? "withdrawn"
     : "rejected";
-  const subject = `[${location}] Advance request from ${requester} — ${subjectSuffix}`;
-  const introduction = kind === "reminder"
-    ? `Reminder ${(request.email_send_count ?? 0) + 1}: this advance request is still waiting for a decision. Please review it and respond.`
-    : kind === "submitted" ? "A new advance request is pending approval."
-    : kind === "approved" ? "The following advance request has been approved."
-    : kind === "withdrawn" ? "The requester has withdrawn the following advance request. No further action is needed."
-    : "The following advance request has been rejected.";
-  const body = [`Dear Team,`, "", introduction, "", ...lines, "", "Regards,", `${companyName} Payments System`].join("\n");
-  return { subject, body };
+  const subject = `Advance ${subjectSuffix} · ${requestLabel}`;
+
+  const reminderNumber = kind === "reminder" ? (request.email_send_count ?? 0) + 1 : undefined;
+  const introduction = kind === "submitted"
+    ? `${requester} requested ${amount} for ${purpose} at ${location} (via ${source}).`
+    : kind === "approved"
+      ? `This advance request was approved${request.approved_amount != null && Number(request.approved_amount) !== Number(request.amount) ? ` for Rs ${Number(request.approved_amount).toLocaleString("en-IN")}` : ""}.${remarksNote}`
+      : kind === "rejected"
+        ? `This advance request was rejected.${remarksNote}`
+        : kind === "withdrawn"
+          ? `${requester} withdrew this advance request. No further action is needed.`
+          : `Reminder ${reminderNumber}: this advance request is still waiting for a decision. Please review it and respond.`;
+  const body = kind === "withdrawn"
+    ? `${introduction} ${requestLabel} for ${amount}.`
+    : `${introduction} ${requestLabel} for ${amount} (${purpose}, ${location}).`;
+
+  const html = approvalEmailCard({
+    eyebrow: kind === "submitted" ? "APPROVAL REQUIRED"
+      : kind === "reminder" ? `REMINDER ${reminderNumber}`
+      : kind === "approved" ? "ADVANCE APPROVED"
+      : kind === "rejected" ? "ADVANCE REJECTED"
+      : "ADVANCE WITHDRAWN",
+    heading: `${requestLabel} · ${requester}`,
+    introduction,
+    infoLabel: purpose,
+    infoValue: `${amount} · ${location}`,
+    ctaLabel: "Open in Ops",
+    ctaUrl: PAYMENT_APPROVALS_URL,
+    steps: kind === "submitted" || kind === "reminder" ? [
+      `Open Ops: ${PAYMENT_APPROVALS_URL}`,
+      "Find the advance request in the approvals list.",
+      "Review the amount and purpose, then Approve or Reject."
+    ] : [],
+    footer: kind === "reminder" ? "Reminders are sent every 90 minutes until this request is approved or rejected." : undefined
+  });
+
+  return { subject, body, html };
 }
 
-async function threadedSend(input: { companyId: string; request: AdvanceRequestRow; to: string[]; subject: string; body: string; scheduleNextReminder: boolean }): Promise<PaymentAdvanceEmailResult> {
+async function threadedSend(input: { companyId: string; request: AdvanceRequestRow; to: string[]; subject: string; body: string; html?: string; scheduleNextReminder: boolean }): Promise<PaymentAdvanceEmailResult> {
   if (!supabaseAdmin) return skipped("Supabase service role key is not configured.");
   if (!input.to.length) return skipped("No recipients were resolved for this advance request email.");
   const messageId = `<dropx.payment-advance.${input.request.id}.${(input.request.email_send_count ?? 0) + 1}@partner.dropxlogistics.com>`;
@@ -103,6 +130,7 @@ async function threadedSend(input: { companyId: string; request: AdvanceRequestR
   const rootMessageId = input.request.email_root_message_id ?? null;
   const result = await sendEmail({
     body: input.body,
+    html: input.html,
     companyId: input.companyId,
     subject: input.subject,
     to: input.to,
@@ -142,8 +170,8 @@ export async function sendPaymentAdvanceRequestNotification(companyId: string, r
     const request = await loadRequest(companyId, requestId);
     if (!request) return skipped("Advance request not found.");
     const to = await ownerEmails(companyId);
-    const { subject, body } = buildSubjectBody(request, await companyName(companyId), "submitted");
-    return await threadedSend({ companyId, request, to, subject, body, scheduleNextReminder: request.status === "submitted" });
+    const { subject, body, html } = buildSubjectBody(request, await companyName(companyId), "submitted");
+    return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: request.status === "submitted" });
   } catch (error) {
     console.error("Advance request submission email failed", error);
     return skipped(error instanceof Error ? error.message : "Advance request submission email failed.");
@@ -155,8 +183,8 @@ export async function sendPaymentAdvanceDecisionNotification(companyId: string, 
     const request = await loadRequest(companyId, requestId);
     if (!request) return skipped("Advance request not found.");
     const to = uniqueEmails([await requesterEmail(companyId, request), ...(await ownerEmails(companyId))]);
-    const { subject, body } = buildSubjectBody(request, await companyName(companyId), decision);
-    return await threadedSend({ companyId, request, to, subject, body, scheduleNextReminder: false });
+    const { subject, body, html } = buildSubjectBody(request, await companyName(companyId), decision);
+    return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: false });
   } catch (error) {
     console.error("Advance request decision email failed", error);
     return skipped(error instanceof Error ? error.message : "Advance request decision email failed.");
@@ -168,8 +196,8 @@ export async function sendPaymentAdvanceWithdrawalNotification(companyId: string
     const request = await loadRequest(companyId, requestId);
     if (!request) return skipped("Advance request not found.");
     const to = await ownerEmails(companyId);
-    const { subject, body } = buildSubjectBody(request, await companyName(companyId), "withdrawn");
-    return await threadedSend({ companyId, request, to, subject, body, scheduleNextReminder: false });
+    const { subject, body, html } = buildSubjectBody(request, await companyName(companyId), "withdrawn");
+    return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: false });
   } catch (error) {
     console.error("Advance request withdrawal email failed", error);
     return skipped(error instanceof Error ? error.message : "Advance request withdrawal email failed.");
@@ -185,8 +213,8 @@ export async function sendPaymentAdvanceReminder(companyId: string, requestId: s
       return skipped("This advance request is no longer awaiting approval.");
     }
     const to = await ownerEmails(companyId);
-    const { subject, body } = buildSubjectBody(request, await companyName(companyId), "reminder");
-    return await threadedSend({ companyId, request, to, subject, body, scheduleNextReminder: true });
+    const { subject, body, html } = buildSubjectBody(request, await companyName(companyId), "reminder");
+    return await threadedSend({ companyId, request, to, subject, body, html, scheduleNextReminder: true });
   } catch (error) {
     console.error("Advance request reminder email failed", error);
     return skipped(error instanceof Error ? error.message : "Advance request reminder email failed.");
