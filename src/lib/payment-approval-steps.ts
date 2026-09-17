@@ -133,6 +133,45 @@ export async function resolveStepApprover(companyId: string, step: ApprovalStepR
   return null;
 }
 
+export type InitialApprovalTarget = {
+  approver: ApproverTarget;
+  currentStepOrder: number;
+  currentApprovalRoleIds: string[];
+  totalSteps: number;
+};
+
+/**
+ * Resolves where a brand-new request should start: the first step whose
+ * candidates yield an approver (or the first required step with none, so the
+ * request still lands somewhere visible instead of erroring at creation).
+ * Used by both createPaymentRequest/createExpenseRequest so a request's
+ * starting point is always consistent with how approvePaymentRequest will
+ * later walk it forward.
+ */
+export async function resolveInitialApprovalTarget(companyId: string, steps: ApprovalStepRow[], locationId: string | null | undefined): Promise<InitialApprovalTarget> {
+  const ordered = [...steps].sort((left, right) => left.step_order - right.step_order);
+  for (const step of ordered) {
+    const approver = await resolveStepApprover(companyId, step, locationId);
+    if (approver) {
+      return {
+        approver,
+        currentStepOrder: step.step_order,
+        currentApprovalRoleIds: step.candidates.map((candidate) => candidate.role_id),
+        totalSteps: ordered.length
+      };
+    }
+    if (step.is_required) {
+      return {
+        approver: null,
+        currentStepOrder: step.step_order,
+        currentApprovalRoleIds: step.candidates.map((candidate) => candidate.role_id),
+        totalSteps: ordered.length
+      };
+    }
+  }
+  return { approver: null, currentStepOrder: ordered.length || 1, currentApprovalRoleIds: [], totalSteps: ordered.length };
+}
+
 export type AdvanceResult = {
   done: boolean;
   nextStepOrder: number | null;
