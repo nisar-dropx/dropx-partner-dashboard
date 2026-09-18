@@ -35,7 +35,8 @@ const reports: NavItem = { code: "ops_reports", label: "Reports", href: "/report
 const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Team Ops", icon: "T", children: [
   { code: "ops_attendance_reports", label: "Attendance Reports", href: "/attendance" },
   { code: "ops_unplanned_leaves", label: "Unplanned Leaves", href: "/attendance/unplanned-leaves" },
-  { code: "ops_offboarding_checklist", label: "Offboarding", href: "/attendance/offboarding" }
+  { code: "ops_offboarding_checklist", label: "Offboarding", href: "/attendance/offboarding" },
+  { code: "ops_salary_hold", label: "Salary Hold", href: "/attendance/salary-hold" }
 ] };
 
 const businessDocuments: NavItem = {
