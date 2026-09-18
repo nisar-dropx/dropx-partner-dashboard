@@ -105,7 +105,7 @@ create table if not exists public.payment_request_approvals (
   action text not null,
   comments text,
   created_at timestamptz not null default now(),
-  constraint payment_request_approvals_action_check check (action in ('approved', 'rejected', 'returned'))
+  constraint payment_request_approvals_action_check check (action in ('approved', 'rejected', 'returned', 'created', 'submitted', 'resubmitted', 'processing', 'processed'))
 );
 
 create table if not exists public.payment_request_answers (
@@ -227,7 +227,7 @@ alter table public.payment_requests alter column payment_mode set not null;
 alter table public.payment_requests drop constraint if exists payment_requests_payment_mode_check;
 alter table public.payment_requests
   add constraint payment_requests_payment_mode_check
-  check (payment_mode in ('account_transfer', 'online_payment'));
+  check (payment_mode in ('account_transfer', 'online_payment', 'upi_payment'));
 
 do $$
 declare
@@ -286,7 +286,7 @@ alter table public.payment_requests
 alter table public.payment_request_approvals drop constraint if exists payment_request_approvals_action_check;
 alter table public.payment_request_approvals
   add constraint payment_request_approvals_action_check
-  check (action in ('approved', 'rejected', 'returned'));
+  check (action in ('approved', 'rejected', 'returned', 'created', 'submitted', 'resubmitted', 'processing', 'processed'));
 
 do $$
 begin
