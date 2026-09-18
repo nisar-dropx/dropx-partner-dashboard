@@ -85,6 +85,19 @@ type PreRequestOversightSummary = {
   requesterCode: string;
 };
 
+type PaymentApproval = {
+  id: string;
+  requestNo: string;
+  locationCode: string | null;
+  paymentHeadName: string;
+  amount: number | null;
+  amountRequested: number | null;
+  requesterName: string | null;
+  remarks: string | null;
+  createdAt: string;
+  attachmentCount: number;
+};
+
 type ReimbursementOversightDetail = ReimbursementOversightSummary & {
   items: ExpenseItem[];
   attachments: Attachment[];
@@ -613,6 +626,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
   const [reimbursements, setReimbursements] = useState<ReimbursementApproval[]>([]);
   const [preRequestApprovals, setPreRequestApprovals] = useState<PreRequestApproval[]>([]);
   const [payAdvanceApprovals, setPayAdvanceApprovals] = useState<PayAdvanceApproval[]>([]);
+  const [paymentApprovals, setPaymentApprovals] = useState<PaymentApproval[]>([]);
   const [payAdvanceError, setPayAdvanceError] = useState("");
   const [payAdvanceTerms, setPayAdvanceTerms] = useState<Record<string, { amount: string; installments: string }>>({});
   const [expenseOversight, setExpenseOversight] = useState<ReimbursementOversightSummary[]>([]);
@@ -701,6 +715,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
       setExitApprovals(leavePayload.exitApprovals ?? []);
       setExitWithdrawalApprovals(leavePayload.exitWithdrawalApprovals ?? []);
       setPayAdvanceApprovals(leavePayload.payAdvanceApprovals ?? []);
+      setPaymentApprovals(leavePayload.paymentApprovals ?? []);
       setSupportPackages(leavePayload.locationSupportPackages ?? []);
       setSection((current) => {
         if (!initialSection && current === "time-off" && !(leavePayload.leaveApprovals ?? []).length) {
@@ -740,6 +755,21 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
       if (!response.ok) throw new Error(payload.error || "Unable to record the pay advance decision.");
       setNotice(payload.notice); closeModal(); await load();
     } catch (reason) { setPayAdvanceError(userFacingError(reason, "Unable to record the pay advance decision.")); }
+    finally { setSaving(false); }
+  }
+
+  async function decidePayment(paymentRequestId: string, decision: "approved" | "returned" | "rejected") {
+    setSaving(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/connect/approvals", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: account.id, profileType: account.profileType,
+          paymentRequestId, decision, comments: notes[paymentRequestId] ?? "" })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to record the payment decision.");
+      setNotice(payload.notice); closeModal(); await load();
+    } catch (reason) { setError(userFacingError(reason, "Unable to record the payment decision.")); }
     finally { setSaving(false); }
   }
 
@@ -1008,9 +1038,9 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
   const businessTripCount = businessTripApprovals.length + businessTripHrApprovals.length;
   const wfhCount = wfhApprovals.length + wfhHrApprovals.length;
   const scopeName = reporteeScope === "immediate" ? "immediate reportees" : "entire reporting team";
-  const othersCount = leaveApprovals.length + reimbursementCount + wfhCount + businessTripCount + exitCount + payAdvanceApprovals.length;
+  const othersCount = leaveApprovals.length + reimbursementCount + wfhCount + businessTripCount + exitCount + payAdvanceApprovals.length + paymentApprovals.length;
   const pendingCount = attendanceCount + rosterCount + supportPackages.length + othersCount;
-  const othersActive = section === "time-off" || section === "reimbursements" || section === "wfh" || section === "business-trip" || section === "exits" || section === "pay-advances";
+  const othersActive = section === "time-off" || section === "reimbursements" || section === "wfh" || section === "business-trip" || section === "exits" || section === "pay-advances" || section === "payments";
   const othersLabel = section === "time-off"
     ? "Time off"
     : section === "reimbursements"
@@ -1021,7 +1051,9 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
           ? "Business trip"
           : section === "exits"
             ? "Exits"
-            : section === "pay-advances" ? "Pay advances" : "More";
+            : section === "pay-advances"
+              ? "Pay advances"
+              : section === "payments" ? "Payments" : "More";
 
   function selectSection(next: ApprovalSection) {
     setSection(next);
@@ -1199,6 +1231,9 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                 </button>
                 <button aria-pressed={section === "pay-advances"} className={section === "pay-advances" ? "active" : ""} onClick={() => selectSection("pay-advances")} type="button">
                   Pay advances<span>{payAdvanceApprovals.length}</span>
+                </button>
+                <button aria-pressed={section === "payments"} className={section === "payments" ? "active" : ""} onClick={() => selectSection("payments")} type="button">
+                  Payments<span>{paymentApprovals.length}</span>
                 </button>
               </div>
             ) : null}
@@ -1698,6 +1733,37 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
               <ApprovalToolbar saving={saving} showReturn={false}
                 onApprove={() => void decidePayAdvance(approval, "approved")}
                 onReject={() => void decidePayAdvance(approval, "rejected")} />
+            </ApprovalModal>;
+          })()}
+        </div>
+      ) : null}
+
+      {!loading && section === "payments" ? (
+        <div className="dx-approval-list">
+          {paymentApprovals.map(approval => <ApprovalRow key={approval.id}
+            badge={<span className="dx-approval-badge">{money(approval.amountRequested ?? approval.amount)}</span>}
+            eyebrow={`${approval.requestNo} · ${approval.paymentHeadName}`} name={approval.requesterName || "Team member"}
+            meta={approval.locationCode || "Payment request"} saving={saving}
+            onReview={() => { setError(""); setActiveKey(`payment:${approval.id}`); }} />)}
+          {!paymentApprovals.length ? <div className="dx-empty"><Clock3 /><strong>No payments waiting</strong><small>No payment requests are assigned to you right now.</small></div> : null}
+          {(() => {
+            const approval = paymentApprovals.find(item => activeKey === `payment:${item.id}`);
+            if (!approval) return null;
+            return <ApprovalModal onClose={closeModal} title={approval.requesterName || "Payment request"}>
+              <ApprovalHead eyebrow={`Payment · ${approval.paymentHeadName}`} name={approval.requesterName || "Team member"}
+                meta={`${approval.requestNo} · ${approval.locationCode || "-"}`} badge={<span className="dx-approval-badge">{money(approval.amountRequested ?? approval.amount)}</span>} />
+              <dl className="dx-approval-facts">
+                <div><dt>Amount</dt><dd>{money(approval.amountRequested ?? approval.amount)}</dd></div>
+                <div><dt>Location</dt><dd>{approval.locationCode || "-"}</dd></div>
+                <div><dt>Payment head</dt><dd>{approval.paymentHeadName}</dd></div>
+                {approval.remarks ? <div><dt>Remarks</dt><dd>{approval.remarks}</dd></div> : null}
+                {approval.attachmentCount ? <div><dt>Attachments</dt><dd>{approval.attachmentCount} file{approval.attachmentCount === 1 ? "" : "s"} - view in Ops for details</dd></div> : null}
+              </dl>
+              <ApprovalNote id={approval.id} notes={notes} onChange={value => setNote(approval.id, value)} placeholder="Add remarks (required for return or reject)" />
+              <ApprovalToolbar saving={saving}
+                onApprove={() => void decidePayment(approval.id, "approved")}
+                onReturn={() => void decidePayment(approval.id, "returned")}
+                onReject={() => void decidePayment(approval.id, "rejected")} />
             </ApprovalModal>;
           })()}
         </div>
