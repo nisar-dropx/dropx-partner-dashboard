@@ -56,6 +56,7 @@ type LocationRow = {
   station_manager_email: string | null;
   parent_station_id: string | null;
   hide_from_location_list: boolean;
+  is_ho: boolean;
   is_active: boolean;
   providers?: { code: string; name: string } | null;
   location_models?: { code: string; name: string } | null;
@@ -172,6 +173,7 @@ async function loadMasterData(companyId: string) {
     station_manager_email,
     parent_station_id,
     hide_from_location_list,
+    is_ho,
     is_active,
     providers (code, name),
     location_models (code, name)
@@ -273,6 +275,7 @@ async function loadMasterData(companyId: string) {
         cluster_manager: clusterManager,
         cluster: clusterManager,
         hide_from_location_list: Boolean(row.hide_from_location_list),
+        is_ho: Boolean(row.is_ho),
         providers: firstRelation(row.providers),
         location_models: firstRelation(row.location_models)
       };
@@ -408,6 +411,10 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
                 <input name="hide_from_location_list" type="checkbox" />
                 <span>Hide from location list</span>
               </label>
+              <label className="check-row span-3">
+                <input name="is_ho" type="checkbox" />
+                <span>Head Office location (for HRMS leave eligibility)</span>
+              </label>
               <div className="form-actions span-3 modal-actions">
                 <Link className="button secondary" href="/master/location" scroll={false}>Cancel</Link>
                 <SubmitButton>Add location</SubmitButton>
@@ -455,6 +462,10 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               <label className="check-row span-3">
                 <input defaultChecked={editLocation.hide_from_location_list} name="hide_from_location_list" type="checkbox" />
                 <span>Hide from location list</span>
+              </label>
+              <label className="check-row span-3">
+                <input defaultChecked={editLocation.is_ho} name="is_ho" type="checkbox" />
+                <span>Head Office location (for HRMS leave eligibility)</span>
               </label>
               <div className="form-actions span-3">
                 <SubmitButton>Save changes</SubmitButton>
