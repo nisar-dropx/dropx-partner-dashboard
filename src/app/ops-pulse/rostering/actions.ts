@@ -220,6 +220,53 @@ async function seedOpsDatedDraftEntries(
   }
 }
 
+/**
+ * Seed a replacement weekly pattern from the approved baseline.  Unlike a dated
+ * draft, this deliberately does not fold in dated overlays: an exception for one
+ * calendar week must never become the new every-week pattern.
+ */
+async function seedOpsRecurringDraftEntries(
+  companyId: string,
+  authorization: AuthorizationContext,
+  planId: string,
+  locationId: string,
+  periodStart: string,
+  periodEnd: string
+) {
+  const station = await authorisedStation(companyId, authorization, locationId);
+  const previous = await db().from("hr_roster_plans")
+    .select("id,hr_roster_entries(worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes)")
+    .eq("company_id", companyId)
+    .eq("location_id", locationId)
+    .eq("roster_kind", "recurring_weekly")
+    .eq("status", "approved")
+    .is("superseded_at", null)
+    .order("effective_from", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (previous.error) throw new Error(previous.error.message);
+
+  const currentPeople = await loadOpsStationManpower(companyId, [station], indiaToday());
+  const allowedPeople = new Set(currentPeople.people.map((person) => `${person.workerType}:${person.id}`));
+  const entries = (previous.data?.hr_roster_entries ?? [])
+    .filter((entry) => allowedPeople.has(`${entry.worker_type}:${entry.worker_id}`))
+    .flatMap((entry) => expandTemplateEntryAcrossWindow(entry, periodStart, periodEnd))
+    .map((entry) => ({
+      company_id: companyId,
+      plan_id: planId,
+      worker_type: entry.worker_type,
+      worker_id: entry.worker_id,
+      location_id: locationId,
+      roster_date: entry.roster_date,
+      day_type: entry.day_type,
+      shift_id: entry.shift_id,
+      notes: entry.notes
+    }));
+  if (!entries.length) return;
+  const inserted = await db().from("hr_roster_entries").insert(entries);
+  if (inserted.error) throw new Error(inserted.error.message);
+}
+
 async function realignOpsDatedDraft(
   companyId: string,
   authorization: AuthorizationContext,
@@ -323,14 +370,8 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
     await assertPlanner(authorization);
     const station = await authorisedStation(companyId, authorization, locationId);
     const currentWeek = rosterMonday(indiaToday());
-    // Anchor a freshly-prepared dated draft to whatever upcoming week the caller was
-    // actually viewing, not always "this week" — otherwise a user who navigated several
-    // weeks ahead before their first edit gets yanked back to the current week's 7-day
-    // window as soon as editing starts. Never anchor earlier than the current week
-    // (edits are upcoming-only). Recalling an existing pending-approval plan below keeps
-    // ITS OWN period instead — that plan already has a defined submission window, and
-    // realigning it to an unrelated future week the viewer happened to be scrolled to
-    // would be destructive, not helpful.
+    // Dated drafts are anchored to the week being viewed. Recurring drafts keep their
+    // own Monday template, independent of which projected week the planner is viewing.
     const requestedStart = viewWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(viewWeekStart) ? rosterMonday(viewWeekStart) : currentWeek;
     const start = requestedStart < currentWeek ? currentWeek : requestedStart;
     const end = addRosterDays(start, 6);
@@ -368,10 +409,28 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
         .maybeSingle();
       if (recalled.error) throw new Error(recalled.error.message);
       if (!recalled.data) throw new Error("This roster is no longer awaiting approval.");
-      // Recalling keeps the plan's OWN already-defined period — it must not be realigned
-      // to whatever future week the viewer's browser happened to be scrolled to.
+      // Recalling keeps the plan's own template/window; it must not be realigned to
+      // whichever future week happens to be on screen.
       const recallStart = recalled.data.period_start ?? start;
       const recallEnd = recalled.data.period_end ?? addRosterDays(recallStart, 6);
+      if (recalled.data.roster_kind === "recurring_weekly") {
+        const entries = await db().from("hr_roster_entries")
+          .select("worker_type,worker_id,roster_date,day_type,shift_id,notes")
+          .eq("company_id", companyId)
+          .eq("plan_id", recalled.data.id);
+        if (entries.error) throw new Error(entries.error.message);
+        refreshRosterViews();
+        return {
+          ok: true,
+          planId: recalled.data.id,
+          periodStart: recallStart,
+          periodEnd: recallEnd,
+          rosterKind: "recurring_weekly",
+          entries: mapPreparedEntries(entries.data ?? []),
+          message: "Pending weekly pattern recalled. Update it, save, then submit for approval again.",
+          persisted: true
+        };
+      }
       const aligned = await realignOpsDatedDraft(companyId, authorization, recalled.data, recallStart, recallEnd, true);
       refreshRosterViews();
       return {
@@ -383,6 +442,19 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
         entries: mapPreparedEntries(aligned.hr_roster_entries ?? []),
         message: "Pending approval recalled. Update week offs or shifts, save, then submit for approval again.",
         persisted: true
+      };
+    }
+
+    if (open.data?.roster_kind === "recurring_weekly") {
+      return {
+        ok: true,
+        planId: open.data.id,
+        periodStart: open.data.period_start,
+        periodEnd: open.data.period_end ?? addRosterDays(open.data.period_start, 6),
+        rosterKind: "recurring_weekly",
+        entries: mapPreparedEntries(open.data.hr_roster_entries ?? []),
+        message: "The open weekly pattern change is ready.",
+        persisted: false
       };
     }
 
@@ -407,7 +479,9 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
       };
     }
 
-    // No Ops draft yet — reuse the approved pattern in-memory. A dated draft is created only on first save.
+    // No Ops draft yet — reuse the approved pattern in-memory. Saving creates a
+    // replacement recurring plan, so a station-pattern edit carries forward rather
+    // than silently becoming a one-week dated overlay.
     const previous = await db().from("hr_roster_plans")
       .select("id,period_start,hr_roster_entries(worker_type,worker_id,location_id,roster_date,day_type,shift_id,notes)")
       .eq("company_id", companyId)
@@ -424,9 +498,11 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
     }
     const currentPeople = await loadOpsStationManpower(companyId, [station], indiaToday());
     const allowedPeople = new Set(currentPeople.people.map((person) => `${person.workerType}:${person.id}`));
+    const templateStart = currentWeek;
+    const templateEnd = addRosterDays(templateStart, 6);
     const projected = (previous.data.hr_roster_entries ?? [])
       .filter((entry) => allowedPeople.has(`${entry.worker_type}:${entry.worker_id}`))
-      .flatMap((entry) => expandTemplateEntryAcrossWindow(entry, start, end))
+      .flatMap((entry) => expandTemplateEntryAcrossWindow(entry, templateStart, templateEnd))
       .map((entry) => ({
         workerType: entry.worker_type as "employee" | "contractor",
         workerId: entry.worker_id,
@@ -438,11 +514,11 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
     return {
       ok: true,
       planId: previous.data.id,
-      periodStart: start,
-      periodEnd: end,
-      rosterKind: "dated",
+      periodStart: templateStart,
+      periodEnd: templateEnd,
+      rosterKind: "recurring_weekly",
       entries: projected,
-      message: "Showing the current approved roster. Save a change to start an Ops draft for approval.",
+      message: "Editing the current weekly pattern. Save and submit to replace the station's recurring roster.",
       // Nothing was written to hr_roster_plans — this is the approved baseline projected
       // in-memory. The caller's local optimistic state is already complete and correct;
       // no follow-up refresh is needed (there is nothing new for the server to say).
@@ -453,7 +529,7 @@ export async function prepareOpsRoster(locationId: string, viewWeekStart?: strin
   }
 }
 
-export async function saveOpsRosterAssignments(input: { planId: string; changes: RosterChange[]; viewWeekStart?: string }): Promise<ActionResult> {
+export async function saveOpsRosterAssignments(input: { planId: string; changes: RosterChange[]; viewWeekStart?: string; templateStart?: string }): Promise<ActionResult> {
   try {
     const authorization = await requirePagePermission("ops_rostering", "edit");
     const companyId = requireCompanyId(authorization);
@@ -463,7 +539,7 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
     }
     let plan = await loadPlan(companyId, authorization, input.planId);
     if (plan.status === "approved") {
-      plan = await materializeOpsDraftFromApproved(companyId, authorization, plan, input.viewWeekStart);
+      plan = await materializeOpsDraftFromApproved(companyId, authorization, plan, input.templateStart);
     }
     if (!["draft", "returned"].includes(plan.status) || !plan.location_id) return { ok: false, message: "This roster is no longer editable." };
     const planId = plan.id;
@@ -549,16 +625,14 @@ async function materializeOpsDraftFromApproved(
   companyId: string,
   authorization: AuthorizationContext,
   approved: Awaited<ReturnType<typeof loadPlan>>,
-  viewWeekStart?: string
+  templateStart?: string
 ) {
   if (!approved.location_id) throw new Error("This roster has no station.");
   const currentWeek = rosterMonday(indiaToday());
-  // Anchor the new dated draft to whatever upcoming week the caller was actually
-  // editing when Save was pressed directly from the approved/recurring view — not
-  // always "this week" — otherwise a change made on a future week gets rejected as
-  // "outside this roster" because the freshly materialized draft only covers the
-  // current week's 7 days. Never anchor earlier than the current week.
-  const requestedStart = viewWeekStart && /^\d{4}-\d{2}-\d{2}$/.test(viewWeekStart) ? rosterMonday(viewWeekStart) : currentWeek;
+  // The client edits weekday template cells. Keep the replacement anchored to its
+  // prepared Monday so those cells remain the same template, never a specific viewed
+  // future week.
+  const requestedStart = templateStart && /^\d{4}-\d{2}-\d{2}$/.test(templateStart) ? rosterMonday(templateStart) : currentWeek;
   const anchorStart = requestedStart < currentWeek ? currentWeek : requestedStart;
   const existingOps = await db().from("hr_roster_plans")
     .select("id,name,period_start,period_end,status,location_id,created_by,submitted_by,roster_kind,effective_from,revision_no,supersedes_plan_id,hr_roster_plan_locations(location_id)")
@@ -571,12 +645,7 @@ async function materializeOpsDraftFromApproved(
     .limit(1)
     .maybeSingle();
   if (existingOps.error) throw new Error(existingOps.error.message);
-  if (existingOps.data) {
-    if (existingOps.data.roster_kind === "dated") return existingOps.data;
-    const end = addRosterDays(anchorStart, 6);
-    await realignOpsDatedDraft(companyId, authorization, existingOps.data, anchorStart, end, true);
-    return loadPlan(companyId, authorization, existingOps.data.id);
-  }
+  if (existingOps.data) return existingOps.data;
 
   const station = await authorisedStation(companyId, authorization, approved.location_id);
   const start = anchorStart;
@@ -584,11 +653,11 @@ async function materializeOpsDraftFromApproved(
   const revision = Number(approved.revision_no ?? 0) + 1;
   const created = await db().from("hr_roster_plans").insert({
     company_id: companyId,
-    name: `${station.station_code} roster · ${start} → ${end}`,
+    name: `${station.station_code} weekly roster · effective ${start}`,
     location_id: approved.location_id,
     period_start: start,
     period_end: end,
-    roster_kind: "dated",
+    roster_kind: "recurring_weekly",
     effective_from: start,
     supersedes_plan_id: approved.id,
     revision_no: revision,
@@ -604,7 +673,7 @@ async function materializeOpsDraftFromApproved(
     throw new Error(linked.error.message);
   }
 
-  await seedOpsDatedDraftEntries(companyId, authorization, created.data.id, approved.location_id, start, end);
+  await seedOpsRecurringDraftEntries(companyId, authorization, created.data.id, approved.location_id, start, end);
   return { ...created.data, hr_roster_plan_locations: [{ location_id: approved.location_id }] };
 }
 
@@ -728,6 +797,17 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
       return { ok: false, message: "Choose a CSV or Excel file smaller than 15 MB." };
     }
 
+    // A Mon–Sun workbook is an explicit weekly-template upload. Detect it before
+    // choosing the target plan so it cannot be accidentally converted into a dated
+    // month/week import.
+    const workbook = XLSX.read(Buffer.from(await file.arrayBuffer()), { type: "buffer", cellDates: false });
+    const firstSheet = workbook.SheetNames[0];
+    if (!firstSheet) return { ok: false, message: "The workbook has no readable sheet." };
+    const sourceRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[firstSheet], { defval: "", raw: true });
+    if (!sourceRows.length) return { ok: false, message: "The workbook has no roster rows." };
+    const sample = sourceRows[0] ?? {};
+    const hasWideDays = recurringRosterDays.some((day) => Object.keys(sample).some((key) => key.trim().toUpperCase().replace(/[\s-]+/g, "_") === day));
+
     let window;
     try {
       window = resolveRosterBulkUploadWindow({
@@ -747,7 +827,9 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
     if (!["draft", "returned"].includes(plan.status) || !plan.location_id || !["dated", "recurring_weekly"].includes(plan.roster_kind ?? "")) {
       return { ok: false, message: "This roster is no longer editable. Recall or prepare a draft first." };
     }
-    if (plan.period_start !== window.periodStart || plan.period_end !== window.periodEnd || plan.roster_kind === "recurring_weekly") {
+    const templateStart = rosterMonday(indiaToday());
+    const templateEnd = addRosterDays(templateStart, 6);
+    if (!hasWideDays && (plan.period_start !== window.periodStart || plan.period_end !== window.periodEnd || plan.roster_kind === "recurring_weekly")) {
       await realignOpsDatedDraft(companyId, authorization, plan, window.periodStart, window.periodEnd, false);
       plan = await loadPlan(companyId, authorization, plan.id);
     }
@@ -763,12 +845,7 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
     const byCode = new Map(manpower.people.map((person) => [String(person.code).trim().toUpperCase(), person]));
     const shiftByCode = new Map((shifts.data ?? []).map((shift) => [String(shift.code).trim().toUpperCase(), shift.id]));
     const today = indiaToday();
-    const cutoffAsOf = window.periodStart > today ? window.periodStart : today;
-    const workbook = XLSX.read(Buffer.from(await file.arrayBuffer()), { type: "buffer", cellDates: false });
-    const firstSheet = workbook.SheetNames[0];
-    if (!firstSheet) return { ok: false, message: "The workbook has no readable sheet." };
-    const sourceRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[firstSheet], { defval: "", raw: true });
-    if (!sourceRows.length) return { ok: false, message: "The workbook has no roster rows." };
+    const cutoffAsOf = hasWideDays ? today : (window.periodStart > today ? window.periodStart : today);
 
     const readColumn = (source: Record<string, unknown>, aliases: string[]) => {
       const match = Object.entries(source).find(([key]) => aliases.includes(key.trim().toUpperCase().replace(/[\s-]+/g, "_")));
@@ -785,8 +862,6 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
       return match ? `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}` : "";
     };
 
-    const sample = sourceRows[0] ?? {};
-    const hasWideDays = recurringRosterDays.some((day) => Object.keys(sample).some((key) => key.trim().toUpperCase().replace(/[\s-]+/g, "_") === day));
     const upserts: Array<{
       company_id: string;
       plan_id: string;
@@ -803,7 +878,7 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
     let skippedCutoff = 0;
 
     const pastCutoff = (date: string) => isOpsRosterChangePastCutoff({
-      rosterKind: "dated",
+      rosterKind: hasWideDays ? "recurring_weekly" : plan.roster_kind,
       templateOrDate: date,
       cutoffAsOf,
       changeDeadlineHour: policy.changeDeadlineHour
@@ -821,7 +896,7 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
 
         for (const day of recurringRosterDays) {
           const cell = normalizeRosterCell(readColumn(source, [day, `${day}_SHIFT`, day.slice(0, 3)]));
-          for (const date of expandRosterPatternDates(window.writeStart, window.writeEnd, day)) {
+          for (const date of expandRosterPatternDates(hasWideDays ? templateStart : window.writeStart, hasWideDays ? templateEnd : window.writeEnd, day)) {
             if (pastCutoff(date)) {
               skippedCutoff += 1;
               continue;
@@ -905,6 +980,25 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
     }
     if (upserts.length + removals.length > 25_000) return { ok: false, message: "The workbook exceeds 25,000 roster cells." };
 
+    // Only replace a dated draft after the uploaded weekly template has passed all
+    // validation. This makes a malformed file non-destructive to an in-progress
+    // date-specific roster.
+    if (hasWideDays && (plan.roster_kind !== "recurring_weekly" || plan.period_start !== templateStart || plan.period_end !== templateEnd)) {
+      const converted = await db().from("hr_roster_plans").update({
+        name: `${station.station_code} weekly roster · effective ${templateStart}`,
+        period_start: templateStart,
+        period_end: templateEnd,
+        effective_from: templateStart,
+        roster_kind: "recurring_weekly",
+        updated_by: authorization.userId,
+        updated_at: new Date().toISOString()
+      }).eq("company_id", companyId).eq("id", plan.id).in("status", ["draft", "returned"]).select("id").maybeSingle();
+      if (converted.error || !converted.data) throw new Error(converted.error?.message ?? "This roster is no longer editable.");
+      const cleared = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", plan.id);
+      if (cleared.error) throw new Error(cleared.error.message);
+      plan = await loadPlan(companyId, authorization, plan.id);
+    }
+
     const touched = await db().from("hr_roster_plans")
       .update({ updated_by: authorization.userId, updated_at: new Date().toISOString() })
       .eq("company_id", companyId)
@@ -928,10 +1022,12 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
       if (removed.error) throw new Error(removed.error.message);
     }
 
-    const trimmedEarly = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", plan.id).lt("roster_date", window.writeStart);
-    if (trimmedEarly.error) throw new Error(trimmedEarly.error.message);
-    const trimmedLate = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", plan.id).gt("roster_date", window.writeEnd);
-    if (trimmedLate.error) throw new Error(trimmedLate.error.message);
+    if (plan.roster_kind === "dated") {
+      const trimmedEarly = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", plan.id).lt("roster_date", window.writeStart);
+      if (trimmedEarly.error) throw new Error(trimmedEarly.error.message);
+      const trimmedLate = await db().from("hr_roster_entries").delete().eq("company_id", companyId).eq("plan_id", plan.id).gt("roster_date", window.writeEnd);
+      if (trimmedLate.error) throw new Error(trimmedLate.error.message);
+    }
 
     const refreshed = await db().from("hr_roster_entries")
       .select("worker_type,worker_id,roster_date,day_type,shift_id,notes")
@@ -945,11 +1041,11 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
     return {
       ok: true,
       planId: plan.id,
-      periodStart: window.periodStart,
-      periodEnd: window.periodEnd,
-      rosterKind: "dated",
+      periodStart: plan.period_start,
+      periodEnd: plan.period_end,
+      rosterKind: plan.roster_kind ?? "dated",
       entries: mapPreparedEntries(refreshed.data ?? []),
-      message: `${cellCount} roster ${cellCount === 1 ? "cell" : "cells"} imported for ${window.label}${skipNote}. Review, then submit for approval.`
+      message: `${cellCount} roster ${cellCount === 1 ? "cell" : "cells"} imported ${hasWideDays ? "as the recurring weekly pattern" : `for ${window.label}`}${skipNote}. Review, then submit for approval.`
     };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "The workbook could not be imported." };

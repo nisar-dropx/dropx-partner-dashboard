@@ -370,7 +370,8 @@ export function OpsRosterPlanner({
     setTemplateStart(preparedPeriodStart);
     const preparedPeriodEnd = result.periodEnd ?? moveIsoDate(preparedPeriodStart, 6);
     setLivePeriodEnd(preparedPeriodEnd);
-    setLiveRecurring(false);
+    const preparedIsRecurring = result.rosterKind === "recurring_weekly";
+    setLiveRecurring(preparedIsRecurring);
     // Snap the view to the week that was actually requested (targetWeekStart), which is
     // also exactly what the server anchored the dated draft to (preparedPeriodStart).
     // This is always correct for every caller: ensureEditing passes the week already
@@ -381,7 +382,7 @@ export function OpsRosterPlanner({
     // window, the stale (still-forward) weekStart could clamp down to preparedPeriodEnd
     // itself — a single Sunday rather than the new window's Monday — collapsing the
     // visible range to one day ("13 Sep to 13 Sep").
-    setWeekStart(preparedPeriodStart);
+    setWeekStart(preparedIsRecurring ? targetWeekStart : preparedPeriodStart);
     assignmentsRef.current = preparedAssignments;
     setAssignments(preparedAssignments);
     editingEnabledRef.current = true;
@@ -633,7 +634,7 @@ export function OpsRosterPlanner({
         : { workerType: workerTypeValue as "employee" | "contractor", workerId, date, remove: true as const };
     });
     startSaving(async () => {
-      const result = await saveOpsRosterAssignments({ planId, changes, viewWeekStart: weekStart });
+      const result = await saveOpsRosterAssignments({ planId, changes, viewWeekStart: weekStart, templateStart: templateStartRef.current });
       setMessage({ tone: result.ok ? "success" : "error", text: result.message });
       if (result.ok) {
         setDirtyKeys(new Set());
@@ -823,7 +824,7 @@ export function OpsRosterPlanner({
       ? "Select a shift, click cells to assign, or drag between people and days."
       : pendingRecall
         ? "Pending approval — use Recall & edit to change this station roster."
-        : "Click a cell to open an editable dated draft for this station."
+        : "Click a cell to prepare an editable weekly pattern for this station."
     : "View only for your current access.";
   const status = editingEnabled && !plan ? "draft" : plan?.status ?? "blank";
   const templateHref = `/rostering/template?station=${encodeURIComponent(stationId)}${activePlanId ? `&plan=${encodeURIComponent(activePlanId)}` : ""}`;
@@ -833,7 +834,7 @@ export function OpsRosterPlanner({
     ? `Effective ${fullDateLabel(plan?.effectiveFrom ?? plan?.periodStart ?? blankPeriodStart)} · v${plan?.revisionNo ?? 1} · repeats until replaced`
     : plan
       ? `Dated ${fullDateLabel(templateStart)} → ${fullDateLabel(livePeriodEnd)} · v${plan.revisionNo} · only these dates change`
-      : "Start editing to prepare a dated Monday–Sunday roster for this station.";
+      : "Start editing to prepare a recurring Monday–Sunday pattern for this station.";
 
   return <section className={`${styles.workspace}${draggingLabel || pointerDrag?.active ? ` ${styles.isDragging}` : ""}`}>
     <header className={styles.hero}>
@@ -913,7 +914,7 @@ export function OpsRosterPlanner({
         <span className={styles.excelIcon} aria-hidden="true"><Upload size={16} /></span>
         <div>
           <strong>Excel upload</strong>
-          <small>{stationCode} · week or month · dated (non-recurring) only</small>
+          <small>{stationCode} · recurring weekly template or dated week/month</small>
         </div>
         <span className={styles.excelBadge}>Draft only</span>
         <span className={styles.excelBadgeMuted}>Submit for approval after import</span>
@@ -973,8 +974,8 @@ export function OpsRosterPlanner({
             <small>
               {editingEnabled && activePlanId
                 ? (bulkPeriodMode === "week"
-                  ? "Imports the selected week only into this dated draft"
-                  : `Expands Mon–Sun across every day in ${bulkRosterMonth}`)
+                  ? "Mon–Sun templates replace the recurring station pattern; date-based files import the selected week"
+                  : `Mon–Sun templates replace the recurring station pattern; date-based files import ${bulkRosterMonth}`)
                 : pendingRecall ? "Recall & edit first, then upload" : "Start or edit the roster first"}
             </small>
           </div>
