@@ -90,6 +90,7 @@ export type CpsAssociate = {
   provider_employee_id: string;
   provider_employee_name: string | null;
   dropx_name: string | null;
+  dropx_emp_code: string | null;
   pay_type: string | null;
   total_delivery: number;
   c_return: number;

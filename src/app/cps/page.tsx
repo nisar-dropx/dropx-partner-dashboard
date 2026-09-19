@@ -81,7 +81,6 @@ export default async function CpsPage({
             period.to,
             selected.map((l) => l.station_code),
             page,
-            view === "unmapped",
           )
         : null,
       view === "inputs"

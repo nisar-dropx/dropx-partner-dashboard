@@ -105,7 +105,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     (w.source_profile_type==='employee' && w.source_profile_id===m.employee_id && m.employee_id) ||
     (w.source_profile_type==='contractor' && w.source_profile_id===m.contractor_id && m.contractor_id) ||
     (w.source_profile_type==='field_executive' && w.source_profile_id===m.field_executive_id && m.field_executive_id));
-  const mappings=facts.mappings.map(m=>({...m,worker:canonical(m)})).sort((a,b)=>b.effective_from.localeCompare(a.effective_from));
+  const mappings=facts.mappings.map((m):RecordRow=>({...m,worker:canonical(m)})).sort((a,b)=>b.effective_from.localeCompare(a.effective_from));
   const components=new Map<string,RecordRow[]>();
   facts.components.forEach(c=>components.set(c.payment_method_id,[...(components.get(c.payment_method_id)??[]),c]));
   const providers=new Map(facts.providers.map(p=>[p.id,compact(`${p.code} ${p.name}`)]));
@@ -140,7 +140,7 @@ export function rebuildCps(base: CpsSnapshot, facts: CpsFacts): CpsSnapshot & { 
     }
     const worker=matches[0].worker!;
     row.dropx_name=worker.full_name;row.dropx_emp_code=worker.dropx_id;
-    const k=`${worker.id}|${row.work_date}`, g=groups.get(k)??{worker,date:row.work_date,rows:[],maps:[]};
+    const k=`${worker.id}|${row.work_date}`, g=groups.get(k)??{worker,date:row.work_date,rows:[] as LiveAssociate[],maps:[] as RecordRow[]};
     g.rows.push(row);g.maps.push(...matches);groups.set(k,g);
   }
   // Monthly commitments accrue even when the provider upload has no row for a worker.
