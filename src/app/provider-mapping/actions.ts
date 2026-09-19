@@ -1,7 +1,7 @@
 "use server";
 
 import { cookies } from "next/headers";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import * as XLSX from "xlsx";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
@@ -324,6 +324,8 @@ export async function bulkUploadProviderIds(formData: FormData): Promise<BulkUpl
       reportRows.push({ ...reportRow, result: "Mapped", reason: paymentMethod ? "ID and payment allocation mapped." : existing ? "Existing ID mapping updated." : "New ID mapping created." });
     }
 
+    revalidateTag("ops-cps");
+    revalidatePath("/cps");
     revalidatePath("/provider-mapping");
     const skippedCount = reportRows.length - saved;
     return { ok: true, message: `${saved} mapped; ${skippedCount} skipped.`, rows: reportRows };
@@ -633,6 +635,8 @@ export async function saveProviderMappingWorksheet(formData: FormData) {
       savedRows += 1;
     }
 
+    revalidateTag("ops-cps");
+    revalidatePath("/cps");
     revalidatePath("/provider-mapping");
     revalidatePath("/workforce");
   } catch (error) {
@@ -698,6 +702,8 @@ export async function saveProviderFirstMappingWorksheet(formData: FormData) {
       await saveExecutiveMappingRow(formData, index, authorization.userId, companyId, allowedLocationIds);
       savedRows += 1;
     }
+    revalidateTag("ops-cps");
+    revalidatePath("/cps");
     revalidatePath("/provider-mapping");
     revalidatePath("/provider-mapping/provider-first");
     revalidatePath("/payments/workforce-payouts");
@@ -765,6 +771,8 @@ export async function saveProviderFirstMapping(formData: FormData) {
       }, companyId));
       if (error) throw new Error(error.message);
     }
+    revalidateTag("ops-cps");
+    revalidatePath("/cps");
     revalidatePath("/provider-mapping");
     revalidatePath("/provider-mapping/provider-first");
     revalidatePath("/payments/workforce-payouts");

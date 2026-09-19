@@ -319,9 +319,11 @@ async function loadMappingData(authorization: AuthorizationContext) {
 }
 
 export async function ProviderMappingPageContent({
+  initialQuery = "",
   active = "ID Mapping",
   pageCode = "provider_mapping"
 }: {
+  initialQuery?: string;
   active?: string;
   pageCode?: string;
 }) {
@@ -365,6 +367,7 @@ export async function ProviderMappingPageContent({
 
       {(permission.canView || permission.canAdd || permission.canEdit) && !error ? (
         <ProviderMappingWorksheet
+          initialQuery={initialQuery}
           canEdit={canEditWorksheet && !error}
           locations={locations}
           mappings={mappings}

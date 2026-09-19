@@ -56,7 +56,8 @@ function RowButton({ canEdit, dirty, index, nameMatches }: { canEdit: boolean; d
   return <button className={`button compact mapping-row-save${dirty ? "" : " secondary"}`} disabled={!canEdit || !dirty || !nameMatches} name="save_row" type="submit" value={index}>{dirty ? "Save" : "Saved"}</button>;
 }
 
-export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paymentMethods }: {
+export function ProviderFirstMappingWorksheet({ initialQuery = "", canEdit, mappings, workers, paymentMethods }: {
+  initialQuery?: string;
   canEdit: boolean;
   mappings: ProviderFirstMappingRow[];
   workers: ProviderFirstWorker[];
@@ -65,6 +66,7 @@ export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paym
   const initialRows = useMemo(() => mappings, [mappings]);
   const initialSignatures = useMemo(() => initialRows.map(signature), [initialRows]);
   const [rows, setRows] = useState(initialRows);
+  const [query,setQuery]=useState(initialQuery);
   const [errors, setErrors] = useState<Record<number, string>>({});
   const paymentMethodById = useMemo(() => new Map(paymentMethods.map((method) => [method.id, method])), [paymentMethods]);
   const paymentOptions = useMemo(() => paymentMethods.map((method) => ({ value: method.id, label: method.name, helper: method.code })), [paymentMethods]);
@@ -140,6 +142,7 @@ export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paym
     <input name="dirty_row_indexes" type="hidden" value={JSON.stringify(dirtyRows.flatMap((dirty, index) => dirty ? [index] : []))} />
     <section className="panel">
       <div className="panel-head"><div><h2>Provider member → DropX ID & pay mapping</h2><p className="subtle">Provider Member ID is read-only. Select the DropX workforce ID, then configure payment method, rates and dates exactly as in the existing worksheet.</p></div><SubmitButton className="button mapping-save-all" disabled={!canEdit || !hasDirty || hasDirtyNameMismatch || hasDirtyMappingConflict || hasDirtyLocationMismatch} disabledText={!canEdit ? "No edit access" : hasDirtyLocationMismatch ? "Fix location mismatches" : hasDirtyMappingConflict ? "Resolve mapping conflicts" : hasDirtyNameMismatch ? "Fix name mismatches" : "No edits"}>Save all</SubmitButton></div>
+      <label className="panel-body">Find provider or DropX ID <input type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Provider ID, DropX ID or name" /></label>
       <div className="mapping-rows">{rows.map((row, index) => {
         const availableWorkers = workers;
         const selectedWorker = workers.find((worker) => worker.id === row.workforceId);
@@ -147,7 +150,7 @@ export function ProviderFirstMappingWorksheet({ canEdit, mappings, workers, paym
         const locationMismatch = Boolean(selectedWorker && selectedWorker.stationId !== row.stationId);
         const workerOptions = availableWorkers.map((worker) => ({ value: worker.id, label: `${worker.dropxId} — ${worker.fullName}`, helper: `${worker.locationLabel} · ${worker.onboardingStatus || "No status"}${worker.mappedProviderMemberId && worker.mappedProviderMemberId !== row.providerMemberId ? " · Already mapped" : ""}` }));
         const components = paymentMethodById.get(row.paymentMethodId)?.components ?? [];
-        return <div className={`mapping-row-card ${dirtyRows[index] ? "unsaved-row" : ""}`} key={row.providerMemberId}>
+        return <div hidden={Boolean(query && ![row.providerMemberId,row.providerMemberName,row.dropxId,row.dropxName].join(" ").toLowerCase().includes(query.toLowerCase()))} className={`mapping-row-card ${dirtyRows[index] ? "unsaved-row" : ""}`} key={row.providerMemberId}>
           <input name={`rows[${index}][id]`} type="hidden" value={row.workforceId} />
           <input name={`rows[${index}][source_type]`} type="hidden" value="workforce" />
           <input name={`rows[${index}][mapping_id]`} type="hidden" value={row.mappingId} />

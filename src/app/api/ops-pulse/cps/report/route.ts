@@ -30,8 +30,14 @@ const summaryRow = (s: ReturnType<typeof summarizeCps>) => ({
   "DA cost": s.da,
   "UTR cost": s.utr,
   "Van cost": s.van,
-  "Other cost (includes rent)": s.other,
-  "Rent included": s.rent,
+  "Other cost": s.other,
+  "Rent": s.rent,
+  "Overhead": s.overhead,
+  "DA salary": s.salary,
+  "DA variable": s.variable,
+  "DA fuel": s.fuel,
+  "DA salary CPS": ratio(s.salary,s.deliveries),
+  "Uncosted deliveries": s.exposedDeliveries,
   "Recorded cost": s.total,
   "Recorded CPS": s.cps,
   "Target CPS": s.target,
@@ -100,7 +106,7 @@ export async function GET(request: Request) {
               Calculation:
                 "Total recorded cost divided by delivered shipments. Missing costs and shipment days are flagged. Not an average of CPS.",
               Sources:
-                "Shipment payment mapping, fuel imports, Cashbook, approved Adhoc, Finance rent and CPS Inputs.",
+                "People CTC, live workforce rate cards, daily shipments, fuel imports, Cashbook, approved Adhoc, Finance rent and cost setup.",
             },
           ],
         },
@@ -137,6 +143,8 @@ export async function GET(request: Request) {
             ),
           })),
         },
+        ...(result.gaps ? [{name:"Needs attention",rows:result.gaps.map(g=>({Issue:g.kind,Owner:g.owner,Station:g.station_code,"DropX ID":g.dropx_id,"Provider ID":g.provider_id,Name:g.name,"First seen":g.first_date,Through:g.last_date,Days:g.days,"Affected deliveries":g.deliveries,Action:g.href}))}] : []),
+        ...(result.people ? [{name:"DA productivity",rows:result.people.map(p=>({"DropX ID":p.dropx_id,Name:p.name,Station:p.station_code,Deliveries:p.deliveries,"Fixed pay":p.salary,"Variable pay":p.variable,"DA fuel":p.fuel,"Van cost":p.van,"Salary CPS":ratio(p.salary,p.deliveries),"Paid days":p.paid_days,"Zero delivery paid days":p.zero_delivery_days}))}] : []),
         ...(people
           ? [
               {
@@ -145,6 +153,8 @@ export async function GET(request: Request) {
                   Date: r.work_date,
                   Location: r.station_code,
                   "Provider ID": r.provider_employee_id,
+                  "DropX ID": r.dropx_emp_code,
+                  "Van pay": r.van_pay,
                   Name: r.dropx_name || r.provider_employee_name,
                   "Pay scheme": r.pay_type,
                   Deliveries: r.total_delivery,

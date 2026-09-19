@@ -8,7 +8,9 @@ function CostForm({
   record,
   stations,
   today,
+  employees,
 }: {
+  employees: {id:string;label:string}[];
   record?: CpsCostInput;
   stations: string[];
   today: string;
@@ -16,6 +18,7 @@ function CostForm({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [employee, setEmployee] = useState(record?.employee_id || "");
   return (
     <form
       className="cps-input-form"
@@ -36,6 +39,13 @@ function CostForm({
     >
       <input type="hidden" name="id" value={record?.id || ""} />
       <input type="hidden" name="updated_at" value={record?.updated_at || ""} />
+      <label>Cost source
+        <select name="employee_id" value={employee} onChange={e=>setEmployee(e.target.value)}>
+          <option value="">Manual expense / adjustment</option>
+          {employees.map(e=><option key={e.id} value={e.id}>People CTC · {e.label}</option>)}
+        </select>
+      </label>
+      {employee && <p className="cps-form-note">Uses the employee’s effective CTC from People and replaces their automatic allocation. Salary revisions flow through automatically.</p>}
       <label>
         Cost name
         <input
@@ -54,22 +64,27 @@ function CostForm({
           ))}
         </select>
       </label>
+      <label>Breakup
+        <input name="sub_head" defaultValue={record?.sub_head || record?.label} list="cps-breakups" placeholder="Choose or type a cost breakup" maxLength={120}/>
+      </label>
       <label>
-        Amount ₹
+        {employee ? 'Amount from People CTC' : 'Amount ₹'}
         <input
           name="amount"
           required
           type="number"
           min="0"
           step="0.01"
-          defaultValue={record?.amount}
+          key={employee}
+          defaultValue={employee ? 0 : record?.amount}
+          readOnly={Boolean(employee)}
         />
       </label>
       <label>
         Frequency
         <select name="frequency" defaultValue={record?.frequency || "monthly"}>
           <option value="monthly">Monthly, calendar-day accrual</option>
-          <option value="once">One-off on start date</option>
+          {!employee && <option value="once">One-off on start date</option>}
         </select>
       </label>
       <label>
@@ -78,18 +93,18 @@ function CostForm({
           name="station_codes"
           required
           defaultValue={record?.station_codes.join(", ")}
-          list="cps-location-codes"
+          list={record ? `cps-locations-${record.id}` : "cps-location-codes"}
           placeholder="KOZA, KGQA"
         />
-        <datalist id={record ? undefined : "cps-location-codes"}>
-          {!record && stations.map((s) => <option key={s}>{s}</option>)}
+        <datalist id={record ? `cps-locations-${record.id}` : "cps-location-codes"}>
+          {stations.map((s) => <option key={s}>{s}</option>)}
         </datalist>
       </label>
       <label>
         Shared-cost allocation
         <select name="allocation" defaultValue={record?.allocation || "equal"}>
           <option value="equal">Equal share</option>
-          <option value="delivery_share">Month delivery share</option>
+          <option value="delivery_share">Daily delivered-volume share</option>
         </select>
       </label>
       <label>
@@ -141,7 +156,9 @@ export function CpsInputs({
   today,
   canAdd,
   canEdit,
+  employees,
 }: {
+  employees: {id:string;label:string}[];
   costs: CpsCostInput[];
   targets: {
     id: string;
@@ -160,39 +177,35 @@ export function CpsInputs({
   const [busy, setBusy] = useState(false);
   return (
     <div className="cps-inputs">
+      <datalist id="cps-breakups">{['Company vehicle rent','Dock van rent','Van fuel','Van driver pay','Van maintenance','Vehicle insurance / permits','DA salary','DA variable pay','DA fuel','Facility rent','Electricity','Internet','Repairs and supplies','Cluster manager CTC','AOM CTC','Telecaller CTC','Shared overhead'].map(label=><option key={label}>{label}</option>)}</datalist>
       <section className="panel">
         <div className="panel-head">
           <h2>Cost sources</h2>
         </div>
         <div className="panel-body">
           <p>
-            Shipment payouts use the portal’s payment mappings. Fuel imports,
+            DA costs recalculate from DropX workforce identities, current effective rate cards and daily shipment counts. Fuel imports,
             Cashbook and approved Adhoc requests update CPS automatically.
             Station rent and maintenance accrue from Finance Rent Master.
           </p>
           <p>
-            Add only costs not already recorded in these sources: fixed UTR
-            staff, van rent, shared manager pay or other adjustments. Monthly
-            amounts use actual calendar days. Shared manager costs can use
-            monthly delivery share.
+            People CTC supplies station staff and shared manager costs automatically. Add van rent, dock van rent, maintenance, electricity and other costs here when they are not recorded elsewhere. Choose a People employee to customize their cost head and station allocation. Monthly costs use calendar days.
           </p>
           <p>
             Changing the location filter does not change a shared cost’s
-            allocation. Payment setup gaps remain visible until the shipment
-            payout source is corrected. No legacy Google Sheet data is silently
-            copied over current records.
+            allocation. Shared costs use that day’s deliveries across the full allocation group. Zero-volume groups split equally. Corrected workforce mappings immediately refresh CPS.
           </p>
         </div>
       </section>
       <section className="panel">
         <div className="panel-head">
-          <h2>Fixed costs and adjustments</h2>
+          <h2>Cost register and People allocations</h2>
         </div>
         <div className="panel-body">
           {canAdd && (
             <details className="cps-input-detail">
               <summary>Add cost</summary>
-              <CostForm stations={stations} today={today} />
+              <CostForm stations={stations} today={today} employees={employees} />
             </details>
           )}
           {costs.map((c) => (
@@ -207,7 +220,7 @@ export function CpsInputs({
                 </small>
               </summary>
               {canEdit ? (
-                <CostForm record={c} stations={stations} today={today} />
+                <CostForm record={c} stations={stations} today={today} employees={employees} />
               ) : (
                 <p>
                   Read-only. Contact the CPS input owner to change this cost.
@@ -217,8 +230,7 @@ export function CpsInputs({
           ))}
           {!costs.length && (
             <p>
-              No fixed cost inputs within this scope. Configure staff costs
-              before treating CPS as complete.
+              No manual costs or People allocation overrides in this scope. Automatic People CTC, workforce payouts and Finance rent are included when configured.
             </p>
           )}
         </div>

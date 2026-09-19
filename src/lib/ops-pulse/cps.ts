@@ -6,10 +6,10 @@ export const cpsViews = {
   stations: { label: "Stations", permission: "cps_stations" },
   breakup: { label: "Cost breakup", permission: "cps_cost_breakup" },
   shipments: { label: "Shipments", permission: "cps_shipments" },
-  associates: { label: "Associates", permission: "cps_associates" },
-  unmapped: { label: "Unmapped IDs", permission: "cps_unmapped" },
+  associates: { label: "DA productivity", permission: "cps_associates" },
+  unmapped: { label: "Needs attention", permission: "cps_unmapped" },
   reports: { label: "Reports", permission: "cps_reports" },
-  inputs: { label: "Inputs", permission: "cps_inputs" },
+  inputs: { label: "Cost setup", permission: "cps_inputs" },
 } as const;
 export type CpsView = keyof typeof cpsViews;
 export type CpsParams = {
@@ -22,7 +22,7 @@ export type CpsParams = {
   region?: string;
   page?: string;
 };
-export const cpsHeads = ["DA", "UTR", "Van", "Other"] as const;
+export const cpsHeads = ["DA", "UTR", "Van", "Rent", "Overhead", "Other"] as const;
 export type CpsHead = (typeof cpsHeads)[number];
 export function cpsView(value?: string): CpsView {
   return value && Object.hasOwn(cpsViews, value)
@@ -98,6 +98,12 @@ export type CpsDay = {
   van: number;
   other: number;
   rent: number;
+  overhead?: number;
+  da_salary?: number;
+  da_variable?: number;
+  da_fuel?: number;
+  exposed_deliveries?: number;
+  cost_gaps?: number;
   total: number;
   target: number | null;
   shipment_present: boolean;
@@ -116,6 +122,9 @@ export type CpsSnapshot = {
   daily: CpsDay[];
   breakup: CpsLine[];
   generated_at: string;
+  associates?: import("./cps-engine").LiveAssociate[];
+  gaps?: import("./cps-engine").CpsGap[];
+  people?: import("./cps-engine").CpsPersonCost[];
 };
 export function ratio(cost: number, deliveries: number) {
   return deliveries > 0 ? cost / deliveries : null;
@@ -136,6 +145,12 @@ export function summarizeCps(rows: CpsDay[]) {
       van: a.van + Number(r.van),
       other: a.other + Number(r.other),
       rent: a.rent + Number(r.rent),
+      overhead: a.overhead + Number(r.overhead ?? 0),
+      salary: a.salary + Number(r.da_salary ?? 0),
+      variable: a.variable + Number(r.da_variable ?? 0),
+      fuel: a.fuel + Number(r.da_fuel ?? 0),
+      exposedDeliveries: a.exposedDeliveries + Number(r.exposed_deliveries ?? 0),
+      costGaps: a.costGaps + Number(r.cost_gaps ?? 0),
       total: a.total + Number(r.total),
       unmapped: a.unmapped + Number(r.unmapped),
       unpaid: a.unpaid + Number(r.unpaid),
@@ -161,6 +176,7 @@ export function summarizeCps(rows: CpsDay[]) {
       van: 0,
       other: 0,
       rent: 0,
+      overhead: 0, salary: 0, variable: 0, fuel: 0, exposedDeliveries: 0, costGaps: 0,
       total: 0,
       unmapped: 0,
       unpaid: 0,
@@ -176,7 +192,7 @@ export function summarizeCps(rows: CpsDay[]) {
       ? ratio(totals.targetCost, totals.deliveries)
       : null;
   const provisional = Boolean(
-    totals.missingDays || totals.unmapped || totals.unpaid || totals.missingUtr,
+    totals.missingDays || totals.unmapped || totals.unpaid || totals.missingUtr || totals.costGaps,
   );
   return {
     ...totals,
@@ -207,13 +223,16 @@ export function cpsIssues(row: ReturnType<typeof summarizeCps>) {
     row.missingDays ? `${row.missingDays} station-days missing shipments` : "",
     row.unmapped ? `${row.unmapped} associate-days missing payment setup` : "",
     row.unpaid ? `${row.unpaid} configured associate-days with no payout` : "",
-    row.missingUtr ? "Fixed staff cost not configured for all days" : "",
+    row.missingUtr ? "People CTC / station staff coverage needs review" : "",
+    row.costGaps ? "Workforce or cost allocation issues need attention" : "",
     row.target == null ? "Target not configured for all deliveries" : "",
   ].filter(Boolean);
 }
 export type CpsCostInput = {
   id: string;
   label: string;
+  sub_head?: string | null;
+  employee_id?: string | null;
   head: CpsHead;
   station_codes: string[];
   amount: number;
@@ -270,8 +289,15 @@ export function validateCostInput(
     throw Error("One-off costs use the effective-from date only.");
   const notes = String(raw.notes ?? "").trim();
   if (notes.length > 500) throw Error("Notes must be 500 characters or fewer.");
+  const employee = String(raw.employee_id ?? "").trim();
+  if (employee && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(employee)) throw Error("Choose a valid People employee.");
+  if (employee && raw.frequency !== "monthly") throw Error("People CTC accrues monthly.");
+  const sub = String(raw.sub_head ?? "").trim();
+  if (sub.length > 120) throw Error("Cost breakup name must be 120 characters or fewer.");
   return {
     label,
+    sub_head: sub || label,
+    employee_id: employee || null,
     head: raw.head as CpsHead,
     station_codes: stations,
     amount: Number(amountText),

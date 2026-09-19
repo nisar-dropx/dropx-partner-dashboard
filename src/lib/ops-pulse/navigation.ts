@@ -62,18 +62,12 @@ const cps: NavItem = {
   icon: "C",
   children: [
     { code: "cps_overview", label: "Overview", href: "/cps" },
-    { code: "cps_daily", label: "Daily CPS", href: "/cps?view=daily" },
-    { code: "cps_monthly", label: "Monthly CPS", href: "/cps?view=monthly" },
-    { code: "cps_monthly", label: "MTD CPS", href: "/cps?view=mtd" },
+    { code: "cps_associates", label: "DA productivity", href: "/cps?view=associates" },
+    { code: "cps_unmapped", label: "Needs attention", href: "/cps?view=unmapped" },
     { code: "cps_cost_breakup", label: "Cost breakup", href: "/cps?view=breakup" },
-    { code: "cps_overview", label: "Adhoc Van & DA", href: "/cps/adhoc-activity" },
-    { code: "cps_stations", label: "Stations", href: "/cps?view=stations" },
-    { code: "cps_shipments", label: "Shipments", href: "/cps?view=shipments" },
-    { code: "cps_associates", label: "Associates", href: "/cps?view=associates" },
-    { code: "cps_reports", label: "Reports", href: "/cps?view=reports" },
-    { code: "imports", label: "Imports", href: "https://dashboard.dropxlogistics.com/imports" },
-    { code: "cps_unmapped", label: "Unmapped IDs", href: "/cps?view=unmapped" },
-    { code: "cps_inputs", label: "Inputs", href: "/cps?view=inputs" }
+    { code: "cps_inputs", label: "Cost setup", href: "/cps?view=inputs" },
+    { code: "cps_overview", label: "Adhoc Van & DA", href: "/cps/adhoc-activity" }
+
   ]
 };
 
