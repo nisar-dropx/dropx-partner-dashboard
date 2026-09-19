@@ -28,6 +28,7 @@ export type ReviewStatusReview = {
   started_at: string;
   closed_at: string | null;
   updated_at: string;
+  reviewer_edit_reopened?: boolean;
 };
 
 export type ReviewStatusStep = {
@@ -36,6 +37,8 @@ export type ReviewStatusStep = {
   step_order: number;
   reviewer_name: string;
   reviewer_role: string;
+  reviewer_user_id?: string | null;
+  proxy_reviewer_user_id?: string | null;
   status: "pending" | "completed" | "skipped";
   feedback: string | null;
   completed_at: string | null;

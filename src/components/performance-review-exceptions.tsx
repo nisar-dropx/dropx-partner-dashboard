@@ -1,9 +1,30 @@
 "use client";
 
 import { useState } from "react";
-import type { PerformanceReview, PerformanceReviewStep } from "@/lib/ops-pulse/performance-review";
 import { bypassPerformanceReviewLevel, closeReopenedPerformanceReviewAccess, proxyPerformanceReview, reopenPerformanceReviewForOriginalReviewer, undoBypassPerformanceReviewLevel } from "@/app/ops-pulse/performance/actions";
 import { ReviewActionForm } from "@/components/review-action-form";
+
+/** Only the fields this component actually reads — lets both the Review Desk's full
+ * PerformanceReview/PerformanceReviewStep and Control Tower's lighter ReviewStatusReview/
+ * ReviewStatusStep pass through without reshaping. */
+type ExceptionsReview = {
+  id: string;
+  source_date: string;
+  station_code: string;
+  updated_at: string;
+  status: string;
+  current_step_order: number;
+};
+type ExceptionsStep = {
+  id: string;
+  step_order: number;
+  status: string;
+  reviewer_name: string;
+  reviewer_role: string;
+  proxy_reviewer_user_id?: string | null;
+  bypassed_at?: string | null;
+  bypass_reason?: string | null;
+};
 
 export function PerformanceReviewExceptions({
   review,
@@ -19,8 +40,8 @@ export function PerformanceReviewExceptions({
   reviewerEditReopened,
   firstReviewerName,
 }: {
-  review: PerformanceReview | null;
-  steps: PerformanceReviewStep[];
+  review: ExceptionsReview | null;
+  steps: ExceptionsStep[];
   canBypass: boolean;
   canProxy: boolean;
   canAccessBypass: boolean;
@@ -40,7 +61,10 @@ export function PerformanceReviewExceptions({
     (!review ? steps.find((step) => step.status === "pending") : undefined);
   const pending = steps.filter((step) => step.status === "pending");
   const skipped = steps.filter((step) => step.status === "skipped" && step.bypassed_at);
-  if (!canAccessBypass && !canAccessProxy) return null;
+  // Buttons stay visible even without oversight rights — a viewer who can open this review
+  // should be able to discover Proxy/Skip exist and see why they're disabled for them,
+  // rather than the section silently disappearing.
+  const noAccessReason = "You don't have oversight rights for this action — contact your Program Manager or an authorised oversight reviewer.";
 
   const inactiveReason = !hasRoute
     ? "A review manager needs to be assigned in People. Contact HR so this station gets a Cluster Manager → National Head route."
@@ -62,70 +86,83 @@ export function PerformanceReviewExceptions({
   const undoEnabled = Boolean(review && skipped.length && canAccessBypass && canUndoBypass);
 
   const proxyHint =
-    inactiveReason ||
-    (canProxy
-      ? null
-      : review?.status === "closed" && skipped.length
-        ? "Proxy is unavailable while the review is closed after a skip. Use Undo skip below to reopen it."
-        : current?.proxy_reviewer_user_id
-          ? "You are already covering this level as proxy (or another proxy is assigned). Complete it in Review discussion, or Undo skip if a later level was closed by mistake."
-          : !canProxy && canBypass && pending.length && current
-            ? "This is your assigned review level — complete it here, or use Skip if that manager should be bypassed."
-            : hasRoute
-              ? "Proxy is for a higher manager or authorised oversight covering this station."
-              : "Proxy needs a People review route for this station.");
+    !canAccessProxy
+      ? noAccessReason
+      : inactiveReason ||
+        (canProxy
+          ? null
+          : review?.status === "closed" && skipped.length
+            ? "Proxy is unavailable while the review is closed after a skip. Use Undo skip below to reopen it."
+            : current?.proxy_reviewer_user_id
+              ? "You are already covering this level as proxy (or another proxy is assigned). Complete it in Review discussion, or Undo skip if a later level was closed by mistake."
+              : !canProxy && canBypass && pending.length && current
+                ? "This is your assigned review level — complete it here, or use Skip if that manager should be bypassed."
+                : hasRoute
+                  ? "Proxy is for a higher manager or authorised oversight covering this station."
+                  : "Proxy needs a People review route for this station.");
+  const skipHint = !canAccessBypass ? noAccessReason : inactiveReason;
 
   return (
     <section className="review-exceptions" aria-label="Review cover and exceptions">
       <div className="review-exception-buttons">
-        {canAccessProxy ? (
+        <button
+          type="button"
+          className="button secondary"
+          disabled={!canAccessProxy || !proxyEnabled}
+          aria-describedby="review-exception-guidance"
+          title={!canAccessProxy ? noAccessReason : undefined}
+          onClick={() => setMode(mode === "proxy" ? null : "proxy")}
+        >
+          Conduct proxy review
+        </button>
+        <button
+          type="button"
+          className="button secondary"
+          disabled={!canAccessBypass || !skipEnabled}
+          aria-describedby="review-exception-guidance"
+          title={!canAccessBypass ? noAccessReason : undefined}
+          onClick={() => setMode(mode === "skip" ? null : "skip")}
+        >
+          Skip a level…
+        </button>
+        {skipped.length ? (
           <button
             type="button"
             className="button secondary"
-            disabled={!proxyEnabled}
-            aria-describedby={!proxyEnabled ? "review-exception-guidance" : undefined}
-            onClick={() => setMode(mode === "proxy" ? null : "proxy")}
+            disabled={!canAccessBypass || !undoEnabled}
+            title={!canAccessBypass ? noAccessReason : undefined}
+            onClick={() => setMode(mode === "undo" ? null : "undo")}
           >
-            Conduct proxy review
-          </button>
-        ) : null}
-        {canAccessBypass ? (
-          <button
-            type="button"
-            className="button secondary"
-            disabled={!skipEnabled}
-            aria-describedby={inactiveReason ? "review-exception-guidance" : undefined}
-            onClick={() => setMode(mode === "skip" ? null : "skip")}
-          >
-            Skip a level…
-          </button>
-        ) : null}
-        {canAccessBypass && skipped.length ? (
-          <button type="button" className="button secondary" disabled={!undoEnabled} onClick={() => setMode(mode === "undo" ? null : "undo")}>
             Undo skip…
           </button>
         ) : null}
-        {canAccessBypass && review ? (
-          <ReviewActionForm
-            key={reviewerEditReopened ? "close-reopen" : "reopen"}
-            action={reviewerEditReopened ? closeReopenedPerformanceReviewAccess : reopenPerformanceReviewForOriginalReviewer}
-            className="review-reopen-inline-form"
-          >
-            <input type="hidden" name="review_id" value={review.id} />
-            <input type="hidden" name="source_date" value={review.source_date} />
-            <input type="hidden" name="station_code" value={review.station_code} />
-            <input type="hidden" name="review_version" value={review.updated_at} />
-            <button type="submit" className="button secondary">
-              {reviewerEditReopened
-                ? "Revoke reopened edit access"
-                : `Give edit access back to ${firstReviewerName || "CM/AOM"}`}
+        {review ? (
+          canAccessBypass ? (
+            <ReviewActionForm
+              key={reviewerEditReopened ? "close-reopen" : "reopen"}
+              action={reviewerEditReopened ? closeReopenedPerformanceReviewAccess : reopenPerformanceReviewForOriginalReviewer}
+              className="review-reopen-inline-form"
+            >
+              <input type="hidden" name="review_id" value={review.id} />
+              <input type="hidden" name="source_date" value={review.source_date} />
+              <input type="hidden" name="station_code" value={review.station_code} />
+              <input type="hidden" name="review_version" value={review.updated_at} />
+              <button type="submit" className="button secondary">
+                {reviewerEditReopened
+                  ? "Revoke reopened edit access"
+                  : `Give edit access back to ${firstReviewerName || "CM/AOM"}`}
+              </button>
+            </ReviewActionForm>
+          ) : (
+            <button type="button" className="button secondary" disabled title={noAccessReason}>
+              {reviewerEditReopened ? "Revoke reopened edit access" : `Give edit access back to ${firstReviewerName || "CM/AOM"}`}
             </button>
-          </ReviewActionForm>
+          )
         ) : null}
       </div>
-      {inactiveReason || (!proxyEnabled && canAccessProxy) || (review?.status === "closed" && skipped.length) ? (
+      {inactiveReason || skipHint || (!proxyEnabled && canAccessProxy) || (review?.status === "closed" && skipped.length) || !canAccessProxy || !canAccessBypass ? (
         <p id="review-exception-guidance" className="review-exception-guidance">
-          {inactiveReason || proxyHint}
+          {proxyHint || skipHint || inactiveReason}
           {!review && canStart && hasRoute ? (
             <>
               {" "}

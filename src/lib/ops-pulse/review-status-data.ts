@@ -12,7 +12,7 @@ async function loadReviews(companyId: string, stationCodes: string[], from: stri
   const pageSize = 1000;
   for (let offset = 0; ; offset += pageSize) {
     const result = await supabaseAdmin!.from("ops_performance_reviews")
-      .select("id,source_date,station_id,station_code,source_type,status,current_step_order,review_summary,started_at,closed_at,updated_at")
+      .select("id,source_date,station_id,station_code,source_type,status,current_step_order,review_summary,started_at,closed_at,updated_at,reviewer_edit_reopened")
       .eq("company_id", companyId).eq("review_type", "daily_operations").in("station_code", stationCodes)
       .gte("source_date", from).lte("source_date", to)
       .order("source_date", { ascending: false }).order("station_code").range(offset, offset + pageSize - 1);
@@ -36,7 +36,7 @@ export async function loadReviewStatusDataset(companyId: string, stationCodes: s
   const dataset = { ...empty, reviews: reviewResult.rows };
   for (const reviewIds of chunks(reviewResult.rows.map((review) => review.id))) {
     const [steps, items, updates, followups] = await Promise.all([
-      supabaseAdmin.from("ops_performance_review_steps").select("id,review_id,step_order,reviewer_name,reviewer_role,status,feedback,completed_at,bypass_reason,bypassed_at,bypassed_by_name,proxy_reviewer_name,proxy_reason,proxy_started_at").eq("company_id", companyId).in("review_id", reviewIds).order("step_order"),
+      supabaseAdmin.from("ops_performance_review_steps").select("id,review_id,step_order,reviewer_user_id,reviewer_name,reviewer_role,proxy_reviewer_user_id,status,feedback,completed_at,bypass_reason,bypassed_at,bypassed_by_name,proxy_reviewer_name,proxy_reason,proxy_started_at").eq("company_id", companyId).in("review_id", reviewIds).order("step_order"),
       supabaseAdmin.from("ops_performance_review_items").select("review_id,metric_label,status,root_cause,corrective_action,action_owner,due_date").eq("company_id", companyId).in("review_id", reviewIds),
       supabaseAdmin.from("ops_performance_review_updates").select("review_id,update_type,note,author_name,author_role,stage_label,created_at").eq("company_id", companyId).in("review_id", reviewIds).order("created_at", { ascending: false }),
       supabaseAdmin.from("ops_performance_followups").select("review_id,action_number,title,owner_label,due_date,status").eq("company_id", companyId).in("review_id", reviewIds).order("action_number")

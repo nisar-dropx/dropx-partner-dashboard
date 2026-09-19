@@ -2,11 +2,13 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PerformanceWorkspaceTabs } from "@/components/performance-workspace-tabs";
+import { PerformanceReviewExceptions } from "@/components/performance-review-exceptions";
 import { hasPermission, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { resolveOperatingContext } from "@/lib/ops-pulse/operating-context";
+import { getReviewAccess, isScorecardImported } from "@/lib/ops-pulse/review-access";
 import {
   buildReviewStatusRows,
   reviewStatusDateRange,
@@ -15,6 +17,7 @@ import {
   type ReviewStatusRow
 } from "@/lib/ops-pulse/review-status";
 import { loadReviewStatusDataset } from "@/lib/ops-pulse/review-status-data";
+import "../review-desk.css";
 import "./review-status.css";
 
 export const dynamic = "force-dynamic";
@@ -99,10 +102,13 @@ function StepStatus({ row }: { row: ReviewStatusRow }) {
   </div>;
 }
 
-function ReviewStatusDetail({ row }: { row: ReviewStatusRow }) {
+type RowAccess = Awaited<ReturnType<typeof getReviewAccess>>;
+
+function ReviewStatusDetail({ row, access }: { row: ReviewStatusRow; access: RowAccess | null }) {
   const openItems = row.items.filter((item) => item.status !== "done");
   const openFollowups = row.followups.filter((item) => item.status !== "done");
   const discussion = row.updates.filter((update) => update.update_type !== "action").slice(0, 4);
+  const routeLabel = [row.clusterManager, row.aom, row.nationalHead].filter(Boolean).join(" → ");
   return <div className="review-status-detail">
     <div className="review-status-detail-head">
       <div><span>Started</span><strong>{formatDashboardDateTime(row.review?.started_at, "Not started")}</strong></div>
@@ -113,6 +119,22 @@ function ReviewStatusDetail({ row }: { row: ReviewStatusRow }) {
       <Link className="button secondary compact" href={`/performance?view=reviews&date=${row.date}&review=${encodeURIComponent(row.stationCode)}`}>Open review</Link>
     </div>
     <StepStatus row={row} />
+    {access ? (
+      <PerformanceReviewExceptions
+        review={row.review}
+        steps={row.steps}
+        canBypass={access.canBypass}
+        canProxy={access.canProxy}
+        canAccessBypass={access.canAccessBypass}
+        canAccessProxy={access.canAccessProxy}
+        canUndoBypass={access.canUndoBypass}
+        canStart={false}
+        hasRoute={Boolean(row.review || routeLabel)}
+        routeLabel={routeLabel}
+        reviewerEditReopened={access.reviewerEditReopened}
+        firstReviewerName={row.steps[0]?.reviewer_name ?? row.clusterManager ?? row.aom ?? null}
+      />
+    ) : null}
     <div className="review-status-notes">
       <section>
         <span>Review takeaway</span>
@@ -174,6 +196,16 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
   const mtdFrom = latestDate.slice(0, 8) + "01";
   const canViewReviews = hasPermission(authorization, "performance_review", "access");
   const canManageAccess = hasPermission(authorization, "users", "access");
+  // Control Tower gets the same Proxy/Skip/Undo controls as the Review Desk — computed per
+  // visible row so oversight can act directly here instead of opening each review. Only
+  // rows the viewer can actually see the review for get real capabilities (access=null
+  // below skips rendering the block entirely); anyone who CAN see the review still sees
+  // the buttons even without oversight rights, disabled with an explanation.
+  const rowAccess = canViewReviews ? new Map(await Promise.all(pageRows.map(async (row) => {
+    const scorecardImported = row.review ? await isScorecardImported(companyId, row.stationCode, row.date) : false;
+    const access = await getReviewAccess(authorization, row.stationId, row.review, row.steps, { inScope: true, scorecardImported });
+    return [row.key, access] as const;
+  }))) : new Map<string, Awaited<ReturnType<typeof getReviewAccess>>>();
 
   return <AppShell active="Review Status" pageCode="performance_review_status">
     <main className="ops-command-center performance-workspace review-status-workspace">
@@ -233,7 +265,7 @@ export default async function PerformanceReviewStatusPage({ searchParams }: { se
               <span data-label="Dependency"><strong>{row.currentDependency}</strong><small>{row.lastActivityAt ? formatDashboardDateTime(row.lastActivityAt) : "No activity"}</small></span>
               <i aria-hidden="true">⌄</i>
             </summary>
-            <ReviewStatusDetail row={row} />
+            <ReviewStatusDetail row={row} access={rowAccess.get(row.key) ?? null} />
           </details>) : <div className="review-status-empty">No station reviews match these filters.</div>}
         </div>
         {totalPages > 1 ? <footer className="review-status-pagination">

@@ -11,6 +11,7 @@ import { hawkeyeMetricDefinitions, hawkeyeTargetKey } from "@/lib/ops-pulse/hawk
 import { parseStationReviewTargets } from "@/lib/ops-pulse/station-review-targets";
 import { stationTargetCode } from "@/lib/ops-pulse/station-review-targets-data";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
+import { addReviewOversightRole, removeReviewOversightRole, updateReviewOversightRole, type ReviewOversightTier } from "@/lib/ops-pulse/review-oversight-roles";
 
 function targetResult(error:string|null) {
   revalidatePath("/master/performance-targets");
@@ -140,6 +141,51 @@ export async function updatePerformanceReviewCadence(formData: FormData) {
   revalidatePath("/master/performance-targets");
   revalidatePath("/ops-pulse/performance");
   redirect(`/master/performance-targets?view=reviews&${result.error ? `error=${encodeURIComponent(result.error.message)}` : "saved=1"}`);
+}
+
+function oversightTier(value: FormDataEntryValue | null): ReviewOversightTier {
+  return value === "override" ? "override" : "full";
+}
+
+export async function addPerformanceReviewOversightRole(formData: FormData) {
+  const authorization = await requirePagePermission("performance_master", "add");
+  const companyId = requireCompanyId(authorization);
+  const error = await addReviewOversightRole(companyId, authorization.userId, {
+    label: String(formData.get("label") ?? ""),
+    tier: oversightTier(formData.get("tier")),
+    matchText: String(formData.get("match_text") ?? "")
+  });
+  revalidatePath("/master/performance-targets");
+  revalidatePath("/ops-pulse/performance");
+  revalidatePath("/performance");
+  revalidatePath("/performance/review-status");
+  redirect(`/master/performance-targets?view=reviews&${error ? `error=${encodeURIComponent(error)}` : "oversight_saved=1"}`);
+}
+
+export async function updatePerformanceReviewOversightRole(formData: FormData) {
+  const authorization = await requirePagePermission("performance_master", "edit");
+  const companyId = requireCompanyId(authorization);
+  const error = await updateReviewOversightRole(companyId, authorization.userId, String(formData.get("id") ?? ""), {
+    label: String(formData.get("label") ?? ""),
+    tier: oversightTier(formData.get("tier")),
+    isActive: formData.get("is_active") === "true"
+  });
+  revalidatePath("/master/performance-targets");
+  revalidatePath("/ops-pulse/performance");
+  revalidatePath("/performance");
+  revalidatePath("/performance/review-status");
+  redirect(`/master/performance-targets?view=reviews&${error ? `error=${encodeURIComponent(error)}` : "oversight_saved=1"}`);
+}
+
+export async function removePerformanceReviewOversightRole(formData: FormData) {
+  const authorization = await requirePagePermission("performance_master", "edit");
+  const companyId = requireCompanyId(authorization);
+  const error = await removeReviewOversightRole(companyId, String(formData.get("id") ?? ""));
+  revalidatePath("/master/performance-targets");
+  revalidatePath("/ops-pulse/performance");
+  revalidatePath("/performance");
+  revalidatePath("/performance/review-status");
+  redirect(`/master/performance-targets?view=reviews&${error ? `error=${encodeURIComponent(error)}` : "oversight_deleted=1"}`);
 }
 
 export async function updatePerformanceStationOpeningWindow(formData: FormData) {

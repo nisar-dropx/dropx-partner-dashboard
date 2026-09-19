@@ -4,6 +4,7 @@ import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { ACTIVE_DAILY_PERFORMANCE_SOURCE } from "@/lib/ops-pulse/performance-source-policy";
 import { reviewCapabilities, reviewRole, reviewRoutingIssue } from "@/lib/ops-pulse/review-policy";
+import { loadReviewOversightRoles, matchesOversightTier } from "@/lib/ops-pulse/review-oversight-roles";
 
 /** Has the Performance Scorecard (Hawkeye daily) been imported for this station/date? Reviews and RCA are blocked until it has. */
 export async function isScorecardImported(companyId: string, stationCode: string, sourceDate: string) {
@@ -42,10 +43,16 @@ export const loadReviewActor = cache(async (companyId: string, userId: string, r
   }
   // People is authoritative for named people; station logins use their existing portal role.
   const roleLabels = labels.length ? labels : [`${roleCode ?? ""} ${roleName ?? ""}`];
+  const oversightRoles = (await loadReviewOversightRoles(companyId)).rows;
+  // Portal role code isn't a People designation, but it still needs to match the configured
+  // oversight list the same way FSD/TECH portal logins matched the old hardcoded check.
+  const matchLabels = [...roleLabels, `${roleCode ?? ""} ${roleName ?? ""}`];
   return {
-    programManager: roleLabels.some((label) => reviewRole(label) === "program"),
-    nationalHead: roleLabels.some((label) => reviewRole(label) === "national"),
-    tech: roleLabels.some((label) => reviewRole(label) === "tech") || ["TECH", "OPERATIONS_TECH"].includes(roleCode ?? ""),
+    // Master-configured "full" oversight tier — replaces the old Program Manager-only check.
+    programManager: matchesOversightTier(oversightRoles, matchLabels, "full"),
+    // Master-configured "override" tier (also true for anyone in the "full" tier).
+    nationalHead: matchesOversightTier(oversightRoles, matchLabels, "override"),
+    tech: matchesOversightTier(oversightRoles, matchLabels, "override") || ["TECH", "OPERATIONS_TECH"].includes(roleCode ?? ""),
     stationUser: roleLabels.some((label) => reviewRole(label) === "station"),
     label: displayLabel || roleName || "Reviewer"
   };
@@ -55,7 +62,7 @@ export async function getReviewAccess(
   authorization: AuthorizationContext,
   stationId: string,
   review: { status: string; current_step_order: number; reviewer_edit_reopened?: boolean } | null,
-  steps: { step_order: number; reviewer_user_id: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[],
+  steps: { step_order: number; reviewer_user_id?: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[],
   options?: { inScope?: boolean; scorecardImported?: boolean }
 ) {
   const actor = await loadReviewActor(authorization.companyId!, authorization.userId, authorization.roleCode, authorization.roleName);
@@ -68,7 +75,9 @@ export async function getReviewAccess(
   const hasClusterFilterAccess = hasPermission(authorization, "performance_review_cluster_filter", "access");
   const capabilities = reviewCapabilities({
     userId: authorization.userId,
-    owner: isCompanyOwner(authorization) || /managing[ _]partner/i.test(`${authorization.roleCode} ${authorization.roleName}`),
+    // Managing Partner is now just another row in the Master-configured oversight list
+    // (actor.programManager) instead of a hardcoded regex here.
+    owner: isCompanyOwner(authorization),
     programManager: actor.programManager,
     nationalHead: actor.nationalHead,
     tech: actor.tech,

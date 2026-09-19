@@ -45,13 +45,18 @@ test('closed after skip offers undo and explains why proxy is disabled',()=>{
   assert.match(html,/Proxy is unavailable while the review is closed after a skip/);
   assert.equal((html.match(/disabled=""/g)||[]).length,2);
 });
-test('proxy-only editors never see undo even when a level was skipped',()=>{
+test('proxy-only editors see skip and undo, disabled, with an oversight-rights explanation',()=>{
   const skipped=[{id:'nh',step_order:2,status:'skipped',reviewer_name:'Akhil',reviewer_role:'National Head',bypassed_at:'2026-09-04',bypass_reason:'proxy'}];
   const html=render({...base,canAccessBypass:false,canBypass:false,canUndoBypass:false,canProxy:true,steps:skipped});
   assert.match(html,/Conduct proxy review/);
-  assert.ok(!html.includes('Undo skip'));
-  assert.ok(!html.includes('Skip a level'));
+  assert.match(html,/Skip a level/);
+  assert.match(html,/Undo skip/);
+  assert.match(html,/have oversight rights/);
 });
-test('read-only station accounts never see exception tools',()=>{
-  assert.equal(render({...base,canAccessProxy:false,canAccessBypass:false,canUndoBypass:false,canProxy:false,canBypass:false}),'');
+test('viewers with no oversight access still see both tools, disabled, with an explanation instead of nothing',()=>{
+  const html=render({...base,canAccessProxy:false,canAccessBypass:false,canUndoBypass:false,canProxy:false,canBypass:false});
+  assert.match(html,/Conduct proxy review/);
+  assert.match(html,/Skip a level/);
+  assert.match(html,/have oversight rights/);
+  assert.ok(!html.includes('<form'));
 });
