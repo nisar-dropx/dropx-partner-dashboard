@@ -16,7 +16,7 @@ function flash() {
   try { return raw ? JSON.parse(raw) as { error?: string; notice?: string } : {}; } catch { return {}; }
 }
 
-export default async function ProviderFirstMappingPage() {
+export default async function ProviderFirstMappingPage({searchParams}: {searchParams?: {q?:string;station?:string}}) {
   const authorization = await requirePagePermission("provider_mapping", "access");
   const companyId = requireCompanyId(authorization);
   const permission = authorization.permissions.provider_mapping;
@@ -31,7 +31,7 @@ export default async function ProviderFirstMappingPage() {
   const [stationsResult, workersResult, providerResult, mappingsResult, methodsResult] = await Promise.all([
     supabaseAdmin.from("stations").select("id, station_code, station_name, provider_id").eq("company_id", companyId).eq("is_active", true).order("station_code"),
     supabaseAdmin.from("workforce").select("id, dropx_id, full_name, location_id, date_of_join, onboarding_status").eq("company_id", companyId).is("deleted_at", null).order("dropx_id"),
-    supabaseAdmin.from("cps_shipment_daily").select("provider_employee_id, provider_employee_name, station_code, work_date").eq("company_id", companyId).order("work_date", { ascending: false }).limit(50000),
+    supabaseAdmin.rpc("ops_cps_mapping_members", {p_company:companyId,p_station_ids:allLocations?null:authorization.locationScopeIds}),
     supabaseAdmin.from("field_executive_provider_mappings").select("id, workforce_id, provider_member_id, station_id, provider_id, payment_method_id, payment_values, effective_from, effective_to, status").eq("company_id", companyId).neq("status", "cancelled").order("effective_from", { ascending: false }).order("created_at", { ascending: false }),
     supabaseAdmin.from("payment_methods").select("id, code, name, payment_method_components(component_code, component_type, label, sort_order)").eq("company_id", companyId).eq("is_active", true).order("code")
   ]);
@@ -51,8 +51,8 @@ export default async function ProviderFirstMappingPage() {
   for (const provider of providerResult.data ?? []) {
     const id = String(provider.provider_employee_id ?? "").trim();
     const station = stationByCode.get(String(provider.station_code ?? "").trim());
-    if (!id || !station || latestMembers.has(id)) continue;
-    latestMembers.set(id, { id, name: String(provider.provider_employee_name ?? "").trim() || "Unnamed provider member", stationId: station.id, stationLabel: station.station_name && station.station_name !== station.station_code ? `${station.station_code} - ${station.station_name}` : station.station_code, providerId: station.provider_id ?? "" });
+    if (!id || !station || latestMembers.has(`${station.id}|${id}`)) continue;
+    latestMembers.set(`${station.id}|${id}`, { id, name: String(provider.provider_employee_name ?? "").trim() || "Unnamed provider member", stationId: station.id, stationLabel: station.station_name && station.station_name !== station.station_code ? `${station.station_code} - ${station.station_name}` : station.station_code, providerId: station.provider_id ?? "" });
   }
   const mappings: ProviderFirstMappingRow[] = Array.from(latestMembers.values()).map((member) => {
     const link = mappingByMember.get(member.id);
@@ -66,6 +66,6 @@ export default async function ProviderFirstMappingPage() {
     <nav className="performance-tabs" aria-label="ID mapping views"><Link href="/provider-mapping">Existing worksheet</Link><Link className="active" href="/provider-mapping/provider-first">Provider member first</Link></nav>
     {loadError ? <section className="panel message-panel error"><div className="panel-body"><strong>Action required</strong><p className="subtle">{loadError.message}</p></div></section> : null}
     {notice.error || notice.notice ? <section className={`panel message-panel ${notice.error ? "error" : "success"}`}><div className="panel-body"><strong>{notice.error ? "Action required" : "Completed"}</strong><p className="subtle">{notice.error ?? notice.notice}</p></div></section> : null}
-    {!loadError ? <ProviderFirstMappingWorksheet canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
+    {!loadError ? <ProviderFirstMappingWorksheet initialQuery={searchParams?.q} canEdit={canEdit} mappings={mappings} paymentMethods={paymentMethods} workers={workers} /> : null}
   </AppShell>;
 }

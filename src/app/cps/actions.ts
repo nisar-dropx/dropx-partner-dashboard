@@ -19,6 +19,11 @@ export async function saveCpsCost(form: FormData) {
       { ...raw, is_active: form.get("is_active") !== "false" },
       codes,
     );
+    if (input.employee_id) {
+      const employee = await supabaseAdmin.from("employees").select("id,location_id").eq("company_id",scope.companyId).eq("id",input.employee_id).maybeSingle();
+      if (employee.error || !employee.data || (!auth.hasAllLocationAccess && !auth.locationScopeIds.includes(employee.data.location_id))) throw Error("Choose an employee within your People location access.");
+      input.amount = 0; // Never accept a client-supplied replacement for the People CTC.
+    }
     let query;
     if (id) {
       if (!/^[0-9a-f-]{36}$/i.test(id)) throw Error("Invalid cost record.");

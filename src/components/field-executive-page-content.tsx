@@ -1,3 +1,4 @@
+import { WorkforceCostReadiness } from "@/components/workforce-cost-readiness";
 import type { ReactNode } from "react";
 import { bulkImportFieldExecutives, createFieldExecutive, reviewFieldExecutiveProfile, updateFieldExecutive } from "@/app/field-executive/actions";
 import { AppShell } from "@/components/app-shell";
@@ -979,7 +980,7 @@ export async function FieldExecutivePageContent({
         </section>
       ) : null}
 
-      {showWorkforceSummary ? <WorkforceRegisterSummary rows={executives} /> : null}
+      {showWorkforceSummary ? <><WorkforceRegisterSummary rows={executives} /><WorkforceCostReadiness auth={authorization}/></> : null}
 
       {permission.canAdd ? (
         <section className="panel">

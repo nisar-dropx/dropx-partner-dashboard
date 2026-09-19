@@ -39,7 +39,8 @@ const context = {
 function dataModule(db, locations = all) {
   return compile("./cps-data.ts", {
     "server-only": {},
-    "next/cache": { unstable_cache: (fn) => fn },
+    react: { cache: (fn) => fn },
+    "./cps-engine": { rebuildCps: (base) => base },
     "@/lib/company-scope": { requireCompanyId: (a) => a.companyId },
     "@/lib/authorization": {},
     "./cod": {
@@ -79,6 +80,7 @@ test("RPC receives company, sorted station scope and exact period; empty scope d
   const calls = [];
   const db = {
     rpc: async (...args) => {
+      if(args[0] === "ops_cps_source_facts") return { data: { shipments: [] }, error: null };
       calls.push(args);
       return { data: { daily: [], breakup: [] }, error: null };
     },

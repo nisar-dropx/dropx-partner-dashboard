@@ -342,11 +342,13 @@ function ProviderMemberName({
 }
 
 export function ProviderMappingWorksheet({
+  initialQuery = "",
   canEdit,
   locations,
   mappings,
   paymentMethods
 }: {
+  initialQuery?: string;
   canEdit: boolean;
   locations: LocationOption[];
   mappings: MappingWorksheetRow[];
@@ -358,7 +360,7 @@ export function ProviderMappingWorksheet({
   const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
   const [memberLookupRows, setMemberLookupRows] = useState<Set<number>>(() => new Set());
   const [memberLookupStatuses, setMemberLookupStatuses] = useState<Record<number, ProviderMemberLookupStatus>>({});
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [locationFilters, setLocationFilters] = useState<string[]>([]);
   const [paymentMethodFilters, setPaymentMethodFilters] = useState<string[]>([]);
   const [mappingStatusFilters, setMappingStatusFilters] = useState<string[]>([]);
