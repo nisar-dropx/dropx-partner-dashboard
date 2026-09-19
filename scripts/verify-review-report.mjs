@@ -11,6 +11,7 @@ function load(file){
 }
 const {buildReviewReport,reviewReportDates}=load('src/lib/ops-pulse/review-report.ts');
 const {reportAllRows}=load('src/lib/ops-pulse/review-report-data.ts');
+const {hawkeyeMetricDefinitions}=load('src/lib/ops-pulse/hawkeye.ts');
 for(const [a,b] of [['2026-02-30','2026-03-01'],['2026-09-10','2026-09-01'],['2026-01-01','2026-09-01']])assert.throws(()=>reviewReportDates(a,b));
 assert.equal(reviewReportDates('2026-09-01','2026-09-10').length,10);
 let pages=0;const source=Array.from({length:2005},(_,id)=>({id}));
@@ -29,7 +30,9 @@ assert.equal(table('Review summary').rows.length,4);
 const summary=table('Review summary').rows.find(r=>r.Station==='TESTA'&&r.Date==='2026-09-08');
 assert.equal(summary['Performance misses'],2);assert.equal(summary['Missing performance RCA'],1);assert.equal(summary['EMD at noon %'],0);assert.equal(summary['Latest EDD pending'],3);
 assert.equal(table('Review summary').rows.find(r=>r.Station==='TESTB')['Performance misses'],null);
-assert.equal(table('Performance scorecard').rows.length,32);assert.ok(table('Performance scorecard').rows.some(r=>r.Actual===0));
+// One scorecard row per definition in hawkeyeMetricDefinitions, not a hardcoded count — the
+// catalog grows when Amazon exports a new metric (e.g. "EMD%", added 2026-09-19).
+assert.equal(table('Performance scorecard').rows.length,hawkeyeMetricDefinitions.length);assert.ok(table('Performance scorecard').rows.some(r=>r.Actual===0));
 assert.equal(table('RCA and reasons').rows.find(r=>r.Type==='Delay reason only')['Corrective action'],'Not required');
 assert.equal(table('EDD checkpoints').rows.length,37);assert.equal(table('EDD checkpoints').rows[0]['Day start EDD'],null);assert.equal(table('EDD checkpoints').rows[0]['At station pending'],null);
 assert.ok(!JSON.stringify(report).includes('MUST NOT APPEAR'));
