@@ -30,6 +30,7 @@ type RequestRow = {
   request_no: string;
   location_id: string | null;
   location_code: string;
+  location_model_id?: string | null;
   payment_head_id: string;
   amount: number | null;
   amount_requested: number | null;
@@ -56,6 +57,7 @@ type RequestRow = {
   processed_at: string | null;
   payment_heads?: { name: string; code: string } | null;
   profiles?: { full_name: string | null; email: string | null } | null;
+  stations?: { location_model_id: string | null } | null;
 };
 
 const NO_LOCATION_SCOPE_ID = "00000000-0000-0000-0000-000000000000";
@@ -202,7 +204,8 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
       updated_at,
       processed_at,
       payment_heads ( name, code ),
-      profiles:requested_by ( full_name, email )
+      profiles:requested_by ( full_name, email ),
+      stations ( location_model_id )
     `)
     .eq("company_id", companyId)
     .order("created_at", { ascending: false });
@@ -225,7 +228,8 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
   const unscopedRequests = ((requestsResult.data ?? []) as unknown as RequestRow[]).map((request) => ({
     ...request,
     payment_heads: firstRelation(request.payment_heads),
-    profiles: firstRelation(request.profiles)
+    profiles: firstRelation(request.profiles),
+    location_model_id: firstRelation(request.stations)?.location_model_id ?? null
   }));
   const eligibleIds = await getPaymentApprovalEligibility(companyId, authorization, unscopedRequests);
   const normalizedFilter = filters.status || "pending";

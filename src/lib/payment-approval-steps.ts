@@ -42,6 +42,28 @@ async function stationCluster(companyId: string, locationId: string | null | und
   return result.data?.cluster ?? null;
 }
 
+async function stationLocationModelId(companyId: string, locationId: string | null | undefined) {
+  if (!supabaseAdmin || !locationId) return null;
+  const result = await supabaseAdmin.from("stations").select("location_model_id").eq("company_id", companyId).eq("id", locationId).maybeSingle();
+  return result.data?.location_model_id ?? null;
+}
+
+/**
+ * The set of business-model ids (location_model_id) covered by a candidate's
+ * own assigned stations - used as a defense-in-depth check alongside the
+ * station/cluster scope match: a Regional Manager whose 7 stations are all
+ * "NOW" model has no business being routed a "EDSP" model station's request
+ * even if a data mistake ever put that station in their location_scope_ids.
+ * has_all_location_access has no station list to derive a model set from, so
+ * it is treated as covering every model (same all-locations meaning it already has).
+ */
+async function candidateModelIds(companyId: string, locationScopeIds: string[], hasAllLocationAccess: boolean): Promise<Set<string> | null> {
+  if (hasAllLocationAccess || !supabaseAdmin) return null;
+  if (!locationScopeIds.length) return new Set();
+  const result = await supabaseAdmin.from("stations").select("location_model_id").eq("company_id", companyId).in("id", locationScopeIds);
+  return new Set((result.data ?? []).map((row) => row.location_model_id).filter((id): id is string => Boolean(id)));
+}
+
 async function candidateUserIds(companyId: string, roleId: string, scope: "station" | "cluster" | "company", locationId: string | null | undefined): Promise<string[]> {
   if (!supabaseAdmin) return [];
 
@@ -61,7 +83,8 @@ async function candidateUserIds(companyId: string, roleId: string, scope: "stati
 
   // station / cluster: narrow to people whose location scope actually covers
   // the requester's station (or, for cluster, any station sharing the same
-  // stations.cluster label).
+  // stations.cluster label), and whose own stations include the requester's
+  // station's business model (see candidateModelIds).
   const memberships = await supabaseAdmin
     .from("company_product_memberships")
     .select("user_id, has_all_location_access, location_scope_ids")
@@ -72,8 +95,17 @@ async function candidateUserIds(companyId: string, roleId: string, scope: "stati
   const rows = memberships.data ?? [];
   if (!locationId) return [];
 
+  const requestModelId = await stationLocationModelId(companyId, locationId);
+  async function matchesModel(row: { has_all_location_access: boolean; location_scope_ids: string[] | null }) {
+    if (!requestModelId) return true;
+    const modelIds = await candidateModelIds(companyId, row.location_scope_ids ?? [], row.has_all_location_access);
+    return modelIds === null || modelIds.has(requestModelId);
+  }
+
   if (scope === "station") {
-    return rows.filter((row) => row.has_all_location_access || (row.location_scope_ids ?? []).includes(locationId)).map((row) => row.user_id);
+    const inStation = rows.filter((row) => row.has_all_location_access || (row.location_scope_ids ?? []).includes(locationId));
+    const matched = await Promise.all(inStation.map(async (row) => (await matchesModel(row)) ? row.user_id : null));
+    return matched.filter((id): id is string => Boolean(id));
   }
 
   // cluster scope: a candidate qualifies if the requester's station shares a
@@ -83,19 +115,30 @@ async function candidateUserIds(companyId: string, roleId: string, scope: "stati
   const scopedStations = await supabaseAdmin.from("stations").select("id").eq("company_id", companyId).eq("cluster", cluster);
   if (scopedStations.error) throw new Error(scopedStations.error.message);
   const clusterStationIds = new Set((scopedStations.data ?? []).map((row) => row.id));
-  return rows
-    .filter((row) => row.has_all_location_access || (row.location_scope_ids ?? []).some((id: string) => clusterStationIds.has(id)))
-    .map((row) => row.user_id);
+  const inCluster = rows.filter((row) => row.has_all_location_access || (row.location_scope_ids ?? []).some((id: string) => clusterStationIds.has(id)));
+  const matchedCluster = await Promise.all(inCluster.map(async (row) => (await matchesModel(row)) ? row.user_id : null));
+  return matchedCluster.filter((id): id is string => Boolean(id));
 }
 
+/**
+ * Only leave, business trips, weekly-offs and "not linked to an active HRMS
+ * engagement" gate approval availability - the shift start/end time is
+ * deliberately NOT compared against the current time. Payment approvers are
+ * managers/leadership, not shift workers; comparing wall-clock time against a
+ * roster shift window (meant for station staff) incorrectly marked people
+ * "unavailable" the moment their nominal shift ended, even when they were
+ * demonstrably still working.
+ */
 async function isApproverAvailable(companyId: string, userId: string) {
   if (!supabaseAdmin) return true;
-  const result = await supabaseAdmin.rpc("hr_approval_email_is_working", { p_company_id: companyId, p_user_id: userId });
-  // Availability is a courtesy skip, not a hard gate: if the RPC is missing
-  // or errors (e.g. this company has no HRMS roster data), fall back to
-  // treating the person as available rather than blocking the request.
-  if (result.error) return true;
-  return result.data !== false;
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+  const result = await supabaseAdmin.rpc("hr_approval_email_workday", { p_company_id: companyId, p_user_id: userId, p_date: today });
+  // Availability is a courtesy skip, not a hard gate: if the RPC is missing,
+  // errors, or returns nothing (e.g. this company has no HRMS roster data),
+  // fall back to treating the person as available rather than blocking the request.
+  if (result.error || !result.data?.length) return true;
+  const dayType = result.data[0]?.day_type;
+  return dayType === "working";
 }
 
 /**

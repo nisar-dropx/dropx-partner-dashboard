@@ -21,23 +21,76 @@ export type PaymentApprovalListItem = {
   attachmentCount: number;
 };
 
-async function actorRoleIds(companyId: string, actorUserIds: string[]): Promise<string[]> {
-  if (!actorUserIds.length) return [];
+type ActorRoleScope = { hasAllLocationAccess: boolean; locationScopeIds: string[]; modelIds: Set<string> | null };
+
+/**
+ * Per role the actor holds, the union of their location access for that role
+ * (has_all_location_access, or the union of location_scope_ids across every
+ * active membership row granting it - a profile's own profiles.role_id has no
+ * location scope of its own, so it's treated as company-wide, matching prior
+ * behavior for that fallback), plus the set of business-model ids
+ * (stations.location_model_id) those stations belong to - null means
+ * has_all_location_access (covers every model, same as it already covers
+ * every station).
+ */
+async function actorRoleScopes(companyId: string, actorUserIds: string[]): Promise<Map<string, ActorRoleScope>> {
+  const scopes = new Map<string, ActorRoleScope>();
+  if (!actorUserIds.length) return scopes;
+
+  function merge(roleId: string, hasAll: boolean, scopeIds: string[]) {
+    const existing = scopes.get(roleId) ?? { hasAllLocationAccess: false, locationScopeIds: [], modelIds: null };
+    existing.hasAllLocationAccess = existing.hasAllLocationAccess || hasAll;
+    if (scopeIds.length) existing.locationScopeIds = [...new Set([...existing.locationScopeIds, ...scopeIds])];
+    scopes.set(roleId, existing);
+  }
+
   const memberships = await db()
     .from("company_product_memberships")
-    .select("role_id")
+    .select("role_id, has_all_location_access, location_scope_ids")
     .eq("company_id", companyId)
     .in("user_id", actorUserIds)
     .eq("is_active", true);
   if (memberships.error) throw new Error(memberships.error.message);
-  const roleIds = (memberships.data ?? []).map((row) => row.role_id).filter(Boolean) as string[];
+  for (const row of memberships.data ?? []) {
+    if (row.role_id) merge(row.role_id, Boolean(row.has_all_location_access), row.location_scope_ids ?? []);
+  }
 
   const profiles = await db().from("profiles").select("role_id").eq("company_id", companyId).in("id", actorUserIds);
   for (const row of profiles.data ?? []) {
-    if (row.role_id) roleIds.push(row.role_id);
+    if (row.role_id) merge(row.role_id, true, []);
   }
 
-  return [...new Set(roleIds)];
+  const allScopeIds = [...new Set([...scopes.values()].flatMap((scope) => scope.locationScopeIds))];
+  if (allScopeIds.length) {
+    const stations = await db().from("stations").select("id, location_model_id").eq("company_id", companyId).in("id", allScopeIds);
+    const modelByStation = new Map((stations.data ?? []).map((row) => [row.id, row.location_model_id]));
+    for (const scope of scopes.values()) {
+      if (scope.hasAllLocationAccess) continue;
+      scope.modelIds = new Set(scope.locationScopeIds.map((id) => modelByStation.get(id)).filter((id): id is string => Boolean(id)));
+    }
+  }
+
+  return scopes;
+}
+
+/**
+ * A role-based match only counts if that role's location access (for this
+ * actor) actually covers the request's station - otherwise, e.g., a Regional
+ * Manager whose region is 7 specific stations would match every request
+ * company-wide just for holding the role, including requests already
+ * assigned to someone else in a different region entirely. Also requires the
+ * request's business model (e.g. Amazon EDSP vs Amazon Now) to be one this
+ * actor's own stations actually operate, as a defense-in-depth check
+ * independent of the station list itself.
+ */
+function roleCoversLocation(scopes: Map<string, ActorRoleScope>, roleId: string, locationId: string | null, locationModelId: string | null) {
+  const scope = scopes.get(roleId);
+  if (!scope) return false;
+  if (scope.hasAllLocationAccess) return true;
+  if (!locationId) return false;
+  if (!scope.locationScopeIds.includes(locationId)) return false;
+  if (locationModelId && scope.modelIds && !scope.modelIds.has(locationModelId)) return false;
+  return true;
 }
 
 /**
@@ -47,14 +100,23 @@ async function actorRoleIds(companyId: string, actorUserIds: string[]): Promise<
  * role the actor holds - same eligibility as canActOnPaymentRequest in the
  * ops dashboard, minus the OWNER/all-locations bypass since Connect accounts
  * are always specific people, never the ops admin session.
+ *
+ * A role-only match is additionally required to actually cover the
+ * request's station for that actor (see roleCoversLocation) - otherwise
+ * anyone holding a station/region-scoped role (e.g. Regional Manager) would
+ * see every request company-wide just for holding the role, including ones
+ * already assigned to a specific person outside their region. A direct
+ * current_approver_user_id match is always trusted as-is, since it was
+ * already scoped correctly when the engine resolved it.
  */
 export async function listConnectPaymentApprovals(companyId: string, actorUserIds: string[]): Promise<PaymentApprovalListItem[]> {
   if (!actorUserIds.length) return [];
-  const roleIds = await actorRoleIds(companyId, actorUserIds);
+  const roleScopes = await actorRoleScopes(companyId, actorUserIds);
+  const roleIds = [...roleScopes.keys()];
 
   let query = db()
     .from("payment_requests")
-    .select("id, request_no, location_code, amount, amount_requested, remarks, created_at, requested_by, payment_heads(name), payment_request_answers(id)")
+    .select("id, request_no, location_id, location_code, amount, amount_requested, remarks, created_at, requested_by, current_approver_user_id, current_approver_role_id, current_approver_role_ids, stations(location_model_id), payment_heads(name), payment_request_answers(id)")
     .eq("company_id", companyId)
     .in("status", ["pending", "resubmitted"])
     .not("current_approver_user_id", "is", null);
@@ -69,13 +131,21 @@ export async function listConnectPaymentApprovals(companyId: string, actorUserId
   const result = await query.order("created_at", { ascending: true });
   if (result.error) throw new Error(result.error.message);
 
-  const requesterIds = [...new Set((result.data ?? []).map((row) => row.requested_by).filter(Boolean))] as string[];
+  const scoped = (result.data ?? []).filter((row) => {
+    if (row.current_approver_user_id && actorUserIds.includes(row.current_approver_user_id)) return true;
+    const station = Array.isArray(row.stations) ? row.stations[0] : row.stations;
+    const locationModelId = station?.location_model_id ?? null;
+    const roleCandidates = [row.current_approver_role_id, ...(row.current_approver_role_ids ?? [])].filter(Boolean) as string[];
+    return roleCandidates.some((roleId) => roleCoversLocation(roleScopes, roleId, row.location_id, locationModelId));
+  });
+
+  const requesterIds = [...new Set(scoped.map((row) => row.requested_by).filter(Boolean))] as string[];
   const requesters = requesterIds.length
     ? await db().from("profiles").select("id, full_name").eq("company_id", companyId).in("id", requesterIds)
     : { data: [] as { id: string; full_name: string | null }[] };
   const requesterNameById = new Map((requesters.data ?? []).map((row) => [row.id, row.full_name]));
 
-  return (result.data ?? []).map((row) => {
+  return scoped.map((row) => {
     const paymentHead = Array.isArray(row.payment_heads) ? row.payment_heads[0] : row.payment_heads;
     return {
       id: row.id,
@@ -104,19 +174,21 @@ type RequestRow = {
   approval_cycle: number | null;
 };
 
-async function loadOwnedRequest(companyId: string, requestId: string, actorUserIds: string[], roleIds: string[]): Promise<RequestRow> {
+async function loadOwnedRequest(companyId: string, requestId: string, actorUserIds: string[], roleScopes: Map<string, ActorRoleScope>): Promise<RequestRow> {
   const result = await db()
     .from("payment_requests")
-    .select("id, company_id, location_id, payment_head_id, current_step_order, current_approver_user_id, current_approver_role_id, current_approver_role_ids, approval_cycle, status")
+    .select("id, company_id, location_id, payment_head_id, current_step_order, current_approver_user_id, current_approver_role_id, current_approver_role_ids, approval_cycle, status, stations(location_model_id)")
     .eq("id", requestId)
     .eq("company_id", companyId)
     .single();
   if (result.error || !result.data) throw new Error("Payment request not found.");
   if (!["pending", "resubmitted"].includes(String(result.data.status))) throw new Error("This request has already been decided.");
 
+  const station = Array.isArray(result.data.stations) ? result.data.stations[0] : result.data.stations;
+  const locationModelId = station?.location_model_id ?? null;
   const isOwnerMatch = Boolean(result.data.current_approver_user_id && actorUserIds.includes(result.data.current_approver_user_id));
-  const isRoleMatch = Boolean(result.data.current_approver_role_id && roleIds.includes(result.data.current_approver_role_id))
-    || (result.data.current_approver_role_ids ?? []).some((roleId: string) => roleIds.includes(roleId));
+  const roleCandidates = [result.data.current_approver_role_id, ...(result.data.current_approver_role_ids ?? [])].filter(Boolean) as string[];
+  const isRoleMatch = roleCandidates.some((roleId) => roleCoversLocation(roleScopes, roleId, result.data.location_id, locationModelId));
   if (!isOwnerMatch && !isRoleMatch) throw new Error("This request is not pending with you.");
 
   return result.data;
@@ -170,8 +242,9 @@ async function applyApproverTarget(companyId: string, requestId: string, roleCod
 
 export async function decideConnectPaymentApproval(companyId: string, actorUserIds: string[], requestId: string, decision: "approved" | "returned" | "rejected", comments: string) {
   if (!actorUserIds.length) throw new Error("A DropX One login is required to act on this request.");
-  const roleIds = await actorRoleIds(companyId, actorUserIds);
-  const request = await loadOwnedRequest(companyId, requestId, actorUserIds, roleIds);
+  const roleScopes = await actorRoleScopes(companyId, actorUserIds);
+  const roleIds = [...roleScopes.keys()];
+  const request = await loadOwnedRequest(companyId, requestId, actorUserIds, roleScopes);
   const actorUserId = request.current_approver_user_id && actorUserIds.includes(request.current_approver_user_id)
     ? request.current_approver_user_id
     : actorUserIds[0];

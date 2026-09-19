@@ -375,12 +375,13 @@ export async function approvePaymentRequest(formData: FormData) {
   const comments = clean(formData.get("comments"));
   const { data: request, error } = await supabaseAdmin
     .from("payment_requests")
-    .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, current_step_order, current_approver_user_id, current_approver_role_id, current_approver_role_ids, final_approval_role_id, final_approval_role_ids")
+    .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, current_step_order, current_approver_user_id, current_approver_role_id, current_approver_role_ids, final_approval_role_id, final_approval_role_ids, stations ( location_model_id )")
     .eq("id", requestId)
     .eq("company_id", companyId)
     .single();
   if (error || !request) throw new Error("Payment request not found.");
-  if (!(await canActOnPaymentRequest(companyId, authorization, request))) throw new Error("This request is not pending with you.");
+  const requestStation = Array.isArray(request.stations) ? request.stations[0] : request.stations;
+  if (!(await canActOnPaymentRequest(companyId, authorization, { ...request, location_model_id: requestStation?.location_model_id ?? null }))) throw new Error("This request is not pending with you.");
   const approvalCycle = Number(request.approval_cycle) || 1;
   await ensureUserHasNotAlreadyActed(companyId, request.id, authorization.userId, approvalCycle);
 
@@ -527,12 +528,13 @@ export async function rejectPaymentRequest(formData: FormData) {
   const comments = required(formData.get("comments"), "Reject remarks");
   const { data: request, error } = await supabaseAdmin
     .from("payment_requests")
-    .select("id, location_id, requested_by, approval_cycle, current_approver_user_id, current_approver_role_id, current_approver_role_ids")
+    .select("id, location_id, requested_by, approval_cycle, current_approver_user_id, current_approver_role_id, current_approver_role_ids, stations ( location_model_id )")
     .eq("id", requestId)
     .eq("company_id", companyId)
     .single();
   if (error || !request) throw new Error("Payment request not found.");
-  if (!(await canActOnPaymentRequest(companyId, authorization, request))) throw new Error("This request is not pending with you.");
+  const rejectStation = Array.isArray(request.stations) ? request.stations[0] : request.stations;
+  if (!(await canActOnPaymentRequest(companyId, authorization, { ...request, location_model_id: rejectStation?.location_model_id ?? null }))) throw new Error("This request is not pending with you.");
   const approvalCycle = Number(request.approval_cycle) || 1;
   await ensureUserHasNotAlreadyActed(companyId, request.id, authorization.userId, approvalCycle);
 
@@ -576,12 +578,13 @@ export async function returnPaymentRequest(formData: FormData) {
   const comments = required(formData.get("comments"), "Return remarks");
   const { data: request, error } = await supabaseAdmin
     .from("payment_requests")
-    .select("id, location_id, requested_by, approval_cycle, current_approver_user_id, current_approver_role_id, current_approver_role_ids")
+    .select("id, location_id, requested_by, approval_cycle, current_approver_user_id, current_approver_role_id, current_approver_role_ids, stations ( location_model_id )")
     .eq("id", requestId)
     .eq("company_id", companyId)
     .single();
   if (error || !request) throw new Error("Payment request not found.");
-  if (!(await canActOnPaymentRequest(companyId, authorization, request))) throw new Error("This request is not pending with you.");
+  const returnStation = Array.isArray(request.stations) ? request.stations[0] : request.stations;
+  if (!(await canActOnPaymentRequest(companyId, authorization, { ...request, location_model_id: returnStation?.location_model_id ?? null }))) throw new Error("This request is not pending with you.");
   const approvalCycle = Number(request.approval_cycle) || 1;
   await ensureUserHasNotAlreadyActed(companyId, request.id, authorization.userId, approvalCycle);
 
