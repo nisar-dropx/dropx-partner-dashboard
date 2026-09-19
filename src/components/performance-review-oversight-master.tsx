@@ -4,6 +4,7 @@ import type { ReviewOversightRole } from "@/lib/ops-pulse/review-oversight-roles
 export function PerformanceReviewOversightMaster({
   rows,
   error,
+  designationOptions,
   canAdd,
   canEdit,
   addAction,
@@ -12,6 +13,7 @@ export function PerformanceReviewOversightMaster({
 }: {
   rows: ReviewOversightRole[];
   error: string | null;
+  designationOptions: { code: string; name: string }[];
   canAdd: boolean;
   canEdit: boolean;
   addAction: (formData: FormData) => void;
@@ -24,10 +26,10 @@ export function PerformanceReviewOversightMaster({
         <div>
           <h2>Review oversight roles</h2>
           <p className="subtle">
-            Anyone whose People designation or portal role matches a row below gets oversight on every station review —
-            not hardcoded to Program Manager. <strong>Full</strong> can edit RCA, actions, comments and timings at any
-            stage, and gets the same controls on Control Tower. <strong>Override</strong> can start, skip a level, take a
-            proxy review or undo a skip, but only edits freely during their own stage.
+            Anyone whose People designation matches a row below gets oversight on every station review — not hardcoded
+            to Program Manager. <strong>Full</strong> can edit RCA, actions, comments and timings at any stage, and gets
+            the same controls on Control Tower. <strong>Override</strong> can start, skip a level, take a proxy review
+            or undo a skip, but only edits freely during their own stage.
           </p>
         </div>
       </div>
@@ -35,16 +37,15 @@ export function PerformanceReviewOversightMaster({
       <div className="table-wrap">
         <table className="performance-target-master">
           <thead>
-            <tr><th>Label</th><th>Matches</th><th>Tier</th><th>Status</th><th>Actions</th></tr>
+            <tr><th>Designation</th><th>Tier</th><th>Status</th><th>Actions</th></tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
-                <td colSpan={5}>
+                <td colSpan={4}>
                   <form action={updateAction} className="performance-target-row review-oversight-row">
                     <input type="hidden" name="id" value={row.id} />
-                    <label><input name="label" defaultValue={row.label} disabled={!canEdit} /></label>
-                    <span className="review-oversight-match">{row.matchText}</span>
+                    <strong className="review-oversight-label">{row.label}</strong>
                     <select name="tier" defaultValue={row.tier} disabled={!canEdit}>
                       <option value="full">Full oversight</option>
                       <option value="override">Override only</option>
@@ -59,7 +60,7 @@ export function PerformanceReviewOversightMaster({
                     <input type="hidden" name="id" value={row.id} />
                     <SubmitButton
                       className="button danger compact"
-                      confirmMessage={`Remove "${row.label}" from oversight roles? Anyone matching only this row loses oversight rights immediately.`}
+                      confirmMessage={`Remove "${row.label}" from oversight roles? Anyone in this designation loses oversight rights immediately.`}
                       confirmSubmitText="Remove role"
                       disabled={!canEdit}
                     >
@@ -69,15 +70,17 @@ export function PerformanceReviewOversightMaster({
                 </td>
               </tr>
             ))}
-            {!rows.length ? <tr><td colSpan={5}>No oversight roles configured yet.</td></tr> : null}
+            {!rows.length ? <tr><td colSpan={4}>No oversight roles configured yet.</td></tr> : null}
           </tbody>
         </table>
       </div>
       <form action={addAction} className="review-oversight-add">
-        <label>Label<input name="label" placeholder="e.g. Regional Head" required disabled={!canAdd} /></label>
         <label>
-          Matches designation/role text
-          <input name="match_text" placeholder="e.g. REGIONAL HEAD" required disabled={!canAdd} />
+          Designation
+          <select name="designation_code" required defaultValue="" disabled={!canAdd || !designationOptions.length}>
+            <option value="" disabled>{designationOptions.length ? "Select a designation" : "All designations already added"}</option>
+            {designationOptions.map((designation) => <option key={designation.code} value={designation.code}>{designation.name}</option>)}
+          </select>
         </label>
         <label>
           Tier
@@ -86,7 +89,7 @@ export function PerformanceReviewOversightMaster({
             <option value="override">Override only</option>
           </select>
         </label>
-        <SubmitButton disabled={!canAdd}>Add oversight role</SubmitButton>
+        <SubmitButton disabled={!canAdd || !designationOptions.length}>Add oversight role</SubmitButton>
       </form>
     </section>
   );

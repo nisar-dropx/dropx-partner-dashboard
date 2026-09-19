@@ -12,6 +12,12 @@ const COOKIE_CHUNK_SIZE = 3000;
 const MAX_COOKIE_CHUNKS = 8;
 const ENCODED_COOKIE_PREFIX = "b64-";
 const CLEAN_OPS_ROOTS = ["/attendance", "/daily-submission", "/performance", "/capacity", "/service-network", "/rostering", "/workforce", "/field-executive", "/work-force-register", "/cod", "/edd", "/station-edd", "/reports", "/client", "/access", "/unauthorized"];
+// Only these specific /master/* subpaths live under src/app/ops-pulse/master/* and need the
+// /ops-pulse prefix rewritten in; every other /master/* path (performance-targets, cod-master,
+// designations, ...) is a real top-level route under src/app/master/* already, so this list
+// must stay a narrow allowlist, not the whole /master root — otherwise every other Master page
+// would get double-rewritten to a path that doesn't exist under ops-pulse and 404 instead.
+const CLEAN_OPS_MASTER_SUBPATHS = ["/master/service-network"];
 const MOVED_OPS_PAYMENT_PATHS = [
   "/payments/advance-request",
   "/payments/expense-request",
@@ -47,7 +53,9 @@ function cleanOpsPath(path: string) {
 }
 
 function isCleanOpsPath(path: string) {
-  return path === "/" || CLEAN_OPS_ROOTS.some((root) => path === root || path.startsWith(`${root}/`));
+  return path === "/" ||
+    CLEAN_OPS_ROOTS.some((root) => path === root || path.startsWith(`${root}/`)) ||
+    CLEAN_OPS_MASTER_SUBPATHS.some((root) => path === root || path.startsWith(`${root}/`));
 }
 
 function isMovedOpsPaymentPath(path: string) {

@@ -151,9 +151,8 @@ export async function addPerformanceReviewOversightRole(formData: FormData) {
   const authorization = await requirePagePermission("performance_master", "add");
   const companyId = requireCompanyId(authorization);
   const error = await addReviewOversightRole(companyId, authorization.userId, {
-    label: String(formData.get("label") ?? ""),
-    tier: oversightTier(formData.get("tier")),
-    matchText: String(formData.get("match_text") ?? "")
+    designationCode: String(formData.get("designation_code") ?? ""),
+    tier: oversightTier(formData.get("tier"))
   });
   revalidatePath("/master/performance-targets");
   revalidatePath("/ops-pulse/performance");
@@ -166,7 +165,6 @@ export async function updatePerformanceReviewOversightRole(formData: FormData) {
   const authorization = await requirePagePermission("performance_master", "edit");
   const companyId = requireCompanyId(authorization);
   const error = await updateReviewOversightRole(companyId, authorization.userId, String(formData.get("id") ?? ""), {
-    label: String(formData.get("label") ?? ""),
     tier: oversightTier(formData.get("tier")),
     isActive: formData.get("is_active") === "true"
   });
