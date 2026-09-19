@@ -294,12 +294,99 @@ function readWorkbookRows(buffer: ArrayBuffer, includeAllSheets = false) {
   return combined;
 }
 
-function readHawkeyeDailyRows(buffer: ArrayBuffer, fileName?: string) {
+type HawkeyeDateBatch = { reportDate: string; rows: HawkeyeMetricRow[] };
+
+/** yyyy-mm-dd in Asia/Kolkata for a cell XLSX already parsed as a JS Date (cellDates: true). */
+function kolkataDateFromCell(value: unknown) {
+  if (!(value instanceof Date) || !Number.isFinite(value.getTime())) return null;
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(value);
+}
+
+/**
+ * Long/tall Hawkeye export seen starting 2026-09-19 ("DROPX.xlsx" style downloads): one row
+ * per (station, metric, date) with Station Code / City / Station Facility Type / Report_date /
+ * Metric_Name_v2 / a percent-value column, instead of the older wide layout's one row per
+ * station with a metric-per-column. Report_date is a real date on every row, so — unlike the
+ * wide layout — this format can carry several days in one file; every distinct date found is
+ * imported as its own batch. Returns null (falls back to the wide-format reader) if the sheet
+ * doesn't look like this shape.
+ */
+function readHawkeyeLongFormatRows(rows: SheetRow[]): HawkeyeDateBatch[] | null {
+  let headerIndex: number;
+  try {
+    headerIndex = locateHeader(rows, ["Report_date"]);
+  } catch {
+    return null;
+  }
+  const headers = rows[headerIndex].map(clean);
+  const stationIndex = headers.findIndex((label) => key(label) === "stationcode");
+  const cityIndex = headers.findIndex((label) => key(label) === "city");
+  const stationTypeIndex = headers.findIndex((label) => key(label) === "stationfacilitytype");
+  const dateIndex = headers.findIndex((label) => key(label) === "reportdate");
+  const metricNameIndex = headers.findIndex((label) => key(label).startsWith("metricname"));
+  const valueIndex = headers.findIndex((label) => key(label).startsWith("metricvalue"));
+  if (stationIndex < 0 || dateIndex < 0 || metricNameIndex < 0 || valueIndex < 0) return null;
+
+  // Same broken-export scale check as the wide format, run per metric name across the whole
+  // file (not just the first 5 rows — a long file's first 5 rows are usually all the same
+  // metric for one station across dates, not 5 different metrics) so a metric that
+  // legitimately sits at a low percentage doesn't get misclassified.
+  const byMetric = new Map<string, number[]>();
+  rows.slice(headerIndex + 1).forEach((row) => {
+    const label = clean(row[metricNameIndex]);
+    const raw = clean(row[valueIndex]).replace(/,/g, "").replace(/%$/, "");
+    const numeric = Number(raw);
+    if (label && raw && Number.isFinite(numeric)) byMetric.set(label, [...(byMetric.get(label) ?? []), numeric]);
+  });
+  const scaleFor = (label: string) => {
+    const values = (byMetric.get(label) ?? []).slice(0, 20);
+    const needsBigScale = values.length > 0 && values.every((value) => value <= 0.01);
+    const usesRawFraction = !needsBigScale && Number.isFinite(values[0]) && values[0] <= 1;
+    return needsBigScale ? 10000 : usesRawFraction ? 100 : 1;
+  };
+
+  const byDate = new Map<string, Map<string, HawkeyeMetricRow>>();
+  rows.slice(headerIndex + 1).forEach((row, offset) => {
+    const stationCode = normalizeStation(row[stationIndex]);
+    const reportDate = kolkataDateFromCell(row[dateIndex]);
+    const metricLabel = clean(row[metricNameIndex]);
+    if (!stationCode || !reportDate || !metricLabel) return;
+    const rawValue = clean(row[valueIndex]).replace(/,/g, "").replace(/%$/, "");
+    const numeric = rawValue && !/^n\/?a$/i.test(rawValue) && Number.isFinite(Number(rawValue)) ? Number(rawValue) : null;
+    const parsed = numeric == null ? null : numeric * scaleFor(metricLabel);
+
+    const stationsForDate = byDate.get(reportDate) ?? new Map<string, HawkeyeMetricRow>();
+    byDate.set(reportDate, stationsForDate);
+    const existing = stationsForDate.get(stationCode) ?? {
+      city: cityIndex >= 0 ? clean(row[cityIndex]) || null : null,
+      metrics: {},
+      rawText: "",
+      rowNumber: headerIndex + offset + 2,
+      stationCode,
+      stationType: stationTypeIndex >= 0 ? clean(row[stationTypeIndex]) || null : null
+    };
+    existing.metrics[metricLabel] = parsed;
+    stationsForDate.set(stationCode, existing);
+  });
+
+  const batches = [...byDate.entries()]
+    .map(([reportDate, stations]) => ({ reportDate, rows: [...stations.values()] }))
+    .sort((left, right) => left.reportDate.localeCompare(right.reportDate));
+  return batches.length ? batches : null;
+}
+
+function readHawkeyeDailyRows(buffer: ArrayBuffer, fileName?: string): { headers: string[]; dates: HawkeyeDateBatch[] } {
   const workbook = XLSX.read(buffer, { type: "array", raw: true, cellDates: true });
   const sheetName = workbook.SheetNames.find((name) => key(name).includes("stationlevelview")) ?? workbook.SheetNames[0];
   if (!sheetName) throw new Error("The Hawkeye workbook has no station-level sheet.");
   const rows = XLSX.utils.sheet_to_json<SheetRow>(workbook.Sheets[sheetName], { header: 1, raw: true, defval: "" });
   if (!rows.length) throw new Error("The Hawkeye station-level sheet is empty.");
+
+  const longFormatBatches = readHawkeyeLongFormatRows(rows);
+  if (longFormatBatches) {
+    const headers = [...new Set(longFormatBatches.flatMap((batch) => batch.rows.flatMap((row) => Object.keys(row.metrics))))];
+    return { headers, dates: longFormatBatches };
+  }
 
   // Two known workbook layouts: the older one has a title banner in the
   // first few rows with the report date embedded in it ("... D-1: 2026-09-01
@@ -393,7 +480,7 @@ function readHawkeyeDailyRows(buffer: ArrayBuffer, fileName?: string) {
     };
   }).filter((row) => row.stationCode);
   if (!metricRows.length) throw new Error("No station rows were found in the Hawkeye workbook.");
-  return { headers: metricColumns.map((column) => column.label), reportDate, rows: metricRows };
+  return { headers: metricColumns.map((column) => column.label), dates: [{ reportDate, rows: metricRows }] };
 }
 
 type PdfMetricRow = {
@@ -1531,41 +1618,53 @@ export async function POST(request: Request) {
       const locationResult = await importStep("Validate Hawkeye stations", () => loadCodLocations(companyId, [], true));
       if (locationResult.error) throw new Error(locationResult.error);
       const allowedStationCodes = new Set(locationResult.locations.map((location) => normalizeStation(location.station_code)));
-      const unknownStations = [...new Set(hawkeye.rows.filter((row) => !allowedStationCodes.has(row.stationCode)).map((row) => row.stationCode))];
-      const week = amazonWeekInfo(hawkeye.reportDate);
-      const metricRows = hawkeye.rows.filter((row) => allowedStationCodes.has(row.stationCode)).map((row) => {
-        const valuesJson = {
-          format_version: 1,
-          headers: hawkeye.headers,
-          metrics: row.metrics,
-          station_type: row.stationType
-        };
-        const hash = crypto.createHash("sha256").update(JSON.stringify({
-          sourceType,
-          reportDate: hawkeye.reportDate,
-          stationCode: row.stationCode,
-          values: valuesJson
-        })).digest("hex");
-        return {
-          batch_id: batch.data.id,
-          company_id: companyId,
-          page_number: 1,
-          raw_text: row.rawText,
-          report_date: hawkeye.reportDate,
-          report_week: week.amazon_week_no,
-          report_year: week.amazon_week_year,
-          row_hash: hash,
-          row_label: row.city,
-          row_number: row.rowNumber,
-          source_type: sourceType,
-          station_code: row.stationCode,
-          values_json: valuesJson
-        };
-      });
-      if (!metricRows.length) {
-        throw new Error(`No Hawkeye rows matched active OpsPulse stations.${unknownStations.length ? ` Unmatched: ${unknownStations.join(", ")}.` : ""}`);
+      // A long-format file (see readHawkeyeLongFormatRows) can carry several report dates in
+      // one upload — each date is hashed, deduped and inserted as its own set of rows, all
+      // sharing this one import batch. A wide-format file still has exactly one date here.
+      const unknownStations = new Set<string>();
+      const allMetricRows: Array<{
+        batch_id: string; company_id: string; page_number: number; raw_text: string;
+        report_date: string; report_week: number; report_year: number; row_hash: string;
+        row_label: string | null; row_number: number; source_type: SourceType; station_code: string;
+        values_json: Record<string, unknown>;
+      }> = [];
+      for (const dateBatch of hawkeye.dates) {
+        const week = amazonWeekInfo(dateBatch.reportDate);
+        dateBatch.rows.forEach((row) => {
+          if (!allowedStationCodes.has(row.stationCode)) { unknownStations.add(row.stationCode); return; }
+          const valuesJson = {
+            format_version: 1,
+            headers: hawkeye.headers,
+            metrics: row.metrics,
+            station_type: row.stationType
+          };
+          const hash = crypto.createHash("sha256").update(JSON.stringify({
+            sourceType,
+            reportDate: dateBatch.reportDate,
+            stationCode: row.stationCode,
+            values: valuesJson
+          })).digest("hex");
+          allMetricRows.push({
+            batch_id: batch.data.id,
+            company_id: companyId,
+            page_number: 1,
+            raw_text: row.rawText,
+            report_date: dateBatch.reportDate,
+            report_week: week.amazon_week_no,
+            report_year: week.amazon_week_year,
+            row_hash: hash,
+            row_label: row.city,
+            row_number: row.rowNumber,
+            source_type: sourceType,
+            station_code: row.stationCode,
+            values_json: valuesJson
+          });
+        });
       }
-      const hashes = metricRows.map((row) => row.row_hash);
+      if (!allMetricRows.length) {
+        throw new Error(`No Hawkeye rows matched active OpsPulse stations.${unknownStations.size ? ` Unmatched: ${[...unknownStations].join(", ")}.` : ""}`);
+      }
+      const hashes = allMetricRows.map((row) => row.row_hash);
       const existing = new Set<string>();
       for (let index = 0; index < hashes.length; index += HASH_LOOKUP_CHUNK_SIZE) {
         const result = await db.from("report_metric_facts").select("row_hash")
@@ -1573,23 +1672,26 @@ export async function POST(request: Request) {
         if (result.error) throw result.error;
         (result.data ?? []).forEach((row) => existing.add(row.row_hash));
       }
-      const validMetrics = metricRows.filter((row) => !existing.has(row.row_hash));
+      const validMetrics = allMetricRows.filter((row) => !existing.has(row.row_hash));
       await importStep("Save Hawkeye metrics", () => insertInChunks("report_metric_facts", validMetrics, 250));
-      const duplicateRows = metricRows.length - validMetrics.length;
-      const warning = unknownStations.length ? ` ${unknownStations.join(", ")} ignored because they are not active OpsPulse stations.` : "";
-      const message = `${validMetrics.length} Hawkeye station row${validMetrics.length === 1 ? "" : "s"} imported for ${hawkeye.reportDate}. ${duplicateRows} duplicate${duplicateRows === 1 ? "" : "s"} ignored.${warning}`;
+      const duplicateRows = allMetricRows.length - validMetrics.length;
+      const reportDates = [...new Set(hawkeye.dates.map((dateBatch) => dateBatch.reportDate))].sort();
+      const dateLabel = reportDates.length > 1 ? `${reportDates[0]} to ${reportDates.at(-1)} (${reportDates.length} days)` : reportDates[0];
+      const warning = unknownStations.size ? ` ${[...unknownStations].join(", ")} ignored because they are not active OpsPulse stations.` : "";
+      const message = `${validMetrics.length} Hawkeye station row${validMetrics.length === 1 ? "" : "s"} imported for ${dateLabel}. ${duplicateRows} duplicate${duplicateRows === 1 ? "" : "s"} ignored.${warning}`;
+      const totalRows = hawkeye.dates.reduce((sum, dateBatch) => sum + dateBatch.rows.length, 0);
       await db.from("report_import_batches").update({
         completed_at: new Date().toISOString(),
         imported_row_count: validMetrics.length,
         message,
-        report_from: hawkeye.reportDate,
-        report_to: hawkeye.reportDate,
-        row_count: hawkeye.rows.length,
-        skipped_row_count: duplicateRows + unknownStations.length,
-        station_code: [...new Set(metricRows.map((row) => row.station_code))].sort().join(", "),
+        report_from: reportDates[0],
+        report_to: reportDates.at(-1),
+        row_count: totalRows,
+        skipped_row_count: duplicateRows + unknownStations.size,
+        station_code: [...new Set(allMetricRows.map((row) => row.station_code))].sort().join(", "),
         status: "Completed"
       }).eq("id", batch.data.id).eq("company_id", companyId);
-      return Response.json({ duplicateRows, imported: validMetrics.length, message, skipped: duplicateRows + unknownStations.length, totalRows: hawkeye.rows.length });
+      return Response.json({ duplicateRows, imported: validMetrics.length, message, skipped: duplicateRows + unknownStations.size, totalRows });
     }
 
     if (masterData.parser_type === "pdf_scorecard" || masterData.parser_type === "pdf_daily_metrics") {

@@ -36,7 +36,12 @@ export const hawkeyeMetricDefinitions: HawkeyeMetricDefinition[] = [
   { label: "MFN - EF FDPS%", short: "MFN EF FDPS" },
   { label: "MFN - ES FDPS%", short: "MFN ES FDPS" },
   { label: "SMD2 Slot AD%", short: "SMD2 slot", targetKey: "slot_adherence" },
-  { label: "Store Returns%", short: "Store returns" }
+  { label: "Store Returns%", short: "Store returns" },
+  // Only present in the long/tall Hawkeye export (readHawkeyeLongFormatRows, from
+  // 2026-09-19) — the older wide-format download never included this column. Distinct
+  // from the manually-entered "noon EMD" reviewers type into the review desk
+  // (review-policy.ts's noonEmdValue) — this is Amazon's own imported EMD% metric.
+  { label: "EMD%", short: "EMD" }
 ];
 
 function normalized(value: unknown) {
