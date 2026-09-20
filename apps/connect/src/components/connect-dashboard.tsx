@@ -11,6 +11,7 @@ import {
   IndianRupee,
   LogIn,
   LogOut,
+  MessageCircleMore,
   PersonStanding,
   Route,
   Target,
@@ -497,13 +498,13 @@ export function ConnectDashboard({
   return <section className={`dx-dashboard${workforce ? " dx-workforce-dashboard" : ""}`}>
     <header className="dx-dashboard-greeting">
       <div>
-        <small className="dx-page-eyebrow">{workforce ? "Workforce" : "Today"} · {todayLabel}</small>
+        <small className="dx-page-eyebrow">Today · {todayLabel}</small>
         <h1>{greeting}, {firstName}</h1>
         <p className="dx-dashboard-motivation" aria-live="polite">
           {workforce ? workforceMotivation(account.role) : motivation || "A fresh moment is ready for thoughtful progress."}
         </p>
       </div>
-      <span className="dx-live-chip"><i /> {workforce ? "Workforce" : "Live"}</span>
+      {!workforce ? <span className="dx-live-chip"><i />Live</span> : null}
     </header>
 
     <section className={`dx-dashboard-card today${workforce ? " dx-workforce-attendance" : ""}`}>
@@ -571,14 +572,14 @@ export function ConnectDashboard({
       <header><div><small>{workforce ? "Work tools" : "Shortcuts"}</small><h2>Quick actions</h2></div></header>
       <div>
         {workforce && (pageAccess.includes("earnings") || pageAccess.includes("advances") || pageAccess.includes("rate_card")) ? <button onClick={onPayments}><i className="amber"><IndianRupee /></i><span><strong>Payments</strong><small>Live earnings, advances and rates</small></span><ChevronRight /></button> : null}
-        {workforce && (attendanceAllowed || rosterAllowed || leaveAllowed) ? <button onClick={onWork}><i className="blue"><CalendarClock /></i><span><strong>Work schedule</strong><small>Attendance, roster and leave</small></span><ChevronRight /></button> : null}
+        {workforce && (attendanceAllowed || rosterAllowed || leaveAllowed) ? <button onClick={onWork}><i className="blue"><CalendarClock /></i><span><strong>Work schedule</strong><small>Roster, shifts and leave</small></span><ChevronRight /></button> : null}
         {!workforce && attendanceAllowed ? <button onClick={onAttendance}><i className="blue"><Fingerprint /></i><span><strong>Attendance</strong><small>View punches</small></span><ChevronRight /></button> : null}
         {!workforce && rosterAllowed ? <button onClick={onRoster}><i className="amber"><CalendarClock /></i><span><strong>My roster</strong><small>Shift and swap requests</small></span><ChevronRight /></button> : null}
         {!workforce && leaveAllowed ? <button onClick={onLeave}><i className="pink"><CalendarDays /></i><span><strong>Time off</strong><small>Request leave</small></span><ChevronRight /></button> : null}
         {performanceAllowed ? <button onClick={onPerformance}><i className="purple"><Target /></i><span><strong>Performance</strong><small>Goals & reviews</small></span><ChevronRight /></button> : null}
-        {workforce && pageAccess.includes("connect") ? <button onClick={onConnect}><i className="pink"><CalendarDays /></i><span><strong>Connect</strong><small>Messages, updates and Speak Up</small></span><ChevronRight /></button> : null}
+        {workforce && pageAccess.includes("connect") ? <button onClick={onConnect}><i className="pink"><MessageCircleMore /></i><span><strong>Connect</strong><small>Updates, Workforce team and Speak Up</small></span><ChevronRight /></button> : null}
         {!workforce && advancesAllowed ? <button onClick={onAdvances}><i className="amber"><IndianRupee /></i><span><strong>My pay</strong><small>Advances</small></span><ChevronRight /></button> : null}
-        {profileAllowed ? <button onClick={onProfile}><i className="green"><UserRound /></i><span><strong>Profile</strong><small>Personal details</small></span><ChevronRight /></button> : null}
+        {profileAllowed && !workforce ? <button onClick={onProfile}><i className="green"><UserRound /></i><span><strong>Profile</strong><small>Personal details</small></span><ChevronRight /></button> : null}
       </div>
     </section>
 
@@ -595,7 +596,7 @@ export function ConnectDashboard({
       </button>
     </section> : null}
 
-    {profileAllowed ? <button className="dx-dashboard-profile dx-dashboard-profile-status" onClick={onProfile}>
+    {!workforce && profileAllowed ? <button className="dx-dashboard-profile dx-dashboard-profile-status" onClick={onProfile}>
       <i><UserRound /></i>
       <span><strong>My profile</strong><small><Pill text={profileStatus} tone={profileStatus === "active" ? "green" : "amber"} /> {profileStatus === "active" ? "100% completed" : "View profile status"}</small></span>
       <ChevronRight />

@@ -4,7 +4,7 @@ import { IndianRupee, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
-type Account = { id: string; profileType: string; reference?: string | null; name?: string | null; role?: string | null };
+type Account = { id: string; profileType: string; reference?: string | null; name?: string | null; role?: string | null; workspace?: "people" | "workforce" };
 type AdvanceRequest = {
   id: string;
   amount: number;
@@ -33,6 +33,7 @@ function formatWhen(value: string) {
 }
 
 export function ConnectAdvances({ account, active = true }: { account: Account; active?: boolean }) {
+  const workforce = account.workspace === "workforce";
   const [rows, setRows] = useState<AdvanceRequest[]>([]);
   const [eligibleForAdvance, setEligibleForAdvance] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -139,7 +140,7 @@ export function ConnectAdvances({ account, active = true }: { account: Account; 
           <span>
             <small className="dx-page-eyebrow">My pay</small>
             <h1>Advances</h1>
-            <p>Request and track salary advances.</p>
+            <p>{workforce ? "Request and track payment advances." : "Request and track salary advances."}</p>
           </span>
         </div>
         <button disabled={!eligibleForAdvance || loading} onClick={() => setShowForm(true)} type="button">

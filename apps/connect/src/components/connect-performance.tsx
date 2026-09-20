@@ -97,7 +97,7 @@ export function ConnectPerformance({ account, active = true }: { account: AppAcc
 
   if (loading && !data) return <div className="dx-loader fullscreen"><span /><small>Loading performance...</small></div>;
   if (error && !data) return <div className="dx-alert error">{error}<button onClick={() => setRefresh((value) => value + 1)}>Retry</button></div>;
-  if (!data?.configured) return <section className="dx-performance"><header className="dx-page-intro"><small>Performance</small><h1>My performance</h1><p>Your People profile needs to be linked first.</p></header><div className="dx-performance-empty"><Target /><strong>Performance profile not configured</strong><span>Ask HR to complete your active People assignment.</span></div></section>;
+  if (!data?.configured) return <section className="dx-performance"><header className="dx-page-intro"><small>Performance</small><h1>My performance</h1><p>{account.workspace === "workforce" ? "Your individual delivery performance will appear once the station publishes it." : "Your People profile needs to be linked first."}</p></header><div className="dx-performance-empty"><Target /><strong>{account.workspace === "workforce" ? "Performance update pending" : "Performance profile not configured"}</strong><span>{account.workspace === "workforce" ? "Your station team can publish delivery, quality and incentive performance for this period." : "Ask HR to complete your active People assignment."}</span></div></section>;
 
   const operational = data.operational;
   const visibleSection = operational ? section : "reviews";

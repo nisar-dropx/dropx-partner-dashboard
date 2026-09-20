@@ -65,7 +65,7 @@ export function ConnectWorkforcePayments({ account }: { account: AppAccount }) {
 
   return <section className="dx-workforce-payments">
     <header className="dx-page-intro">
-      <small>My pay</small><h1>Payments</h1><p>See live earnings, final payment statements, advances and your active rate card in one place.</p>
+      <small>My pay</small><h1>Payments</h1><p>See live earnings, payment advances and your active rate card in one place.</p>
     </header>
     <nav aria-label="Payment section" className="dx-workforce-tabs">
       {earningsAllowed ? <button className={tab === "earnings" ? "active" : ""} onClick={() => setTab("earnings")}><IndianRupee />Live earnings</button> : null}
