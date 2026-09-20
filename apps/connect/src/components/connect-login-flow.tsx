@@ -601,7 +601,10 @@ export function ConnectLoginFlow() {
     router.replace(urlFor(destination, refreshed));
   }
 
-  const loggedIn = ["accounts","dashboard","profile","documents","connect","approvals","requests","payments","advances","earnings","reimbursements","attendance","roster","leave","lop","wfh","performance","settings"].includes(step);
+  // `work` is a Workforce-only screen, but it still uses the same authenticated
+  // shell. Omitting it here made a valid session render the sign-in artwork
+  // (and no login controls) whenever a user opened Work schedule.
+  const loggedIn = ["accounts","dashboard","profile","documents","connect","approvals","requests","payments","work","advances","earnings","reimbursements","attendance","roster","leave","lop","wfh","performance","settings"].includes(step);
   const screenLabel: Partial<Record<Step, string>> = {
     accounts: "Accounts",
     dashboard: "Today",
@@ -611,6 +614,7 @@ export function ConnectLoginFlow() {
     approvals: "Approvals",
     requests: "My requests",
     payments: "Payments",
+    work: "Work schedule",
     advances: "Pay advances",
     earnings: "My Earnings",
     reimbursements: "Expense requests",
