@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireConnectAccount } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { workforcePaymentMonth } from "@/lib/workforce-payment-period";
+import { workforcePaymentStatus } from "@/lib/workforce-payment-status";
 
 type Mapping = {
   id: string;
@@ -111,7 +112,7 @@ export async function GET(request: NextRequest) {
       current.amount += line.amount;
       mtdLines.set(key, current);
     }
-    const payrollItems = account.profileType === "workforce"
+    const payrollItems = account.profileType === "workforce" && account.pageAccess.includes("earnings")
       ? await supabaseAdmin.from("workforce_payroll_items")
         .select("id,payroll_run_id,shipment_count,work_days,base_amount,incentive_amount,adjustment_amount,deduction_amount,gross_amount,net_amount,status")
         .eq("company_id", account.companyId).eq("workforce_id", account.id).order("created_at", { ascending: false }).limit(36)
@@ -124,13 +125,22 @@ export async function GET(request: NextRequest) {
         .eq("company_id", account.companyId).in("id", runIds)
       : { data: [], error: null };
     if (payrollRuns.error) throw new Error("We could not load your payment statements. Please try again.");
+    const itemIds = (payrollItems.data ?? []).map(item => item.id);
+    const financePayments = itemIds.length
+      ? await supabaseAdmin.from("payment_requests").select("source_id,status,processed_at,utr_cin")
+        .eq("company_id",account.companyId).eq("source_system","WORKFORCE_PAYROLL").in("source_id",itemIds)
+      : {data:[],error:null};
+    if (financePayments.error) throw new Error("We could not load your payment reconciliation. Please try again.");
+    const financeByItem = new Map((financePayments.data ?? []).map(payment=>[payment.source_id,payment]));
     const runsById = new Map((payrollRuns.data ?? []).map((row) => [row.id, row]));
     const statements = (payrollItems.data ?? []).flatMap((item) => {
       const run = runsById.get(item.payroll_run_id);
-      if (!run || !["approved", "paid"].includes(String(run.status))) return [];
+      if (!run) return [];
+      const paymentStatus = workforcePaymentStatus(item,run,financeByItem.get(item.id));
+      if (!paymentStatus) return [];
       return [{
         id: item.id, runNumber: run.run_number, periodStart: run.period_start, periodEnd: run.period_end,
-        status: run.status, paymentDate: run.payment_date ?? run.paid_at ?? null, paymentReference: run.payment_reference ?? null,
+        ...paymentStatus,
         shipments: Number(item.shipment_count ?? 0), workingDays: Number(item.work_days ?? 0), baseAmount: Number(item.base_amount ?? 0),
         incentiveAmount: Number(item.incentive_amount ?? 0), adjustmentAmount: Number(item.adjustment_amount ?? 0), deductionAmount: Number(item.deduction_amount ?? 0),
         grossAmount: Number(item.gross_amount ?? 0), netAmount: Number(item.net_amount ?? 0)
@@ -150,14 +160,14 @@ export async function GET(request: NextRequest) {
         effectiveFrom: mapping.effective_from,
         effectiveTo: mapping.effective_to
       })),
-      summary: {
+      summary: account.pageAccess.includes("earnings") ? {
         deliveries: daily.reduce((total, row) => total + row.deliveries, 0),
         earnings: daily.reduce((total, row) => total + row.earnings, 0),
         workingDays: daily.length,
         latestDate: daily[0]?.date ?? null,
         rateLines: [...mtdLines.values()]
-      },
-      daily,
+      } : {deliveries:0,earnings:0,workingDays:0,latestDate:null,rateLines:[]},
+      daily: account.pageAccess.includes("earnings") ? daily : [],
       statements,
       rateCard
     }, { headers: { "Cache-Control": "private, no-store" } });
