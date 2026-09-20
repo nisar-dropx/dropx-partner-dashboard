@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { userFacingError } from "@/lib/user-facing-error";
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
-import { resolveWorkforceLeaveApproval, resolveWorkforceLeaveEntitlements, type LeaveWorkerType } from "../../../../src/lib/connect-leave-data";
+import { resolveWorkforceLeaveApproval, resolveWorkforceLeaveBalance, resolveWorkforceLeaveEntitlements, type LeaveWorkerType } from "../../../../src/lib/connect-leave-data";
 import { notifyConnectLeaveSubmitted } from "../../../../src/lib/connect-leave-notifications";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
@@ -165,25 +165,30 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType, prev
       steps: stepsByRequest.get(request.id) ?? []
     };
   });
-  const types = entitlements.map((leaveType) => {
-    const approved = (requestResult.data ?? []).filter((request) => request.leave_type_id === leaveType.leave_type_id && request.status === "approved")
-      .reduce((total, request) => total + overlapDays(request.start_date, request.end_date, yearStart, yearEnd), 0);
+  // Ledger-backed balance (hr_resolve_leave_balance) - not a re-count of this year's requests
+  // here, so it reflects any cancellation, HR adjustment or comp-off credit against the same
+  // balance, exactly like the HRMS Leave page. "pending" stays a request-list figure (days
+  // requested but not yet decided), which the ledger correctly does not touch until approval.
+  const types = await Promise.all(entitlements.map(async (leaveType) => {
     const pending = (requestResult.data ?? []).filter((request) => request.leave_type_id === leaveType.leave_type_id && request.status === "pending")
       .reduce((total, request) => total + overlapDays(request.start_date, request.end_date, yearStart, yearEnd), 0);
-    const tracksBalance = leaveType.balance_mode === "annual_balance";
+    const tracksBalance = leaveType.balance_mode === "annual_balance" || leaveType.balance_mode === "earned_balance";
+    const balance = tracksBalance
+      ? await resolveWorkforceLeaveBalance(account.companyId, type, account.id, leaveType.leave_type_id, leaveType.annual_allowance)
+      : { entitlement: null, used: null, remaining: null };
     return {
       id: leaveType.leave_type_id,
       name: leaveType.name,
       code: leaveType.code,
-      allowance: tracksBalance ? leaveType.annual_allowance : null,
+      allowance: tracksBalance ? balance.entitlement : null,
       color: leaveType.color,
-      used: approved,
+      used: tracksBalance ? balance.used : 0,
       pending,
-      available: tracksBalance ? Math.max(0, leaveType.annual_allowance - approved) : null,
+      available: tracksBalance ? balance.remaining : null,
       isPaid: leaveType.is_paid,
       balanceMode: leaveType.balance_mode
     };
-  });
+  }));
   return {
     year,
     types,

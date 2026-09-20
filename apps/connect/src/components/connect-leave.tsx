@@ -18,7 +18,7 @@ type LeaveType = {
   pending: number;
   available: number | null;
   isPaid: boolean;
-  balanceMode: "annual_balance" | "unlimited_unpaid";
+  balanceMode: "annual_balance" | "unlimited_unpaid" | "earned_balance";
 };
 type LeaveApprovalStep = {
   stepOrder: number;

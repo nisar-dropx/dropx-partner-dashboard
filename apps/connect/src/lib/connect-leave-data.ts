@@ -19,12 +19,14 @@ export type WorkforceLeaveEntitlement = {
   color: string;
   annual_allowance: number;
   is_paid: boolean;
-  balance_mode: "annual_balance" | "unlimited_unpaid";
+  balance_mode: "annual_balance" | "unlimited_unpaid" | "earned_balance";
   attendance_code: string;
   attendance_label: string;
   rule_id: string;
   scope_type: "company" | "location" | "designation" | "location_designation";
 };
+
+export type WorkforceLeaveBalance = { entitlement: number | null; used: number | null; remaining: number | null };
 
 type PermissionUser = {
   userId: string;
@@ -117,6 +119,38 @@ export async function resolveWorkforceLeaveEntitlements({ companyId, workerId, w
   });
   if (result.error) throw new Error(result.error.message);
   return (result.data ?? []) as WorkforceLeaveEntitlement[];
+}
+
+function relationRow<T>(value: T | T[] | null | undefined): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+/**
+ * The ledger-backed (entitlement, used, remaining) triple for one worker/leave type - the
+ * same hr_resolve_leave_balance RPC dropx-hrms's own leave-workflow.ts calls, so DropX One
+ * shows exactly what HR sees: a cancelled/adjusted leave, comp-off earned on a week-off or
+ * holiday, and any manual HR correction all net out correctly. Replaces the ad-hoc "count
+ * approved/pending hr_leave_requests rows in the current calendar year" math the leave list
+ * used to do inline, which only ever reflected the original approval and never a later
+ * cancellation, adjustment or comp-off credit against the same balance.
+ */
+export async function resolveWorkforceLeaveBalance(
+  companyId: string,
+  workerType: LeaveWorkerType,
+  workerId: string,
+  leaveTypeId: string,
+  entitlement: number | null
+): Promise<WorkforceLeaveBalance> {
+  const result = await db().rpc("hr_resolve_leave_balance", {
+    p_company_id: companyId,
+    p_worker_type: workerType,
+    p_worker_id: workerId,
+    p_leave_type_id: leaveTypeId,
+    p_entitlement: entitlement
+  });
+  if (result.error) throw new Error(result.error.message);
+  const row = relationRow(result.data as WorkforceLeaveBalance[] | WorkforceLeaveBalance | null);
+  return row ?? { entitlement: null, used: null, remaining: null };
 }
 
 export async function resolveWorkforceLeaveApproval({ companyId, workerId, workerType, days }: {
