@@ -3,6 +3,9 @@ import {workforcePaymentMonth} from "@/lib/workforce-payment-period";
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
+import {loadOwnAdjustmentLedger} from '@/lib/workforce-own-adjustments';
+
+export const dynamic='force-dynamic';
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 function first<T>(value: T | T[] | null | undefined) { return Array.isArray(value) ? value[0] : value ?? null; }
@@ -36,12 +39,13 @@ export async function GET(request: Request) {
     const mappingResult = await db().from("field_executive_provider_mappings").select("id,provider_member_id,station_id,provider_id,workforce_id,contractor_id,employee_id,field_executive_id,payment_method_id,payment_values,effective_from,effective_to,providers(name,code),stations(station_code),payment_methods(name)").eq("company_id", account.companyId).neq("status", "cancelled").lte("effective_from",to).or(`effective_to.is.null,effective_to.gte.${from}`).or(identityFilter);
     if (mappingResult.error) throw new Error(mappingResult.error.message);
     const mappings = mappingResult.data ?? []; const stationIds = [...new Set(mappings.map((row) => row.station_id).filter(Boolean))]; const memberIds = [...new Set(mappings.map((row) => row.provider_member_id).filter(Boolean))];
-    const [stationsResult, metricsResult, allocationsResult, workforceResult, rateCardsResult] = await Promise.all([
+    const [stationsResult, metricsResult, allocationsResult, workforceResult, rateCardsResult, adjustments] = await Promise.all([
       stationIds.length ? db().from("stations").select("id,station_code,location_model_id").eq("company_id", account.companyId).in("id", stationIds) : Promise.resolve({ data: [], error: null }),
       memberIds.length ? db().from("cps_shipment_daily").select("provider_employee_id,work_date,station_code,client,total_activity,amazon_delivery,swa_delivery,total_delivery,c_return,mfn,mfn_return").eq("company_id", account.companyId).in("provider_employee_id", memberIds).gte("work_date", from).lte("work_date", to) : Promise.resolve({ data: [], error: null }),
       db().from("payment_field_provider_metrics").select("provider_id,provider_model_id,provider_production_metrics(source_key),payment_fields(code,label,field_type)").eq("company_id", account.companyId),
       account.profileType === "workforce" ? db().from("workforce").select("designation_id,location_id").eq("company_id", account.companyId).eq("id", account.id).maybeSingle() : Promise.resolve({ data: null, error: null }),
-      db().from("workforce_rate_cards").select("id,provider_id,station_id,designation_id,pay_type,effective_from,effective_to,delivery_rate,return_rate,mfn_rate,mfn_return_rate,fuel_rate,fixed_amount,guarantee_amount,status,approved_at").eq("company_id", account.companyId).neq("status", "draft").lte("effective_from", to).or(`effective_to.is.null,effective_to.gte.${from}`)
+      db().from("workforce_rate_cards").select("id,provider_id,station_id,designation_id,pay_type,effective_from,effective_to,delivery_rate,return_rate,mfn_rate,mfn_return_rate,fuel_rate,fixed_amount,guarantee_amount,status,approved_at").eq("company_id", account.companyId).neq("status", "draft").lte("effective_from", to).or(`effective_to.is.null,effective_to.gte.${from}`),
+      loadOwnAdjustmentLedger(db(),account,from,to)
     ]);
     const error = stationsResult.error?.message || metricsResult.error?.message || allocationsResult.error?.message || workforceResult.error?.message || rateCardsResult.error?.message; if (error) throw new Error(error);
     const stationById = new Map((stationsResult.data ?? []).map((row) => [row.id, row])); const dailyByMember = new Map<string, Array<Record<string, unknown>>>();
@@ -74,6 +78,11 @@ export async function GET(request: Request) {
     });
     const summary = earnings.reduce((total, row) => ({ workDays: total.workDays + row.workDays, baseAmount: total.baseAmount + row.baseAmount, additions: total.additions + row.additions, grossAmount: total.grossAmount + row.grossAmount }), { workDays: 0, baseAmount: 0, additions: 0, grossAmount: 0 });
     summary.workDays=new Set(earnings.flatMap(row=>row.daily.map(day=>day.date))).size;
-    return NextResponse.json({ month, earnings, summary }, { headers: { "Cache-Control": "private, no-store" } });
-  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load earnings." }, { status: 400 }); }
+    // Posted adjustments remain part of this period's estimate exactly once. Statements are
+    // a separate historical record, never added again and never treated as outstanding dues.
+    summary.additions=adjustments.summary.additions;
+    summary.grossAmount=Math.round((summary.baseAmount+summary.additions)*100)/100;
+    const deductionAmount=adjustments.summary.deductions,netAmount=Math.round((summary.grossAmount-deductionAmount)*100)/100;
+    return NextResponse.json({ month, earnings, adjustments, summary:{...summary,deductionAmount,netAmount} }, { headers: { "Cache-Control": "private, no-store", "Vary":"Cookie" } });
+  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load earnings." }, { status: 400,headers:{"Cache-Control":"private, no-store","Vary":"Cookie"} }); }
 }

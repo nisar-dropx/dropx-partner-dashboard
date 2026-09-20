@@ -1,10 +1,12 @@
 "use client";
 
 import { CalendarDays, ChevronDown, ChevronRight, Download, IndianRupee, ReceiptText, RefreshCw, Route, WalletCards } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectAdvances } from "./connect-advances";
 import { ConnectWorkforceJoining } from "./connect-workforce-joining";
+import {ConnectPayAdjustments} from './connect-pay-adjustments';
+import type {OwnAdjustmentLedger} from '@/lib/workforce-own-adjustments';
 
 type PaymentData = {
   period: string;
@@ -16,7 +18,8 @@ type PaymentData = {
 };
 
 type EarningsData = {
-  summary: { grossAmount: number };
+  summary: { grossAmount: number; netAmount:number; baseAmount:number; additions:number; deductionAmount:number };
+  adjustments:OwnAdjustmentLedger;
   earnings: Array<{ daily: Array<{ date: string; amount: number }> }>;
 };
 
@@ -26,6 +29,10 @@ const money = (value: number) => `₹${value.toLocaleString("en-IN", { maximumFr
 const label = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
 
 export function ConnectWorkforcePayments({ account }: { account: AppAccount }) {
+  return <WorkforcePayments key={`${account.companyId}:${account.profileType}:${account.id}:${account.pageAccess?.join(',')}`} account={account} />;
+}
+
+function WorkforcePayments({ account }: { account: AppAccount }) {
   const access = account.pageAccess ?? [];
   const earningsAllowed = access.includes("earnings");
   const advancesAllowed = access.includes("advances");
@@ -36,32 +43,40 @@ export function ConnectWorkforcePayments({ account }: { account: AppAccount }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [expandedDate, setExpandedDate] = useState("");
+  const [calculated,setCalculated]=useState<EarningsData|null>(null);
+  const generation=useRef(0);
   const load = useCallback(async () => {
-    setLoading(true); setError("");
+    const version=++generation.current;
+    setLoading(true); setError("");setData(null);setCalculated(null);setExpandedDate('');
+    if(!earningsAllowed&&!rateCardAllowed){setLoading(false);return;}
     try {
       const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
       const [response, earningsResponse] = await Promise.all([
         fetch(`/api/connect/workforce-payments?${query}`, { cache: "no-store" }),
-        fetch(`/api/connect/earnings?${query}`, { cache: "no-store" })
+        earningsAllowed?fetch(`/api/connect/earnings?${query}`, { cache: "no-store" }):Promise.resolve(null)
       ]);
-      const [payload, earningsPayload] = await Promise.all([response.json(), earningsResponse.json()]);
+      const [payload, earningsPayload] = await Promise.all([response.json(), earningsResponse?.json()??Promise.resolve(null)]);
       if (!response.ok) throw new Error(payload.error || "Unable to load earnings.");
-      const calculated = earningsResponse.ok ? earningsPayload as EarningsData : null;
+      if(earningsResponse&&!earningsResponse.ok)throw new Error(earningsPayload?.error||'Unable to reconcile your payment estimate. Please retry.');
+      const calculated = earningsPayload as EarningsData|null;
+      if(earningsAllowed&&(!calculated?.adjustments||!Number.isFinite(calculated.summary?.netAmount)))throw new Error('Your payment estimate could not be reconciled. Please retry.');
       const earningsByDate = new Map<string, number>();
       for (const mapping of calculated?.earnings ?? []) for (const row of mapping.daily) {
         earningsByDate.set(row.date, (earningsByDate.get(row.date) ?? 0) + Number(row.amount ?? 0));
       }
+      if(version!==generation.current)return;
+      setCalculated(calculated);
       setData({
         ...payload,
-        summary: { ...payload.summary, earnings: calculated?.summary.grossAmount ?? payload.summary.earnings },
-        daily: payload.daily.map((row: PaymentData["daily"][number]) => ({ ...row, earnings: earningsByDate.get(row.date) ?? row.earnings }))
+        summary: { ...payload.summary, earnings: calculated?.summary.netAmount ?? payload.summary.earnings },
+        daily: payload.daily.map((row: PaymentData["daily"][number]) => ({ ...row, earnings: calculated?(earningsByDate.get(row.date)??0):row.earnings }))
       });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to load earnings.");
-    } finally { setLoading(false); }
-  }, [account.id, account.profileType]);
-  useEffect(() => { void load(); }, [load]);
-  useEffect(() => { if ((tab === "earnings" && !earningsAllowed) || (tab === "advances" && !advancesAllowed) || (tab === "rate-card" && !rateCardAllowed)) setTab(firstTab); }, [advancesAllowed, earningsAllowed, firstTab, rateCardAllowed, tab]);
+      if(version===generation.current)setError(reason instanceof Error ? reason.message : "Unable to load earnings.");
+    } finally { if(version===generation.current)setLoading(false); }
+  }, [account.id, account.profileType,earningsAllowed,rateCardAllowed]);
+  useEffect(() => { void load();return()=>{generation.current++;}; }, [load]);
+  useEffect(() => { if (((tab === "earnings"||tab==='statements') && !earningsAllowed) || (tab === "advances" && !advancesAllowed) || (tab === "rate-card" && !rateCardAllowed)) setTab(firstTab); }, [advancesAllowed, earningsAllowed, firstTab, rateCardAllowed, tab]);
   const mapping = data?.mapping[0];
   const hasMap = Boolean(data?.mapping.length);
   const entries = useMemo(() => data?.rateCard ?? [], [data]);
@@ -87,12 +102,15 @@ export function ConnectWorkforcePayments({ account }: { account: AppAccount }) {
     {tab !== "advances" && error ? <div className="dx-alert error">{error}<button onClick={() => void load()}><RefreshCw />Retry</button></div> : null}
     {tab === "earnings" && earningsAllowed && data && !loading && !error ? <>
       {!hasMap ? <section className="dx-workforce-empty"><i><Route /></i><div><strong>Payment mapping is being set up</strong><p>Your profile is active, but it is not yet connected to a provider ID and rate card. Your station team can complete the mapping before live earnings appear here.</p></div></section> : <>
-        <section className="dx-workforce-payment-hero"><span><small>{data.period}</small><strong>{money(data.summary.earnings)}</strong><em>Estimated live earnings</em></span><button onClick={() => setTab("rate-card")}>View rate card <ChevronRight /></button></section>
+        <section className="dx-workforce-payment-hero"><span><small>{data.period}</small><strong>{money(data.summary.earnings)}</strong><em>Estimated live earnings</em></span>{rateCardAllowed?<button onClick={() => setTab("rate-card")}>View rate card <ChevronRight /></button>:null}</section>
+        {calculated?<p className="dx-workforce-payment-note">Production {money(calculated.summary.baseAmount)} + approved additions {money(calculated.summary.additions)} − approved deductions {money(calculated.summary.deductionAmount)}. An estimate, not your unpaid balance.</p>:null}
         <section className="dx-workforce-payment-stats"><article><Route /><span><strong>{data.summary.deliveries.toLocaleString("en-IN")}</strong><small>Deliveries</small></span></article><article><CalendarDays /><span><strong>{data.summary.workingDays}</strong><small>Active days</small></span></article><article><IndianRupee /><span><strong>{date(data.summary.latestDate)}</strong><small>Latest import</small></span></article></section>
+        {calculated?<ConnectPayAdjustments ledger={calculated.adjustments}/>:null}
         <section className="dx-workforce-mtd-breakdown"><header><div><small>Month to date</small><h2>Activity &amp; earnings break-up</h2><p>Your deliveries and the payment estimate for each activity this month.</p></div></header>{data.summary.rateLines.length ? <div>{data.summary.rateLines.map((line) => <article key={`${line.code}:${line.rate}`}><span><strong>{line.label}</strong><small>{line.sharedRate ? "Included at the delivery rate" : "Payment rate"}</small></span><b>{line.count.toLocaleString("en-IN")} × {money(line.rate)}<em>{money(line.amount)}</em></b></article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>Activity details are not available yet</strong><small>Your payment estimate will update when the next shipment import is processed.</small></div>}</section>
         <section className="dx-workforce-ledger"><header><div><small>Daily view</small><h2>This month&apos;s earnings</h2></div><button onClick={() => void load()} aria-label="Refresh earnings"><RefreshCw /></button></header>{data.daily.length ? <div>{data.daily.map((row) => <article className={expandedDate === row.date ? "expanded" : ""} key={row.date}><button aria-expanded={expandedDate === row.date} className="dx-workforce-day" onClick={() => setExpandedDate((current) => current === row.date ? "" : row.date)} type="button"><span><strong>{date(row.date)}</strong><small>{row.deliveries.toLocaleString("en-IN")} total deliveries · tap for break-up</small></span><b>{money(row.earnings)}<ChevronDown /></b></button>{expandedDate === row.date ? <div className="dx-workforce-rate-breakdown">{row.rateLines.length ? row.rateLines.map((line) => <div key={`${line.code}:${line.rate}`}><span><strong>{line.label}</strong><small>{line.sharedRate ? "Included at the delivery rate" : "Payment rate"}</small></span><b>{line.count.toLocaleString("en-IN")} × {money(line.rate)}<em>{money(line.amount)}</em></b></div>) : <small>Activity details will appear after the next shipment import.</small>}</div> : null}</article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>No imported delivery data yet</strong><small>New Amazon delivery imports will show here after they are mapped and processed.</small></div>}</section>
-        <p className="dx-workforce-payment-note">Live earnings use imported delivery data and your active rate card. Final payout remains subject to the payout review cycle.</p>
+        <p className="dx-workforce-payment-note">Daily activity shows production only. The monthly estimate includes approved adjustments; training pay and other payroll-only entitlements are confirmed in your statement. Final payout remains subject to payroll and Finance review.</p>
       </>}
+      {calculated&&!hasMap?<ConnectPayAdjustments ledger={calculated.adjustments}/>:null}
     </> : null}
     {tab === "statements" && earningsAllowed && data && !loading && !error ? <section className="dx-workforce-statements"><header><div><small>Payment history</small><h2>Payment statements</h2><p>Confirmed cycles and individual Finance payment progress appear here. Open a statement to print or save as PDF.</p></div></header>{data.statements.length ? <div>{data.statements.map((statement) => <article key={statement.id}><div><span><strong>{statementLabel(statement.periodStart, statement.periodEnd)}</strong><em className={statement.status}>{statement.statusLabel}</em></span><small>{statement.shipments.toLocaleString("en-IN")} shipments · {statement.workingDays} active days{statement.paymentReference ? ` · Ref ${statement.paymentReference}` : ""}</small><dl><div><dt>Base</dt><dd>{money(statement.baseAmount)}</dd></div><div><dt>Incentives</dt><dd>{money(statement.incentiveAmount)}</dd></div><div><dt>Adjustments</dt><dd>{money(statement.adjustmentAmount)}</dd></div><div><dt>Deductions</dt><dd>-{money(statement.deductionAmount)}</dd></div></dl></div><aside><strong>{money(statement.netAmount)}</strong><small>{statement.paymentDate ? `Paid ${date(statement.paymentDate)}` : "Awaiting disbursal"}</small><button onClick={() => downloadStatement(statement.id)} type="button"><Download />Open statement</button></aside></article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>No payment statements yet</strong><small>Once a payment cycle is approved, its statement and payment break-up will be available here.</small></div>}</section> : null}
     {tab === "rate-card" && rateCardAllowed && data && !loading && !error ? <>

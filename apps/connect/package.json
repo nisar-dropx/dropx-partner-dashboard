@@ -5,7 +5,7 @@
   "scripts": {
 "prebuild": "node --experimental-strip-types --test src/lib/workforce-operating-schedule.test.mjs src/lib/workforce-payment-mapping.test.mjs src/lib/workforce-payment-status.test.mjs src/lib/workforce-payment-period.test.mjs src/lib/workforce-joining.test.mjs src/lib/connect-approval-links.test.mjs src/lib/connect-pay-advance-approval-data.test.mjs src/lib/connect-account-routing.test.mjs src/lib/connect-navigation-state.test.mjs src/lib/expense-request-form.test.mjs && node ../../scripts/verify-connect-workspace-boundary.mjs && node ../../scripts/verify-connect-canonical-workforce.mjs && node ../../scripts/verify-connect-approval-reportee-scope.mjs && node ../../scripts/verify-connect-expense-request-routing.mjs && node ../../scripts/verify-connect-roster-integrity.mjs && node ../../scripts/verify-connect-performance-navigation.mjs && node ../../scripts/verify-dropx-one-native.mjs",
     "dev": "next dev",
-    "build": "next build",
+    "build": "node --test src/lib/workforce-own-adjustments.test.mjs && next build",
     "start": "next start"
   },
   "dependencies": {

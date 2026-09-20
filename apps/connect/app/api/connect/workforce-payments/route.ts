@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { workforcePaymentMonth } from "@/lib/workforce-payment-period";
 import {paymentMappingForDay} from "@/lib/workforce-payment-mapping";
 import { workforcePaymentStatus } from "@/lib/workforce-payment-status";
+export const dynamic='force-dynamic';
 
 type Mapping = {
   id: string;
@@ -29,7 +30,7 @@ export async function GET(request: NextRequest) {
     const profileType = request.nextUrl.searchParams.get("profileType") as "employee" | "workforce" | "field_executive" | "contractor" | "vendor" | "worker";
     const account = await requireConnectAccount(profileType, accountId);
     if (account.workspace !== "workforce") throw new Error("This payment view is available in the Workforce workspace only.");
-    if (!account.pageAccess.some(code => ["earnings", "rate_card"].includes(code))) return NextResponse.json({error:"Payments are not enabled for this account."},{status:403,headers:{"Cache-Control":"private, no-store"}});
+    if (!account.pageAccess.some(code => ["earnings", "rate_card"].includes(code))) return NextResponse.json({error:"Payments are not enabled for this account."},{status:403,headers:{"Cache-Control":"private, no-store","Vary":"Cookie"}});
 
     const identityFilters:string[] = account.profileType==="workforce" ? [`workforce_id.eq.${account.id}`] : [];
     const legacyColumns:Record<string,string>={employee:"employee_id",contractor:"contractor_id",field_executive:"field_executive_id"};
@@ -176,8 +177,8 @@ export async function GET(request: NextRequest) {
       daily: account.pageAccess.includes("earnings") ? daily : [],
       statements,
       rateCard
-    }, { headers: { "Cache-Control": "private, no-store" } });
+    }, { headers: { "Cache-Control": "private, no-store", "Vary":"Cookie" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load workforce payments." }, { status: 400 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load workforce payments." }, { status: 400,headers:{"Cache-Control":"private, no-store","Vary":"Cookie"} });
   }
 }
