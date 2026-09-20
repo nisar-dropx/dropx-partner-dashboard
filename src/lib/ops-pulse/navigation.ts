@@ -36,7 +36,8 @@ const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Tea
   { code: "ops_attendance_reports", label: "Attendance Reports", href: "/attendance" },
   { code: "ops_unplanned_leaves", label: "Unplanned Leaves", href: "/attendance/unplanned-leaves" },
   { code: "ops_offboarding_checklist", label: "Offboarding", href: "/attendance/offboarding" },
-  { code: "ops_salary_hold", label: "Salary Hold", href: "/attendance/salary-hold" }
+  { code: "ops_salary_hold", label: "People Salary Hold", href: "/attendance/salary-hold" },
+  { code: "ops_salary_hold", label: "Workforce Payment Holds", href: "/attendance/workforce-holds" }
 ] };
 
 const businessDocuments: NavItem = {

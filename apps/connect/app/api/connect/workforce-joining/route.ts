@@ -55,9 +55,11 @@ export async function GET(request: NextRequest) {
     const state = joiningState(person,plan,mappings,attendance,today);
     const entitlements = plan ? trainingEntitlements(person,plan,mappings,attendance,plan.eligible_from,today) : [];
     const payVisible = account.pageAccess.includes("earnings");
+    const paymentHolds = payVisible ? await allRows(db.from('workforce_payment_holds').select('id,period_start,period_end,status,requested_at').eq('company_id',company).eq('workforce_id',person.id).neq('status','released').order('requested_at',{ascending:false}).order('id')) : [];
     // Deliberate allowlist: internal notes, portal credentials, other staff and documents never leave this endpoint.
     return NextResponse.json({
       available:true,stage:state.stage,stageLabel:joiningStages[state.stage],configured:Boolean(plan),mode:plan?.mode ?? null,
+      paymentHolds:paymentHolds.map(row=>({id:row.id,from:row.period_start,to:row.period_end,status:row.status,placedAt:row.requested_at})),
       firstPunch:state.firstPunch,mappingEffectiveFrom:state.mapping?.effective_from ?? null,
       providerStage:plan ? providerStages[plan.provider_stage] : null,nextFollowUp:plan?.next_follow_up_on ?? null,updatedAt:plan?.updated_at ?? null,
       tasks:plan ? Object.entries(amazonTasks).filter(([,task])=>task.owner==="Associate").map(([code,task])=>({code,label:task.label,status:amazonTaskStates[plan.amazon_tasks?.[code as keyof typeof amazonTasks] ?? "pending"]})) : [],
