@@ -2,6 +2,7 @@ import 'server-only';
 import type {AuthorizationContext} from '@/lib/authorization';
 import {requireCompanyId} from '@/lib/company-scope';
 import {supabaseAdmin} from '@/lib/supabase-admin';
+import {workforceClassification} from './workforce-classification';
 export async function manageWorkforceHold(auth:AuthorizationContext,form:FormData,reviewer:boolean){
   if(auth.readOnly)throw new Error('Preview mode is read-only.');
   if(!supabaseAdmin)throw new Error('Database is unavailable.');
@@ -9,6 +10,10 @@ export async function manageWorkforceHold(auth:AuthorizationContext,form:FormDat
   const action=value('action');
   if(!['create','request_release','release'].includes(action))throw new Error('Choose a valid hold action.');
   if(action==='create'){
+    const company=requireCompanyId(auth);
+    const person=await supabaseAdmin.from('workforce').select('designation_id,designation').eq('company_id',company).eq('id',value('workforce_id')).is('deleted_at',null).neq('migration_state','reclassified').maybeSingle();
+    const eligible=await workforceClassification(company);
+    if(person.error||!person.data||!eligible(person.data))throw new Error('Choose a master-classified Workforce associate.');
     for(const key of ['period_start','period_end']) {const raw=value(key);if(!/^\d{4}-\d{2}-\d{2}$/.test(raw)||new Date(`${raw}T00:00:00Z`).toISOString().slice(0,10)!==raw)throw new Error('Choose valid hold dates.');}
     if(value('reason').length<5||value('reason').length>2000||value('reference').length<3||value('reference').length>250)throw new Error('Provide a reason and unique case reference.');
   }
