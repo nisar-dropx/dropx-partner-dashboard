@@ -29,8 +29,9 @@ export async function GET(request: Request, { params }: { params: { kind: string
     const url = new URL(request.url);
     const accountId = clean(url.searchParams.get("accountId"));
     const profileType = clean(url.searchParams.get("profileType"));
-    if (profileType !== "employee" && profileType !== "contractor") return Response.json({ error: "Account is invalid." }, { status: 400 });
+    if (profileType !== "employee" && profileType !== "contractor" && profileType !== "workforce") return Response.json({ error: "Account is invalid." }, { status: 400 });
     const account = await requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
+    if (profileType === "workforce" && params.kind !== "issued") return Response.json({ error: "This document is not available for the Workforce account." }, { status: 404 });
 
     if (params.kind === "exit") {
       const document = await supabaseAdmin.from("hr_exit_documents")

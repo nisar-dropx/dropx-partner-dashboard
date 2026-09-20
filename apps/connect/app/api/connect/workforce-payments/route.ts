@@ -66,15 +66,45 @@ export async function GET(request: NextRequest) {
       : { data: [], error: null };
     if (dailyResult.error) throw new Error("We could not load your live earnings. Please try again.");
 
-    const dailyByDate = new Map<string, { date: string; deliveries: number; earnings: number }>();
+    const dailyByDate = new Map<string, { date: string; deliveries: number; amazonDeliveries: number; swaDeliveries: number; cReturns: number; mfn: number; mfnReturns: number; earnings: number }>();
     for (const row of dailyResult.data ?? []) {
       const date = String(row.work_date ?? "");
-      const current = dailyByDate.get(date) ?? { date, deliveries: 0, earnings: 0 };
+      const current = dailyByDate.get(date) ?? { date, deliveries: 0, amazonDeliveries: 0, swaDeliveries: 0, cReturns: 0, mfn: 0, mfnReturns: 0, earnings: 0 };
       current.deliveries += Number(row.total_delivery ?? (Number(row.amazon_delivery ?? 0) + Number(row.swa_delivery ?? 0)));
+      current.amazonDeliveries += Number(row.amazon_delivery ?? 0);
+      current.swaDeliveries += Number(row.swa_delivery ?? 0);
+      current.cReturns += Number(row.c_return ?? 0);
+      current.mfn += Number(row.mfn ?? 0);
+      current.mfnReturns += Number(row.mfn_return ?? 0);
       current.earnings += Number(row.da_total_pay ?? 0);
       dailyByDate.set(date, current);
     }
     const daily = [...dailyByDate.values()].sort((left, right) => right.date.localeCompare(left.date));
+    const payrollItems = account.profileType === "workforce"
+      ? await supabaseAdmin.from("workforce_payroll_items")
+        .select("id,payroll_run_id,shipment_count,work_days,base_amount,incentive_amount,adjustment_amount,deduction_amount,gross_amount,net_amount,status")
+        .eq("company_id", account.companyId).eq("workforce_id", account.id).order("created_at", { ascending: false }).limit(36)
+      : { data: [], error: null };
+    if (payrollItems.error) throw new Error("We could not load your payment statements. Please try again.");
+    const runIds = [...new Set((payrollItems.data ?? []).map((row) => String(row.payroll_run_id)).filter(Boolean))];
+    const payrollRuns = runIds.length
+      ? await supabaseAdmin.from("workforce_payroll_runs")
+        .select("id,run_number,period_start,period_end,status,payment_reference,payment_date,paid_at")
+        .eq("company_id", account.companyId).in("id", runIds)
+      : { data: [], error: null };
+    if (payrollRuns.error) throw new Error("We could not load your payment statements. Please try again.");
+    const runsById = new Map((payrollRuns.data ?? []).map((row) => [row.id, row]));
+    const statements = (payrollItems.data ?? []).flatMap((item) => {
+      const run = runsById.get(item.payroll_run_id);
+      if (!run || !["approved", "paid"].includes(String(run.status))) return [];
+      return [{
+        id: item.id, runNumber: run.run_number, periodStart: run.period_start, periodEnd: run.period_end,
+        status: run.status, paymentDate: run.payment_date ?? run.paid_at ?? null, paymentReference: run.payment_reference ?? null,
+        shipments: Number(item.shipment_count ?? 0), workingDays: Number(item.work_days ?? 0), baseAmount: Number(item.base_amount ?? 0),
+        incentiveAmount: Number(item.incentive_amount ?? 0), adjustmentAmount: Number(item.adjustment_amount ?? 0), deductionAmount: Number(item.deduction_amount ?? 0),
+        grossAmount: Number(item.gross_amount ?? 0), netAmount: Number(item.net_amount ?? 0)
+      }];
+    });
     const rateCard = mappings.flatMap((mapping) => Object.entries(mapping.payment_values ?? {})
       .filter(([, value]) => Number.isFinite(Number(value)))
       .map(([code, value]) => ({ code, rate: Number(value), providerMemberId: mapping.provider_member_id, effectiveFrom: mapping.effective_from, effectiveTo: mapping.effective_to })));
@@ -96,6 +126,7 @@ export async function GET(request: NextRequest) {
         latestDate: daily[0]?.date ?? null
       },
       daily,
+      statements,
       rateCard
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {

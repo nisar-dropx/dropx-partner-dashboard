@@ -66,7 +66,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const accountId = clean(url.searchParams.get("accountId"));
     const profileType = clean(url.searchParams.get("profileType"));
-    if (profileType !== "employee" && profileType !== "contractor") throw new Error("Documents are available for employees and independent contractors.");
+    if (!["employee", "contractor", "workforce"].includes(profileType)) throw new Error("Documents are unavailable for this account.");
     const account = await requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
 
     const attachmentId = clean(url.searchParams.get("attachmentId"));
@@ -93,7 +93,7 @@ export async function GET(request: Request) {
         .is("revoked_at", null).order("published_at", { ascending: false }),
       // Relieving letters, experience certificates and other exit documents —
       // generated on demand (see connect-exit-document.ts), never stored.
-      supabaseAdmin.from("hr_exit_documents")
+      profileType === "workforce" ? Promise.resolve({ data: [], error: null }) : supabaseAdmin.from("hr_exit_documents")
         .select("id,document_type,file_name,generated_at,status,hr_exit_cases!inner(worker_type,employee_id,contractor_id)")
         .eq("company_id", account.companyId).neq("status", "void")
         .eq("hr_exit_cases.worker_type", profileType)

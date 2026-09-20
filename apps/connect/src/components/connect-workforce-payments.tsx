@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, ChevronRight, IndianRupee, ReceiptText, RefreshCw, Route, WalletCards } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronRight, Download, IndianRupee, ReceiptText, RefreshCw, Route, WalletCards } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectAdvances } from "./connect-advances";
@@ -9,7 +9,8 @@ type PaymentData = {
   period: string;
   mapping: Array<{ id: string; providerMemberId: string | null; provider: string | null; paymentMethod: string | null; effectiveFrom: string | null; effectiveTo: string | null }>;
   summary: { deliveries: number; earnings: number; workingDays: number; latestDate: string | null };
-  daily: Array<{ date: string; deliveries: number; earnings: number }>;
+  daily: Array<{ date: string; deliveries: number; amazonDeliveries: number; swaDeliveries: number; cReturns: number; mfn: number; mfnReturns: number; earnings: number }>;
+  statements: Array<{ id: string; runNumber: string; periodStart: string; periodEnd: string; status: string; paymentDate: string | null; paymentReference: string | null; shipments: number; workingDays: number; baseAmount: number; incentiveAmount: number; adjustmentAmount: number; deductionAmount: number; grossAmount: number; netAmount: number }>;
   rateCard: Array<{ code: string; rate: number; providerMemberId: string | null; effectiveFrom: string | null; effectiveTo: string | null }>;
 };
 
@@ -18,7 +19,7 @@ type EarningsData = {
   earnings: Array<{ daily: Array<{ date: string; amount: number }> }>;
 };
 
-type Tab = "earnings" | "advances" | "rate-card";
+type Tab = "earnings" | "statements" | "advances" | "rate-card";
 const date = (value: string | null) => value ? new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(new Date(`${value}T00:00:00`)) : "—";
 const money = (value: number) => `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 const label = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (character) => character.toUpperCase());
@@ -33,6 +34,7 @@ export function ConnectWorkforcePayments({ account }: { account: AppAccount }) {
   const [data, setData] = useState<PaymentData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [expandedDate, setExpandedDate] = useState("");
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
@@ -62,6 +64,11 @@ export function ConnectWorkforcePayments({ account }: { account: AppAccount }) {
   const mapping = data?.mapping[0];
   const hasMap = Boolean(data?.mapping.length);
   const entries = useMemo(() => data?.rateCard ?? [], [data]);
+  const statementLabel = (start: string, end: string) => `${new Intl.DateTimeFormat("en-IN", { month: "short", year: "numeric" }).format(new Date(`${start}T00:00:00`))} · ${date(start)} – ${date(end)}`;
+  const downloadStatement = (statementId: string) => {
+    const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType, statementId });
+    window.open(`/api/connect/workforce-payment-statement?${query}`, "_blank", "noopener,noreferrer");
+  };
 
   return <section className="dx-workforce-payments">
     <header className="dx-page-intro">
@@ -69,6 +76,7 @@ export function ConnectWorkforcePayments({ account }: { account: AppAccount }) {
     </header>
     <nav aria-label="Payment section" className="dx-workforce-tabs">
       {earningsAllowed ? <button className={tab === "earnings" ? "active" : ""} onClick={() => setTab("earnings")}><IndianRupee />Live earnings</button> : null}
+      {earningsAllowed ? <button className={tab === "statements" ? "active" : ""} onClick={() => setTab("statements")}><ReceiptText />Monthly statements</button> : null}
       {advancesAllowed ? <button className={tab === "advances" ? "active" : ""} onClick={() => setTab("advances")}><WalletCards />Advances</button> : null}
       {rateCardAllowed ? <button className={tab === "rate-card" ? "active" : ""} onClick={() => setTab("rate-card")}><ReceiptText />Rate card</button> : null}
     </nav>
@@ -79,10 +87,11 @@ export function ConnectWorkforcePayments({ account }: { account: AppAccount }) {
       {!hasMap ? <section className="dx-workforce-empty"><i><Route /></i><div><strong>Payment mapping is being set up</strong><p>Your profile is active, but it is not yet connected to a provider ID and rate card. Your station team can complete the mapping before live earnings appear here.</p></div></section> : <>
         <section className="dx-workforce-payment-hero"><span><small>{data.period}</small><strong>{money(data.summary.earnings)}</strong><em>Estimated live earnings</em></span><button onClick={() => setTab("rate-card")}>View rate card <ChevronRight /></button></section>
         <section className="dx-workforce-payment-stats"><article><Route /><span><strong>{data.summary.deliveries.toLocaleString("en-IN")}</strong><small>Deliveries</small></span></article><article><CalendarDays /><span><strong>{data.summary.workingDays}</strong><small>Active days</small></span></article><article><IndianRupee /><span><strong>{date(data.summary.latestDate)}</strong><small>Latest import</small></span></article></section>
-        <section className="dx-workforce-ledger"><header><div><small>Daily view</small><h2>This month&apos;s earnings</h2></div><button onClick={() => void load()} aria-label="Refresh earnings"><RefreshCw /></button></header>{data.daily.length ? <div>{data.daily.map((row) => <article key={row.date}><span><strong>{date(row.date)}</strong><small>{row.deliveries.toLocaleString("en-IN")} deliveries</small></span><b>{money(row.earnings)}</b></article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>No imported delivery data yet</strong><small>New Amazon delivery imports will show here after they are mapped and processed.</small></div>}</section>
+        <section className="dx-workforce-ledger"><header><div><small>Daily view</small><h2>This month&apos;s earnings</h2></div><button onClick={() => void load()} aria-label="Refresh earnings"><RefreshCw /></button></header>{data.daily.length ? <div>{data.daily.map((row) => <article className={expandedDate === row.date ? "expanded" : ""} key={row.date}><button aria-expanded={expandedDate === row.date} className="dx-workforce-day" onClick={() => setExpandedDate((current) => current === row.date ? "" : row.date)} type="button"><span><strong>{date(row.date)}</strong><small>{row.deliveries.toLocaleString("en-IN")} total deliveries · tap for shipment detail</small></span><b>{money(row.earnings)}<ChevronDown /></b></button>{expandedDate === row.date ? <dl className="dx-workforce-shipment-breakdown"><div><dt>Amazon deliveries</dt><dd>{row.amazonDeliveries.toLocaleString("en-IN")}</dd></div>{row.swaDeliveries ? <div><dt>SWA deliveries</dt><dd>{row.swaDeliveries.toLocaleString("en-IN")}</dd></div> : null}<div><dt>C-returns</dt><dd>{row.cReturns.toLocaleString("en-IN")}</dd></div><div><dt>MFN</dt><dd>{row.mfn.toLocaleString("en-IN")}</dd></div><div><dt>MFN returns</dt><dd>{row.mfnReturns.toLocaleString("en-IN")}</dd></div></dl> : null}</article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>No imported delivery data yet</strong><small>New Amazon delivery imports will show here after they are mapped and processed.</small></div>}</section>
         <p className="dx-workforce-payment-note">Live earnings use imported delivery data and your active rate card. Final payout remains subject to the payout review cycle.</p>
       </>}
     </> : null}
+    {tab === "statements" && earningsAllowed && data && !loading && !error ? <section className="dx-workforce-statements"><header><div><small>Payment history</small><h2>Monthly payment statements</h2><p>Approved and paid cycles are retained here. Open one to save a PDF invoice.</p></div></header>{data.statements.length ? <div>{data.statements.map((statement) => <article key={statement.id}><div><span><strong>{statementLabel(statement.periodStart, statement.periodEnd)}</strong><em className={statement.status}>{statement.status === "paid" ? "Paid" : "Approved"}</em></span><small>{statement.shipments.toLocaleString("en-IN")} shipments · {statement.workingDays} active days{statement.paymentReference ? ` · Ref ${statement.paymentReference}` : ""}</small><dl><div><dt>Base</dt><dd>{money(statement.baseAmount)}</dd></div><div><dt>Incentives</dt><dd>{money(statement.incentiveAmount)}</dd></div><div><dt>Adjustments</dt><dd>{money(statement.adjustmentAmount)}</dd></div><div><dt>Deductions</dt><dd>-{money(statement.deductionAmount)}</dd></div></dl></div><aside><strong>{money(statement.netAmount)}</strong><small>{statement.paymentDate ? `Paid ${date(statement.paymentDate)}` : "Awaiting disbursal"}</small><button onClick={() => downloadStatement(statement.id)} type="button"><Download />Invoice PDF</button></aside></article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>No payment statements yet</strong><small>Once a payment cycle is approved, its invoice and payment break-up will be available here.</small></div>}</section> : null}
     {tab === "rate-card" && rateCardAllowed && data && !loading && !error ? <>
       {!hasMap ? <section className="dx-workforce-empty"><i><ReceiptText /></i><div><strong>No active rate card yet</strong><p>Once your provider ID is mapped, the applicable station rate card will appear here.</p></div></section> : <section className="dx-workforce-rate-card"><header><small>Active mapping</small><h2>{mapping?.paymentMethod || "Rate card"}</h2><p>{mapping?.provider ? `${mapping.provider} · ` : ""}Provider ID {mapping?.providerMemberId || "—"}</p></header><div className="dx-workforce-rate-meta"><span>Effective from <b>{date(mapping?.effectiveFrom ?? null)}</b></span><span>Valid to <b>{date(mapping?.effectiveTo ?? null)}</b></span></div>{entries.length ? <div className="dx-workforce-rate-lines">{entries.map((entry, index) => <article key={`${entry.code}:${index}`}><span><strong>{label(entry.code)}</strong><small>{entry.providerMemberId ? `Provider ID ${entry.providerMemberId}` : "Active mapping"}</small></span><b>{money(entry.rate)}</b></article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>Rate details are not published yet</strong><small>Your payment mapping is active. The station can publish rate details when they are ready.</small></div>}</section>}
     </> : null}

@@ -65,6 +65,7 @@ const statusLabels: Record<string, string> = {
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function ConnectDocuments({ account, active = true }: { account: AppAccount; active?: boolean }) {
+  const workforce = account.workspace === "workforce" || ["workforce", "field_executive", "vendor", "worker"].includes(account.profileType);
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [requestTypes, setRequestTypes] = useState<RequestType[]>([]);
   const [requests, setRequests] = useState<DocumentRequest[]>([]);
@@ -241,10 +242,10 @@ export function ConnectDocuments({ account, active = true }: { account: AppAccou
   }
 
   return <section className="dx-documents">
-    <header className="dx-page-intro dx-documents-head"><div><small>My records</small><h1>Documents</h1><p>Payslips, insurance and official HR records—organised by type.</p></div><button disabled={!requestTypes.length} onClick={() => setShowRequest(true)}><FilePlus2 />Request document</button></header>
+    <header className="dx-page-intro dx-documents-head"><div><small>My records</small><h1>Documents</h1><p>{workforce ? "Insurance, Form 16 and official workforce records—kept private and ready when issued." : "Payslips, insurance and official HR records—organised by type."}</p></div>{requestTypes.length ? <button onClick={() => setShowRequest(true)}><FilePlus2 />Request document</button> : null}</header>
     <div className="dx-document-summary">
       <div><i><FileCheck2 /></i><span><small>Available</small><strong>{loading ? "—" : summary.total}</strong></span></div>
-      <div><i><WalletCards /></i><span><small>{account.profileType === "employee" ? "Payslips" : "Pay statements"}</small><strong>{loading ? "—" : summary.pay}</strong></span></div>
+      <div><i><WalletCards /></i><span><small>{workforce ? "Payment docs" : account.profileType === "employee" ? "Payslips" : "Pay statements"}</small><strong>{loading ? "—" : summary.pay}</strong></span></div>
       <div><i><FileClock /></i><span><small>Open requests</small><strong>{loading ? "—" : summary.requests}</strong></span></div>
     </div>
     {notice ? <div className="dx-alert success">{notice}<button aria-label="Dismiss" onClick={() => setNotice("")}><X /></button></div> : null}
