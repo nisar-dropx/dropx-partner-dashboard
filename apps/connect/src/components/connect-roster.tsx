@@ -6,10 +6,11 @@ import { formatShiftClock } from "@/lib/roster-plan-preference";
 import { rosterChangeDeadlineShortLabel } from "@/lib/roster-change-deadline";
 import type { AppAccount } from "./connect-profile-app";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
+import { indiaScheduleToday, scheduleWeekStart } from "../lib/workforce-operating-schedule";
 
 type Shift = { id: string; name: string; code: string; start_time: string; end_time: string };
 type Partner = { id: string; workerType: string; workerId: string; name?: string; code?: string; dayType: "working" | "weekly_off"; shift: Shift | null };
-type RosterDay = { id: string; date: string; dayType: "working" | "weekly_off"; locationId: string | null; shift: Shift | null; isProjected: boolean; canSwap: boolean; partners: Partner[] };
+type RosterDay = { id: string; date: string; dayType: "working" | "weekly_off"; locationId: string | null; operatingPincode?:string|null; shift: Shift | null; isProjected: boolean; canSwap: boolean; partners: Partner[] };
 type SwapRequest = {
   id: string;
   date: string;
@@ -52,14 +53,11 @@ function shiftLabel(shift: Shift | null, dayType: string) {
 }
 
 function localIsoDate(date = new Date()) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return indiaScheduleToday(date);
 }
 
 function weekKey(value: string) {
-  const date = new Date(`${value}T00:00:00`);
-  const day = (date.getDay() + 6) % 7;
-  date.setDate(date.getDate() - day);
-  return date.toISOString().slice(0, 10);
+  return scheduleWeekStart(value);
 }
 
 function weekHeading(value: string) {
@@ -132,8 +130,8 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
   );
   const days = data?.days ?? [];
   const nextWorking = useMemo(
-    () => days.find((day) => day.date >= today && day.dayType === "working" && day.shift) ?? null,
-    [days, today]
+    () => days.find((day) => day.date >= today && day.dayType === "working" && (data?.source === "workforce" || day.shift)) ?? null,
+    [days, today, data?.source]
   );
   const offCount = useMemo(() => days.filter((day) => day.dayType === "weekly_off").length, [days]);
   const weekGroups = useMemo(() => {
@@ -270,20 +268,20 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
       {!loading && days.length ? (
         <div className="dx-roster-summary" aria-label="Roster summary">
           <div>
-            <small>Next shift</small>
+            <small>{data?.source === "workforce" ? "Next operating day" : "Next shift"}</small>
             <strong>{nextWorking ? data?.source === "workforce" ? "Operating day" : shiftLabel(nextWorking.shift, nextWorking.dayType) : "—"}</strong>
-            <em>{nextWorking ? data?.source === "workforce" ? `Pincode ${data.operatingPincode || "to be assigned"}` : displayDate(nextWorking.date) : "No upcoming shift"}</em>
+            <em>{nextWorking ? data?.source === "workforce" ? `${displayDate(nextWorking.date)} · Pincode ${nextWorking.operatingPincode || "to be assigned"}` : displayDate(nextWorking.date) : data?.source === "workforce" ? "No upcoming operating day" : "No upcoming shift"}</em>
           </div>
           <div>
             <small>Rest days</small>
             <strong>{offCount}</strong>
             <em>In this view</em>
           </div>
-          <div>
+          {data?.source !== "workforce" ? <div>
             <small>Open swaps</small>
             <strong>{activeRequests.length}</strong>
             <em>{activeRequests.length ? "Needs attention" : "None pending"}</em>
-          </div>
+          </div> : <div><small>Schedule owner</small><strong>Workforce</strong><em>Contact your station for changes</em></div>}
         </div>
       ) : null}
 
@@ -291,7 +289,7 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
         <div className="dx-empty"><CalendarDays /><strong>{data?.source === "workforce" ? "Operating schedule not configured yet" : "No roster published yet"}</strong><small>{data?.source === "workforce" ? "Your Workforce manager can set your operating pincode and regular weekly off in Associate Rostering. Once saved, it will appear here automatically." : "Your upcoming shifts will appear here once the roster is published."}</small></div>
       ) : null}
 
-      {!loading ? (
+      {!loading && days.length > 0 ? (
         <div className="dx-roster-panel">
           {days.length ? weekGroups.map((group) => (
             <section className="dx-roster-week-block" key={group.key}>
@@ -324,7 +322,7 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
                         </span>
                         <em className={isOff ? "off" : "shift"}>
                           <Clock3 />
-                          {data?.source === "workforce" && !isOff ? `Pincode ${data.operatingPincode || "to be assigned"}` : shiftLabel(day.shift, day.dayType)}
+                          {data?.source === "workforce" && !isOff ? `Pincode ${day.operatingPincode || "to be assigned"}` : shiftLabel(day.shift, day.dayType)}
                         </em>
                       </div>
                       {!data?.readOnly ? <button

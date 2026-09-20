@@ -4,6 +4,7 @@ import { userFacingError } from "../../../../src/lib/user-facing-error";
 import { formatShiftClock, preferActiveRosterRowsByKey } from "@/lib/roster-plan-preference";
 import { isRosterChangePastDeadline, normalizeRosterChangeDeadlineHour, rosterChangeDeadlineMessage } from "@/lib/roster-change-deadline";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
+import { workforceOperatingDays } from "../../../../src/lib/workforce-operating-schedule";
 
 type WorkerType = "employee" | "contractor";
 type WorkerIdentity = { workerType: WorkerType; workerId: string };
@@ -447,24 +448,7 @@ async function workforceRosterPayload(account: ConnectAccount) {
   if (assignments.error) throw new Error(assignments.error.message);
 
   const schedule = (assignments.data ?? []) as unknown as WorkforceOperatingSchedule[];
-  const days = Array.from({ length: ROSTER_VIEW_DAYS }, (_, offset) => {
-    const date = addDays(start, offset);
-    const assignment = schedule.find((item) =>
-      item.effective_from <= date && (!item.effective_to || item.effective_to >= date)
-    );
-    if (!assignment) return null;
-    const isWeeklyOff = new Date(`${date}T00:00:00Z`).getUTCDay() === Number(assignment.weekly_off_day);
-    return {
-      id: `workforce:${assignment.id}:${date}`,
-      date,
-      dayType: isWeeklyOff ? "weekly_off" as const : "working" as const,
-      locationId: null,
-      shift: null,
-      isProjected: date > start,
-      canSwap: false,
-      partners: []
-    };
-  }).filter(Boolean);
+  const days = workforceOperatingDays(schedule,start,ROSTER_VIEW_DAYS);
 
   return {
     days,
