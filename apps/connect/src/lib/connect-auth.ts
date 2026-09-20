@@ -546,11 +546,17 @@ function resolveConnectPageAccess(
   designationPages?: string[] | null
 ) {
   if (profileType === "user") return managerPageAccess;
+  // Workforce menus are configured per designation. A registration policy can
+  // offer a sensible template, but it must not silently remove a menu the
+  // designation owner has explicitly enabled. People profiles retain the
+  // existing category-and-designation intersection.
+  const workforceDesignationAccess = ["workforce", "field_executive", "vendor", "worker"].includes(profileType)
+    && Array.isArray(designationPages);
   const baselinePages = profileType === "employee" || profileType === "contractor"
     ? ["performance"]
     : [];
   return [...new Set([
-    ...intersectPageAccess(categoryPages, designationPages),
+    ...(workforceDesignationAccess ? designationPages ?? [] : intersectPageAccess(categoryPages, designationPages)),
     ...baselinePages,
     ...requiredDropxOnePageCodes
   ])];
