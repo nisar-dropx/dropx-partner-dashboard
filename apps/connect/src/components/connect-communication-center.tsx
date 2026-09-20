@@ -89,6 +89,13 @@ function readableSize(value: number) {
 }
 
 export function ConnectCommunicationCenter({ account, active = true }: { account: AppAccount; active?: boolean }) {
+  // Keep the established People terminology intact; Workforce is presented as a
+  // dedicated support channel while retaining the same secure case workflow.
+  const workforce = account.workspace === "workforce";
+  const supportLabel = workforce ? "Workforce team" : "HR Help";
+  const supportTeamLabel = workforce ? "Workforce team" : "People & Culture";
+  const supportChannelLabel = workforce ? "DIRECT WORKFORCE SUPPORT" : "DIRECT PEOPLE SUPPORT";
+  const supportConversationLabel = workforce ? "PRIVATE WORKFORCE CONVERSATION" : "PRIVATE HR CONVERSATION";
   const { markLoaded, setReload } = useKeepAliveRefresh(active);
   const [section, setSection] = useState<Section>("updates");
   const [settings, setSettings] = useState<ChannelSetting[]>([]);
@@ -248,35 +255,35 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
   if (selectedCase) {
     const confidential = selectedCase.channel === "integrity";
     return <section className="dx-communication dx-communication-detail">
-      <button className="dx-communication-back" onClick={() => setSelectedCaseId("")}><ArrowLeft />{confidential ? "Speak Up cases" : "HR Help"}</button>
+      <button className="dx-communication-back" onClick={() => setSelectedCaseId("")}><ArrowLeft />{confidential ? "Speak Up cases" : supportLabel}</button>
       <header className={`dx-case-hero ${confidential ? "confidential" : "help"}`}>
         <div><span>{selectedCase.case_number}</span><h1>{selectedCase.subject}</h1><p>{selectedCase.category} · {shortDate(selectedCase.created_at)}</p></div>
         <b className={`dx-case-status ${selectedCase.status}`}>{statusLabels[selectedCase.status] ?? selectedCase.status}</b>
       </header>
       <div className="dx-privacy-strip"><LockKeyhole /><span>{confidential
         ? <><strong>Confidential conversation.</strong> Your identity is separated from the case shown to ordinary reviewers.</>
-        : <><strong>Private HR conversation.</strong> Only you and authorised People team members can access this thread.</>}</span></div>
+        : <><strong>Private conversation.</strong> Only you and authorised {supportTeamLabel} members can access this thread.</>}</span></div>
       {error ? <div className="dx-communication-alert error"><AlertTriangle />{error}<button aria-label="Dismiss error" onClick={() => setError("")}><X /></button></div> : null}
       <div className="dx-case-timeline">
         {(selectedCase.messages ?? []).map((message) => <article className={message.author_kind === "reporter" ? "mine" : "committee"} key={message.id}>
-          <span>{message.author_kind === "reporter" ? "You" : "People & Culture"}</span>
+          <span>{message.author_kind === "reporter" ? "You" : supportTeamLabel}</span>
           <p>{message.body}</p>
           <small>{shortDate(message.created_at)}</small>
         </article>)}
       </div>
       {selectedCase.attachments?.length ? <div className="dx-evidence-list"><strong>Attachments</strong>{selectedCase.attachments.map((file) => <button key={file.id} onClick={() => void openAttachment(file.id)}><FileText /><span>{file.original_name}<small>{readableSize(file.file_size)}</small></span><ChevronRight /></button>)}</div> : null}
-      {!(["closed", "dismissed"].includes(selectedCase.status)) ? <form className="dx-case-reply" onSubmit={sendReply}><label>Reply<textarea maxLength={3000} onChange={(event) => setReply(event.target.value)} placeholder="Add an update or answer the People team…" value={reply} /></label><button disabled={saving || reply.trim().length < 2}>{saving ? <LoaderCircle /> : <Send />}Send reply</button></form> : null}
+      {!(["closed", "dismissed"].includes(selectedCase.status)) ? <form className="dx-case-reply" onSubmit={sendReply}><label>Reply<textarea maxLength={3000} onChange={(event) => setReply(event.target.value)} placeholder={`Add an update or answer the ${supportTeamLabel}…`} value={reply} /></label><button disabled={saving || reply.trim().length < 2}>{saving ? <LoaderCircle /> : <Send />}Send reply</button></form> : null}
     </section>;
   }
 
   if (selectedChannel && activeSetting) {
     const confidential = selectedChannel === "integrity";
     return <section className="dx-communication dx-new-case">
-      <button className="dx-communication-back" onClick={() => setSelectedChannel(null)}><ArrowLeft />{confidential ? "Speak Up" : "HR Help"}</button>
-      <header className={`dx-new-case-hero ${confidential ? "coral" : "violet"}`}><i>{confidential ? <ShieldCheck /> : <Headphones />}</i><div><span>{confidential ? "CONFIDENTIAL REPORT" : "PRIVATE HR CONVERSATION"}</span><h1>{activeSetting.title}</h1><p>{activeSetting.guidance}</p></div></header>
+      <button className="dx-communication-back" onClick={() => setSelectedChannel(null)}><ArrowLeft />{confidential ? "Speak Up" : supportLabel}</button>
+      <header className={`dx-new-case-hero ${confidential ? "coral" : "violet"}`}><i>{confidential ? <ShieldCheck /> : <Headphones />}</i><div><span>{confidential ? "CONFIDENTIAL REPORT" : supportConversationLabel}</span><h1>{confidential ? activeSetting.title : supportLabel}</h1><p>{activeSetting.guidance}</p></div></header>
       <div className="dx-privacy-strip"><LockKeyhole /><span>{confidential
         ? <><strong>Confidential by design.</strong> Reporter identity is stored separately from the review case.</>
-        : <><strong>Private and access-controlled.</strong> This message goes to the authorised People team.</>}</span></div>
+        : <><strong>Private and access-controlled.</strong> This message goes to the authorised {supportTeamLabel}.</>}</span></div>
       {confidential && activeSetting.rewardEnabled ? <div className="dx-reward-note"><BadgeIndianRupee /><span><strong>Integrity reward</strong> Verified reports may be considered under the company reward policy after review.</span></div> : null}
       {error ? <div className="dx-communication-alert error"><AlertTriangle />{error}<button aria-label="Dismiss error" onClick={() => setError("")}><X /></button></div> : null}
       <form className="dx-communication-form" onSubmit={submit}>
@@ -286,7 +293,7 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
         <label>Details<textarea maxLength={5000} onChange={(event) => setDescription(event.target.value)} placeholder="Include dates, places and facts. Avoid assumptions where possible." value={description} /><small>{description.length}/5000</small></label>
         {activeSetting.allowAttachments ? <div className="dx-evidence-picker"><input accept="image/jpeg,image/png,image/webp,application/pdf,audio/*,video/mp4" hidden multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []).slice(0, 3))} ref={fileRef} type="file" /><button onClick={() => fileRef.current?.click()} type="button"><Paperclip />Add evidence</button><span>{files.length ? `${files.length} file${files.length > 1 ? "s" : ""} selected` : "Up to 3 files · 8 MB each"}</span></div> : null}
         {files.map((file) => <div className="dx-selected-file" key={`${file.name}-${file.size}`}><FileText /><span>{file.name}<small>{readableSize(file.size)}</small></span><button aria-label={`Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((item) => item !== file))} type="button"><X /></button></div>)}
-        <button className="dx-submit-case" disabled={saving || subject.trim().length < 5 || description.trim().length < 20}>{saving ? <LoaderCircle /> : confidential ? <ShieldCheck /> : <Send />}{saving ? "Submitting…" : confidential ? "Submit confidentially" : "Send to HR"}</button>
+        <button className="dx-submit-case" disabled={saving || subject.trim().length < 5 || description.trim().length < 20}>{saving ? <LoaderCircle /> : confidential ? <ShieldCheck /> : <Send />}{saving ? "Submitting…" : confidential ? "Submit confidentially" : `Send to ${supportLabel}`}</button>
       </form>
     </section>;
   }
@@ -297,24 +304,24 @@ export function ConnectCommunicationCenter({ account, active = true }: { account
   const confidential = section === "speak-up";
 
   return <section className="dx-communication">
-    <header className="dx-communication-hero"><div><span><Sparkles />INFORMED · SUPPORTED · HEARD</span><h1>Connect</h1><p>Company updates, private HR conversations and confidential reporting in one trusted place.</p></div><MessageCircleMore /></header>
+    <header className="dx-communication-hero"><div><span><Sparkles />INFORMED · SUPPORTED · HEARD</span><h1>Connect</h1><p>{workforce ? "Company updates, direct Workforce team conversations and confidential reporting in one trusted place." : "Company updates, private HR conversations and confidential reporting in one trusted place."}</p></div><MessageCircleMore /></header>
     {success ? <div className="dx-communication-alert success"><CheckCircle2 />{success}<button aria-label="Dismiss message" onClick={() => setSuccess("")}><X /></button></div> : null}
     {error ? <div className="dx-communication-alert error"><AlertTriangle />{error}<button aria-label="Dismiss error" onClick={() => setError("")}><X /></button></div> : null}
     <nav aria-label="Connect sections" className="dx-connect-tabs">
       <button className={section === "updates" ? "active" : ""} onClick={() => setSection("updates")}><Megaphone /><span>Updates</span>{announcements.filter((item) => !item.readAt).length ? <b>{announcements.filter((item) => !item.readAt).length}</b> : null}</button>
-      <button className={section === "hr-help" ? "active" : ""} onClick={() => setSection("hr-help")}><Headphones /><span>HR Help</span></button>
+      <button className={section === "hr-help" ? "active" : ""} onClick={() => setSection("hr-help")}><Headphones /><span>{supportLabel}</span></button>
       <button className={section === "speak-up" ? "active" : ""} onClick={() => setSection("speak-up")}><ShieldCheck /><span>Speak Up</span></button>
     </nav>
 
     {section === "updates" ? <div className="dx-announcement-panel"><header><div><span><Megaphone />COMPANY COMMUNICATION</span><h2>Updates</h2><p>Announcements, policies, incentives and rollout plans from DropX.</p></div>{announcements.filter((item) => !item.readAt).length ? <b>{announcements.filter((item) => !item.readAt).length} new</b> : null}</header><div>{announcements.length ? announcements.slice(0, 30).map((item) => <button className={item.readAt ? "read" : "unread"} key={item.id} onClick={() => void openAnnouncement(item)}><i className={item.priority}><Megaphone /></i><span><small>{item.category} · {shortDate(item.published_at)}</small><strong>{item.title}</strong><em>{item.body.slice(0, 120)}{item.body.length > 120 ? "…" : ""}</em></span><ChevronRight /></button>) : <div className="dx-empty-cases"><Megaphone /><strong>You’re all caught up</strong><span>Official updates sent to your team will appear here.</span></div>}</div></div> : <>
       <section className={`dx-connect-channel-card ${confidential ? "speak-up" : "hr-help"}`}>
         <i>{confidential ? <ShieldCheck /> : <Headphones />}</i>
-        <div><small>{confidential ? "CONFIDENTIAL CHANNEL" : "DIRECT PEOPLE SUPPORT"}</small><h2>{confidential ? "Speak Up" : "HR Help"}</h2><p>{channelSetting?.subtitle ?? (confidential ? "Report fraud, abuse, harassment or serious misconduct." : "Start a private conversation with People & Culture.")}</p></div>
-        <button disabled={!channelSetting?.active} onClick={() => startCase(channel)}>{confidential ? "Report a concern" : "Start a conversation"}<ChevronRight /></button>
+        <div><small>{confidential ? "CONFIDENTIAL CHANNEL" : supportChannelLabel}</small><h2>{confidential ? "Speak Up" : supportLabel}</h2><p>{channelSetting?.subtitle ?? (confidential ? "Report fraud, abuse, harassment or serious misconduct." : `Start a private conversation with the ${supportTeamLabel}.`)}</p></div>
+        <button disabled={!channelSetting?.active} onClick={() => startCase(channel)}>{confidential ? "Report a concern" : `Message ${supportLabel}`}<ChevronRight /></button>
       </section>
       {confidential ? <div className="dx-anonymous-promise"><LockKeyhole /><div><strong>Your confidentiality promise</strong><p>Your report uses a case reference in the review workflow. Identity data is kept separately and access is restricted. Verified integrity reports may be considered for a reward under company policy.</p></div></div> : null}
-      <div className="dx-my-cases-heading"><div><h2>{confidential ? "My Speak Up cases" : "My HR conversations"}</h2><p>Track progress and reply securely.</p></div><button aria-label="Refresh cases" onClick={() => void load(true)}><RefreshCw /></button></div>
-      <div className="dx-my-cases">{channelCases.length ? channelCases.map((item) => <button key={item.id} onClick={() => setSelectedCaseId(item.id)}><i className={confidential ? "coral" : "violet"}>{confidential ? <ShieldCheck /> : <Headphones />}</i><span><small>{item.case_number} · {item.category}</small><strong>{item.subject}</strong><em>{shortDate(item.last_activity_at)}</em></span><b className={`dx-case-status ${item.status}`}>{statusLabels[item.status] ?? item.status}</b><ChevronRight /></button>) : <div className="dx-empty-cases"><MessageCircleMore /><strong>No conversations yet</strong><span>{confidential ? "Your confidential reports will appear here." : "Start a private conversation whenever you need HR support."}</span></div>}</div>
+      <div className="dx-my-cases-heading"><div><h2>{confidential ? "My Speak Up cases" : `My ${supportLabel} conversations`}</h2><p>Track progress and reply securely.</p></div><button aria-label="Refresh cases" onClick={() => void load(true)}><RefreshCw /></button></div>
+      <div className="dx-my-cases">{channelCases.length ? channelCases.map((item) => <button key={item.id} onClick={() => setSelectedCaseId(item.id)}><i className={confidential ? "coral" : "violet"}>{confidential ? <ShieldCheck /> : <Headphones />}</i><span><small>{item.case_number} · {item.category}</small><strong>{item.subject}</strong><em>{shortDate(item.last_activity_at)}</em></span><b className={`dx-case-status ${item.status}`}>{statusLabels[item.status] ?? item.status}</b><ChevronRight /></button>) : <div className="dx-empty-cases"><MessageCircleMore /><strong>No conversations yet</strong><span>{confidential ? "Your confidential reports will appear here." : `Start a private conversation whenever you need ${supportLabel} support.`}</span></div>}</div>
     </>}
   </section>;
 }
