@@ -25,11 +25,10 @@ export async function GET() {
     await supabaseAdmin.from("connect_login_sessions").update({ last_seen_at: new Date().toISOString() }).eq("id", session.id);
     const accounts = await findConnectAccounts(session.country_code, session.mobile_number);
     if (!accounts.length) {
-      await supabaseAdmin
-        .from("connect_login_sessions")
-        .update({ revoked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-        .eq("id", session.id);
-      cookies().delete(connectSessionCookieName);
+      // A missing account must deny access, but it must not silently destroy a
+      // valid 180-day device session. Workforce records can be momentarily
+      // unavailable while a profile/designation update is propagating; deleting
+      // the cookie here was forcing users through PIN/biometric sign-in again.
       return NextResponse.json({
         authenticated: false,
         error: "You don't have access to DropX One. Contact HR or your platform administrator for access."

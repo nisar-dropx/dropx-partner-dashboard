@@ -631,7 +631,7 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
   if (!profile && !error) return <Spinner />;
   if (!profile) return <div className="dx-alert error">{error}</div>;
 
-  const supportsExit = ["employee", "user", "contractor", "field_executive", "vendor", "worker"].includes(account.profileType);
+  const supportsExit = ["employee", "user", "contractor", "field_executive", "workforce", "vendor", "worker"].includes(account.profileType);
   if (completed && supportsExit && exitOpen) {
     return <ConnectExitManagement account={account} onBack={() => setExitOpen(false)} />;
   }
