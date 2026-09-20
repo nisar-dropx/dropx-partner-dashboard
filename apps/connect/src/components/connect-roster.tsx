@@ -246,8 +246,10 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
     <section className="dx-roster">
       <header className="dx-page-intro">
         <small>My work plan</small>
-        <h1>Roster</h1>
-        <p>Next {data?.viewDays ?? (days.length || 7)} days · shift times and swap requests.</p>
+        <h1>{data?.source === "workforce" ? "Operating schedule" : "Roster"}</h1>
+        <p>{data?.source === "workforce"
+          ? `Next ${data?.viewDays ?? (days.length || 7)} days · operating pincode and weekly off.`
+          : `Next ${data?.viewDays ?? (days.length || 7)} days · shift times and swap requests.`}</p>
       </header>
 
       {error ? (
@@ -286,7 +288,7 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
       ) : null}
 
       {!loading && !days.length ? (
-        <div className="dx-empty"><CalendarDays /><strong>{data?.source === "workforce" ? "No Workforce shift assigned yet" : "No roster published yet"}</strong><small>{data?.source === "workforce" ? "Your Workforce manager can assign your shift in Associate Rostering. Once saved, it will appear here automatically." : "Your upcoming shifts will appear here once the roster is published."}</small></div>
+        <div className="dx-empty"><CalendarDays /><strong>{data?.source === "workforce" ? "Operating schedule not configured yet" : "No roster published yet"}</strong><small>{data?.source === "workforce" ? "Your Workforce manager can set your operating pincode and regular weekly off in Associate Rostering. Once saved, it will appear here automatically." : "Your upcoming shifts will appear here once the roster is published."}</small></div>
       ) : null}
 
       {!loading ? (
@@ -343,8 +345,8 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
           )) : (
             <div className="dx-roster-empty">
               <CalendarDays />
-              <strong>{data?.source === "workforce" ? "Your Workforce shift is not configured" : "Your roster is not configured"}</strong>
-              <small>{data?.source === "workforce" ? "Ask your Workforce manager to assign a shift in Associate Rostering." : "Contact your HR or manager."}</small>
+              <strong>{data?.source === "workforce" ? "Your operating schedule is not configured" : "Your roster is not configured"}</strong>
+              <small>{data?.source === "workforce" ? "Ask your Workforce manager to set your pincode and weekly off in Associate Rostering." : "Contact your HR or manager."}</small>
             </div>
           )}
         </div>
