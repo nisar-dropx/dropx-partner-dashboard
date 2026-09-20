@@ -551,7 +551,7 @@ export function ConnectDashboard({
     <section className="dx-dashboard-card dx-dashboard-actions">
       <header><div><small>{workforce ? "Work tools" : "Shortcuts"}</small><h2>Quick actions</h2></div></header>
       <div>
-        {workforce && (pageAccess.includes("earnings") || pageAccess.includes("advances") || pageAccess.includes("rate_card")) ? <button onClick={onPayments}><i className="amber"><IndianRupee /></i><span><strong>Earnings & payments</strong><small>Live earnings, advances and rates</small></span><ChevronRight /></button> : null}
+        {workforce && (pageAccess.includes("earnings") || pageAccess.includes("advances") || pageAccess.includes("rate_card")) ? <button onClick={onPayments}><i className="amber"><IndianRupee /></i><span><strong>Payments</strong><small>Live earnings, advances and rates</small></span><ChevronRight /></button> : null}
         {workforce && (attendanceAllowed || rosterAllowed || leaveAllowed) ? <button onClick={onWork}><i className="blue"><CalendarClock /></i><span><strong>Work schedule</strong><small>Attendance, roster and leave</small></span><ChevronRight /></button> : null}
         {!workforce && attendanceAllowed ? <button onClick={onAttendance}><i className="blue"><Fingerprint /></i><span><strong>Attendance</strong><small>View punches</small></span><ChevronRight /></button> : null}
         {!workforce && rosterAllowed ? <button onClick={onRoster}><i className="amber"><CalendarClock /></i><span><strong>My roster</strong><small>Shift and swap requests</small></span><ChevronRight /></button> : null}

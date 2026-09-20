@@ -647,7 +647,7 @@ export function ConnectLoginFlow() {
         <small className="dx-nav-label">Workspace</small>
         {isWorkforceWorkspace(account) ? <>
           <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Gauge />Home</button>
-          {workforcePaymentsAvailable(account) ? <button aria-current={step === "payments" ? "page" : undefined} className={step === "payments" ? "active" : ""} onClick={() => open("payments")}><CreditCard />Earnings & payments</button> : null}
+          {workforcePaymentsAvailable(account) ? <button aria-current={step === "payments" ? "page" : undefined} className={step === "payments" ? "active" : ""} onClick={() => open("payments")}><CreditCard />Payments</button> : null}
           {workforceWorkAvailable(account) ? <button aria-current={step === "work" ? "page" : undefined} className={step === "work" ? "active" : ""} onClick={() => open("work")}><CalendarDays />Work schedule</button> : null}
           {allowed(account, "performance") ? <button aria-current={step === "performance" ? "page" : undefined} className={step === "performance" ? "active" : ""} onClick={() => open("performance")}><Target />Performance</button> : null}
           {allowed(account, "connect") ? <button aria-current={step === "connect" ? "page" : undefined} className={step === "connect" ? "active" : ""} onClick={() => open("connect")}><MessageCircleMore />Connect</button> : null}
@@ -701,7 +701,7 @@ export function ConnectLoginFlow() {
       <nav>
         {isWorkforceWorkspace(account) ? <>
           <button onClick={() => open("dashboard")}><Gauge />Home<ChevronRight /></button>
-          {workforcePaymentsAvailable(account) ? <button onClick={() => open("payments")}><CreditCard />Earnings & payments<ChevronRight /></button> : null}
+          {workforcePaymentsAvailable(account) ? <button onClick={() => open("payments")}><CreditCard />Payments<ChevronRight /></button> : null}
           {workforceWorkAvailable(account) ? <button onClick={() => open("work")}><CalendarDays />Work schedule<ChevronRight /></button> : null}
           {allowed(account, "performance") ? <button onClick={() => open("performance")}><Target />Performance<ChevronRight /></button> : null}
           {allowed(account, "connect") ? <button onClick={() => open("connect")}><MessageCircleMore />Connect<ChevronRight /></button> : null}
