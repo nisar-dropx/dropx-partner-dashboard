@@ -52,6 +52,12 @@ type ConnectNotification = {
 const defaultKeyName = "dropx_connect_default_account";
 const biometricKey = "dropx_connect_biometric";
 const credentialKey = "dropx_connect_passkey_id";
+const biometricUnlockTimestampKey = "dropx_connect_last_biometric_unlock";
+const biometricUnlockGracePeriodMs = 12 * 60 * 60 * 1000;
+const biometricUnlockIsFresh = () => {
+  const unlockedAt = Number(localStorage.getItem(biometricUnlockTimestampKey));
+  return Number.isFinite(unlockedAt) && unlockedAt > 0 && Date.now() - unlockedAt < biometricUnlockGracePeriodMs;
+};
 const accountIdentity = (account?: AppAccount | null) =>
   [account?.reference, account?.biometricId].filter(Boolean).join(" | ");
 const active = (account?: AppAccount | null) => account?.status?.toLowerCase() === "active";
@@ -196,7 +202,7 @@ export function ConnectLoginFlow() {
           const rows = payload.accounts ?? [];
           setCountryCode(String(payload.countryCode || "91"));
           setMobile(String(payload.mobile || ""));
-          if (localStorage.getItem(biometricKey) === "true" && localStorage.getItem(credentialKey)) {
+          if (localStorage.getItem(biometricKey) === "true" && localStorage.getItem(credentialKey) && !biometricUnlockIsFresh()) {
             setLockedAccounts(rows);
             setStep("unlock");
           } else route(rows);
@@ -344,6 +350,7 @@ export function ConnectLoginFlow() {
   }
   async function logout() {
     await fetch("/api/connect/auth/session", { method: "DELETE" });
+    localStorage.removeItem(biometricUnlockTimestampKey);
     setCountryCode("91"); setMobile(""); setPin(""); setConfirmPin(""); setOtp("");
     setAccounts([]); setLockedAccounts([]); setAccount(null); setAvatar(""); setDrawer(false); setProfileMenu(false); setNotificationMenu(false); setNotifications([]); setUnreadNotifications(0); setStep("mobile"); setNotice("Logged out."); setError("");
   }
@@ -464,6 +471,7 @@ export function ConnectLoginFlow() {
     if (!enabled) {
       localStorage.removeItem(biometricKey);
       localStorage.removeItem(credentialKey);
+      localStorage.removeItem(biometricUnlockTimestampKey);
       setNotice("Biometric login disabled.");
       return;
     }
@@ -480,9 +488,11 @@ export function ConnectLoginFlow() {
       if (!credential) throw new Error("Biometric setup was cancelled.");
       localStorage.setItem(credentialKey, encoded(credential.rawId));
       localStorage.setItem(biometricKey, "true");
+      localStorage.setItem(biometricUnlockTimestampKey, String(Date.now()));
       setNotice("Biometric login enabled.");
     } catch (reason) {
       localStorage.removeItem(biometricKey);
+      localStorage.removeItem(biometricUnlockTimestampKey);
       setError(userFacingError(reason, "Unable to enable biometric login. Please try again."));
     }
   }
@@ -497,6 +507,7 @@ export function ConnectLoginFlow() {
         userVerification: "required",
         timeout: 60000
       } });
+      localStorage.setItem(biometricUnlockTimestampKey, String(Date.now()));
       route(lockedAccounts);
     } catch (reason) {
       setPin("");
@@ -771,7 +782,7 @@ export function ConnectLoginFlow() {
         <header className="dx-page-intro"><small>Personalisation</small><h1>Settings</h1><p>Control sign-in and the account you open first.</p></header>
         <div className="dx-settings-grid">
           <section className="dx-setting-card"><i><SwitchCamera /></i><span><strong>Default account</strong><small>Choose the workspace shown after sign in.</small></span><label><span className="sr-only">Default account</span><select disabled={pending} value={defaultKey} onChange={(e) => saveDefaultAccount(e.target.value)}><option value="">Ask me every time</option>{accounts.map((row) => <option key={accountKey(row)} value={accountKey(row)}>{row.role || row.profileType} · {row.workspaceLabel || (isWorkforceWorkspace(row) ? "Workforce workspace" : "People workspace")} · {row.companyName} - {row.reference || row.name}</option>)}</select></label></section>
-          <section className="dx-setting-card"><i><Fingerprint /></i><span><strong>Biometric login</strong><small>Use Face ID or device security on this device.</small></span><label className="toggle"><span>Enable biometric login</span><input aria-label="Enable biometric login" defaultChecked={localStorage.getItem(biometricKey) === "true"} onChange={(e) => enrollBiometric(e.target.checked)} type="checkbox" /></label></section>
+          <section className="dx-setting-card"><i><Fingerprint /></i><span><strong>Biometric login</strong><small>Use Face ID or device security once every 12 hours on this device.</small></span><label className="toggle"><span>Enable biometric login</span><input aria-label="Enable biometric login" defaultChecked={localStorage.getItem(biometricKey) === "true"} onChange={(e) => enrollBiometric(e.target.checked)} type="checkbox" /></label></section>
           <section className="dx-setting-card security"><i><LockKeyhole /></i><span><strong>App PIN</strong><small>Change your six-digit sign-in PIN securely.</small></span><button onClick={resetPin}>Change PIN <ChevronRight /></button></section>
         </div>
       </section> : null}

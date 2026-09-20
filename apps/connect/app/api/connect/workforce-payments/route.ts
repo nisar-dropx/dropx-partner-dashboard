@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type Mapping = {
   id: string;
+  workforce_id?: string | null;
   provider_member_id: string | null;
   effective_from: string | null;
   effective_to: string | null;
@@ -45,13 +46,13 @@ export async function GET(request: NextRequest) {
     }
 
     const mappingResult = await supabaseAdmin.from("field_executive_provider_mappings")
-      .select("id,provider_member_id,effective_from,effective_to,payment_values,providers(name),payment_methods(name),field_executive_id,contractor_id,employee_id")
+      .select("id,provider_member_id,effective_from,effective_to,payment_values,providers(name),payment_methods(name),workforce_id,field_executive_id,contractor_id,employee_id")
       .eq("company_id", account.companyId)
       .eq("status", "active");
     if (mappingResult.error) throw new Error("We could not load your payment mapping. Please try again.");
 
     const mappings = ((mappingResult.data ?? []) as Array<Mapping & { field_executive_id?: string | null; contractor_id?: string | null; employee_id?: string | null }>)
-      .filter((mapping) => [mapping.field_executive_id, mapping.contractor_id, mapping.employee_id].some((id) => id && sourceIds.has(String(id))));
+      .filter((mapping) => [mapping.workforce_id, mapping.field_executive_id, mapping.contractor_id, mapping.employee_id].some((id) => id && sourceIds.has(String(id))));
     const providerMemberIds = [...new Set(mappings.map((mapping) => mapping.provider_member_id).filter((id): id is string => Boolean(id)))];
     const period = monthRange();
     const dailyResult = providerMemberIds.length
