@@ -760,7 +760,7 @@ export function ConnectLoginFlow() {
       {step === "dashboard" && account && !isManagerAccount(account) ? <ConnectDashboard account={account} onAdvances={() => open("advances")} onAttendance={() => open("attendance")} onConnect={() => open("connect")} onLeave={() => open("leave")} onPayments={() => open("payments")} onPerformance={() => open("performance")} onProfile={() => open("profile")} onRoster={() => open("roster")} onWork={() => open("work")} variant={isWorkforceWorkspace(account) ? "workforce" : "people"} /> : null}
       {step === "profile" && account && !isManagerAccount(account) && (allowed(account, "profile") || !active(account)) ? <ConnectProfileApp account={account} onPhoto={(url) => setAvatar(url)} onSubmitted={profileSubmitted} /> : null}
       {step === "documents" && account && peopleSelfService(account) && allowed(account, "documents") ? <ConnectDocuments account={account} /> : null}
-      {step === "connect" && account && isWorkforceWorkspace(account) ? <ConnectMyRequests account={account} workforce /> : null}
+      {step === "connect" && account && isWorkforceWorkspace(account) ? <ConnectCommunicationCenter account={account} /> : null}
       {step === "connect" && account && !isWorkforceWorkspace(account) ? <ConnectCommunicationCenter account={account} /> : null}
       {step === "requests" && account && peopleSelfService(account) ? <ConnectMyRequests account={account} /> : null}
       {step === "approvals" && account && approvalAccess === "allowed" ? <ConnectApprovalInbox account={account} initialSection={requestedApprovalSection} /> : null}

@@ -8711,6 +8711,12 @@ tr:last-child td {
   min-height: 65dvh;
 }
 
+/* Workforce starts with pay and action; attendance remains available but secondary. */
+.dx-workforce-dashboard > .dx-workforce-dashboard-pay { order: 1; }
+.dx-workforce-dashboard > .dx-dashboard-actions { order: 2; }
+.dx-workforce-dashboard > .dx-workforce-attendance-summary { order: 4; }
+.dx-workforce-dashboard > .dx-workforce-attendance { order: 5; }
+
 .dx-dashboard-greeting {
   padding: 2px 2px 4px;
 }

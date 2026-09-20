@@ -487,7 +487,7 @@ export function ConnectDashboard({
       <span className="dx-live-chip"><i /> {workforce ? "Workforce" : "Live"}</span>
     </header>
 
-    <section className="dx-dashboard-card today">
+    <section className={`dx-dashboard-card today${workforce ? " dx-workforce-attendance" : ""}`}>
       <header><div><small>Today</small><h2>Attendance</h2></div><Pill text={todayStatus} tone={statusTone} /></header>
       {today?.scheduledStart && today.scheduledStart !== "--:--" ? <p className="dx-dashboard-shift-expectation">
         <CalendarClock />
@@ -523,7 +523,7 @@ export function ConnectDashboard({
       </div>
     </section> : null}
 
-    <section className="dx-dashboard-card dx-dashboard-summary-card">
+    <section className={`dx-dashboard-card dx-dashboard-summary-card${workforce ? " dx-workforce-attendance-summary" : ""}`}>
       <header><div><small>This month</small><h2>Summary</h2></div></header>
       <div className="dx-dashboard-metrics">
         <Metric icon={<CheckCircle2 />} label="Full day" value={fullDayCount} tone="green" />
@@ -545,7 +545,7 @@ export function ConnectDashboard({
 
     {workforce && pageAccess.includes("earnings") ? <section className="dx-dashboard-card dx-workforce-dashboard-pay">
       <header><div><small>My pay · {paymentSummary?.period || "This month"}</small><h2>Live earnings</h2></div><button onClick={(event) => { event.stopPropagation(); onPayments(); }}>View all <ChevronRight /></button></header>
-      {paymentSummary?.mapping.length ? <div className="dx-dashboard-metrics"><Metric icon={<IndianRupee />} label="Recorded earnings" value={`₹${paymentSummary.summary.earnings.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`} tone="orange" /><Metric icon={<Route />} label="Deliveries" value={paymentSummary.summary.deliveries.toLocaleString("en-IN")} tone="purple" /><Metric icon={<CalendarDays />} label="Active days" value={paymentSummary.summary.workingDays} tone="green" /></div> : <p className="dx-workforce-dashboard-pay-empty">Payment mapping is being set up. Earnings appear here once your provider ID and rate card are active.</p>}
+      {paymentSummary?.mapping.length ? <div className="dx-dashboard-metrics"><Metric icon={<IndianRupee />} label="Estimated live earnings" value={`₹${paymentSummary.summary.earnings.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`} tone="orange" /><Metric icon={<Route />} label="Deliveries" value={paymentSummary.summary.deliveries.toLocaleString("en-IN")} tone="purple" /><Metric icon={<CalendarDays />} label="Active days" value={paymentSummary.summary.workingDays} tone="green" /></div> : <p className="dx-workforce-dashboard-pay-empty">Payment mapping is being set up. Earnings appear here once your provider ID and rate card are active.</p>}
     </section> : null}
 
     <section className="dx-dashboard-card dx-dashboard-actions">
@@ -557,7 +557,7 @@ export function ConnectDashboard({
         {!workforce && rosterAllowed ? <button onClick={onRoster}><i className="amber"><CalendarClock /></i><span><strong>My roster</strong><small>Shift and swap requests</small></span><ChevronRight /></button> : null}
         {!workforce && leaveAllowed ? <button onClick={onLeave}><i className="pink"><CalendarDays /></i><span><strong>Time off</strong><small>Request leave</small></span><ChevronRight /></button> : null}
         {performanceAllowed ? <button onClick={onPerformance}><i className="purple"><Target /></i><span><strong>Performance</strong><small>Goals & reviews</small></span><ChevronRight /></button> : null}
-        {workforce && pageAccess.includes("connect") ? <button onClick={onConnect}><i className="pink"><CalendarDays /></i><span><strong>Connect</strong><small>Track your requests</small></span><ChevronRight /></button> : null}
+        {workforce && pageAccess.includes("connect") ? <button onClick={onConnect}><i className="pink"><CalendarDays /></i><span><strong>Connect</strong><small>Messages, updates and Speak Up</small></span><ChevronRight /></button> : null}
         {!workforce && advancesAllowed ? <button onClick={onAdvances}><i className="amber"><IndianRupee /></i><span><strong>My pay</strong><small>Advances</small></span><ChevronRight /></button> : null}
         {profileAllowed ? <button onClick={onProfile}><i className="green"><UserRound /></i><span><strong>Profile</strong><small>Personal details</small></span><ChevronRight /></button> : null}
       </div>
