@@ -534,6 +534,22 @@ function designationLookupKey(companyId: string, categoryCode: string, value: st
   return `${companyId}:${categoryCode}:${value.trim().toLowerCase()}`;
 }
 
+function designationRoleLookupKey(companyId: string, value: string) {
+  return `${companyId}:${value.trim().toLowerCase()}`;
+}
+
+// The Workforce dashboard owns the designation editor and stores the payment
+// menu as `payments`. DropX One calls the same self-service surface `earnings`.
+// Keep this translation at the integration boundary so neither master needs to
+// change its persisted values (and, importantly, People page access is left as-is).
+function normalizeWorkforcePageAccess(pages?: string[] | null) {
+  if (!Array.isArray(pages)) return pages;
+  return Array.from(new Set(pages.map((page) => {
+    const normalized = String(page).trim().toLowerCase();
+    return normalized === "payments" ? "earnings" : normalized;
+  })));
+}
+
 function intersectPageAccess(categoryPages: string[], designationPages?: string[] | null) {
   if (!designationPages) return [];
   const allowedByDesignation = new Set(designationPages.map((page) => page.trim().toLowerCase()));
@@ -796,6 +812,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   const designationNameById = new Map<string, string>();
   const designationCodeById = new Map<string, string | null>();
   const pageAccessByDesignationKey = new Map<string, string[] | null>();
+  const pageAccessByDesignationRole = new Map<string, string[] | null>();
   const categoryIds = [...new Set(designationRows.map((designation) => designation.designation_category_id).filter(Boolean))] as string[];
   const designationCategoryResult = categoryIds.length
     ? await supabaseAdmin.from("designation_categories")
@@ -837,6 +854,18 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         pages
       );
     }
+    // Legacy and imported Workforce profiles carry the designation text rather
+    // than a designation id. Resolve it independently of the registration
+    // policy as a fallback: the designation master is the source of truth for
+    // Workforce menu access.
+    pageAccessByDesignationRole.set(
+      designationRoleLookupKey(String(designation.company_id), String(designation.name)),
+      pages
+    );
+    pageAccessByDesignationRole.set(
+      designationRoleLookupKey(String(designation.company_id), String(designation.code)),
+      pages
+    );
   }
   const preferenceResult = await supabaseAdmin
     .from("mob_app_user_preferences")
@@ -862,11 +891,15 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     .map(async (account): Promise<ConnectAccount> => {
       const categoryCode = categoryCodeForProfile(account.profile_type);
       const categoryPages = pageAccessByCategory.get(`${account.company_id}:${categoryCode}`) ?? [];
-      const designationPages = account.designation_id
+      const rawDesignationPages = account.designation_id
         ? pageAccessByDesignationId.get(account.designation_id)
         : account.role
           ? pageAccessByDesignationKey.get(designationLookupKey(account.company_id, categoryCode, account.role))
+            ?? pageAccessByDesignationRole.get(designationRoleLookupKey(account.company_id, account.role))
           : undefined;
+      const designationPages = account.profile_type === "workforce"
+        ? normalizeWorkforcePageAccess(rawDesignationPages)
+        : rawDesignationPages;
       const workspace = connectWorkspace(
         account.profile_type,
         account.designation_id ? peopleModuleByDesignationId.get(account.designation_id) : null

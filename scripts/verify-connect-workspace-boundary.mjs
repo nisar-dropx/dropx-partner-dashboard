@@ -36,8 +36,16 @@ requireSource(
   "Workforce page access is still being stripped on the server"
 );
 requireSource(
-  auth.includes("intersectPageAccess(categoryPages, designationPages)"),
-  "Workforce page access must follow category and designation rules"
+  auth.includes("workforceDesignationAccess") && auth.includes("intersectPageAccess(categoryPages, designationPages)"),
+  "Workforce designation access and the People category/designation boundary must both be enforced"
+);
+requireSource(
+  auth.includes("normalizeWorkforcePageAccess") && auth.includes('normalized === "payments" ? "earnings"'),
+  "Workforce Payments access must be translated to the DropX One earnings surface"
+);
+requireSource(
+  auth.includes("pageAccessByDesignationRole") && auth.includes("designationRoleLookupKey"),
+  "Legacy Workforce profiles must resolve menu access by designation name or code"
 );
 requireSource(
   auth.includes("resolveIcSelfServiceByReference") && auth.includes("collectSelfServiceReferences"),
