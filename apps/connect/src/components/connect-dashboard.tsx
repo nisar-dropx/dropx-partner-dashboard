@@ -12,6 +12,7 @@ import {
   LogIn,
   LogOut,
   PersonStanding,
+  Route,
   Target,
   UserRound,
   UserRoundX
@@ -95,6 +96,12 @@ type PunchState = {
   open?: boolean;
 };
 
+type WorkforcePaymentSummary = {
+  period: string;
+  mapping: Array<unknown>;
+  summary: { deliveries: number; earnings: number; workingDays: number; latestDate: string | null };
+};
+
 function localIsoDate(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
@@ -153,6 +160,9 @@ export function ConnectDashboard({
   account,
   onAttendance,
   onAdvances,
+  onPayments,
+  onWork,
+  onConnect,
   onLeave,
   onPerformance,
   onProfile,
@@ -162,6 +172,9 @@ export function ConnectDashboard({
   account: AppAccount;
   onAttendance: () => void;
   onAdvances: () => void;
+  onPayments: () => void;
+  onWork: () => void;
+  onConnect: () => void;
   onLeave: () => void;
   onPerformance: () => void;
   onProfile: () => void;
@@ -176,6 +189,7 @@ export function ConnectDashboard({
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [motivation, setMotivation] = useState("");
+  const [paymentSummary, setPaymentSummary] = useState<WorkforcePaymentSummary | null>(null);
 
   useEffect(() => {
     if (!profile || !attendance) {
@@ -315,6 +329,20 @@ export function ConnectDashboard({
       setPunchState(punchPayload.shift);
     }).catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load dashboard."));
   }, [account.id, account.profileType, refreshKey]);
+
+  useEffect(() => {
+    if (variant !== "workforce" || !account.pageAccess?.includes("earnings")) {
+      setPaymentSummary(null);
+      return;
+    }
+    let cancelled = false;
+    const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
+    fetch(`/api/connect/workforce-payments?${query}`, { cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((payload) => { if (!cancelled) setPaymentSummary(payload); })
+      .catch(() => { if (!cancelled) setPaymentSummary(null); });
+    return () => { cancelled = true; };
+  }, [account.id, account.pageAccess, account.profileType, variant]);
 
   const alerts = useMemo(() => {
     if (!profile) return [] as DashboardAlert[];
@@ -485,13 +513,21 @@ export function ConnectDashboard({
       </div>
     </section>
 
+    {workforce && pageAccess.includes("earnings") ? <section className="dx-dashboard-card dx-workforce-dashboard-pay">
+      <header><div><small>My pay · {paymentSummary?.period || "This month"}</small><h2>Live earnings</h2></div><button onClick={(event) => { event.stopPropagation(); onPayments(); }}>View all <ChevronRight /></button></header>
+      {paymentSummary?.mapping.length ? <div className="dx-dashboard-metrics"><Metric icon={<IndianRupee />} label="Recorded earnings" value={`₹${paymentSummary.summary.earnings.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`} tone="orange" /><Metric icon={<Route />} label="Deliveries" value={paymentSummary.summary.deliveries.toLocaleString("en-IN")} tone="purple" /><Metric icon={<CalendarDays />} label="Active days" value={paymentSummary.summary.workingDays} tone="green" /></div> : <p className="dx-workforce-dashboard-pay-empty">Payment mapping is being set up. Your earnings will appear here once your provider ID and rate card are active.</p>}
+    </section> : null}
+
     <section className="dx-dashboard-card dx-dashboard-actions">
       <header><div><small>{workforce ? "Work tools" : "Shortcuts"}</small><h2>Quick actions</h2></div></header>
       <div>
-        {attendanceAllowed ? <button onClick={onAttendance}><i className="blue"><Fingerprint /></i><span><strong>Attendance</strong><small>View punches</small></span><ChevronRight /></button> : null}
-        {workforce && rosterAllowed ? <button onClick={onRoster}><i className="amber"><CalendarClock /></i><span><strong>My roster</strong><small>Shift and swap requests</small></span><ChevronRight /></button> : null}
-        {leaveAllowed ? <button onClick={onLeave}><i className="pink"><CalendarDays /></i><span><strong>Time off</strong><small>Request leave</small></span><ChevronRight /></button> : null}
+        {workforce && (pageAccess.includes("earnings") || pageAccess.includes("advances") || pageAccess.includes("rate_card")) ? <button onClick={onPayments}><i className="amber"><IndianRupee /></i><span><strong>Earnings & payments</strong><small>Live earnings and advances</small></span><ChevronRight /></button> : null}
+        {workforce && (attendanceAllowed || rosterAllowed || leaveAllowed) ? <button onClick={onWork}><i className="blue"><CalendarClock /></i><span><strong>Work schedule</strong><small>Attendance, roster and leave</small></span><ChevronRight /></button> : null}
+        {!workforce && attendanceAllowed ? <button onClick={onAttendance}><i className="blue"><Fingerprint /></i><span><strong>Attendance</strong><small>View punches</small></span><ChevronRight /></button> : null}
+        {!workforce && rosterAllowed ? <button onClick={onRoster}><i className="amber"><CalendarClock /></i><span><strong>My roster</strong><small>Shift and swap requests</small></span><ChevronRight /></button> : null}
+        {!workforce && leaveAllowed ? <button onClick={onLeave}><i className="pink"><CalendarDays /></i><span><strong>Time off</strong><small>Request leave</small></span><ChevronRight /></button> : null}
         {performanceAllowed ? <button onClick={onPerformance}><i className="purple"><Target /></i><span><strong>Performance</strong><small>Goals & reviews</small></span><ChevronRight /></button> : null}
+        {workforce && pageAccess.includes("connect") ? <button onClick={onConnect}><i className="pink"><CalendarDays /></i><span><strong>Connect</strong><small>Track your requests</small></span><ChevronRight /></button> : null}
         {!workforce && advancesAllowed ? <button onClick={onAdvances}><i className="amber"><IndianRupee /></i><span><strong>My pay</strong><small>Advances</small></span><ChevronRight /></button> : null}
         {profileAllowed ? <button onClick={onProfile}><i className="green"><UserRound /></i><span><strong>Profile</strong><small>Personal details</small></span><ChevronRight /></button> : null}
       </div>

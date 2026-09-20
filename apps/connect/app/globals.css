@@ -16102,6 +16102,112 @@ img.dx-selfie-live {
 .dx-days button.review.selected { color: #c3313d; background: #fff; }
 .dx-days button.on-shift.selected { color: #1678d2; background: #fff; }
 
+/* Workforce keeps the existing DropX One rhythm: one shell, compact grouped tools. */
+.dx-workforce-payments,
+.dx-workforce-work {
+  display: grid;
+  gap: 16px;
+  width: min(100%, 860px);
+  margin-inline: auto;
+}
+
+.dx-workforce-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 5px;
+  overflow-x: auto;
+  background: #f2f4f7;
+  border: 1px solid #e4e7ec;
+  border-radius: 14px;
+}
+
+.dx-workforce-tabs button {
+  display: inline-flex;
+  flex: 1 0 auto;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 13px;
+  color: #667085;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dx-workforce-tabs button svg { width: 16px; height: 16px; }
+.dx-workforce-tabs button.active { color: #101828; background: #fff; box-shadow: 0 1px 3px rgba(16, 24, 40, .12); }
+
+.dx-workforce-payment-hero {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 23px;
+  color: #fff;
+  background: linear-gradient(120deg, #272044, #442b62 55%, #b4386e);
+  border-radius: 20px;
+  box-shadow: 0 15px 30px rgba(62, 42, 90, .17);
+}
+
+.dx-workforce-payment-hero span { display: grid; gap: 2px; }
+.dx-workforce-payment-hero small { color: #fce7f3; font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.dx-workforce-payment-hero strong { font-size: clamp(28px, 5vw, 40px); letter-spacing: -.04em; }
+.dx-workforce-payment-hero em { color: #f8d9e8; font-size: 12px; font-style: normal; }
+.dx-workforce-payment-hero button { display: inline-flex; gap: 5px; align-items: center; padding: 9px 12px; color: #fff; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.22); border-radius: 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.dx-workforce-payment-hero button svg { width: 15px; }
+
+.dx-workforce-payment-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.dx-workforce-payment-stats article { display: flex; gap: 10px; align-items: center; padding: 14px; background: #fff; border: 1px solid #e4e7ec; border-radius: 14px; }
+.dx-workforce-payment-stats article > svg { width: 19px; color: #7f56d9; }
+.dx-workforce-payment-stats span { display: grid; min-width: 0; gap: 2px; }
+.dx-workforce-payment-stats strong { color: #101828; font-size: 16px; }
+.dx-workforce-payment-stats small { overflow: hidden; color: #667085; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+.dx-workforce-ledger,
+.dx-workforce-rate-card { overflow: hidden; background: #fff; border: 1px solid #e4e7ec; border-radius: 18px; box-shadow: 0 8px 22px rgba(16,24,40,.05); }
+.dx-workforce-ledger > header,
+.dx-workforce-rate-card > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 18px 18px 14px; border-bottom: 1px solid #f2f4f7; }
+.dx-workforce-ledger h2,
+.dx-workforce-rate-card h2 { margin: 2px 0 0; color: #101828; font-size: 17px; }
+.dx-workforce-ledger header small,
+.dx-workforce-rate-card header small { color: #b54708; font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.dx-workforce-ledger header button { display: grid; place-items: center; width: 32px; height: 32px; color: #667085; background: #f9fafb; border: 1px solid #eaecf0; border-radius: 9px; }
+.dx-workforce-ledger header button svg { width: 15px; }
+.dx-workforce-ledger article,
+.dx-workforce-rate-lines article { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 18px; border-top: 1px solid #f2f4f7; }
+.dx-workforce-ledger article:first-child { border-top: 0; }
+.dx-workforce-ledger article span,
+.dx-workforce-rate-lines article span { display: grid; gap: 3px; }
+.dx-workforce-ledger article strong,
+.dx-workforce-rate-lines article strong { color: #344054; font-size: 13px; }
+.dx-workforce-ledger article small,
+.dx-workforce-rate-lines article small,
+.dx-workforce-rate-card header p { margin: 0; color: #667085; font-size: 11px; }
+.dx-workforce-ledger article > b,
+.dx-workforce-rate-lines article > b { color: #101828; font-size: 14px; white-space: nowrap; }
+.dx-workforce-rate-meta { display: flex; gap: 20px; padding: 13px 18px; color: #667085; background: #fcfcfd; border-bottom: 1px solid #f2f4f7; font-size: 11px; }
+.dx-workforce-rate-meta b { margin-left: 4px; color: #344054; }
+.dx-workforce-payment-note { margin: -5px 0 0; color: #667085; font-size: 11px; line-height: 1.5; }
+.dx-workforce-empty { display: flex; gap: 14px; align-items: start; padding: 20px; color: #344054; background: #fff; border: 1px solid #e4e7ec; border-radius: 16px; }
+.dx-workforce-empty i { display: grid; flex: 0 0 auto; place-items: center; width: 38px; height: 38px; color: #b54708; background: #fff6ed; border-radius: 11px; }
+.dx-workforce-empty i svg { width: 19px; }
+.dx-workforce-empty div { display: grid; gap: 4px; }
+.dx-workforce-empty strong { color: #101828; font-size: 14px; }
+.dx-workforce-empty p { margin: 0; color: #667085; font-size: 12px; line-height: 1.5; }
+.dx-workforce-dashboard-pay { cursor: pointer; }
+.dx-workforce-dashboard-pay > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.dx-workforce-dashboard-pay > header button { display: inline-flex; gap: 4px; align-items: center; color: #b54708; background: transparent; border: 0; font-size: 12px; font-weight: 700; }
+.dx-workforce-dashboard-pay > header button svg { width: 15px; }
+.dx-workforce-dashboard-pay-empty { margin: 10px 0 0; color: #667085; font-size: 12px; line-height: 1.5; }
+
+@media (max-width: 560px) {
+  .dx-workforce-payment-hero { align-items: start; flex-direction: column; }
+  .dx-workforce-payment-stats { grid-template-columns: 1fr; }
+  .dx-workforce-tabs button { flex: 0 0 auto; }
+}
+
 @media (max-width: 520px) {
   .dx-attendance-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));

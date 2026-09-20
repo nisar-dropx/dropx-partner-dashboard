@@ -81,7 +81,7 @@ async function safeJson(response: Response) {
   try { return await response.json(); } catch { return null; }
 }
 
-export function ConnectMyRequests({ account }: { account: AppAccount }) {
+export function ConnectMyRequests({ account, workforce = false }: { account: AppAccount; workforce?: boolean }) {
   const [requests, setRequests] = useState<UnifiedRequest[]>([]);
   const [filter, setFilter] = useState<"all" | RequestKind>("all");
   const [month, setMonth] = useState(currentMonthKey());
@@ -239,9 +239,9 @@ export function ConnectMyRequests({ account }: { account: AppAccount }) {
   return (
     <section className="dx-approval-inbox">
       <header className="dx-page-intro">
-        <small>Your submissions</small>
-        <h1>My requests</h1>
-        <p>Every request you have submitted, with its current status and approval flow.</p>
+        <small>{workforce ? "Workforce support" : "Your submissions"}</small>
+        <h1>{workforce ? "Connect" : "My requests"}</h1>
+        <p>{workforce ? "Track leave, attendance, shift swap and exit requests in one place." : "Every request you have submitted, with its current status and approval flow."}</p>
       </header>
       {error ? <div className="dx-alert error">{error}</div> : null}
       <div aria-label="Choose month" className="dx-requests-month" role="group">
