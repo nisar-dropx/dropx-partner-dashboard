@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
         current.rateLines.set(key, previous);
       };
       const deliveryRate = Number(row.del_rate ?? 0);
-      addLine("amazon_delivery", "Amazon delivery", Number(row.amazon_delivery ?? 0), deliveryRate);
+      addLine("delivery", "Delivery", Number(row.amazon_delivery ?? 0), deliveryRate);
       // The current Amazon feed supplies one SWA total. It uses the configured delivery
       // rate until the upstream file supplies separate SWA Prepaid / COD counts.
       addLine("swa_delivery", "SWA delivery", Number(row.swa_delivery ?? 0), deliveryRate, true);
@@ -98,6 +98,14 @@ export async function GET(request: NextRequest) {
       dailyByDate.set(date, current);
     }
     const daily = [...dailyByDate.values()].map((row) => ({ ...row, rateLines: [...row.rateLines.values()] })).sort((left, right) => right.date.localeCompare(left.date));
+    const mtdLines = new Map<string, RateLine>();
+    for (const day of daily) for (const line of day.rateLines) {
+      const key = `${line.code}:${line.rate}`;
+      const current = mtdLines.get(key) ?? { ...line, count: 0, amount: 0 };
+      current.count += line.count;
+      current.amount += line.amount;
+      mtdLines.set(key, current);
+    }
     const payrollItems = account.profileType === "workforce"
       ? await supabaseAdmin.from("workforce_payroll_items")
         .select("id,payroll_run_id,shipment_count,work_days,base_amount,incentive_amount,adjustment_amount,deduction_amount,gross_amount,net_amount,status")
@@ -141,7 +149,8 @@ export async function GET(request: NextRequest) {
         deliveries: daily.reduce((total, row) => total + row.deliveries, 0),
         earnings: daily.reduce((total, row) => total + row.earnings, 0),
         workingDays: daily.length,
-        latestDate: daily[0]?.date ?? null
+        latestDate: daily[0]?.date ?? null,
+        rateLines: [...mtdLines.values()]
       },
       daily,
       statements,
