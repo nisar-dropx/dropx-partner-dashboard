@@ -2,15 +2,16 @@ export const dropxOnePageCodes = [
   "dashboard",
   "profile",
   "documents",
-  "connect",
   "approvals",
+  "connect",
+  "advances",
   "earnings",
   "rate_card",
-  "advances",
   "reimbursements",
   "attendance",
   "roster",
   "leave",
+  "wfh",
   "performance",
   "settings"
 ] as const;

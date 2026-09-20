@@ -153,7 +153,7 @@ async function loadPaymentProcess(companyId: string, userId: string | null, effe
       const isReturnedToThisUser = String(request.approval_status ?? "").toUpperCase() === "RE_APPROVED" && request.current_approver_user_id === userId;
       return isReturnedToThisUser || (request.payment_process_role_ids ?? []).some((roleId) => effectiveRoleIds.includes(roleId));
     })
-    .filter((request) => String(request.approval_status ?? "").toUpperCase() !== "RE_APPROVED" || request.current_approver_user_id === userId || (request.current_approver_role_ids ?? []).some((roleId) => effectiveRoleIds.includes(roleId)));
+    .filter((request) => canSeeAllFinalApproved || String(request.approval_status ?? "").toUpperCase() !== "RE_APPROVED" || request.current_approver_user_id === userId || (request.current_approver_role_ids ?? []).some((roleId) => effectiveRoleIds.includes(roleId)));
   const requestIds = requestRows.map((request) => request.id);
   const requestIdBatches = chunkValues(requestIds, PROCESS_DETAIL_BATCH_SIZE);
   const [answerBatchResults, approvalBatchResults] = requestIds.length ? await Promise.all([

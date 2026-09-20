@@ -56,6 +56,7 @@ export async function POST(request: Request) {
     const { authorization, companyId, db } = await context();
     if (!hasPermission(authorization, "imports", "add")) return Response.json({ error: "Permission denied." }, { status: 403 });
     const values = payload(await request.json());
+    if(values.parser_type==="performance_station_target"||values.source_code.startsWith("perf_station_review_"))return Response.json({error:"Use Performance Master to configure station targets."},{status:403});
     if (!values.source_code || !values.name || !values.parser_type || !values.file_types.length) {
       return Response.json({ error: "Name, source code, parser and file type are required." }, { status: 400 });
     }
@@ -74,10 +75,11 @@ export async function PATCH(request: Request) {
     const { authorization, companyId, db } = await context();
     if (!hasPermission(authorization, "imports", "edit")) return Response.json({ error: "Permission denied." }, { status: 403 });
     const body = await request.json();
+    if(clean(body.parser_type)==="performance_station_target"||clean(body.source_code).startsWith("perf_station_review_"))return Response.json({error:"Use Performance Master to configure station targets."},{status:403});
     const id = clean(body.id);
     const { data, error } = await db.from("report_import_master").update({
       ...payload(body), updated_at: new Date().toISOString()
-    }).eq("id", id).eq("company_id", companyId).select(fields).single();
+    }).eq("id", id).eq("company_id", companyId).neq("parser_type","performance_station_target").select(fields).single();
     if (error) throw error;
     return Response.json({ report: data });
   } catch (error) {
@@ -90,7 +92,7 @@ export async function DELETE(request: Request) {
     const { authorization, companyId, db } = await context();
     if (!hasPermission(authorization, "imports", "edit")) return Response.json({ error: "Permission denied." }, { status: 403 });
     const id = clean(new URL(request.url).searchParams.get("id"));
-    const { error } = await db.from("report_import_master").delete().eq("id", id).eq("company_id", companyId);
+    const { error } = await db.from("report_import_master").delete().eq("id", id).eq("company_id", companyId).neq("parser_type","performance_station_target");
     if (error) throw error;
     return Response.json({ deleted: true });
   } catch (error) {

@@ -1,6 +1,68 @@
 import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
+import { approvalEmailCard } from "@/lib/approval-email-card";
+
+const PAYMENT_APPROVALS_URL = "https://ops.dropxlogistics.com/payments/approvals";
+
+function paymentEmailHtml(eventType: PaymentEmailEventType, values: Record<string, string>, reminderNumber?: number) {
+  const heading = `${values.request_no} · ${values.requester_name}`;
+  const infoValue = `${values.amount} · ${values.location_code}`;
+  const isReminder = Boolean(reminderNumber);
+  if (eventType === "payment_approve") {
+    return approvalEmailCard({
+      eyebrow: "PAYMENT APPROVED",
+      heading,
+      introduction: `This payment request was approved by ${values.action_by}.${values.remarks_note}`,
+      infoLabel: values.payment_head,
+      infoValue,
+      ctaLabel: "Open in Ops",
+      ctaUrl: PAYMENT_APPROVALS_URL,
+      steps: []
+    });
+  }
+  if (eventType === "payment_return") {
+    return approvalEmailCard({
+      eyebrow: "PAYMENT RETURNED",
+      heading,
+      introduction: `This payment request was returned by ${values.action_by} for correction.${values.remarks_note}`,
+      infoLabel: values.payment_head,
+      infoValue,
+      ctaLabel: "Open in Ops",
+      ctaUrl: PAYMENT_APPROVALS_URL,
+      steps: []
+    });
+  }
+  if (eventType === "payment_reject") {
+    return approvalEmailCard({
+      eyebrow: "PAYMENT REJECTED",
+      heading,
+      introduction: `This payment request was rejected by ${values.action_by}.${values.remarks_note}`,
+      infoLabel: values.payment_head,
+      infoValue,
+      ctaLabel: "Open in Ops",
+      ctaUrl: PAYMENT_APPROVALS_URL,
+      steps: []
+    });
+  }
+  return approvalEmailCard({
+    eyebrow: isReminder ? `REMINDER ${reminderNumber}` : "APPROVAL REQUIRED",
+    heading,
+    introduction: isReminder
+      ? `Reminder ${reminderNumber}: this payment request is still waiting for a decision. Please review it and respond.`
+      : "This payment request is waiting for a decision.",
+    infoLabel: values.payment_head,
+    infoValue,
+    ctaLabel: "Open in Ops",
+    ctaUrl: PAYMENT_APPROVALS_URL,
+    steps: [
+      `Open Ops: ${PAYMENT_APPROVALS_URL}`,
+      "Find the payment request in the approvals list.",
+      "Review the amount, payment head and location, then Approve, Return or Reject."
+    ],
+    footer: isReminder ? "Reminders are sent every 90 minutes until this request is approved, returned or rejected." : undefined
+  });
+}
 
 export type PaymentEmailEventType = "payment_request" | "payment_approve" | "payment_return" | "payment_reject";
 
@@ -28,75 +90,26 @@ const defaultTemplates: Record<PaymentEmailEventType, Pick<TemplateRow, "subject
   payment_request: {
     to_recipients: ["location_manager", "final_approver", "payment_processor"],
     cc_recipients: ["requester"],
-    subject_template: "Payment request {{request_no}} pending approval",
-    body_template: `Dear Team,
-
-A new payment request is pending approval.
-
-Request No: {{request_no}}
-Location: {{location_code}}
-Payment Head: {{payment_head}}
-Amount: {{amount}}
-Requested By: {{requester_name}}
-Status: {{status}}
-
-Regards,
-DropX Payments System`
+    subject_template: "Payment approval required · {{request_no}}",
+    body_template: "{{requester_name}} requested {{amount}} for {{payment_head}} at {{location_code}}. Open Ops or DropX One to approve or reject."
   },
   payment_approve: {
     to_recipients: ["initial:current_approver", "final:requester"],
     cc_recipients: ["initial:requester", "initial:location_manager", "initial:payment_processor", "final:location_manager", "final:final_approver", "final:payment_processor"],
-    subject_template: "Payment request {{request_no}} approved",
-    body_template: `Dear Team,
-
-The following payment request has been approved.
-
-Request No: {{request_no}}
-Location: {{location_code}}
-Payment Head: {{payment_head}}
-Amount: {{amount}}
-Approved By: {{action_by}}
-Status: {{status}}
-Remarks: {{remarks}}
-
-Regards,
-DropX Payments System`
+    subject_template: "Payment approved · {{request_no}}",
+    body_template: "{{request_no}} for {{amount}} ({{payment_head}}, {{location_code}}) was approved by {{action_by}}.{{remarks_note}}"
   },
   payment_return: {
     to_recipients: ["requester"],
     cc_recipients: ["location_manager", "current_approver", "final_approver", "payment_processor"],
-    subject_template: "Payment request {{request_no}} returned",
-    body_template: `Dear Team,
-
-The following payment request has been returned.
-
-Request No: {{request_no}}
-Location: {{location_code}}
-Payment Head: {{payment_head}}
-Amount: {{amount}}
-Returned By: {{action_by}}
-Return Remarks: {{remarks}}
-
-Regards,
-DropX Payments System`
+    subject_template: "Payment returned · {{request_no}}",
+    body_template: "{{request_no}} for {{amount}} ({{payment_head}}, {{location_code}}) was returned by {{action_by}} for correction.{{remarks_note}}"
   },
   payment_reject: {
     to_recipients: ["requester"],
     cc_recipients: ["location_manager", "current_approver", "final_approver", "payment_processor"],
-    subject_template: "Payment request {{request_no}} rejected",
-    body_template: `Dear Team,
-
-The following payment request has been rejected.
-
-Request No: {{request_no}}
-Location: {{location_code}}
-Payment Head: {{payment_head}}
-Amount: {{amount}}
-Rejected By: {{action_by}}
-Reject Remarks: {{remarks}}
-
-Regards,
-DropX Payments System`
+    subject_template: "Payment rejected · {{request_no}}",
+    body_template: "{{request_no}} for {{amount}} ({{payment_head}}, {{location_code}}) was rejected by {{action_by}}.{{remarks_note}}"
   }
 };
 
@@ -388,6 +401,9 @@ export async function sendPaymentNotification({
         final_approval_role_id,
         final_approval_role_ids,
         payment_process_role_ids,
+        email_root_message_id,
+        email_last_message_id,
+        email_send_count,
         payment_heads ( name, code )
       `)
       .eq("company_id", companyId)
@@ -425,6 +441,7 @@ export async function sendPaymentNotification({
       location_code: clean(request.location_code || locationResult.data?.station_code || "-"),
       payment_head: clean(paymentHead?.name || paymentHead?.code || "-"),
       remarks: clean(remarks || "-"),
+      remarks_note: clean(remarks) ? ` Remarks: ${clean(remarks)}` : "",
       request_no: clean(request.request_no || "-"),
       requester_name: clean(requester?.full_name || requester?.email || "-"),
       status: clean(request.approval_status || request.status || "-")
@@ -470,17 +487,127 @@ export async function sendPaymentNotification({
         ? template.initial_body_template || template.body_template
         : template.final_body_template || template.body_template
       : template.body_template;
-    await sendEmail({
+    const messageId = `<dropx.payment.${request.id}.${(request.email_send_count ?? 0) + 1}@partner.dropxlogistics.com>`;
+    const lastMessageId = request.email_last_message_id ?? null;
+    const rootMessageId = request.email_root_message_id ?? null;
+    const result = await sendEmail({
       body: render(bodyTemplate, values),
+      html: paymentEmailHtml(eventType, values),
       cc,
       companyId,
       subject: render(subjectTemplate, values),
-      to
+      to,
+      messageId,
+      inReplyTo: lastMessageId ?? undefined,
+      references: lastMessageId ? [...new Set([rootMessageId, lastMessageId].filter((id): id is string => Boolean(id)))] : undefined
     });
+    await supabaseAdmin.from("payment_requests").update({
+      email_root_message_id: rootMessageId ?? result.messageId ?? messageId,
+      email_last_message_id: result.messageId ?? messageId,
+      email_send_count: (request.email_send_count ?? 0) + 1,
+      // A decision (approve/reject/return) closes the thread; only a still-pending
+      // request should get another reminder scheduled.
+      email_next_reminder_at: eventType === "payment_request" && request.current_approver_user_id ? new Date(Date.now() + 90 * 60_000).toISOString() : null
+    }).eq("company_id", companyId).eq("id", request.id);
     return { sent: true, cc, to };
   } catch (error) {
     console.error("Payment email notification failed", error);
     return skipped(error instanceof Error ? error.message : "Payment email notification failed.");
+  }
+}
+
+/**
+ * A 90-minute reminder for a payment request still awaiting its current
+ * approver. Reuses the same recipient resolution as the initial
+ * payment_request email (the request hasn't moved, so the same people are
+ * still waiting), but always threads onto the existing conversation - never
+ * a fresh email - and is skipped once the request is no longer pending.
+ */
+export async function sendPaymentApprovalReminder(companyId: string, requestId: string): Promise<PaymentEmailResult> {
+  try {
+    if (!supabaseAdmin) return skipped("Supabase service role key is not configured.");
+    const template = await loadTemplate(companyId, "payment_request");
+    if (!template?.is_enabled) return skipped("Payment email template is disabled.");
+
+    const { data: request, error: requestError } = await supabaseAdmin
+      .from("payment_requests")
+      .select(`
+        id, request_no, location_id, location_code, payment_head_id, amount, status, approval_status,
+        requested_by, current_approver_user_id, payment_process_role_ids, final_approval_role_id, final_approval_role_ids,
+        email_root_message_id, email_last_message_id, email_send_count,
+        payment_heads ( name, code )
+      `)
+      .eq("company_id", companyId)
+      .eq("id", requestId)
+      .maybeSingle();
+    if (requestError || !request) throw new Error(requestError?.message ?? "Payment request not found.");
+    if (!["pending", "resubmitted"].includes(String(request.status)) || !request.current_approver_user_id) {
+      await supabaseAdmin.from("payment_requests").update({ email_next_reminder_at: null }).eq("company_id", companyId).eq("id", request.id);
+      return skipped("This payment request is no longer awaiting approval.");
+    }
+
+    const finalRoleIds = (request.final_approval_role_ids?.length ? request.final_approval_role_ids : request.final_approval_role_id ? [request.final_approval_role_id] : []) as string[];
+    const paymentProcessRoleIds = (request.payment_process_role_ids ?? []) as string[];
+    const [requester, currentApprover, locationResult, companyResult, paymentProcessors] = await Promise.all([
+      profileById(companyId, request.requested_by),
+      profileById(companyId, request.current_approver_user_id),
+      request.location_id
+        ? supabaseAdmin.from("stations").select("station_code, station_email, station_manager_email").eq("company_id", companyId).eq("id", request.location_id).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      supabaseAdmin.from("companies").select("name").eq("id", companyId).maybeSingle(),
+      profilesForProductRoles(companyId, paymentProcessRoleIds, request.location_id)
+    ]);
+    const finalApprovers = await resolveHierarchyFinalApprovers({
+      companyId, currentApproverUserId: request.current_approver_user_id, finalRoleIds,
+      locationId: request.location_id, locationManagerEmail: locationResult.data?.station_manager_email, requesterUserId: request.requested_by
+    });
+
+    const paymentHead = firstRelation(request.payment_heads);
+    const values = {
+      action_by: "-",
+      amount: request.amount == null ? "-" : `Rs ${Number(request.amount).toLocaleString("en-IN")}`,
+      company_name: clean(companyResult.data?.name || "DropX"),
+      location_code: clean(request.location_code || locationResult.data?.station_code || "-"),
+      payment_head: clean(paymentHead?.name || paymentHead?.code || "-"),
+      remarks: "-",
+      request_no: clean(request.request_no || "-"),
+      requester_name: clean(requester?.full_name || requester?.email || "-"),
+      status: clean(request.approval_status || request.status || "-")
+    };
+
+    const to = uniqueEmails(await resolveRecipientEmails({
+      actor: null, currentApprover, finalApprovers, location: locationResult.data, paymentProcessors, requester,
+      selected: template.to_recipients ?? []
+    }));
+    if (!to.length) return skipped("No To recipients were resolved for this payment reminder.");
+    const cc = uniqueEmails(await resolveRecipientEmails({
+      actor: null, currentApprover, finalApprovers, location: locationResult.data, paymentProcessors, requester,
+      selected: template.cc_recipients ?? []
+    })).filter((email) => !to.includes(email));
+
+    const reminderNumber = request.email_send_count ?? 1;
+    const subject = `Reminder ${reminderNumber}: ${render(template.subject_template, values)}`;
+    const body = `This request is still waiting for a decision. Please review it and respond.\n\n${render(template.body_template, values)}`;
+    const messageId = `<dropx.payment.${request.id}.${(request.email_send_count ?? 0) + 1}@partner.dropxlogistics.com>`;
+    const lastMessageId = request.email_last_message_id ?? null;
+    const rootMessageId = request.email_root_message_id ?? null;
+    const result = await sendEmail({
+      body, cc, companyId, subject, to,
+      html: paymentEmailHtml("payment_request", values, reminderNumber),
+      messageId,
+      inReplyTo: lastMessageId ?? undefined,
+      references: lastMessageId ? [...new Set([rootMessageId, lastMessageId].filter((id): id is string => Boolean(id)))] : undefined
+    });
+    await supabaseAdmin.from("payment_requests").update({
+      email_root_message_id: rootMessageId ?? result.messageId ?? messageId,
+      email_last_message_id: result.messageId ?? messageId,
+      email_send_count: (request.email_send_count ?? 0) + 1,
+      email_next_reminder_at: new Date(Date.now() + 90 * 60_000).toISOString()
+    }).eq("company_id", companyId).eq("id", request.id);
+    return { sent: true, cc, to };
+  } catch (error) {
+    console.error("Payment reminder email failed", error);
+    return skipped(error instanceof Error ? error.message : "Payment reminder email failed.");
   }
 }
 

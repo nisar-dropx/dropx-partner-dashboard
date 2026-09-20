@@ -5,9 +5,12 @@ export type AccessSurface = "dashboard" | "ops";
 export type AdminAccessSurface = AccessSurface | "people" | "finance";
 
 export const opsAccessPageCodes = [
+  'ops_notification_settings',
   "ops_pulse",
   "performance",
   "performance_review",
+  "performance_review_cluster_filter",
+  "performance_review_status",
   "capacity",
   "capacity_overview",
   "capacity_associates",
@@ -15,6 +18,10 @@ export const opsAccessPageCodes = [
   "capacity_hiring",
   "ops_reports",
   "ops_attendance_reports",
+  "ops_unplanned_leaves",
+  "ops_offboarding_checklist",
+  "ops_salary_hold",
+  "ops_rostering",
   "daily_submission",
   "cod",
   "cod_executive_reconciliation",
@@ -24,6 +31,7 @@ export const opsAccessPageCodes = [
   "cod_portal_checks",
   "cod_cash_in_associate",
   "edd_dashboard",
+  "station_edd",
   "cps",
   "cps_overview",
   "cps_daily",
@@ -38,9 +46,6 @@ export const opsAccessPageCodes = [
   "service_network",
   "service_network_master",
   "delivery_associates",
-  "contractors",
-  "workers",
-  "vendors",
   "business_documents",
   "advance_requests",
   "expense_requests",
@@ -71,9 +76,6 @@ const opsPageCodes = new Set<string>(opsAccessPageCodes);
 
 const sharedPageCodes = new Set([
   "imports",
-  "contractors",
-  "workers",
-  "vendors",
   "business_documents",
   "advance_requests",
   "expense_requests",

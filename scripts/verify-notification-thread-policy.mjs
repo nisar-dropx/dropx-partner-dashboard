@@ -1,0 +1,14 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import ts from "typescript";
+const source=fs.readFileSync(new URL("../src/lib/notification-thread-policy.ts",import.meta.url),"utf8");
+const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
+const {notificationThreadPolicy:make}=await import("data:text/javascript;base64,"+Buffer.from(js).toString("base64"));
+const base={companyId:"company-a",portal:"people",eventKey:"unplanned_leave_digest",to:["first@example.com"],reportDate:"2026-09-08",title:"Unplanned Leave Follow-up"};
+assert.equal(make(base).subject,"Unplanned Leave Follow-up | September 2026");
+assert.equal(make(base).key,make({...base,reportDate:"2026-09-30"}).key);
+for(const override of [{reportDate:"2026-10-01"},{reportDate:"2027-09-08"},{companyId:"company-b"},{portal:"ops"},{eventKey:"review_digest"},{to:["second@example.com"]},{cc:["second@example.com"]}])assert.notEqual(make(base).key,make({...base,...override}).key);
+assert.equal(make({...base,to:[" FIRST@example.com "]}).key,make(base).key);
+assert.throws(()=>make({...base,reportDate:"2026-02-30"}));
+assert.equal(make({...base,mode:"new"}).reuseThread,false);
+console.log("PASS: monthly reply identity, month/year rollover, recipient/CC/tenant/portal/event isolation and subject.");

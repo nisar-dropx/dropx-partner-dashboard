@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
+import { userFacingError } from "../../../../src/lib/user-facing-error";
+import { formatShiftClock, preferActiveRosterRowsByKey } from "@/lib/roster-plan-preference";
+import { isRosterChangePastDeadline, normalizeRosterChangeDeadlineHour, rosterChangeDeadlineMessage } from "@/lib/roster-change-deadline";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 type WorkerType = "employee" | "contractor";
@@ -31,7 +34,9 @@ function hasAssignedWorkingShift(entry: Entry) { return entry.day_type === "week
 function rosterAssignmentKey(entry: Entry) {
   if (entry.day_type === "weekly_off") return "weekly_off";
   const shift = shiftOf(entry);
-  return shift ? `working:${shift.start_time.slice(0, 8)}:${shift.end_time.slice(0, 8)}` : "working:unassigned";
+  return shift
+    ? `working:${formatShiftClock(shift.start_time)}:${formatShiftClock(shift.end_time)}`
+    : "working:unassigned";
 }
 function isMeaningfulRosterSwap(requester: Entry, partner: Entry) {
   return hasAssignedWorkingShift(requester)
@@ -46,6 +51,93 @@ function projectedEntryId(sourceEntryId: string, date: string) { return `preview
 function projectedSelection(value: string) {
   const match = /^preview:([0-9a-f-]{36}):(\d{4}-\d{2}-\d{2})$/i.exec(value);
   return match ? { sourceEntryId: match[1], date: match[2] } : null;
+}
+
+/** HO / corporate office locations keep cross-designation swaps; stations do not. */
+function isHeadOfficeLocation(station: {
+  station_code?: string | null;
+  station_name?: string | null;
+  location_models?: { code?: string | null; name?: string | null } | { code?: string | null; name?: string | null }[] | null;
+}) {
+  const model = relation(station.location_models);
+  const value = `${model?.name ?? ""} ${model?.code ?? ""} ${station.station_code ?? ""} ${station.station_name ?? ""}`.toLowerCase();
+  return /\bho\b|head office|corporate office/.test(value);
+}
+
+async function stationSameDesignationFlags(companyId: string, locationIds: string[]) {
+  const unique = [...new Set(locationIds.filter(Boolean))];
+  const flags = new Map<string, boolean>();
+  if (!unique.length) return flags;
+  for (const id of unique) flags.set(id, true);
+  const stations = await db().from("stations")
+    .select("id,station_code,station_name,location_models(code,name)")
+    .eq("company_id", companyId)
+    .in("id", unique);
+  if (stations.error) throw new Error(stations.error.message);
+  for (const row of stations.data ?? []) {
+    flags.set(String(row.id), !isHeadOfficeLocation(row as {
+      station_code?: string | null;
+      station_name?: string | null;
+      location_models?: { code?: string | null; name?: string | null } | { code?: string | null; name?: string | null }[] | null;
+    }));
+  }
+  return flags;
+}
+
+async function resolveWorkerDesignationIds(companyId: string, workers: Array<{ workerType: WorkerType; workerId: string }>) {
+  const unique = [...new Map(workers.map((worker) => [identityKey(worker), worker])).values()];
+  const designations = new Map<string, string | null>();
+  for (const worker of unique) designations.set(identityKey(worker), null);
+  if (!unique.length) return designations;
+
+  const today = todayIndia();
+  const employeeIds = unique.filter((worker) => worker.workerType === "employee").map((worker) => worker.workerId);
+  const contractorIds = unique.filter((worker) => worker.workerType === "contractor").map((worker) => worker.workerId);
+  const engagementResults = await Promise.all([
+    employeeIds.length
+      ? db().from("hr_engagements").select("id,worker_type,employee_id,contractor_id").eq("company_id", companyId).eq("worker_type", "employee").eq("status", "active").in("employee_id", employeeIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; worker_type: string; employee_id: string | null; contractor_id: string | null }>, error: null }),
+    contractorIds.length
+      ? db().from("hr_engagements").select("id,worker_type,employee_id,contractor_id").eq("company_id", companyId).eq("worker_type", "contractor").eq("status", "active").in("contractor_id", contractorIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; worker_type: string; employee_id: string | null; contractor_id: string | null }>, error: null })
+  ]);
+  const engagementError = engagementResults.find((result) => result.error)?.error;
+  if (engagementError) throw new Error(engagementError.message);
+
+  const engagementToWorker = new Map<string, string>();
+  for (const engagement of engagementResults.flatMap((result) => result.data ?? [])) {
+    if (engagement.worker_type === "employee" && engagement.employee_id) {
+      engagementToWorker.set(String(engagement.id), `employee:${engagement.employee_id}`);
+    } else if (engagement.worker_type === "contractor" && engagement.contractor_id) {
+      engagementToWorker.set(String(engagement.id), `contractor:${engagement.contractor_id}`);
+    }
+  }
+  const engagementIds = [...engagementToWorker.keys()];
+  if (!engagementIds.length) return designations;
+
+  const assignments = await db().from("hr_work_assignments")
+    .select("engagement_id,designation_id,effective_from")
+    .eq("company_id", companyId)
+    .in("engagement_id", engagementIds)
+    .eq("is_primary", true)
+    .lte("effective_from", today)
+    .or(`effective_to.is.null,effective_to.gte.${today}`)
+    .order("effective_from", { ascending: false });
+  if (assignments.error) throw new Error(assignments.error.message);
+
+  const seenEngagements = new Set<string>();
+  for (const assignment of assignments.data ?? []) {
+    const engagementId = String(assignment.engagement_id);
+    if (seenEngagements.has(engagementId)) continue;
+    seenEngagements.add(engagementId);
+    const workerKey = engagementToWorker.get(engagementId);
+    if (workerKey) designations.set(workerKey, assignment.designation_id ? String(assignment.designation_id) : null);
+  }
+  return designations;
+}
+
+function sameStationDesignation(requesterDesignationId: string | null | undefined, partnerDesignationId: string | null | undefined) {
+  return Boolean(requesterDesignationId) && requesterDesignationId === partnerDesignationId;
 }
 
 async function resolveWorkerIdentities(account: ConnectAccount, workerType: WorkerType) {
@@ -65,10 +157,18 @@ async function resolveWorkerIdentities(account: ConnectAccount, workerType: Work
 }
 
 async function expandRecurringOwnEntries(account: ConnectAccount, workerType: WorkerType, identities: WorkerIdentity[], start: string, direct: Entry[]) {
+  const preferredDirect = preferActiveRosterRowsByKey(
+    direct,
+    (entry) => entry.roster_date,
+    (entry) => entry.roster_date,
+    (entry) => planOf(entry)
+  );
   const byDate = new Map<string, Entry>();
-  for (const entry of direct) {
+  for (const entry of preferredDirect.values()) {
     const current = byDate.get(entry.roster_date);
-    if (!current || (entry.worker_type === workerType && entry.worker_id === account.id)) byDate.set(entry.roster_date, entry);
+    if (!current || (entry.worker_type === workerType && entry.worker_id === account.id)) {
+      byDate.set(entry.roster_date, entry);
+    }
   }
   let locationId = direct.find((entry) => entry.location_id)?.location_id ?? null;
   if (!locationId) {
@@ -175,21 +275,16 @@ async function accountFrom(url: URL, body?: Record<string, unknown>) {
   return { account, workerType, identities };
 }
 
-async function swapCutoff(companyId: string) {
-  const result = await db().from("hr_company_settings").select("roster_swap_lead_hours").eq("company_id", companyId).maybeSingle();
-  if (result.error && !/roster_swap_lead_hours/i.test(result.error.message)) throw new Error(result.error.message);
-  return Number(result.data?.roster_swap_lead_hours ?? 24);
+function assertSwapBeforeCutoff(_requester: Entry, _partner: Entry, rosterDate: string, deadlineHour: number) {
+  if (isRosterChangePastDeadline(rosterDate, deadlineHour)) {
+    throw new Error(rosterChangeDeadlineMessage(deadlineHour));
+  }
 }
 
-function assertBeforeCutoff(entry: Entry, leadHours: number) {
-  const start = shiftOf(entry)?.start_time?.slice(0, 8) ?? "00:00:00";
-  const beginsAt = Date.parse(`${entry.roster_date}T${start}+05:30`);
-  if (!Number.isFinite(beginsAt) || Date.now() > beginsAt - leadHours * 3_600_000) throw new Error(`Shift swaps close ${leadHours} hours before the shift.`);
-}
-
-function assertSwapBeforeCutoff(requester: Entry, partner: Entry, rosterDate: string, leadHours: number) {
-  const workingEntries = [requester, partner].filter((entry) => entry.day_type === "working");
-  for (const entry of workingEntries) assertBeforeCutoff({ ...entry, roster_date: rosterDate }, leadHours);
+async function loadRosterChangeDeadlineHour(companyId: string) {
+  const settings = await db().from("hr_company_settings").select("roster_change_deadline_hour").eq("company_id", companyId).maybeSingle();
+  if (settings.error) throw new Error(settings.error.message);
+  return normalizeRosterChangeDeadlineHour(settings.data?.roster_change_deadline_hour);
 }
 
 async function immediateManager(companyId: string, workerType: WorkerType, workerId: string) {
@@ -218,7 +313,7 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   const start = todayIndia();
   const end = addDays(start, ROSTER_VIEW_DAYS - 1);
   const entryResults = await Promise.all(identities.map((identity) => db().from("hr_roster_entries")
-    .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status)")
+    .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
     .eq("company_id", account.companyId).eq("worker_type", identity.workerType).eq("worker_id", identity.workerId)
     .gte("roster_date", start).lte("roster_date", end).eq("hr_roster_plans.status", "approved").order("roster_date")));
   const entryError = entryResults.find((result) => result.error)?.error;
@@ -229,10 +324,16 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   let colleagueEntries: Entry[] = [];
   if (locations.length) {
     const colleagues = await db().from("hr_roster_entries")
-      .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status)")
+      .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
       .eq("company_id", account.companyId).in("location_id", locations).gte("roster_date", start).lte("roster_date", end).eq("hr_roster_plans.status", "approved");
     if (colleagues.error) throw new Error(colleagues.error.message);
-    colleagueEntries = await expandRecurringColleagueEntries(account.companyId, locations, start, (colleagues.data ?? []) as unknown as Entry[]);
+    const preferredColleagues = [...preferActiveRosterRowsByKey(
+      (colleagues.data ?? []) as unknown as Entry[],
+      (entry) => entry.roster_date,
+      (entry) => `${entry.worker_type}:${entry.worker_id}:${entry.roster_date}`,
+      (entry) => planOf(entry)
+    ).values()];
+    colleagueEntries = await expandRecurringColleagueEntries(account.companyId, locations, start, preferredColleagues);
   }
   const swapColumns = "id,requester_entry_id,partner_entry_id,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,requester_shift_id,partner_shift_id,requester_day_type,partner_day_type,roster_date,status,requester_note,partner_note,requested_at";
   const swapResults = await Promise.all(identities.flatMap((identity) => [
@@ -265,14 +366,27 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   for (const item of contractors.data ?? []) names.set(`contractor:${item.id}`, { name: item.full_name, code: item.dropx_id });
   const shifts = new Map<string, Shift>();
   for (const item of storedShifts.data ?? []) shifts.set(item.id, item as Shift);
-  const leadHours = await swapCutoff(account.companyId);
+  const leadHours = await loadRosterChangeDeadlineHour(account.companyId);
   const entriesById = new Map([...own, ...colleagueEntries].map((entry) => [entry.id, entry]));
+  const colleagueWorkers = colleagueEntries.map((item) => ({ workerType: item.worker_type, workerId: item.worker_id }));
+  const [designationByWorker, stationDesignationRequired] = await Promise.all([
+    resolveWorkerDesignationIds(account.companyId, [...identities, ...colleagueWorkers]),
+    stationSameDesignationFlags(account.companyId, locations)
+  ]);
+  const requesterDesignationId = identities
+    .map((identity) => designationByWorker.get(identityKey(identity)) ?? null)
+    .find((value) => Boolean(value)) ?? null;
   const days = own.map((entry) => {
+    const requireSameDesignation = Boolean(entry.location_id && stationDesignationRequired.get(entry.location_id));
     const meaningfulPartners = colleagueEntries.filter((candidate) => candidate.id !== entry.id
       && candidate.roster_date === entry.roster_date
       && candidate.location_id === entry.location_id
       && !isOwnIdentity(candidate.worker_type, candidate.worker_id, identities)
-      && isMeaningfulRosterSwap(entry, candidate));
+      && isMeaningfulRosterSwap(entry, candidate)
+      && (!requireSameDesignation || sameStationDesignation(
+        requesterDesignationId,
+        designationByWorker.get(`${candidate.worker_type}:${candidate.worker_id}`) ?? null
+      )));
     const partners = meaningfulPartners.filter((candidate) => {
       try { assertSwapBeforeCutoff(entry, candidate, entry.roster_date, leadHours); return true; }
       catch { return false; }
@@ -311,7 +425,7 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
 
 export async function GET(request: Request) {
   try { const { account, workerType, identities } = await accountFrom(new URL(request.url)); return NextResponse.json(await rosterPayload(account, workerType, identities), { headers: { "Cache-Control": "private, no-store" } }); }
-  catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load roster." }, { status: 400 }); }
+  catch (error) { return NextResponse.json({ error: userFacingError(error, "Unable to load roster.") }, { status: 400 }); }
 }
 
 export async function POST(request: Request) {
@@ -335,14 +449,51 @@ export async function POST(request: Request) {
     if (requesterSelection?.date !== partnerSelection?.date && requesterSelection && partnerSelection) throw new Error("Choose a colleague from the same date.");
     if (requester.location_id !== partner.location_id) throw new Error("Choose a colleague from the same location.");
     if (!isMeaningfulRosterSwap(requester, partner)) throw new Error("Choose a colleague whose roster is different for this date.");
-    const leadHours = await swapCutoff(account.companyId); assertSwapBeforeCutoff(requester, partner, rosterDate, leadHours);
-    const approverUserId = await immediateManager(account.companyId, workerType, account.id);
-    const created = await db().rpc("hr_create_roster_swap_request", { p_company_id: account.companyId, p_requester_source_entry_id: requester.id, p_partner_source_entry_id: partner.id, p_roster_date: rosterDate, p_requester_worker_type: requester.worker_type, p_requester_worker_id: requester.worker_id, p_approver_user_id: approverUserId, p_requester_note: note || null });
+    if (requester.location_id) {
+      const stationDesignationRequired = await stationSameDesignationFlags(account.companyId, [requester.location_id]);
+      if (stationDesignationRequired.get(requester.location_id)) {
+        const designations = await resolveWorkerDesignationIds(account.companyId, [
+          { workerType: requester.worker_type, workerId: requester.worker_id },
+          { workerType: partner.worker_type, workerId: partner.worker_id }
+        ]);
+        const requesterDesignationId = designations.get(`${requester.worker_type}:${requester.worker_id}`) ?? null;
+        const partnerDesignationId = designations.get(`${partner.worker_type}:${partner.worker_id}`) ?? null;
+        if (!sameStationDesignation(requesterDesignationId, partnerDesignationId)) {
+          throw new Error("Choose a colleague with the same designation.");
+        }
+      }
+    }
+    assertSwapBeforeCutoff(requester, partner, rosterDate, await loadRosterChangeDeadlineHour(account.companyId));
+    // People policy: roster_swap = immediate reporting manager only (no L2 / HR).
+    const managerUserId = await immediateManager(account.companyId, requester.worker_type, requester.worker_id);
+    if (!managerUserId) throw new Error("No reporting manager is set for this person, so the swap cannot be sent for approval.");
+    const approvalSteps = [{
+      step_name: "Immediate reporting manager approval",
+      approver_user_id: managerUserId,
+      approver_person_id: null,
+      route_id: null,
+      resolved_via: "reporting_chain",
+      original_approver_person_id: null,
+      fallback_reason: null
+    }];
+    let created = await db().rpc("hr_create_roster_swap_request_v2", {
+      p_company_id: account.companyId,
+      p_requester_source_entry_id: requester.id,
+      p_partner_source_entry_id: partner.id,
+      p_roster_date: rosterDate,
+      p_requester_worker_type: requester.worker_type,
+      p_requester_worker_id: requester.worker_id,
+      p_approval_steps: approvalSteps,
+      p_requester_note: note || null
+    });
+    if (created.error && /Could not find the function|schema cache|does not exist/i.test(created.error.message)) {
+      created = await db().rpc("hr_create_roster_swap_request", { p_company_id: account.companyId, p_requester_source_entry_id: requester.id, p_partner_source_entry_id: partner.id, p_roster_date: rosterDate, p_requester_worker_type: requester.worker_type, p_requester_worker_id: requester.worker_id, p_approver_user_id: managerUserId, p_requester_note: note || null });
+    }
     if (created.error) throw new Error(created.error.message);
     const requestId = String(created.data);
     await notifyWorker({ companyId: account.companyId, workerType: partner.worker_type, workerId: partner.worker_id, event: "roster_swap_requested", sourceKey: requestId, title: "Shift swap request", body: `${account.name ?? account.reference ?? "A colleague"} wants to swap the ${rosterDate} shift with you.`, data: { requestId, rosterDate } });
     return NextResponse.json({ ok: true, notice: "Swap request sent to your colleague." });
-  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to request the shift swap." }, { status: 400 }); }
+  } catch (error) { return NextResponse.json({ error: userFacingError(error, "Unable to request the shift swap.") }, { status: 400 }); }
 }
 
 export async function PATCH(request: Request) {
@@ -365,7 +516,16 @@ export async function PATCH(request: Request) {
     if (response.error) throw new Error(response.error.message);
     const decided = response.data as typeof current.data;
     await notifyWorker({ companyId: account.companyId, workerType: decided.requester_worker_type, workerId: decided.requester_worker_id, event: action === "accept" ? "roster_swap_partner_accepted" : "roster_swap_rejected", sourceKey: requestId, title: action === "accept" ? "Swap partner accepted" : "Shift swap declined", body: action === "accept" ? `Your colleague accepted. Manager approval is now pending for ${decided.roster_date}.` : `Your colleague declined the swap for ${decided.roster_date}.` });
-    if (action === "accept") await db().from("people_web_notifications").upsert({ company_id: account.companyId, recipient_user_id: decided.approver_user_id, event_code: "roster_swap_approval_required", title: "Shift swap awaiting approval", body: `Both people accepted a shift swap for ${decided.roster_date}.`, href: "/approvals", source_key: requestId, data: { requestId, rosterDate: decided.roster_date } }, { onConflict: "company_id,event_code,source_key,recipient_user_id", ignoreDuplicates: true });
+    if (action === "accept") {
+      // hr_partner_decide_roster_swap's return isn't formally typed against
+      // hr_roster_swap_requests's own columns, so read approver_user_id
+      // defensively - if the RPC's shape ever changes, skip the manager
+      // notification instead of writing a bad/undefined recipient_user_id.
+      const approverUserId = (response.data as Record<string, unknown> | null)?.approver_user_id;
+      if (typeof approverUserId === "string" && approverUserId) {
+        await db().from("people_web_notifications").upsert({ company_id: account.companyId, recipient_user_id: approverUserId, event_code: "roster_swap_approval_required", title: "Shift swap awaiting approval", body: `Both people accepted a shift swap for ${decided.roster_date}.`, href: "/approvals", source_key: requestId, data: { requestId, rosterDate: decided.roster_date } }, { onConflict: "company_id,event_code,source_key,recipient_user_id", ignoreDuplicates: true });
+      }
+    }
     return NextResponse.json({ ok: true, notice: action === "accept" ? "Accepted. Sent to the reporting manager." : "Swap request declined." });
-  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to update the shift swap." }, { status: 400 }); }
+  } catch (error) { return NextResponse.json({ error: userFacingError(error, "Unable to update the shift swap.") }, { status: 400 }); }
 }

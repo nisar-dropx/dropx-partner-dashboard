@@ -23,10 +23,13 @@ import { SelfieCapturePanel } from "./selfie-capture-panel";
 import { stampSupportSelfieBlob } from "@/lib/support-selfie-stamp";
 import { readResilientPosition } from "@/lib/read-geolocation";
 import {
+  attendanceCompactNudge,
   attendanceDayInsight,
-  attendanceIssueSummary,
+  isCurrentAttendanceAttentionDate,
   type AttendanceInsightRow
 } from "@/lib/attendance-insights";
+import { readJsonResponse, userFacingError } from "@/lib/user-facing-error";
+import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
 
 type Account = { id: string; profileType: string; profilePhotoUrl?: string | null };
 type Regularization = {
@@ -44,7 +47,9 @@ type Row = AttendanceInsightRow & {
   date: string;
   status: string;
   statusLabel?: string | null;
-  statusKind?: "attendance" | "leave";
+  statusKind?: "attendance" | "leave" | "paid_leave";
+  isPaidLeave?: boolean | null;
+  payDayType?: string | null;
   attendanceStatus?: string | null;
   inTime: string;
   outTime: string;
@@ -188,6 +193,8 @@ function minutes(value: string) {
 
 function attendanceLabel(row: Row | undefined) {
   if (!row) return "No record";
+  if (row.workMode === "wfh") return row.attendanceStatus || "WFH approved";
+  if (row.workMode === "business_trip") return "Present · Business trip";
   if (row.statusLabel) return row.statusLabel;
   if (row.attendanceStatus) return row.attendanceStatus;
   const status = row.status.toUpperCase();
@@ -211,6 +218,7 @@ function emptyAttendanceRow(date: string): Row {
     workHours: "",
     punchCount: 0,
     remark: "",
+    workMode: "onsite",
     regularization: null
   };
 }
@@ -221,7 +229,8 @@ function localIsoDate(date = new Date()) {
 
 const readPosition = readResilientPosition;
 
-export function ConnectAttendance({ account }: { account: Account }) {
+export function ConnectAttendance({ account, active = true }: { account: Account; active?: boolean }) {
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const [month, setMonth] = useState(currentMonth);
@@ -235,28 +244,32 @@ export function ConnectAttendance({ account }: { account: Account }) {
   const [punchStatus, setPunchStatus] = useState<PunchStatus | null>(null);
   const [supportFlag, setSupportFlag] = useState<OpenFlag | null>(null);
   const [supportNotice, setSupportNotice] = useState("");
+  const selectedDayRef = useRef<HTMLDivElement>(null);
 
-  const loadAttendance = useCallback(() => {
-    setData(null);
+  const loadAttendance = useCallback((background = false) => {
+    // A background revalidation (screen was already showing data, just
+    // gone stale after being kept alive off-screen) must not blank the
+    // calendar back to the loading state - only a genuine first load does.
+    if (!background) setData(null);
     setError("");
     fetch(`/api/connect/attendance?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}&month=${month}`)
       .then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || "Unable to load attendance.");
+        const payload = await readJsonResponse<Attendance>(response, "Unable to load attendance. Please try again.");
         setData(payload);
-        setSelected(payload.rows?.find((row: Row) => row.date === localIsoDate()) ?? payload.rows?.at(-1) ?? null);
+        setSelected((current) => current ? payload.rows.find((row) => row.date === current.date) ?? null : null);
+        markLoaded();
       })
-      .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load attendance."));
-  }, [account.id, account.profileType, month]);
+      .catch((reason) => setError(userFacingError(reason, "Unable to load attendance. Please try again.")));
+  }, [account.id, account.profileType, month, markLoaded]);
+  setReload(() => loadAttendance(true));
 
   const loadPunchStatus = useCallback(async () => {
     const response = await fetch(
       `/api/connect/attendance/punch?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`
     );
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Unable to load punch status.");
+    const payload = await readJsonResponse<PunchStatus>(response, "Unable to load punch status. Please try again.");
     setPunchStatus(payload);
-    return payload as PunchStatus;
+    return payload;
   }, [account.id, account.profileType]);
 
   useEffect(() => {
@@ -284,15 +297,37 @@ export function ConnectAttendance({ account }: { account: Account }) {
     shiftOpen: row?.date === punchStatus?.shift.punchDate && punchStatus?.shift.open === true
   }), [punchStatus?.shift.open, punchStatus?.shift.punchDate, todayDate]);
   const selectedInsight = selected ? insightFor(selected) : null;
+  const selectedTimingIssues = selectedInsight?.issues.filter((issue) => issue.code === "late" || issue.code === "early_out") ?? [];
+  const showSelectedOutcome = Boolean(selectedInsight && !["full", "off"].includes(selectedInsight.calendarClass));
   const attentionRow = useMemo(() => {
     if (!data?.rows.length) return null;
     const ordered = [...data.rows].sort((left, right) => right.date.localeCompare(left.date));
     return ordered.find((row) => {
+      if (!isCurrentAttendanceAttentionDate(row.date, todayDate)) return false;
       const insight = insightFor(row);
       return insight.needsRegularization || insight.issues.length > 0;
     }) ?? null;
-  }, [data?.rows, insightFor]);
+  }, [data?.rows, insightFor, todayDate]);
   const attentionInsight = attentionRow ? insightFor(attentionRow) : null;
+  const attentionNudge = attentionRow ? attendanceCompactNudge(attentionRow, {
+    today: attentionRow.date === todayDate,
+    shiftOpen: attentionRow.date === punchStatus?.shift.punchDate && punchStatus?.shift.open === true
+  }) : null;
+  const reviewCount = useMemo(
+    () => (data?.rows ?? []).filter((row) => insightFor(row).needsRegularization).length,
+    [data?.rows, insightFor]
+  );
+
+  const openDayDetails = useCallback((row: Row) => {
+    setSelected(row);
+    setTab("calendar");
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        selectedDayRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        selectedDayRef.current?.focus({ preventScroll: true });
+      });
+    });
+  }, []);
 
   const supportStationKey = [
     punchStatus?.station?.id,
@@ -384,15 +419,14 @@ export function ConnectAttendance({ account }: { account: Account }) {
       {error ? <div className="dx-alert error">{error}<button onClick={() => setMonth((value) => `${value}`)}>Retry</button></div> : null}
       {!data && !error ? <div className="dx-loader"><span /><small>Loading attendance...</small></div> : null}
       {data ? <>
-        {attentionRow && attentionInsight ? <section className={`dx-attendance-attention ${attentionInsight.tone}`}>
+        {attentionRow && attentionInsight && attentionNudge ? <section className={`dx-attendance-attention ${attentionNudge.tone}`}>
           <i>{attentionInsight.needsRegularization ? <ShieldAlert /> : <CircleGauge />}</i>
           <span>
-            <small>{attentionRow.date === todayDate ? "TODAY" : attentionRow.date.split("-").reverse().join("/")}</small>
-            <strong>{attentionInsight.headline}</strong>
-            <em>{attentionInsight.detail}</em>
-            {attentionInsight.issues.filter((issue) => issue.code === "late" || issue.code === "early_out").map((issue) => <em className="dx-attendance-attention-penalty" key={issue.code}><b>{issue.label}.</b> {issue.message}</em>)}
+            <small>{attentionRow.date === todayDate ? "TODAY" : "YESTERDAY"}</small>
+            <strong>{attentionNudge.headline}</strong>
+            <em>{attentionNudge.detail}</em>
           </span>
-          <button onClick={() => { setSelected(attentionRow); setTab("calendar"); }}>
+          <button aria-controls="attendance-day-details" aria-expanded={selected?.date === attentionRow.date && tab === "calendar"} onClick={() => openDayDetails(attentionRow)}>
             View details
           </button>
         </section> : null}
@@ -400,9 +434,15 @@ export function ConnectAttendance({ account }: { account: Account }) {
           <div><i><CheckCircle2 /></i><span>Full Day<strong>{data.summary.fullDay ?? data.summary.present}</strong></span></div>
           <div><i><UserCheck /></i><span>Half Day<strong>{data.summary.halfDay ?? 0}</strong></span></div>
           <div><i><UserX /></i><span>Absent<strong>{data.summary.absent}</strong></span></div>
-          <div><i><ShieldAlert /></i><span>Review<strong>{data.summary.needsReview ?? data.summary.misPunch}</strong></span></div>
+          <div><i><ShieldAlert /></i><span>Needs review<strong>{reviewCount}</strong></span></div>
           <p><Clock3 /> Total Hours <strong>{Math.floor(total / 60)}:{String(total % 60).padStart(2, "0")}</strong></p>
         </div>
+        {(data.summary.lateIn || data.summary.earlyOut) ? (
+          <div className="dx-attendance-flashes" aria-label="Attendance exceptions this month">
+            {data.summary.lateIn ? <span className="late"><Clock3 /> Late in <strong>{data.summary.lateIn}</strong></span> : null}
+            {data.summary.earlyOut ? <span className="early"><LogOut /> Early out <strong>{data.summary.earlyOut}</strong></span> : null}
+          </div>
+        ) : null}
         <div className="dx-tabs-card">
           <nav>
             {(["calendar", "list", "punches"] as const).map((item) => (
@@ -426,39 +466,60 @@ export function ConnectAttendance({ account }: { account: Account }) {
                 return <button aria-label={`${date}: ${future ? "Future" : insight.label}`} className={`${future ? "off" : insight.calendarClass} ${insight.issues.length ? "has-issue" : ""} ${selected?.date === date ? "selected" : ""}`} disabled={future} key={day} onClick={() => !future && setSelected(row ?? emptyAttendanceRow(date))}><span>{day}</span></button>;
               })}
             </div>
-            <div className="dx-legend"><span className="full">Full day</span><span className="half">Half day</span><span className="leave">Leave</span><span className="absent">Absent</span><span className="review">Review</span><span className="off">Off</span></div>
+            <div className="dx-legend">
+              <span className="full">Full day</span>
+              <span className="half">Half day</span>
+              <span className="paid-leave">Paid leave</span>
+              <span className="leave">Leave</span>
+              <span className="week-off">Week off / holiday</span>
+              <span className="on-shift">On shift</span>
+              <span className="absent">Absent</span>
+              <span className="review">Review</span>
+              <span className="off">No record</span>
+              <span className="issue">Late / early</span>
+            </div>
           </div> : null}
           {tab === "list" ? <div className="dx-attendance-list">
-            {[...data.rows].sort((left, right) => right.date.localeCompare(left.date)).map((row) => {
+            {data.rows.length ? [...data.rows].sort((left, right) => right.date.localeCompare(left.date)).map((row) => {
               const insight = insightFor(row);
-              const issue = attendanceIssueSummary(row);
-              return <button key={row.date} onClick={() => { setSelected(row); setTab("calendar"); }}>
+              const nudge = attendanceCompactNudge(row, {
+                today: row.date === todayDate,
+                shiftOpen: row.date === punchStatus?.shift.punchDate && punchStatus?.shift.open === true
+              });
+              return <button key={row.date} onClick={() => openDayDetails(row)}>
                 <header><strong>{row.date.split("-").reverse().join("/")}</strong><em className={insight.calendarClass}>{insight.label}</em></header>
-                <span><small>IN</small>{row.inTime || "--:--"}</span><span><small>OUT</small>{row.outTime || "--:--"}</span><span><small>HRS</small>{row.workHours || "00:00"}</span>
-                {issue ? <p className={`dx-attendance-list-issue ${issue.tone}`}>{issue.label} · {issue.message}</p> : null}
+                <span><small>IN</small>{row.inTime || "--:--"}</span><span><small>OUT</small>{row.outTime || "--:--"}</span><span><small>{row.workMode === "wfh" && !row.punchCount ? "CREDIT" : "HRS"}</small>{row.workHours || "00:00"}</span>
+                {nudge ? <p className={`dx-attendance-list-issue ${nudge.tone}`}>{nudge.headline} · {nudge.detail}</p> : null}
               </button>;
-            })}
+            }) : <div className="dx-empty"><CalendarDays /><strong>No records this month</strong><small>Attendance days will appear here once you punch in.</small></div>}
           </div> : null}
           {tab === "punches" ? <div className="dx-punches">
-            {[...data.rows].sort((left, right) => right.date.localeCompare(left.date)).flatMap((row) => {
+            {data.rows.some((row) => (row.punches?.length ?? 0) > 0 || row.inTime || row.outTime) ? [...data.rows].sort((left, right) => right.date.localeCompare(left.date)).flatMap((row) => {
               const punches = row.punches?.length ? row.punches : [row.inTime, row.outTime].filter(Boolean);
               return [...punches].sort((left, right) => right.localeCompare(left)).map((time, index) => <div key={`${row.date}-${index}-${time}`}><Fingerprint /><span>{row.date.split("-").reverse().join("/")}</span><strong>{time}</strong></div>);
-            })}
+            }) : <div className="dx-empty"><Fingerprint /><strong>No punches this month</strong><small>Your check-in and check-out times will appear here.</small></div>}
           </div> : null}
         </div>
-        {tab === "calendar" && selected && selectedInsight ? <div className="dx-selected-day">
+        {tab === "calendar" && selected && selectedInsight ? <div className="dx-selected-day" id="attendance-day-details" ref={selectedDayRef} tabIndex={-1}>
           <header><div><CalendarDays /><strong>{selected.date.split("-").reverse().join("/")}</strong></div><em className={selectedInsight.calendarClass}>{selectedInsight.label}</em></header>
-          {selected.scheduledStart && selected.scheduledStart !== "--:--" ? <p className="dx-attendance-shift"><Clock3 /> <strong>Report by {selected.scheduledStart}</strong> · {selected.shiftName || "Shift"} {selected.scheduledStart}–{selected.scheduledEnd} <small>{selected.shiftSource}</small></p> : null}
-          <div><span><LogIn /><small>IN</small><strong>{selected.inTime || "--:--"}</strong></span><span><LogOut /><small>OUT</small><strong>{selected.outTime || "--:--"}</strong></span><span><Clock3 /><small>WORK</small><strong>{selected.workHours || "00:00"}</strong></span><span><Fingerprint /><small>PUNCHES</small><strong>{selected.punchCount}</strong></span></div>
-          <section className={`dx-attendance-day-insight ${selectedInsight.tone}`}>
-            <strong>{selectedInsight.headline}</strong>
-            <small>{selectedInsight.detail}</small>
-            {selectedInsight.issues.length ? <div className="dx-attendance-consequence-list">{selectedInsight.issues.map((issue) => <p key={issue.code}><strong>{issue.label}</strong><small>{issue.message}</small></p>)}</div> : null}
-          </section>
+          {selected.scheduledStart && selected.scheduledStart !== "--:--" ? <p className="dx-attendance-shift"><Clock3 /> <strong>{selected.workMode === "wfh" ? "Scheduled start" : "Report by"} {selected.scheduledStart}</strong> · {selected.shiftName || "Shift"} {selected.scheduledStart}–{selected.scheduledEnd} <small>{selected.shiftSource}</small></p> : null}
+          <div><span><LogIn /><small>IN</small><strong>{selected.inTime || "--:--"}</strong></span><span><LogOut /><small>OUT</small><strong>{selected.outTime || "--:--"}</strong></span><span><Clock3 /><small>{selected.workMode === "wfh" && !selected.punchCount ? "WFH CREDIT" : "WORK"}</small><strong>{selected.workHours || "00:00"}</strong></span><span><Fingerprint /><small>PUNCHES</small><strong>{selected.punchCount}</strong></span></div>
+          {showSelectedOutcome || selectedTimingIssues.length ? <section className={`dx-attendance-day-insight compact ${selectedInsight.tone}`}>
+            {showSelectedOutcome ? <p className="dx-attendance-detail-row"><strong>{selectedInsight.headline}</strong><small>{selectedInsight.detail}</small></p> : null}
+            {selectedTimingIssues.map((issue) => <p className="dx-attendance-detail-row" key={issue.code}><strong>{issue.label}</strong><small>{issue.message}</small></p>)}
+          </section> : null}
           {selected.remark ? <p className="dx-attendance-day-note">{selected.remark}</p> : null}
           <footer>
             {selected.regularization ? <span className={`dx-request-status ${selected.regularization.status}`}>Regularization {selected.regularization.status}</span> : null}
-            {selected.regularization?.status !== "pending" && selected.statusKind !== "leave" && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0) ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.needsRegularization ? "Regularize missing punch" : "Request regularization"}</button> : null}
+            {selected.regularization?.status !== "pending"
+              && selected.statusKind !== "leave"
+              && selected.statusKind !== "paid_leave"
+              && selected.workMode !== "wfh"
+              && selected.workMode !== "business_trip"
+              && !["week-off", "paid-leave", "leave"].includes(selectedInsight.calendarClass)
+              && (selectedInsight.needsRegularization || selectedInsight.issues.length > 0)
+              ? <button onClick={() => { setRequestError(""); setRegularizing(true); }}>{selectedInsight.needsRegularization ? "Regularize missing punch" : "Request regularization"}</button>
+              : null}
           </footer>
         </div> : null}
       </> : null}
@@ -565,7 +626,7 @@ function SupportEvidenceSheet({
           distanceM: null,
           radiusM: null,
           stationLabel: "station",
-          message: reason instanceof Error ? reason.message : "Unable to read location. Allow GPS to continue."
+          message: userFacingError(reason, "Unable to read location. Allow GPS to continue.")
         });
       }
     }
@@ -610,11 +671,10 @@ function SupportEvidenceSheet({
       form.set("remarks", remarks);
       form.set("selfie", selfie);
       const response = await fetch("/api/connect/attendance/support-evidence", { method: "POST", body: form });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to submit support evidence.");
+      await readJsonResponse(response, "Unable to submit support evidence. Please try again.");
       onSubmitted();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to submit support evidence.");
+      setError(userFacingError(reason, "Unable to submit support evidence. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -707,6 +767,69 @@ function SupportEvidenceSheet({
   </>;
 }
 
+const HOUR_OPTIONS_24 = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, "0"));
+const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, "0"));
+
+function normalizeTwentyFourHour(value: string) {
+  const match = String(value ?? "").trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return "";
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isInteger(hours) || hours < 0 || hours > 23 || !Number.isInteger(minutes) || minutes < 0 || minutes > 59) {
+    return "";
+  }
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function isValidTwentyFourHour(value: string) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function TwentyFourHourTimeInput({
+  value,
+  onChange,
+  required
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  required?: boolean;
+}) {
+  const normalized = normalizeTwentyFourHour(value);
+  const [hour, minute] = normalized ? normalized.split(":") : ["", ""];
+
+  function update(nextHour: string, nextMinute: string) {
+    if (!nextHour || !nextMinute) {
+      onChange("");
+      return;
+    }
+    onChange(`${nextHour}:${nextMinute}`);
+  }
+
+  return (
+    <div className="dx-time-24h">
+      <select
+        aria-label="Hours (24-hour)"
+        required={required}
+        value={hour}
+        onChange={(event) => update(event.target.value, minute || "00")}
+      >
+        <option value="">HH</option>
+        {HOUR_OPTIONS_24.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+      <span aria-hidden="true">:</span>
+      <select
+        aria-label="Minutes"
+        required={required}
+        value={minute}
+        onChange={(event) => update(hour || "00", event.target.value)}
+      >
+        <option value="">MM</option>
+        {MINUTE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function RegularizationSheet({
   account,
   row,
@@ -722,23 +845,25 @@ function RegularizationSheet({
   error: string;
   setError: (message: string) => void;
 }) {
-  const [inTime, setInTime] = useState(row.regularization?.requestedInTime || row.inTime || "");
-  const [outTime, setOutTime] = useState(row.regularization?.requestedOutTime || row.outTime || "");
+  const [inTime, setInTime] = useState(normalizeTwentyFourHour(row.regularization?.requestedInTime || row.inTime || ""));
+  const [outTime, setOutTime] = useState(normalizeTwentyFourHour(row.regularization?.requestedOutTime || row.outTime || ""));
   const [reason, setReason] = useState(row.regularization?.reasonCode || "");
   const [remarks, setRemarks] = useState(row.regularization?.remarks || "");
   const [attachment, setAttachment] = useState<File | null>(null);
   const [attachmentOut, setAttachmentOut] = useState<File | null>(null);
   const needsDualProof = reason === "missed_both";
   const [saving, setSaving] = useState(false);
-  const requestsInTime = ["missed_in", "incorrect_in", "missed_both", "other"].includes(reason);
-  const requestsOutTime = ["missed_out", "incorrect_out", "missed_both", "other"].includes(reason);
+  const requestsInTime = ["missed_in", "incorrect_in", "missed_both", "late_in_permission"].includes(reason);
+  const requestsOutTime = ["missed_out", "incorrect_out", "missed_both", "early_out_permission"].includes(reason);
   const proofTimeLabel = !reason
     ? "requested attendance time"
-    : requestsInTime && requestsOutTime
-      ? "requested IN and OUT times"
-      : requestsInTime
-        ? "requested IN time"
-        : "requested OUT time";
+    : reason === "other"
+      ? "attendance day"
+      : requestsInTime && requestsOutTime
+        ? "requested IN and OUT times"
+        : requestsInTime
+          ? "requested IN time"
+          : "requested OUT time";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -746,12 +871,12 @@ function RegularizationSheet({
       setError("Select a regularization reason.");
       return;
     }
-    if (requestsInTime && !inTime) {
-      setError("Enter the requested IN time.");
+    if (requestsInTime && !isValidTwentyFourHour(inTime)) {
+      setError("Enter the requested IN time in 24-hour format (HH:MM).");
       return;
     }
-    if (requestsOutTime && !outTime) {
-      setError("Enter the requested OUT time.");
+    if (requestsOutTime && !isValidTwentyFourHour(outTime)) {
+      setError("Enter the requested OUT time in 24-hour format (HH:MM).");
       return;
     }
     if (!attachment && !row.regularization?.hasAttachment) {
@@ -778,11 +903,10 @@ function RegularizationSheet({
       if (attachment) form.set("attachment", attachment);
       if (attachmentOut) form.set("attachmentOut", attachmentOut);
       const response = await fetch("/api/connect/attendance", { method: "POST", body: form });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to submit regularization request.");
+      await readJsonResponse(response, "Unable to submit regularization request. Please try again.");
       onSubmitted();
     } catch (reasonValue) {
-      setError(reasonValue instanceof Error ? reasonValue.message : "Unable to submit regularization request.");
+      setError(userFacingError(reasonValue, "Unable to submit regularization request. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -807,12 +931,14 @@ function RegularizationSheet({
           <option value="missed_both">Missed both punches</option>
           <option value="incorrect_in">Incorrect IN time</option>
           <option value="incorrect_out">Incorrect OUT time</option>
-          <option value="other">Other</option>
+          <option value="late_in_permission">Permission – late IN</option>
+          <option value="early_out_permission">Permission – early OUT</option>
+          <option value="other">Other (remarks only)</option>
         </select></label>
-        {reason ? <div className={`dx-time-grid ${requestsInTime !== requestsOutTime ? "single" : ""}`}>
-          {requestsInTime ? <label>Requested IN<input required type="time" value={inTime} onChange={(event) => setInTime(event.target.value)} /></label> : null}
-          {requestsOutTime ? <label>Requested OUT<input required type="time" value={outTime} onChange={(event) => setOutTime(event.target.value)} /></label> : null}
-        </div> : <p className="dx-time-prompt">Select a reason to enter only the time that needs correction.</p>}
+        {reason && (requestsInTime || requestsOutTime) ? <div className={`dx-time-grid ${requestsInTime !== requestsOutTime ? "single" : ""}`}>
+          {requestsInTime ? <label>Requested IN (24h)<TwentyFourHourTimeInput required value={inTime} onChange={setInTime} /></label> : null}
+          {requestsOutTime ? <label>Requested OUT (24h)<TwentyFourHourTimeInput required value={outTime} onChange={setOutTime} /></label> : null}
+        </div> : reason === "other" ? <p className="dx-time-prompt">Other keeps recorded times unchanged. Explain the correction in remarks and attach proof.</p> : <p className="dx-time-prompt">Select a reason to enter only the time that needs correction.</p>}
         <label>Remarks<textarea required minLength={5} placeholder="Briefly explain the correction" rows={3} value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
         <div className="dx-evidence-info" role="note">
           <Info aria-hidden="true" />

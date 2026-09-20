@@ -3,10 +3,10 @@ import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { requireCompanyId } from "@/lib/company-scope";
 import { requireEddAccess } from "@/lib/ops-pulse/edd-access";
-import { fetchEddAllowedStations, isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
+import { fetchEddAllowedStations, fetchEddPerformanceStation, isEddWorkerConfigured } from "@/lib/ops-pulse/edd-worker";
 import { loadCodLocations, loadCodStationSettings } from "@/lib/ops-pulse/cod";
 import { EddStationSectionTabs } from "../edd-station-section-tabs";
-import { EddPerformanceView } from "../edd-performance-view";
+import { EddPerformanceView, type EddPerformanceInitialOutcome } from "../edd-performance-view";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -54,6 +54,19 @@ export default async function EddStationPerformancePage({
   const stationName = String(location?.station_name ?? "").trim();
   const placeBits = [location?.city, location?.state].filter(Boolean).join(", ");
 
+  // Fetch the station's performance snapshot server-side, same as the
+  // network list pages do, so this page shows data on first paint instead
+  // of an empty shell followed by a client-side fetch. EddPerformanceView
+  // still owns the "Refresh" action and re-fetches client-side for that.
+  let initialOutcome: EddPerformanceInitialOutcome | null = null;
+  if (workerConfigured && stationCode && authorized) {
+    try {
+      initialOutcome = await fetchEddPerformanceStation({ stationCode });
+    } catch (err) {
+      initialOutcome = { status: "error", error: err instanceof Error ? err.message : "Unable to load the performance report." };
+    }
+  }
+
   return (
     <AppShell active="Delivery Performance" pageCode="edd_dashboard">
       <div className="ops-command-center">
@@ -94,7 +107,7 @@ export default async function EddStationPerformancePage({
         ) : (
           <>
             <EddStationSectionTabs stationCode={stationCode} active="performance" />
-            <EddPerformanceView stationCode={stationCode} />
+            <EddPerformanceView stationCode={stationCode} initialOutcome={initialOutcome} />
           </>
         )}
       </div>

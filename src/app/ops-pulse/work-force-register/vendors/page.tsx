@@ -1,5 +1,5 @@
-import { WorkForceRegisterCategoryPage, type WorkForceRegisterSearchParams } from "@/components/ops-work-force-register-page";
+import { redirect } from "next/navigation";
 
-export default function VendorsRegisterPage({ searchParams }: { searchParams?: WorkForceRegisterSearchParams }) {
-  return <WorkForceRegisterCategoryPage category="vendors" searchParams={searchParams} />;
+export default function VendorsRegisterPage() {
+  redirect("/work-force-register");
 }

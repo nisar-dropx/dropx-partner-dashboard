@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { userFacingError } from "@/lib/user-facing-error";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { connectSessionCookieName, findConnectAccounts } from "@/lib/connect-auth";
@@ -43,7 +44,7 @@ export async function GET() {
         : session.mobile_number
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load session." }, { status: 500 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load session.") }, { status: 500 });
   }
 }
 
@@ -61,6 +62,6 @@ export async function DELETE() {
     cookies().delete(connectSessionCookieName);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to clear session." }, { status: 500 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to clear session.") }, { status: 500 });
   }
 }

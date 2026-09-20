@@ -10,6 +10,7 @@ import { OpsContextSwitcher } from "@/components/ops-context-switcher";
 import { OpsAiChat } from "@/components/ops-ai-chat";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { UserMenu } from "@/components/user-menu";
+import { OwnerPreviewSwitcher } from "@/components/owner-preview-switcher";
 import { redirect } from "next/navigation";
 import { opsAccessPageCodes } from "@/lib/access-surface";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
@@ -95,16 +96,17 @@ export async function AppShell({ children, active, pageCode }: { children: React
       children: item.children.filter((child) => !child.code || hasPermission(authorization, child.code, "access"))
     } : item)
     .filter((item) => item.children?.length ? item.children.length > 0 : hasPermission(authorization, item.code, "access"));
-  const inboxNotificationsEnabled = hasPermission(authorization, "inbox", "access");
+  const inboxNotificationsEnabled = !authorization.isPreview && hasPermission(authorization, "inbox", "access");
   const paymentNotifications = await loadPaymentNotificationSnapshot(authorization);
   const userMenuProps = {
     action: signOut,
     email: authorization.email,
     name: authorization.fullName ?? authorization.email ?? "DropX user",
-    role: authorization.roleName
+    role: authorization.designationName ?? authorization.roleName
   };
   const topActions = (
     <>
+      {authorization.canPreviewUsers ? <OwnerPreviewSwitcher active={Boolean(authorization.isPreview)} name={authorization.fullName ?? "user"} /> : null}
       {isOpsHost && opsContext.location ? (
         <OpsContextSwitcher
           availableModes={opsContext.availableModes}
@@ -153,13 +155,14 @@ export async function AppShell({ children, active, pageCode }: { children: React
           <div className="sidebar-footer">
             <strong>{authorization.fullName ?? authorization.email ?? "DropX user"}</strong>
             <br />
-            {authorization.roleName ?? "Dashboard user"}
+            {authorization.designationName ?? authorization.roleName ?? "Portal user"}
           </div>
         </aside>
       )}
     >
       <DocumentTitle pageName={active} productName={isOpsHost ? "OpsPulse · DropX" : isPeopleHost ? "DropX People" : "DropX Dashboard"} />
       <InboxNotificationListener enabled={inboxNotificationsEnabled} />
+      {authorization.isPreview ? <div className="owner-preview-banner"><strong>Read-only user preview</strong><span>You are viewing this portal as {authorization.fullName}. Exit preview to make changes.</span></div> : null}
       {children}
       {isOpsHost && hasPermission(authorization, "ops_pulse", "access") ? <OpsAiChat /> : null}
     </AppShellFrame>

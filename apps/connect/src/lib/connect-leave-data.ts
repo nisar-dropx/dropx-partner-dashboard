@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isManagingPartnerDesignation } from "./approval-designation-labels";
 import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
 import { supabaseAdmin } from "./supabase-admin";
 import { canUseAvailableManagerChain } from "./leave-approval-chain";
@@ -18,12 +19,14 @@ export type WorkforceLeaveEntitlement = {
   color: string;
   annual_allowance: number;
   is_paid: boolean;
-  balance_mode: "annual_balance" | "unlimited_unpaid";
+  balance_mode: "annual_balance" | "unlimited_unpaid" | "earned_balance";
   attendance_code: string;
   attendance_label: string;
   rule_id: string;
   scope_type: "company" | "location" | "designation" | "location_designation";
 };
+
+export type WorkforceLeaveBalance = { entitlement: number | null; used: number | null; remaining: number | null };
 
 type PermissionUser = {
   userId: string;
@@ -118,6 +121,38 @@ export async function resolveWorkforceLeaveEntitlements({ companyId, workerId, w
   return (result.data ?? []) as WorkforceLeaveEntitlement[];
 }
 
+function relationRow<T>(value: T | T[] | null | undefined): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+/**
+ * The ledger-backed (entitlement, used, remaining) triple for one worker/leave type - the
+ * same hr_resolve_leave_balance RPC dropx-hrms's own leave-workflow.ts calls, so DropX One
+ * shows exactly what HR sees: a cancelled/adjusted leave, comp-off earned on a week-off or
+ * holiday, and any manual HR correction all net out correctly. Replaces the ad-hoc "count
+ * approved/pending hr_leave_requests rows in the current calendar year" math the leave list
+ * used to do inline, which only ever reflected the original approval and never a later
+ * cancellation, adjustment or comp-off credit against the same balance.
+ */
+export async function resolveWorkforceLeaveBalance(
+  companyId: string,
+  workerType: LeaveWorkerType,
+  workerId: string,
+  leaveTypeId: string,
+  entitlement: number | null
+): Promise<WorkforceLeaveBalance> {
+  const result = await db().rpc("hr_resolve_leave_balance", {
+    p_company_id: companyId,
+    p_worker_type: workerType,
+    p_worker_id: workerId,
+    p_leave_type_id: leaveTypeId,
+    p_entitlement: entitlement
+  });
+  if (result.error) throw new Error(result.error.message);
+  const row = relationRow(result.data as WorkforceLeaveBalance[] | WorkforceLeaveBalance | null);
+  return row ?? { entitlement: null, used: null, remaining: null };
+}
+
 export async function resolveWorkforceLeaveApproval({ companyId, workerId, workerType, days }: {
   companyId: string;
   workerId: string;
@@ -128,10 +163,21 @@ export async function resolveWorkforceLeaveApproval({ companyId, workerId, worke
   const requesterLink = await db().from("hr_user_person_links").select("user_id,status")
     .eq("company_id", companyId).eq("person_id", engagement.person_id).maybeSingle();
   if (requesterLink.error) throw new Error(requesterLink.error.message);
-  if (assignment.is_top_level) {
+  let managingPartner = false;
+  if (assignment.designation_id) {
+    const designation = await db().from("designations").select("code,name")
+      .eq("company_id", companyId).eq("id", assignment.designation_id).maybeSingle();
+    if (designation.error) throw new Error(designation.error.message);
+    managingPartner = isManagingPartnerDesignation(
+      designation.data
+        ? { code: designation.data.code as string | null, name: String(designation.data.name ?? "") }
+        : null
+    );
+  }
+  if (assignment.is_top_level || managingPartner) {
     return {
       direct: true,
-      policyName: "Top-level direct record",
+      policyName: managingPartner ? "Managing partner direct record" : "Top-level direct record",
       requesterUserId: requesterLink.data?.status === "active" ? requesterLink.data.user_id : null,
       steps: [] as LeaveApprovalStep[]
     };

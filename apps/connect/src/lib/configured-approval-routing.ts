@@ -9,6 +9,11 @@ export async function resolveConfiguredApprovalWorkflow(input: {
   workerType: "employee" | "contractor";
   workerId: string;
   asOf?: string;
+  maxLevel?: 1 | 2 | 3;
+  reportingChainOnly?: boolean;
+  reportingChainMaxLevel?: 1 | 2 | 3;
+  level3StepName?: string;
+  allowMissingApprovers?: boolean;
 }) {
   if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
   return resolveSharedWorkflow(input);

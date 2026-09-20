@@ -14,13 +14,28 @@ function toggle(values: string[], value: string) {
   return values.includes(value) ? values.filter((entry) => entry !== value) : [...values, value];
 }
 
-function MultiFilter({ label, options, values, onChange }: {
+function clusterManagerNames(location: CodLocationRow) {
+  return location.cluster_manager_names?.length
+    ? location.cluster_manager_names
+    : [location.cluster_manager].filter(Boolean) as string[];
+}
+
+function reportingAuthorityOptions(location: CodLocationRow) {
+  if (location.reporting_authorities?.length) {
+    return location.reporting_authorities.map((person) => `${person.name} · ${person.role}`);
+  }
+  return (location.aom_names?.length ? location.aom_names : [location.aom].filter(Boolean) as string[])
+    .map((name) => `${name} · Area Operations Manager`);
+}
+
+function MultiFilter({ label, options, values, onChange, emptyText }: {
   label: string;
   options: string[];
   values: string[];
   onChange: (values: string[]) => void;
+  emptyText?: string;
 }) {
-  if (!options.length) return <div className="ops-scope-fixed"><small>{label}</small><strong>Not configured</strong></div>;
+  if (!options.length) return <div className="ops-scope-fixed"><small>{label}</small><strong>{emptyText ?? "Not configured"}</strong></div>;
   if (options.length === 1) return <div className="ops-scope-fixed"><small>{label}</small><strong>{options[0]}</strong></div>;
   return (
     <fieldset>
@@ -55,8 +70,8 @@ export function OpsContextSwitcher({
   const selectedRows = locations.filter((location) => selectedLocationIds.includes(location.id));
   const [selectedMode, setSelectedMode] = useState(mode);
   const [regions, setRegions] = useState(unique(selectedRows.map((location) => location.region)));
-  const [aoms, setAoms] = useState(unique(selectedRows.map((location) => location.aom)));
-  const [managers, setManagers] = useState(unique(selectedRows.map((location) => location.cluster_manager)));
+  const [authorities, setAuthorities] = useState(unique(selectedRows.flatMap(reportingAuthorityOptions)));
+  const [managers, setManagers] = useState(unique(selectedRows.flatMap(clusterManagerNames)));
   const [selectedIds, setSelectedIds] = useState(selectedLocationIds);
   const [autoSelectAll, setAutoSelectAll] = useState(false);
   const [locationQuery, setLocationQuery] = useState("");
@@ -66,10 +81,14 @@ export function OpsContextSwitcher({
   );
   const regionOptions = unique(modeLocations.map((location) => location.region));
   const regionLocations = regions.length ? modeLocations.filter((location) => regions.includes(String(location.region))) : modeLocations;
-  const aomOptions = unique(regionLocations.map((location) => location.aom));
-  const aomLocations = aoms.length ? regionLocations.filter((location) => aoms.includes(String(location.aom))) : regionLocations;
-  const managerOptions = unique(aomLocations.map((location) => location.cluster_manager));
-  const filteredLocations = managers.length ? aomLocations.filter((location) => managers.includes(String(location.cluster_manager))) : aomLocations;
+  const authorityOptions = unique(regionLocations.flatMap(reportingAuthorityOptions));
+  const authorityLocations = authorities.length
+    ? regionLocations.filter((location) => reportingAuthorityOptions(location).some((authority) => authorities.includes(authority)))
+    : regionLocations;
+  const managerOptions = unique(authorityLocations.flatMap(clusterManagerNames));
+  const filteredLocations = managers.length
+    ? authorityLocations.filter((location) => clusterManagerNames(location).some((manager) => managers.includes(manager)))
+    : authorityLocations;
   const visibleLocations = locationQuery.trim()
     ? filteredLocations.filter((location) => locationLabel(location).toLowerCase().includes(locationQuery.trim().toLowerCase()))
     : filteredLocations;
@@ -78,7 +97,7 @@ export function OpsContextSwitcher({
   function changeMode(next: OperatingMode) {
     setSelectedMode(next);
     setRegions([]);
-    setAoms([]);
+    setAuthorities([]);
     setManagers([]);
     setSelectedIds([]);
     setAutoSelectAll(true);
@@ -112,9 +131,9 @@ export function OpsContextSwitcher({
               {availableModes.map((entry) => <label key={entry.code}><input type="radio" name="mode" value={entry.code} checked={selectedMode === entry.code} onChange={() => changeMode(entry.code)} /><span>{entry.label}</span></label>)}
             </div>
           </fieldset>
-          <MultiFilter label="Region" options={regionOptions} values={regions} onChange={(value) => selectHierarchy(() => { setRegions(value); setAoms([]); setManagers([]); })} />
-          <MultiFilter label="AOM" options={aomOptions} values={aoms} onChange={(value) => selectHierarchy(() => { setAoms(value); setManagers([]); })} />
-          <MultiFilter label="Cluster Manager" options={managerOptions} values={managers} onChange={(value) => selectHierarchy(() => setManagers(value))} />
+          <MultiFilter label="Region" options={regionOptions} values={regions} onChange={(value) => selectHierarchy(() => { setRegions(value); setAuthorities([]); setManagers([]); })} />
+          <MultiFilter label="Reporting authority" options={authorityOptions} values={authorities} emptyText="Not assigned in People" onChange={(value) => selectHierarchy(() => { setAuthorities(value); setManagers([]); })} />
+          <MultiFilter label="Cluster Manager" options={managerOptions} values={managers} emptyText="Not assigned in People" onChange={(value) => selectHierarchy(() => setManagers(value))} />
         </div>
         <fieldset className="ops-location-picker">
           <legend>Locations</legend>

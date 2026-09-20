@@ -1,0 +1,63 @@
+import { readFileSync } from "node:fs";
+
+const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+const component = read("src/components/performance-review-desk.tsx");
+const carriedActions = read("src/components/performance-carried-actions.tsx");
+const opening = read("src/components/performance-opening-card.tsx");
+const operations = read("src/components/performance-review-operations.tsx");
+const attendanceHistory = read("src/components/review-attendance-history.tsx");
+const picker = read("src/components/performance-review-picker.tsx");
+const styles = read("src/app/globals.css");
+const reviewStyles = read("src/app/ops-pulse/performance/review-desk.css");
+const statusPage = read("src/app/ops-pulse/performance/review-status/page.tsx");
+const statusStyles = read("src/app/ops-pulse/performance/review-status/review-status.css");
+const navigation = read("src/lib/ops-pulse/navigation.ts");
+const accessPages = read("src/lib/access-pages.ts");
+const permissionMatrix = read("src/components/permission-matrix.tsx");
+
+const checks = [
+  [reviewStyles.includes(".performance-review-desk .performance-review-facts:has(> details[open]) { z-index: 20; }"), "open fact drill-downs stay above later station/EMD controls"],
+  [reviewStyles.includes(".review-vehicles header { flex-wrap: wrap; }"), "vehicle header actions wrap instead of overlapping narrow layouts"],
+  [styles.includes(".performance-review-facts { position: relative;"), "review facts provide one panel-bounded positioning context"],
+  [styles.includes(".performance-associate-popover { right: auto; left: 0; width: min(760px, 100%); max-width: 100%; }"), "associate drill-down is contained by the performance panel"],
+  [styles.includes(".performance-opening-popover { right: 0; left: auto; }"), "opening drill-down is aligned inside the performance panel"],
+  [styles.includes(".performance-associate-popover-scroll { max-width: 100%; max-height: 290px; overflow: auto;"), "large associate lists scroll within their drill-down"],
+  [styles.includes(".performance-associate-popover-head { position: sticky;"), "associate headers remain visible while scrolling"],
+  [component.includes('className="performance-associate-popover-scroll"'), "associate table uses the contained scroll region"],
+  [((component + opening + operations + attendanceHistory).match(/name="performance-review-fact"/g) ?? []).length === 6, "top drill-downs form one exclusive accordion group"],
+  [component.includes("metrics.length - metricMisses.length"), "attendance exceptions do not reduce Amazon metric health"],
+  [component.includes("{rcaRows.length ? (") && !component.includes("{review && rcaRows.length"), "unstarted reviews still show their performance misses and reporting reasons"],
+  [component.includes("Start review & add RCA") && component.indexOf("<ReviewScorecard") < component.indexOf("<PerformanceConnections") && component.indexOf("<PerformanceConnections") < component.indexOf("<PerformanceNoonEmdEntry") && component.indexOf("<PerformanceNoonEmdEntry") < component.indexOf("<PerformanceRcaActions"), "Vehicle and EMD follow the performance cards before RCA, retaining the nearby start-review action"],
+  [!styles.includes("details:nth-child(2) .performance-associate-popover"), "drill-down position does not depend on the selected card index"],
+  [component.includes("<PerformanceReviewPicker"), "review desk uses the synchronized date and station picker"],
+  [picker.includes('value={selectedDate}') && picker.includes('value={selectedStation}'), "picker controls remain synchronized with the loaded review"],
+  [(picker.match(/onChange=/g) ?? []).length >= 2 && picker.includes("router.push"), "date and station changes apply immediately"],
+  [picker.includes("All stations") && picker.includes("canFilterClusters") && picker.includes("Cluster / AOM"), "cluster filter is available to authorised roles only"],
+  [component.includes("Loaded performance date"), "loaded source date is explicit beside the picker"],
+  [carriedActions.includes('const openItems=items.filter(item=>item.status!=="done")') && carriedActions.includes("if(!openItems.length)return null"), "completed carry-forward actions do not show an empty open-actions section"],
+  [carriedActions.includes("const openCount=openItems.length") && carriedActions.includes("{openItems.map(item=>{"), "carry-forward count and cards use the same open-only collection"],
+  [carriedActions.includes('return <ReviewDetails className="review-followups">'), "carry-forward actions start collapsed instead of opening on first load"],
+  [navigation.includes('code: "performance_review_status", label: "Review Status"'), "review status has its own OpsPulse submenu and permission code"],
+  [accessPages.includes('["performance_review"], "performance_review_status"'), "review status starts from existing review grants and remains independently configurable"],
+  [permissionMatrix.includes('"performance_review_cluster_filter", "performance_review_status"'), "review status permission stays grouped under Performance"],
+  [statusPage.includes("buildReviewStatusRows") && statusPage.includes('status === "not_started"'), "review register includes station-days where nobody started a review"],
+  [statusPage.includes("Cluster manager") && statusPage.includes("<span>AOM</span>") && statusPage.includes("All statuses"), "compact register filters by hierarchy and workflow status"],
+  [statusPage.includes("<StepStatus row={row}") && statusPage.includes("Open RCA / actions") && statusPage.includes("Latest discussion"), "expanded rows expose reviewer history, RCA, actions and discussion"],
+  [statusStyles.includes("content-visibility: auto") && statusStyles.includes("@media (max-width: 720px)"), "long date ranges stay efficient and responsive"],
+];
+
+const failures = checks.filter(([passed]) => !passed).map(([, message]) => message);
+for (const [passed, message] of checks) console.log(`${passed ? "PASS" : "FAIL"} ${message}`);
+
+if (failures.length) {
+  console.error(`Performance review layout verification failed:\n${failures.map((failure) => `- ${failure}`).join("\n")}`);
+  process.exit(1);
+}
+
+await import("./verify-review-operations.mjs");
+await import("./verify-review-live-targets.mjs");
+await import("./verify-review-discipline-rca.mjs");
+await import("./verify-review-cod-rca.mjs");
+await import("./verify-review-attendance-history.mjs");
+await import("./verify-review-compact-ux.mjs");
+await import("./verify-review-report.mjs");

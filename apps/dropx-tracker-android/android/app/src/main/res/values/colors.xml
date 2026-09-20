@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- colorPrimaryDark also becomes the status bar's background on Android's
+         non-edge-to-edge layout (this app's mode; see MainActivity.java's
+         setDecorFitsSystemWindows comment). #f9f5fc here, paired with
+         android:windowLightStatusBar in styles.xml, replaces the system's
+         dark-gray/black default that was showing before this file existed
+         (colorPrimaryDark had no real value to resolve to). -->
+    <color name="colorPrimary">#f9f5fc</color>
+    <color name="colorPrimaryDark">#f9f5fc</color>
+    <color name="colorAccent">#e73f2e</color>
+</resources>

@@ -428,7 +428,7 @@ export default async function ExpenseRequestPage({
                     <td><strong>{request.request_no}</strong></td>
                     <td>{request.location_code}</td>
                     <td>{headById.get(request.payment_head_id)?.name ?? "-"}</td>
-                    <td>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN")}`}</td>
+                    <td>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
                     <td><StatusPill status={displayApprovalStatus(request)} /></td>
                     <td>{formatDashboardDate(request.created_at)}</td>
                     {pagePermission.canAdd ? (
@@ -529,7 +529,7 @@ export default async function ExpenseRequestPage({
                 </label>
                 <label>
                   Estimated Amount
-                  <input className="field" value={bankRequest.amount_requested == null ? "-" : `Rs ${Number(bankRequest.amount_requested).toLocaleString("en-IN")}`} readOnly />
+                  <input className="field" value={bankRequest.amount_requested == null ? "-" : `Rs ${Number(bankRequest.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`} readOnly />
                 </label>
                 <label>
                   Actual Amount *

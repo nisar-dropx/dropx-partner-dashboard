@@ -3,7 +3,7 @@
 import * as XLSX from "xlsx";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requirePagePermission } from "@/lib/authorization";
+import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { notifyReimbursementPayment } from "@/lib/reimbursement-payment-notifications";
@@ -235,7 +235,7 @@ export async function updatePaymentProcessStatus(
       .eq("id", requestId)
       .single();
     if (error || !request) throw new Error("Payment request was not found.");
-    if (String(request.approval_status ?? "").toUpperCase() === "RE_APPROVED" && request.current_approver_user_id !== authorization.userId && !(request.current_approver_role_ids ?? []).some((roleId: string) => authorization.effectiveRoleIds.includes(roleId))) {
+    if (!isCompanyOwner(authorization) && String(request.approval_status ?? "").toUpperCase() === "RE_APPROVED" && request.current_approver_user_id !== authorization.userId && !(request.current_approver_role_ids ?? []).some((roleId: string) => authorization.effectiveRoleIds.includes(roleId))) {
       throw new Error("This returned request is assigned to another processor.");
     }
     if (action === "rejected" && (
@@ -419,7 +419,7 @@ export async function finalizePaymentProcess(formData: FormData) {
         skippedCount += 1;
         continue;
       }
-      if (String(request.approval_status ?? "").toUpperCase() === "RE_APPROVED" && request.current_approver_user_id !== authorization.userId && !(request.current_approver_role_ids ?? []).some((roleId: string) => authorization.effectiveRoleIds.includes(roleId))) {
+      if (!isCompanyOwner(authorization) && String(request.approval_status ?? "").toUpperCase() === "RE_APPROVED" && request.current_approver_user_id !== authorization.userId && !(request.current_approver_role_ids ?? []).some((roleId: string) => authorization.effectiveRoleIds.includes(roleId))) {
         skippedCount += 1;
         continue;
       }

@@ -3,6 +3,7 @@
 import { ArrowLeftRight, CalendarClock, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, DoorOpen, FileText, LocateFixed, ReceiptText, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AppAccount } from "./connect-profile-app";
+import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
 type RequestKind = "attendance" | "location_flag" | "leave" | "reimbursement" | "roster_swap" | "exit";
 
@@ -34,6 +35,7 @@ function statusBadgeClass(status: string) {
   if (["approved", "fulfilled", "completed", "accepted"].includes(status)) return "status-approved";
   if (["rejected", "cancelled", "withdrawn"].includes(status)) return "status-rejected";
   if (status === "returned") return "status-returned";
+  if (status === "withdrawal_requested") return "status-pending";
   return "status-pending";
 }
 function money(value: number | null | undefined) {
@@ -64,6 +66,8 @@ function regularizationReasonLabel(reasonCode: string) {
     case "missed_both": return "Missed both punches";
     case "incorrect_in": return "Incorrect IN time";
     case "incorrect_out": return "Incorrect OUT time";
+    case "late_in_permission": return "Permission – late IN";
+    case "early_out_permission": return "Permission – early OUT";
     default: return "Other correction";
   }
 }
@@ -81,15 +85,16 @@ async function safeJson(response: Response) {
   try { return await response.json(); } catch { return null; }
 }
 
-export function ConnectMyRequests({ account, workforce = false }: { account: AppAccount; workforce?: boolean }) {
+export function ConnectMyRequests({ account, active = true, workforce = false }: { account: AppAccount; active?: boolean; workforce?: boolean }) {
   const [requests, setRequests] = useState<UnifiedRequest[]>([]);
   const [filter, setFilter] = useState<"all" | RequestKind>("all");
   const [month, setMonth] = useState(currentMonthKey());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true);
     setError("");
     const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
     const [attendanceResult, flagResult, leaveResult, reimbursementResult, rosterResult, exitResult] = await Promise.allSettled([
@@ -153,17 +158,39 @@ export function ConnectMyRequests({ account, workforce = false }: { account: App
           { label: "Reason", value: item.reason || "—" },
           ...(item.reviewerNote ? [{ label: reviewNoteLabel(item.status), value: item.reviewerNote }] : [])
         ],
-        steps: []
+        steps: (item.steps ?? []).map((step: { stepName: string; status: string }) => ({
+          name: step.stepName,
+          status: step.status
+        }))
       });
     }
 
     const reimbursement = reimbursementResult.status === "fulfilled" ? reimbursementResult.value : null;
+    for (const request of reimbursement?.preRequests ?? []) {
+      unified.push({
+        id: `reimbursement-request:${request.id}`,
+        kind: "reimbursement",
+        title: `${request.request_no}${request.estimated_amount != null ? ` – ${money(request.estimated_amount)}` : ""}`,
+        eyebrow: `Request · ${request.purpose}`,
+        submittedAt: request.created_at,
+        status: request.status,
+        facts: [
+          ...(request.decision_note ? [{ label: "Decision note", value: request.decision_note }] : []),
+          ...(request.consumed_claim_id ? [{ label: "Claim", value: "Submitted" }] : request.status === "approved" ? [{ label: "Next step", value: "Submit claim with receipts" }] : [])
+        ],
+        steps: (request.assignees ?? []).map((assignee: { assignee_role: string; status: string; approver_name?: string | null; decision_note?: string | null }) => ({
+          name: `${assignee.approver_name || "Approver"} · ${assignee.assignee_role === "finance_head" ? "Finance owner" : "Reporting manager"}`,
+          status: assignee.status,
+          note: assignee.decision_note
+        }))
+      });
+    }
     for (const claim of reimbursement?.claims ?? []) {
       unified.push({
         id: `reimbursement:${claim.id}`,
         kind: "reimbursement",
         title: `${claim.claim_no} – ${money(claim.total_claimed)}`,
-        eyebrow: claim.purpose,
+        eyebrow: `Claim · ${claim.purpose}`,
         submittedAt: claim.submitted_at ?? claim.created_at,
         status: claim.status,
         facts: [
@@ -171,8 +198,8 @@ export function ConnectMyRequests({ account, workforce = false }: { account: App
           ...(claim.rejection_reason ? [{ label: "Rejection reason", value: claim.rejection_reason }] : []),
           ...(claim.payment?.utr_cin ? [{ label: "UTR", value: claim.payment.utr_cin }] : [])
         ],
-        steps: (claim.steps ?? []).map((step: { step_name: string; status: string; decision_note?: string | null }) => ({
-          name: step.step_name,
+        steps: (claim.steps ?? []).map((step: { step_name: string; status: string; approver_name?: string | null; decision_note?: string | null }) => ({
+          name: step.approver_name ? `${step.approver_name} · ${step.step_name}` : step.step_name,
           status: step.status,
           note: step.decision_note
         }))
@@ -217,8 +244,10 @@ export function ConnectMyRequests({ account, workforce = false }: { account: App
     setRequests(unified);
     const failedAll = [attendanceResult, flagResult, leaveResult, reimbursementResult, rosterResult, exitResult].every((result) => result.status === "rejected");
     if (failedAll) setError("Unable to load your requests.");
-    setLoading(false);
-  }, [account.id, account.profileType]);
+    if (!background) setLoading(false);
+    markLoaded();
+  }, [account.id, account.profileType, markLoaded]);
+  setReload(() => load(true));
 
   useEffect(() => { void load(); }, [load]);
 
@@ -241,7 +270,7 @@ export function ConnectMyRequests({ account, workforce = false }: { account: App
       <header className="dx-page-intro">
         <small>{workforce ? "Workforce support" : "Your submissions"}</small>
         <h1>{workforce ? "Connect" : "My requests"}</h1>
-        <p>{workforce ? "Track leave, attendance, shift swap and exit requests in one place." : "Every request you have submitted, with its current status and approval flow."}</p>
+        <p>{workforce ? "Track your leave, attendance, roster and payout-related requests in one place." : "Every request you have submitted, with its current status and approval flow."}</p>
       </header>
       {error ? <div className="dx-alert error">{error}</div> : null}
       <div aria-label="Choose month" className="dx-requests-month" role="group">

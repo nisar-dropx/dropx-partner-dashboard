@@ -1,6 +1,8 @@
 import "server-only";
 
+import { isManagingPartnerDesignation } from "./approval-designation-labels";
 import { resolveConfiguredApprovalWorkflow } from "./configured-approval-routing";
+import { resolveConnectApproverUserId } from "./connect-approver-identity";
 import { supabaseAdmin } from "./supabase-admin";
 import type { ConnectAccount } from "./connect-auth";
 
@@ -103,62 +105,89 @@ export async function resolveExpensePolicy(account: ConnectAccount, amount: numb
   return { identity, policy };
 }
 
+type ExpenseApprovalStepDraft = {
+  step_order: number;
+  step_name: string;
+  approver_user_id: string;
+  approver_person_id: string;
+  approver_name?: string;
+  route_id?: string | null;
+  resolved_via?: "configured_designation" | "delegation" | "fallback" | "policy_exception";
+  original_approver_person_id?: string | null;
+  fallback_reason?: string | null;
+  stage_code?: "manager" | "policy_exception" | "finance";
+};
+
+/** Top-level / Managing Partner requesters approve their own request trail. */
+export async function isDirectExpenseRequester(account: ConnectAccount) {
+  const identity = await expenseIdentity(account);
+  if (identity.assignment.is_top_level) {
+    return { direct: true as const, identity, reason: "top_level" as const };
+  }
+  if (!identity.assignment.designation_id) {
+    return { direct: false as const, identity, reason: null };
+  }
+  const designation = await db().from("designations").select("code,name")
+    .eq("company_id", account.companyId).eq("id", identity.assignment.designation_id).maybeSingle();
+  if (designation.error) throw new Error(designation.error.message);
+  const label = designation.data
+    ? { code: designation.data.code as string | null, name: String(designation.data.name ?? "") }
+    : null;
+  if (isManagingPartnerDesignation(label)) {
+    return { direct: true as const, identity, reason: "managing_partner" as const };
+  }
+  return { direct: false as const, identity, reason: null };
+}
+
 export async function resolveExpenseApprovers(account: ConnectAccount, amount: number) {
   const { identity, policy } = await resolveExpensePolicy(account, amount);
+  const directRequester = await isDirectExpenseRequester(account);
+
   const configured = await resolveConfiguredApprovalWorkflow({
     companyId: account.companyId,
     workflowCode: "reimbursement",
     workerId: identity.workerId,
     workerType: identity.workerType,
-    asOf: identity.today
+    asOf: identity.today,
+    maxLevel: 3,
+    reportingChainOnly: true,
+    reportingChainMaxLevel: 2,
+    level3StepName: "Finance approval",
+    // A short hierarchy is valid for senior leaders. Finance remains mandatory below.
+    allowMissingApprovers: true
   });
-  if (configured) {
-    return {
-      identity,
-      policy,
-      steps: configured.steps.map((step, index) => ({
-        step_order: index + 1,
-        step_name: step.step_name,
-        approver_user_id: step.approver_user_id,
-        approver_person_id: step.approver_person_id
-      }))
-    };
+  if (!configured) throw new Error("The reimbursement approval route is not configured for your designation. Contact HR.");
+
+  const steps: ExpenseApprovalStepDraft[] = configured.steps.map((step, index) => ({
+    step_order: index + 1,
+    step_name: step.step_name,
+    approver_user_id: step.approver_user_id,
+    approver_person_id: step.approver_person_id,
+    approver_name: step.approver_name,
+    route_id: step.route_id,
+    resolved_via: step.resolved_via,
+    original_approver_person_id: step.original_approver_person_id,
+    fallback_reason: step.fallback_reason,
+    stage_code: step.step_name === "Finance approval" ? "finance" : "manager"
+  }));
+  const financeIndex = steps.findIndex((step) => step.step_name === "Finance approval");
+  if (financeIndex < 0) {
+    throw new Error("A final Finance approver is not configured for this reimbursement route. Contact HR.");
   }
-  const steps: Array<{ step_order: number; step_name: string; approver_user_id: string; approver_person_id: string }> = [];
-  const seen = new Set<string>([identity.personId]);
-  let subjectAssignmentId = identity.assignment.id;
-  for (let level = 1; level <= policy.manager_levels; level += 1) {
-    const relationship = await db().from("hr_reporting_relationships").select("manager_assignment_id")
-      .eq("company_id", account.companyId).eq("subject_assignment_id", subjectAssignmentId)
-      .eq("relationship_type", "solid_line").eq("is_primary", true)
-      .lte("effective_from", identity.today).or(`effective_to.is.null,effective_to.gte.${identity.today}`)
-      .order("effective_from", { ascending: false }).limit(1).maybeSingle();
-    if (relationship.error) throw new Error(relationship.error.message);
-    if (!relationship.data) {
-      if (policy.allow_short_manager_chain && steps.length > 0) break;
-      throw new Error(`Reporting manager level ${level} is not configured for this reimbursement policy.`);
-    }
-    const assignment = await db().from("hr_work_assignments").select("id,engagement_id,position_title")
-      .eq("company_id", account.companyId).eq("id", relationship.data.manager_assignment_id).maybeSingle();
-    if (assignment.error || !assignment.data) throw new Error(`Reporting manager level ${level} is not active.`);
-    const engagement = await db().from("hr_engagements").select("person_id,status")
-      .eq("company_id", account.companyId).eq("id", assignment.data.engagement_id).maybeSingle();
-    if (engagement.error || !engagement.data || engagement.data.status !== "active") throw new Error(`Reporting manager level ${level} is not active.`);
-    if (seen.has(engagement.data.person_id)) throw new Error("The reporting hierarchy contains a cycle.");
-    seen.add(engagement.data.person_id);
-    const link = await db().from("hr_user_person_links").select("user_id,status")
-      .eq("company_id", account.companyId).eq("person_id", engagement.data.person_id).maybeSingle();
-    if (link.error || !link.data || link.data.status !== "active") throw new Error(`${assignment.data.position_title} does not have an active One/People login.`);
-    steps.push({ step_order: level, step_name: `${assignment.data.position_title} approval`, approver_user_id: link.data.user_id, approver_person_id: engagement.data.person_id });
-    subjectAssignmentId = assignment.data.id;
+  if (!directRequester.direct && financeIndex === 0) {
+    throw new Error("No reporting manager is configured. Configure the reporting hierarchy before submitting a claim.");
   }
-  if (!steps.length) throw new Error("No reporting manager is configured. Configure a reporting line or policy fallback before submission.");
-  return { identity, policy, steps };
+  return {
+    identity,
+    policy,
+    steps,
+    directToPayment: false as const
+  };
 }
 
 export async function activeExpenseCategories(account: ConnectAccount) {
   const result = await db().from("hr_expense_categories")
-    .select("id,code,name,description,receipt_required,receipt_threshold,per_item_limit,per_day_limit,sort_order")
+    .select("id,code,name,description,receipt_required,receipt_threshold,per_item_limit,per_day_limit,sort_order,show_in_expense_requests")
     .eq("company_id", account.companyId).eq("is_active", true).order("sort_order").order("name");
   if (result.error) throw new Error(result.error.message);
   return result.data ?? [];
@@ -194,4 +223,116 @@ export async function expensePayoutReadiness(account: ConnectAccount) {
   const row = result.data as Record<string, unknown> | null;
   const ready = Boolean(String(row?.bank_account_no ?? "").trim() && String(row?.[ifscColumn] ?? "").trim());
   return { ready, message: ready ? null : "Complete your bank account and IFSC in My Profile before submitting a reimbursement." };
+}
+
+export type ExpenseClaimRequestAssignee = {
+  assignee_role: "reporting_manager" | "finance_head" | "managing_partner";
+  approver_user_id: string;
+  approver_person_id: string | null;
+};
+
+async function resolveImmediateReportingManager(account: ConnectAccount, identity: Awaited<ReturnType<typeof expenseIdentity>>): Promise<ExpenseClaimRequestAssignee | null> {
+  const relationship = await db().from("hr_reporting_relationships").select("manager_assignment_id")
+    .eq("company_id", account.companyId).eq("subject_assignment_id", identity.assignment.id)
+    .eq("relationship_type", "solid_line").eq("is_primary", true)
+    .lte("effective_from", identity.today).or(`effective_to.is.null,effective_to.gte.${identity.today}`)
+    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+  if (relationship.error) throw new Error(relationship.error.message);
+  if (!relationship.data) return null;
+  const assignment = await db().from("hr_work_assignments").select("id,engagement_id,position_title")
+    .eq("company_id", account.companyId).eq("id", relationship.data.manager_assignment_id).maybeSingle();
+  if (assignment.error || !assignment.data) return null;
+  const engagement = await db().from("hr_engagements").select("person_id,status")
+    .eq("company_id", account.companyId).eq("id", assignment.data.engagement_id).maybeSingle();
+  if (engagement.error || !engagement.data || engagement.data.status !== "active") return null;
+  if (engagement.data.person_id === identity.personId) return null;
+  const approverUserId = await resolveConnectApproverUserId(account.companyId, engagement.data.person_id);
+  if (!approverUserId) {
+    throw new Error(`${assignment.data.position_title} does not have an active One/People login.`);
+  }
+  return {
+    assignee_role: "reporting_manager",
+    approver_user_id: approverUserId,
+    approver_person_id: engagement.data.person_id
+  };
+}
+
+async function resolveCompanyDesignationApprover(
+  companyId: string,
+  today: string,
+  role: "finance_head" | "managing_partner",
+  matches: (label: { code: string | null; name: string }) => boolean,
+  excludePersonId: string
+): Promise<ExpenseClaimRequestAssignee | null> {
+  const designations = await db().from("designations").select("id,code,name")
+    .eq("company_id", companyId).eq("is_active", true);
+  if (designations.error) throw new Error(designations.error.message);
+  const designationIds = (designations.data ?? [])
+    .filter((designation) => matches({ code: designation.code, name: String(designation.name ?? "") }))
+    .map((designation) => designation.id);
+  if (!designationIds.length) return null;
+
+  const assignment = await db().from("hr_work_assignments").select("engagement_id")
+    .eq("company_id", companyId).in("designation_id", designationIds).eq("is_primary", true)
+    .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`)
+    .order("effective_from", { ascending: false }).limit(1).maybeSingle();
+  if (assignment.error || !assignment.data) return null;
+
+  const engagement = await db().from("hr_engagements").select("person_id,status")
+    .eq("company_id", companyId).eq("id", assignment.data.engagement_id).maybeSingle();
+  if (engagement.error || !engagement.data || engagement.data.status !== "active") return null;
+  if (engagement.data.person_id === excludePersonId) return null;
+
+  const approverUserId = await resolveConnectApproverUserId(companyId, engagement.data.person_id);
+  if (!approverUserId) return null;
+  return { assignee_role: role, approver_user_id: approverUserId, approver_person_id: engagement.data.person_id };
+}
+
+async function resolveFinanceHeadApprover(account: ConnectAccount, identity: Awaited<ReturnType<typeof expenseIdentity>>) {
+  const configured = await resolveConfiguredApprovalWorkflow({
+    companyId: account.companyId,
+    workflowCode: "reimbursement",
+    workerId: identity.workerId,
+    workerType: identity.workerType,
+    asOf: identity.today,
+    maxLevel: 3,
+    reportingChainOnly: true,
+    reportingChainMaxLevel: 2,
+    level3StepName: "Finance approval",
+    allowMissingApprovers: true
+  });
+  const financeStep = configured?.steps.find((step) => step.step_name === "Finance approval");
+  if (!financeStep || financeStep.approver_person_id === identity.personId) return null;
+  return {
+    assignee_role: "finance_head" as const,
+    approver_user_id: financeStep.approver_user_id,
+    approver_person_id: financeStep.approver_person_id
+  };
+}
+
+/**
+ * Expense pre-requests can be approved by any one of the requester's immediate
+ * reporting manager, the company Finance Head, or the Managing Partner
+ * (first decision wins - hr_decide_expense_claim_request skips the remaining
+ * pending assignees once one of them decides). Only the reporting manager is
+ * emailed; Finance Head/Managing Partner remain eligible without being notified.
+ */
+export async function resolveExpenseClaimRequestAssignees(account: ConnectAccount) {
+  const identity = await expenseIdentity(account);
+  const manager = await resolveImmediateReportingManager(account, identity);
+  if (!manager) {
+    throw new Error("Configure an active reporting manager with a One/People login before requesting expense approval.");
+  }
+  const [financeHead, managingPartner] = await Promise.all([
+    resolveFinanceHeadApprover(account, identity),
+    resolveCompanyDesignationApprover(account.companyId, identity.today, "managing_partner", isManagingPartnerDesignation, identity.personId)
+  ]);
+  const seenPersonIds = new Set([manager.approver_person_id]);
+  const assignees = [manager];
+  for (const candidate of [financeHead, managingPartner]) {
+    if (!candidate || !candidate.approver_person_id || seenPersonIds.has(candidate.approver_person_id)) continue;
+    seenPersonIds.add(candidate.approver_person_id);
+    assignees.push(candidate);
+  }
+  return { identity, assignees };
 }

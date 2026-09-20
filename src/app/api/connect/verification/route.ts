@@ -195,6 +195,17 @@ function verifiedResponse(result: Record<string, unknown>) {
   return ok(result);
 }
 
+async function saveVerifiedIfsc(profileType: string, accountId: string, ifscCode: string) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+  const table = workforceTable(profileType as Parameters<typeof workforceTable>[0]);
+  const values = profileType === "employee" ? { ifsc: ifscCode } : { ifsc_code: ifscCode };
+  const { error } = await supabaseAdmin
+    .from(table)
+    .update(values as never)
+    .eq("id", accountId);
+  if (error) throw new Error(`Bank verification succeeded but IFSC could not be saved: ${error.message}`);
+}
+
 export async function GET(request: NextRequest) {
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
@@ -302,27 +313,25 @@ export async function POST(request: NextRequest) {
         endpoint: "/srv2/validation/pan-aadhaar-link",
         payload: { ...credentials, pan, aadhar, aadhaar: aadhar }
       });
-      const code = Number(body?.result_code);
       const resultCode = text(
         body?.data?.code || body?.result?.code || body?.code
       ).toUpperCase();
-      const resultMessage = text(body?.result?.message).toLowerCase();
-      const responseText = deepText(body).toLowerCase();
-      const verified = code === 101 ||
-        resultCode === "LINK-001" ||
-        resultMessage.includes("already linked") ||
-        responseText.includes("already linked to given aadhaar") ||
-        responseText.includes("is already linked");
+      const verified = resultCode === "LINK-001";
+      const reviewRequired = resultCode === "LINK-002";
+      const providerMessage = text(body?.data?.message) ||
+        text(body?.result?.message) ||
+        text(body?.message) ||
+        "PAN Aadhaar link verification failed.";
       const result = {
         verified,
-        manualReview: !verified,
+        // Only LINK-002 is eligible for review. Other provider failures must
+        // remain a blocking error, rather than being presented as a warning.
+        manualReview: reviewRequired,
+        blockSubmit: !verified && !reviewRequired,
         inputKey: inputKey([pan, aadhar]),
-        message: resultCode === "LINK-001"
-          ? "Pan and Aadhaar Linked"
-          : text(body?.data?.message) ||
-            text(body?.result?.message) ||
-            text(body?.message) ||
-            (verified ? "PAN Aadhaar link verified." : "PAN Aadhaar link verification failed.")
+        // This is shown directly in DropX One. Keep it exactly as supplied by
+        // the provider; submission handling supplies no extra wording.
+        message: providerMessage
       };
       return verifiedResponse(result);
     }
@@ -415,6 +424,7 @@ export async function POST(request: NextRequest) {
         accountName: compact(resource?.creditorName),
         message: verified ? text(body?.message) || "Bank account checked." : "Bank verification failed."
       };
+      if (verified) await saveVerifiedIfsc(profileType, accountId, ifscCode);
       return verifiedResponse(result);
     }
 

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { istDate, punchLabel, rebuildAttendanceDay, resolveAttendanceWorkDate } from "@/lib/biometric/attendance";
+import { istDate, loadWorkerShiftWindow, punchLabel, rebuildAttendanceDay, resolveAttendanceWorkDate } from "@/lib/biometric/attendance";
 import {
   normalizeOutsideStationMinutes,
   outsideStationThresholdMinutes
@@ -23,7 +23,14 @@ export const LOCATION_TRACKING_MS = 9 * 60 * 60 * 1000;
 export const SHIFT_REMINDER_MS = [9.5 * 60 * 60 * 1000, 10 * 60 * 60 * 1000] as const;
 /** Biometric punch must match a phone GPS sample within this lookback. */
 export const BIOMETRIC_SAMPLE_WINDOW_MS = 20 * 60 * 1000;
-export const HEARTBEAT_MIN_INTERVAL_MS = 2 * 60 * 1000;
+// This is the compliance heartbeat's floor — it exists to catch "left the site for too long,"
+// not to animate a live map (see /api/connect/attendance/live-position for that, which is
+// cheap enough to call every ~30s instead). Raised from 2min to 10min: at scale (1000+
+// workers over a 9h shift) the old 2min floor meant ~270 of these expensive, history-scanning
+// calls per worker per day; 10min cuts that to ~54 without weakening the actual fraud check,
+// since a worker being outside their station gets flagged (OUTSIDE_CONTINUOUS_MS = 30min
+// continuous) well before this coarser sampling could miss it.
+export const HEARTBEAT_MIN_INTERVAL_MS = 10 * 60 * 1000;
 
 export type GeofenceStatus = "inside" | "outside" | "unknown";
 
@@ -86,32 +93,19 @@ export async function loadOutsideStationPolicy({
     .maybeSingle();
   if (settings.error) throw new Error(settings.error.message);
 
-  const assignmentTable = profileType === "employee"
-    ? "hr_employee_shift_assignments"
-    : "hr_contractor_shift_assignments";
-  const profileColumn = profileType === "employee" ? "employee_id" : "contractor_id";
-  const assignment = await supabaseAdmin
-    .from(assignmentTable)
-    .select("hr_shifts(break_minutes)")
-    .eq("company_id", companyId)
-    .eq(profileColumn, profileId)
-    .lte("effective_from", punchDate)
-    .or(`effective_to.is.null,effective_to.gte.${punchDate}`)
-    .order("effective_from", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (assignment.error) throw new Error(assignment.error.message);
+  const shift = await loadWorkerShiftWindow({
+    accountId: profileType === "employee" ? null : profileId,
+    companyId,
+    employeeId: profileType === "employee" ? profileId : null,
+    fieldExecutiveId: profileType === "employee" ? null : profileId,
+    profileType,
+    workDate: punchDate
+  });
 
   const companyAllowanceMinutes = normalizeOutsideStationMinutes(
     settings.data?.outside_station_allowance_minutes
   );
-  const joinedShift = assignment.data?.hr_shifts as
-    | { break_minutes?: unknown }
-    | { break_minutes?: unknown }[]
-    | null
-    | undefined;
-  const shift = Array.isArray(joinedShift) ? joinedShift[0] : joinedShift;
-  const shiftBreakMinutes = Math.max(0, Math.round(Number(shift?.break_minutes ?? 0)) || 0);
+  const shiftBreakMinutes = Math.max(0, Math.round(Number(shift?.breakMinutes ?? 0)) || 0);
   const effectiveAllowanceMinutes = outsideStationThresholdMinutes(
     companyAllowanceMinutes,
     shiftBreakMinutes
@@ -549,6 +543,14 @@ export async function loadOpenShift({
   previousDateValue.setUTCDate(previousDateValue.getUTCDate() - 1);
   const previousDate = previousDateValue.toISOString().slice(0, 10);
   const dates = punchDate ? [date] : [date, previousDate];
+  const companySettings = await supabaseAdmin
+    .from("hr_company_settings")
+    .select("odd_punch_treatment, overnight_shift_pairing_enabled, maximum_daily_minutes")
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (companySettings.error) throw new Error(companySettings.error.message);
+  const firstInLatestOut = companySettings.data?.odd_punch_treatment === "first_last";
+  const isOpenPunchSequence = (count: number) => count === 1 || (!firstInLatestOut && count % 2 === 1);
 
   // Duty status includes calculated punches and held flagged punches awaiting
   // manager approval. The calendar remains based on calculated punches only.
@@ -576,18 +578,12 @@ export async function loadOpenShift({
   let dutyPunches = dutyByDate.get(date) ?? [];
   if (!dutyPunches.length && !punchDate) {
     const priorPunches = dutyByDate.get(previousDate) ?? [];
-    if (priorPunches.length % 2 === 1 && priorPunches[0]?.punch_time) {
-      const settings = await supabaseAdmin
-        .from("hr_company_settings")
-        .select("overnight_shift_pairing_enabled, maximum_daily_minutes")
-        .eq("company_id", companyId)
-        .maybeSingle();
-      if (settings.error) throw new Error(settings.error.message);
+    if (isOpenPunchSequence(priorPunches.length) && priorPunches[0]?.punch_time) {
       const elapsedMinutes =
         (Date.now() - new Date(String(priorPunches[0].punch_time)).getTime()) / 60_000;
-      const maximumDailyMinutes = Math.max(1, Number(settings.data?.maximum_daily_minutes ?? 960));
+      const maximumDailyMinutes = Math.max(1, Number(companySettings.data?.maximum_daily_minutes ?? 960));
       if (
-        settings.data?.overnight_shift_pairing_enabled !== false &&
+        companySettings.data?.overnight_shift_pairing_enabled !== false &&
         elapsedMinutes > 0 &&
         elapsedMinutes <= maximumDailyMinutes
       ) {
@@ -602,9 +598,9 @@ export async function loadOpenShift({
     const inTime = dutyPunches[0]?.punch_time
       ? new Date(String(dutyPunches[0].punch_time))
       : null;
-    const open = dutyPunches.length % 2 === 1;
+    const open = isOpenPunchSequence(dutyPunches.length);
     const outTime =
-      !open && dutyPunches.length > 1
+      dutyPunches.length > 1 && (firstInLatestOut || !open)
         ? new Date(String(dutyPunches[dutyPunches.length - 1].punch_time))
         : null;
     const locationId =
@@ -629,21 +625,17 @@ export async function loadOpenShift({
     .in("punch_date", dates)
     .order("punch_date", { ascending: false });
   if (daily.error) throw new Error(daily.error.message);
-  const openRows = (daily.data ?? []).filter((row) => row.in_time && Number(row.punch_count ?? 0) % 2 === 1);
+  const openRows = (daily.data ?? []).filter((row) => row.in_time && (
+    !row.out_time || (!firstInLatestOut && Number(row.punch_count ?? 0) % 2 === 1)
+  ));
   let selected = openRows.find((row) => row.punch_date === date) ?? null;
 
   if (!selected && !punchDate) {
     const prior = openRows.find((row) => row.punch_date === previousDate) ?? null;
     if (prior?.in_time) {
-      const settings = await supabaseAdmin
-        .from("hr_company_settings")
-        .select("overnight_shift_pairing_enabled, maximum_daily_minutes")
-        .eq("company_id", companyId)
-        .maybeSingle();
-      if (settings.error) throw new Error(settings.error.message);
       const elapsedMinutes = (Date.now() - new Date(prior.in_time).getTime()) / 60_000;
-      const maximumDailyMinutes = Math.max(1, Number(settings.data?.maximum_daily_minutes ?? 960));
-      if (settings.data?.overnight_shift_pairing_enabled !== false && elapsedMinutes > 0 && elapsedMinutes <= maximumDailyMinutes) {
+      const maximumDailyMinutes = Math.max(1, Number(companySettings.data?.maximum_daily_minutes ?? 960));
+      if (companySettings.data?.overnight_shift_pairing_enabled !== false && elapsedMinutes > 0 && elapsedMinutes <= maximumDailyMinutes) {
         selected = prior;
       }
     }
@@ -652,7 +644,7 @@ export async function loadOpenShift({
   const inTime = selected?.in_time ? new Date(selected.in_time) : null;
   const outTime = selected?.out_time ? new Date(selected.out_time) : null;
   const punchCount = Number(selected?.punch_count ?? 0);
-  const open = Boolean(inTime && punchCount % 2 === 1);
+  const open = Boolean(inTime && (!outTime || (!firstInLatestOut && punchCount % 2 === 1)));
   return {
     punchDate: String(selected?.punch_date ?? date),
     inTime,

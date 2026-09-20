@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { ConnectAccount } from "./connect-auth";
+import { amazonWeekPeriod, type PerformanceWeekPeriod } from "./performance-periods";
 import { supabaseAdmin } from "./supabase-admin";
 
 type MetricFact = {
@@ -76,8 +77,12 @@ export type ConnectOperationalPerformance = {
   scopeLabel: string;
   stationCount: number;
   availableWeeks: number[];
+  availableWeekPeriods: PerformanceWeekPeriod[];
   selectedWeek: number | null;
   selectedYear: number | null;
+  selectedWeekKey: number | null;
+  selectedWeekStart: string | null;
+  selectedWeekEnd: string | null;
   averageSls: number | null;
   averageAttainment: number | null;
   availableCpsMonths: string[];
@@ -189,10 +194,10 @@ function parseTarget(row: { description: string | null }) {
   }
 }
 
-async function performanceLocationScope(account: ConnectAccount, personId: string, engagementId: string) {
+async function performanceLocationScope(account: ConnectAccount, personId: string, engagementId: string, companyOwner: boolean) {
   const day = today();
   const locationIds = new Set<string>();
-  let allLocations = false;
+  let allLocations = companyOwner;
 
   const ownAssignments = await db().from("hr_work_assignments")
     .select("id,location_id")
@@ -225,7 +230,7 @@ async function performanceLocationScope(account: ConnectAccount, personId: strin
     ]);
     const setupError = profile.error ?? access.error ?? memberships.error ?? positionAssignments.error;
     if (setupError) throw new Error(setupError.message);
-    allLocations = Boolean(profile.data?.is_master_owner || access.data?.all_locations || (memberships.data ?? []).some((row) => row.has_all_location_access));
+    allLocations ||= Boolean(profile.data?.is_master_owner || access.data?.all_locations || (memberships.data ?? []).some((row) => row.has_all_location_access));
     for (const id of profile.data?.location_scope_ids ?? []) locationIds.add(String(id));
     for (const id of access.data?.location_ids ?? []) locationIds.add(String(id));
     for (const row of memberships.data ?? []) for (const id of row.location_scope_ids ?? []) locationIds.add(String(id));
@@ -278,12 +283,15 @@ export async function loadConnectOperationalPerformance(input: {
   account: ConnectAccount;
   personId: string;
   engagementId: string;
+  /** Derived by the server from a verified People/account link, never from request input. */
+  companyOwner?: boolean;
   requestedWeek?: number | null;
+  requestedWeekKey?: number | null;
   requestedCpsMonth?: string | null;
 }): Promise<ConnectOperationalPerformance> {
   const selectedCpsMonth = validMonth(input.requestedCpsMonth);
   const cpsPeriodState = selectedCpsMonth === monthKey() ? "mtd" : "closed";
-  const scope = await performanceLocationScope(input.account, input.personId, input.engagementId);
+  const scope = await performanceLocationScope(input.account, input.personId, input.engagementId, input.companyOwner === true);
   let stationQuery = db().from("stations")
     .select("id,station_code,station_name,region,location_models(code,name)")
     .eq("company_id", input.account.companyId)
@@ -300,14 +308,18 @@ export async function loadConnectOperationalPerformance(input: {
     scopeLabel: scope.allLocations ? "All locations" : "No mapped station",
     stationCount: 0,
     availableWeeks: [],
+    availableWeekPeriods: [],
     selectedWeek: null,
     selectedYear: null,
+    selectedWeekKey: null,
+    selectedWeekStart: null,
+    selectedWeekEnd: null,
     averageSls: null,
     averageAttainment: null,
     availableCpsMonths: [selectedCpsMonth],
     selectedCpsMonth,
     cpsPeriodState,
-    cpsPeriodLabel: `${monthLabel(selectedCpsMonth)} · ${cpsPeriodState === "mtd" ? "MTD" : "Closed"}`,
+    cpsPeriodLabel: `${monthLabel(selectedCpsMonth)}${cpsPeriodState === "mtd" ? " · MTD" : ""}`,
     cpsLatestDate: null,
     averageCps: null,
     cpsOnTarget: 0,
@@ -353,10 +365,15 @@ export async function loadConnectOperationalPerformance(input: {
 
   const facts = (factsResult.data ?? []) as MetricFact[];
   const weekKeys = [...new Set(facts.filter((row) => row.report_year && row.report_week).map((row) => Number(row.report_year) * 100 + Number(row.report_week)))].sort((a, b) => b - a);
-  const requestedKey = input.requestedWeek ? weekKeys.find((key) => key % 100 === input.requestedWeek) : null;
+  const requestedKey = input.requestedWeekKey && weekKeys.includes(input.requestedWeekKey)
+    ? input.requestedWeekKey
+    : input.requestedWeek
+      ? weekKeys.find((key) => key % 100 === input.requestedWeek) ?? null
+      : null;
   const selectedKey = requestedKey ?? weekKeys[0] ?? null;
   const selectedYear = selectedKey ? Math.floor(selectedKey / 100) : null;
   const selectedWeek = selectedKey ? selectedKey % 100 : null;
+  const selectedWeekPeriod = selectedKey ? amazonWeekPeriod(selectedKey) : null;
   const candidates = selectedKey ? facts.filter((row) => row.report_year === selectedYear && row.report_week === selectedWeek) : [];
   const factByStation = new Map<string, MetricFact>();
   for (const row of candidates) {
@@ -440,14 +457,18 @@ export async function loadConnectOperationalPerformance(input: {
     scopeLabel: scope.allLocations ? "All locations" : `${stationRows.length} mapped location${stationRows.length === 1 ? "" : "s"}`,
     stationCount: stationRows.length,
     availableWeeks: weekKeys.map((key) => key % 100),
+    availableWeekPeriods: weekKeys.map(amazonWeekPeriod),
     selectedWeek,
     selectedYear,
+    selectedWeekKey: selectedKey,
+    selectedWeekStart: selectedWeekPeriod?.startDate ?? null,
+    selectedWeekEnd: selectedWeekPeriod?.endDate ?? null,
     averageSls: slsCards.length ? slsCards.reduce((sum, card) => sum + (card.sls?.score ?? 0), 0) / slsCards.length : null,
     averageAttainment: slsCards.length ? Math.round(slsCards.reduce((sum, card) => sum + (card.sls?.attainment ?? 0), 0) / slsCards.length) : null,
     availableCpsMonths: monthRange(oldestCpsResult.data?.work_date?.slice(0, 7) ?? null),
     selectedCpsMonth,
     cpsPeriodState,
-    cpsPeriodLabel: `${monthLabel(selectedCpsMonth)} · ${cpsPeriodState === "mtd" ? "MTD" : "Closed"}`,
+    cpsPeriodLabel: `${monthLabel(selectedCpsMonth)}${cpsPeriodState === "mtd" ? " · MTD" : ""}`,
     cpsLatestDate: cpsCards.map((card) => card.cps?.date ?? "").sort().at(-1) || null,
     averageCps: cpsCards.length ? cpsCards.reduce((sum, card) => sum + (card.cps?.value ?? 0), 0) / cpsCards.length : null,
     cpsOnTarget: cpsCards.filter((card) => card.cps?.onTarget).length,

@@ -1010,10 +1010,19 @@ function retryAt(attempt: number) {
   return new Date(Date.now() + minutes * 60000).toISOString();
 }
 
+// dropx-hrms now owns provision/restore/suspend directly (its own Admin SDK
+// integration, src/lib/workspace-job-processor.ts there) - this repo is
+// being retired as the system of record, so this cron must stop claiming
+// those three job types to avoid racing dropx-hrms's processor for the same
+// rows. directory_sync, update_access, and delete remain fully handled here
+// since dropx-hrms's processor does not implement them.
+const JOB_TYPES_OWNED_BY_HRMS = ["provision", "restore", "suspend"] as const;
+
 export async function processWorkspaceJobs(limit = 10, companyId?: string) {
   const now = new Date().toISOString();
   let query = db().from("google_workspace_jobs").select("*")
     .in("status", ["queued", "failed"]).lte("next_attempt_at", now)
+    .not("job_type", "in", `(${JOB_TYPES_OWNED_BY_HRMS.join(",")})`)
     .order("priority", { ascending: true }).order("created_at", { ascending: true }).limit(Math.max(1, Math.min(limit, 50)));
   if (companyId) query = query.eq("company_id", companyId);
   const result = await query;
@@ -1022,7 +1031,7 @@ export async function processWorkspaceJobs(limit = 10, companyId?: string) {
   const summary = { processed: 0, completed: 0, failed: 0, blocked: 0 };
   for (const job of jobs) {
     const claimed = await db().from("google_workspace_jobs").update({ status: "running", locked_at: now, attempt_count: job.attempt_count + 1, updated_at: now })
-      .eq("id", job.id).in("status", ["queued", "failed"]).select("id").maybeSingle();
+      .eq("id", job.id).in("status", ["queued", "failed"]).not("job_type", "in", `(${JOB_TYPES_OWNED_BY_HRMS.join(",")})`).select("id").maybeSingle();
     if (claimed.error || !claimed.data) continue;
     summary.processed += 1;
     try {

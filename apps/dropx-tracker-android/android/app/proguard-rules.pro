@@ -1,0 +1,42 @@
+# Add project specific ProGuard rules here.
+# You can control the set of applied configuration files using the
+# proguardFiles setting in build.gradle.
+#
+# For more details, see
+#   http://developer.android.com/guide/developing/tools/proguard.html
+
+# If your project uses WebView with JS, uncomment the following
+# and specify the fully qualified class name to the JavaScript interface
+# class:
+#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
+#   public *;
+#}
+
+# Uncomment this to preserve the line number information for
+# debugging stack traces.
+#-keepattributes SourceFile,LineNumberTable
+
+# If you keep the line number information, uncomment this to
+# hide the original source file name.
+#-renamesourcefileattribute SourceFile
+
+# Capacitor's Bridge dispatches JS calls to native plugin methods by MATCHING METHOD NAME
+# STRINGS via reflection (e.g. the web call Plugins.DropxOne.configureAttendance(...) has to
+# find a real method literally named configureAttendance on DropxOnePlugin at runtime). R8
+# renaming/stripping those methods would silently break every native call with no crash — the
+# JS side would just get an error the WebView console shows, not something that surfaces on
+# the device otherwise. Capacitor's own AAR may already cover this, but relying on that
+# without verifying it (can't inspect a release build's WebView console the way a debug
+# build's can be) isn't worth the risk for a location-tracking feature.
+-keep class com.dropxlogistics.onetracker.location.DropxOnePlugin { *; }
+-keepclassmembers class * extends com.getcapacitor.Plugin {
+    @com.getcapacitor.annotation.PluginMethod public *;
+}
+-keep class com.dropxlogistics.onetracker.location.LocationTrackingService { *; }
+-keep class com.dropxlogistics.onetracker.location.BootReceiver { *; }
+-keep class com.dropxlogistics.onetracker.MainActivity { *; }
+
+# play-services-location and androidx.work also do some of their own reflection-based
+# component lookup (Services/Receivers started by class reference from the manifest).
+-keep class com.google.android.gms.location.** { *; }
+

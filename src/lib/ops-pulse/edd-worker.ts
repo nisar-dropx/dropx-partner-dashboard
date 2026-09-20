@@ -20,6 +20,17 @@ export type EddPackage = {
   shipOption: string | null;
   packageType: string | null;
   lockerName: string | null;
+  /** EDD-only ledger enrichment; never used by legacy Ageing/Performance. */
+  driverName?: string | null;
+  sourceAt?: string;
+  sourceMissing?: boolean;
+  verifiedAt?: string | null;
+  verification?: import("./edd-verification").EddVerification | null;
+  isAccessPoint?: boolean;
+  summaryCheckedAt?: string;
+  /** Actual per-package event clock, only when supplied by the summary source. */
+  stateUpdatedAt?: string | null;
+  observedStationCode?: string;
 };
 
 export type EddStationPayload = {
@@ -125,6 +136,8 @@ function normalizePackage(raw: Record<string, unknown>): EddPackage {
   return {
     trackingId: String(raw.trackingId ?? "").trim(),
     state: raw.state == null ? null : String(raw.state),
+    summaryCheckedAt: typeof raw.summaryCheckedAt === "string" ? raw.summaryCheckedAt : undefined,
+    stateUpdatedAt: typeof raw.stateUpdatedAt === "string" ? raw.stateUpdatedAt : null,
     internalEAD: raw.internalEAD == null ? null : String(raw.internalEAD),
     promisedDeliveryDate: raw.promisedDeliveryDate == null ? null : String(raw.promisedDeliveryDate),
     estimatedArrivalTimeUTC: raw.estimatedArrivalTimeUTC == null ? null : String(raw.estimatedArrivalTimeUTC),
@@ -162,7 +175,7 @@ function normalizePayload(raw: Record<string, unknown>, stationCode: string): Ed
   return {
     status: String(raw.status ?? "ok"),
     stationCode: String(raw.stationCode ?? stationCode).toUpperCase(),
-    fetchedAt: String(raw.fetchedAt ?? new Date().toISOString()),
+    fetchedAt: String(raw.fetchedAt ?? ""),
     todayYmd: String(raw.todayYmd ?? ""),
     window: { from: String(windowRaw.from ?? ""), to: String(windowRaw.to ?? "") },
     totalCount: Number(raw.totalCount ?? packages.length) || packages.length,
@@ -189,7 +202,7 @@ async function readJson(response: Response): Promise<Record<string, unknown>> {
  * too slow for a page load, so this only ever reads what the daily cron or
  * a manual "Refresh live" (see refreshEddStation) last saved.
  */
-export async function fetchEddStation(params: { stationCode: string }): Promise<EddStationResult> {
+export async function fetchEddStation(params: { stationCode: string; timeoutMs?: number }): Promise<EddStationResult> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
     throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
@@ -203,7 +216,7 @@ export async function fetchEddStation(params: { stationCode: string }): Promise<
     method: "GET",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
     cache: "no-store",
-    signal: AbortSignal.timeout(20000)
+    signal: AbortSignal.timeout(params.timeoutMs ?? 20000)
   });
   const raw = await readJson(response);
 
@@ -292,7 +305,7 @@ export async function refreshAllEddNetwork(): Promise<EddNetworkRunStatus | null
  * and saves it as the new cached snapshot — what the dashboard's manual
  * "Refresh live" button calls.
  */
-export async function refreshEddStation(params: { stationCode: string }): Promise<EddStationPayload> {
+export async function refreshEddStation(params: { stationCode: string; timeoutMs?: number }): Promise<EddStationPayload> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
     throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
@@ -306,12 +319,17 @@ export async function refreshEddStation(params: { stationCode: string }): Promis
     method: "POST",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
     cache: "no-store",
-    signal: AbortSignal.timeout(170000)
+    signal: AbortSignal.timeout(params.timeoutMs ?? 170000)
   });
   const raw = await readJson(response);
 
   if (!response.ok || raw.status !== "ok") {
-    throw new EddWorkerError(String(raw.error ?? `EDD worker returned HTTP ${response.status}.`), {
+    const error = raw.error;
+    const message = typeof error === "string" ? error
+      : error && typeof error === "object" && typeof (error as Record<string, unknown>).message === "string"
+        ? String((error as Record<string, unknown>).message)
+        : `EDD refresh failed (HTTP ${response.status}). The previous snapshot has been retained.`;
+    throw new EddWorkerError(message, {
       code: raw.code == null ? null : String(raw.code)
     });
   }
@@ -423,7 +441,7 @@ function normalizePerformancePayload(raw: Record<string, unknown>, stationCode: 
   return {
     stationCode: String(raw.stationCode ?? stationCode).toUpperCase(),
     window: { from: String(windowRaw.from ?? ""), to: String(windowRaw.to ?? "") },
-    fetchedAt: String(raw.fetchedAt ?? new Date().toISOString()),
+    fetchedAt: String(raw.fetchedAt ?? ""),
     assigned: Number(raw.assigned ?? 0) || 0,
     delivered: Number(raw.delivered ?? 0) || 0,
     returned: Number(raw.returned ?? 0) || 0,
@@ -437,7 +455,7 @@ function normalizePerformancePayload(raw: Record<string, unknown>, stationCode: 
 }
 
 /** Reads today's cached performance snapshot for a station — instant, no live Amazon calls. Kept current by the 15-minute sweep and refreshEddPerformanceStation. */
-export async function fetchEddPerformanceStation(params: { stationCode: string }): Promise<EddPerformanceResult> {
+export async function fetchEddPerformanceStation(params: { stationCode: string; timeoutMs?: number }): Promise<EddPerformanceResult> {
   const { baseUrl, adminKey } = workerConfig();
   if (!baseUrl || !adminKey) {
     throw new EddWorkerError("EDD worker is not configured. Set EDD_WORKER_URL and EDD_WORKER_ADMIN_KEY.");
@@ -451,7 +469,7 @@ export async function fetchEddPerformanceStation(params: { stationCode: string }
     method: "GET",
     headers: { "x-admin-key": adminKey, Accept: "application/json" },
     cache: "no-store",
-    signal: AbortSignal.timeout(20000)
+    signal: AbortSignal.timeout(params.timeoutMs ?? 20000)
   });
   const raw = await readJson(response);
 

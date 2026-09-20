@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
+import { resolveConnectActorUserId } from "../../../../src/lib/connect-approver-identity";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function setupMessage(error: unknown) {
@@ -7,6 +8,12 @@ function setupMessage(error: unknown) {
   return message.toLowerCase().includes("mob_app_notifications")
     ? "App notifications are not configured. Run scripts/mob_app_notifications_v1.sql in Supabase."
     : message || "Unable to load notifications.";
+}
+
+function errorResponse(error: unknown) {
+  const message = setupMessage(error);
+  const status = /login|expired/i.test(message) ? 401 : 500;
+  return NextResponse.json({ error: message }, { status });
 }
 
 async function selectedAccount(request: Request, body?: Record<string, unknown>) {
@@ -30,13 +37,68 @@ export async function GET(request: Request) {
       .order("created_at", { ascending: false })
       .limit(50);
     if (result.error) throw result.error;
-    const notifications = result.data ?? [];
+
+    const rows = result.data ?? [];
+    const requestIds = [...new Set(rows.flatMap((row) => {
+      const data = (row.data ?? {}) as Record<string, unknown>;
+      const id = String(data.claimRequestId ?? "").trim();
+      return row.event_code === "REIMBURSEMENT_REQUEST_APPROVAL_REQUIRED" && id ? [id] : [];
+    }))];
+    const claimIds = [...new Set(rows.flatMap((row) => {
+      const data = (row.data ?? {}) as Record<string, unknown>;
+      const id = String(data.claimId ?? "").trim();
+      return row.event_code === "REIMBURSEMENT_APPROVAL_REQUIRED" && id ? [id] : [];
+    }))];
+
+    const staleIds = new Set<string>();
+    if (requestIds.length) {
+      const requests = await supabaseAdmin.from("hr_expense_claim_requests")
+        .select("id,status")
+        .eq("company_id", account.companyId)
+        .in("id", requestIds);
+      if (!requests.error) {
+        const pending = new Set((requests.data ?? []).filter((row) => row.status === "pending").map((row) => row.id));
+        for (const row of rows) {
+          const data = (row.data ?? {}) as Record<string, unknown>;
+          const id = String(data.claimRequestId ?? "").trim();
+          if (row.event_code === "REIMBURSEMENT_REQUEST_APPROVAL_REQUIRED" && id && !pending.has(id)) staleIds.add(row.id);
+        }
+      }
+    }
+    if (claimIds.length) {
+      const steps = await supabaseAdmin.from("hr_expense_approval_steps")
+        .select("claim_id,status,approver_user_id")
+        .eq("company_id", account.companyId)
+        .in("claim_id", claimIds)
+        .eq("status", "pending");
+      const linkedUserId = await resolveConnectActorUserId(account);
+      const pendingClaims = new Set(
+        (steps.data ?? [])
+          .filter((step) => !linkedUserId || step.approver_user_id === linkedUserId)
+          .map((step) => step.claim_id)
+      );
+      for (const row of rows) {
+        const data = (row.data ?? {}) as Record<string, unknown>;
+        const id = String(data.claimId ?? "").trim();
+        if (row.event_code === "REIMBURSEMENT_APPROVAL_REQUIRED" && id && !pendingClaims.has(id)) staleIds.add(row.id);
+      }
+    }
+
+    if (staleIds.size) {
+      const now = new Date().toISOString();
+      await supabaseAdmin.from("mob_app_notifications")
+        .update({ read_at: now, archived_at: now })
+        .eq("company_id", account.companyId)
+        .in("id", [...staleIds]);
+    }
+
+    const notifications = rows.filter((row) => !staleIds.has(row.id));
     return NextResponse.json({
       notifications,
       unreadCount: notifications.filter((row) => !row.read_at).length
     });
   } catch (error) {
-    return NextResponse.json({ error: setupMessage(error) }, { status: 500 });
+    return errorResponse(error);
   }
 }
 
@@ -63,7 +125,7 @@ export async function PATCH(request: Request) {
     if (result.error) throw result.error;
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: setupMessage(error) }, { status: 500 });
+    return errorResponse(error);
   }
 }
 
@@ -105,7 +167,7 @@ export async function POST(request: Request) {
     if (result.error) throw result.error;
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: setupMessage(error) }, { status: 500 });
+    return errorResponse(error);
   }
 }
 
@@ -132,6 +194,6 @@ export async function DELETE(request: Request) {
     if (result.error) throw result.error;
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: setupMessage(error) }, { status: 500 });
+    return errorResponse(error);
   }
 }

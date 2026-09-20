@@ -9,6 +9,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { StatusPill } from "@/components/status-pill";
 import { SubmitButton } from "@/components/submit-button";
 import { SurfaceDesignationAccessPanel } from "@/components/surface-designation-access-panel";
+import { UserRolesListPanel } from "@/components/user-roles-list-panel";
 import { UsersListPanel } from "@/components/users-list-panel";
 import { accessSurfaceLabel, currentAdminAccessSurface, pageBelongsToSurface } from "@/lib/access-surface";
 import { accessPages, ensureAccessPages } from "@/lib/access-pages";
@@ -280,9 +281,9 @@ async function loadCanonicalUserAccess(companyId: string, users: UserRow[], loca
         access_source: isLocation ? "location" as const : designation ? "people" as const : "manual" as const,
         portal_codes: [...new Set(memberships.map((membership) => membership.product_code))].sort(),
         people_profile_url: !candidate ? null : candidate.worker_type === "employee" && candidate.employee_id
-          ? `https://people.dropxlogistics.com/people/employees/${candidate.employee_id}`
+          ? `https://people.dropxlogistics.com/employees?edit=${candidate.employee_id}`
           : candidate.worker_type === "contractor" && candidate.contractor_id
-            ? `https://people.dropxlogistics.com/people/contractors/${candidate.contractor_id}`
+            ? `https://people.dropxlogistics.com/contractors?edit=${candidate.contractor_id}`
             : null,
         has_all_location_access: Boolean(candidate?.has_all_location_access || memberships.some((membership) => membership.has_all_location_access)),
         location_scope_ids: canonicalLocationIds
@@ -324,7 +325,7 @@ async function loadSurfaceDesignationAccess(companyId: string, surface: ReturnTy
 }
 
 const businessProducts = [
-  { code: "people", label: "People", href: "https://people.dropxlogistics.com/settings/roles" },
+  { code: "people", label: "People", href: "https://people.dropxlogistics.com/users?section=roles" },
   { code: "operations", label: "OpsPulse", href: "https://ops.dropxlogistics.com/users?section=roles" },
   { code: "workforce", label: "Workforce", href: "https://workforce.dropxlogistics.com/users?section=roles" },
   { code: "recruit", label: "Recruit", href: "https://recruit.dropxlogistics.com/settings/access" },
@@ -627,11 +628,11 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
     );
   const roles = showRolesSection
     ? accessSurface === "dashboard"
-      ? []
+      ? loadedRoles.filter((role) => !role.product_code)
       : loadedRoles.filter((role) => surfaceDesignationAccess.designations.some((designation) => designation.defaultRoleId === role.id) || role.id === surfaceDesignationAccess.locationRoleId)
     : identityRoles;
   const showAddUser = pagePermission.canAdd && searchParams?.addUser === "1";
-  const showAddRole = false;
+  const showAddRole = accessSurface === "dashboard" && pagePermission.canAdd && searchParams?.addRole === "1";
   const editUser = pagePermission.canEdit ? users.find((user) => user.id === searchParams?.editUser) ?? null : null;
   const editRole = pagePermission.canEdit ? roles.find((role) => role.id === searchParams?.editRole) ?? null : null;
   const editDesignation = editRole
@@ -717,7 +718,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
           : "Users and station access"}
         subtitle={showRolesSection
           ? accessSurface === "dashboard"
-            ? "People owns designation eligibility. Dashboard owns station mailboxes and their portal access; each portal owns its menus."
+            ? "Configure designation-wise Dashboard capabilities here. Portal eligibility remains visible below and each business portal continues to own its own menus."
             : `Configure menus and actions only for People designations eligible for ${accessSurfaceLabel(accessSurface)}.`
           : accessSurface === "dashboard"
             ? "People designations and managed locations are authoritative for people. Dashboard remains authoritative for station mailboxes and Super Admin visibility."
@@ -777,14 +778,27 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
       ) : null}
 
       {showRolesSection && accessSurface === "dashboard" && (pagePermission.canView || pagePermission.canEdit) ? (
+      <UserRolesListPanel
+        canAdd={pagePermission.canAdd}
+        canEdit={pagePermission.canEdit}
+        roles={roles.map((role) => ({
+          ...role,
+          permissionSummary: permissionText(role, permissions, pages)
+        }))}
+        subtitle="Set the Dashboard pages, actions, reporting hierarchy and location scope available to each designation-level access role."
+        title="Dashboard designation capabilities"
+      />
+      ) : null}
+
+      {showRolesSection && accessSurface === "dashboard" && (pagePermission.canView || pagePermission.canEdit) ? (
       <section className="panel">
         <div className="panel-head">
           <div>
             <h2>Portal access overview</h2>
-            <p className="subtle">Super Admin visibility only. People owns eligibility; each business portal owns its menu permissions. Technical administration is managed separately and never inherited from a designation.</p>
+            <p className="subtle">Cross-portal eligibility remains visible here. Open a portal to configure that portal&apos;s menus; use the Dashboard capability section above for Dashboard permissions.</p>
           </div>
           <div className="stacked-actions">
-            <a className="button" href="https://people.dropxlogistics.com/settings/designations">People Designation Master</a>
+            <a className="button" href="https://people.dropxlogistics.com/master/designations">People Designation Master</a>
             {isCompanyOwner(authorization) && pagePermission.canEdit ? <form action={reconcilePeopleAccessArchitecture}><SubmitButton className="button secondary" pendingText="Applying defaults…">Apply previous defaults</SubmitButton></form> : null}
           </div>
         </div>
@@ -814,7 +828,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
         canEdit={pagePermission.canEdit}
         configureAction={configureSurfaceDesignationRole}
         configureLocationAction={configureSurfaceLocationRole}
-        masterHref="https://people.dropxlogistics.com/settings/designations"
+        masterHref="https://people.dropxlogistics.com/master/designations"
         productCode={membershipProductCode(accessSurface) ?? ""}
         locationAccount={{
           roleId: surfaceDesignationAccess.locationRoleId,

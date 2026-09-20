@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { userFacingError } from "@/lib/user-facing-error";
 import { requireConnectAccount } from "../../../../src/lib/connect-auth";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { isNonEmployeeProfileType, workforceLabel, workforceTable, type NonEmployeeProfileType } from "../../../../src/lib/workforce-profiles";
@@ -101,7 +102,7 @@ export async function GET(request: Request) {
       exitCase: caseResult.data ? await serializeCase(caseResult.data) : null
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load resignation status." }, { status: 403 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load resignation status.") }, { status: 403 });
   }
 }
 
@@ -163,6 +164,6 @@ export async function POST(request: Request) {
     if (event.error) throw new Error(event.error.message);
     return NextResponse.json({ ok: true, notice: "Resignation submitted to the Workforce lifecycle team." });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to submit resignation." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to submit resignation.") }, { status: 400 });
   }
 }

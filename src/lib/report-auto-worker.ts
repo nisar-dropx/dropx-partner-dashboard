@@ -7,7 +7,8 @@ export const REPORT_AUTO_SOURCE_CODES = [
   "delivered_shipment_detail",
   "iocl_fuel",
   "bpcl_fuel",
-  "cashbook"
+  "cashbook",
+  "amazon_hawkeye_daily"
 ] as const;
 
 export type ReportAutoSourceCode = (typeof REPORT_AUTO_SOURCE_CODES)[number];

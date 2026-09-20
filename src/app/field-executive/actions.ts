@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { waitUntil } from "@vercel/functions";
 import * as XLSX from "xlsx";
 import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
@@ -20,6 +20,8 @@ import { moveProfileDocumentToTrash, uploadProfileDocument } from "@/lib/profile
 import { saveProfileVerifications } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createAppNotification } from "@/lib/app-notifications";
+import { assertOnboardingIdentityAllowed, evaluateOnboardingIdentity, identityExceptionEventMetadata } from "@/lib/onboarding-identity";
+import { assertWorkforceContactsAvailable } from "@/lib/workforce-contact-availability";
 import { loadWorkforceCategoryDirectActivate, loadWorkforceCategoryRules } from "@/lib/workforce-category-rules";
 import { sendFieldExecutiveOnboardingWhatsApp } from "@/lib/whatsapp";
 import {
@@ -36,6 +38,34 @@ function required(value: FormDataEntryValue | null, field: string) {
 function optional(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
   return text || null;
+}
+
+function normalizeFullName(value: FormDataEntryValue | null) {
+  const text = required(value, "Full name")
+    .replace(/[^A-Za-z ]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+  if (!text || !/^[A-Z]+(?: [A-Z]+)*$/.test(text)) {
+    throw new Error("Full name can contain only letters and spaces.");
+  }
+  return text;
+}
+
+function normalizeEmail(value: FormDataEntryValue | null) {
+  const email = required(value, "Email").toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Enter a valid email address.");
+  }
+  return email;
+}
+
+function normalizeMobileNumber(value: FormDataEntryValue | null) {
+  const mobile = required(value, "Mobile number").replace(/\D/g, "");
+  if (!/^\d{10}$/.test(mobile)) {
+    throw new Error("Mobile number must be exactly 10 digits.");
+  }
+  return mobile;
 }
 
 type FieldExecutiveReturnPath = NonEmployeeRoute;
@@ -63,7 +93,7 @@ function fieldExecutiveRedirect(params?: Record<string, string>, returnPath: Fie
 
 function addFormParams(formData: FormData) {
   return {
-    full_name: String(formData.get("full_name") ?? ""),
+    full_name: String(formData.get("full_name") ?? "").replace(/[^A-Za-z ]+/g, "").replace(/\s+/g, " ").trim().toUpperCase(),
     mobile_country_code: cleanCountryCode(formData.get("mobile_country_code")),
     mobile: String(formData.get("mobile") ?? "").replace(/\D/g, ""),
     email: String(formData.get("email") ?? "").trim().toLowerCase(),
@@ -97,6 +127,19 @@ function generatedDropxId(category: "field_executive" | "contractor" | "vendor" 
   return `${prefix}-${Date.now().toString(36).toUpperCase()}`;
 }
 
+/** Canonical Workforce rows must self-identify; DB rejects null source_profile_type. */
+function workforceIdentityFields() {
+  const id = randomUUID();
+  return {
+    id,
+    source_profile_type: "canonical" as const,
+    source_profile_id: id,
+    compatibility_mode: false,
+    migration_state: "canonical",
+    synced_at: new Date().toISOString()
+  };
+}
+
 const fieldExecutiveDocumentFields = [
   { ruleKey: "aadhaar_front", formKey: "aadhaar_front_file", pathKey: "aadhaar_front_path", label: "Aadhaar front" },
   { ruleKey: "aadhaar_back", formKey: "aadhaar_back_file", pathKey: "aadhaar_back_path", label: "Aadhaar back" },
@@ -108,10 +151,10 @@ const fieldExecutiveDocumentFields = [
 
 function normalizeFieldExecutivePayload(formData: FormData, requireId = false) {
   const id = requireId ? required(formData.get("id"), "Field executive") : null;
-  const fullName = required(formData.get("full_name"), "Full name");
+  const fullName = normalizeFullName(formData.get("full_name"));
   const mobileCountryCode = cleanCountryCode(formData.get("mobile_country_code"));
-  const mobile = required(formData.get("mobile"), "Mobile number").replace(/\D/g, "");
-  const email = required(formData.get("email"), "Email").toLowerCase();
+  const mobile = normalizeMobileNumber(formData.get("mobile"));
+  const email = normalizeEmail(formData.get("email"));
   const dateOfJoin = required(formData.get("date_of_join"), "Date of join");
   const locationId = required(formData.get("location_id"), "Location");
   const designation = required(formData.get("designation"), "Designation");
@@ -146,7 +189,6 @@ function normalizeFieldExecutivePayload(formData: FormData, requireId = false) {
   const isActive = optional(formData.get("is_active")) !== "false";
   const statutoryApplicability = formData.getAll("statutory_applicability").map(String).filter(Boolean);
 
-  if (!/^\d{6,15}$/.test(mobile)) throw new Error("Mobile number must contain 6 to 15 digits.");
   if (biometricId && !/^\d{1,20}$/.test(biometricId)) throw new Error("Biometric enrolment ID must be numeric.");
   if (emergencyContactNumber && !/^\d{10}$/.test(emergencyContactNumber)) throw new Error("Emergency contact number must contain exactly 10 digits.");
   if (aadhaarNumber && !/^\d{12}$/.test(aadhaarNumber)) throw new Error("Aadhaar number must contain exactly 12 digits.");
@@ -223,10 +265,10 @@ export async function createFieldExecutive(formData: FormData) {
   if (!supabaseAdmin) fieldExecutiveRedirect({ error: "Supabase service role key is not configured." }, returnPath);
 
   try {
-    const fullName = required(formData.get("full_name"), "Full name");
+    const fullName = normalizeFullName(formData.get("full_name"));
     const mobileCountryCode = cleanCountryCode(formData.get("mobile_country_code"));
-    const mobile = required(formData.get("mobile"), "Mobile number").replace(/\D/g, "");
-    const email = required(formData.get("email"), "Email").toLowerCase();
+    const mobile = normalizeMobileNumber(formData.get("mobile"));
+    const email = normalizeEmail(formData.get("email"));
     const dateOfJoin = required(formData.get("date_of_join"), "Date of join");
     const locationId = required(formData.get("location_id"), "Location");
     const designation = required(formData.get("designation"), "Designation");
@@ -283,7 +325,6 @@ export async function createFieldExecutive(formData: FormData) {
       }
     }
 
-    if (!/^\d{6,15}$/.test(mobile)) throw new Error("Mobile number must contain 6 to 15 digits.");
     if (Number.isNaN(Date.parse(dateOfJoin))) throw new Error("Enter a valid date of join.");
     if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) {
       throw new Error("You do not have access to the selected location.");
@@ -296,6 +337,20 @@ export async function createFieldExecutive(formData: FormData) {
       .maybeSingle();
     if (locationError) throw new Error(locationError.message);
     if (!location) throw new Error("Selected location is not available for this company.");
+    await assertWorkforceContactsAvailable({
+      companyId,
+      mobile,
+      email,
+      excludeRegister: table
+    });
+    const identityEvaluation = await evaluateOnboardingIdentity({
+      client: supabaseAdmin,
+      companyId,
+      mobile,
+      designationId: designationRuleResult.data.id,
+      designationName: designation
+    });
+    assertOnboardingIdentityAllowed(identityEvaluation, table === "workforce");
     const workerCategory = config.category;
     const biometricId = await generateConfiguredBiometricId({
       category: workerCategory,
@@ -336,6 +391,7 @@ export async function createFieldExecutive(formData: FormData) {
       date_of_join: dateOfJoin,
       location_id: locationId,
       designation,
+      ...(table === "workforce" ? { designation_id: designationRuleResult.data.id, ...workforceIdentityFields() } : {}),
       biometric_id: biometricId,
       dropx_id: dropxId,
       created_by: authorization.userId,
@@ -360,7 +416,7 @@ export async function createFieldExecutive(formData: FormData) {
 
     if (error) {
       const message = error.message.toLowerCase();
-      if (message.includes("unique") || message.includes("duplicate")) {
+      if ((message.includes("unique") || message.includes("duplicate")) && !message.includes("mobile number")) {
         throw new Error("Field Executive ID is already registered.");
       }
       throw new Error(friendlyFieldExecutiveError(error.message));
@@ -404,13 +460,14 @@ export async function createFieldExecutive(formData: FormData) {
     if (config.profileType === "field_executive") {
       await supabaseAdmin.from("workforce_onboarding_events").insert({
         company_id: companyId,
-        field_executive_id: executive.id,
+        field_executive_id: table === "workforce" ? null : executive.id,
+        workforce_id: table === "workforce" ? executive.id : null,
         event_code: "onboarding_requested",
         from_status: null,
         to_status: "pending",
         actor_user_id: authorization.userId,
         source_portal: applicationSource,
-        metadata: { designation, location_id: locationId }
+        metadata: { designation, location_id: locationId, ...identityExceptionEventMetadata(identityEvaluation) }
       });
     }
 
@@ -444,7 +501,7 @@ export async function createFieldExecutive(formData: FormData) {
   }
 
   fieldExecutiveRedirect({
-    notice: returnPath === "/workforce"
+    notice: config.profileType === "field_executive"
       ? `${entityLabel} onboarding request created. The applicant must submit the profile and agreement before HO activation.`
       : `${entityLabel} added successfully.`
   }, returnPath);
@@ -486,13 +543,20 @@ export async function updateFieldExecutive(formData: FormData) {
 
     const designationResult = await supabaseAdmin
       .from("designations")
-      .select("code, profile_field_rules, portal_permissions")
+      .select("id, code, profile_field_rules, portal_permissions")
       .eq("company_id", companyId)
       .eq("name", payload.designation)
       .eq("is_active", true)
       .maybeSingle();
     if (designationResult.error) throw new Error(designationResult.error.message);
     if (!designationResult.data) throw new Error("Selected designation is not available.");
+    if (table === "workforce") {
+      await assertDesignationRegister({
+        companyId,
+        designationId: designationResult.data.id,
+        expectedTables: [targetRegisterForWorkforceRoute(returnPath)]
+      });
+    }
     const accessSurface = currentAccessSurface();
     requireDesignationPortalAccess(designationResult.data, accessSurface, "edit", { isOwner: accessSurface === "dashboard" && isCompanyOwner(authorization) });
     const dashboardRules = (await loadWorkforceCategoryRules(
@@ -544,6 +608,13 @@ export async function updateFieldExecutive(formData: FormData) {
         .filter((key): key is keyof typeof payload => Boolean(key))
         .map((key) => [key, payload[key]])
     );
+    await assertWorkforceContactsAvailable({
+      companyId,
+      mobile: payload.mobile,
+      email: payload.email,
+      excludeId: executiveId,
+      excludeRegister: table
+    });
     const corePayload = {
       full_name: payload.full_name,
       mobile_country_code: payload.mobile_country_code,
@@ -552,6 +623,7 @@ export async function updateFieldExecutive(formData: FormData) {
       date_of_join: payload.date_of_join,
       location_id: payload.location_id,
       designation: payload.designation,
+      ...(table === "workforce" ? { designation_id: designationResult.data.id } : {}),
       biometric_id: payload.biometric_id,
       is_active: payload.is_active,
       statutory_applicability: payload.statutory_applicability
@@ -816,7 +888,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
   const authorization = await requirePagePermission(pageCodeForReturnPath(returnPath), "add");
   const companyId = requireCompanyId(authorization);
   if (!supabaseAdmin) fieldExecutiveRedirect({ error: "Supabase service role key is not configured." }, returnPath);
-  const inserted: { id: string; locationId: string; biometricId: string | null; dateOfJoin: string }[] = [];
+  const inserted: { id: string; locationId: string; biometricId: string | null; dateOfJoin: string; identityExceptionMetadata: Record<string, unknown> }[] = [];
   const requestHost = headers().get("host")?.split(":")[0].toLowerCase() ?? "";
   const applicationSource = requestHost === "ops.dropxlogistics.com" || requestHost.startsWith("ops-")
     ? "ops"
@@ -886,6 +958,19 @@ export async function bulkImportFieldExecutives(formData: FormData) {
         throw new Error(`Row ${rowNumber}: You do not have access to location ${row.locationCode}.`);
       }
 
+      const identityEvaluation = await evaluateOnboardingIdentity({
+        client: supabaseAdmin,
+        companyId,
+        mobile: row.mobile,
+        designationId: designation.id,
+        designationName: designation.name
+      });
+      try {
+        assertOnboardingIdentityAllowed(identityEvaluation, table === "workforce");
+      } catch (error) {
+        throw new Error(`Row ${rowNumber}: ${error instanceof Error ? error.message : "Mobile identity conflict."}`);
+      }
+
       const dropxId = row.dropxId || await generateConfiguredWorkerId({
         category: designation.workerCategory,
         companyId,
@@ -911,6 +996,7 @@ export async function bulkImportFieldExecutives(formData: FormData) {
         date_of_join: row.dateOfJoin,
         location_id: locationId,
         designation: designation.name,
+        ...(table === "workforce" ? { designation_id: designation.id, ...workforceIdentityFields() } : {}),
         created_by: authorization.userId,
         onboarding_status: "pending",
         ...(config.profileType === "field_executive" ? {
@@ -922,19 +1008,20 @@ export async function bulkImportFieldExecutives(formData: FormData) {
         is_active: config.profileType === "field_executive" ? false : true
       }, companyId)).select("id").single();
       if (insertResult.error) throw new Error(`Row ${rowNumber}: ${friendlyFieldExecutiveError(insertResult.error.message)}`);
-      inserted.push({ id: insertResult.data.id, locationId, biometricId, dateOfJoin: row.dateOfJoin });
+      inserted.push({ id: insertResult.data.id, locationId, biometricId, dateOfJoin: row.dateOfJoin, identityExceptionMetadata: identityExceptionEventMetadata(identityEvaluation) });
     }
 
     for (const row of inserted) {
       if (config.profileType === "field_executive") {
         await supabaseAdmin.from("workforce_onboarding_events").insert({
           company_id: companyId,
-          field_executive_id: row.id,
+          field_executive_id: table === "workforce" ? null : row.id,
+          workforce_id: table === "workforce" ? row.id : null,
           event_code: "onboarding_requested",
           to_status: "pending",
           actor_user_id: authorization.userId,
           source_portal: applicationSource,
-          metadata: { bulk_import: true, location_id: row.locationId }
+          metadata: { bulk_import: true, location_id: row.locationId, ...row.identityExceptionMetadata }
         });
         continue;
       }

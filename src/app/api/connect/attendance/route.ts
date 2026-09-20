@@ -8,6 +8,7 @@ import { createAppNotification } from "@/lib/app-notifications";
 import { resolveAttendanceRegularizationApprovers } from "@/lib/attendance-regularization-workflow";
 import { notifyAttendanceApprovalRequired } from "@/lib/connect-attendance-notifications";
 import { isWorkforceProfileType, type WorkforceProfileType, workforceTable } from "@/lib/workforce-profiles";
+import { resolveAttendancePayDayType } from "@/lib/attendance-pay-day";
 
 function monthRange(month: string | null) {
   const today = new Date();
@@ -129,7 +130,7 @@ export async function GET(request: NextRequest) {
     const needsReview = rows.filter((row) => row.attendanceStatus === "Needs Review").length;
     const lateIn = rows.filter((row) => row.lateMinutes > 0).length;
     const earlyOut = rows.filter((row) => row.earlyOutMinutes > 0).length;
-    const misPunch = rows.filter((row) => row.punchCount % 2 === 1 || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length;
+    const misPunch = rows.filter((row) => row.punchCount < 2 || !row.outTime || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing")).length;
     const requestsResult = await supabaseAdmin
       .from("attendance_regularization_requests")
       .select("id, attendance_date, requested_in_time, requested_out_time, reason_code, remarks, attachment_path, status, review_remarks, created_at")
@@ -159,32 +160,79 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const responseRows = rows.map((row) => ({
-      date: row.punchDate,
-      status: row.status,
-      attendanceStatus: row.attendanceStatus,
-      inTime: row.inTime,
-      outTime: row.outTime,
-      punches: row.punchTimes,
-      workHours: row.workHours,
-      punchCount: row.punchCount,
-      lateMinutes: row.lateMinutes,
-      earlyOutMinutes: row.earlyOutMinutes,
-      scheduledStart: row.scheduledStart,
-      scheduledEnd: row.scheduledEnd,
-      scheduledMinutes: row.scheduledMinutes,
-      shiftName: row.shiftName,
-      shiftCode: row.shiftCode,
-      shiftSource: row.shiftSource,
-      remark: row.remark,
-      regularization: requestByDate.get(row.punchDate) ?? null
-    }));
+    const leaveTypes = await supabaseAdmin
+      .from("hr_leave_types")
+      .select("attendance_code,attendance_label,is_paid,balance_mode")
+      .eq("company_id", worker.companyId);
+    if (leaveTypes.error) throw new Error(leaveTypes.error.message);
+    const labels = new Map((leaveTypes.data ?? []).map((type) => [type.attendance_code, type]));
+
+    const responseRows = rows.map((row) => {
+      const configured = labels.get(String(row.status ?? ""));
+      const unpaidLeave = Boolean(configured) && (
+        configured?.is_paid === false
+        || String(configured?.balance_mode ?? "") === "unlimited_unpaid"
+      );
+      const paidLeave = Boolean(configured) && !unpaidLeave;
+      const isPaidLeave = configured ? paidLeave : null;
+      const statusLabel = unpaidLeave
+        ? (configured?.attendance_label || "Unpaid leave")
+        : (configured?.attendance_label ?? null);
+      const statusKind = unpaidLeave
+        ? "leave" as const
+        : paidLeave
+          ? "paid_leave" as const
+          : "attendance" as const;
+      const payDayType = resolveAttendancePayDayType({
+        status: row.status,
+        statusLabel: statusLabel ?? row.attendanceStatus,
+        attendanceStatus: row.attendanceStatus,
+        workMode: row.workMode ?? "onsite",
+        leaveType: configured
+          ? {
+            attendance_code: configured.attendance_code,
+            attendance_label: configured.attendance_label,
+            is_paid: unpaidLeave ? false : paidLeave ? true : null
+          }
+          : null,
+        isPaidLeave
+      });
+      return {
+        date: row.punchDate,
+        status: row.status,
+        statusLabel,
+        statusKind,
+        isPaidLeave,
+        payDayType,
+        attendanceStatus: row.attendanceStatus,
+        inTime: row.inTime,
+        outTime: row.outTime,
+        punches: row.punchTimes,
+        workHours: row.workHours,
+        punchCount: row.punchCount,
+        lateMinutes: row.lateMinutes,
+        earlyOutMinutes: row.earlyOutMinutes,
+        scheduledStart: row.scheduledStart,
+        scheduledEnd: row.scheduledEnd,
+        scheduledMinutes: row.scheduledMinutes,
+        shiftName: row.shiftName,
+        shiftCode: row.shiftCode,
+        shiftSource: row.shiftSource,
+        remark: row.remark,
+        workMode: row.workMode ?? "onsite",
+        regularization: requestByDate.get(row.punchDate) ?? null
+      };
+    });
     const attendanceDates = new Set(responseRows.map((row) => row.date));
     for (const [date, regularization] of requestByDate) {
       if (!attendanceDates.has(date)) {
         responseRows.push({
           date,
           status: "",
+          statusLabel: null,
+          statusKind: "attendance" as const,
+          isPaidLeave: null,
+          payDayType: "needs_review" as const,
           attendanceStatus: "Needs Review",
           inTime: "",
           outTime: "",
@@ -200,6 +248,7 @@ export async function GET(request: NextRequest) {
           shiftCode: "",
           shiftSource: "Unassigned",
           remark: "",
+          workMode: "onsite" as const,
           regularization
         });
       }
@@ -244,18 +293,31 @@ export async function POST(request: NextRequest) {
     if (!accountId) throw new Error("Account is required.");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(attendanceDate)) throw new Error("Attendance date is required.");
     if (attendanceDate > new Date().toISOString().slice(0, 10)) throw new Error("Future attendance cannot be regularized.");
-    if (!["missed_in", "missed_out", "missed_both", "incorrect_in", "incorrect_out", "other"].includes(reasonCode)) {
+    if (![
+      "missed_in",
+      "missed_out",
+      "missed_both",
+      "incorrect_in",
+      "incorrect_out",
+      "late_in_permission",
+      "early_out_permission",
+      "other"
+    ].includes(reasonCode)) {
       throw new Error("Select a regularization reason.");
     }
-    const requestsInTime = ["missed_in", "incorrect_in", "missed_both", "other"].includes(reasonCode);
-    const requestsOutTime = ["missed_out", "incorrect_out", "missed_both", "other"].includes(reasonCode);
+    const requestsInTime = ["missed_in", "incorrect_in", "missed_both", "late_in_permission"].includes(reasonCode);
+    const requestsOutTime = ["missed_out", "incorrect_out", "missed_both", "early_out_permission"].includes(reasonCode);
+    const remarksOnly = reasonCode === "other";
     const normalizedRequestedInTime = requestsInTime ? requestedInTime : currentInTime;
     const normalizedRequestedOutTime = requestsOutTime ? requestedOutTime : currentOutTime;
     if (requestsInTime && !validTime(requestedInTime)) throw new Error("Requested IN time is required for this reason.");
     if (requestsOutTime && !validTime(requestedOutTime)) throw new Error("Requested OUT time is required for this reason.");
-    if (!requestsInTime && !validTime(currentInTime)) throw new Error("The existing IN punch is missing. Select Missed both punches.");
-    if (!requestsOutTime && !validTime(currentOutTime)) throw new Error("The existing OUT punch is missing. Select Missed both punches.");
-    if (normalizedRequestedOutTime <= normalizedRequestedInTime) throw new Error("Requested OUT time must be after IN time.");
+    if (!remarksOnly && !requestsInTime && !validTime(currentInTime)) throw new Error("The existing IN punch is missing. Select Missed both punches.");
+    if (!remarksOnly && !requestsOutTime && !validTime(currentOutTime)) throw new Error("The existing OUT punch is missing. Select Missed both punches.");
+    if (!remarksOnly && normalizedRequestedOutTime <= normalizedRequestedInTime) throw new Error("Requested OUT time must be after IN time.");
+    if (remarksOnly && validTime(normalizedRequestedInTime) && validTime(normalizedRequestedOutTime) && normalizedRequestedOutTime <= normalizedRequestedInTime) {
+      throw new Error("Existing OUT time must be after IN time.");
+    }
     if (remarks.length < 5) throw new Error("Enter a short explanation.");
     const worker = await resolveWorker({ accountId, profileType });
     const existingResult = await supabaseAdmin
@@ -339,8 +401,8 @@ export async function POST(request: NextRequest) {
       p_attendance_date: attendanceDate,
       p_current_in_time: currentInTime || null,
       p_current_out_time: currentOutTime || null,
-      p_requested_in_time: normalizedRequestedInTime,
-      p_requested_out_time: normalizedRequestedOutTime,
+      p_requested_in_time: validTime(normalizedRequestedInTime) ? normalizedRequestedInTime : null,
+      p_requested_out_time: validTime(normalizedRequestedOutTime) ? normalizedRequestedOutTime : null,
       p_reason_code: reasonCode,
       p_remarks: remarks,
       p_attachment_path: attachmentPath,

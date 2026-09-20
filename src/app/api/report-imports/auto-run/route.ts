@@ -121,15 +121,19 @@ export async function POST(request: Request) {
     );
   }
 
-  // IOCL/BPCL portals only ever have the PRIOR day's transactions ready —
-  // whatever date the uploader sends is what the user is trying to look at,
-  // and the portal's actual data for that calendar day always lands one day
-  // later. So always shift back one day from whatever was sent, not only
-  // when "today" was picked — picking a past date for backfill must shift
-  // too, or it silently fetches the wrong (one-day-late) data.
-  const isFuelPortalSource = sourceType === "iocl_fuel" || sourceType === "bpcl_fuel";
+  // Every source on this shared reportDate path (IOCL/BPCL fuel portals,
+  // delivered shipment detail, Cashbook) only ever has the PRIOR day's data
+  // ready — whatever calendar date the checklist/uploader is looking at,
+  // the source's real data for that day lands one day later. So always
+  // shift back one day from whatever was sent, not only when "today" was
+  // picked — picking a past date for backfill must shift too, or it
+  // silently fetches the wrong (one-day-late) data. The 5 workforce-supp
+  // sources (amazon_shipments, daily_edsp_metrics, da_inapp_onboarding,
+  // edsp_outstanding_cash, edsp_sls_scorecard) and amazon_hawkeye_daily
+  // don't take this path at all — they resolve their own date/isoWeek
+  // separately below and must NOT be shifted here.
   const requestedDate = ymdOrNull(body.report_date) || yesterdayIst();
-  const reportDate = isFuelPortalSource ? addDaysYmd(requestedDate, -1) : requestedDate;
+  const reportDate = addDaysYmd(requestedDate, -1);
 
   try {
     if (isWorkforceAutoSource(sourceType)) {
@@ -156,6 +160,11 @@ export async function POST(request: Request) {
         "/api/admin/reports/workforce-supp/run",
         { isoWeek, reportId: sourceType, forceNew: true }
       );
+      // The worker's own runWorkforceSuppNetwork already pushes this file
+      // into Import Master itself (via its DASHBOARD_IMPORT_SERVICE_KEY,
+      // same mechanism BPCL/IOCL/Cashbook use) — verified live 2026-09-11.
+      // Don't import it again here; that would double-import the same
+      // file on every manual "Auto upload" click.
       const week = run.isoWeek || ready.isoWeek || isoWeek;
       const result: AutoRunResult = {
         ok: true,
@@ -208,6 +217,50 @@ export async function POST(request: Request) {
           : `Fetching ${run.lastStationCode || "next station"}…`
       };
       return Response.json(result);
+    }
+
+    if (sourceType === "amazon_hawkeye_daily") {
+      // Not date-scoped like the others — the worker polls Gmail for every
+      // new "Hawkeye Daily Report" message (not just today's) and uploads
+      // whatever it finds, same as its 15-min cron. Clicking Auto upload
+      // just runs that same check immediately instead of waiting.
+      const tick = await reportAutoPost<{
+        ok: boolean;
+        checked: number;
+        processed: number;
+        results: Array<{
+          messageId: string;
+          subject: string;
+          ok: boolean;
+          reason?: string;
+          fileName?: string;
+          upload?: { ok: boolean; reason?: string };
+        }>;
+        reason?: string;
+      }>("/api/admin/reports/hawkeye-daily/tick", {});
+      if (!tick.ok) {
+        return Response.json(
+          { ok: false, sourceType, error: tick.reason || "Hawkeye Gmail check failed." },
+          { status: 502 }
+        );
+      }
+      const succeeded = tick.results.filter((r) => r.ok);
+      const failed = tick.results.filter((r) => !r.ok);
+      const message =
+        tick.results.length === 0
+          ? `Checked ${tick.checked} recent email${tick.checked === 1 ? "" : "s"} — nothing new to upload.`
+          : `${succeeded.length} of ${tick.results.length} new Hawkeye report${tick.results.length === 1 ? "" : "s"} imported.${
+              failed.length ? ` ${failed.length} failed: ${failed.map((r) => r.reason).filter(Boolean).join("; ").slice(0, 300)}` : ""
+            }`;
+      const result: AutoRunResult = {
+        ok: failed.length === 0,
+        sourceType,
+        imported: succeeded.length,
+        skipped: 0,
+        totalRows: tick.results.length,
+        message
+      };
+      return Response.json(result, { status: failed.length && succeeded.length === 0 ? 502 : 200 });
     }
 
     // IOCL/BPCL/Cashbook all run directly on the worker now — no office-PC

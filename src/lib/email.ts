@@ -7,6 +7,10 @@ type SendEmailParams = {
   companyId?: string;
   subject: string;
   to: string[];
+  html?: string;
+  messageId?: string;
+  inReplyTo?: string;
+  references?: string[];
 };
 
 type EmailConfig = {
@@ -73,7 +77,7 @@ function loadEnvEmailConfig(): EmailConfig {
   };
 }
 
-export async function sendEmail({ body, cc = [], companyId, subject, to }: SendEmailParams) {
+export async function sendEmail({ body, cc = [], companyId, subject, to, html, messageId, inReplyTo, references }: SendEmailParams) {
   const recipients = Array.from(new Set(to.map((email) => email.trim().toLowerCase()).filter(Boolean)));
   const ccRecipients = Array.from(new Set(cc.map((email) => email.trim().toLowerCase()).filter(Boolean)));
   if (!recipients.length) throw new Error("No email recipients found.");
@@ -87,11 +91,16 @@ export async function sendEmail({ body, cc = [], companyId, subject, to }: SendE
     auth: config.user && config.pass ? { user: config.user, pass: config.pass } : undefined
   });
 
-  await transporter.sendMail({
+  const result = await transporter.sendMail({
     from: config.from,
     to: recipients,
     cc: ccRecipients.length ? ccRecipients : undefined,
     subject,
-    text: body
+    text: body,
+    html,
+    messageId,
+    inReplyTo,
+    references
   });
+  return { messageId: result.messageId, response: result.response };
 }

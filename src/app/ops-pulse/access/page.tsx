@@ -85,10 +85,10 @@ export default async function OpsAccessPage() {
           <div className="metric-card"><span>Unassigned</span><strong>{rows.filter((row) => !row.scoped.length).length}</strong><small>Needs OpsPulse location access</small></div>
         </section>
         <section className="panel">
-          <div className="panel-head"><div><h2>OpsPulse scope register</h2><p className="subtle">Every model and hierarchy value below is derived from that user’s permitted stations.</p></div></div>
+          <div className="panel-head"><div><h2>OpsPulse scope register</h2><p className="subtle">Station scope comes from access permissions. Managers and reporting authorities come from the live People reporting hierarchy.</p></div></div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>User</th><th>Ops role</th><th>Models</th><th>Region</th><th>AOM</th><th>Cluster Manager</th><th>Cluster</th><th>Locations</th><th>Status</th></tr></thead>
+              <thead><tr><th>User</th><th>Ops role</th><th>Models</th><th>Region</th><th>Reporting authority</th><th>Cluster Manager</th><th>Locations</th><th>Status</th></tr></thead>
               <tbody>
                 {rows.map(({ membership, profile, roleLabel, scoped, modes }) => (
                   <tr key={membership.user_id}>
@@ -96,9 +96,8 @@ export default async function OpsAccessPage() {
                     <td>{roleLabel}</td>
                     <td>{modes.join(", ") || "-"}</td>
                     <td>{unique(scoped.map((location) => location.region)).join(", ") || "-"}</td>
-                    <td>{unique(scoped.map((location) => location.aom)).join(", ") || "-"}</td>
-                    <td>{unique(scoped.map((location) => location.cluster_manager)).join(", ") || "-"}</td>
-                    <td>{unique(scoped.map((location) => location.cluster)).join(", ") || "-"}</td>
+                    <td>{unique(scoped.flatMap((location) => location.reporting_authorities?.map((person) => `${person.name} · ${person.role}`) ?? [])).join(", ") || "-"}</td>
+                    <td>{unique(scoped.flatMap((location) => location.cluster_manager_names ?? [])).join(", ") || "-"}</td>
                     <td title={scoped.map(locationLabel).join(", ")}>{scoped.length} stations</td>
                     <td><span className={`status-pill ${profile?.is_active && (membership.has_all_location_access || scoped.length) ? "good" : "warn"}`}>{profile?.is_active ? membership.has_all_location_access || scoped.length ? "Active" : "Unassigned" : "Inactive"}</span></td>
                   </tr>

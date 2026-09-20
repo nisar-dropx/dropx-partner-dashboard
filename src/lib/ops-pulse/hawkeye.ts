@@ -12,7 +12,7 @@ export const hawkeyeMetricDefinitions: HawkeyeMetricDefinition[] = [
   { label: "AFN Std DEA%", short: "AFN Std DEA" },
   { label: "AFN Std DOT%", short: "AFN Std DOT", targetKey: "afn_standard_dot" },
   { label: "AFN Std LM Miss%", short: "AFN Std LM Miss", targetKey: "afn_standard_lmc_dea" },
-  { label: "AFN Std PDD DSR%", short: "AFN Std DSR" },
+  { label: "AFN Std PDD DSR%", short: "AFN Std DSR", targetKey: "dsr" },
   { label: "Prem DDS%", short: "Premium DDS", targetKey: "dds_premium" },
   { label: "Prem FDDS%", short: "Premium FDDS" },
   { label: "Prem FTDS%", short: "Premium FTDS" },
@@ -36,7 +36,12 @@ export const hawkeyeMetricDefinitions: HawkeyeMetricDefinition[] = [
   { label: "MFN - EF FDPS%", short: "MFN EF FDPS" },
   { label: "MFN - ES FDPS%", short: "MFN ES FDPS" },
   { label: "SMD2 Slot AD%", short: "SMD2 slot", targetKey: "slot_adherence" },
-  { label: "Store Returns%", short: "Store returns" }
+  { label: "Store Returns%", short: "Store returns" },
+  // Only present in the long/tall Hawkeye export (readHawkeyeLongFormatRows, from
+  // 2026-09-19) — the older wide-format download never included this column. Distinct
+  // from the manually-entered "noon EMD" reviewers type into the review desk
+  // (review-policy.ts's noonEmdValue) — this is Amazon's own imported EMD% metric.
+  { label: "EMD%", short: "EMD" }
 ];
 
 function normalized(value: unknown) {
@@ -56,8 +61,20 @@ export function hawkeyeMetrics(valuesJson: unknown) {
 }
 
 export function hawkeyeValue(valuesJson: unknown, label: string) {
-  return hawkeyeMetrics(valuesJson)?.get(normalized(label)) ?? null;
+  // readHawkeyeDailyRows stores a proper 0-100 percent in values_json (see
+  // its per-file scaling fix), but every consumer of this function across
+  // review-trends.ts and performance/page.tsx (percent(), ragStatus(),
+  // target.target comparisons, trend series math) works in the 0-1
+  // fraction convention this whole app uses for percent metrics elsewhere
+  // (the target master stores percentage thresholds as 0-1 fractions).
+  // Divide back down here, once, centrally — rather than at every call
+  // site — so the stored value's real 0-100 scale never leaks into code
+  // that still expects 0-1.
+  const stored = hawkeyeMetrics(valuesJson)?.get(normalized(label)) ?? null;
+  return stored == null ? null : stored / 100;
 }
+
+export const hawkeyeTargetKey = (definition:HawkeyeMetricDefinition) => definition.targetKey || definition.label.toLowerCase().replace(/[^a-z0-9]+/g, "_");
 
 const targetMetricLabels: Record<string, string> = {
   afn_premium_lmc_dea: "AFN Prem LM Miss%",
@@ -74,6 +91,6 @@ const targetMetricLabels: Record<string, string> = {
 };
 
 export function hawkeyeValueForTarget(valuesJson: unknown, metricKey: string) {
-  const label = targetMetricLabels[metricKey];
+  const label = targetMetricLabels[metricKey] || hawkeyeMetricDefinitions.find(definition => hawkeyeTargetKey(definition) === metricKey)?.label;
   return label ? hawkeyeValue(valuesJson, label) : null;
 }

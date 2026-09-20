@@ -69,8 +69,7 @@ async function processCompany(companyId: string, fromDate: string, toDate: strin
     .limit(1000);
   if (dailyResult.error) throw new Error(dailyResult.error.message);
 
-  const openRows = (dailyResult.data ?? [])
-    .filter((row) => Number(row.punch_count ?? 0) % 2 === 1) as DailyRow[];
+  const openRows = (dailyResult.data ?? []) as DailyRow[];
   if (!openRows.length) return { notified: 0, open: 0, skipped: 0 };
 
   const enrolmentIds = Array.from(new Set(openRows.map((row) => row.enrolment_id)));

@@ -165,12 +165,15 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
   }
 
   const exitCase = data?.exitCase;
-  const canStart = !exitCase || ["rejected", "withdrawn", "cancelled", "settled", "withdrawal_requested"].includes(exitCase.status);
+  const canStart = !exitCase || ["rejected", "withdrawn", "cancelled", "settled"].includes(exitCase.status);
+  // Once HR/manager approval is fully complete, the exit is only waiting on clearance
+  // — the worker can no longer back out of it themselves from here; only HR (in HRMS)
+  // can revert an approved offboarding.
   const canWithdraw = Boolean(
     data?.flow === "people" &&
     exitCase &&
     data.policy.withdrawal_allowed &&
-    !["withdrawal_requested", "documents_ready", "closed", "rejected", "withdrawn", "cancelled"].includes(exitCase.status)
+    !["approved", "notice_period", "clearance", "ready_to_close", "withdrawal_requested", "documents_ready", "closed", "rejected", "withdrawn", "cancelled"].includes(exitCase.status)
   );
   const minDate = todayInIndia();
   const suggestedDate = addDaysToDateOnly(minDate, data?.policy.resignation_notice_days ?? 0);
@@ -184,7 +187,8 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
 
     {error ? <div className="dx-alert error">{error}</div> : null}
     {notice ? <div className="dx-alert success">{notice}</div> : null}
-    {pending && !data ? <div className="connect-exit-card"><p className="connect-help">Loading exit details...</p></div> : null}
+    {pending && !data ? <div className="dx-loader"><span /><small>Loading exit details…</small></div> : null}
+    {!pending && !data && !error ? <div className="dx-empty"><FileText /><strong>Exit details unavailable</strong><small>We couldn't load your exit workflow. Try again in a moment.</small></div> : null}
 
     {canStart && data ? <form className="connect-exit-card dx-exit-form" onSubmit={submit}>
       <div className="dx-exit-card-heading"><span className="connect-exit-eyebrow">New request</span><h2>Plan your last working day</h2><p>This request will enter the configured {data.flow === "people" ? "People approval" : "Workforce lifecycle"} workflow.</p></div>
@@ -193,17 +197,21 @@ export function ConnectExitManagement({ account, onBack }: { account: Account; o
       {data.flow === "people" ? <label>Comments<textarea name="comments" placeholder="Share any details the reviewers should know" /></label> : <label>Reason *<textarea minLength={5} name="reason_details" placeholder="Briefly explain your reason" required /></label>}
       {data.flow === "people" ? <div className="dx-exit-contact-grid"><label>Personal email<input name="personal_email" type="email" defaultValue={account.email ?? ""} placeholder="For exit communication" /></label><label>Personal mobile<input name="personal_mobile" inputMode="tel" placeholder="For exit communication" /></label></div> : null}
       {data.flow === "people" ? <div className="dx-exit-route-preview" aria-label="Configured approval route">
-        <div><span className="connect-exit-eyebrow">Approval route</span><strong>{data.approvalRouteReady ? `${data.approvalRoute.length} stage${data.approvalRoute.length === 1 ? "" : "s"}` : "Setup required"}</strong></div>
-        {data.approvalRouteReady ? <ol>{data.approvalRoute.map((step) => <li key={`${step.stepOrder}-${step.stepName}`}><i>{step.stepOrder}</i><span><strong>{step.stepName}</strong><small>{step.approverName} · {step.detail}</small></span></li>)}</ol> : <p role="alert">{data.approvalRouteError || "No approver could be resolved for this profile. Ask the People team to review the reporting hierarchy or Offboarding Masters."}</p>}
+        <div><span className="connect-exit-eyebrow">Approval route</span><strong>{data.approvalRouteReady && data.approvalRoute.length
+          ? `${data.approvalRoute.length} stage${data.approvalRoute.length === 1 ? "" : "s"}`
+          : "Setup required"}</strong></div>
+        {data.approvalRouteReady && data.approvalRoute.length ? <ol>{data.approvalRoute.map((step) => <li key={`${step.stepOrder}-${step.stepName}`}><i>{step.stepOrder}</i><span><strong>{step.stepName}</strong><small>{step.approverName} · {step.detail}</small></span></li>)}</ol> : <p role="alert">{data.approvalRouteError || "No approver could be resolved for this profile. Ask the People team to review the reporting hierarchy or Offboarding Masters."}</p>}
       </div> : null}
       <div className="connect-exit-warning"><strong>Before submitting</strong><span>Your requested date becomes final only after the configured approval and clearance stages are complete.</span></div>
-      <button className="connect-primary" disabled={pending || (data.flow === "people" && (!data.reasons.length || !data.approvalRouteReady))} type="submit">{pending ? "Submitting..." : "Submit resignation"}</button>
+      <button className="connect-primary" disabled={pending || (data.flow === "people" && (!data.reasons.length || !data.approvalRouteReady || !data.approvalRoute.length))} type="submit">{pending ? "Submitting..." : "Submit resignation"}</button>
     </form> : null}
 
     {exitCase && !canStart ? <div className="connect-exit-stack">
       <article className="connect-exit-card status-card">
         <div className="connect-exit-status-head"><div><span className="connect-exit-eyebrow">{exitCase.caseNumber}</span><h2>{label(exitCase.status)}</h2></div><span className={`connect-status-badge ${exitCase.status}`}>{label(exitCase.stage)}</span></div>
         <div className="connect-exit-facts"><div><span>Reason</span><strong>{exitCase.reason || "Resignation"}</strong></div><div><span>Requested last day</span><strong>{displayDate(exitCase.requestedLastWorkingDate)}</strong></div><div><span>Approved last day</span><strong>{displayDate(exitCase.approvedLastWorkingDate)}</strong></div><div><span>Settlement</span><strong>{label(exitCase.settlementStatus || "not started")}</strong></div></div>
+        {exitCase.status === "withdrawal_requested" ? <div className="connect-exit-warning"><strong>Withdrawal pending</strong><span>Your withdrawal request was sent to the first manager who approved this resignation. They will review it in People → Approval inbox. Status will update here when they accept or keep the exit open.</span></div> : null}
+        {exitCase.status === "withdrawn" ? <div className="connect-exit-warning"><strong>Withdrawn</strong><span>This resignation is withdrawn. You can submit a new request when ready.</span></div> : null}
         {canWithdraw ? <button className="connect-secondary danger" disabled={pending} onClick={withdraw} type="button">Request withdrawal</button> : null}
       </article>
 

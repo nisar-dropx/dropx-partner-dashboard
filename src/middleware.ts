@@ -1,13 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { isPeopleHostName, isPeoplePortalPath } from "@/lib/people/surface";
+import { timeoutFetch } from "@/lib/timeout-fetch";
+import { TimeoutError, withTimeout } from "@/lib/with-timeout";
+
+const AUTH_TIMEOUT_MS = 5000;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAuthKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
 const COOKIE_CHUNK_SIZE = 3000;
 const MAX_COOKIE_CHUNKS = 8;
 const ENCODED_COOKIE_PREFIX = "b64-";
-const CLEAN_OPS_ROOTS = ["/attendance", "/daily-submission", "/performance", "/capacity", "/service-network", "/workforce", "/field-executive", "/helpers", "/work-force-register", "/cod", "/edd", "/reports", "/client", "/access", "/unauthorized"];
+const CLEAN_OPS_ROOTS = ["/attendance", "/daily-submission", "/performance", "/capacity", "/service-network", "/rostering", "/workforce", "/field-executive", "/work-force-register", "/cod", "/edd", "/station-edd", "/reports", "/client", "/access", "/unauthorized"];
+// Only these specific /master/* subpaths live under src/app/ops-pulse/master/* and need the
+// /ops-pulse prefix rewritten in; every other /master/* path (performance-targets, cod-master,
+// designations, ...) is a real top-level route under src/app/master/* already, so this list
+// must stay a narrow allowlist, not the whole /master root — otherwise every other Master page
+// would get double-rewritten to a path that doesn't exist under ops-pulse and 404 instead.
+const CLEAN_OPS_MASTER_SUBPATHS = ["/master/service-network"];
 const MOVED_OPS_PAYMENT_PATHS = [
   "/payments/advance-request",
   "/payments/expense-request",
@@ -43,7 +53,9 @@ function cleanOpsPath(path: string) {
 }
 
 function isCleanOpsPath(path: string) {
-  return path === "/" || CLEAN_OPS_ROOTS.some((root) => path === root || path.startsWith(`${root}/`));
+  return path === "/" ||
+    CLEAN_OPS_ROOTS.some((root) => path === root || path.startsWith(`${root}/`)) ||
+    CLEAN_OPS_MASTER_SUBPATHS.some((root) => path === root || path.startsWith(`${root}/`));
 }
 
 function isMovedOpsPaymentPath(path: string) {
@@ -106,6 +118,9 @@ function decodeCookieValue(value: string) {
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname || "/";
+  if (request.cookies.get("dropx_portal_preview_v1")?.value && !["GET", "HEAD", "OPTIONS"].includes(request.method) && path !== "/api/owner-preview") {
+    return NextResponse.json({ error: "User preview is read-only. Exit preview to make changes." }, { status: 403 });
+  }
   const host = request.headers.get("host")?.split(":")[0].toLowerCase() ?? "";
   const isPlatformAdminHost = host === "admin-panel.dropxlogistics.com";
   const isOpsHost = host === "ops.dropxlogistics.com";
@@ -152,6 +167,24 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "ops_portal", path));
   }
 
+  // Legacy Manage-in-People deep links used /people/employees|contractors/:id.
+  const legacyPeopleEmployee = path.match(/^\/people\/employees\/([^/]+)\/?$/);
+  if (isPeopleHost && legacyPeopleEmployee) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = "/employees";
+    redirectUrl.search = "";
+    redirectUrl.searchParams.set("edit", legacyPeopleEmployee[1]);
+    return NextResponse.redirect(redirectUrl);
+  }
+  const legacyPeopleContractor = path.match(/^\/people\/contractors\/([^/]+)\/?$/);
+  if (isPeopleHost && legacyPeopleContractor) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = "/contractors";
+    redirectUrl.search = "";
+    redirectUrl.searchParams.set("edit", legacyPeopleContractor[1]);
+    return NextResponse.redirect(redirectUrl);
+  }
+
   if (isPeopleHost && !isPublicAppPath(path) && !isPeoplePortalPath(path)) {
     const peopleHomeUrl = request.nextUrl.clone();
     peopleHomeUrl.pathname = "/";
@@ -165,6 +198,7 @@ export async function middleware(request: NextRequest) {
     !isCleanOpsPath(path) &&
     !isMovedOpsPaymentPath(path) &&
     !isSharedOpsPath &&
+    path !== "/settings/notifications" &&
     !path.startsWith("/cps") &&
     !path.startsWith("/master/") &&
     !path.startsWith("/users") &&
@@ -248,14 +282,24 @@ export async function middleware(request: NextRequest) {
         setItem: setStoredValue,
         removeItem: clearStoredValue
       }
+    },
+    global: {
+      fetch: timeoutFetch()
     }
   });
 
-  const { data } = await supabase.auth.getUser();
-  if (!data.user) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("next", request.nextUrl.pathname);
-    return NextResponse.redirect(loginUrl);
+  try {
+    const { data } = await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Session check");
+    if (!data.user) {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("next", request.nextUrl.pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  } catch (error) {
+    // Middleware is only a fast best-effort gate; the page-level auth check
+    // is authoritative, so a stuck Supabase call here should let the request
+    // through rather than hang until the platform kills the invocation.
+    if (!(error instanceof TimeoutError)) throw error;
   }
 
   if (isPlatformAdminHost && path === "/") {

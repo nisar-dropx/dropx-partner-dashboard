@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
-import { connectApproverIdentity } from "../../../../src/lib/connect-expense-data";
-import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval, listConnectReturnedRosters, resubmitConnectReturnedRoster } from "../../../../src/lib/connect-manager-approvals";
+import { resolveConnectActorUserId, resolveConnectActorUserIds } from "../../../../src/lib/connect-approver-identity";
+import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval, listConnectReturnedRosters, resubmitConnectReturnedRoster, listConnectExitApprovals, decideConnectExitApproval, listConnectExitWithdrawalApprovals, decideConnectExitWithdrawal } from "../../../../src/lib/connect-manager-approvals";
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
-import { connectReporteeMatches, loadConnectReporteeAccess, normalizeConnectReporteeScope, type ConnectReporteeAccess } from "../../../../src/lib/connect-reportee-scope";
+import { connectReporteeMatches, loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
+import { decideConnectWfhApproval, decideConnectWfhHrApproval, listConnectWfhApprovals, listConnectWfhHrApprovals } from "../../../../src/lib/connect-wfh-data";
+import { decideConnectBusinessTripApproval, decideConnectBusinessTripHrApproval, listConnectBusinessTripApprovals, listConnectBusinessTripHrApprovals } from "../../../../src/lib/connect-business-trip-data";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
+import { userFacingError } from "../../../../src/lib/user-facing-error";
+import { approvalJourneySummary, loadApprovalJourneySteps } from "../../../../src/lib/connect-approval-journey";
+import { listConnectPayAdvanceApprovals, decideConnectPayAdvanceApproval } from "../../../../src/lib/connect-pay-advance-approval-data";
+import { listConnectPaymentApprovals, decideConnectPaymentApproval } from "../../../../src/lib/connect-payment-approvals";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -19,30 +25,35 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>)
   return requireConnectAccount(profileType as ConnectAccount["profileType"], accountId);
 }
 
-async function listLeaveApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
-  const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
-  const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
-  if (!approverUserId) return [];
+async function requireActorUserId(account: ConnectAccount, actionLabel: string) {
+  const actorUserId = await resolveConnectActorUserId(account);
+  if (!actorUserId) {
+    throw new Error(`A DropX One manager login is required to ${actionLabel}. Sign in with the mobile number linked to your People record.`);
+  }
+  return actorUserId;
+}
+
+async function listLeaveApprovals(account: ConnectAccount) {
+  const approverUserIds = await resolveConnectActorUserIds(account);
+  if (!approverUserIds.length) return [];
   const stepResult = await db().from("hr_leave_approval_steps")
     .select("id,request_id,step_order,step_name,status")
     .eq("company_id", account.companyId)
-    .eq("approver_user_id", approverUserId)
+    .in("approver_user_id", approverUserIds)
     .eq("status", "pending")
     .order("created_at");
   if (stepResult.error) throw new Error(stepResult.error.message);
   const steps = stepResult.data ?? [];
   if (!steps.length) return [];
   const requestResult = await db().from("hr_leave_requests")
-    .select("id,employee_id,contractor_id,start_date,end_date,days,reason,status,hr_leave_types(name,code),employees(full_name,employee_code),contractors(full_name,dropx_id)")
+    .select("id,employee_id,contractor_id,start_date,end_date,days,reason,status,requested_at,hr_leave_types(name,code),employees(full_name,employee_code),contractors(full_name,dropx_id)")
     .eq("company_id", account.companyId)
     .eq("status", "pending")
     .in("id", steps.map((step) => step.request_id));
   if (requestResult.error) throw new Error(requestResult.error.message);
   const stepByRequest = new Map(steps.map((step) => [step.request_id, step]));
-  return (requestResult.data ?? []).flatMap((request) => {
-    const profileType = request.contractor_id ? "contractor" : "employee";
-    const profileId = request.contractor_id ?? request.employee_id;
-    if (!connectReporteeMatches(reportees, profileType, profileId)) return [];
+  // Steps are assigned explicitly — do not hide them behind reportee-scope filters.
+  const rows = (requestResult.data ?? []).flatMap((request) => {
     const step = stepByRequest.get(request.id);
     if (!step) return [];
     const employee = relation(request.employees);
@@ -60,9 +71,18 @@ async function listLeaveApprovals(account: ConnectAccount, reportees: ConnectRep
       reason: request.reason,
       requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
       requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
-      profileType
+      profileType: request.contractor_id ? "contractor" as const : "employee" as const,
+      requestedAt: request.requested_at
     }];
   });
+  const journeys = await loadApprovalJourneySteps(account.companyId, rows.map((row) => row.requestId), {
+    table: "hr_leave_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["approver_user_id"], actedAtColumn: "decided_at", noteColumn: "decision_note"
+  });
+  return rows.map((row) => ({
+    ...row,
+    journey: approvalJourneySummary(row.requestedAt, row.requesterName, row.stepName, journeys.get(row.requestId) ?? [])
+  }));
 }
 
 export async function GET(request: Request) {
@@ -70,18 +90,59 @@ export async function GET(request: Request) {
     const account = await selectedAccount(request);
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     const reportees = await loadConnectReporteeAccess(account, scope);
-    const [leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters] = await Promise.all([
-      listLeaveApprovals(account, reportees),
+    const approverUserIds = await resolveConnectActorUserIds(account);
+    const matchesReportee = (profileType: string, profileId: string | null) =>
+      connectReporteeMatches(reportees, profileType, profileId);
+    const [leaveApprovals, wfhApprovals, wfhHrApprovals, businessTripApprovals, businessTripHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals, payAdvanceApprovals, paymentApprovals] = await Promise.all([
+      listLeaveApprovals(account),
+      approverUserIds.length
+        ? listConnectWfhApprovals({
+            companyId: account.companyId,
+            approverUserIds,
+            // Explicit step assignment — show regardless of reporting-tree toggle.
+            matchesReportee: () => true
+          })
+        : Promise.resolve([]),
+      listConnectWfhHrApprovals(account, matchesReportee),
+      approverUserIds.length
+        ? listConnectBusinessTripApprovals({
+            companyId: account.companyId,
+            approverUserIds,
+            matchesReportee: () => true
+          })
+        : Promise.resolve([]),
+      listConnectBusinessTripHrApprovals(account, matchesReportee),
       listConnectLocationSupportPackages(account, reportees),
       listConnectAttendanceApprovals(account, reportees),
       listConnectAttendanceHrApprovals(account, reportees),
       listConnectRosterApprovals(account),
-      listConnectRosterSwapApprovals(account),
-      listConnectReturnedRosters(account)
+      listConnectRosterSwapApprovals(account, reportees),
+      listConnectReturnedRosters(account),
+      listConnectExitApprovals(account),
+      listConnectExitWithdrawalApprovals(account),
+      listConnectPayAdvanceApprovals(account),
+      listConnectPaymentApprovals(account.companyId, approverUserIds)
     ]);
-    return NextResponse.json({ scope, leaveApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({
+      scope,
+      leaveApprovals,
+      wfhApprovals,
+      wfhHrApprovals,
+      businessTripApprovals,
+      businessTripHrApprovals,
+      locationSupportPackages,
+      attendanceApprovals,
+      attendanceHrApprovals,
+      rosterApprovals,
+      rosterSwapApprovals,
+      returnedRosters,
+      exitApprovals,
+      exitWithdrawalApprovals,
+      payAdvanceApprovals,
+      paymentApprovals
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load approvals." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load approvals.") }, { status: 400 });
   }
 }
 
@@ -89,6 +150,21 @@ export async function PATCH(request: Request) {
   try {
     const body = await request.json() as Record<string, unknown>;
     const account = await selectedAccount(request, body);
+    const payAdvanceRequestId = clean(body.payAdvanceRequestId);
+    if (payAdvanceRequestId) {
+      await decideConnectPayAdvanceApproval(account, payAdvanceRequestId, body.decision, body.note, body.approvedAmount, body.approvedInstallments);
+      return NextResponse.json({ notice: "Pay advance decision recorded." });
+    }
+    const paymentRequestId = clean(body.paymentRequestId);
+    if (paymentRequestId) {
+      const decision = clean(body.decision);
+      if (decision !== "approved" && decision !== "returned" && decision !== "rejected") {
+        throw new Error("Select a valid decision.");
+      }
+      const actorUserIds = await resolveConnectActorUserIds(account);
+      await decideConnectPaymentApproval(account.companyId, actorUserIds, paymentRequestId, decision, clean(body.comments));
+      return NextResponse.json({ ok: true, notice: `Payment request ${decision}.` });
+    }
     const reviewId = clean(body.reviewId);
     if (reviewId) {
       const decision = clean(body.decision);
@@ -126,9 +202,81 @@ export async function PATCH(request: Request) {
       const notice = await decideConnectRosterSwapApproval(account, rosterSwapRequestId, decision, note);
       return NextResponse.json({ ok: true, notice });
     }
-    const identity = account.profileType === "user" ? null : await connectApproverIdentity(account);
-    const approverUserId = account.profileType === "user" ? account.id : identity?.userId;
-    if (!approverUserId) throw new Error("A linked People login is required to approve time off.");
+    const wfhRequestId = clean(body.wfhRequestId);
+    if (wfhRequestId) {
+      const decision = clean(body.decision);
+      const note = clean(body.note);
+      const queue = clean(body.wfhQueue);
+      if (queue === "hr") {
+        if (decision !== "approved" && decision !== "returned" && decision !== "rejected") {
+          throw new Error("Choose Apply WFH, Return, or Reject.");
+        }
+        const result = await decideConnectWfhHrApproval({
+          account,
+          requestId: wfhRequestId,
+          decision: decision as "approved" | "returned" | "rejected",
+          note,
+          defaultIn: clean(body.defaultIn) || "09:00",
+          defaultOut: clean(body.defaultOut) || "18:00"
+        });
+        return NextResponse.json({ ok: true, notice: result.notice });
+      }
+      const approverUserId = await requireActorUserId(account, "approve work from home");
+      if (decision !== "approved" && decision !== "returned" && decision !== "rejected") throw new Error("Choose Approve, Return or Reject.");
+      const result = await decideConnectWfhApproval({
+        companyId: account.companyId,
+        approverUserId,
+        requestId: wfhRequestId,
+        decision: decision as "approved" | "returned" | "rejected",
+        note
+      });
+      return NextResponse.json({ ok: true, notice: result.notice });
+    }
+    const businessTripRequestId = clean(body.businessTripRequestId);
+    if (businessTripRequestId) {
+      const decision = clean(body.decision);
+      const note = clean(body.note);
+      const queue = clean(body.businessTripQueue);
+      if (queue === "hr") {
+        if (decision !== "approved" && decision !== "returned" && decision !== "rejected") {
+          throw new Error("Choose Apply Business Trip, Return, or Reject.");
+        }
+        const result = await decideConnectBusinessTripHrApproval({
+          account,
+          requestId: businessTripRequestId,
+          decision: decision as "approved" | "returned" | "rejected",
+          note,
+          defaultIn: clean(body.defaultIn) || "09:00",
+          defaultOut: clean(body.defaultOut) || "18:00"
+        });
+        return NextResponse.json({ ok: true, notice: result.notice });
+      }
+      const approverUserId = await requireActorUserId(account, "approve business trip");
+      if (decision !== "approved" && decision !== "returned" && decision !== "rejected") throw new Error("Choose Approve, Return or Reject.");
+      const result = await decideConnectBusinessTripApproval({
+        companyId: account.companyId,
+        approverUserId,
+        requestId: businessTripRequestId,
+        decision: decision as "approved" | "returned" | "rejected",
+        note
+      });
+      return NextResponse.json({ ok: true, notice: result.notice });
+    }
+    const exitWithdrawalCaseId = clean(body.exitWithdrawalCaseId);
+    if (exitWithdrawalCaseId) {
+      const decision = clean(body.decision);
+      const note = clean(body.note);
+      const notice = await decideConnectExitWithdrawal(account, exitWithdrawalCaseId, decision, note);
+      return NextResponse.json({ ok: true, notice });
+    }
+    const exitApprovalId = clean(body.exitApprovalId);
+    if (exitApprovalId) {
+      const decision = clean(body.decision);
+      const note = clean(body.note);
+      const notice = await decideConnectExitApproval(account, exitApprovalId, decision, note);
+      return NextResponse.json({ ok: true, notice });
+    }
+    const approverUserId = await requireActorUserId(account, "approve time off");
     const requestId = clean(body.requestId);
     const decision = clean(body.decision);
     const note = clean(body.note);
@@ -151,6 +299,6 @@ export async function PATCH(request: Request) {
           : "Approved and routed to the next approver."
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to update time-off approval." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to update this approval. Please try again.") }, { status: 400 });
   }
 }

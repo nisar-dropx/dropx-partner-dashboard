@@ -551,6 +551,7 @@ export async function createLocation(formData: FormData) {
   const stationManagerEmail = required(formData.get("station_manager_email"), "Manager").toLowerCase();
   const stationReportingEmail = stationManagerEmail;
   const hideFromLocationList = formData.get("hide_from_location_list") === "on";
+  const isHo = formData.get("is_ho") === "on";
   const address = [addressLine1, addressLine2, city, state, postalCode].filter(Boolean).join(", ");
   const accessProfiles = await locationAccessProfiles(stationReportingEmail, companyId);
 
@@ -573,11 +574,12 @@ export async function createLocation(formData: FormData) {
     station_manager_email: stationManagerEmail,
     parent_station_id: parentStationId,
     hide_from_location_list: hideFromLocationList,
+    is_ho: isHo,
     is_active: true
   }, companyId);
   let { data: location, error } = await supabaseAdmin.from("stations").insert(payload).select("id").single();
-  if (error && /geofence_radius_m|does not exist|schema cache/i.test(error.message)) {
-    const { geofence_radius_m: _radius, ...legacyPayload } = payload as Record<string, unknown>;
+  if (error && /geofence_radius_m|is_ho|does not exist|schema cache/i.test(error.message)) {
+    const { geofence_radius_m: _radius, is_ho: _isHo, ...legacyPayload } = payload as Record<string, unknown>;
     const fallback = await supabaseAdmin.from("stations").insert(legacyPayload).select("id").single();
     location = fallback.data;
     error = fallback.error;
@@ -621,6 +623,7 @@ export async function updateLocation(formData: FormData) {
   const stationReportingEmail = stationManagerEmail;
   const isActive = formData.get("is_active") !== "inactive";
   const hideFromLocationList = formData.get("hide_from_location_list") === "on";
+  const isHo = formData.get("is_ho") === "on";
   const address = [addressLine1, addressLine2, city, state, postalCode].filter(Boolean).join(", ");
   const accessProfiles = await locationAccessProfiles(stationReportingEmail, companyId);
   const { data: existingLocation, error: existingLocationError } = await supabaseAdmin
@@ -650,6 +653,7 @@ export async function updateLocation(formData: FormData) {
       station_manager_email: stationManagerEmail,
       parent_station_id: parentStationId,
       hide_from_location_list: hideFromLocationList,
+      is_ho: isHo,
       is_active: isActive
     };
   let { error } = await supabaseAdmin
@@ -657,8 +661,8 @@ export async function updateLocation(formData: FormData) {
     .update(updatePayload)
     .eq("id", id)
     .eq("company_id", companyId);
-  if (error && /geofence_radius_m|does not exist|schema cache/i.test(error.message)) {
-    const { geofence_radius_m: _radius, ...legacyPayload } = updatePayload;
+  if (error && /geofence_radius_m|is_ho|does not exist|schema cache/i.test(error.message)) {
+    const { geofence_radius_m: _radius, is_ho: _isHo, ...legacyPayload } = updatePayload;
     const fallback = await supabaseAdmin
       .from("stations")
       .update(legacyPayload)

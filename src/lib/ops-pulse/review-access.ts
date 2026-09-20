@@ -1,0 +1,109 @@
+import "server-only";
+import { cache } from "react";
+import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { ACTIVE_DAILY_PERFORMANCE_SOURCE } from "@/lib/ops-pulse/performance-source-policy";
+import { reviewCapabilities, reviewRole, reviewRoutingIssue } from "@/lib/ops-pulse/review-policy";
+import { loadReviewOversightRoles, matchesOversightTier } from "@/lib/ops-pulse/review-oversight-roles";
+
+/** Has the Performance Scorecard (Hawkeye daily) been imported for this station/date? Reviews and RCA are blocked until it has. */
+export async function isScorecardImported(companyId: string, stationCode: string, sourceDate: string) {
+  if (!supabaseAdmin || !stationCode || !sourceDate) return false;
+  const result = await supabaseAdmin.from("report_metric_facts")
+    .select("id", { head: true, count: "exact" })
+    .eq("company_id", companyId)
+    .eq("station_code", stationCode)
+    .eq("report_date", sourceDate)
+    .eq("source_type", ACTIVE_DAILY_PERFORMANCE_SOURCE)
+    .limit(1);
+  if (result.error) return false;
+  return Boolean(result.count);
+}
+
+export const loadReviewActor = cache(async (companyId: string, userId: string, roleCode: string | null, roleName: string | null) => {
+  if (!supabaseAdmin) throw new Error("Review access is unavailable.");
+  const link = await supabaseAdmin.from("hr_user_person_links").select("person_id")
+    .eq("company_id", companyId).eq("user_id", userId).eq("status", "active").maybeSingle();
+  if (link.error) throw new Error("Unable to check your People role.");
+  let labels: string[] = [];
+  let displayLabel: string | null = null;
+  if (link.data?.person_id) {
+    const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+    const result = await supabaseAdmin.from("hr_work_assignments")
+      .select("position_title,designations(code,name),hr_engagements!inner(person_id,status)")
+      .eq("company_id", companyId).eq("hr_engagements.person_id", link.data.person_id)
+      .eq("hr_engagements.status", "active").eq("is_primary", true)
+      .lte("effective_from", day).or(`effective_to.is.null,effective_to.gte.${day}`);
+    if (result.error) throw new Error("Unable to check your People designation.");
+    labels = (result.data ?? []).map((row) => {
+      const designation = Array.isArray(row.designations) ? row.designations[0] : row.designations;
+      displayLabel ??= designation?.name || row.position_title || null;
+      return `${designation?.code ?? ""} ${designation?.name ?? ""} ${row.position_title ?? ""}`.trim();
+    });
+  }
+  // People is authoritative for named people; station logins use their existing portal role.
+  const roleLabels = labels.length ? labels : [`${roleCode ?? ""} ${roleName ?? ""}`];
+  const oversightRoles = (await loadReviewOversightRoles(companyId)).rows;
+  // Portal role code isn't a People designation, but it still needs to match the configured
+  // oversight list the same way FSD/TECH portal logins matched the old hardcoded check.
+  const matchLabels = [...roleLabels, `${roleCode ?? ""} ${roleName ?? ""}`];
+  return {
+    // Master-configured "full" oversight tier — replaces the old Program Manager-only check.
+    programManager: matchesOversightTier(oversightRoles, matchLabels, "full"),
+    // Master-configured "override" tier (also true for anyone in the "full" tier).
+    nationalHead: matchesOversightTier(oversightRoles, matchLabels, "override"),
+    tech: matchesOversightTier(oversightRoles, matchLabels, "override") || ["TECH", "OPERATIONS_TECH"].includes(roleCode ?? ""),
+    stationUser: roleLabels.some((label) => reviewRole(label) === "station"),
+    label: displayLabel || roleName || "Reviewer"
+  };
+});
+
+export async function getReviewAccess(
+  authorization: AuthorizationContext,
+  stationId: string,
+  review: { status: string; current_step_order: number; reviewer_edit_reopened?: boolean } | null,
+  steps: { step_order: number; reviewer_user_id?: string | null; reviewer_role: string; status: string; bypassed_at?: string | null; proxy_reviewer_user_id?: string | null }[],
+  options?: { inScope?: boolean; scorecardImported?: boolean }
+) {
+  const actor = await loadReviewActor(authorization.companyId!, authorization.userId, authorization.roleCode, authorization.roleName);
+  const pendingSteps = steps.filter((step) => step.status !== "skipped" && ["cluster","aom","national"].includes(reviewRole(step.reviewer_role))).sort((a, b) => a.step_order - b.step_order);
+  const current = pendingSteps.find((step) => step.step_order === review?.current_step_order && step.status === "pending");
+  // Review Desk already filtered the station into permittedLocations — trust that over a second scope check.
+  const inScope = options?.inScope ?? (authorization.hasAllLocationAccess || authorization.locationScopeIds.includes(stationId));
+  // Anyone with the Cluster/AOM filter permission gets the same oversight-level edit rights as
+  // Program Manager/Owner — they can already see every station in scope, so editing should follow.
+  const hasClusterFilterAccess = hasPermission(authorization, "performance_review_cluster_filter", "access");
+  const capabilities = reviewCapabilities({
+    userId: authorization.userId,
+    // Managing Partner is now just another row in the Master-configured oversight list
+    // (actor.programManager) instead of a hardcoded regex here.
+    owner: isCompanyOwner(authorization),
+    programManager: actor.programManager,
+    nationalHead: actor.nationalHead,
+    tech: actor.tech,
+    stationUser: actor.stationUser,
+    hasClusterFilterAccess,
+    inScope,
+    canView: hasPermission(authorization, "performance_review", "access"),
+    canAdd: hasPermission(authorization, "performance_review", "add"),
+    canEdit: hasPermission(authorization, "performance_review", "edit"),
+    closed: review?.status === "closed",
+    firstReviewerId: pendingSteps[0]?.reviewer_user_id ?? null,
+    currentReviewerId: current?.proxy_reviewer_user_id || current?.reviewer_user_id || null,
+    currentIsFirst: current?.step_order === pendingSteps[0]?.step_order,
+    hasProxy: Boolean(current?.proxy_reviewer_user_id),
+    higherReviewer: pendingSteps.some(step => step.reviewer_user_id === authorization.userId && step.step_order > (current?.step_order ?? pendingSteps[0]?.step_order ?? 0)),
+    currentRole: current?.reviewer_role ?? null,
+    scorecardImported: options?.scorecardImported ?? false,
+    reviewerEditReopened: Boolean(review?.reviewer_edit_reopened)
+  });
+  const routingIssue = reviewRoutingIssue(steps);
+  return {
+    actor,
+    routingIssue,
+    ...capabilities,
+    canComplete: capabilities.canComplete && !routingIssue,
+    // Exposed so the UI can show "you are the original reviewer" hints (e.g. the reopened-edit-access banner).
+    isOriginalReviewer: Boolean(pendingSteps[0]?.reviewer_user_id && pendingSteps[0].reviewer_user_id === authorization.userId)
+  };
+}

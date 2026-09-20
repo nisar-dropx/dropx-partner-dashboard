@@ -1,0 +1,13 @@
+.review-edd-number{border:0;background:transparent;color:#c2410c;font:inherit;font-weight:700;cursor:pointer;padding:5px;min-height:32px;text-decoration:underline;text-underline-offset:3px}
+.review-edd-number:hover{background:#fff3e8;border-radius:5px}
+.review-edd-number:focus-visible{outline:2px solid #f97316;outline-offset:2px}
+.review-edd-checkpoint{margin:12px 0;padding:14px;border:1px solid #fed7aa;border-radius:10px;background:#fff;scroll-margin:80px;min-width:0}
+.review-edd-checkpoint>header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.review-edd-checkpoint p{font-size:12px;color:#64748b;margin:7px 0}
+.review-edd-checkpoint-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0}
+.review-edd-checkpoint-controls>input{flex:1;min-width:180px;border:1px solid #dce3ec;border-radius:7px;padding:10px;font:inherit}
+.review-edd-checkpoint-controls>button{min-height:36px;border:1px solid #dce3ec;border-radius:7px;background:#fff;padding:6px 12px}
+.review-edd-checkpoint .review-operation-table{max-height:350px;overflow:auto}
+.review-edd-explanation{padding:10px 0;font-size:12px}.review-edd-explanation>summary{cursor:pointer;font-weight:650;color:#475569}
+.review-edd-checkpoint .edd-multiselect-panel{max-width:calc(100vw - 64px)}
+@media(max-width:650px){.review-edd-checkpoint{padding:10px}.review-edd-checkpoint-controls{align-items:stretch}.review-edd-checkpoint-controls>input{flex-basis:100%}.review-edd-number{min-height:40px}.review-edd-checkpoint .review-operation-table{max-height:300px}}

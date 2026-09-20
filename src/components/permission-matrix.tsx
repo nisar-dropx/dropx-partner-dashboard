@@ -51,13 +51,15 @@ const dashboardGroups: PermissionGroup[] = [
 ];
 
 const opsGroups: PermissionGroup[] = [
+  { key: "ops_attendance", label: "Team Ops", codes: ["ops_attendance_reports", "ops_unplanned_leaves", "ops_offboarding_checklist", "ops_salary_hold"] },
   { key: "ops_pulse", label: "Command Center", codes: ["ops_pulse"] },
-  { key: "performance", label: "Performance", codes: ["performance", "performance_review"] },
+  { key: "performance", label: "Performance", codes: ["performance", "performance_review", "performance_review_cluster_filter", "performance_review_status"] },
   { key: "capacity", label: "Capacity", codes: ["capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring"], hiddenCodes: ["capacity"] },
   { key: "service_network", label: "Network Planning", codes: ["service_network"] },
-  { key: "workforce_register", label: "Work Force Register", codes: ["contractors", "workers", "vendors"] },
+  { key: "workforce_register", label: "Workforce Register", codes: ["delivery_associates"] },
+  { key: "ops_rostering", label: "Rostering", codes: ["ops_rostering"] },
   { key: "operations", label: "Operations", codes: ["daily_submission", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate"], hiddenCodes: ["cod"] },
-  { key: "edd_dashboard", label: "Delivery Performance", codes: ["edd_dashboard"] },
+  { key: "edd_dashboard", label: "Delivery Performance", codes: ["edd_dashboard"], hiddenCodes: ["station_edd"] },
   { key: "business_documents", label: "Business Documents", codes: ["business_documents"] },
   { key: "payments", label: "Payments", codes: ["expense_requests", "payment_requests", "payment_approvals", "payment_reports"], hiddenCodes: ["payments"] },
   { key: "cps", label: "CPS", codes: ["cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "imports", "cps_inputs", "cps_unmapped"], hiddenCodes: ["cps"] },

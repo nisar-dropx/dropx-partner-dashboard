@@ -1,5 +1,6 @@
 import "server-only";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
+import { formatShiftClock } from "@/lib/roster-plan-preference";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type Relation<T> = T | T[] | null | undefined;
@@ -62,9 +63,12 @@ export type OpsStationManpowerPerson = {
     reported: boolean;
     lateMinutes: number;
     workMinutes: number;
+    workMinutesRecorded?: boolean;
     missingPunch: boolean;
     rosterDayType: string | null;
     shiftName: string | null;
+    shiftStartTime: string | null;
+    shiftEndTime: string | null;
     shiftSource: string | null;
     inTime: string | null;
     outTime: string | null;
@@ -124,7 +128,7 @@ function indiaPunchMinutes(value: string | null | undefined, punchDate: string) 
 }
 
 function shiftStartMinutes(value: string | null | undefined) {
-  const match = String(value ?? "").match(/^(\d{2}):(\d{2})/);
+  const match = String(value ?? "").match(/^(\d{1,2}):(\d{2})/);
   return match ? Number(match[1]) * 60 + Number(match[2]) : null;
 }
 
@@ -136,26 +140,36 @@ function isoWeekday(value: string) {
 export async function loadOpsStationManpower(
   companyId: string,
   locations: CodLocationRow[],
-  asOf: string
+  asOf: string,
+  options: { historical?: boolean } = {}
 ): Promise<OpsStationManpowerResult> {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   if (!locations.length) return { asOf, people: [] };
   const admin = supabaseAdmin;
   const locationIds = new Set(locations.map((location) => location.id));
+  const employeeQuery = admin.from("employees")
+    .select("id,employee_code,full_name,biometric_id,location_id,designation_id")
+    .eq("company_id", companyId).is("deleted_at", null);
+  const contractorQuery = admin.from("contractors")
+    .select("id,dropx_id,full_name,biometric_id,location_id,designation")
+    .eq("company_id", companyId).is("deleted_at", null);
+  const engagementQuery = admin.from("hr_engagements")
+    .select("id,worker_type,employee_id,contractor_id").eq("company_id", companyId);
+  const designationQuery = admin.from("designations").select("id,name,code").eq("company_id", companyId);
+  if (options.historical) {
+    for (const query of [employeeQuery, contractorQuery]) query
+      .or(`date_of_join.is.null,date_of_join.lte.${asOf}`)
+      .or(`last_working_date.is.null,last_working_date.gte.${asOf}`)
+      .or(`is_active.eq.true,last_working_date.gte.${asOf}`);
+    engagementQuery.lte("start_date", asOf).or(`end_date.is.null,end_date.gte.${asOf}`);
+  } else {
+    employeeQuery.eq("is_active", true).not("people_lifecycle_status", "in", '("offboarding","offboarded")');
+    contractorQuery.eq("is_active", true).not("people_lifecycle_status", "in", '("offboarding","offboarded")');
+    engagementQuery.eq("status", "active"); designationQuery.eq("is_active", true);
+  }
 
   const [employeesResult, contractorsResult, engagementsResult, designationsResult] = await Promise.all([
-    admin.from("employees")
-      .select("id,employee_code,full_name,biometric_id,location_id,designation_id")
-      .eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).limit(5000),
-    admin.from("contractors")
-      .select("id,dropx_id,full_name,biometric_id,location_id,designation")
-      .eq("company_id", companyId).eq("is_active", true).is("deleted_at", null).limit(5000),
-    admin.from("hr_engagements")
-      .select("id,worker_type,employee_id,contractor_id")
-      .eq("company_id", companyId).eq("status", "active").limit(5000),
-    admin.from("designations")
-      .select("id,name,code")
-      .eq("company_id", companyId).eq("is_active", true).limit(1000)
+    employeeQuery.limit(5000), contractorQuery.limit(5000), engagementQuery.limit(5000), designationQuery.limit(1000)
   ]);
   const initialError = employeesResult.error ?? contractorsResult.error ?? engagementsResult.error ?? designationsResult.error;
   if (initialError) throw new Error(initialError.message);
@@ -230,6 +244,8 @@ export async function loadOpsStationManpower(
   ].filter((person): person is typeof person & { locationId: string } => Boolean(person.locationId && locationIds.has(person.locationId)));
 
   const employeeIds = rawPeople.filter((person) => person.workerType === "employee").map((person) => person.id);
+  const contractorIds = options.historical ? rawPeople.filter(person => person.workerType === "contractor").map(person => person.id) : [];
+  const leaveFilters = [employeeIds.length ? `employee_id.in.(${employeeIds.join(",")})` : "", contractorIds.length ? `contractor_id.in.(${contractorIds.join(",")})` : ""].filter(Boolean);
   const workerIds = rawPeople.map((person) => person.id);
   const enrolmentIds = [...new Set(rawPeople.flatMap((person) => biometricVariants(person.biometricId)))];
   const [attendanceResult, punchResult, datedRosterResult, weeklyPlansResult, leaveResult] = await Promise.all([
@@ -244,10 +260,10 @@ export async function loadOpsStationManpower(
       .select("worker_type,worker_id,roster_date,day_type,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
       .eq("company_id", companyId).eq("roster_date", asOf).in("worker_id", workerIds).eq("hr_roster_plans.status", "approved").eq("hr_roster_plans.roster_kind", "dated").limit(5000) : Promise.resolve({ data: [], error: null }),
     admin.from("hr_roster_plans")
-      .select("id,status,roster_kind,effective_from,superseded_at,revision_no")
-      .eq("company_id", companyId).eq("status", "approved").eq("roster_kind", "recurring_weekly").in("location_id", locations.map((location) => location.id)).lte("effective_from", asOf).limit(1000),
-    employeeIds.length ? admin.from("hr_leave_requests")
-      .select("employee_id").eq("company_id", companyId).eq("status", "approved").in("employee_id", employeeIds).lte("start_date", asOf).gte("end_date", asOf).limit(5000) : Promise.resolve({ data: [], error: null })
+      .select("id,status,roster_kind,effective_from,superseded_at,revision_no,location_id,hr_roster_plan_locations(location_id)")
+      .eq("company_id", companyId).eq("status", "approved").eq("roster_kind", "recurring_weekly").lte("effective_from", asOf).limit(2000),
+    leaveFilters.length ? admin.from("hr_leave_requests")
+      .select("employee_id,contractor_id").eq("company_id", companyId).eq("status", "approved").or(leaveFilters.join(",")).lte("start_date", asOf).gte("end_date", asOf).limit(5000) : Promise.resolve({ data: [], error: null })
   ]);
   const detailError = attendanceResult.error ?? punchResult.error ?? datedRosterResult.error ?? weeklyPlansResult.error ?? leaveResult.error;
   if (detailError) throw new Error(detailError.message);
@@ -278,7 +294,15 @@ export async function loadOpsStationManpower(
     rows.push(punch);
     punchesByEnrolment.set(key, rows);
   }
-  const activeWeeklyPlans = (weeklyPlansResult.data ?? []).filter((plan) => !plan.superseded_at || asOf < plan.superseded_at);
+  const selectedLocationIds = new Set(locations.map((location) => location.id));
+  const activeWeeklyPlans = (weeklyPlansResult.data ?? []).filter((plan) => {
+    if (plan.superseded_at && !(asOf < plan.superseded_at)) return false;
+    const linked = Array.isArray(plan.hr_roster_plan_locations) ? plan.hr_roster_plan_locations : [];
+    if (plan.location_id && selectedLocationIds.has(plan.location_id)) return true;
+    if (linked.some((item: { location_id: string }) => selectedLocationIds.has(item.location_id))) return true;
+    // Keep plans without location metadata so worker-scoped entries can still resolve.
+    return !plan.location_id && linked.length === 0;
+  });
   const activeWeeklyPlanIds = activeWeeklyPlans.map((plan) => plan.id);
   const weeklyEntriesResult = activeWeeklyPlanIds.length && workerIds.length ? await admin.from("hr_roster_entries")
     .select("plan_id,worker_type,worker_id,roster_date,day_type,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes)")
@@ -313,6 +337,7 @@ export async function loadOpsStationManpower(
     if (key) attendanceByWorker.set(key, attendance);
   }
   const leaveEmployeeIds = new Set((leaveResult.data ?? []).map((leave) => leave.employee_id));
+  const leaveContractorIds = new Set((leaveResult.data ?? []).map(leave => leave.contractor_id));
 
   const people = rawPeople.map((person): OpsStationManpowerPerson => {
     const roster = rosterRows.filter((row) => {
@@ -359,7 +384,7 @@ export async function loadOpsStationManpower(
       : 0;
     const reported = Boolean(attendance?.in_time);
     const missingPunch = reported && (Number(attendance?.punch_count ?? 0) < 2 || !attendance?.out_time);
-    const onLeave = person.workerType === "employee" && leaveEmployeeIds.has(person.id);
+    const onLeave = person.workerType === "employee" ? leaveEmployeeIds.has(person.id) : leaveContractorIds.has(person.id);
     const availability = onLeave ? "On leave"
       : !reported && roster?.day_type === "weekly_off" ? "Roster off"
         : !reported ? "Not reported"
@@ -377,9 +402,12 @@ export async function loadOpsStationManpower(
         reported,
         lateMinutes,
         workMinutes: Number(attendance?.work_minutes ?? 0),
+        workMinutesRecorded: attendance?.work_minutes != null,
         missingPunch,
         rosterDayType: roster?.day_type ? String(roster.day_type) : null,
-        shiftName: shift ? `${shift.name} · ${shift.start_time.slice(0, 5)}-${shift.end_time.slice(0, 5)}` : null,
+        shiftName: shift ? `${shift.name} · ${formatShiftClock(shift.start_time)}-${formatShiftClock(shift.end_time)}` : null,
+        shiftStartTime: shift?.start_time ?? null,
+        shiftEndTime: shift?.end_time ?? null,
         shiftSource,
         inTime: attendance?.in_time ?? null,
         outTime: attendance?.out_time ?? null,

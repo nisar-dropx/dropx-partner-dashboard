@@ -76,7 +76,7 @@ export function SidebarNav({ active, items }: SidebarNavProps) {
             {item.children.map((child) => child.href ? (
               <PendingLink className="nav-subitem" disableWhenCurrent href={child.href} key={child.label}>
                 <span className="nav-label">{child.label}</span>
-                <PaymentNavBadge code={item.code === "people_all" && child.code === "people_all" ? undefined : child.code} />
+                <PaymentNavBadge code={child.hideBadge || (item.code === "people_all" && child.code === "people_all") ? undefined : child.code} />
               </PendingLink>
             ) : (
               <span className="nav-subitem disabled" key={child.label}>{child.label}</span>

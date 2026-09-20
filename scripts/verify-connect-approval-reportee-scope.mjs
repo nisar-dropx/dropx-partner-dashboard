@@ -12,6 +12,17 @@ const reimbursements = read("apps/connect/app/api/connect/reimbursements/route.t
 const attendance = read("apps/connect/src/lib/connect-manager-approvals.ts");
 const location = read("apps/connect/src/lib/connect-location-integrity.ts");
 
+function extractExport(source, name) {
+  const start = source.indexOf(`export async function ${name}`);
+  if (start < 0) return "";
+  const next = source.indexOf("\nexport async function ", start + 1);
+  return next < 0 ? source.slice(start) : source.slice(start, next);
+}
+
+const attendanceManagerList = extractExport(attendance, "listConnectAttendanceApprovals");
+const attendanceHrList = extractExport(attendance, "listConnectAttendanceHrApprovals");
+const rosterSwapList = extractExport(attendance, "listConnectRosterSwapApprovals");
+
 const checks = [
   [component.includes('useState<ReporteeScope>("immediate")'), "Approval Inbox always opens with immediate reportees"],
   [component.includes("Immediate reportees") && component.includes("Entire team"), "the user-controlled scope switch is present"],
@@ -20,8 +31,29 @@ const checks = [
   [scope.includes('relationship_type", "solid_line"') && scope.includes('is_primary", true'), "scope follows active primary solid-line Org Chart relationships"],
   [reportingTree.includes("while (queue.length)"), "Entire team recursively traverses the reporting tree"],
   [approvals.includes("loadConnectReporteeAccess(account, scope)"), "leave, attendance and location APIs load one shared reportee scope"],
-  [attendance.match(/connectReporteeMatches\(reportees/g)?.length >= 2, "manager and HR attendance queues are both reportee-scoped"],
-  [reimbursements.includes("connectReporteeMatches(reportees"), "claims are reportee-scoped"],
+  [
+    attendanceManagerList.includes('.in("approver_user_id", actorUserIds)')
+      && attendanceManagerList.includes("Explicit step assignment")
+      && !attendanceManagerList.includes("connectReporteeMatches")
+      && attendanceHrList.includes("loadConnectAttendanceApproveScope")
+      && attendanceHrList.includes("connectWorkforceMatches")
+      && attendanceHrList.includes("connectReporteeMatches(reportees")
+      && rosterSwapList.includes("connectReporteeMatches(reportees"),
+    "manager attendance is assignee-scoped; HR finalization uses attendance.approve scope filtered by selected reportees"
+  ],
+  [
+    approvals.includes("Steps are assigned explicitly")
+      && approvals.includes("matchesReportee: () => true")
+      && approvals.includes("listConnectWfhHrApprovals(account, matchesReportee)")
+      && approvals.includes("connectReporteeMatches(reportees, profileType, profileId)"),
+    "leave and WFH manager queues are assignee-scoped; WFH/Business Trip HR finalization follows selected reportees"
+  ],
+  [
+    reimbursements.includes('.in("approver_user_id", userIds)')
+      && reimbursements.includes("Do not require org-chart reportee scope")
+      && !reimbursements.includes("connectReporteeMatches(reportees"),
+    "claims are assignee-scoped (not org-chart filtered)"
+  ],
   [location.includes("loadConnectReporteeAccess(account, reporteeScope)"), "location review authorization follows the selected reporting scope"]
 ];
 

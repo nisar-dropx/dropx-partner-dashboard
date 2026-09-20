@@ -127,7 +127,18 @@ function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
   if (question.answer_type === "file") {
     return (
       <>
-        {answer?.file_name ? <p className="subtle" style={{ margin: "4px 0 8px" }}>Current file: {answer.file_name}</p> : null}
+        {answer?.file_name ? (
+          <p className="subtle payment-attachment-cell" style={{ margin: "4px 0 8px" }}>
+            Current file:{" "}
+            <a
+              href={`/api/payments/requests/attachment?answer_id=${encodeURIComponent(answer.id)}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {answer.file_name}
+            </a>
+          </p>
+        ) : null}
         <input
           accept={paymentFileAccept(question.dropdown_options)}
           className="field"
@@ -135,7 +146,11 @@ function resubmitInputForQuestion(question: QuestionRow, answer?: AnswerRow) {
           required={question.is_required && !answer?.file_name}
           type="file"
         />
-        <p className="subtle" style={{ margin: "4px 0 0" }}>Allowed: {paymentFileGroupLabels(question.dropdown_options).join(", ")}</p>
+        <p className="subtle" style={{ margin: "4px 0 0" }}>
+          {answer?.file_name
+            ? "Choose a file to replace the current one, or leave blank to keep it."
+            : `Allowed: ${paymentFileGroupLabels(question.dropdown_options).join(", ")}`}
+        </p>
       </>
     );
   }
@@ -376,8 +391,8 @@ export default async function PaymentRequestsPage({
                       <td><strong>{request.request_no}</strong></td>
                       <td>{request.location_code}</td>
                       <td>{head?.name ?? "-"}</td>
-                      <td>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN")}`}</td>
-                      <td>{request.amount == null ? "-" : `Rs ${Number(request.amount).toLocaleString("en-IN")}`}</td>
+                      <td>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
+                      <td>{request.amount == null ? "-" : `Rs ${Number(request.amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>
                       <td>{request.payment_mode ? paymentModeLabel(request.payment_mode) : "-"}</td>
                       <td>{request.account_holder_name ?? "-"}</td>
                       <td>{request.payment_mode === "upi_payment" ? request.payment_reference ?? "-" : request.bank_account_no ?? "-"}</td>
@@ -427,7 +442,7 @@ export default async function PaymentRequestsPage({
                 </label>
                 <label>
                   Estimated Amount
-                  <input className="field" value={bankRequest.amount_requested == null ? "-" : `Rs ${Number(bankRequest.amount_requested).toLocaleString("en-IN")}`} readOnly />
+                  <input className="field" value={bankRequest.amount_requested == null ? "-" : `Rs ${Number(bankRequest.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`} readOnly />
                 </label>
                 <label>
                   Actual Amount *

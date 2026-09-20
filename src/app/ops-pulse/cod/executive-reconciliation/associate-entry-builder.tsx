@@ -82,7 +82,7 @@ function numberValue(value: string) {
 }
 
 function currency(value: number) {
-  return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return value.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 function optimisticStatus(expectedAmount: number, collectedAmount: number) {

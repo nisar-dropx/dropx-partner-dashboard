@@ -9,6 +9,8 @@ import { requirePagePermission, type AuthorizationContext } from "@/lib/authoriz
 import { requireCompanyId } from "@/lib/company-scope";
 import { formatDashboardDate, formatDashboardDateTime } from "@/lib/date-format";
 import { getPaymentApprovalEligibility } from "@/lib/payment-approval-scope";
+import { paymentApprovalAmount } from "@/lib/payment-approval-amount";
+import { paymentShipmentCount } from "@/lib/payment-shipment-count";
 import {
   matchesPaymentApprovalFacets,
   paymentApprovalDateKey,
@@ -28,6 +30,7 @@ type RequestRow = {
   request_no: string;
   location_id: string | null;
   location_code: string;
+  location_model_id?: string | null;
   payment_head_id: string;
   amount: number | null;
   amount_requested: number | null;
@@ -54,6 +57,7 @@ type RequestRow = {
   processed_at: string | null;
   payment_heads?: { name: string; code: string } | null;
   profiles?: { full_name: string | null; email: string | null } | null;
+  stations?: { location_model_id: string | null } | null;
 };
 
 const NO_LOCATION_SCOPE_ID = "00000000-0000-0000-0000-000000000000";
@@ -200,7 +204,8 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
       updated_at,
       processed_at,
       payment_heads ( name, code ),
-      profiles:requested_by ( full_name, email )
+      profiles:requested_by ( full_name, email ),
+      stations ( location_model_id )
     `)
     .eq("company_id", companyId)
     .order("created_at", { ascending: false });
@@ -223,7 +228,8 @@ async function loadApprovals(companyId: string, authorization: AuthorizationCont
   const unscopedRequests = ((requestsResult.data ?? []) as unknown as RequestRow[]).map((request) => ({
     ...request,
     payment_heads: firstRelation(request.payment_heads),
-    profiles: firstRelation(request.profiles)
+    profiles: firstRelation(request.profiles),
+    location_model_id: firstRelation(request.stations)?.location_model_id ?? null
   }));
   const eligibleIds = await getPaymentApprovalEligibility(companyId, authorization, unscopedRequests);
   const normalizedFilter = filters.status || "pending";
@@ -346,6 +352,7 @@ export default async function PaymentApprovalsPage({
   selectedFilters.dates.forEach((value) => currentParams.append("date", value));
   const manageId = firstSearchParam(searchParams?.manage);
   const selectedRequest = manageId ? requests.find((request) => request.id === manageId) ?? null : null;
+  const selectedAmount = selectedRequest ? paymentApprovalAmount(selectedRequest) : null;
   const selectedLocationResult = selectedRequest && supabaseAdmin
     ? await supabaseAdmin
         .from("stations")
@@ -370,6 +377,7 @@ export default async function PaymentApprovalsPage({
     ...answer,
     payment_head_questions: firstRelation(answer.payment_head_questions)
   }));
+  const shipmentCount = paymentShipmentCount(answers);
   const logs = detailData?.[1].logs ?? [];
   const currentApprovalCycle = Number(selectedRequest?.approval_cycle) || 1;
   const isResubmitted = selectedRequest ? isResubmittedPaymentStage(selectedRequest) : false;
@@ -483,18 +491,24 @@ export default async function PaymentApprovalsPage({
                 </tr>
               </thead>
               <tbody>
-                {requests.length ? requests.map((request) => (
-                  <tr key={request.id}>
-                    <td><strong>{request.request_no}</strong></td>
-                    <td>{request.location_code}</td>
-                    <td>{request.payment_heads?.name ?? "-"}</td>
-                    <td>{request.amount == null ? "-" : `Rs ${Number(request.amount).toLocaleString("en-IN")}`}</td>
-                    <td>{request.profiles?.full_name ?? request.profiles?.email ?? "-"}</td>
-                    <td><StatusPill status={paymentStatusLabel(request)} /></td>
-                    <td>{formatDashboardDate(request.created_at)}</td>
-                    {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/payments/approvals?${withQueryParam(currentParams, "manage", request.id)}`} scroll={false}>Manage</PendingLink></td> : null}
-                  </tr>
-                )) : (
+                {requests.length ? requests.map((request) => {
+                  const displayAmount = paymentApprovalAmount(request);
+                  return (
+                    <tr key={request.id}>
+                      <td><strong>{request.request_no}</strong></td>
+                      <td>{request.location_code}</td>
+                      <td>{request.payment_heads?.name ?? "-"}</td>
+                      <td>
+                        <span>{displayAmount.text}</span>
+                        {displayAmount.isEstimated ? <small className="subtle" style={{ display: "block" }}>Estimated</small> : null}
+                      </td>
+                      <td>{request.profiles?.full_name ?? request.profiles?.email ?? "-"}</td>
+                      <td><StatusPill status={paymentStatusLabel(request)} /></td>
+                      <td>{formatDashboardDate(request.created_at)}</td>
+                      {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/payments/approvals?${withQueryParam(currentParams, "manage", request.id)}`} scroll={false}>Manage</PendingLink></td> : null}
+                    </tr>
+                  );
+                }) : (
                   <tr><td className="empty-cell" colSpan={pagePermission.canEdit ? 8 : 7}>No approvals pending.</td></tr>
                 )}
               </tbody>
@@ -525,8 +539,9 @@ export default async function PaymentApprovalsPage({
               ) : null}
               <div className="form-grid three">
                 <label>Payment Head<input className="field" readOnly value={selectedRequest.payment_heads?.name ?? "-"} /></label>
-                <label>{selectedRequest.amount == null && selectedRequest.amount_requested != null ? "Estimated Amount" : "Amount"}<input className="field" readOnly value={(selectedRequest.amount ?? selectedRequest.amount_requested) == null ? "-" : `Rs ${Number(selectedRequest.amount ?? selectedRequest.amount_requested).toLocaleString("en-IN")}`} /></label>
+                <label>{selectedAmount?.isEstimated ? "Estimated Amount" : "Amount"}<input className="field" readOnly value={selectedAmount?.text ?? "-"} /></label>
                 <label>Status<input className="field" readOnly value={paymentStatusLabel(selectedRequest)} /></label>
+                {shipmentCount !== null ? <label>Number of Shipments<input className="field" readOnly value={shipmentCount.toLocaleString("en-IN")} /></label> : null}
                 <label>Payment Method<input className="field" readOnly value={selectedRequest.payment_mode === "upi_payment" ? "UPI Payment" : selectedRequest.payment_mode === "online_payment" ? "Online Payment" : "Bank Transfer"} /></label>
                 {hasDisplayValue(selectedRequest.account_holder_name) ? <label>Acc Holder Name<input className="field" readOnly value={selectedRequest.account_holder_name ?? "-"} /></label> : null}
                 {selectedRequest.payment_mode === "upi_payment" && hasDisplayValue(selectedRequest.payment_reference) ? <label>UPI ID<input className="field" readOnly value={selectedRequest.payment_reference ?? "-"} /></label> : null}

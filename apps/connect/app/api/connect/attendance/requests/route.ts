@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { userFacingError } from "@/lib/user-facing-error";
 import { resolveConnectAttendanceWorker } from "@/lib/connect-attendance-worker";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -66,6 +67,6 @@ export async function GET(request: NextRequest) {
       }))
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load attendance requests." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load attendance requests.") }, { status: 400 });
   }
 }

@@ -17,7 +17,7 @@ const MATCH_EPSILON = 0.01;
 const DIFFERENCE_REMARKS_RUPEES = 5;
 
 function currency(value: number) {
-  return value.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return value.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 /** Formats INR with the sign before the rupee symbol: -₹26.00 */

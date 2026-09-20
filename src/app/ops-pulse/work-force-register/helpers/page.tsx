@@ -1,14 +1,5 @@
-import { DynamicWorkforceCategoryPageContent } from "@/app/people/category/[code]/page";
-import { RegisterNavigation, type WorkForceRegisterSearchParams } from "@/components/ops-work-force-register-page";
+import { redirect } from "next/navigation";
 
-export default function HelpersRegisterPage({ searchParams }: { searchParams?: WorkForceRegisterSearchParams }) {
-  return (
-    <DynamicWorkforceCategoryPageContent
-      pageCodeOverride="contractors"
-      params={{ code: "helpers" }}
-      registerNavigation={<RegisterNavigation active="helpers" />}
-      returnPathOverride="/work-force-register/helpers"
-      searchParams={searchParams}
-    />
-  );
+export default function HelpersRegisterPage() {
+  redirect("/work-force-register");
 }

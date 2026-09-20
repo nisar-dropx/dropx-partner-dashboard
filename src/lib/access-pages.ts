@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { workforceCategoryPageCode, workforceCategoryPagePrefix } from "@/lib/dynamic-workforce";
 
 export const accessPages = [
+  {code:'ops_notification_settings',name:'Ops Settings · Notifications',sort_order:133},
   { code: "dashboard", name: "Command Center", sort_order: 10 },
   { code: "people_all", name: "All People", sort_order: 20 },
   { code: "people_review", name: "Profile Review", sort_order: 29 },
@@ -25,6 +26,8 @@ export const accessPages = [
   { code: "ops_pulse", name: "Ops Pulse", sort_order: 84 },
   { code: "performance", name: "Performance", sort_order: 84 },
   { code: "performance_review", name: "Performance Reviews", sort_order: 84 },
+  { code: "performance_review_cluster_filter", name: "Review Desk Cluster Filter", sort_order: 84 },
+  { code: "performance_review_status", name: "Review Status", sort_order: 84 },
   { code: "capacity", name: "Capacity", sort_order: 84 },
   { code: "capacity_overview", name: "Capacity Overview", sort_order: 84 },
   { code: "capacity_associates", name: "Associate SPR", sort_order: 84 },
@@ -32,6 +35,10 @@ export const accessPages = [
   { code: "capacity_hiring", name: "Hiring Review", sort_order: 84 },
   { code: "ops_reports", name: "Ops Reports", sort_order: 84 },
   { code: "ops_attendance_reports", name: "Attendance Reports", sort_order: 85 },
+  { code: "ops_unplanned_leaves", name: "Attendance · Unplanned Leaves (read-only)", sort_order: 85 },
+  { code: "ops_offboarding_checklist", name: "Team Ops · Offboarding Checklist", sort_order: 85 },
+  { code: "ops_salary_hold", name: "Team Ops · Salary Hold", sort_order: 86 },
+  { code: "ops_rostering", name: "Rostering", sort_order: 85 },
   { code: "service_network", name: "Network Planning", sort_order: 92 },
   { code: "service_network_master", name: "Network Planning Master", sort_order: 93 },
   { code: "daily_submission", name: "Daily Submission", sort_order: 85 },
@@ -43,6 +50,7 @@ export const accessPages = [
   { code: "cod_portal_checks", name: "COD Portal Checks", sort_order: 91 },
   { code: "cod_cash_in_associate", name: "Cash In Associate", sort_order: 94 },
   { code: "edd_dashboard", name: "Delivery Performance", sort_order: 95 },
+  { code: "station_edd", name: "EDD", sort_order: 96 },
   { code: "cps", name: "CPS", sort_order: 73 },
   { code: "cps_overview", name: "CPS Overview", sort_order: 74 },
   { code: "cps_daily", name: "Daily CPS", sort_order: 75 },
@@ -496,6 +504,8 @@ export async function ensureAccessPages(supabase: SupabaseClient, companyId: str
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_executive_reconciliation"], "cod_cash_in_associate");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cod_reports"], "performance");
     await seedTargetPermissionsFromSources(supabase, companyId, ["performance"], "performance_review");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["performance_review"], "performance_review_status");
+    await seedTargetPermissionsFromSources(supabase, companyId, ["edd_dashboard"], "station_edd");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity_overview");
     await seedTargetPermissionsFromSources(supabase, companyId, ["cps_associates"], "capacity_associates");

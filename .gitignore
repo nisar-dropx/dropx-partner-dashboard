@@ -15,6 +15,7 @@ build-output.txt
 deploy-output.txt
 
 .vercel
+supabase/.temp/
 .env*
 /docs/CASH_RECON_EXECUTIVE_RECONCILIATION_MIGRATION.md
 */node_modules

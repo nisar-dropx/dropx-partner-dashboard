@@ -10,6 +10,9 @@ import {
   workforceTable
 } from "@/lib/workforce-profiles";
 import { requiredDropxOnePageCodes } from "@/lib/dropx-one-pages";
+import { connectWfhEligible, loadConnectWfhPolicies } from "./connect-wfh-access";
+import { connectBusinessTripEligible, loadConnectBusinessTripPolicies } from "./connect-business-trip-access";
+import { enforceAccessCutoffIfDueForWorker } from "./access-cutoff";
 
 export type ConnectAccount = {
   id: string;
@@ -336,6 +339,23 @@ async function resolveIcSelfServiceByReference(
   mobile: string,
   localMobile: string
 ): Promise<AccountRow | null> {
+  const match = await resolveIcSelfServiceByReferenceUnchecked(companyId, reference, countryCode, mobile, localMobile);
+  // Offboarding access lasts through the confirmed last working day, enforced lazily —
+  // re-check the matched worker's cutoff before returning it as a valid login.
+  if (match && (match.profile_type === "employee" || match.profile_type === "contractor")) {
+    const stillActive = await enforceAccessCutoffIfDueForWorker(match.company_id, match.profile_type, match.id);
+    if (!stillActive) return null;
+  }
+  return match;
+}
+
+async function resolveIcSelfServiceByReferenceUnchecked(
+  companyId: string,
+  reference: string,
+  countryCode: string,
+  mobile: string,
+  localMobile: string
+): Promise<AccountRow | null> {
   if (!supabaseAdmin || !reference) return null;
 
   const references = new Set([reference.toLowerCase()]);
@@ -526,8 +546,12 @@ function resolveConnectPageAccess(
   designationPages?: string[] | null
 ) {
   if (profileType === "user") return managerPageAccess;
+  const baselinePages = profileType === "employee" || profileType === "contractor"
+    ? ["performance"]
+    : [];
   return [...new Set([
     ...intersectPageAccess(categoryPages, designationPages),
+    ...baselinePages,
     ...requiredDropxOnePageCodes
   ])];
 }
@@ -627,6 +651,19 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     }),
     ...employeeAccounts
   ].filter((account) => account.company_id);
+
+  // Offboarding access lasts through the confirmed last working day, enforced lazily
+  // (no scheduled job) — re-check any employee/contractor account matched above in
+  // case their cutoff has passed since the is_active=true queries ran (this is the
+  // point of enforcement for Connect login, since a stale is_active could otherwise
+  // let a login through past the worker's last day).
+  const cutoffChecks = await Promise.all(accounts.map(async (account) => {
+    if (account.profile_type !== "employee" && account.profile_type !== "contractor") return true;
+    return enforceAccessCutoffIfDueForWorker(account.company_id, account.profile_type, account.id);
+  }));
+  const liveAccounts = accounts.filter((_, index) => cutoffChecks[index]);
+  accounts.length = 0;
+  accounts.push(...liveAccounts);
 
   await enrichAccountsWithIcSelfService(
     profilesResult.data ?? [],
@@ -751,6 +788,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   }
   const pageAccessByDesignationId = new Map<string, string[] | null>();
   const designationNameById = new Map<string, string>();
+  const designationCodeById = new Map<string, string | null>();
   const pageAccessByDesignationKey = new Map<string, string[] | null>();
   const categoryIds = [...new Set(designationRows.map((designation) => designation.designation_category_id).filter(Boolean))] as string[];
   const designationCategoryResult = categoryIds.length
@@ -773,6 +811,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       : null;
     pageAccessByDesignationId.set(String(designation.id), pages);
     designationNameById.set(String(designation.id), String(designation.name || designation.code));
+    designationCodeById.set(String(designation.id), designation.code ? String(designation.code) : null);
     peopleModuleByDesignationId.set(
       String(designation.id),
       designation.designation_category_id
@@ -805,6 +844,12 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     throw new Error(preferenceResult.error.message);
   }
   const defaultPreference = preferenceResult.error ? null : preferenceResult.data;
+  const wfhPolicies = await loadConnectWfhPolicies(
+    [...new Set(loginAccounts.map((account) => account.company_id))]
+  );
+  const businessTripPolicies = await loadConnectBusinessTripPolicies(
+    [...new Set(loginAccounts.map((account) => account.company_id))]
+  );
 
   return Promise.all(loginAccounts
     .filter((account) => companyNameById.has(account.company_id))
@@ -820,6 +865,39 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         account.profile_type,
         account.designation_id ? peopleModuleByDesignationId.get(account.designation_id) : null
       );
+      // WFH and Business Trip are never granted via designation/category app_page_access.
+      // Each is shown only when its People attendance master lists the worker's designation.
+      const pageAccess = resolveConnectPageAccess(account.profile_type, categoryPages, designationPages)
+        .filter((page) => page !== "wfh" && page !== "business_trip");
+      const designationId = account.designation_id ?? null;
+      const designationLabel = designationId
+        ? {
+          name: designationNameById.get(designationId) ?? account.role ?? "",
+          code: designationCodeById.get(designationId) ?? null
+        }
+        : account.role
+          ? { name: account.role, code: null }
+          : null;
+      if (
+        (account.profile_type === "employee" || account.profile_type === "contractor")
+        && connectWfhEligible({
+          policy: wfhPolicies.get(account.company_id),
+          designationId,
+          designation: designationLabel
+        })
+      ) {
+        pageAccess.push("wfh");
+      }
+      if (
+        (account.profile_type === "employee" || account.profile_type === "contractor")
+        && connectBusinessTripEligible({
+          policy: businessTripPolicies.get(account.company_id),
+          designationId,
+          designation: designationLabel
+        })
+      ) {
+        pageAccess.push("business_trip");
+      }
 
       return {
       id: account.id,
@@ -838,7 +916,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       status: account.status ?? null,
       biometricId: account.biometric_id ?? null,
       profilePhotoUrl: await signedProfilePhotoUrl(account.profile_photo_path),
-      pageAccess: resolveConnectPageAccess(account.profile_type, categoryPages, designationPages),
+      pageAccess,
       isDefault: defaultPreference?.default_company_id === account.company_id &&
         defaultPreference?.default_profile_type === account.profile_type &&
         defaultPreference?.default_account_id === account.id,

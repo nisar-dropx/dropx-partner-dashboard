@@ -1,6 +1,13 @@
 import type { AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
+// "helpers" is correct here -- the "worker" profile type's real table is "helpers", not
+// "workers" (see src/lib/workforce-profiles.ts's nonEmployeeProfileConfigs: route "/workers",
+// pageCode "workers", but table: "helpers"). A prior pass here "fixed" this to "workers" based
+// on an unrelated repo's script naming without checking this repo's own source of truth --
+// reverted after that "fix" itself failed applying a migration against the real database
+// ("relation public.workers does not exist"). "helpers" is what every other live
+// .from(...) call site in this app already queries.
 const SOURCES = [
   ["employees", "employee"], ["workforce", "workforce"], ["contractors", "contractor"], ["vendors", "vendor"], ["helpers", "worker"]
 ] as const;

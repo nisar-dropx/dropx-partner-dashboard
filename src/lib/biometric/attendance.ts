@@ -1,4 +1,12 @@
 import { supabaseAdmin } from "../supabase-admin";
+import { wfhCreditState, wfhCreditLabel, type WfhCreditState } from "../wfh-attendance-credit";
+import { formatShiftClock, preferActiveRosterRow, preferActiveRosterRowsByKey, type RosterPlanPreference } from "../roster-plan-preference";
+import {
+  buildWeeklyRosterIndex,
+  isoWeekday as weeklyIsoWeekday,
+  weeklyRosterValueForDate,
+  type WeeklyRosterVersion
+} from "../weekly-roster";
 
 export type AttendanceReportType =
   | "performance"
@@ -34,6 +42,8 @@ export type AttendanceReportRow = {
   lateMinutes: number;
   earlyOutMinutes: number;
   remark: string;
+  workMode: "onsite" | "wfh";
+  wfhCreditState?: WfhCreditState | null;
   deviceSerial: string;
   labels: Record<string, string>;
 };
@@ -72,12 +82,20 @@ type DailyRow = {
   work_minutes: number | null;
   status: string | null;
   remark: string | null;
+  work_mode: string | null;
+  wfh_scheduled_start_at?: string | null;
+  wfh_scheduled_end_at?: string | null;
+  wfh_credit_finalized_at?: string | null;
   employee_id: string | null;
   field_executive_id: string | null;
   location_id: string | null;
   employee_code: string | null;
   station_code: string | null;
   worker_name: string | null;
+  in_source?: string | null;
+  out_source?: string | null;
+  manual_in_request_id?: string | null;
+  manual_out_request_id?: string | null;
 };
 
 type EmployeeLookupRow = {
@@ -130,13 +148,28 @@ function normalizeDailyRows(rows: Partial<DailyRow>[]): DailyRow[] {
     work_minutes: row.work_minutes ?? 0,
     status: row.status ?? "P",
     remark: row.remark ?? null,
+    work_mode: row.work_mode ?? "onsite",
+    wfh_scheduled_start_at: row.wfh_scheduled_start_at ?? null,
+    wfh_scheduled_end_at: row.wfh_scheduled_end_at ?? null,
+    wfh_credit_finalized_at: row.wfh_credit_finalized_at ?? null,
     employee_id: row.employee_id ?? null,
     field_executive_id: row.field_executive_id ?? null,
     location_id: row.location_id ?? null,
     employee_code: row.employee_code ?? null,
     station_code: row.station_code ?? null,
-    worker_name: row.worker_name ?? null
+    worker_name: row.worker_name ?? null,
+    in_source: row.in_source ?? null,
+    out_source: row.out_source ?? null,
+    manual_in_request_id: row.manual_in_request_id ?? null,
+    manual_out_request_id: row.manual_out_request_id ?? null
   })).filter((row) => row.enrolment_id && row.punch_date);
+}
+
+function isManualRegularizationDay(row: DailyRow) {
+  return row.in_source === "manual_regularization"
+    || row.out_source === "manual_regularization"
+    || Boolean(row.manual_in_request_id || row.manual_out_request_id)
+    || /attendance regularized/i.test(String(row.remark ?? ""));
 }
 
 function normalizeBiometricId(value: string | null | undefined) {
@@ -150,6 +183,54 @@ function biometricIdVariants(values: string[]) {
     const normalized = normalizeBiometricId(raw);
     return [raw, normalized, normalized.padStart(6, "0"), normalized.padStart(8, "0")].filter(Boolean);
   })));
+}
+
+/** Prefer the enrolment spelling that already holds the richest day summary. */
+function preferEnrolmentDailyRow(left: DailyRow, right: DailyRow) {
+  const leftScore =
+    Number(left.punch_count ?? 0) * 100 +
+    Number(Boolean(left.out_time)) * 10 +
+    String(left.enrolment_id).length;
+  const rightScore =
+    Number(right.punch_count ?? 0) * 100 +
+    Number(Boolean(right.out_time)) * 10 +
+    String(right.enrolment_id).length;
+  return rightScore > leftScore ? right : left;
+}
+
+/**
+ * Biometric devices / master sync sometimes store the same worker under both
+ * cleaned (`230878`) and zero-padded (`00230878`) enrolment ids. Collapse those
+ * duplicate daily rows before building the Connect/People attendance report.
+ */
+function mergeDailyRowsAcrossEnrolmentVariants(dailyRows: DailyRow[]) {
+  const groups = new Map<string, DailyRow>();
+  for (const row of dailyRows) {
+    const key = `${normalizeBiometricId(row.enrolment_id)}:${row.punch_date}`;
+    const existing = groups.get(key);
+    groups.set(key, existing ? preferEnrolmentDailyRow(existing, row) : row);
+  }
+  return Array.from(groups.values()).sort((left, right) =>
+    right.punch_date.localeCompare(left.punch_date) || left.enrolment_id.localeCompare(right.enrolment_id)
+  );
+}
+
+function punchesForDailyRow(
+  row: DailyRow,
+  punchesByKey: Map<string, PunchRow[]>
+) {
+  const merged = biometricIdVariants([row.enrolment_id]).flatMap(
+    (enrolmentId) => punchesByKey.get(`${enrolmentId}:${row.punch_date}`) ?? []
+  );
+  const seen = new Set<string>();
+  return merged
+    .filter((punch) => {
+      const stamp = String(punch.punch_time ?? "");
+      if (!stamp || seen.has(stamp)) return false;
+      seen.add(stamp);
+      return true;
+    })
+    .sort((left, right) => String(left.punch_time).localeCompare(String(right.punch_time)));
 }
 
 export function istDate(value: Date) {
@@ -170,13 +251,15 @@ function addIsoDateDays(date: string, days: number) {
 }
 
 function istDateTime(date: string, time: string) {
-  const normalizedTime = String(time || "00:00:00").slice(0, 8);
+  const clock = formatShiftClock(time);
+  const normalizedTime = clock === "--:--" ? "00:00:00" : `${clock}:00`;
   return new Date(`${date}T${normalizedTime}+05:30`);
 }
 
 type ShiftWindow = {
   startTime: string;
   endTime: string;
+  breakMinutes: number;
 };
 
 type ShiftDefinition = {
@@ -192,9 +275,17 @@ type ShiftDefinition = {
 
 type ShiftSchedule = {
   shift: ShiftDefinition | null;
-  source: "Roster" | "Assigned shift" | "Unassigned";
+  source: "Roster" | "Unassigned";
   dayType: string;
 };
+
+function isoWeekday(value: string) {
+  return weeklyIsoWeekday(value);
+}
+
+function rosterWorkerType(profileType: string | null | undefined): "employee" | "contractor" {
+  return profileType === "employee" ? "employee" : "contractor";
+}
 
 type AttendanceRules = {
   attendance_grace_minutes?: number | null;
@@ -211,7 +302,7 @@ type AttendanceRules = {
   work_duration_basis?: string | null;
 };
 
-async function loadWorkerShiftWindow({
+export async function loadWorkerShiftWindow({
   accountId,
   companyId,
   employeeId,
@@ -233,42 +324,71 @@ async function loadWorkerShiftWindow({
 
   const roster = await supabaseAdmin
     .from("hr_roster_entries")
-    .select("day_type, hr_shifts(start_time, end_time), hr_roster_plans(status)")
+    .select("day_type, hr_shifts(start_time, end_time, break_minutes), hr_roster_plans(status,roster_kind,effective_from,superseded_at,revision_no)")
     .eq("company_id", companyId)
     .eq("worker_id", workerId)
     .eq("roster_date", workDate)
-    .limit(5);
+    .limit(20);
   if (!roster.error) {
-    for (const row of roster.data ?? []) {
-      const planValue = row.hr_roster_plans as { status?: string | null } | { status?: string | null }[] | null;
-      const plan = Array.isArray(planValue) ? planValue[0] : planValue;
-      const shiftValue = row.hr_shifts as { start_time?: string | null; end_time?: string | null } | { start_time?: string | null; end_time?: string | null }[] | null;
-      const shift = Array.isArray(shiftValue) ? shiftValue[0] : shiftValue;
-      if (plan?.status === "approved" && row.day_type === "working" && shift?.start_time && shift.end_time) {
-        return { startTime: shift.start_time, endTime: shift.end_time };
+    const preferred = preferActiveRosterRow(
+      (roster.data ?? []) as Array<{
+        day_type: string | null;
+        hr_shifts: { start_time?: string | null; end_time?: string | null; break_minutes?: number | null } | { start_time?: string | null; end_time?: string | null; break_minutes?: number | null }[] | null;
+        hr_roster_plans: RosterPlanPreference | RosterPlanPreference[] | null;
+      }>,
+      workDate,
+      (row) => relationFirst(row.hr_roster_plans)
+    );
+    if (preferred) {
+      const shift = relationFirst(preferred.hr_shifts);
+      if (preferred.day_type === "working" && shift?.start_time && shift.end_time) {
+        return { startTime: shift.start_time, endTime: shift.end_time, breakMinutes: Math.max(0, Number(shift.break_minutes ?? 0)) };
       }
+      if (preferred.day_type && preferred.day_type !== "working") return null;
     }
   }
 
-  const assignmentTable = isEmployee
-    ? "hr_employee_shift_assignments"
-    : "hr_contractor_shift_assignments";
-  const profileColumn = isEmployee ? "employee_id" : "contractor_id";
-  const assignment = await supabaseAdmin
-    .from(assignmentTable)
-    .select("hr_shifts(start_time, end_time)")
+  const plans = await supabaseAdmin
+    .from("hr_roster_plans")
+    .select("id,effective_from,superseded_at,revision_no")
     .eq("company_id", companyId)
-    .eq(profileColumn, workerId)
-    .lte("effective_from", workDate)
-    .or(`effective_to.is.null,effective_to.gte.${workDate}`)
-    .order("effective_from", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (assignment.error) return null;
-  const shiftValue = assignment.data?.hr_shifts as { start_time?: string | null; end_time?: string | null } | { start_time?: string | null; end_time?: string | null }[] | null | undefined;
-  const shift = Array.isArray(shiftValue) ? shiftValue[0] : shiftValue;
-  return shift?.start_time && shift.end_time
-    ? { startTime: shift.start_time, endTime: shift.end_time }
+    .eq("status", "approved")
+    .eq("roster_kind", "recurring_weekly")
+    .lte("effective_from", workDate);
+  if (plans.error) return null;
+  const versions = ((plans.data ?? []) as WeeklyRosterVersion[])
+    .filter((plan) => !plan.superseded_at || workDate < plan.superseded_at);
+  const planIds = versions.map((plan) => plan.id);
+  if (!planIds.length) return null;
+  const weekly = await supabaseAdmin
+    .from("hr_roster_entries")
+    .select("plan_id,worker_type,worker_id,day_type,roster_date,hr_shifts(start_time,end_time,break_minutes)")
+    .eq("company_id", companyId)
+    .eq("worker_id", workerId)
+    .in("plan_id", planIds);
+  if (weekly.error) return null;
+  const index = buildWeeklyRosterIndex(
+    versions,
+    ((weekly.data ?? []) as Array<{
+      plan_id: string;
+      worker_type: string | null;
+      worker_id: string;
+      day_type: string | null;
+      roster_date: string;
+      hr_shifts: { start_time?: string | null; end_time?: string | null; break_minutes?: number | null } | { start_time?: string | null; end_time?: string | null; break_minutes?: number | null }[] | null;
+    }>).map((entry) => ({
+      plan_id: entry.plan_id,
+      worker_type: entry.worker_type === "employee" ? "employee" as const : "contractor" as const,
+      worker_id: entry.worker_id,
+      roster_date: entry.roster_date,
+      value: entry
+    }))
+  );
+  const entry = weeklyRosterValueForDate(index, rosterWorkerType(profileType), workerId, workDate);
+  if (!entry) return null;
+  const shift = relationFirst(entry.hr_shifts);
+  return entry.day_type === "working" && shift?.start_time && shift.end_time
+    ? { startTime: shift.start_time, endTime: shift.end_time, breakMinutes: Math.max(0, Number(shift.break_minutes ?? 0)) }
     : null;
 }
 
@@ -308,7 +428,7 @@ export async function resolveAttendanceWorkDate({
     .from("attendance_punches")
     .select("id")
     .eq("company_id", companyId)
-    .eq("enrolment_id", enrolmentId)
+    .in("enrolment_id", biometricIdVariants([enrolmentId]))
     .eq("punch_date", calendarDate)
     .eq("calculated", true)
     .limit(1);
@@ -318,7 +438,7 @@ export async function resolveAttendanceWorkDate({
     .from("attendance_punches")
     .select("punch_time")
     .eq("company_id", companyId)
-    .eq("enrolment_id", enrolmentId)
+    .in("enrolment_id", biometricIdVariants([enrolmentId]))
     .eq("punch_date", previousDate)
     .eq("calculated", true)
     .order("punch_time", { ascending: true });
@@ -339,10 +459,9 @@ export async function resolveAttendanceWorkDate({
     profileType,
     workDate: previousDate
   });
-  // Without a shift, only an unmatched prior punch is safe to pair. With a
-  // shift, every scan inside the configured workday window belongs together,
-  // including post-midnight break scans and duplicate device reads.
-  if (!shift) return previousPunches.data.length % 2 === 1 ? previousDate : calendarDate;
+  // Overnight pairing is roster-authoritative. Without an approved roster
+  // shift, the scan remains on its actual calendar date for review.
+  if (!shift) return calendarDate;
 
   const shiftStart = istDateTime(previousDate, shift.startTime);
   let shiftEnd = istDateTime(previousDate, shift.endTime);
@@ -382,7 +501,7 @@ function relationFirst<T>(value: T | T[] | null | undefined): T | null {
 }
 
 function formatClock(value: string | null | undefined) {
-  return value ? value.slice(0, 5) : "--:--";
+  return formatShiftClock(value);
 }
 
 function clockMinutes(value: string | null | undefined) {
@@ -429,7 +548,9 @@ function attendanceDayStatus({
   }
   if (status === "A" || punchCount === 0) return treatmentLabel(rules.no_punch_treatment, "Absent");
   if (punchCount === 1) return treatmentLabel(rules.single_punch_treatment, "Needs Review");
-  if (punchCount % 2 === 1) return treatmentLabel(rules.odd_punch_treatment, "Needs Review");
+  if (punchCount % 2 === 1 && rules.odd_punch_treatment !== "first_last") {
+    return treatmentLabel(rules.odd_punch_treatment, "Needs Review");
+  }
 
   const percentageBasis = String(rules.work_duration_basis ?? "").toLowerCase().includes("percent");
   const fullThreshold = percentageBasis && scheduledMinutes > 0
@@ -488,11 +609,9 @@ async function loadAttendanceScheduleContext({
 }) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const workerIds = Array.from(new Set(workers.map((worker) => worker.profileId).filter(Boolean)));
-  const employeeIds = Array.from(new Set(workers.filter((worker) => worker.profileType === "employee").map((worker) => worker.profileId)));
-  const contractorIds = Array.from(new Set(workers.filter((worker) => worker.profileType !== "employee").map((worker) => worker.profileId)));
   const shiftColumns = "id, code, name, start_time, end_time, break_minutes, grace_in_minutes, grace_out_minutes";
 
-  const [settingsResult, rosterResult, employeeAssignmentResult, contractorAssignmentResult] = await Promise.all([
+  const [settingsResult, rosterResult, recurringPlanResult] = await Promise.all([
     supabaseAdmin
       .from("hr_company_settings")
       .select("attendance_grace_minutes, below_half_day_treatment, full_day_minutes, full_day_percent, half_day_minutes, half_day_percent, no_punch_treatment, odd_punch_treatment, partial_day_treatment, single_punch_treatment, unassigned_shift_treatment, work_duration_basis")
@@ -501,70 +620,79 @@ async function loadAttendanceScheduleContext({
     workerIds.length
       ? supabaseAdmin
         .from("hr_roster_entries")
-        .select(`worker_id, roster_date, day_type, hr_shifts(${shiftColumns}), hr_roster_plans(status)`)
+        .select(`worker_id, roster_date, day_type, hr_shifts(${shiftColumns}), hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)`)
         .eq("company_id", companyId)
+        .eq("hr_roster_plans.status", "approved")
+        .eq("hr_roster_plans.roster_kind", "dated")
         .gte("roster_date", fromDate)
         .lte("roster_date", toDate)
         .in("worker_id", workerIds)
       : Promise.resolve({ data: [], error: null }),
-    employeeIds.length
-      ? supabaseAdmin
-        .from("hr_employee_shift_assignments")
-        .select(`employee_id, effective_from, effective_to, hr_shifts(${shiftColumns})`)
-        .eq("company_id", companyId)
-        .lte("effective_from", toDate)
-        .or(`effective_to.is.null,effective_to.gte.${fromDate}`)
-        .in("employee_id", employeeIds)
-        .order("effective_from", { ascending: false })
-      : Promise.resolve({ data: [], error: null }),
-    contractorIds.length
-      ? supabaseAdmin
-        .from("hr_contractor_shift_assignments")
-        .select(`contractor_id, effective_from, effective_to, hr_shifts(${shiftColumns})`)
-        .eq("company_id", companyId)
-        .lte("effective_from", toDate)
-        .or(`effective_to.is.null,effective_to.gte.${fromDate}`)
-        .in("contractor_id", contractorIds)
-        .order("effective_from", { ascending: false })
-      : Promise.resolve({ data: [], error: null })
+    supabaseAdmin
+      .from("hr_roster_plans")
+      .select("id,effective_from,superseded_at,revision_no")
+      .eq("company_id", companyId)
+      .eq("status", "approved")
+      .eq("roster_kind", "recurring_weekly")
+      .lte("effective_from", toDate)
+      .order("effective_from", { ascending: false })
   ]);
   if (settingsResult.error) throw new Error(settingsResult.error.message);
   if (rosterResult.error) throw new Error(rosterResult.error.message);
-  if (employeeAssignmentResult.error) throw new Error(employeeAssignmentResult.error.message);
-  // Older non-employee categories do not all have contractor shift records; an empty result is valid.
-  if (contractorAssignmentResult.error && !isMissingColumnError(contractorAssignmentResult.error)) throw new Error(contractorAssignmentResult.error.message);
+  if (recurringPlanResult.error) throw new Error(recurringPlanResult.error.message);
 
   type RosterRow = {
     worker_id: string;
     roster_date: string;
     day_type: string | null;
     hr_shifts: ShiftDefinition | ShiftDefinition[] | null;
-    hr_roster_plans: { status?: string | null } | Array<{ status?: string | null }> | null;
+    hr_roster_plans: RosterPlanPreference | RosterPlanPreference[] | null;
   };
-  type AssignmentRow = {
-    employee_id?: string;
-    contractor_id?: string;
-    effective_from: string;
-    effective_to: string | null;
+  type WeeklyRosterRow = {
+    plan_id: string;
+    worker_type: string | null;
+    worker_id: string;
+    roster_date: string;
+    day_type: string | null;
     hr_shifts: ShiftDefinition | ShiftDefinition[] | null;
   };
+  const preferredDated = preferActiveRosterRowsByKey(
+    (rosterResult.data ?? []) as unknown as RosterRow[],
+    (row) => row.roster_date,
+    (row) => `${row.worker_id}:${row.roster_date}`,
+    (row) => relationFirst(row.hr_roster_plans)
+  );
   const rosterByWorkerDate = new Map<string, ShiftSchedule>();
-  ((rosterResult.data ?? []) as unknown as RosterRow[]).forEach((row) => {
-    if (relationFirst(row.hr_roster_plans)?.status !== "approved") return;
-    rosterByWorkerDate.set(`${row.worker_id}:${row.roster_date}`, {
+  for (const [key, row] of preferredDated) {
+    rosterByWorkerDate.set(key, {
       dayType: row.day_type ?? "working",
       shift: relationFirst(row.hr_shifts),
       source: "Roster"
     });
-  });
-  const assignmentsByWorker = new Map<string, AssignmentRow[]>();
-  ([...(employeeAssignmentResult.data ?? []), ...(contractorAssignmentResult.data ?? [])] as unknown as AssignmentRow[]).forEach((assignment) => {
-    const workerId = assignment.employee_id ?? assignment.contractor_id;
-    if (!workerId) return;
-    const values = assignmentsByWorker.get(workerId) ?? [];
-    values.push(assignment);
-    assignmentsByWorker.set(workerId, values);
-  });
+  }
+  const recurringVersions = ((recurringPlanResult.data ?? []) as WeeklyRosterVersion[])
+    .filter((plan) => !plan.superseded_at || plan.superseded_at > fromDate);
+  const recurringPlanIds = recurringVersions.map((plan) => plan.id);
+  const weeklyEntriesResult = recurringPlanIds.length && workerIds.length
+    ? await supabaseAdmin
+      .from("hr_roster_entries")
+      .select(`plan_id,worker_type,worker_id,roster_date,day_type,hr_shifts(${shiftColumns})`)
+      .eq("company_id", companyId)
+      .in("plan_id", recurringPlanIds)
+      .in("worker_id", workerIds)
+    : { data: [], error: null };
+  if (weeklyEntriesResult.error) throw new Error(weeklyEntriesResult.error.message);
+  const weeklyIndex = buildWeeklyRosterIndex(
+    recurringVersions,
+    ((weeklyEntriesResult.data ?? []) as unknown as WeeklyRosterRow[]).map((entry) => ({
+      plan_id: entry.plan_id,
+      worker_type: entry.worker_type === "employee" ? "employee" as const : "contractor" as const,
+      worker_id: entry.worker_id,
+      roster_date: entry.roster_date,
+      value: entry
+    }))
+  );
+  const profileTypeById = new Map(workers.map((worker) => [worker.profileId, worker.profileType]));
 
   return {
     rules: (settingsResult.data ?? {}) as AttendanceRules,
@@ -572,11 +700,14 @@ async function loadAttendanceScheduleContext({
       if (!profileId) return { dayType: "unassigned", shift: null, source: "Unassigned" };
       const roster = rosterByWorkerDate.get(`${profileId}:${punchDate}`);
       if (roster) return roster;
-      const assignment = (assignmentsByWorker.get(profileId) ?? []).find((candidate) => (
-        candidate.effective_from <= punchDate && (!candidate.effective_to || candidate.effective_to >= punchDate)
-      ));
-      return assignment
-        ? { dayType: "working", shift: relationFirst(assignment.hr_shifts), source: "Assigned shift" }
+      const weekly = weeklyRosterValueForDate(
+        weeklyIndex,
+        rosterWorkerType(profileTypeById.get(profileId)),
+        profileId,
+        punchDate
+      );
+      return weekly
+        ? { dayType: weekly.day_type ?? "working", shift: relationFirst(weekly.hr_shifts), source: "Roster" }
         : { dayType: "unassigned", shift: null, source: "Unassigned" };
     }
   };
@@ -599,7 +730,7 @@ function summarizeFirstInLastOut(punchTimes: string[]) {
   };
 }
 
-async function loadDailyWorkerSnapshot({
+export async function loadDailyWorkerSnapshot({
   companyId,
   employeeId,
   fieldExecutiveId,
@@ -632,7 +763,7 @@ async function loadDailyWorkerSnapshot({
       workerName = employee.data.full_name ?? null;
       locationId = employee.data.location_id ?? locationId;
     }
-  } else if (accountId && ["field_executive", "contractor", "vendor", "worker"].includes(profileType ?? "")) {
+  } else if (accountId && ["workforce", "field_executive", "contractor", "vendor", "worker"].includes(profileType ?? "")) {
     const table = profileType === "contractor"
       ? "contractors"
       : profileType === "vendor"
@@ -702,17 +833,25 @@ async function loadDailyWorkerSnapshot({
 export async function rebuildAttendanceDay(companyId: string, enrolmentId: string, punchDate: string) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
+  const enrolmentVariants = biometricIdVariants([enrolmentId]);
+  const canonicalEnrolmentId = normalizeBiometricId(enrolmentId);
   const { data, error } = await supabaseAdmin
     .from("attendance_punches")
-    .select("id, punch_time")
+    .select("id, punch_time, enrolment_id")
     .eq("company_id", companyId)
-    .eq("enrolment_id", enrolmentId)
+    .in("enrolment_id", enrolmentVariants)
     .eq("punch_date", punchDate)
     .eq("calculated", true)
     .order("punch_time", { ascending: true });
   if (error) throw new Error(error.message);
 
-  const punches = data ?? [];
+  const seenTimes = new Set<string>();
+  const punches = (data ?? []).filter((punch) => {
+    const stamp = String(punch.punch_time ?? "");
+    if (!stamp || seenTimes.has(stamp)) return false;
+    seenTimes.add(stamp);
+    return true;
+  });
   // Freeze punch times before order updates so rebuild never picks up approval/server "now".
   const punchTimes = punches.map((punch) => punch.punch_time).filter(Boolean) as string[];
   for (let index = 0; index < punches.length; index += 1) {
@@ -721,6 +860,7 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
     await supabaseAdmin
       .from("attendance_punches")
       .update({
+        enrolment_id: canonicalEnrolmentId,
         punch_order: order,
         punch_label: punchLabel(order),
         ...(preservedTime ? { punch_time: preservedTime } : {})
@@ -740,7 +880,7 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
     .from("attendance_punches")
     .select("worker_type, employee_id, field_executive_id, profile_type, account_id, location_id")
     .eq("company_id", companyId)
-    .eq("enrolment_id", enrolmentId)
+    .in("enrolment_id", enrolmentVariants)
     .eq("punch_date", punchDate)
     .eq("calculated", true)
     .order("punch_time", { ascending: false })
@@ -759,7 +899,7 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
 
   const basePayload = {
     company_id: companyId,
-    enrolment_id: enrolmentId,
+    enrolment_id: canonicalEnrolmentId,
     worker_type: latestPunch.data?.worker_type ?? null,
     employee_id: latestPunch.data?.employee_id ?? null,
     field_executive_id: latestPunch.data?.field_executive_id ?? null,
@@ -790,10 +930,20 @@ export async function rebuildAttendanceDay(companyId: string, enrolmentId: strin
       .from("attendance_daily")
       .upsert(basePayload, { onConflict: "company_id,enrolment_id,punch_date" });
     if (fallbackUpsert.error) throw new Error(fallbackUpsert.error.message);
-    return;
+  } else if (firstUpsert.error) {
+    throw new Error(firstUpsert.error.message);
   }
 
-  if (firstUpsert.error) throw new Error(firstUpsert.error.message);
+  // Drop padded/legacy duplicate daily rows for the same workday.
+  const staleVariants = enrolmentVariants.filter((value) => value !== canonicalEnrolmentId);
+  if (staleVariants.length) {
+    await supabaseAdmin
+      .from("attendance_daily")
+      .delete()
+      .eq("company_id", companyId)
+      .eq("punch_date", punchDate)
+      .in("enrolment_id", staleVariants);
+  }
 }
 
 type HistoricalRawPunchRow = {
@@ -937,8 +1087,106 @@ function reportMatchesType(row: AttendanceReportRow, type: AttendanceReportType)
   if (type === "absent") return row.attendanceStatus === "Absent";
   if (type === "late_in") return row.lateMinutes > 0 || row.remark.toLowerCase().includes("late");
   if (type === "early_out") return row.earlyOutMinutes > 0 || row.remark.toLowerCase().includes("early out");
-  if (type === "mis_punch") return row.punchCount % 2 === 1 || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing");
+  if (type === "mis_punch") return row.punchCount < 2 || !row.outTime || row.remark.toLowerCase().includes("single") || row.remark.toLowerCase().includes("missing");
   return true;
+}
+
+/**
+ * Fills the gaps in a single worker's day-by-day calendar for a date range.
+ *
+ * `loadAttendanceReportRows` (below) only returns a row per `attendance_daily`
+ * entry, i.e. per real attendance event. A day with no punch and no other
+ * attendance activity - most commonly a scheduled weekly off or holiday -
+ * never gets a row at all, so a calendar view built purely from those rows
+ * cannot tell "week off" apart from "we have no data for this day". This
+ * helper is additive and opt-in: it reuses the same roster lookup already
+ * used to label existing rows (`loadAttendanceScheduleContext`), and returns
+ * one synthetic row per date in range that has no existing row, so a
+ * per-worker calendar (e.g. the DropX Connect attendance screen) can render
+ * every day of the month correctly. It does not change what
+ * `loadAttendanceReportRows` returns for its other, list/export/notification
+ * consumers - those keep seeing only real attendance events.
+ */
+export async function fillAttendanceCalendarGaps({
+  companyId,
+  existingDates,
+  fromDate,
+  profileId,
+  profileType,
+  toDate
+}: {
+  companyId: string;
+  existingDates: Iterable<string>;
+  fromDate: string;
+  profileId: string;
+  // Only the employee/contractor split matters here - loadAttendanceScheduleContext's
+  // roster lookup (rosterWorkerType) treats every non-employee profile type the
+  // same way, so callers with a wider profile-type enum (e.g. Connect's
+  // WorkforceProfileType) should pass "employee" or "contractor" accordingly.
+  profileType: "employee" | "contractor";
+  toDate: string;
+}): Promise<AttendanceReportRow[]> {
+  if (!profileId) return [];
+  const present = new Set(existingDates);
+  const missingDates: string[] = [];
+  for (let cursor = fromDate; cursor <= toDate; cursor = addIsoDateDays(cursor, 1)) {
+    if (!present.has(cursor)) missingDates.push(cursor);
+  }
+  if (!missingDates.length) return [];
+
+  const scheduleContext = await loadAttendanceScheduleContext({
+    companyId,
+    fromDate,
+    toDate,
+    workers: [{ profileId, profileType }]
+  });
+
+  const rows: AttendanceReportRow[] = [];
+  for (const punchDate of missingDates) {
+    const schedule = scheduleContext.scheduleFor(profileId, punchDate);
+    // Only backfill days with a known non-working roster day type (weekly
+    // off, holiday, etc). A day with no roster entry at all is genuinely
+    // "no record" - synthesizing a status for it would be a guess.
+    if (schedule.dayType === "working" || schedule.dayType === "unassigned") continue;
+    const attendanceStatus = attendanceDayStatus({
+      dayType: schedule.dayType,
+      punchCount: 0,
+      rules: scheduleContext.rules,
+      scheduledMinutes: 0,
+      status: "",
+      workMinutes: 0
+    });
+    rows.push({
+      enrolmentId: "",
+      workerCode: "",
+      workerName: "",
+      workerType: "",
+      locationId: null,
+      location: "-",
+      designation: "-",
+      shiftName: schedule.dayType.replaceAll("_", " "),
+      shiftCode: "",
+      shiftSource: schedule.source,
+      scheduledStart: "",
+      scheduledEnd: "",
+      scheduledMinutes: 0,
+      punchDate,
+      inTime: "",
+      outTime: "",
+      punchTimes: [],
+      workHours: "",
+      punchCount: 0,
+      status: schedule.dayType,
+      attendanceStatus,
+      lateMinutes: 0,
+      earlyOutMinutes: 0,
+      remark: "",
+      workMode: "onsite",
+      deviceSerial: "",
+      labels: {}
+    });
+  }
+  return rows;
 }
 
 export async function loadAttendanceReportRows({
@@ -972,12 +1220,20 @@ export async function loadAttendanceReportRows({
     work_minutes,
     status,
     remark,
+    work_mode,
+    wfh_scheduled_start_at,
+    wfh_scheduled_end_at,
+    wfh_credit_finalized_at,
     employee_id,
     field_executive_id,
     location_id,
     employee_code,
     station_code,
-    worker_name
+    worker_name,
+    in_source,
+    out_source,
+    manual_in_request_id,
+    manual_out_request_id
   `;
   const fallbackSelect = `
     enrolment_id,
@@ -1016,12 +1272,17 @@ export async function loadAttendanceReportRows({
   }
   if (dailyResult.error) throw new Error(dailyResult.error.message);
 
-  const dailyRows = normalizeDailyRows((dailyResult.data ?? []) as Partial<DailyRow>[]);
+  const dailyRows = mergeDailyRowsAcrossEnrolmentVariants(
+    normalizeDailyRows((dailyResult.data ?? []) as Partial<DailyRow>[])
+  );
   const employeeIds = Array.from(new Set(dailyRows.map((row) => row.employee_id).filter(Boolean))) as string[];
   const executiveIds = Array.from(new Set(dailyRows.map((row) => row.field_executive_id).filter(Boolean))) as string[];
   const dailyLocationIds = Array.from(new Set(dailyRows.map((row) => row.location_id).filter(Boolean))) as string[];
   const enrolmentIds = Array.from(new Set(dailyRows.map((row) => row.enrolment_id)));
-  const biometricVariants = biometricIdVariants(enrolmentIds);
+  const biometricVariants = biometricIdVariants([
+    ...enrolmentIds,
+    ...(requestedEnrolmentIds ?? [])
+  ]);
   const [employeeResult, executiveResult, locationResult, biometricEmployeeResult, biometricExecutiveResult, biometricContractorResult, biometricVendorResult, biometricWorkerResult, biometricHelperResult, biometricPickerResult] = await Promise.all([
     employeeIds.length
       ? supabaseAdmin
@@ -1135,13 +1396,13 @@ export async function loadAttendanceReportRows({
   const punchFilterDates = Array.from(new Set(dailyRows.map((row) => row.punch_date)));
   let punchesByKey = new Map<string, PunchRow[]>();
 
-  if (enrolmentIds.length && punchFilterDates.length) {
+  if (biometricVariants.length && punchFilterDates.length) {
     let punchQuery = supabaseAdmin
       .from("attendance_punches")
       .select("enrolment_id, punch_date, punch_time, punch_label, device_serial, calculated")
       .eq("company_id", companyId)
       .eq("calculated", true)
-      .in("enrolment_id", enrolmentIds)
+      .in("enrolment_id", biometricVariants)
       .in("punch_date", punchFilterDates)
       .order("punch_time", { ascending: true });
     if (locationIds?.length) punchQuery = punchQuery.in("location_id", locationIds);
@@ -1191,7 +1452,36 @@ export async function loadAttendanceReportRows({
       ? designationsById.get(biometricWorker.designation_id)
       : null;
     const station = row.location_id ? locationsById.get(row.location_id) : null;
-    const punches = punchesByKey.get(`${row.enrolment_id}:${row.punch_date}`) ?? [];
+    const punches = punchesForDailyRow(row, punchesByKey);
+    const punchTimes = punches.map((punch) => punch.punch_time).filter(Boolean) as string[];
+    const storedPunchCount = Number(row.punch_count ?? 0);
+    const regularized = isManualRegularizationDay(row);
+    // Only rebuild from raw punches when they are richer than the stored day.
+    // Approved regularizations often update attendance_daily without inserting a
+    // matching OUT punch row — never overwrite those approved times.
+    const shouldRecomputeFromPunches = !regularized && punchTimes.length > 0 && (
+      punchTimes.length > storedPunchCount
+      || (punchTimes.length >= 2 && (!row.out_time || Number(row.work_minutes ?? 0) <= 0))
+    );
+    const punchSummary = shouldRecomputeFromPunches
+      ? summarizeFirstInLastOut(punchTimes)
+      : null;
+    const effectiveInTime = punchSummary && punchTimes[0]
+      ? punchTimes[0]
+      : (regularized ? row.in_time : (punchTimes[0] ?? row.in_time));
+    const effectiveOutTime = punchSummary
+      ? punchSummary.lastOutTime
+      : row.out_time;
+    const effectivePunchCount = regularized
+      ? Math.max(storedPunchCount, 2)
+      : Math.max(storedPunchCount, punches.length);
+    const creditState = wfhCreditState({ ...row, in_time: effectiveInTime, out_time: effectiveOutTime, punch_count: effectivePunchCount });
+    const effectiveWorkMinutes = creditState && creditState !== "credited" ? 0 : punchSummary
+      ? punchSummary.workMinutes
+      : Number(row.work_minutes ?? 0);
+    const effectiveRemark = punchSummary && punchTimes.length >= 2
+      ? (String(row.remark ?? "").toLowerCase().includes("single") ? "" : (row.remark ?? ""))
+      : (row.remark ?? "");
     const labels = Object.fromEntries(punches.map((punch) => [punch.punch_label, formatTime(punch.punch_time)]));
     const firstDevice = punches.find((punch) => punch.device_serial)?.device_serial ?? "";
     const profileType = row.employee_id || row.worker_type === "employee"
@@ -1201,19 +1491,19 @@ export async function loadAttendanceReportRows({
     const schedule = scheduleContext.scheduleFor(profileId, row.punch_date);
     const scheduledMinutes = scheduledDuration(schedule.shift);
     const variance = attendanceVariance({
-      inTime: row.in_time,
-      outTime: row.out_time,
+      inTime: effectiveInTime,
+      outTime: effectiveOutTime,
       punchDate: row.punch_date,
       rules: scheduleContext.rules,
       shift: schedule.shift
     });
-    const attendanceStatus = attendanceDayStatus({
+    const attendanceStatus = creditState ? wfhCreditLabel(creditState) : attendanceDayStatus({
       dayType: schedule.dayType,
-      punchCount: Number(row.punch_count ?? 0),
+      punchCount: effectivePunchCount,
       rules: scheduleContext.rules,
       scheduledMinutes,
       status: row.status ?? "P",
-      workMinutes: Number(row.work_minutes ?? 0)
+      workMinutes: effectiveWorkMinutes
     });
     const reportRow: AttendanceReportRow = {
       enrolmentId: row.enrolment_id,
@@ -1226,20 +1516,22 @@ export async function loadAttendanceReportRows({
       shiftName: schedule.shift?.name ?? schedule.shift?.code ?? (schedule.dayType !== "unassigned" && schedule.dayType !== "working" ? schedule.dayType.replaceAll("_", " ") : "Unassigned"),
       shiftCode: schedule.shift?.code ?? "",
       shiftSource: schedule.source,
-      scheduledStart: formatClock(schedule.shift?.start_time),
-      scheduledEnd: formatClock(schedule.shift?.end_time),
+      scheduledStart: formatClock(schedule.shift?.start_time) === "--:--" && creditState ? formatTime(row.wfh_scheduled_start_at ?? null) : formatClock(schedule.shift?.start_time),
+      scheduledEnd: formatClock(schedule.shift?.end_time) === "--:--" && creditState ? formatTime(row.wfh_scheduled_end_at ?? null) : formatClock(schedule.shift?.end_time),
       scheduledMinutes,
       punchDate: row.punch_date,
-      inTime: formatTime(row.in_time),
-      outTime: formatTime(row.out_time),
+      inTime: formatTime(effectiveInTime),
+      outTime: formatTime(effectiveOutTime),
       punchTimes: punches.map((punch) => formatTime(punch.punch_time)),
-      workHours: formatDuration(row.work_minutes),
-      punchCount: Number(row.punch_count ?? 0),
-      status: row.status ?? "P",
+      workHours: formatDuration(effectiveWorkMinutes),
+      punchCount: effectivePunchCount,
+      status: creditState ? (creditState === "credited" ? "P" : "PENDING") : row.status ?? "P",
+      wfhCreditState: creditState,
       attendanceStatus,
       lateMinutes: variance.lateMinutes,
       earlyOutMinutes: variance.earlyOutMinutes,
-      remark: row.remark ?? "",
+      remark: effectiveRemark,
+      workMode: row.work_mode === "wfh" ? "wfh" as const : "onsite" as const,
       deviceSerial: firstDevice,
       labels
     };

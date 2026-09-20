@@ -33,7 +33,7 @@ export function PerformanceStationFilter({
       params.set("week", String(week));
     }
     if (selected.length !== stations.length) params.set("stations", selected.join(","));
-    router.push(`/ops-pulse/performance?${params.toString()}`);
+    router.push(`/performance?${params.toString()}`);
     setOpen(false);
   }
 

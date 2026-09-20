@@ -194,6 +194,54 @@ export async function findPositionApprover(
   return null;
 }
 
+/**
+ * Approval routing (position assignments / product memberships) is scoped by
+ * role + location only. It has no idea whether that role actually has edit
+ * access to the approvals page in Settings > Roles, so a role can end up
+ * routed/notified as an approver while getting bounced to /unauthorized the
+ * moment they try to act. Filter candidate role ids down to ones that are
+ * both routable AND actually allowed to approve before picking an approver.
+ */
+export async function roleIdsWithPageEditAccess(companyId: string, roleIds: string[], pageCode: string): Promise<Set<string>> {
+  if (!supabaseAdmin || !roleIds.length) return new Set();
+
+  const rolesResult = await supabaseAdmin
+    .from("user_roles")
+    .select("id, code")
+    .eq("company_id", companyId)
+    .in("id", roleIds);
+  if (rolesResult.error) return new Set(roleIds);
+  const ownerRoleIds = (rolesResult.data ?? [])
+    .filter((role) => String(role.code ?? "").trim().toUpperCase() === "OWNER")
+    .map((role) => role.id);
+
+  let pageResult = await supabaseAdmin
+    .from("app_pages")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("code", pageCode)
+    .maybeSingle();
+  if (!pageResult.data) {
+    pageResult = await supabaseAdmin.from("app_pages").select("id").eq("code", pageCode).is("company_id", null).maybeSingle();
+  }
+  const pageId = pageResult.data?.id;
+  if (!pageId) return new Set(roleIds);
+
+  const grantsResult = await supabaseAdmin
+    .from("role_page_permissions")
+    .select("role_id, can_edit")
+    .eq("company_id", companyId)
+    .eq("page_id", pageId)
+    .in("role_id", roleIds);
+  if (grantsResult.error) return new Set(roleIds);
+
+  const editableRoleIds = (grantsResult.data ?? [])
+    .filter((grant) => grant.can_edit)
+    .map((grant) => grant.role_id);
+
+  return new Set([...ownerRoleIds, ...editableRoleIds]);
+}
+
 async function findAuthUserIdByEmail(email: string) {
   if (!supabaseAdmin) return null;
   for (let page = 1; page <= 20; page += 1) {

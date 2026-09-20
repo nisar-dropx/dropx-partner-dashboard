@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { userFacingError } from "@/lib/user-facing-error";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { connectSessionCookieName, findConnectAccounts } from "../../../../src/lib/connect-auth";
@@ -296,7 +297,7 @@ export async function GET(request: Request) {
     const employee = await loadEmployee(account.id, account.companyId);
     return NextResponse.json({ ok: true, profile: await serializeEmployee(employee) });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load profile." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load profile.") }, { status: 400 });
   }
 }
 
@@ -351,7 +352,6 @@ export async function POST(request: Request) {
       eshram_uan: normalizeDigitsLength(formData.get("eshram_uan"), "eShram UAN", 12, 12),
       is_handicapped: cleanText(formData.get("is_handicapped")) === null ? null : cleanText(formData.get("is_handicapped")) === "true",
       address: cleanText(formData.get("address")),
-      state: null,
       pincode: normalizeDigitsLength(formData.get("pincode"), "Pincode", 6, 6),
       landmark: cleanText(formData.get("landmark")),
       state_code: cleanText(formData.get("state_code"))?.toUpperCase() ?? null,
@@ -441,6 +441,6 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ ok: true, profile: await serializeEmployee(employee), notice: "Profile saved successfully." });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to save profile." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to save profile.") }, { status: 400 });
   }
 }

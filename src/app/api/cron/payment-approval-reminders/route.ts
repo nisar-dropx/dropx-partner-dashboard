@@ -1,0 +1,62 @@
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { sendPaymentApprovalReminder } from "@/lib/payment-email-notifications";
+import { sendPaymentAdvanceReminder } from "@/lib/payment-advance-email-notifications";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+function unauthorized() {
+  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+}
+
+/**
+ * Fires the 90-minute reminder for any payment (advance) request still
+ * awaiting a decision, threaded onto the same email conversation as the
+ * initial email - never a fresh, separate message. Each request's own
+ * email_next_reminder_at column (set by sendPaymentNotification /
+ * sendPaymentAdvanceRequestNotification after every send) is the schedule;
+ * this cron only polls for rows whose time has passed.
+ */
+export async function GET(request: Request) {
+  const secret = process.env.CRON_SECRET?.trim();
+  if (secret) {
+    const auth = request.headers.get("authorization") ?? "";
+    if (auth !== `Bearer ${secret}`) return unauthorized();
+  }
+  if (!supabaseAdmin) return NextResponse.json({ error: "Supabase service role key is not configured." }, { status: 500 });
+
+  const [paymentDue, advanceDue] = await Promise.all([
+    supabaseAdmin.from("payment_requests").select("id, company_id").not("email_next_reminder_at", "is", null).lte("email_next_reminder_at", new Date().toISOString()).limit(20),
+    supabaseAdmin.from("payment_advance_requests").select("id, company_id").not("email_next_reminder_at", "is", null).lte("email_next_reminder_at", new Date().toISOString()).limit(20)
+  ]);
+  if (paymentDue.error || advanceDue.error) {
+    return NextResponse.json({ error: paymentDue.error?.message ?? advanceDue.error?.message }, { status: 500 });
+  }
+
+  // Interleave the two tables (rather than draining payment_requests before
+  // ever starting payment_advance_requests) so a large batch on one table
+  // can never starve the other within this function's time budget - if the
+  // budget runs out, both tables have made partial progress, not just one.
+  const queue: Array<{ kind: "payment" | "advance"; companyId: string; requestId: string }> = [];
+  const payments = paymentDue.data ?? [];
+  const advances = advanceDue.data ?? [];
+  const maxLength = Math.max(payments.length, advances.length);
+  for (let index = 0; index < maxLength; index += 1) {
+    if (payments[index]) queue.push({ kind: "payment", companyId: payments[index].company_id, requestId: payments[index].id });
+    if (advances[index]) queue.push({ kind: "advance", companyId: advances[index].company_id, requestId: advances[index].id });
+  }
+
+  let sent = 0;
+  let skipped = 0;
+  const deadline = Date.now() + 45_000; // Leave headroom under maxDuration for the response itself.
+  for (const item of queue) {
+    if (Date.now() > deadline) break;
+    const result = item.kind === "payment"
+      ? await sendPaymentApprovalReminder(item.companyId, item.requestId)
+      : await sendPaymentAdvanceReminder(item.companyId, item.requestId);
+    if (result.sent) sent += 1; else skipped += 1;
+  }
+
+  return NextResponse.json({ sent, skipped, queued: queue.length, total: payments.length + advances.length });
+}

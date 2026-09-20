@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { userFacingError } from "@/lib/user-facing-error";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { connectSessionCookieName, findConnectAccounts } from "@/lib/connect-auth";
@@ -56,7 +57,7 @@ export async function PUT(request: Request) {
     if (result.error) throw new Error(result.error.message);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to save default account." }, { status: 500 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to save default account.") }, { status: 500 });
   }
 }
 
@@ -72,6 +73,6 @@ export async function DELETE() {
     if (result.error) throw new Error(result.error.message);
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to remove default account." }, { status: 500 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to remove default account.") }, { status: 500 });
   }
 }

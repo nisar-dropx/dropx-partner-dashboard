@@ -9,6 +9,7 @@ import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { indiaStateCode, indiaStateOptions } from "@/lib/india-states";
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import {
   createLocation,
   deleteLocation,
@@ -55,6 +56,7 @@ type LocationRow = {
   station_manager_email: string | null;
   parent_station_id: string | null;
   hide_from_location_list: boolean;
+  is_ho: boolean;
   is_active: boolean;
   providers?: { code: string; name: string } | null;
   location_models?: { code: string; name: string } | null;
@@ -171,6 +173,7 @@ async function loadMasterData(companyId: string) {
     station_manager_email,
     parent_station_id,
     hide_from_location_list,
+    is_ho,
     is_active,
     providers (code, name),
     location_models (code, name)
@@ -253,6 +256,7 @@ async function loadMasterData(companyId: string) {
 
   const rawLocations = (locationsResult.data ?? []) as unknown as RawLocationRow[];
   const rawModels = (modelsResult.data ?? []) as unknown as RawModelRow[];
+  const hierarchy = await loadPeopleOperationalHierarchy(companyId, rawLocations.map((row) => row.id));
 
   return {
     providers: (providersResult.data ?? []) as ProviderRow[],
@@ -262,13 +266,21 @@ async function loadMasterData(companyId: string) {
     })) as ModelRow[],
     users: (usersResult.data ?? []) as UserRow[],
     userRoles: (userRolesResult.data ?? []) as UserRoleRow[],
-    locations: rawLocations.map((row) => ({
-      ...row,
-      hide_from_location_list: Boolean(row.hide_from_location_list),
-      providers: firstRelation(row.providers),
-      location_models: firstRelation(row.location_models)
-    })) as LocationRow[],
-    error
+    locations: rawLocations.map((row) => {
+      const resolved = hierarchy.byLocation.get(row.id);
+      const clusterManager = resolved?.clusterManagers[0]?.name ?? null;
+      return {
+        ...row,
+        aom: resolved?.areaOperationsManagers[0]?.name ?? null,
+        cluster_manager: clusterManager,
+        cluster: clusterManager,
+        hide_from_location_list: Boolean(row.hide_from_location_list),
+        is_ho: Boolean(row.is_ho),
+        providers: firstRelation(row.providers),
+        location_models: firstRelation(row.location_models)
+      };
+    }) as LocationRow[],
+    error: error || hierarchy.error
   };
 }
 
@@ -399,6 +411,10 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
                 <input name="hide_from_location_list" type="checkbox" />
                 <span>Hide from location list</span>
               </label>
+              <label className="check-row span-3">
+                <input name="is_ho" type="checkbox" />
+                <span>Head Office location (for HRMS leave eligibility)</span>
+              </label>
               <div className="form-actions span-3 modal-actions">
                 <Link className="button secondary" href="/master/location" scroll={false}>Cancel</Link>
                 <SubmitButton>Add location</SubmitButton>
@@ -446,6 +462,10 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               <label className="check-row span-3">
                 <input defaultChecked={editLocation.hide_from_location_list} name="hide_from_location_list" type="checkbox" />
                 <span>Hide from location list</span>
+              </label>
+              <label className="check-row span-3">
+                <input defaultChecked={editLocation.is_ho} name="is_ho" type="checkbox" />
+                <span>Head Office location (for HRMS leave eligibility)</span>
               </label>
               <div className="form-actions span-3">
                 <SubmitButton>Save changes</SubmitButton>

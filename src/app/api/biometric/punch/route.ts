@@ -74,6 +74,60 @@ function bearerToken(request: NextRequest) {
   return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
 }
 
+/**
+ * biometric_enrolments.status is set to "Inactive" the moment an offboarding
+ * profile save runs (People edit-page -> syncEmployeeBiometricEnrolment/
+ * syncContractorBiometricEnrolment), which can happen well before the worker's
+ * confirmed last working day (LWD) — the same "cut off too early" problem the
+ * clearance-aware access-cutoff model (hr_exit_cases.access_cutoff_at) already
+ * solves for web/app login. Without this check, a punch during that gap is
+ * captured into attendance_punches but never materialized into attendance_daily
+ * (see the `!active` early-return below), silently losing attendance for days the
+ * worker genuinely worked. This looks up whether the worker still has an open
+ * exit case whose confirmed LWD (end of day, IST) hasn't passed yet — if so, the
+ * punch counts as active regardless of what biometric_enrolments.status says.
+ * Scoped to employee/contractor only, since hr_exit_cases only models those two
+ * worker types (field_executive/vendor/worker profile types are unaffected and
+ * keep relying solely on biometric_enrolments.status, unchanged).
+ */
+async function isWithinConfirmedLastWorkingDay(companyId: string, profileType: string | null, employeeId: string | null, contractorId: string | null) {
+  if (!supabaseAdmin) return false;
+  const workerType = profileType === "employee" ? "employee" : profileType === "contractor" ? "contractor" : null;
+  const workerId = workerType === "employee" ? employeeId : workerType === "contractor" ? contractorId : null;
+  if (!workerType || !workerId) return false;
+  const result = await supabaseAdmin
+    .from("hr_exit_cases")
+    .select("access_cutoff_at, approved_last_working_date, effective_date, requested_last_working_date")
+    .eq("company_id", companyId)
+    .eq("worker_type", workerType)
+    .eq(workerType === "employee" ? "employee_id" : "contractor_id", workerId)
+    .not("status", "in", '("closed","rejected","withdrawn","cancelled")')
+    .order("submitted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (result.error || !result.data) return false;
+  // access_cutoff_at is the authoritative cutoff once it's set (applyAccessCutoffForExitCase
+  // sets it whenever a case reaches approved/notice_period/clearance with a known last
+  // working date) — but a case can end up in one of those statuses with access_cutoff_at
+  // still null if that confirmation step was ever skipped (a data-integrity gap, not
+  // something this webhook can fix). Falling back to the same
+  // approved_last_working_date/effective_date/requested_last_working_date chain used
+  // elsewhere in this codebase means a genuinely open, in-progress exit still protects
+  // the worker's pre-LWD attendance even when access_cutoff_at itself is missing.
+  if (result.data.access_cutoff_at) return Date.parse(result.data.access_cutoff_at) > Date.now();
+  const lastWorkingDate = result.data.approved_last_working_date ?? result.data.effective_date ?? result.data.requested_last_working_date;
+  // No confirmed date of any kind yet: this worker's LWD hasn't passed, so their
+  // attendance should keep counting.
+  if (!lastWorkingDate) return true;
+  // Mirrors dropx-hrms's computeAccessCutoff (worker-lifecycle.ts) — end of the last
+  // working date, IST, expressed as 18:30 UTC on that same calendar date — since this
+  // is a fallback for access_cutoff_at itself being unexpectedly missing, not something
+  // this webhook can import cross-repo.
+  const [year, month, day] = lastWorkingDate.split("-").map(Number);
+  const cutoffUtcMillis = Date.UTC(year, month - 1, day, 18, 30, 0);
+  return cutoffUtcMillis > Date.now();
+}
+
 function clean(value: unknown) {
   return String(value ?? "").trim();
 }
@@ -663,8 +717,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const canonicalEnrolmentId = enrolment.enrolment_id;
-    const active = enrolment.status === "Active";
+    const canonicalEnrolmentId = cleanEnrolmentId(enrolment.enrolment_id) || enrolment.enrolment_id;
+    const enrolmentVariants = enrolmentIdCandidates(canonicalEnrolmentId);
+    const active = enrolment.status === "Active"
+      || await isWithinConfirmedLastWorkingDay(device.company_id, enrolment.profile_type, enrolment.employee_id, enrolment.account_id);
     const punchDate = await resolveAttendanceWorkDate({
       accountId: enrolment.account_id,
       companyId: device.company_id,
@@ -678,7 +734,7 @@ export async function POST(request: NextRequest) {
       .from("attendance_punches")
       .select("id, punch_time")
       .eq("company_id", device.company_id)
-      .eq("enrolment_id", canonicalEnrolmentId)
+      .in("enrolment_id", enrolmentVariants.length ? enrolmentVariants : [canonicalEnrolmentId])
       .eq("punch_date", punchDate)
       .eq("calculated", true)
       .order("punch_time", { ascending: true });

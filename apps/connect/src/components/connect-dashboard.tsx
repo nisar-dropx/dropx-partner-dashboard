@@ -17,7 +17,7 @@ import {
   UserRound,
   UserRoundX
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import {
   dashboardMotivationContext,
@@ -28,10 +28,13 @@ import {
   type MotivationHistoryEntry
 } from "../lib/dashboard-motivation";
 import {
+  attendanceCompactNudge,
   attendanceDayInsight,
-  attendanceIssueSummary,
+  isCurrentAttendanceAttentionDate,
   type AttendanceInsightRow
 } from "../lib/attendance-insights";
+import { readJsonResponse, userFacingError } from "../lib/user-facing-error";
+import { useKeepAliveRefresh } from "../lib/use-keep-alive-refresh";
 
 type Profile = {
   editable: Record<string, string>;
@@ -53,7 +56,7 @@ type AttendanceRow = AttendanceInsightRow & {
   date: string;
   status: string;
   statusLabel?: string | null;
-  statusKind?: "attendance" | "leave";
+  statusKind?: "attendance" | "leave" | "paid_leave";
   attendanceStatus?: string | null;
   inTime: string;
   outTime: string;
@@ -71,6 +74,8 @@ type Attendance = {
     halfDay?: number;
     absent: number;
     needsReview?: number;
+    lateIn?: number;
+    earlyOut?: number;
     misPunch: number;
   };
   rows: AttendanceRow[];
@@ -158,27 +163,30 @@ function Metric({
 
 export function ConnectDashboard({
   account,
+  active = true,
   onAttendance,
   onAdvances,
-  onPayments,
-  onWork,
   onConnect,
   onLeave,
+  onPayments,
   onPerformance,
   onProfile,
   onRoster,
+  onWork,
   variant = "people"
 }: {
   account: AppAccount;
+  /** Whether this screen is the one currently shown (vs. kept alive but hidden behind another tab). Triggers a background refresh on becoming active again if the data has gone stale. */
+  active?: boolean;
   onAttendance: () => void;
   onAdvances: () => void;
-  onPayments: () => void;
-  onWork: () => void;
   onConnect: () => void;
   onLeave: () => void;
+  onPayments: () => void;
   onPerformance: () => void;
   onProfile: () => void;
   onRoster: () => void;
+  onWork: () => void;
   variant?: "people" | "workforce";
 }) {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -190,6 +198,12 @@ export function ConnectDashboard({
   const [refreshKey, setRefreshKey] = useState(0);
   const [motivation, setMotivation] = useState("");
   const [paymentSummary, setPaymentSummary] = useState<WorkforcePaymentSummary | null>(null);
+  const { markLoaded, setReload } = useKeepAliveRefresh(active);
+  // A background staleness refresh must not blank the dashboard back to its
+  // loading state - only the very first load should do that. This flag is
+  // read (and reset) once by the fetch effect below when refreshKey bumps.
+  const backgroundRefresh = useRef(false);
+  setReload(() => { backgroundRefresh.current = true; setRefreshKey((value) => value + 1); });
 
   useEffect(() => {
     if (!profile || !attendance) {
@@ -282,11 +296,15 @@ export function ConnectDashboard({
   }, [account.companyId, account.id, account.profileType, attendance, profile]);
 
   useEffect(() => {
-    setProfile(null);
-    setAttendance(null);
-    setOpenFlags([]);
-    setPunchState(null);
-    setError("");
+    const background = backgroundRefresh.current;
+    backgroundRefresh.current = false;
+    if (!background) {
+      setProfile(null);
+      setAttendance(null);
+      setOpenFlags([]);
+      setPunchState(null);
+      setError("");
+    }
     const executive = account.profileType !== "employee" && account.profileType !== "user";
     const profileUrl = executive
       ? `/api/connect/field-executive-profile?executiveId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`
@@ -295,26 +313,21 @@ export function ConnectDashboard({
 
     Promise.all([
       fetch(profileUrl).then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || "Unable to load profile.");
+        const payload = await readJsonResponse<{ profile: Profile }>(response, "Unable to load profile. Please try again.");
         return payload.profile as Profile;
       }),
       fetch(`/api/connect/attendance?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}&month=${month}`)
         .then(async (response) => {
-          const payload = await response.json();
-          if (!response.ok) throw new Error(payload.error || "Unable to load attendance.");
-          return payload as Attendance;
+          return readJsonResponse<Attendance>(response, "Unable to load attendance. Please try again.");
         }),
       fetch(`/api/connect/verification?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`)
         .then(async (response) => {
-          const payload = await response.json();
-          if (!response.ok) throw new Error(payload.error || "Unable to load verifications.");
+          const payload = await readJsonResponse<{ verifications?: Verification[] }>(response, "Unable to load profile checks. Please try again.");
           return (payload.verifications ?? []) as Verification[];
         }),
       fetch(`/api/connect/attendance/punch?accountId=${encodeURIComponent(account.id)}&profileType=${encodeURIComponent(account.profileType)}`)
         .then(async (response) => {
-          const payload = await response.json();
-          if (!response.ok) return { flags: [] as OpenFlagNotice[], shift: null as PunchState | null };
+          const payload = await readJsonResponse<{ openFlags?: OpenFlagNotice[]; shift?: PunchState | null }>(response, "Unable to refresh punch status.");
           return {
             flags: (payload.openFlags ?? []) as OpenFlagNotice[],
             shift: (payload.shift ?? null) as PunchState | null
@@ -327,8 +340,9 @@ export function ConnectDashboard({
       setVerifications(nextVerifications);
       setOpenFlags(punchPayload.flags);
       setPunchState(punchPayload.shift);
-    }).catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to load dashboard."));
-  }, [account.id, account.profileType, refreshKey]);
+      markLoaded();
+    }).catch((reason) => setError(userFacingError(reason, "Unable to load dashboard. Please try again.")));
+  }, [account.id, account.profileType, refreshKey, markLoaded]);
 
   useEffect(() => {
     if (variant !== "workforce" || !account.pageAccess?.includes("earnings")) {
@@ -395,16 +409,17 @@ export function ConnectDashboard({
       .sort((left, right) => right.date.localeCompare(left.date))
       .forEach((row) => {
         if (rows.length >= 6) return;
+        if (row.date === todayDate || !isCurrentAttendanceAttentionDate(row.date, todayDate)) return;
         const insight = attendanceDayInsight(row, {
-          today: row.date === todayDate,
+          today: false,
           shiftOpen: row.date === punchState?.punchDate && punchState?.open === true
         });
-        const issue = attendanceIssueSummary(row);
-        if (!issue || (row.date === todayDate && punchState?.open)) return;
+        const nudge = attendanceCompactNudge(row);
+        if (!nudge) return;
         rows.push({
-          label: `${issue.label} · ${displayDate(row.date)}`,
-          detail: issue.message,
-          danger: issue.tone === "red",
+          label: `Yesterday · ${nudge.headline}`,
+          detail: nudge.detail,
+          danger: nudge.tone === "red",
           target: "attendance"
         });
       });
@@ -417,6 +432,10 @@ export function ConnectDashboard({
   const now = new Date();
   const today = attendance.rows.find((row) => row.date === localIsoDate());
   const todayInsight = attendanceDayInsight(today, {
+    today: true,
+    shiftOpen: today?.date === punchState?.punchDate && punchState?.open === true
+  });
+  const todayNudge = attendanceCompactNudge(today, {
     today: true,
     shiftOpen: today?.date === punchState?.punchDate && punchState?.open === true
   });
@@ -442,11 +461,16 @@ export function ConnectDashboard({
   const profileAllowed = pageAccess.includes("profile");
   const rosterAllowed = pageAccess.includes("roster");
   const leaveAllowed = pageAccess.includes("leave");
-  const performanceAllowed = pageAccess.includes("performance");
+  const performanceAllowed = account.profileType === "employee" || account.profileType === "contractor" || pageAccess.includes("performance");
   const advancesAllowed = pageAccess.includes("advances");
   const fullDayCount = attendance.summary.fullDay ?? attendance.summary.present;
   const halfDayCount = attendance.summary.halfDay ?? 0;
-  const reviewCount = attendance.summary.needsReview ?? attendance.summary.misPunch;
+  const lateInCount = attendance.summary.lateIn ?? 0;
+  const earlyOutCount = attendance.summary.earlyOut ?? 0;
+  const reviewCount = attendance.rows.filter((row) => attendanceDayInsight(row, {
+    today: row.date === localIsoDate(now),
+    shiftOpen: row.date === punchState?.punchDate && punchState?.open === true
+  }).needsRegularization).length;
   const trackedDays = fullDayCount + halfDayCount + attendance.summary.absent + reviewCount;
   const attendanceRate = trackedDays ? Math.round(((fullDayCount + halfDayCount * 0.5) / trackedDays) * 100) : 0;
   const workforce = variant === "workforce";
@@ -467,17 +491,17 @@ export function ConnectDashboard({
       <header><div><small>Today</small><h2>Attendance</h2></div><Pill text={todayStatus} tone={statusTone} /></header>
       {today?.scheduledStart && today.scheduledStart !== "--:--" ? <p className="dx-dashboard-shift-expectation">
         <CalendarClock />
-        <span><strong>Report by {today.scheduledStart}</strong><small>{today.shiftName || "Rostered shift"} · {today.scheduledStart}–{today.scheduledEnd}</small></span>
+        <span><strong>{today.workMode === "wfh" ? "Scheduled start" : "Report by"} {today.scheduledStart}</strong><small>{today.shiftName || "Rostered shift"} · {today.scheduledStart}–{today.scheduledEnd}</small></span>
       </p> : null}
       <div className="dx-dashboard-metrics">
         <Metric icon={<LogIn />} label="In" value={today?.inTime || "--:--"} tone="green" />
         <Metric icon={<LogOut />} label="Out" value={today?.outTime || "--:--"} tone="red" />
-        <Metric icon={<Clock3 />} label="Work" value={today?.workHours || "00:00"} tone="orange" />
+        <Metric icon={<Clock3 />} label={today?.workMode === "wfh" && !today?.punchCount ? "WFH credit" : "Work"} value={today?.workHours || "00:00"} tone="orange" />
         <Metric icon={<Fingerprint />} label="Punches" value={today?.punchCount || 0} tone="purple" />
       </div>
-      {today && (todayInsight.issues.length > 0 || todayInsight.needsRegularization) ? <button className={`dx-dashboard-attendance-nudge ${todayInsight.tone}`} onClick={onAttendance}>
+      {today && todayNudge ? <button className={`dx-dashboard-attendance-nudge ${todayNudge.tone}`} onClick={onAttendance}>
         <AlertTriangle />
-        <span><strong>{todayInsight.headline}</strong><small>{todayInsight.detail}</small>{todayInsight.issues.filter((issue) => issue.code === "late" || issue.code === "early_out").map((issue) => <small className="dx-dashboard-attendance-penalty" key={issue.code}>{issue.label} · {issue.message}</small>)}</span>
+        <span><strong>{todayNudge.headline}</strong><small>{todayNudge.detail}</small></span>
         <ChevronRight />
       </button> : null}
       {attendanceAllowed ? <button className="dx-dashboard-link" onClick={onAttendance}>View attendance <ChevronRight /></button> : null}
@@ -507,6 +531,12 @@ export function ConnectDashboard({
         <Metric icon={<UserRoundX />} label="Absent" value={attendance.summary.absent} tone="red" />
         <Metric icon={<Clock3 />} label="Needs review" value={reviewCount} tone="purple" />
       </div>
+      {(lateInCount || earlyOutCount) ? (
+        <div className="dx-attendance-flashes dx-dashboard-flashes" aria-label="Attendance exceptions this month">
+          {lateInCount ? <span className="late"><Clock3 /> Late in <strong>{lateInCount}</strong></span> : null}
+          {earlyOutCount ? <span className="early"><LogOut /> Early out <strong>{earlyOutCount}</strong></span> : null}
+        </div>
+      ) : null}
       <div className="dx-month-progress">
         <span><b>{attendanceRate}%</b><small>Attendance score · {totalHours} hrs</small></span>
         <i aria-label={`${attendanceRate}% attendance rate`}><b style={{ width: `${attendanceRate}%` }} /></i>
@@ -515,13 +545,13 @@ export function ConnectDashboard({
 
     {workforce && pageAccess.includes("earnings") ? <section className="dx-dashboard-card dx-workforce-dashboard-pay">
       <header><div><small>My pay · {paymentSummary?.period || "This month"}</small><h2>Live earnings</h2></div><button onClick={(event) => { event.stopPropagation(); onPayments(); }}>View all <ChevronRight /></button></header>
-      {paymentSummary?.mapping.length ? <div className="dx-dashboard-metrics"><Metric icon={<IndianRupee />} label="Recorded earnings" value={`₹${paymentSummary.summary.earnings.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`} tone="orange" /><Metric icon={<Route />} label="Deliveries" value={paymentSummary.summary.deliveries.toLocaleString("en-IN")} tone="purple" /><Metric icon={<CalendarDays />} label="Active days" value={paymentSummary.summary.workingDays} tone="green" /></div> : <p className="dx-workforce-dashboard-pay-empty">Payment mapping is being set up. Your earnings will appear here once your provider ID and rate card are active.</p>}
+      {paymentSummary?.mapping.length ? <div className="dx-dashboard-metrics"><Metric icon={<IndianRupee />} label="Recorded earnings" value={`₹${paymentSummary.summary.earnings.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`} tone="orange" /><Metric icon={<Route />} label="Deliveries" value={paymentSummary.summary.deliveries.toLocaleString("en-IN")} tone="purple" /><Metric icon={<CalendarDays />} label="Active days" value={paymentSummary.summary.workingDays} tone="green" /></div> : <p className="dx-workforce-dashboard-pay-empty">Payment mapping is being set up. Earnings appear here once your provider ID and rate card are active.</p>}
     </section> : null}
 
     <section className="dx-dashboard-card dx-dashboard-actions">
       <header><div><small>{workforce ? "Work tools" : "Shortcuts"}</small><h2>Quick actions</h2></div></header>
       <div>
-        {workforce && (pageAccess.includes("earnings") || pageAccess.includes("advances") || pageAccess.includes("rate_card")) ? <button onClick={onPayments}><i className="amber"><IndianRupee /></i><span><strong>Earnings & payments</strong><small>Live earnings and advances</small></span><ChevronRight /></button> : null}
+        {workforce && (pageAccess.includes("earnings") || pageAccess.includes("advances") || pageAccess.includes("rate_card")) ? <button onClick={onPayments}><i className="amber"><IndianRupee /></i><span><strong>Earnings & payments</strong><small>Live earnings, advances and rates</small></span><ChevronRight /></button> : null}
         {workforce && (attendanceAllowed || rosterAllowed || leaveAllowed) ? <button onClick={onWork}><i className="blue"><CalendarClock /></i><span><strong>Work schedule</strong><small>Attendance, roster and leave</small></span><ChevronRight /></button> : null}
         {!workforce && attendanceAllowed ? <button onClick={onAttendance}><i className="blue"><Fingerprint /></i><span><strong>Attendance</strong><small>View punches</small></span><ChevronRight /></button> : null}
         {!workforce && rosterAllowed ? <button onClick={onRoster}><i className="amber"><CalendarClock /></i><span><strong>My roster</strong><small>Shift and swap requests</small></span><ChevronRight /></button> : null}

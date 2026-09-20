@@ -80,6 +80,23 @@ function dueTimePassed(report: ReportImportMaster, date: string, today: string) 
   return now >= report.upload_time.slice(0, 5);
 }
 
+// These 4 sources' actual data is always one calendar day older than the
+// day they're being checked for — the same lag the auto-upload route
+// shifts around (see addDaysYmd(requestedDate, -1) in auto-run/route.ts).
+// report_import_master.day_offset for bpcl_fuel/iocl_fuel is configured as
+// 0 ("D0"), which describes when the checklist expects the row to be due,
+// not which calendar date the underlying data actually covers — using it
+// directly here made the checklist look for a same-day batch that this
+// source can never produce, so "select 25 Aug -> we correctly fetch and
+// tag 24 Aug's data" never satisfied 25 Aug's own row. Override the
+// effective offset for these 4 to match the real one-day lag instead of
+// trusting day_offset, which describes something else (schedule timing).
+const REAL_DATA_LAG_SOURCES = new Set(["bpcl_fuel", "iocl_fuel", "delivered_shipment_detail", "cashbook"]);
+
+function effectiveDayOffset(report: ReportImportMaster) {
+  return REAL_DATA_LAG_SOURCES.has(report.source_code) ? -1 : report.day_offset;
+}
+
 function reportIsDue(report: ReportImportMaster, date: string) {
   if (report.frequency === "weekly" && report.weekday !== null) {
     return new Date(`${date}T00:00:00Z`).getUTCDay() === report.weekday;
@@ -107,13 +124,6 @@ function successfulBatchCoversDate(batch: ImportBatch, sourceCode: string, date:
   return batch.source_type === sourceCode
     && (status === "completed" || status === "success" || status === "succeeded")
     && batchMatchesDate(batch, date);
-}
-
-function successfulBatchUploadedOn(batch: ImportBatch, sourceCode: string, date: string) {
-  const status = batch.status.toLowerCase();
-  return batch.source_type === sourceCode
-    && (status === "completed" || status === "success" || status === "succeeded")
-    && createdDateInIndia(batch.created_at) === date;
 }
 
 async function loadImportMaster(companyId: string | null) {
@@ -245,10 +255,9 @@ export async function ReportUploadPageContent({
   const reportBySource = new Map(reports.map((report) => [report.source_code, report]));
   const latestBySource = new Map<string, ImportBatch>();
   dueReports.forEach((report) => {
-    const reportDate = addDays(date, report.day_offset);
+    const reportDate = addDays(date, effectiveDayOffset(report));
     const batch = batches.find((candidate) =>
       successfulBatchCoversDate(candidate, report.source_code, reportDate))
-      ?? batches.find((candidate) => successfulBatchUploadedOn(candidate, report.source_code, date))
       ?? batches.find((candidate) =>
         candidate.source_type === report.source_code
         && (batchMatchesDate(candidate, reportDate) || createdDateInIndia(candidate.created_at) === date));
@@ -263,22 +272,20 @@ export async function ReportUploadPageContent({
       for (let daysBack = 14; daysBack >= 0; daysBack -= 1) {
         const dueDate = addDays(today, -daysBack);
         if (dueTimePassed(report, dueDate, today)) {
-          expectedPeriods.push({ dueDate, reportDate: addDays(dueDate, report.day_offset) });
+          expectedPeriods.push({ dueDate, reportDate: addDays(dueDate, effectiveDayOffset(report)) });
         }
       }
     } else if (report.weekday !== null) {
       let dueDate = previousWeekday(addDays(today, 1), report.weekday);
       for (let week = 0; week < 6; week += 1) {
         if (dueTimePassed(report, dueDate, today)) {
-          expectedPeriods.push({ dueDate, reportDate: addDays(dueDate, report.day_offset) });
+          expectedPeriods.push({ dueDate, reportDate: addDays(dueDate, effectiveDayOffset(report)) });
         }
         dueDate = addDays(dueDate, -7);
       }
     }
-    const missing = expectedPeriods.filter(({ dueDate, reportDate }) =>
-      !batches.some((batch) =>
-        successfulBatchCoversDate(batch, report.source_code, reportDate)
-        || successfulBatchUploadedOn(batch, report.source_code, dueDate)));
+    const missing = expectedPeriods.filter(({ reportDate }) =>
+      !batches.some((batch) => successfulBatchCoversDate(batch, report.source_code, reportDate)));
     return missing.length ? [{ report, missing }] : [];
   });
   const recentBatches = batches.slice(0, 10);

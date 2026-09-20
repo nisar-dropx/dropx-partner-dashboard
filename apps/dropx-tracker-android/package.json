@@ -1,0 +1,16 @@
+{
+  "name": "dropx-tracker-android",
+  "private": true,
+  "version": "1.0.0",
+  "description": "DropX One Android app: Capacitor shell around one.dropxlogistics.com plus a native DropxOne plugin for always-on background location tracking.",
+  "scripts": {
+    "sync": "cap sync android",
+    "open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.2",
+    "@capacitor/cli": "^6.2.2",
+    "@capacitor/core": "^6.2.2",
+    "@capacitor/status-bar": "^6.0.3"
+  }
+}

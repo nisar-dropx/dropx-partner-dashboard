@@ -21,6 +21,7 @@ export const appNotificationEvents = [
   "advance_request_raised",
   "advance_request_approved",
   "advance_request_rejected",
+  "advance_request_withdrawn",
   "exit_request_raised",
   "exit_request_approved",
   "exit_request_rejected"
@@ -104,6 +105,12 @@ export const appNotificationDefaults: Record<AppNotificationEvent, {
     route: "advances",
     titleTemplate: "Advance request rejected",
     bodyTemplate: "Your advance request was rejected. {remarks}"
+  },
+  advance_request_withdrawn: {
+    label: "Advance request withdrawn",
+    route: "advances",
+    titleTemplate: "Advance request withdrawn",
+    bodyTemplate: "You withdrew your advance request for Rs {amount}."
   },
   exit_request_raised: {
     label: "Exit request raised",
@@ -250,7 +257,7 @@ export async function createAttendancePunchNotification({
   if (!supabaseAdmin || !isWorkforceProfileType(profileType)) return;
 
   const eventCode: AttendanceNotificationEvent =
-    punchOrder % 2 === 1 ? "attendance_punch_in" : "attendance_punch_out";
+    punchOrder === 1 ? "attendance_punch_in" : "attendance_punch_out";
   const rows = await loadAttendanceReportRows({
     companyId,
     enrolmentIds: [enrolmentId],

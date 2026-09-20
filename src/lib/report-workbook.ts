@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import JSZip from "jszip";
 
 /**
  * Builds a multi-sheet .xlsx download response — same approach already used
@@ -32,4 +33,14 @@ export function workbookResponse(sheets: Array<{ name: string; rows: Record<stri
       "Cache-Control": "no-store"
     }
   });
+}
+
+/** Detailed EDD reports duplicate audit rows across sheets. Recompress the XLSX
+ * ZIP with DEFLATE so large stations fit the serverless response budget. The
+ * existing workbookResponse behavior and other report callers stay unchanged. */
+export async function compressedWorkbookResponse(sheets: Array<{ name: string; rows: Record<string, unknown>[] }>, filename: string): Promise<Response> {
+  const response = workbookResponse(sheets, filename);
+  const archive = await JSZip.loadAsync(await response.arrayBuffer());
+  const body = await archive.generateAsync({ type: "uint8array", compression: "DEFLATE", compressionOptions: { level: 6 } });
+  return new Response(new Uint8Array(body), { headers: response.headers });
 }

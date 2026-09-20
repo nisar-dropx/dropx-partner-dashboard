@@ -1,8 +1,17 @@
 import "server-only";
 
+// NOTE: This resolver is hand-duplicated in two other places that read the same
+// hr_approval_workflow_routes/designations tables against the shared database:
+//   - dropx-hrms/src/lib/approval-workflow-routing.ts
+//   - dropx-partner-dashboard/apps/connect/src/lib/approval-workflow-routing.ts
+// The three copies have already diverged in features (this one has neither the
+// senior-head-skip logic nor allowMissingApprovers/reportingChainOnly). Any behavioral
+// change here (routing rules, new designation flags, etc.) must be applied to all three
+// by hand until they're consolidated into one shared package.
 import { selectApprovalRoute } from "@/lib/approval-workflow-routing-core";
 import { isTeamLeadDesignation } from "@/lib/approval-designation-labels";
 import { resolveConnectApproverUserId } from "@/lib/connect-approver-identity";
+import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export type ConfiguredApprovalStep = {
@@ -84,6 +93,40 @@ async function designationLabels(companyId: string, designationIds: string[]) {
   const result = await db().from("designations").select("id,name,code").eq("company_id", companyId).in("id", unique);
   if (result.error) throw new Error(result.error.message);
   return new Map((result.data ?? []).map((item) => [item.id, { name: item.name, code: item.code }]));
+}
+
+/**
+ * Designations HR has marked "require HR review immediately before this
+ * approver, and this approver's step becomes the request's final step".
+ * Set from the HRMS Approval Workflow Master screen
+ * (designations.requires_hr_precheck_and_finalizes) — never hardcoded to a
+ * specific designation name (e.g. Business Head).
+ */
+async function hrPrecheckFinalizeDesignations(companyId: string, designationIds: string[]) {
+  const unique = [...new Set(designationIds.filter(Boolean))];
+  if (!unique.length) return new Set<string>();
+  const result = await db().from("designations").select("id,requires_hr_precheck_and_finalizes")
+    .eq("company_id", companyId).in("id", unique).eq("requires_hr_precheck_and_finalizes", true);
+  if (result.error) {
+    if (/does not exist|schema cache/i.test(result.error.message)) return new Set<string>();
+    throw new Error(result.error.message);
+  }
+  return new Set((result.data ?? []).map((item) => item.id as string));
+}
+
+// Which workflow(s) the "requires HR precheck and finalizes" designation flag applies to
+// is admin-configurable from the Approval Workflow Master (hr_approval_workflow_catalog.
+// applies_hr_precheck_finalize_flag), not hardcoded to a specific workflow name in code.
+async function workflowAppliesHrPrecheckFinalizeFlag(companyId: string, workflowCode: string) {
+  const result = await db().rpc("hr_workflow_applies_hr_precheck_finalize_flag", {
+    p_company_id: companyId,
+    p_workflow_code: workflowCode
+  });
+  if (result.error) {
+    if (/does not exist|schema cache/i.test(result.error.message)) return false;
+    throw new Error(result.error.message);
+  }
+  return Boolean(result.data);
 }
 
 function chainCandidates(
@@ -186,14 +229,23 @@ async function scopedDesignationCandidates(companyId: string, designationId: str
     if (!requesterLocationId) return [];
     if (scope === "same_location") allowedLocations = new Set([requesterLocationId]);
     else {
-      const requesterStation = await db().from("stations").select("region,cluster,cluster_name").eq("company_id", companyId).eq("id", requesterLocationId).maybeSingle();
+      const requesterStation = await db().from("stations").select("region").eq("company_id", companyId).eq("id", requesterLocationId).maybeSingle();
       if (requesterStation.error || !requesterStation.data) return [];
-      const stationResult = await db().from("stations").select("id,region,cluster,cluster_name").eq("company_id", companyId).eq("is_active", true);
+      const stationResult = await db().from("stations").select("id,region").eq("company_id", companyId).eq("is_active", true);
       if (stationResult.error) throw new Error(stationResult.error.message);
-      const cluster = requesterStation.data.cluster || requesterStation.data.cluster_name;
-      allowedLocations = new Set((stationResult.data ?? []).filter((station) => scope === "same_region"
-        ? Boolean(requesterStation.data?.region && station.region === requesterStation.data.region)
-        : Boolean(cluster && (station.cluster || station.cluster_name) === cluster)).map((station) => station.id));
+      if (scope === "same_region") {
+        allowedLocations = new Set((stationResult.data ?? []).filter((station) => (
+          Boolean(requesterStation.data?.region && station.region === requesterStation.data.region)
+        )).map((station) => station.id));
+      } else {
+        const stationIds = (stationResult.data ?? []).map((station) => station.id);
+        const hierarchy = await loadPeopleOperationalHierarchy(companyId, stationIds);
+        if (hierarchy.error) throw new Error(hierarchy.error);
+        const requesterManagers = new Set((hierarchy.byLocation.get(requesterLocationId)?.clusterManagers ?? []).map((person) => person.personId));
+        allowedLocations = new Set(stationIds.filter((stationId) => (
+          (hierarchy.byLocation.get(stationId)?.clusterManagers ?? []).some((person) => requesterManagers.has(person.personId))
+        )));
+      }
     }
   }
   const assignments = (result.data ?? []).filter((assignment) => !allowedLocations || Boolean(assignment.location_id && allowedLocations.has(assignment.location_id)));
@@ -231,13 +283,28 @@ export async function resolveConfiguredApprovalWorkflow(input: {
   const maxLevel = input.maxLevel ?? 3;
   const chain = await reportingChain(input.companyId, worker.assignment.id, asOf);
   const designationById = await designationLabels(input.companyId, chain.map((item) => item.designationId ?? "").filter(Boolean));
+  // Which workflow(s) the "requires HR precheck and finalizes" reorder applies to is
+  // admin-configurable from the Approval Workflow Master (per-workflow, not hardcoded
+  // to any specific workflow name) — see hr_workflow_applies_hr_precheck_finalize_flag.
+  const precheckFinalizeDesignationIds = (await workflowAppliesHrPrecheckFinalizeFlag(input.companyId, input.workflowCode))
+    ? await hrPrecheckFinalizeDesignations(input.companyId, [
+      route.level_1_designation_id,
+      route.level_2_designation_id ?? ""
+    ].filter(Boolean))
+    : new Set<string>();
   const excludedPeople = new Set<string>([worker.engagement.person_id]);
   const steps: ConfiguredApprovalStep[] = [];
   let lastChainIndex = -1;
+  // Set once a level-1/level-2 approver flagged "requires_hr_precheck_and_finalizes" resolves
+  // (attendance regularization only — see precheckFinalizeDesignationIds above). Its own step
+  // is held back until the very end (after an HR review step is spliced in front of it), and
+  // the route's normal level-3/HR-final resolution is skipped entirely — this designation's
+  // step replaces it as the request's true final approval.
+  let deferredFinalStep: ConfiguredApprovalStep | null = null;
   for (const level of [1, 2, 3] as const) {
     if (level > maxLevel) continue;
     if (level === 2 && !route.level_2_required) continue;
-    if (level === 3 && !route.hr_final_required) continue;
+    if (level === 3 && (deferredFinalStep || !route.hr_final_required)) continue;
     const designationId = level === 1 ? route.level_1_designation_id : level === 2 ? route.level_2_designation_id : route.hr_final_designation_id;
     if (!designationId) throw new Error(`${level === 3 ? "HR final" : `Level ${level}`} approver designation is missing. Contact HR.`);
     const searchScope = level === 1 ? route.level_1_search_scope : level === 2 ? route.level_2_search_scope : route.hr_final_search_scope;
@@ -271,9 +338,41 @@ export async function resolveConfiguredApprovalWorkflow(input: {
     }
     if (!resolved) throw new Error(`${level === 3 ? "HR final" : `Level ${level}`} approval is not available for this request. Contact HR.`);
     if (level === 3) resolved.step.step_name = "HR final approval";
-    steps.push(resolved.step);
     excludedPeople.add(resolved.candidate.personId);
     if (resolved.candidate.chainIndex >= 0) lastChainIndex = Math.max(lastChainIndex, resolved.candidate.chainIndex);
+    if (level !== 3 && !deferredFinalStep && precheckFinalizeDesignationIds.has(designationId)) {
+      // This approver requires an HR review immediately before them, and becomes the
+      // request's final step. Resolve the HR step now (reusing the route's hr_final_*
+      // config as the source of who counts as "HR" for this route), splice it in ahead
+      // of the deferred final step, and hold this step back until after the loop.
+      if (!route.hr_final_designation_id) throw new Error("HR final approver designation is missing. Contact HR.");
+      const hrCandidates = ["reporting_chain", "immediate_reporting_manager", "manager_above_team_lead"].includes(route.hr_final_search_scope)
+        ? chainCandidates(chain, route.hr_final_search_scope, route.hr_final_designation_id, lastChainIndex, designationById)
+        : await scopedDesignationCandidates(input.companyId, route.hr_final_designation_id, route.hr_final_search_scope, worker.assignment.location_id, asOf);
+      let hrResolved = await findAvailable(hrCandidates, input.companyId, route.id, 3, excludedPeople, "configured_designation", null, null, asOf);
+      if (!hrResolved && route.hr_final_fallback_mode !== "block") {
+        let hrFallbackCandidates: Candidate[] = [];
+        if (route.hr_final_fallback_mode === "specific_person" && route.hr_final_fallback_person_id) {
+          const candidate = await activePersonCandidate(input.companyId, route.hr_final_fallback_person_id, asOf);
+          if (candidate) hrFallbackCandidates = [candidate];
+        } else if (route.hr_final_fallback_mode === "target_reporting_manager" || route.hr_final_fallback_mode === "next_reporting_manager") {
+          hrFallbackCandidates = chain.filter((item) => item.chainIndex > lastChainIndex);
+        } else {
+          const fallbackScope = route.hr_final_fallback_mode.replace("same_designation_", "same_") as SearchScope;
+          hrFallbackCandidates = await scopedDesignationCandidates(input.companyId, route.hr_final_designation_id, fallbackScope, worker.assignment.location_id, asOf);
+        }
+        hrResolved = await findAvailable(hrFallbackCandidates, input.companyId, route.id, 3, excludedPeople, "fallback", null, "Configured designation not found", asOf);
+      }
+      if (!hrResolved) throw new Error("HR review approval is not available for this request. Contact HR.");
+      hrResolved.step.step_name = "HR review";
+      excludedPeople.add(hrResolved.candidate.personId);
+      if (hrResolved.candidate.chainIndex >= 0) lastChainIndex = Math.max(lastChainIndex, hrResolved.candidate.chainIndex);
+      steps.push(hrResolved.step);
+      deferredFinalStep = resolved.step;
+      continue;
+    }
+    steps.push(resolved.step);
   }
+  if (deferredFinalStep) steps.push(deferredFinalStep);
   return { routeName: route.route_name, steps, routeId: route.id };
 }

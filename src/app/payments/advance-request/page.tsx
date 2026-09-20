@@ -136,11 +136,11 @@ export default async function AdvanceRequestPage({
           <tbody>{requests.length ? requests.map((request) => <tr key={request.id}>
             <td><strong>{request.requester_name || request.account_code || "-"}</strong>{request.requester_name && request.account_code ? <div className="subtle">{request.account_code}</div> : null}</td>
             <td>{exactDesignations.get(`${request.profile_type}:${request.account_id}`) || request.designation || "-"}</td>
-            <td>{request.station_code || "-"}</td><td>Rs {Number(request.amount).toLocaleString("en-IN")}</td><td>{request.purpose}</td>
+            <td>{request.station_code || "-"}</td><td>Rs {Number(request.amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}</td><td>{request.purpose}</td>
             <td><StatusPill status={statusLabel(request.status)} /></td><td>{formatDashboardDateTime(request.requested_at)}</td>
             {openStatuses.has(request.status) ? <>
               <td colSpan={3} className="advance-request-inline-cell"><AdvanceRequestInlineActions requestId={request.id} requestedAmount={Number(request.amount)} requesterLabel={request.requester_name || request.account_code || "request"} /></td>
-            </> : <><td>{request.approved_amount == null ? "-" : `Rs ${Number(request.approved_amount).toLocaleString("en-IN")}`}</td><td>{request.decision_comment || "-"}</td><td>-</td></>}
+            </> : <><td>{request.approved_amount == null ? "-" : `Rs ${Number(request.approved_amount).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td><td>{request.decision_comment || "-"}</td><td>-</td></>}
           </tr>) : <tr><td className="empty-cell" colSpan={10}>No advance requests found.</td></tr>}</tbody>
         </table></div>
       </section> : null}

@@ -1,3 +1,4 @@
+import { WorkforceCostReadiness } from "@/components/workforce-cost-readiness";
 import type { ReactNode } from "react";
 import { bulkImportFieldExecutives, createFieldExecutive, reviewFieldExecutiveProfile, updateFieldExecutive } from "@/app/field-executive/actions";
 import { AppShell } from "@/components/app-shell";
@@ -9,6 +10,8 @@ import { ProfileVerificationPanel } from "@/components/profile-verification-pane
 import { ScopedDesignationFields, type ScopedDesignationOption, type ScopedLocationOption } from "@/components/scoped-designation-fields";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
+import { WorkforceEmailInput, WorkforceMobileInput } from "@/components/workforce-contact-inputs";
+import { WorkforceFullNameInput } from "@/components/workforce-full-name-input";
 import { isCompanyOwner, type AuthorizationContext, requirePagePermission } from "@/lib/authorization";
 import { currentAccessSurface, type AccessSurface } from "@/lib/access-surface";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -65,6 +68,7 @@ type ExecutiveRow = {
   date_of_join: string;
   is_active: boolean;
   onboarding_status?: string | null;
+  people_lifecycle_status?: string | null;
   profile_return_remarks?: string | null;
   statutory_applicability?: string[] | null;
   location_id: string;
@@ -196,11 +200,46 @@ const statusOptions = [
   { value: "false", label: "Inactive" }
 ];
 
-function fieldExecutiveStatus(executive: Pick<ExecutiveRow, "is_active" | "onboarding_status">) {
+function fieldExecutiveStatus(
+  executive: Pick<ExecutiveRow, "is_active" | "onboarding_status" | "people_lifecycle_status">,
+  canonicalWorkforce = false
+) {
+  const lifecycleStatus = String(executive.people_lifecycle_status ?? "").trim().toLowerCase();
+  if (lifecycleStatus === "offboarding") return "Offboarding";
+  if (lifecycleStatus === "offboarded") return "Offboarded";
+  if (lifecycleStatus === "suspended") return "Suspended";
+  const onboardingStatus = String(executive.onboarding_status ?? "").trim().toLowerCase();
+  if (canonicalWorkforce) {
+    if (onboardingStatus === "pending") return "Pending";
+    if (onboardingStatus === "under_review") return "Workforce approval pending";
+    if (onboardingStatus === "returned") return "Correction requested";
+    if (onboardingStatus === "approved") return "Activation pending";
+    if (onboardingStatus === "rejected") return "Rejected";
+    if (onboardingStatus === "cancelled") return "Inactive";
+    if (onboardingStatus === "active") return executive.is_active ? "Active" : "Activation pending";
+  }
+  if (onboardingStatus === "under_review") return "Under review";
+  if (onboardingStatus === "returned") return "Returned";
   if (!executive.is_active) return "Inactive";
-  if (executive.onboarding_status === "under_review") return "Under review";
-  if (executive.onboarding_status === "returned") return "Returned";
-  return executive.onboarding_status === "active" ? "Active" : "Pending";
+  return onboardingStatus === "active" ? "Active" : "Pending";
+}
+
+function WorkforceRegisterSummary({ rows }: { rows: FieldExecutiveListRow[] }) {
+  const registrationPending = rows.filter((row) =>
+    row.status === "Pending" || row.status === "Correction requested"
+  ).length;
+  const approvalPending = rows.filter((row) =>
+    row.status === "Workforce approval pending" || row.status === "Activation pending"
+  ).length;
+  const active = rows.filter((row) => row.status === "Active").length;
+  return (
+    <section className="workforce-register-summary" aria-label="Workforce registration summary">
+      <article><span>Total in scope</span><strong>{rows.length}</strong></article>
+      <article><span>Registration pending</span><strong>{registrationPending}</strong></article>
+      <article><span>Approval pending</span><strong>{approvalPending}</strong></article>
+      <article><span>Active associates</span><strong>{active}</strong></article>
+    </section>
+  );
 }
 
 function textValue(value: string | null | undefined) {
@@ -246,9 +285,11 @@ function UploadDetail({ label, url }: { label: string; url?: string | null }) {
 }
 
 function FieldExecutiveDetails({
+  canonicalWorkforce,
   dashboardRules,
   executive
 }: {
+  canonicalWorkforce?: boolean;
   dashboardRules: { enabled: string[]; required: string[] };
   executive: ExecutiveRow;
 }) {
@@ -265,7 +306,7 @@ function FieldExecutiveDetails({
           <ExecutiveDetail label="Designation" value={executive.designation} />
           <ExecutiveDetail label="Date of join" value={formatDashboardDate(executive.date_of_join)} />
           <ExecutiveDetail label="Location" value={location?.station_name || location?.station_code} />
-          <ExecutiveDetail label="Status" value={fieldExecutiveStatus(executive)} />
+          <ExecutiveDetail label="Status" value={fieldExecutiveStatus(executive, canonicalWorkforce)} />
           <ExecutiveDetail label="Biometric enrolment ID" value={executive.biometric_id} />
         </dl>
       </section>
@@ -373,8 +414,8 @@ function FieldExecutiveForm({
       <input type="hidden" name="return_path" value={returnPath} />
       {executive ? <input type="hidden" name="id" value={executive.id} /> : null}
 
-      <label>Full name<input className="field" name="full_name" placeholder="Enter full name" required={!optionalEditFields} defaultValue={textValue(executive?.full_name)} /></label>
-      <label>Email<input className="field" name="email" placeholder="Enter email" required={!optionalEditFields} type="email" defaultValue={textValue(executive?.email)} /></label>
+      <label>Full name<WorkforceFullNameInput required={!optionalEditFields} defaultValue={textValue(executive?.full_name)} /></label>
+      <label>Email<WorkforceEmailInput required={!optionalEditFields} defaultValue={textValue(executive?.email)} /></label>
 
       <label>Country code
         <select className="select" name="mobile_country_code" defaultValue={executive?.mobile_country_code ?? "91"}>
@@ -383,7 +424,7 @@ function FieldExecutiveForm({
           ))}
         </select>
       </label>
-      <label>Mobile number<input className="field" inputMode="tel" maxLength={15} name="mobile" pattern="[0-9]{6,15}" placeholder="Enter mobile number" required={!optionalEditFields} defaultValue={textValue(executive?.mobile)} /></label>
+      <label>Mobile number<WorkforceMobileInput required={!optionalEditFields} defaultValue={textValue(executive?.mobile)} /></label>
       <label>Date of join<input className="field" name="date_of_join" required={!optionalEditFields} type="date" defaultValue={textValue(executive?.date_of_join)} /></label>
       <ScopedDesignationFields
         designationName="designation"
@@ -502,16 +543,16 @@ function AddFieldExecutiveForm({
   return (
     <form action={createFieldExecutive} className="form-grid three field-executive-add-form">
       <input type="hidden" name="return_path" value={returnPath} />
-      <label>Full name<input className="field" name="full_name" placeholder="Enter full name" required defaultValue={values?.fullName ?? ""} /></label>
+      <label>Full name<WorkforceFullNameInput required defaultValue={values?.fullName ?? ""} /></label>
       <label className="field-executive-mobile-group">Mobile number
         <div className="field-executive-mobile-row">
           <div className="field-executive-country-code">
             <SearchableSelect name="mobile_country_code" options={countryCodeSelectOptions} defaultValue={values?.mobileCountryCode ?? "91"} placeholder="+91" required />
           </div>
-          <input className="field" inputMode="tel" maxLength={15} name="mobile" pattern="[0-9]{6,15}" placeholder="Enter mobile number" required defaultValue={values?.mobile ?? ""} />
+          <WorkforceMobileInput required defaultValue={values?.mobile ?? ""} />
         </div>
       </label>
-      <label>Email<input className="field" name="email" placeholder="Enter email" required type="email" defaultValue={values?.email ?? ""} /></label>
+      <label>Email<WorkforceEmailInput required defaultValue={values?.email ?? ""} /></label>
       <label>Date of join<input className="field" name="date_of_join" required type="date" defaultValue={values?.dateOfJoin ?? ""} /></label>
       <ScopedDesignationFields
         designationName="designation"
@@ -667,6 +708,7 @@ async function loadFieldExecutiveData(
         date_of_join,
         is_active,
         onboarding_status,
+        people_lifecycle_status,
         profile_return_remarks,
         statutory_applicability,
         location_id,
@@ -706,7 +748,9 @@ async function loadFieldExecutiveData(
         profile_photo_path,
         stations (station_code, station_name, providers (name), location_models (code, name))
       `;
-  const legacyExecutiveSelect = executiveSelect.replace("mobile_country_code,", "");
+  const legacyExecutiveSelect = executiveSelect
+    .replace("mobile_country_code,", "")
+    .replace("people_lifecycle_status,", "");
   let executivesResult: { data: unknown[] | null; error: { message?: string } | null } = await supabaseAdmin
     .from(table)
     .select(executiveSelect)
@@ -762,7 +806,7 @@ async function loadFieldExecutiveData(
           { isOwner: ownerAccess }
       ),
       isActive: executive.is_active,
-      status: fieldExecutiveStatus(executive)
+      status: fieldExecutiveStatus(executive, targetRegister === "workforce")
     };
   });
   const uploadUrlRows = await Promise.all(visibleExecutiveRows.map(async (executive) => ({
@@ -816,6 +860,7 @@ export async function FieldExecutivePageContent({
   pageTitle = "Field Executive",
   registerNavigation,
   returnPath = "/workforce",
+  showWorkforceSummary = false,
   viewId
 }: {
   activeLabel?: string;
@@ -837,6 +882,7 @@ export async function FieldExecutivePageContent({
   pageTitle?: string;
   registerNavigation?: ReactNode;
   returnPath?: FieldExecutiveRoute;
+  showWorkforceSummary?: boolean;
   viewId?: string;
 }) {
   const authorization = await requirePagePermission(pageCode, "access");
@@ -848,7 +894,7 @@ export async function FieldExecutivePageContent({
     canEdit: false
   };
   const workforceConfig = nonEmployeeConfigForRoute(returnPath);
-  const displayTable = returnPath === "/work-force-register" ? "workforce" : workforceConfig.table;
+  const displayTable = workforceConfig.table;
   const { executives, locations, designations, editExecutive, viewExecutive, error } = await loadFieldExecutiveData(
     authorization,
     designationCategoryFilter,
@@ -934,6 +980,8 @@ export async function FieldExecutivePageContent({
         </section>
       ) : null}
 
+      {showWorkforceSummary ? <><WorkforceRegisterSummary rows={executives} /><WorkforceCostReadiness auth={authorization}/></> : null}
+
       {permission.canAdd ? (
         <section className="panel">
           <div className="panel-head"><h2>{addTitle}</h2></div>
@@ -969,12 +1017,16 @@ export async function FieldExecutivePageContent({
               </div>
               <PendingLink className="icon-button" href={returnPath} scroll={false} aria-label={`Close ${entityLabel.toLowerCase()} details`}>x</PendingLink>
             </div>
-            <FieldExecutiveDetails dashboardRules={viewRules} executive={viewExecutive} />
+            <FieldExecutiveDetails
+              canonicalWorkforce={workforceConfig.profileType === "field_executive"}
+              dashboardRules={viewRules}
+              executive={viewExecutive}
+            />
           </section>
         </div>
       ) : null}
 
-      {permission.canEdit && editExecutive && editDesignationOptions.some((option) => option.value === editExecutive.designation) ? (
+      {permission.canEdit && editExecutive ? (
         <div className="modal-backdrop">
           <section className="modal-panel wide" aria-label="Edit field executive">
             <div className="panel-head">

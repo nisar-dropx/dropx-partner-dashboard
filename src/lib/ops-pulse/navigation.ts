@@ -11,6 +11,7 @@ const commonStart: NavItem[] = [
     children: [
       { code: "performance", label: "Daily Performance", href: "/performance?view=daily" },
       { code: "performance_review", label: "Review Desk", href: "/performance?view=reviews" },
+      { code: "performance_review_status", label: "Review Status", href: "/performance/review-status" },
       { code: "performance", label: "Amazon SLS", href: "/performance?view=sls" }
     ]
   },
@@ -26,11 +27,17 @@ const commonStart: NavItem[] = [
     ]
   },
   { code: "service_network", label: "Network Planning", href: "/service-network", icon: "N" },
-  { code: "contractors", label: "Work Force Register", href: "/work-force-register", icon: "+" }
+  { code: "delivery_associates", label: "Workforce Register", href: "/work-force-register", icon: "+" },
+  { code: "ops_rostering", label: "Rostering", href: "/rostering", icon: "S" }
 ];
 
 const reports: NavItem = { code: "ops_reports", label: "Reports", href: "/reports", icon: "R" };
-const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Attendance", href: "/attendance", icon: "T" };
+const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Team Ops", icon: "T", children: [
+  { code: "ops_attendance_reports", label: "Attendance Reports", href: "/attendance" },
+  { code: "ops_unplanned_leaves", label: "Unplanned Leaves", href: "/attendance/unplanned-leaves" },
+  { code: "ops_offboarding_checklist", label: "Offboarding", href: "/attendance/offboarding" },
+  { code: "ops_salary_hold", label: "Salary Hold", href: "/attendance/salary-hold" }
+] };
 
 const businessDocuments: NavItem = {
   code: "business_documents",
@@ -57,17 +64,17 @@ const cps: NavItem = {
   icon: "C",
   children: [
     { code: "cps_overview", label: "Overview", href: "/cps" },
-    { code: "cps_stations", label: "Stations", href: "/cps?view=stations" },
-    { code: "cps_shipments", label: "Shipments", href: "/cps?view=shipments" },
-    { code: "cps_associates", label: "Associates", href: "/cps?view=associates" },
-    { code: "cps_reports", label: "Reports", href: "/cps?view=reports" },
-    { code: "imports", label: "Imports", href: "https://dashboard.dropxlogistics.com/imports" },
-    { code: "cps_unmapped", label: "Unmapped IDs", href: "/cps?view=unmapped" },
-    { code: "cps_inputs", label: "Inputs", href: "/cps?view=inputs" }
+    { code: "cps_associates", label: "DA productivity", href: "/cps?view=associates" },
+    { code: "cps_unmapped", label: "Needs attention", href: "/cps?view=unmapped" },
+    { code: "cps_cost_breakup", label: "Cost breakup", href: "/cps?view=breakup" },
+    { code: "cps_inputs", label: "Cost setup", href: "/cps?view=inputs" },
+    { code: "cps_overview", label: "Adhoc Van & DA", href: "/cps/adhoc-activity" }
+
   ]
 };
 
 const administration: NavItem[] = [
+  {code:'ops_notification_settings',label:'Settings',icon:'*',children:[{code:'ops_notification_settings',label:'Notifications',href:'/settings/notifications'}]},
   {
     code: "master_data",
     label: "Ops Masters",

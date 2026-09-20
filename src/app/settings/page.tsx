@@ -214,6 +214,12 @@ export default async function SettingsPage() {
               <p className="subtle">Approval flow for location expense payment requests.</p>
             </div>
           </PendingLink>
+          <PendingLink className="settings-tile actionable" href="/settings/payment-approvals">
+            <div>
+              <h3>Payment Approval Steps</h3>
+              <p className="subtle">Configure the ordered approval chain per payment head.</p>
+            </div>
+          </PendingLink>
           <PendingLink className="settings-tile actionable" href="/settings/dropx-id-generation?type=dropx_id">
             <div>
               <h3>DropX ID Generation</h3>

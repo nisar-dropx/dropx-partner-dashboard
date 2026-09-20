@@ -1,9 +1,19 @@
 import { NextResponse } from "next/server";
+import { userFacingError } from "@/lib/user-facing-error";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
-import { notifyEmployeeExitSubmitted, notifyExitApprovalRequired } from "../../../../src/lib/connect-exit-notifications";
+import { notifyEmployeeExitSubmitted, notifyEmployeeExitWithdrawal, notifyExitApprovalRequired, notifyExitWithdrawalReviewer } from "../../../../src/lib/connect-exit-notifications";
 import { createAppNotification } from "../../../../src/lib/app-notifications";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import { todayInIndia } from "../../../../src/lib/india-date";
+import {
+  classifyResignationTier,
+  planResignationSeats,
+  resolveResignationSeats,
+  resignationRouteSummary,
+  type ChainManagerSeat,
+  type ResignationSeatKind
+} from "../../../../src/lib/exit-resignation-route";
+import type { DesignationLabel } from "../../../../src/lib/approval-designation-labels";
 
 type PeopleProfileType = "employee" | "user" | "contractor";
 type WorkerContext = {
@@ -21,7 +31,7 @@ type WorkerContext = {
 
 type ApprovalRouteRow = {
   company_id: string;
-  workflow_step_id: string;
+  workflow_step_id: string | null;
   step_order: number;
   step_name: string;
   approver_role: string;
@@ -118,7 +128,7 @@ async function resolveWorker(profileType: string, accountId: string): Promise<Wo
   };
 }
 
-async function reportingManagerChain(context: WorkerContext, levels: number) {
+async function reportingManagerChain(context: WorkerContext, levels: number): Promise<ChainManagerSeat[]> {
   const sourceColumn = context.workerType === "contractor" ? "contractor_id" : "employee_id";
   const today = todayInIndia();
   const { data: engagement } = await db().from("hr_engagements")
@@ -129,10 +139,10 @@ async function reportingManagerChain(context: WorkerContext, levels: number) {
     .order("start_date", { ascending: false })
     .limit(1)
     .maybeSingle();
-  const chain: Array<{ userId: string; name: string; positionTitle: string | null }> = [];
+  const chain: ChainManagerSeat[] = [];
   if (engagement) {
     const { data: assignment } = await db().from("hr_work_assignments")
-      .select("id")
+      .select("id, designation_id")
       .eq("company_id", context.account.companyId)
       .eq("engagement_id", engagement.id)
       .eq("is_primary", true)
@@ -159,7 +169,7 @@ async function reportingManagerChain(context: WorkerContext, levels: number) {
         if (!relationship?.manager_assignment_id || seenAssignments.has(relationship.manager_assignment_id)) break;
         seenAssignments.add(relationship.manager_assignment_id);
         const { data: managerAssignment } = await db().from("hr_work_assignments")
-          .select("id, engagement_id, position_title")
+          .select("id, engagement_id, position_title, designation_id")
           .eq("company_id", context.account.companyId)
           .eq("id", relationship.manager_assignment_id)
           .maybeSingle();
@@ -170,17 +180,25 @@ async function reportingManagerChain(context: WorkerContext, levels: number) {
             .eq("id", managerAssignment.engagement_id)
             .maybeSingle();
           if (managerEngagement) {
-            const [{ data: link }, { data: person }] = await Promise.all([
+            const [{ data: link }, { data: person }, designationResult] = await Promise.all([
               db().from("hr_user_person_links")
               .select("user_id")
               .eq("company_id", context.account.companyId)
               .eq("person_id", managerEngagement.person_id)
               .eq("status", "active")
               .maybeSingle(),
-              db().from("hr_people").select("display_name").eq("company_id", context.account.companyId).eq("id", managerEngagement.person_id).maybeSingle()
+              db().from("hr_people").select("display_name").eq("company_id", context.account.companyId).eq("id", managerEngagement.person_id).maybeSingle(),
+              managerAssignment.designation_id
+                ? db().from("designations").select("name, code").eq("company_id", context.account.companyId).eq("id", managerAssignment.designation_id).maybeSingle()
+                : Promise.resolve({ data: null })
             ]);
             if (!link?.user_id) break;
-            chain.push({ userId: link.user_id, name: person?.display_name ?? `Manager level ${level}`, positionTitle: managerAssignment.position_title });
+            chain.push({
+              userId: link.user_id,
+              name: person?.display_name ?? `Manager level ${level}`,
+              positionTitle: managerAssignment.position_title,
+              designation: designationResult.data ? { name: designationResult.data.name, code: designationResult.data.code } : null
+            });
             subjectAssignmentId = managerAssignment.id;
             continue;
           }
@@ -198,10 +216,110 @@ async function reportingManagerChain(context: WorkerContext, levels: number) {
       .maybeSingle();
     if (profile?.reports_to_user_id) {
       const { data: manager } = await db().from("profiles").select("id, full_name").eq("company_id", context.account.companyId).eq("id", profile.reports_to_user_id).eq("is_active", true).maybeSingle();
-      if (manager) chain.push({ userId: manager.id, name: manager.full_name ?? "Reporting manager", positionTitle: null });
+      if (manager) chain.push({ userId: manager.id, name: manager.full_name ?? "Reporting manager", positionTitle: null, designation: null });
     }
   }
   return chain;
+}
+
+async function requesterDesignation(context: WorkerContext): Promise<DesignationLabel | null> {
+  const sourceColumn = context.workerType === "contractor" ? "contractor_id" : "employee_id";
+  const today = todayInIndia();
+  const { data: engagement } = await db().from("hr_engagements")
+    .select("id")
+    .eq("company_id", context.account.companyId)
+    .eq(sourceColumn, context.workerId)
+    .eq("status", "active")
+    .order("start_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (engagement) {
+    const { data: assignment } = await db().from("hr_work_assignments")
+      .select("designation_id")
+      .eq("company_id", context.account.companyId)
+      .eq("engagement_id", engagement.id)
+      .eq("is_primary", true)
+      .lte("effective_from", today)
+      .or(`effective_to.is.null,effective_to.gte.${today}`)
+      .order("effective_from", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (assignment?.designation_id) {
+      const { data } = await db().from("designations").select("name, code").eq("company_id", context.account.companyId).eq("id", assignment.designation_id).maybeSingle();
+      if (data) return { name: data.name, code: data.code };
+    }
+  }
+  if (context.workerType === "employee") {
+    const { data } = await db().from("employees").select("designations(name, code)").eq("company_id", context.account.companyId).eq("id", context.workerId).maybeSingle();
+    const relation = Array.isArray(data?.designations) ? data?.designations[0] : data?.designations;
+    if (relation?.name) return { name: relation.name, code: relation.code ?? null };
+  }
+  return null;
+}
+
+/** Same resolution path as requesterDesignation, but returns the raw designation_id (used to scope exit task templates). */
+async function requesterDesignationId(context: WorkerContext): Promise<string | null> {
+  const sourceColumn = context.workerType === "contractor" ? "contractor_id" : "employee_id";
+  const today = todayInIndia();
+  const { data: engagement } = await db().from("hr_engagements")
+    .select("id")
+    .eq("company_id", context.account.companyId)
+    .eq(sourceColumn, context.workerId)
+    .eq("status", "active")
+    .order("start_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (engagement) {
+    const { data: assignment } = await db().from("hr_work_assignments")
+      .select("designation_id")
+      .eq("company_id", context.account.companyId)
+      .eq("engagement_id", engagement.id)
+      .eq("is_primary", true)
+      .lte("effective_from", today)
+      .or(`effective_to.is.null,effective_to.gte.${today}`)
+      .order("effective_from", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (assignment?.designation_id) return assignment.designation_id as string;
+  }
+  if (context.workerType === "employee") {
+    const { data } = await db().from("employees").select("designation_id").eq("company_id", context.account.companyId).eq("id", context.workerId).maybeSingle();
+    if (data?.designation_id) return data.designation_id as string;
+  }
+  return null;
+}
+
+function isHrWorkflowStep(step: { code?: string | null; name?: string | null; approver_role?: string | null; approver_source?: string | null }) {
+  const code = String(step.code ?? "").toUpperCase();
+  const role = String(step.approver_role ?? "").toUpperCase();
+  const name = String(step.name ?? "").toLowerCase();
+  const source = String(step.approver_source ?? "").toLowerCase();
+  if (code === "HR_APPROVAL") return true;
+  if (["HR_MANAGER", "CONFIGURED_ROLE", "HRMS_ADMIN", "HRE", "HRM"].includes(role)) return true;
+  if (source === "role" && (name.includes("hr") || name.includes("human resource"))) return true;
+  return name.includes("hr approval") || name.includes("hr manager") || name.includes("human resources");
+}
+
+function pickWorkflowStepForSeat(steps: any[], kind: ResignationSeatKind, usedStepIds: Set<string>) {
+  const unused = steps.filter((step) => !usedStepIds.has(step.id));
+  if (kind === "cluster_manager" || kind === "business_head") {
+    const byName = unused.find((step) => {
+      const name = String(step.name ?? "").toLowerCase();
+      if (kind === "cluster_manager") return name.includes("cluster");
+      return name.includes("business") || name.includes("national") || name.includes("head");
+    });
+    if (byName) return byName;
+    return unused.find((step) => step.approver_source === "reporting_manager" || step.approver_role === "REPORTING_MANAGER") ?? null;
+  }
+  if (kind === "managing_partner") {
+    return unused.find((step) => step.approver_role === "OWNER"
+      || String(step.code ?? "").toUpperCase() === "OWNER_APPROVAL"
+      || String(step.name ?? "").toLowerCase().includes("managing partner")
+      || String(step.name ?? "").toLowerCase().includes("leadership")) ?? null;
+  }
+  return unused.find((step) => isHrWorkflowStep(step))
+    ?? unused.find((step) => step.approver_source === "role")
+    ?? null;
 }
 
 async function activeRoleUsers(companyId: string, roleId: string) {
@@ -241,39 +359,119 @@ async function configuredApprovalRoute(context: WorkerContext, scenario: string)
   const directSteps = (storedSteps ?? []).filter((step) => step.scenario === scenario);
   const steps = directSteps.length ? directSteps : (storedSteps ?? []).filter((step) => step.scenario === "all");
   if (!steps.length) throw new Error("No approval workflow is active for resignations. Configure it in Offboarding Masters.");
-  const highestLevel = steps.reduce((maximum, step) => step.approver_source === "reporting_manager" ? Math.max(maximum, Number(step.hierarchy_level ?? 0)) : maximum, 0);
-  const [managerChain, approvalUsers] = await Promise.all([reportingManagerChain(context, highestLevel), activeApprovalUserIds(context.account.companyId)]);
+
+  const employeeSteps = steps.filter((step) => {
+    const sources = Array.isArray(step.applies_to_sources) && step.applies_to_sources.length ? step.applies_to_sources : ["employee", "hr"];
+    return sources.includes("employee");
+  });
+
+  const [designation, managerChain, approvalUsers] = await Promise.all([
+    requesterDesignation(context),
+    reportingManagerChain(context, 16),
+    activeApprovalUserIds(context.account.companyId)
+  ]);
+  const tier = classifyResignationTier(designation);
+  const planned = planResignationSeats(tier);
+  const { resolved, skipped } = resolveResignationSeats({ seats: planned, chain: managerChain });
+
   const rows: ApprovalRouteRow[] = [];
   const preview: ApprovalRoutePreview[] = [];
-  for (const step of steps) {
-    const source = step.approver_source === "role" ? "role" : "reporting_manager";
-    if (source === "reporting_manager") {
-      const hierarchyLevel = Number(step.hierarchy_level ?? 0);
-      const manager = hierarchyLevel > 0 ? managerChain[hierarchyLevel - 1] : null;
-      if (!manager) {
-        if (step.unavailable_behavior === "skip") continue;
-        throw new Error(`${step.name} cannot be resolved from the current reporting hierarchy. Update the employee's reporting line or change this step's fallback in Offboarding Masters.`);
+  const usedStepIds = new Set<string>();
+  let fallbackOrder = 10;
+
+  for (const seat of resolved) {
+    if (seat.status !== "resolved") continue;
+    const master = pickWorkflowStepForSeat(employeeSteps.length ? employeeSteps : steps, seat.kind, usedStepIds);
+    if (master) usedStepIds.add(master.id);
+
+    if (seat.approverSource === "reporting_manager") {
+      if (!seat.assignedUserId) continue;
+      if (!approvalUsers.has(seat.assignedUserId)) {
+        throw new Error(`${seat.detail} is in the reporting route but does not have Approval Inbox approval access. Update the manager's role access or this workflow step in Offboarding Masters.`);
       }
-      if (!approvalUsers.has(manager.userId)) throw new Error(`${manager.name} is in the reporting route but does not have Approval Inbox approval access. Update the manager's role access or this workflow step in Offboarding Masters.`);
-      rows.push({ company_id: context.account.companyId, workflow_step_id: step.id, step_order: step.step_order, step_name: step.name, approver_role: "REPORTING_MANAGER", approver_source: source, hierarchy_level: hierarchyLevel, approver_role_id: null, assigned_user_id: manager.userId, is_required: step.is_required });
-      preview.push({ stepOrder: step.step_order, stepName: step.name, approverName: manager.name, detail: manager.positionTitle || `Reporting hierarchy level ${hierarchyLevel}` });
+      const manager = managerChain.find((row) => row.userId === seat.assignedUserId);
+      rows.push({
+        company_id: context.account.companyId,
+        workflow_step_id: master?.id ?? null,
+        step_order: master?.step_order ?? fallbackOrder,
+        step_name: master?.name ?? seat.label,
+        approver_role: "REPORTING_MANAGER",
+        approver_source: "reporting_manager",
+        hierarchy_level: null,
+        approver_role_id: null,
+        assigned_user_id: seat.assignedUserId,
+        is_required: master?.is_required !== false
+      });
+      preview.push({
+        stepOrder: master?.step_order ?? fallbackOrder,
+        stepName: master?.name ?? seat.label,
+        approverName: manager?.name ?? "Reporting manager",
+        detail: seat.detail
+      });
+      fallbackOrder += 10;
       continue;
     }
-    if (!step.approver_role_id) {
-      if (step.unavailable_behavior === "skip") continue;
-      throw new Error(`${step.name} does not have an approver role selected in Offboarding Masters.`);
+
+    if (master?.approver_role_id) {
+      const roleUsers = await activeRoleUsers(context.account.companyId, master.approver_role_id);
+      const roleRelation = Array.isArray(master.hr_roles) ? master.hr_roles[0] : master.hr_roles;
+      if (!roleUsers.length && master.unavailable_behavior !== "skip") {
+        throw new Error(`${roleRelation?.name ?? master.name} has no active user assignment. Assign the role in Users & Access or update Offboarding Masters.`);
+      }
+      if (!roleUsers.length) continue;
+      rows.push({
+        company_id: context.account.companyId,
+        workflow_step_id: master.id,
+        step_order: master.step_order,
+        step_name: master.name,
+        approver_role: "CONFIGURED_ROLE",
+        approver_source: "role",
+        hierarchy_level: null,
+        approver_role_id: master.approver_role_id,
+        assigned_user_id: null,
+        is_required: master.is_required !== false
+      });
+      preview.push({
+        stepOrder: master.step_order,
+        stepName: master.name,
+        approverName: roleRelation?.name ?? "Configured People role",
+        detail: `${roleUsers.length} active approver${roleUsers.length === 1 ? "" : "s"}`
+      });
+      fallbackOrder += 10;
+      continue;
     }
-    const roleUsers = await activeRoleUsers(context.account.companyId, step.approver_role_id);
-    const roleRelation = Array.isArray(step.hr_roles) ? step.hr_roles[0] : step.hr_roles;
-    if (!roleUsers.length) {
-      if (step.unavailable_behavior === "skip") continue;
-      throw new Error(`${roleRelation?.name ?? step.name} has no active user assignment. Assign the role in Users & Access or update Offboarding Masters.`);
-    }
-    rows.push({ company_id: context.account.companyId, workflow_step_id: step.id, step_order: step.step_order, step_name: step.name, approver_role: "CONFIGURED_ROLE", approver_source: source, hierarchy_level: null, approver_role_id: step.approver_role_id, assigned_user_id: null, is_required: step.is_required });
-    preview.push({ stepOrder: step.step_order, stepName: step.name, approverName: roleRelation?.name ?? "Configured People role", detail: `${roleUsers.length} active approver${roleUsers.length === 1 ? "" : "s"}` });
+
+    // Shared HR / Owner queue without a configured role id — still create the approval step.
+    rows.push({
+      company_id: context.account.companyId,
+      workflow_step_id: master?.id ?? null,
+      step_order: master?.step_order ?? fallbackOrder,
+      step_name: master?.name ?? seat.label,
+      approver_role: seat.approverRole === "OWNER" ? "OWNER" : (master?.approver_role === "CONFIGURED_ROLE" ? "CONFIGURED_ROLE" : seat.approverRole),
+      approver_source: "role",
+      hierarchy_level: null,
+      approver_role_id: master?.approver_role_id ?? null,
+      assigned_user_id: null,
+      is_required: master?.is_required !== false
+    });
+    preview.push({
+      stepOrder: master?.step_order ?? fallbackOrder,
+      stepName: master?.name ?? seat.label,
+      approverName: seat.label,
+      detail: seat.detail
+    });
+    fallbackOrder += 10;
   }
+
   if (!rows.length) throw new Error("The configured workflow does not resolve to an active approval step.");
-  return { rows, preview, firstManagerId: rows.find((row) => row.approver_source === "reporting_manager")?.assigned_user_id ?? null };
+  return {
+    rows,
+    preview,
+    firstManagerId: rows.find((row) => row.approver_source === "reporting_manager")?.assigned_user_id ?? null,
+    skipped,
+    routeSummary: resignationRouteSummary(resolved),
+    tier
+  };
 }
 
 async function taskOwnerUser(context: WorkerContext, role: string) {
@@ -284,23 +482,43 @@ async function taskOwnerUser(context: WorkerContext, role: string) {
 }
 
 function caseQuery(context: WorkerContext) {
-  const query = db().from("hr_exit_cases")
+  // Match either FK so corrected employee cases and legacy mis-typed contractor rows both resolve.
+  return db().from("hr_exit_cases")
     .select("*, hr_exit_reasons(name)")
     .eq("company_id", context.account.companyId)
-    .eq("worker_type", context.workerType);
-  return context.workerType === "contractor"
-    ? query.eq("contractor_id", context.workerId)
-    : query.eq("employee_id", context.workerId);
+    .or(`employee_id.eq.${context.workerId},contractor_id.eq.${context.workerId}`);
+}
+
+async function loadLatestExitCase(context: WorkerContext) {
+  const open = await caseQuery(context)
+    .not("status", "in", '("closed","rejected","withdrawn","cancelled","settled")')
+    .order("submitted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (open.error) throw new Error(open.error.message);
+  if (open.data) return open.data;
+  const latest = await caseQuery(context).order("submitted_at", { ascending: false }).limit(1).maybeSingle();
+  if (latest.error) throw new Error(latest.error.message);
+  return latest.data;
 }
 
 async function serializeCase(row: Record<string, any>) {
   const [{ data: tasks }, { data: documents }, { data: events }, { data: approvals }] = await Promise.all([
     db().from("hr_exit_tasks").select("id, category, name, due_date, status, is_required").eq("case_id", row.id).order("created_at"),
-    db().from("hr_exit_documents").select("id, document_type, file_name, status, generated_at, storage_path").eq("case_id", row.id).neq("status", "void").order("generated_at", { ascending: false }),
+    db().from("hr_exit_documents").select("id, document_type, file_name, status, generated_at, storage_path, template_id").eq("case_id", row.id).neq("status", "void").order("generated_at", { ascending: false }),
     db().from("hr_exit_events").select("id, event_code, title, actor_name, created_at, details").eq("case_id", row.id).order("created_at"),
     db().from("hr_exit_approvals").select("id, step_order, step_name, approver_role, approver_source, hierarchy_level, approver_role_id, assigned_user_id, status, comments, acted_at, created_at, hr_roles(name)").eq("case_id", row.id).order("step_order")
   ]);
+  // New documents (template_id set, storage_path null) are generated on demand —
+  // point at the same regenerate-on-download route the main Documents page uses,
+  // rather than a Storage signed URL, since nothing is uploaded any more. Only a
+  // historical document that still has a stored PDF (predating this change) uses
+  // the old signed-URL path, for as long as that object still exists.
   const safeDocuments = await Promise.all((documents ?? []).map(async (document) => {
+    if (document.template_id) {
+      const downloadUrl = `/api/connect/documents/exit/${document.id}?${new URLSearchParams({ accountId: row.worker_type === "contractor" ? String(row.contractor_id ?? "") : String(row.employee_id ?? ""), profileType: row.worker_type === "contractor" ? "contractor" : "employee" })}`;
+      return { id: document.id, type: document.document_type, name: document.file_name, status: document.status, generatedAt: document.generated_at, downloadUrl };
+    }
     if (!document.storage_path) return { id: document.id, type: document.document_type, name: document.file_name, status: document.status, generatedAt: document.generated_at, downloadUrl: "" };
     const { data } = await db().storage.from("hr-exit-documents").createSignedUrl(document.storage_path, 15 * 60);
     return { id: document.id, type: document.document_type, name: document.file_name, status: document.status, generatedAt: document.generated_at, downloadUrl: data?.signedUrl ?? "" };
@@ -346,19 +564,25 @@ async function serializeCase(row: Record<string, any>) {
   };
 }
 
+function isTerminalExitStatus(status: string | null | undefined) {
+  return ["rejected", "withdrawn", "cancelled", "settled", "closed"].includes(String(status ?? ""));
+}
+
 export async function GET(request: Request) {
   try {
     const params = new URL(request.url).searchParams;
     const context = await resolveWorker(params.get("profileType") ?? "", params.get("accountId") ?? "");
-    const [policyResult, reasonsResult, caseResult] = await Promise.all([
+    const [policyResult, reasonsResult, latestCase] = await Promise.all([
       db().from("hr_exit_policies").select("resignation_notice_days, withdrawal_allowed").eq("company_id", context.account.companyId).maybeSingle(),
       db().from("hr_exit_reasons").select("id, name, comment_required").eq("company_id", context.account.companyId).eq("scenario", "resignation").eq("employee_selectable", true).eq("is_active", true).order("display_order"),
-      caseQuery(context).order("submitted_at", { ascending: false }).limit(1).maybeSingle()
+      loadLatestExitCase(context)
     ]);
-    if (policyResult.error || reasonsResult.error || caseResult.error) throw new Error(policyResult.error?.message ?? reasonsResult.error?.message ?? caseResult.error?.message ?? "Unable to load exit request.");
+    if (policyResult.error || reasonsResult.error) throw new Error(policyResult.error?.message ?? reasonsResult.error?.message ?? "Unable to load exit request.");
+    // After a rejected/withdrawn/cancelled case the form is shown again — still resolve the route.
+    const canStartNew = !latestCase || isTerminalExitStatus(latestCase.status);
     let approvalRoute: ApprovalRoutePreview[] = [];
     let approvalRouteError = "";
-    if (!caseResult.data) {
+    if (canStartNew) {
       try {
         approvalRoute = (await configuredApprovalRoute(context, "resignation")).preview;
       } catch (problem) {
@@ -372,12 +596,12 @@ export async function GET(request: Request) {
       policy: policyResult.data ?? { resignation_notice_days: 30, withdrawal_allowed: true },
       reasons: reasonsResult.data ?? [],
       approvalRoute,
-      approvalRouteReady: !approvalRouteError,
+      approvalRouteReady: !approvalRouteError && approvalRoute.length > 0,
       approvalRouteError,
-      exitCase: caseResult.data ? await serializeCase(caseResult.data) : null
+      exitCase: latestCase ? await serializeCase(latestCase) : null
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to load exit request." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to load exit request.") }, { status: 400 });
   }
 }
 
@@ -395,28 +619,98 @@ export async function POST(request: Request) {
       if (policyResult.error || caseResult.error) throw new Error(policyResult.error?.message ?? caseResult.error?.message ?? "Unable to load exit request.");
       if (!policyResult.data?.withdrawal_allowed) throw new Error("Withdrawal requests are disabled by company policy.");
       const exitCase = caseResult.data;
-      if (!exitCase || ["documents_ready", "closed"].includes(exitCase.status)) throw new Error("This exit request can no longer be withdrawn.");
+      // Once the case is fully approved and moves into notice/clearance, the worker can
+      // no longer withdraw it themselves — only HR can revert an approved offboarding,
+      // from HRMS.
+      if (!exitCase || ["approved", "notice_period", "clearance", "ready_to_close", "documents_ready", "closed", "withdrawal_requested"].includes(exitCase.status)) {
+        throw new Error(exitCase?.status === "withdrawal_requested"
+          ? "A withdrawal request is already waiting for the first approving manager."
+          : ["approved", "notice_period", "clearance", "ready_to_close", "documents_ready", "closed"].includes(exitCase?.status ?? "")
+            ? "This exit request is already approved and can no longer be withdrawn. Contact HR if this needs to change."
+            : "This exit request can no longer be withdrawn.");
+      }
       const now = new Date().toISOString();
-      const updated = await db().from("hr_exit_cases").update({
-        status: "withdrawn",
-        current_stage: "closed",
+      const approvedSteps = await db().from("hr_exit_approvals")
+        .select("id,step_order,step_name,assigned_user_id,acted_by,status")
+        .eq("company_id", context.account.companyId)
+        .eq("case_id", exitCase.id)
+        .eq("is_required", true)
+        .eq("status", "approved")
+        .order("step_order");
+      if (approvedSteps.error) throw new Error(approvedSteps.error.message);
+      const firstApproved = (approvedSteps.data ?? [])[0] ?? null;
+      const reviewerUserId = firstApproved?.acted_by ?? firstApproved?.assigned_user_id ?? null;
+
+      // Before any required approval: employee may withdraw immediately.
+      if (!firstApproved || !reviewerUserId) {
+        const updated = await db().from("hr_exit_cases").update({
+          status: "withdrawn",
+          current_stage: "closed",
+          updated_at: now
+        }).eq("id", exitCase.id);
+        if (updated.error) throw new Error(updated.error.message);
+        const skipped = await db().from("hr_exit_approvals").update({ status: "skipped", updated_at: now })
+          .eq("case_id", exitCase.id).in("status", ["pending", "waiting"]);
+        if (skipped.error && !String(skipped.error.message).toLowerCase().includes("does not exist")) {
+          throw new Error(skipped.error.message);
+        }
+        await db().from("hr_exit_events").insert({
+          company_id: context.account.companyId,
+          case_id: exitCase.id,
+          event_code: "WITHDRAWN",
+          title: "Resignation withdrawn",
+          actor_name: context.account.name ?? context.worker.full_name,
+          details: {}
+        });
+        return NextResponse.json({ ok: true, notice: "Resignation withdrawn. You can submit a new request when ready." });
+      }
+
+      // After first-level approval: route withdrawal only to that first approver.
+      const requested = await db().from("hr_exit_cases").update({
+        status: "withdrawal_requested",
+        status_before_withdrawal: exitCase.status,
+        withdrawal_reviewer_user_id: reviewerUserId,
+        withdrawal_requested_at: now,
         updated_at: now
-      }).eq("id", exitCase.id);
-      if (updated.error) throw new Error(updated.error.message);
-      const skipped = await db().from("hr_exit_approvals").update({ status: "skipped", updated_at: now })
-        .eq("case_id", exitCase.id).in("status", ["pending", "waiting"]);
-      if (skipped.error && !String(skipped.error.message).toLowerCase().includes("does not exist")) {
-        throw new Error(skipped.error.message);
+      }).eq("id", exitCase.id).neq("status", "withdrawal_requested");
+      if (requested.error) {
+        if (/withdrawal_reviewer_user_id|status_before_withdrawal|schema cache|does not exist/i.test(requested.error.message)) {
+          const fallback = await db().from("hr_exit_cases").update({
+            status: "withdrawal_requested",
+            updated_at: now
+          }).eq("id", exitCase.id);
+          if (fallback.error) throw new Error(fallback.error.message);
+        } else {
+          throw new Error(requested.error.message);
+        }
       }
       await db().from("hr_exit_events").insert({
         company_id: context.account.companyId,
         case_id: exitCase.id,
-        event_code: "WITHDRAWN",
-        title: "Resignation withdrawn",
+        event_code: "WITHDRAWAL_REQUESTED",
+        title: "Withdrawal requested — waiting for first approver",
         actor_name: context.account.name ?? context.worker.full_name,
-        details: {}
+        details: { reviewer_user_id: reviewerUserId, first_step: firstApproved.step_name }
       });
-      return NextResponse.json({ ok: true, notice: "Resignation withdrawn. You can submit a new request when ready." });
+      await notifyEmployeeExitWithdrawal({
+        companyId: context.account.companyId,
+        caseId: exitCase.id,
+        employee: context.worker,
+        requestedDate: exitCase.requested_last_working_date ?? ""
+      });
+      const reviewer = await db().from("profiles").select("email,full_name").eq("company_id", context.account.companyId).eq("id", reviewerUserId).maybeSingle();
+      await notifyExitWithdrawalReviewer({
+        companyId: context.account.companyId,
+        caseId: exitCase.id,
+        reviewerUserId,
+        employeeName: context.worker.full_name,
+        caseNumber: exitCase.case_number,
+        requestedDate: exitCase.requested_last_working_date ?? ""
+      }).catch(() => undefined);
+      return NextResponse.json({
+        ok: true,
+        notice: `Withdrawal requested. Only ${reviewer.data?.full_name ?? "the first approving manager"} can accept it. Your request stays open until they decide.`
+      });
     }
 
     const reasonId = clean(body.reasonId);
@@ -471,19 +765,70 @@ export async function POST(request: Request) {
     if (insertError) throw new Error(insertError.message);
 
     if (approvalRows.length) {
-      const inserted = await db().from("hr_exit_approvals").insert(approvalRows.map((step) => ({ ...step, case_id: exitCase.id })));
+      const inserted = await db().from("hr_exit_approvals").insert(approvalRows.map((step) => ({
+        company_id: step.company_id,
+        case_id: exitCase.id,
+        workflow_step_id: step.workflow_step_id || null,
+        step_order: step.step_order,
+        step_name: step.step_name,
+        approver_role: step.approver_role,
+        assigned_user_id: step.assigned_user_id,
+        is_required: step.is_required
+      })));
       if (inserted.error) throw new Error(inserted.error.message);
     }
+    if (approvalRoute.skipped?.length) {
+      await db().from("hr_exit_events").insert({
+        company_id: context.account.companyId,
+        case_id: exitCase.id,
+        event_code: "MANAGER_LEVEL_SKIPPED",
+        title: "Reporting manager level skipped",
+        actor_name: context.account.name ?? context.worker.full_name,
+        details: { skipped: approvalRoute.skipped, route: approvalRoute.routeSummary, tier: approvalRoute.tier }
+      });
+    }
     if (policyResult.data?.auto_create_tasks !== false) {
-      const { data: templates } = await db().from("hr_exit_task_templates").select("*").eq("company_id", context.account.companyId).eq("is_active", true).in("scenario", ["resignation", "all"]).order("display_order");
-      if (templates?.length) {
+      const { data: allTemplates } = await db().from("hr_exit_task_templates").select("*").eq("company_id", context.account.companyId).eq("is_active", true).in("scenario", ["resignation", "all"]).order("display_order");
+      const requesterDesignationIdValue = await requesterDesignationId(context);
+      const templates = (allTemplates ?? []).filter((template) => {
+        const scoped = (template.applies_to_designation_ids ?? []) as string[];
+        if (!scoped.length) return true;
+        return Boolean(requesterDesignationIdValue && scoped.includes(requesterDesignationIdValue));
+      });
+      if (templates.length) {
         const rows = await Promise.all(templates.map(async (template) => {
           const due = new Date(`${requestedDate}T00:00:00Z`);
           due.setUTCDate(due.getUTCDate() + template.due_offset_days);
           return { company_id: context.account.companyId, case_id: exitCase.id, template_id: template.id, category: template.category, code: template.code, name: template.name, instructions: template.instructions, owner_role: template.owner_role, owner_user_id: template.owner_role === "EMPLOYEE" ? null : await taskOwnerUser(context, template.owner_role), due_date: due.toISOString().slice(0, 10), is_required: template.is_required };
         }));
-        const inserted = await db().from("hr_exit_tasks").insert(rows);
+        const inserted = await db().from("hr_exit_tasks").insert(rows).select("id, template_id");
         if (inserted.error) throw new Error(inserted.error.message);
+
+        const templateIds = templates.map((template) => template.id);
+        const { data: requirements, error: requirementError } = await db()
+          .from("hr_exit_task_template_approval_requirements")
+          .select("template_id, approval_level_id, hr_exit_task_approval_levels(sequence_order)")
+          .in("template_id", templateIds);
+        if (requirementError) throw new Error(requirementError.message);
+        const approvalRows = (inserted.data ?? []).flatMap((task) => {
+          const taskRequirements = (requirements ?? []).filter((requirement) => requirement.template_id === task.template_id);
+          return taskRequirements.map((requirement) => {
+            const level = Array.isArray(requirement.hr_exit_task_approval_levels)
+              ? requirement.hr_exit_task_approval_levels[0]
+              : requirement.hr_exit_task_approval_levels;
+            return {
+              company_id: context.account.companyId,
+              task_id: task.id,
+              approval_level_id: requirement.approval_level_id,
+              sequence_order: level?.sequence_order ?? 0,
+              status: "pending" as const
+            };
+          });
+        });
+        if (approvalRows.length) {
+          const insertedApprovals = await db().from("hr_exit_task_approvals").insert(approvalRows);
+          if (insertedApprovals.error) throw new Error(insertedApprovals.error.message);
+        }
       }
     }
     await db().from("hr_exit_events").insert({ company_id: context.account.companyId, case_id: exitCase.id, event_code: "CASE_SUBMITTED", title: "Resignation submitted", actor_name: context.account.name ?? context.worker.full_name, details: { requested_last_working_date: requestedDate } });
@@ -496,9 +841,15 @@ export async function POST(request: Request) {
       sourceKey: String(exitCase.id)
     });
     const firstApproval = approvalRows.slice().sort((left, right) => left.step_order - right.step_order)[0];
-    if (firstApproval) await notifyExitApprovalRequired({ companyId: context.account.companyId, caseId: exitCase.id, approvalStepId: firstApproval.workflow_step_id });
+    if (firstApproval?.workflow_step_id) {
+      await notifyExitApprovalRequired({
+        companyId: context.account.companyId,
+        caseId: exitCase.id,
+        approvalStepId: firstApproval.workflow_step_id
+      });
+    }
     return NextResponse.json({ ok: true, notice: `Resignation submitted successfully. Case ${caseNumber} has been sent for review.` });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to submit exit request." }, { status: 400 });
+    return NextResponse.json({ error: userFacingError(error, "Unable to submit exit request.") }, { status: 400 });
   }
 }

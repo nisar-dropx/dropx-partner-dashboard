@@ -6,6 +6,30 @@ import { loadEffectivePositionAccess } from "@/lib/position-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { currentAdminAccessSurface } from "@/lib/access-surface";
+import { loadPeopleDesignations } from "@/lib/people-designation";
+import { getPreviewViewer, hasPreviewProductAccess, selectedPreviewUserId } from "@/lib/portal-preview";
+import { enforceAccessCutoffIfDue } from "@/lib/access-cutoff";
+import { TimeoutError, withTimeout } from "@/lib/with-timeout";
+
+const AUTH_TIMEOUT_MS = 10000;
+
+/**
+ * A single slow-but-alive Supabase response (common under sustained DB load)
+ * should never be indistinguishable from "you're not signed in." Retry once
+ * before letting a timeout propagate - callers can then choose to show a
+ * retryable error instead of redirecting away from work in progress, while a
+ * genuine "no session" response still resolves normally through the usual
+ * null-returning path below.
+ */
+async function getUserWithRetry(supabase: ReturnType<typeof createServerSupabaseClient>) {
+  if (!supabase) return { data: { user: null } };
+  try {
+    return await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Sign-in check");
+  } catch (error) {
+    if (!(error instanceof TimeoutError)) throw error;
+    return await withTimeout(supabase.auth.getUser(), AUTH_TIMEOUT_MS, "Sign-in check (retry)");
+  }
+}
 
 export type PermissionAction = "access" | "view" | "add" | "edit";
 
@@ -31,6 +55,11 @@ export type AuthorizationContext = {
   roleId: string | null;
   roleName: string | null;
   userId: string;
+  designationName?: string | null;
+  canPreviewUsers?: boolean;
+  isPreview?: boolean;
+  readOnly?: boolean;
+  viewerUserId?: string;
 };
 
 const noPermission: PagePermission = { canView: false, canAdd: false, canEdit: false };
@@ -42,6 +71,7 @@ const groupedParentPermissions: Record<string, string[]> = {
   ops_pulse: [
     "performance",
     "performance_review",
+    "performance_review_status",
     "capacity",
     "capacity_overview",
     "capacity_associates",
@@ -49,6 +79,10 @@ const groupedParentPermissions: Record<string, string[]> = {
     "capacity_hiring",
     "ops_reports",
     "ops_attendance_reports",
+    "ops_unplanned_leaves",
+    "ops_offboarding_checklist",
+    "ops_salary_hold",
+    "ops_rostering",
     "daily_submission",
     "cod",
     "cod_executive_reconciliation",
@@ -58,6 +92,7 @@ const groupedParentPermissions: Record<string, string[]> = {
     "cod_portal_checks",
     "cod_cash_in_associate",
     "edd_dashboard",
+    "station_edd",
     "cps",
     "cps_overview",
     "cps_daily",
@@ -149,7 +184,7 @@ function inheritGroupedParentPermissions(permissions: Record<string, PagePermiss
 }
 
 const ensureMissingCurrentAccessPages = unstable_cache(async (companyId: string) => {
-  const requiredCodes = ["people_all", "people_review", "people_exceptions", "executive_id_onboarding", "business_documents", "payments", "advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports", "master_payment_banks", "master_payment_heads", "master_contacts", "payment_settings", "imports", "workforce_categories", "workforce_whatsapp", "master_imports", "ops_pulse", "performance", "performance_review", "capacity", "capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring", "ops_reports", "ops_attendance_reports", "daily_submission", "cod", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate", "edd_dashboard", "cod_master", "performance_master", "capacity_master", "biometric_devices", "reports", "attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports", "ai_connector", "amazon_connector", "developer_mode", "cps", "cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "cps_inputs", "cps_unmapped", "service_network", "service_network_master"];
+  const requiredCodes = ["people_all", "people_review", "people_exceptions", "executive_id_onboarding", "business_documents", "payments", "advance_requests", "expense_requests", "payment_requests", "payment_approvals", "payment_process", "payment_reports", "master_payment_banks", "master_payment_heads", "master_contacts", "payment_settings", "imports", "workforce_categories", "workforce_whatsapp", "master_imports", "ops_pulse", "performance", "performance_review", "performance_review_cluster_filter", "performance_review_status", "capacity", "capacity_overview", "capacity_associates", "capacity_delivery", "capacity_hiring", "ops_reports", "ops_attendance_reports", "ops_unplanned_leaves", "ops_offboarding_checklist", "ops_salary_hold", "ops_rostering", "daily_submission", "cod", "cod_executive_reconciliation", "cod_submission", "cod_validation", "cod_reports", "cod_portal_checks", "cod_cash_in_associate", "edd_dashboard", "station_edd", "cod_master", "performance_master", "capacity_master", "biometric_devices", "reports", "attendance_reports", "attendance_integrity", "raw_punch_reports", "verification_api_reports", "event_log_reports", "ai_connector", "amazon_connector", "developer_mode", "cps", "cps_overview", "cps_daily", "cps_monthly", "cps_cost_breakup", "cps_stations", "cps_shipments", "cps_associates", "cps_reports", "cps_inputs", "cps_unmapped", "service_network", "service_network_master"];
   const { data, error } = await supabaseAdmin!
     .from("app_pages")
     .select("code")
@@ -160,11 +195,11 @@ const ensureMissingCurrentAccessPages = unstable_cache(async (companyId: string)
   if (requiredCodes.some((code) => !existingCodes.has(code))) {
     await ensureAccessPages(supabaseAdmin!, companyId);
   }
-}, ["current-access-pages-v1"], { revalidate: 3600 });
+}, ["current-access-pages-v3"], { revalidate: 3600 });
 
 export const getAuthorization = cache(async (): Promise<AuthorizationContext | null> => {
   const supabase = createServerSupabaseClient();
-  const { data } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
+  const { data } = await getUserWithRetry(supabase);
   if (!data.user || !supabaseAdmin) return null;
   const signedInEmail = normalizeEmail(data.user.email);
 
@@ -210,7 +245,25 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     profile = activeEmailMatches.length === 1 ? activeEmailMatches[0] : (masterOwnerMatch && signedInEmail === "nisar@dropxlogistics.com" ? masterOwnerMatch : null);
   }
 
-  if (!profile?.is_active) return null;
+  if (!profile) return null;
+  // Offboarding access lasts through the confirmed last working day, enforced lazily
+  // (no scheduled job) — this is the moment that check runs for dashboard login.
+  const isActive = profile.is_active ? await enforceAccessCutoffIfDue(profile.id) : profile.is_active;
+  if (!isActive) return null;
+
+  const viewerProfile = profile;
+  const previewViewer = await getPreviewViewer();
+  const requestedPreviewUserId = selectedPreviewUserId(viewerProfile.id);
+  if (requestedPreviewUserId && !previewViewer) redirect("/unauthorized?reason=preview-unavailable");
+  let isPreview = false;
+  if (requestedPreviewUserId && requestedPreviewUserId !== viewerProfile.id && viewerProfile.company_id) {
+    const target = await supabaseAdmin.from("profiles").select(profileColumns)
+      .eq("id", requestedPreviewUserId).eq("company_id", viewerProfile.company_id).eq("is_active", true).maybeSingle();
+    if (target.error || !target.data || !await hasPreviewProductAccess(viewerProfile.company_id, target.data.id, Boolean(target.data.is_master_owner))) redirect("/unauthorized?reason=preview-unavailable");
+    profile = target.data;
+    isPreview = true;
+  }
+  const effectiveEmail = isPreview ? normalizeEmail(profile.email) : normalizeEmail(profile.email) || signedInEmail;
 
   const permissions: Record<string, PagePermission> = Object.fromEntries(
     initializedPermissionCodes.map((code) => [code, { ...noPermission }])
@@ -221,8 +274,8 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   let companyId: string | null = typeof profile.company_id === "string" ? profile.company_id : null;
   let companyCode: string | null = null;
   let companyName: string | null = null;
-  let isMasterCompany = signedInEmail === "nisar@dropxlogistics.com";
-  let isMasterOwner = Boolean(profile.is_master_owner) || signedInEmail === "nisar@dropxlogistics.com";
+  let isMasterCompany = effectiveEmail === "nisar@dropxlogistics.com";
+  let isMasterOwner = Boolean(profile.is_master_owner) || effectiveEmail === "nisar@dropxlogistics.com";
   let roleCode: string | null = null;
   let effectiveRoleIds: string[] = profile.role_id ? [profile.role_id] : [];
   let primaryRoleId: string | null = profile.role_id ?? null;
@@ -243,7 +296,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
       companyName = company.name;
       isMasterCompany = Boolean(company.is_master);
     }
-    await ensureMissingCurrentAccessPages(companyId as string);
+    if (!isPreview) await ensureMissingCurrentAccessPages(companyId as string);
   }
 
   const positionAccess = await loadEffectivePositionAccess(companyId as string, profile.id);
@@ -273,11 +326,18 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
       .eq("product_code", surfaceProductCode)
       .eq("is_active", true);
     if (!membershipResult.error && !isMasterOwner) {
-      const membershipRoleIds = (membershipResult.data ?? []).map((membership) => membership.role_id).filter((roleId): roleId is string => Boolean(roleId));
-      effectiveRoleIds = Array.from(new Set(membershipRoleIds));
-      primaryRoleId = membershipRoleIds[0] ?? null;
-      hasAllLocationAccess = (membershipResult.data ?? []).some((membership) => membership.has_all_location_access);
-      locationScopeIds = hasAllLocationAccess ? [] : Array.from(new Set((membershipResult.data ?? []).flatMap((membership) => membership.location_scope_ids ?? [])));
+      const membershipRows = membershipResult.data ?? [];
+      const membershipRoleIds = membershipRows.map((membership) => membership.role_id).filter((roleId): roleId is string => Boolean(roleId));
+      // Ops/People/Finance must use the product membership role matrix from Settings.
+      // Keep prior roles only when no active membership is configured yet.
+      if (membershipRoleIds.length) {
+        effectiveRoleIds = Array.from(new Set(membershipRoleIds));
+        primaryRoleId = membershipRoleIds[0] ?? null;
+      }
+      hasAllLocationAccess = membershipRows.some((membership) => membership.has_all_location_access);
+      locationScopeIds = hasAllLocationAccess
+        ? []
+        : Array.from(new Set(membershipRows.flatMap((membership) => membership.location_scope_ids ?? [])));
     }
   }
 
@@ -293,10 +353,13 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     const primaryRole = roles.find((role) => role.id === primaryRoleId) ?? roles[0] ?? null;
     roleName = primaryRole?.name ?? null;
     roleCode = String(primaryRole?.code ?? "").trim().toUpperCase() || null;
-    hasAllLocationAccess = hasAllLocationAccess || roles.some((role) => role.location_access_mode === "all_locations");
-
+    // Settings role "All locations" is authoritative even if membership flag is stale.
+    if (roles.some((role) => role.location_access_mode === "all_locations")) {
+      hasAllLocationAccess = true;
+      locationScopeIds = [];
+    }
     const hasLocationRole = roles.some((role) => String(role.code ?? "").trim().toUpperCase() === "LOCATION");
-    if (hasLocationRole && data.user.email) {
+    if (hasLocationRole && effectiveEmail) {
       const { data: allEmailLocations } = await supabaseAdmin
         .from("stations")
         .select("id, station_email")
@@ -304,7 +367,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
         .eq("is_active", true)
         .not("station_email", "is", null);
       const emailLocationIds = (allEmailLocations ?? [])
-        .filter((location) => normalizeEmail(location.station_email) === signedInEmail)
+        .filter((location) => normalizeEmail(location.station_email) === effectiveEmail)
         .map((location) => location.id);
       locationScopeIds = Array.from(new Set([
         ...locationScopeIds,
@@ -373,11 +436,17 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     permissions.company_master = { ...noPermission };
   }
 
+  const designation = companyId ? (await loadPeopleDesignations(companyId, [profile.id])).get(profile.id) : undefined;
   return {
+    designationName: designation?.name ?? null,
+    canPreviewUsers: Boolean(previewViewer),
+    isPreview,
+    readOnly: isPreview,
+    viewerUserId: viewerProfile.id,
     companyCode,
     companyId,
     companyName,
-    email: data.user.email ?? null,
+    email: isPreview ? profile.email ?? null : data.user.email ?? null,
     effectiveRoleIds,
     fullName: profile.full_name,
     hasAllLocationAccess,
@@ -401,6 +470,7 @@ export function hasPermission(
   pageCode: string,
   action: PermissionAction
 ) {
+  if (authorization.readOnly && (action === "add" || action === "edit")) return false;
   if (isCompanyOwner(authorization)) return true;
   const permission = authorization.permissions[pageCode] ?? noPermission;
   if (action === "access") return permission.canView || permission.canAdd || permission.canEdit;
@@ -411,6 +481,31 @@ export function hasPermission(
 
 export async function requirePagePermission(pageCode: string, action: PermissionAction) {
   const authorization = await getAuthorization();
+  if (!authorization) redirect("/login");
+  if (!hasPermission(authorization, pageCode, action)) {
+    redirect(`/unauthorized?page=${encodeURIComponent(pageCode)}&action=${action}`);
+  }
+  return authorization;
+}
+
+/**
+ * For Server Actions only: a page load has no in-progress user input to lose,
+ * so requirePagePermission's redirect-on-any-failure is fine there. A Server
+ * Action triggered mid-form does have input worth preserving - on a Supabase
+ * timeout specifically, throw a plain Error instead of redirecting, so the
+ * action's own try/catch can surface a retryable message rather than
+ * navigating the browser away and discarding what the user was entering. A
+ * genuine "not signed in" or "not permitted" result still redirects exactly
+ * as before.
+ */
+export async function requirePagePermissionOrThrow(pageCode: string, action: PermissionAction) {
+  let authorization: AuthorizationContext | null;
+  try {
+    authorization = await getAuthorization();
+  } catch (error) {
+    if (error instanceof TimeoutError) throw new Error("Couldn't verify your session right now. Please try again.");
+    throw error;
+  }
   if (!authorization) redirect("/login");
   if (!hasPermission(authorization, pageCode, action)) {
     redirect(`/unauthorized?page=${encodeURIComponent(pageCode)}&action=${action}`);

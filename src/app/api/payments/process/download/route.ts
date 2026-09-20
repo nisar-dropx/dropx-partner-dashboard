@@ -31,6 +31,7 @@ type RequestRow = {
   approval_status: string | null;
   current_approver_user_id: string | null;
   current_approver_role_id: string | null;
+  current_approver_role_ids: string[] | null;
   payment_process_role_ids: string[] | null;
   payment_heads?: { name: string; code: string; external_id: string | null } | null;
 };
@@ -137,7 +138,12 @@ export async function GET(request: Request) {
     const companyId = requireCompanyId(authorization);
     if (!supabaseAdmin) return Response.json({ error: "Supabase service role key is not configured" }, { status: 500 });
     const canSeeAllFinalApproved = isCompanyOwner(authorization);
-    if (!authorization.roleId && !canSeeAllFinalApproved) return Response.json({ error: "Payment process role not available." }, { status: 403 });
+    const effectiveRoleIds = authorization.effectiveRoleIds.length
+      ? authorization.effectiveRoleIds
+      : authorization.roleId
+        ? [authorization.roleId]
+        : [];
+    if (!effectiveRoleIds.length && !canSeeAllFinalApproved) return Response.json({ error: "Payment process role not available." }, { status: 403 });
 
     const params = new URL(request.url).searchParams;
     const bankId = params.get("bank_id");
@@ -183,6 +189,7 @@ export async function GET(request: Request) {
         approval_status,
         current_approver_user_id,
         current_approver_role_id,
+        current_approver_role_ids,
         payment_process_role_ids,
         payment_heads ( name, code, external_id )
       `)
@@ -190,16 +197,17 @@ export async function GET(request: Request) {
       .in("id", requestIds)
       .order("created_at", { ascending: true });
 
-    if (!canSeeAllFinalApproved && authorization.roleId) {
-      requestsQuery = requestsQuery.contains("payment_process_role_ids", [authorization.roleId]);
-    }
-
     const { data, error } = await requestsQuery;
     if (error) throw new Error(error.message);
 
     const requests = ((data ?? []) as unknown as RequestRow[])
       .filter(isReadyForPaymentProcess)
-      .filter((item) => String(item.approval_status ?? "").toUpperCase() !== "RE_APPROVED" || item.current_approver_user_id === authorization.userId)
+      .filter((item) => {
+        if (canSeeAllFinalApproved) return true;
+        const isReturnedToThisUser = String(item.approval_status ?? "").toUpperCase() === "RE_APPROVED" && item.current_approver_user_id === authorization.userId;
+        return isReturnedToThisUser || (item.payment_process_role_ids ?? []).some((roleId) => effectiveRoleIds.includes(roleId));
+      })
+      .filter((item) => canSeeAllFinalApproved || String(item.approval_status ?? "").toUpperCase() !== "RE_APPROVED" || item.current_approver_user_id === authorization.userId || (item.current_approver_role_ids ?? []).some((roleId) => effectiveRoleIds.includes(roleId)))
       .map((row) => ({
         ...row,
         payment_heads: firstRelation(row.payment_heads)

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { attendanceDayInsight, attendanceIssueSummary } from "./attendance-insights.ts";
+import {
+  attendanceCompactNudge,
+  attendanceDayInsight,
+  attendanceIssueSummary,
+  isCurrentAttendanceAttentionDate
+} from "./attendance-insights.ts";
 
 function row(overrides = {}) {
   return {
@@ -20,6 +25,17 @@ test("uses the canonical People day status", () => {
   assert.equal(attendanceDayInsight(row()).label, "Full day");
   assert.equal(attendanceDayInsight(row({ attendanceStatus: "Half Day" })).calendarClass, "half");
   assert.equal(attendanceDayInsight(row({ attendanceStatus: "Absent", status: "A" })).calendarClass, "absent");
+});
+
+test("WFH approval is not a full day or missing-punch warning before finalization", () => {
+  for (const label of ["WFH approved · Upcoming", "WFH approved · Day in progress", "WFH approved · Finalizing"]) {
+    const insight = attendanceDayInsight(row({ workMode: "wfh", status: "PENDING", attendanceStatus: label,
+      inTime: "", outTime: "", workHours: "00:00", punchCount: 0 }));
+    assert.equal(insight.label, label);
+    assert.equal(insight.payDayType, "no_record");
+    assert.equal(insight.needsRegularization, false);
+    assert.deepEqual(insight.issues, []);
+  }
 });
 
 test("keeps an open current workday out of needs-review until punch-out", () => {
@@ -56,14 +72,35 @@ test("does not call a complete punch pair missing when policy review is required
   assert.doesNotMatch(insight.detail, /punch is missing/i);
 });
 
+test("uses first IN and latest OUT for three completed punches", () => {
+  const insight = attendanceDayInsight(row({
+    attendanceStatus: "Full Day",
+    outTime: "23:21",
+    punchCount: 3,
+    lateMinutes: 349,
+    scheduledStart: "09:30",
+    inTime: "15:19",
+    workHours: "08:02"
+  }));
+  assert.equal(insight.label, "Full day · Late");
+  assert.equal(insight.calendarClass, "full");
+  assert.equal(insight.needsRegularization, false);
+  assert.deepEqual(insight.issues.map((issue) => issue.code), ["late"]);
+});
+
 test("surfaces late and early-out consequences without replacing full-day status", () => {
   const lateRow = row({ lateMinutes: 18, earlyOutMinutes: 7, scheduledStart: "09:30", inTime: "09:48" });
   const insight = attendanceDayInsight(lateRow);
-  assert.equal(insight.label, "Full day");
+  assert.equal(insight.label, "Full day · Late");
   assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "early_out"]);
   assert.match(insight.issues[0].message, /Expected 09:30 · reported 09:48/i);
-  assert.match(insight.issues[0].message, /will be deducted from an upcoming payment when the configured threshold is met/i);
+  assert.match(insight.issues[0].message, /Any applicable deduction will appear in an upcoming payment/i);
   assert.equal(attendanceIssueSummary(lateRow)?.code, "late");
+  assert.deepEqual(attendanceCompactNudge(lateRow), {
+    headline: "Reported late",
+    detail: "18 min · Penalty applicable",
+    tone: "amber"
+  });
 });
 
 test("keeps half day as the payable status while leading with the late warning", () => {
@@ -83,4 +120,65 @@ test("keeps half day as the payable status while leading with the late warning",
   assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "half_day"]);
   assert.equal(insight.needsRegularization, false);
   assert.equal(attendanceIssueSummary(halfDay)?.code, "late");
+});
+
+test("keeps the first-glance message compact while retaining full details", () => {
+  const halfDay = row({ attendanceStatus: "Half Day", lateMinutes: 45, scheduledStart: "09:30", inTime: "10:15", workHours: "05:30" });
+  const insight = attendanceDayInsight(halfDay);
+  const nudge = attendanceCompactNudge(halfDay);
+  assert.equal(nudge?.headline, "Reported late");
+  assert.equal(nudge?.detail, "45 min · Penalty applicable");
+  assert.match(insight.detail, /Half Day/);
+  assert.deepEqual(insight.issues.map((issue) => issue.code), ["late", "half_day"]);
+});
+
+test("recovers late flashes from People-style remark notes", () => {
+  const insight = attendanceDayInsight(row({
+    lateMinutes: 0,
+    remark: "22 min late · First punch and latest punch used for the attendance outcome"
+  }));
+  assert.equal(insight.label, "Full day · Late");
+  assert.equal(insight.issues[0]?.code, "late");
+  assert.match(insight.issues[0]?.label ?? "", /22 min late/i);
+});
+
+test("carries an attendance nudge for one day only", () => {
+  assert.equal(isCurrentAttendanceAttentionDate("2026-09-03", "2026-09-03"), true);
+  assert.equal(isCurrentAttendanceAttentionDate("2026-09-02", "2026-09-03"), true);
+  assert.equal(isCurrentAttendanceAttentionDate("2026-09-01", "2026-09-03"), false);
+  assert.equal(isCurrentAttendanceAttentionDate("2026-08-31", "2026-09-01"), true);
+});
+
+test("maps WFH to paid-leave color and holiday to week-off color", () => {
+  assert.equal(attendanceDayInsight(row({
+    status: "V",
+    statusLabel: "LOP",
+    statusKind: "leave",
+    isPaidLeave: false,
+    attendanceStatus: "LOP"
+  })).calendarClass, "leave");
+  assert.equal(attendanceDayInsight(row({
+    status: "CL",
+    statusLabel: "Casual Leave",
+    statusKind: "paid_leave",
+    isPaidLeave: true,
+    attendanceStatus: "Casual Leave"
+  })).calendarClass, "paid-leave");
+  const wfh = attendanceDayInsight(row({
+    status: "P",
+    workMode: "wfh",
+    attendanceStatus: "Full Day"
+  }));
+  assert.equal(wfh.calendarClass, "paid-leave");
+  assert.equal(wfh.label, "Present · WFH");
+  assert.equal(attendanceDayInsight(row({
+    status: "WO",
+    attendanceStatus: "Weekly Off"
+  })).calendarClass, "week-off");
+  const holiday = attendanceDayInsight(row({
+    status: "H",
+    attendanceStatus: "Holiday"
+  }));
+  assert.equal(holiday.calendarClass, "week-off");
+  assert.equal(holiday.label, "Holiday");
 });

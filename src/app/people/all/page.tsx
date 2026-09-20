@@ -23,7 +23,7 @@ function first<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
 
-function displayStatus(value: unknown, active: boolean) {
+function stationDetails(value: unknown) {  const station = first(value as { station_code?: string; providers?: { name?: string } | Array<{ name?: string }> | null; location_models?: { code?: string; name?: string } | Array<{ code?: string; name?: string }> | null } | Array<{ station_code?: string; providers?: { name?: string } | Array<{ name?: string }> | null; location_models?: { code?: string; name?: string } | Array<{ code?: string; name?: string }> | null }> | null);  const modelRecord = first(station?.location_models);  return {    location: String(station?.station_code ?? "-"),    model: String(modelRecord?.code ?? modelRecord?.name ?? "-"),    provider: String(first(station?.providers)?.name ?? "-")  };}function displayStatus(value: unknown, active: boolean) {
   if (!active) return "Inactive";
   const text = String(value ?? "pending").replaceAll("_", " ");
   return text.replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -81,7 +81,7 @@ function buildExportValues(
   codeField: string,
   category: string,
   location: string,
-  designation: string,
+  model: string, provider: string, designation: string,
   status: string,
   employee: boolean
 ): AllPeopleExportValues {
@@ -95,8 +95,7 @@ function buildExportValues(
     mobileNumber: text(row.mobile),
     email: text(row.email),
     dateOfJoin: dateText(row.date_of_join),
-    location,
-    designation,
+    location, model, provider, designation,
     status,
     active: booleanText(row.is_active),
     statutoryApplicability: listText(row.statutory_applicability),
@@ -187,7 +186,7 @@ async function loadPeople(
     const sourceSpecificFields = source.employeeDesignation ? ", pincode, ifsc" : ", postal_pin, ifsc_code";
     const result = await supabaseAdmin!
       .from(source.table)
-      .select(`id, ${sharedProfileColumns}, biometric_id, location_id, ${source.codeField}, ${source.statusField}, stations (station_code)${designationFields}${sourceSpecificFields}`)
+      .select(`id, ${sharedProfileColumns}, biometric_id, location_id, ${source.codeField}, ${source.statusField}, stations (station_code, providers (name), location_models (code, name))${designationFields}${sourceSpecificFields}`)
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
     if (result.error) return { rows: [] as AllPeopleRow[], error: result.error.message };
@@ -204,7 +203,7 @@ async function loadPeople(
           return canAccessDesignationPortal(designation, "dashboard", "view", { isOwner: ownerAccess });
         })
         .map((row: Record<string, unknown>) => {
-          const location = String((first(row.stations as { station_code?: string } | Array<{ station_code?: string }> | null) ?? {}).station_code ?? "-");
+          const { location, model, provider } = stationDetails(row.stations);
           const joinedDesignation = first(row.designations as { id?: string; name?: string } | Array<{ id?: string; name?: string }> | null);
           const designationRecord = source.employeeDesignation
             ? designationById.get(String(row.designation_id ?? joinedDesignation?.id ?? ""))
@@ -220,13 +219,12 @@ async function loadPeople(
             fullName: String(row.full_name ?? "-"),
             mobile: `+${String(row.mobile_country_code ?? "91")} ${String(row.mobile ?? "")}`,
             email: String(row.email ?? "-"),
-            location,
-            designation,
+            location, model, provider, designation,
             status,
             viewHref: profileActionHref(source.basePath, "view", row.id),
             editHref: profileActionHref(source.basePath, "edit", row.id),
             canEdit: source.canEdit && canAccessDesignationPortal(designationRecord, "dashboard", "edit", { isOwner: ownerAccess }),
-            exportValues: buildExportValues(row, source.codeField, source.category, location, designation, status, source.employeeDesignation)
+            exportValues: buildExportValues(row, source.codeField, source.category, location, model, provider, designation, status, source.employeeDesignation)
           };
         })
     };
@@ -234,7 +232,7 @@ async function loadPeople(
   const customResults = await Promise.all(customSources.map(async (source) => {
     const result = await supabaseAdmin!
       .from(source.table)
-      .select(`id, ${sharedProfileColumns}, biometric_id, location_id, dropx_id, onboarding_status, postal_pin, ifsc_code, stations (station_code), designation`)
+      .select(`id, ${sharedProfileColumns}, biometric_id, location_id, dropx_id, onboarding_status, postal_pin, ifsc_code, stations (station_code, providers (name), location_models (code, name)), designation`)
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
     if (result.error) return { rows: [] as AllPeopleRow[], error: result.error.message };
@@ -248,7 +246,7 @@ async function loadPeople(
           return canAccessDesignationPortal(designation, "dashboard", "view", { isOwner: ownerAccess });
         })
         .map((row: Record<string, unknown>) => {
-          const location = String((first(row.stations as { station_code?: string } | Array<{ station_code?: string }> | null) ?? {}).station_code ?? "-");
+          const { location, model, provider } = stationDetails(row.stations);
           const designation = String(row.designation ?? "-");
           const designationRecord = designationByName.get(designation.trim().toLowerCase());
           const status = displayStatus(row[source.statusField], row.is_active !== false);
@@ -261,13 +259,12 @@ async function loadPeople(
             fullName: String(row.full_name ?? "-"),
             mobile: `+${String(row.mobile_country_code ?? "91")} ${String(row.mobile ?? "")}`,
             email: String(row.email ?? "-"),
-            location,
-            designation,
+            location, model, provider, designation,
             status,
             viewHref: profileActionHref(source.basePath, "view", row.id),
             editHref: profileActionHref(source.basePath, "edit", row.id),
             canEdit: source.canEdit && canAccessDesignationPortal(designationRecord, "dashboard", "edit", { isOwner: ownerAccess }),
-            exportValues: buildExportValues(row, source.codeField, source.category, location, designation, status, false)
+            exportValues: buildExportValues(row, source.codeField, source.category, location, model, provider, designation, status, false)
           };
         })
     };

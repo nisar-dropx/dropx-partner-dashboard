@@ -1,15 +1,47 @@
 import "server-only";
 
-import type { ConnectAccount } from "./connect-auth";
-import { connectApproverIdentity, expenseWorkerType } from "./connect-expense-data";
-import { resolveConnectApproverUserId } from "./connect-approver-identity";
 import { notifyAttendanceApprovalRequired } from "../../../../src/lib/connect-attendance-notifications";
+import { resolveConnectActorUserId, resolveConnectActorUserIds } from "./connect-approver-identity";
+import { notifyApproverMobile } from "./approver-mobile-notifications";
+import {
+  connectWorkforceMatches,
+  loadConnectAccessibleWorkforceIds,
+  loadConnectAttendanceApproveScope
+} from "./connect-people-attendance-access";
 import { connectReporteeMatches, type ConnectReporteeAccess } from "./connect-reportee-scope";
 import { notifyConnectExitOutcome, notifyExitApprovalRequired } from "./connect-exit-notifications";
 import { todayInIndia } from "./india-date";
 import { supabaseAdmin } from "./supabase-admin";
+import type { ConnectAccount } from "./connect-auth";
+import { connectApproverIdentity } from "./connect-expense-data";
+import { userFacingError } from "./user-facing-error";
+import { approvalJourneySummary, loadApprovalJourneySteps } from "./connect-approval-journey";
 
 type Decision = "approved" | "returned" | "rejected";
+
+type RosterPreviewAssignment = {
+  kind: "shift" | "weekly_off" | "not_rostered";
+  label: string;
+  shiftCode: string | null;
+};
+
+type RosterApprovalRow = {
+  id: string;
+  planId: string;
+  stepId: string | null;
+  stageType: string;
+  stageNumber: number;
+  name: string;
+  stationCode: string;
+  stationName: string;
+  effectiveFrom: string;
+  periodEnd: string;
+  revision: number;
+  rowCount: number;
+  baselinePlanId: string | null;
+  submittedAt: string | null;
+  submittedById: string | null;
+};
 
 function db() {
   if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
@@ -54,46 +86,60 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 }
 
 async function approverUserId(account: ConnectAccount) {
-  if (account.profileType === "user") return account.id;
-  try {
-    const identity = await connectApproverIdentity(account);
-    if (identity.userId) return identity.userId;
-    return resolveConnectApproverUserId(account.companyId, identity.personId);
-  } catch {
-    const workerType = expenseWorkerType(account.profileType);
-    if (!workerType) return null;
-    const workerColumn = workerType === "employee" ? "employee_id" : "contractor_id";
-    const engagement = await db().from("hr_engagements").select("person_id,status")
-      .eq("company_id", account.companyId).eq("worker_type", workerType).eq(workerColumn, account.id)
-      .eq("status", "active").limit(1).maybeSingle();
-    if (engagement.error || !engagement.data) return null;
-    return resolveConnectApproverUserId(account.companyId, engagement.data.person_id);
-  }
+  return resolveConnectActorUserId(account);
+}
+
+async function approverUserIds(account: ConnectAccount) {
+  return resolveConnectActorUserIds(account);
+}
+
+/** People HR / Owner roles that may finalize attendance after manager approval. Line managers with attendance.approve must not see this company queue. */
+const CONNECT_ATTENDANCE_HR_ROLE_CODES = new Set([
+  "OWNER",
+  "OWNER_BREAK_GLASS",
+  "PEOPLE_MANAGING_PARTNER",
+  "HR_HEAD",
+  "HR_HAEAD",
+  "HR_OPERATIONS",
+  "HR_EXECUTIVE",
+  "PEOPLE_HRM",
+  "PEOPLE_HRE"
+]);
+
+function isConnectAttendanceHrRoleCode(value: unknown) {
+  return CONNECT_ATTENDANCE_HR_ROLE_CODES.has(String(value ?? "").trim().toUpperCase());
 }
 
 async function canConnectFinalizeAttendance(companyId: string, userId: string) {
-  const pageResult = await db().from("hr_permission_pages")
-    .select("id").eq("company_id", companyId).eq("code", "attendance").eq("is_active", true).maybeSingle();
-  if (pageResult.error || !pageResult.data) return false;
-  const permissionResult = await db().from("hr_role_page_permissions")
-    .select("role_id").eq("company_id", companyId).eq("page_id", pageResult.data.id).eq("can_approve", true);
-  if (permissionResult.error) throw new Error(permissionResult.error.message);
-  const roleIds = [...new Set((permissionResult.data ?? []).map((row) => row.role_id))];
-  if (!roleIds.length) return false;
   const today = todayInIndia();
-  const grantResult = await db().from("hr_access_grants").select("id")
-    .eq("company_id", companyId).eq("user_id", userId).eq("is_active", true).in("role_id", roleIds)
-    .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`).limit(1);
-  if (grantResult.error && !String(grantResult.error.message).toLowerCase().includes("does not exist")) {
+  const legacy = await db().from("hr_user_access").select("role_code,role_id")
+    .eq("company_id", companyId).eq("user_id", userId).eq("is_active", true);
+  if (legacy.error && !/does not exist|schema cache/i.test(legacy.error.message)) {
+    throw new Error(legacy.error.message);
+  }
+  if ((legacy.data ?? []).some((row) => isConnectAttendanceHrRoleCode(row.role_code))) return true;
+
+  const grantResult = await db().from("hr_access_grants")
+    .select("role_id,hr_roles(code)")
+    .eq("company_id", companyId).eq("user_id", userId).eq("is_active", true)
+    .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`);
+  if (grantResult.error && !/does not exist|schema cache/i.test(grantResult.error.message)) {
     throw new Error(grantResult.error.message);
   }
-  if ((grantResult.data ?? []).length) return true;
-  const legacyResult = await db().from("hr_user_access").select("id")
-    .eq("company_id", companyId).eq("user_id", userId).eq("is_active", true).in("role_id", roleIds).limit(1);
-  if (legacyResult.error && !String(legacyResult.error.message).toLowerCase().includes("does not exist")) {
-    throw new Error(legacyResult.error.message);
+  if ((grantResult.data ?? []).some((row) => isConnectAttendanceHrRoleCode(one(row.hr_roles)?.code))) {
+    return true;
   }
-  return Boolean((legacyResult.data ?? []).length);
+
+  const roleIds = [...new Set([
+    ...(legacy.data ?? []).map((row) => row.role_id),
+    ...(grantResult.data ?? []).map((row) => row.role_id)
+  ].filter(Boolean))];
+  if (!roleIds.length) return false;
+  const roles = await db().from("hr_roles").select("id,code").eq("company_id", companyId).in("id", roleIds);
+  if (roles.error && !/does not exist|schema cache/i.test(roles.error.message)) {
+    throw new Error(roles.error.message);
+  }
+  return (roles.data ?? []).some((row) => isConnectAttendanceHrRoleCode(row.code));
 }
 
 async function signedEvidence(path: string | null | undefined) {
@@ -102,13 +148,13 @@ async function signedEvidence(path: string | null | undefined) {
   return result.data?.signedUrl ?? null;
 }
 
-export async function listConnectAttendanceApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
-  const actorUserId = await approverUserId(account);
-  if (!actorUserId) return [];
+export async function listConnectAttendanceApprovals(account: ConnectAccount, _reportees: ConnectReporteeAccess) {
+  const actorUserIds = await approverUserIds(account);
+  if (!actorUserIds.length) return [];
   if (await isTeamLeadRegularizationApprover(account)) return [];
   const stepsResult = await db().from("attendance_regularization_approval_steps")
     .select("id,request_id,step_order,step_name")
-    .eq("company_id", account.companyId).eq("approver_user_id", actorUserId).eq("status", "pending")
+    .eq("company_id", account.companyId).in("approver_user_id", actorUserIds).eq("status", "pending")
     .order("created_at");
   if (stepsResult.error) throw new Error(stepsResult.error.message);
   const steps = stepsResult.data ?? [];
@@ -118,10 +164,9 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount, re
     .eq("company_id", account.companyId).is("request_kind", null).eq("status", "pending_manager")
     .in("id", [...new Set(steps.map((step) => step.request_id))]);
   if (requestsResult.error) throw new Error(requestsResult.error.message);
-  const requestById = new Map((requestsResult.data ?? [])
-    .filter((request) => connectReporteeMatches(reportees, request.profile_type, request.profile_id))
-    .map((request) => [request.id, request]));
-  return Promise.all(steps.flatMap((step) => {
+  // Explicit step assignment — show regardless of reporting-tree toggle.
+  const requestById = new Map((requestsResult.data ?? []).map((request) => [request.id, request]));
+  const rows = await Promise.all(steps.flatMap((step) => {
     const request = requestById.get(step.request_id);
     return request ? [{ step, request }] : [];
   }).map(async ({ step, request }) => ({
@@ -143,54 +188,54 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount, re
     createdAt: request.created_at,
     queue: "manager" as const
   })));
+  const journeys = await loadApprovalJourneySteps(account.companyId, rows.map((row) => row.requestId), {
+    table: "attendance_regularization_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["approver_user_id"], actedAtColumn: "decided_at", noteColumn: "decision_note"
+  });
+  return rows.map((row) => ({ ...row, journey: approvalJourneySummary(row.createdAt, row.workerName, row.stepName, journeys.get(row.requestId) ?? []) }));
 }
 
 export async function listConnectAttendanceHrApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
-  const actorUserId = await approverUserId(account);
-  if (!actorUserId) return [];
-  if (!(await canConnectFinalizeAttendance(account.companyId, actorUserId))) return [];
+  const scope = await loadConnectAttendanceApproveScope(account);
+  if (!scope.canFinalize) return [];
+  const access = await loadConnectAccessibleWorkforceIds(account, scope);
+  if (!access.allowAll && !(access.employeeIds?.size || access.contractorIds?.size)) return [];
+
   const requestsResult = await db().from("attendance_regularization_requests")
     .select("id,profile_type,profile_id,dropx_id,full_name,attendance_date,current_in_time,current_out_time,requested_in_time,requested_out_time,reason_code,remarks,attachment_path,status,created_at")
     .eq("company_id", account.companyId).is("request_kind", null)
     .in("status", ["pending_hr", "pending"])
     .order("created_at");
   if (requestsResult.error) throw new Error(requestsResult.error.message);
-  const rows = ((requestsResult.data ?? []) as Array<{
-    id: string;
-    profile_type: string;
-    profile_id: string;
-    dropx_id: string | null;
-    full_name: string | null;
-    attendance_date: string;
-    current_in_time: string | null;
-    current_out_time: string | null;
-    requested_in_time: string | null;
-    requested_out_time: string | null;
-    reason_code: string;
-    remarks: string | null;
-    attachment_path: string | null;
-    status: string;
-    created_at: string;
-  }>).filter((request) => connectReporteeMatches(reportees, request.profile_type, request.profile_id));
+
+  // Immediate reportees / Entire team toggle applies to HR finalization too —
+  // only show workers inside the selected reporting scope (not the full attendance grant).
+  const rows = (requestsResult.data ?? []).filter((request) =>
+    connectWorkforceMatches(access, String(request.profile_type), String(request.profile_id))
+    && connectReporteeMatches(reportees, request.profile_type, request.profile_id)
+  );
+
   const filtered = [];
   for (const request of rows) {
     if (request.status === "pending_hr") {
       filtered.push(request);
       continue;
     }
+    // Legacy `pending` only when no manager steps exist (People HR inbox parity).
     const stepsResult = await db().from("attendance_regularization_approval_steps")
       .select("id").eq("company_id", account.companyId).eq("request_id", request.id).limit(1);
     if (stepsResult.error) throw new Error(stepsResult.error.message);
     if (!(stepsResult.data ?? []).length) filtered.push(request);
   }
-  return Promise.all(filtered.map(async (request) => ({
+
+  const approvalRows = await Promise.all(filtered.map(async (request) => ({
     id: request.id,
     requestId: request.id,
     stepName: "HR finalization",
     stepOrder: 0,
     workerName: request.full_name || "Team member",
     workerCode: request.dropx_id || "",
-    profileType: request.profile_type === "contractor" ? "contractor" as const : "employee" as const,
+    profileType: request.profile_type === "contractor" ? "contractor" : "employee",
     attendanceDate: request.attendance_date,
     currentInTime: request.current_in_time,
     currentOutTime: request.current_out_time,
@@ -202,6 +247,11 @@ export async function listConnectAttendanceHrApprovals(account: ConnectAccount, 
     createdAt: request.created_at,
     queue: "hr" as const
   })));
+  const journeys = await loadApprovalJourneySteps(account.companyId, approvalRows.map((row) => row.requestId), {
+    table: "attendance_regularization_approval_steps", parentColumn: "request_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["approver_user_id"], actedAtColumn: "decided_at", noteColumn: "decision_note"
+  });
+  return approvalRows.map((row) => ({ ...row, journey: approvalJourneySummary(row.createdAt, row.workerName, row.stepName, journeys.get(row.requestId) ?? []) }));
 }
 
 export async function decideConnectAttendanceHrApproval(
@@ -210,9 +260,9 @@ export async function decideConnectAttendanceHrApproval(
   decisionValue: unknown,
   noteValue: unknown
 ) {
-  const actorUserId = await approverUserId(account);
-  if (!actorUserId) throw new Error("A linked People login is required to finalize attendance.");
-  if (!(await canConnectFinalizeAttendance(account.companyId, actorUserId))) {
+  const scope = await loadConnectAttendanceApproveScope(account);
+  const actorUserId = scope.actorUserIds[0] ?? null;
+  if (!actorUserId || !scope.canFinalize) {
     throw new Error("Attendance finalization is not enabled for this account.");
   }
   const requestId = clean(requestIdValue);
@@ -222,10 +272,41 @@ export async function decideConnectAttendanceHrApproval(
     throw new Error("Choose Apply correction, Return, or Reject.");
   }
   if (decision !== "approved" && note.length < 3) throw new Error("Add a note when returning or rejecting.");
-  const request = await db().from("attendance_regularization_requests").select("attachment_path")
+
+  const access = await loadConnectAccessibleWorkforceIds(account, scope);
+  const request = await db().from("attendance_regularization_requests")
+    .select("id,profile_type,profile_id,attachment_path,status")
     .eq("company_id", account.companyId).eq("id", requestId).is("request_kind", null).maybeSingle();
   if (request.error || !request.data) throw new Error(request.error?.message ?? "Attendance request was not found.");
-  if (decision === "approved" && !(await signedEvidence(request.data.attachment_path))) {
+  if (!["pending_hr", "pending"].includes(String(request.data.status))) {
+    throw new Error("This attendance request is no longer awaiting HR finalization.");
+  }
+  if (!connectWorkforceMatches(access, String(request.data.profile_type), String(request.data.profile_id))) {
+    throw new Error("This attendance request is outside your approval scope.");
+  }
+
+  if (decision === "returned" || decision === "rejected") {
+    const now = new Date().toISOString();
+    const update = await db().from("attendance_regularization_requests").update({
+      status: decision,
+      review_remarks: note,
+      reviewed_by: actorUserId,
+      reviewed_at: now,
+      updated_at: now
+    }).eq("company_id", account.companyId).eq("id", requestId).is("request_kind", null).in("status", ["pending", "pending_hr"]);
+    if (update.error) throw new Error(update.error.message);
+    await db().from("attendance_regularization_approval_steps").update({
+      status: "skipped",
+      decision_note: note,
+      decided_at: now,
+      updated_at: now
+    }).eq("company_id", account.companyId).eq("request_id", requestId).in("status", ["pending", "queued"]);
+    return decision === "returned"
+      ? "Attendance correction returned to the worker."
+      : "Attendance correction rejected.";
+  }
+
+  if (!(await signedEvidence(request.data.attachment_path))) {
     throw new Error("Correction cannot be applied. Workplace CCTV proof is missing or unavailable.");
   }
   const result = await db().rpc("hr_review_attendance_regularization", {
@@ -237,13 +318,12 @@ export async function decideConnectAttendanceHrApproval(
     p_reviewer_name: account.name ?? account.reference ?? "HR reviewer"
   });
   if (result.error) throw new Error(result.error.message);
-  if (decision === "approved") return "Attendance correction applied to the register.";
-  if (decision === "returned") return "Attendance correction returned to the worker.";
-  return "Attendance correction rejected.";
+  return "Attendance correction applied to the register.";
 }
 
 export async function decideConnectAttendanceApproval(account: ConnectAccount, requestIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
-  const actorUserId = await approverUserId(account);
+  const actorUserIds = await approverUserIds(account);
+  const actorUserId = actorUserIds[0] ?? null;
   if (!actorUserId) throw new Error("A linked People login is required to approve attendance.");
   if (await isTeamLeadRegularizationApprover(account)) {
     throw new Error("Team leads cannot approve attendance regularizations.");
@@ -251,10 +331,12 @@ export async function decideConnectAttendanceApproval(account: ConnectAccount, r
   const requestId = clean(requestIdValue);
   const decision = clean(decisionValue);
   const note = clean(noteValue);
-  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !["approved", "rejected"].includes(decision)) throw new Error("Choose Approve or Reject.");
-  const assigned = await db().from("attendance_regularization_approval_steps").select("id")
-    .eq("company_id", account.companyId).eq("request_id", requestId).eq("approver_user_id", actorUserId).eq("status", "pending").maybeSingle();
+  if (!/^[0-9a-f-]{36}$/i.test(requestId) || !["approved", "rejected", "returned"].includes(decision)) throw new Error("Choose Approve, Return or Reject.");
+  if (decision === "returned" && note.length < 3) throw new Error("Add a short note explaining why the request is being returned.");
+  const assigned = await db().from("attendance_regularization_approval_steps").select("id,approver_user_id")
+    .eq("company_id", account.companyId).eq("request_id", requestId).in("approver_user_id", actorUserIds).eq("status", "pending").maybeSingle();
   if (assigned.error || !assigned.data) throw new Error(assigned.error?.message ?? "This attendance approval is no longer assigned to you.");
+  const actingUserId = assigned.data.approver_user_id || actorUserId;
   const request = await db().from("attendance_regularization_requests").select("attachment_path")
     .eq("company_id", account.companyId).eq("id", requestId).is("request_kind", null).maybeSingle();
   if (request.error || !request.data) throw new Error(request.error?.message ?? "Attendance request was not found.");
@@ -264,7 +346,7 @@ export async function decideConnectAttendanceApproval(account: ConnectAccount, r
   const result = await db().rpc("hr_decide_attendance_regularization_step", {
     p_company_id: account.companyId,
     p_request_id: requestId,
-    p_actor_user_id: actorUserId,
+    p_actor_user_id: actingUserId,
     p_decision: decision,
     p_note: note
   });
@@ -289,32 +371,146 @@ export async function decideConnectAttendanceApproval(account: ConnectAccount, r
     return "Attendance step approved and routed to the next manager.";
   }
   if (result.data === "approved") return "Attendance regularization approved.";
-  if (result.data === "pending_hr") return "Manager approvals complete. People will perform final attendance validation.";
+  if (result.data === "pending_hr") return "Manager approvals complete. Awaiting HR attendance finalization.";
+  if (result.data === "returned") return "Attendance correction returned to the worker.";
   return "Attendance regularization rejected.";
 }
 
 async function canApproveUnassignedRosterHr(account: ConnectAccount) {
   if (/owner/i.test(account.role ?? "")) return true;
-  const identity = await connectApproverIdentity(account);
-  const designationId = identity?.assignment?.designation_id;
-  if (!designationId) return false;
-  const result = await db().from("hr_roster_designation_rules").select("can_approve_hr")
-    .eq("company_id", account.companyId).eq("designation_id", designationId).maybeSingle();
-  if (result.error) throw new Error(result.error.message);
-  return Boolean(result.data?.can_approve_hr);
+  const userId = await approverUserId(account);
+  if (!userId) return false;
+  return canConnectFinalizeAttendance(account.companyId, userId);
+}
+
+function rosterIsoWeekday(date: string) {
+  return new Date(`${date}T12:00:00Z`).getUTCDay() || 7;
+}
+
+function rosterDateForWeekday(effectiveFrom: string, weekday: number) {
+  const date = new Date(`${effectiveFrom}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + weekday - rosterIsoWeekday(effectiveFrom));
+  return date.toISOString().slice(0, 10);
+}
+
+function rosterClock(value: string | null | undefined) {
+  const match = String(value ?? "").match(/^(\d{1,2}):(\d{2})/);
+  return match ? `${String(Number(match[1])).padStart(2, "0")}:${match[2]}` : "";
+}
+
+function rosterApprovalStageName(stageType: string) {
+  if (stageType === "level_1") return "Level 1 approval";
+  if (stageType === "level_2") return "Level 2 approval";
+  if (stageType === "hr") return "HR approval";
+  return "Roster approval";
+}
+
+async function addRosterApprovalPreviews(companyId: string, approvals: RosterApprovalRow[]) {
+  if (!approvals.length) return approvals.map(({ baselinePlanId: _baselinePlanId, ...approval }) => approval);
+  try {
+    const baselineIds = [...new Set(approvals.map((approval) => approval.baselinePlanId).filter((id): id is string => Boolean(id)))];
+    const planIds = [...new Set([...approvals.map((approval) => approval.planId), ...baselineIds])];
+    const entriesResult = await db().from("hr_roster_entries")
+      .select("plan_id,worker_type,worker_id,roster_date,day_type,shift_id,hr_shifts!hr_roster_entries_shift_id_fkey(code,name,start_time,end_time)")
+      .eq("company_id", companyId).in("plan_id", planIds).limit(25000);
+    if (entriesResult.error) throw new Error(entriesResult.error.message);
+    const entries = entriesResult.data ?? [];
+    const employeeIds = [...new Set(entries.filter((entry) => entry.worker_type === "employee").map((entry) => entry.worker_id))];
+    const contractorIds = [...new Set(entries.filter((entry) => entry.worker_type === "contractor").map((entry) => entry.worker_id))];
+    const [employeesResult, contractorsResult, baselinePlansResult] = await Promise.all([
+      employeeIds.length ? db().from("employees").select("id,full_name,employee_code").eq("company_id", companyId).in("id", employeeIds) : Promise.resolve({ data: [], error: null }),
+      contractorIds.length ? db().from("contractors").select("id,full_name,dropx_id").eq("company_id", companyId).in("id", contractorIds) : Promise.resolve({ data: [], error: null }),
+      baselineIds.length ? db().from("hr_roster_plans").select("id,revision_no").eq("company_id", companyId).in("id", baselineIds) : Promise.resolve({ data: [], error: null })
+    ]);
+    const queryError = employeesResult.error || contractorsResult.error || baselinePlansResult.error;
+    if (queryError) throw new Error(queryError.message);
+    const people = new Map<string, { name: string; code: string }>();
+    for (const person of employeesResult.data ?? []) people.set(`employee:${person.id}`, { name: person.full_name, code: person.employee_code ?? "" });
+    for (const person of contractorsResult.data ?? []) people.set(`contractor:${person.id}`, { name: person.full_name, code: person.dropx_id ?? "" });
+    const baselineRevisions = new Map((baselinePlansResult.data ?? []).map((plan) => [plan.id, plan.revision_no ?? null]));
+    const assignment = (entry: typeof entries[number] | undefined): RosterPreviewAssignment => {
+      if (!entry) return { kind: "not_rostered", label: "Not rostered", shiftCode: null };
+      if (entry.day_type === "weekly_off") return { kind: "weekly_off", label: "Weekly off", shiftCode: null };
+      const shift = one(entry.hr_shifts);
+      if (!shift) return { kind: "shift", label: "Shift not assigned", shiftCode: null };
+      const start = rosterClock(shift.start_time), end = rosterClock(shift.end_time);
+      return { kind: "shift", label: start && end ? `${start}–${end}` : shift.name || shift.code || "Shift", shiftCode: shift.code ?? null };
+    };
+    const sameAssignment = (before: typeof entries[number] | undefined, after: typeof entries[number] | undefined) =>
+      Boolean(before && after && before.day_type === after.day_type && (before.shift_id ?? null) === (after.shift_id ?? null));
+
+    return approvals.map(({ baselinePlanId, ...approval }) => {
+      const currentEntries = entries.filter((entry) => entry.plan_id === approval.planId);
+      const baselineEntries = baselinePlanId ? entries.filter((entry) => entry.plan_id === baselinePlanId) : [];
+      const currentByKey = new Map(currentEntries.map((entry) => [`${entry.worker_type}:${entry.worker_id}:${rosterIsoWeekday(entry.roster_date)}`, entry]));
+      const baselineByKey = new Map(baselineEntries.map((entry) => [`${entry.worker_type}:${entry.worker_id}:${rosterIsoWeekday(entry.roster_date)}`, entry]));
+      const keys = [...new Set([...currentByKey.keys(), ...baselineByKey.keys()])];
+      const changes = keys.flatMap((key) => {
+        const before = baselineByKey.get(key), after = currentByKey.get(key);
+        if (sameAssignment(before, after)) return [];
+        const [workerType, workerId] = key.split(":");
+        const weekday = rosterIsoWeekday(after?.roster_date ?? before!.roster_date);
+        return [{ workerType, workerId, weekday, date: rosterDateForWeekday(approval.effectiveFrom, weekday), before: assignment(before), after: assignment(after) }];
+      });
+      const grouped = new Map<string, typeof changes>();
+      for (const change of changes) {
+        const key = `${change.workerType}:${change.workerId}`;
+        grouped.set(key, [...(grouped.get(key) ?? []), change]);
+      }
+      const peopleChanges = [...grouped.entries()].map(([key, personChanges]) => {
+        const [workerType, workerId] = key.split(":");
+        const person = people.get(key);
+        return {
+          workerId,
+          workerType,
+          name: person?.name ?? (workerType === "employee" ? "Former employee" : "Former contractor"),
+          code: person?.code || "Record removed",
+          changes: personChanges.sort((left, right) => left.weekday - right.weekday).map(({ workerType: _workerType, workerId: _workerId, ...change }) => change)
+        };
+      }).sort((left, right) => left.name.localeCompare(right.name) || left.code.localeCompare(right.code));
+      const days = Array.from({ length: 7 }, (_, index) => {
+        const weekday = index + 1;
+        const dayEntries = currentEntries.filter((entry) => rosterIsoWeekday(entry.roster_date) === weekday);
+        return {
+          weekday,
+          date: rosterDateForWeekday(approval.effectiveFrom, weekday),
+          working: dayEntries.filter((entry) => entry.day_type === "working").length,
+          weeklyOff: dayEntries.filter((entry) => entry.day_type === "weekly_off").length
+        };
+      });
+      return {
+        ...approval,
+        preview: {
+          status: "ready" as const,
+          baselineRevision: baselinePlanId ? baselineRevisions.get(baselinePlanId) ?? null : null,
+          changedCells: changes.length,
+          affectedPeople: peopleChanges.length,
+          people: peopleChanges,
+          days
+        }
+      };
+    });
+  } catch (error) {
+    console.error("Roster approval preview unavailable", error instanceof Error ? error.message : "Unknown error");
+    return approvals.map(({ baselinePlanId: _baselinePlanId, ...approval }) => ({
+      ...approval,
+      preview: { status: "unavailable" as const, baselineRevision: null, changedCells: null, affectedPeople: null, people: [], days: [] }
+    }));
+  }
 }
 
 export async function listConnectRosterApprovals(account: ConnectAccount) {
-  const actorUserId = await approverUserId(account);
-  if (!actorUserId) return [];
+  const actorUserIds = await approverUserIds(account);
+  if (!actorUserIds.length) return [];
+  const actorIdSet = new Set(actorUserIds);
   const [stepsResult, canApproveHr] = await Promise.all([
     db().from("hr_roster_approval_steps")
-      .select("id,plan_id,stage_no,stage_type,approver_user_id,status,hr_roster_plans!inner(id,name,location_id,period_start,period_end,status,roster_kind,effective_from,revision_no,submitted_at,stations!hr_roster_plans_location_id_fkey(station_code,station_name),hr_roster_entries(id))")
+      .select("id,plan_id,stage_no,stage_type,approver_user_id,status,hr_roster_plans!inner(id,name,location_id,period_start,period_end,status,roster_kind,effective_from,revision_no,supersedes_plan_id,submitted_at,submitted_by,stations!hr_roster_plans_location_id_fkey(station_code,station_name),hr_roster_entries(id))")
       .eq("company_id", account.companyId).eq("status", "pending").order("created_at"),
     canApproveUnassignedRosterHr(account)
   ]);
   if (stepsResult.error) throw new Error(stepsResult.error.message);
-  const staged = (stepsResult.data ?? []).filter((step) => step.approver_user_id === actorUserId || (step.stage_type === "hr" && !step.approver_user_id && canApproveHr));
+  const staged = (stepsResult.data ?? []).filter((step) => (step.approver_user_id && actorIdSet.has(step.approver_user_id)) || (step.stage_type === "hr" && !step.approver_user_id && canApproveHr));
   const rows = staged.flatMap((step) => {
     const plan = one(step.hr_roster_plans);
     const station = one(plan?.stations);
@@ -330,19 +526,44 @@ export async function listConnectRosterApprovals(account: ConnectAccount) {
       effectiveFrom: plan.effective_from ?? plan.period_start,
       periodEnd: plan.period_end,
       revision: plan.revision_no ?? 1,
-      rowCount: plan.hr_roster_entries?.length ?? 0
+      rowCount: plan.hr_roster_entries?.length ?? 0,
+      baselinePlanId: plan.supersedes_plan_id ?? null,
+      submittedAt: plan.submitted_at ?? null,
+      submittedById: plan.submitted_by ?? null
     }] : [];
   });
   const legacyResult = await db().from("hr_roster_plans")
-    .select("id,name,location_id,period_start,period_end,status,roster_kind,effective_from,revision_no,stations!hr_roster_plans_location_id_fkey(station_code,station_name),hr_roster_entries(id)")
-    .eq("company_id", account.companyId).eq("approver_user_id", actorUserId).eq("status", "pending_approval").order("submitted_at");
+    .select("id,name,location_id,period_start,period_end,status,roster_kind,effective_from,revision_no,supersedes_plan_id,submitted_at,submitted_by,stations!hr_roster_plans_location_id_fkey(station_code,station_name),hr_roster_entries(id)")
+    .eq("company_id", account.companyId).in("approver_user_id", actorUserIds).eq("status", "pending_approval").order("submitted_at");
   if (legacyResult.error) throw new Error(legacyResult.error.message);
   const stagedPlanIds = new Set(rows.map((row) => row.planId));
-  return [...rows, ...(legacyResult.data ?? []).flatMap((plan) => {
+  const approvals: RosterApprovalRow[] = [...rows, ...(legacyResult.data ?? []).flatMap((plan) => {
     if (stagedPlanIds.has(plan.id)) return [];
     const station = one(plan.stations);
-    return [{ id: `legacy:${plan.id}`, planId: plan.id, stepId: null, stageType: "level_1", stageNumber: 1, name: plan.name, stationCode: station?.station_code ?? "—", stationName: station?.station_name ?? "", effectiveFrom: plan.effective_from ?? plan.period_start, periodEnd: plan.period_end, revision: plan.revision_no ?? 1, rowCount: plan.hr_roster_entries?.length ?? 0 }];
+    return [{ id: `legacy:${plan.id}`, planId: plan.id, stepId: null, stageType: "level_1", stageNumber: 1, name: plan.name, stationCode: station?.station_code ?? "—", stationName: station?.station_name ?? "", effectiveFrom: plan.effective_from ?? plan.period_start, periodEnd: plan.period_end, revision: plan.revision_no ?? 1, rowCount: plan.hr_roster_entries?.length ?? 0, baselinePlanId: plan.supersedes_plan_id ?? null, submittedAt: plan.submitted_at ?? null, submittedById: plan.submitted_by ?? null }];
   })];
+  const [previewed, journeySteps, submittersResult] = await Promise.all([
+    addRosterApprovalPreviews(account.companyId, approvals),
+    loadApprovalJourneySteps(account.companyId, approvals.map((approval) => approval.planId), {
+      table: "hr_roster_approval_steps", parentColumn: "plan_id", orderColumn: "stage_no", labelColumn: "stage_type",
+      actorColumns: ["decided_by", "approver_user_id"], actedAtColumn: "decided_at", noteColumn: "decision_note"
+    }),
+    (() => {
+      const ids = [...new Set(approvals.map((approval) => approval.submittedById).filter((id): id is string => Boolean(id)))];
+      return ids.length ? db().from("profiles").select("id,full_name,email").eq("company_id", account.companyId).in("id", ids) : Promise.resolve({ data: [], error: null });
+    })()
+  ]);
+  if (submittersResult.error) throw new Error(submittersResult.error.message);
+  const submitters = new Map((submittersResult.data ?? []).map((profile) => [profile.id, profile.full_name || profile.email || "Roster planner"]));
+  return previewed.map((approval) => ({
+    ...approval,
+    journey: approvalJourneySummary(
+      approval.submittedAt,
+      approval.submittedById ? submitters.get(approval.submittedById) ?? "Roster planner" : "Roster planner",
+      rosterApprovalStageName(approval.stageType),
+      journeySteps.get(approval.planId) ?? []
+    )
+  }));
 }
 
 export async function decideConnectRosterApproval(account: ConnectAccount, planIdValue: unknown, stepIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
@@ -356,10 +577,10 @@ export async function decideConnectRosterApproval(account: ConnectAccount, planI
   if (decision !== "approved" && note.length < 3) throw new Error("Add a decision note when returning or rejecting a roster.");
   const now = new Date().toISOString();
   if (!stepId) {
-    const legacy = await db().from("hr_roster_plans").select("id,location_id,effective_from,status,approver_user_id")
+    const legacy = await db().from("hr_roster_plans").select("id,location_id,effective_from,status,approver_user_id,roster_kind")
       .eq("company_id", account.companyId).eq("id", planId).eq("status", "pending_approval").maybeSingle();
     if (legacy.error || !legacy.data || legacy.data.approver_user_id !== actorUserId) throw new Error(legacy.error?.message ?? "This roster approval is no longer assigned to you.");
-    if (decision === "approved" && legacy.data.location_id && legacy.data.effective_from) {
+    if (decision === "approved" && legacy.data.roster_kind === "recurring_weekly" && legacy.data.location_id && legacy.data.effective_from) {
       const ended = await db().from("hr_roster_plans").update({ superseded_at: legacy.data.effective_from })
         .eq("company_id", account.companyId).eq("location_id", legacy.data.location_id).eq("roster_kind", "recurring_weekly")
         .eq("status", "approved").is("superseded_at", null).neq("id", planId);
@@ -371,7 +592,7 @@ export async function decideConnectRosterApproval(account: ConnectAccount, planI
     return `Weekly roster ${decision}.`;
   }
   const stepResult = await db().from("hr_roster_approval_steps")
-    .select("id,stage_no,stage_type,approver_user_id,status,hr_roster_plans!inner(id,location_id,effective_from,status)")
+    .select("id,stage_no,stage_type,approver_user_id,status,hr_roster_plans!inner(id,location_id,effective_from,status,roster_kind)")
     .eq("company_id", account.companyId).eq("plan_id", planId).eq("id", stepId).maybeSingle();
   if (stepResult.error || !stepResult.data || stepResult.data.status !== "pending") throw new Error(stepResult.error?.message ?? "This roster approval is no longer pending.");
   const step = stepResult.data;
@@ -396,10 +617,22 @@ export async function decideConnectRosterApproval(account: ConnectAccount, planI
     if (activated.error) throw new Error(activated.error.message);
     const routed = await db().from("hr_roster_plans").update({ approver_user_id: next.data.approver_user_id ?? null }).eq("company_id", account.companyId).eq("id", planId);
     if (routed.error) throw new Error(routed.error.message);
+    await notifyApproverMobile({
+      companyId: account.companyId,
+      recipientUserId: next.data.approver_user_id,
+      eventCode: "ROSTER_APPROVAL_REQUIRED",
+      title: "Weekly roster needs approval",
+      body: "A weekly roster step is waiting in Approval Inbox.",
+      route: "approvals",
+      sourceKey: `${planId}:${next.data.id}`,
+      data: { planId, stepId: next.data.id }
+    });
     return "Roster step approved and routed to the next approver.";
   }
-  const ended = await db().from("hr_roster_plans").update({ superseded_at: plan.effective_from }).eq("company_id", account.companyId).eq("location_id", plan.location_id).eq("roster_kind", "recurring_weekly").eq("status", "approved").is("superseded_at", null).neq("id", planId);
-  if (ended.error) throw new Error(ended.error.message);
+  if (plan.roster_kind === "recurring_weekly") {
+    const ended = await db().from("hr_roster_plans").update({ superseded_at: plan.effective_from }).eq("company_id", account.companyId).eq("location_id", plan.location_id).eq("roster_kind", "recurring_weekly").eq("status", "approved").is("superseded_at", null).neq("id", planId);
+    if (ended.error) throw new Error(ended.error.message);
+  }
   const published = await db().from("hr_roster_plans").update({ status: "approved", decision_note: note || "All approvals complete", decided_at: now, approver_user_id: null }).eq("company_id", account.companyId).eq("id", planId).eq("status", "pending_approval");
   if (published.error) throw new Error(published.error.message);
   return "Weekly roster approved and published to attendance.";
@@ -417,14 +650,16 @@ async function actorRoleIds(companyId: string, actorUserId: string) {
 }
 
 export async function listConnectExitApprovals(account: ConnectAccount) {
-  const actorUserId = await approverUserId(account);
-  if (!actorUserId) return [];
+  const actorUserIds = await approverUserIds(account);
+  if (!actorUserIds.length) return [];
+  const actorUserId = actorUserIds[0];
+  const actorIdSet = new Set(actorUserIds);
   const roles = await actorRoleIds(account.companyId, actorUserId);
   const stepsResult = await db().from("hr_exit_approvals")
     .select("id,case_id,workflow_step_id,step_order,step_name,approver_source,approver_role_id,assigned_user_id,is_required,status,created_at")
     .eq("company_id", account.companyId).eq("status", "pending").order("created_at");
   if (stepsResult.error) throw new Error(stepsResult.error.message);
-  const candidates = (stepsResult.data ?? []).filter((step) => step.assigned_user_id === actorUserId || (!step.assigned_user_id && step.approver_role_id && roles.has(step.approver_role_id)));
+  const candidates = (stepsResult.data ?? []).filter((step) => (step.assigned_user_id && actorIdSet.has(step.assigned_user_id)) || (!step.assigned_user_id && step.approver_role_id && roles.has(step.approver_role_id)));
   if (!candidates.length) return [];
   const caseIds = [...new Set(candidates.map((step) => step.case_id))];
   const [casesResult, allStepsResult] = await Promise.all([
@@ -434,10 +669,10 @@ export async function listConnectExitApprovals(account: ConnectAccount) {
   if (casesResult.error || allStepsResult.error) throw new Error(casesResult.error?.message ?? allStepsResult.error?.message ?? "Exit approvals could not be loaded.");
   const caseById = new Map((casesResult.data ?? []).map((item) => [item.id, item]));
   const allSteps = allStepsResult.data ?? [];
-  return candidates.flatMap((step) => {
+  const rows = candidates.flatMap((step) => {
     const exitCase = caseById.get(step.case_id);
     const blocked = allSteps.some((item) => item.case_id === step.case_id && item.is_required && item.step_order < step.step_order && item.status !== "approved");
-    if (!exitCase || blocked || ["rejected", "closed", "cancelled", "withdrawn"].includes(exitCase.status)) return [];
+    if (!exitCase || blocked || ["rejected", "closed", "cancelled", "withdrawn", "withdrawal_requested"].includes(exitCase.status)) return [];
     const employee = one(exitCase.employees);
     const contractor = one(exitCase.contractors);
     return [{
@@ -454,6 +689,11 @@ export async function listConnectExitApprovals(account: ConnectAccount) {
       submittedAt: exitCase.submitted_at
     }];
   });
+  const journeys = await loadApprovalJourneySteps(account.companyId, rows.map((row) => row.caseId), {
+    table: "hr_exit_approvals", parentColumn: "case_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["acted_by", "assigned_user_id"], actedAtColumn: "acted_at", noteColumn: "comments"
+  });
+  return rows.map((row) => ({ ...row, journey: approvalJourneySummary(row.submittedAt, row.requesterName, row.stepName, journeys.get(row.caseId) ?? []) }));
 }
 
 export async function decideConnectExitApproval(account: ConnectAccount, approvalIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
@@ -497,6 +737,157 @@ export async function decideConnectExitApproval(account: ConnectAccount, approva
   return "Exit request fully approved and the requester was notified.";
 }
 
+export async function listConnectExitWithdrawalApprovals(account: ConnectAccount) {
+  const actorUserId = await approverUserId(account);
+  if (!actorUserId) return [];
+  const casesResult = await db().from("hr_exit_cases")
+    .select("id,case_number,worker_type,requested_last_working_date,employee_reason,status,submitted_at,withdrawal_requested_at,withdrawal_reviewer_user_id,employees(full_name,employee_code),contractors(full_name,dropx_id)")
+    .eq("company_id", account.companyId)
+    .eq("status", "withdrawal_requested")
+    .eq("withdrawal_reviewer_user_id", actorUserId)
+    .order("withdrawal_requested_at", { ascending: false });
+  if (casesResult.error) {
+    if (/withdrawal_reviewer_user_id|schema cache|does not exist/i.test(casesResult.error.message)) {
+      // Fallback before migration: match first approved step acted_by / assigned_user_id.
+      const open = await db().from("hr_exit_cases")
+        .select("id,case_number,worker_type,requested_last_working_date,employee_reason,status,submitted_at,employees(full_name,employee_code),contractors(full_name,dropx_id)")
+        .eq("company_id", account.companyId)
+        .eq("status", "withdrawal_requested")
+        .order("submitted_at", { ascending: false });
+      if (open.error) throw new Error(open.error.message);
+      const rows = open.data ?? [];
+      if (!rows.length) return [];
+      const steps = await db().from("hr_exit_approvals")
+        .select("case_id,assigned_user_id,acted_by,step_order,status")
+        .eq("company_id", account.companyId)
+        .in("case_id", rows.map((row) => row.id))
+        .eq("status", "approved")
+        .order("step_order");
+      if (steps.error) throw new Error(steps.error.message);
+      const firstApprover = new Map<string, string>();
+      for (const step of steps.data ?? []) {
+        if (firstApprover.has(step.case_id)) continue;
+        const reviewer = step.acted_by ?? step.assigned_user_id;
+        if (reviewer) firstApprover.set(step.case_id, reviewer);
+      }
+      const approvals = rows.flatMap((exitCase) => {
+        if (firstApprover.get(exitCase.id) !== actorUserId) return [];
+        const employee = one(exitCase.employees);
+        const contractor = one(exitCase.contractors);
+        return [{
+          id: exitCase.id,
+          caseId: exitCase.id,
+          caseNumber: exitCase.case_number,
+          requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
+          requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
+          profileType: exitCase.worker_type === "contractor" ? "contractor" : "employee",
+          requestedLastWorkingDate: exitCase.requested_last_working_date,
+          reason: exitCase.employee_reason ?? "No additional comment",
+          requestedAt: exitCase.submitted_at
+        }];
+      });
+      const journeys = await loadApprovalJourneySteps(account.companyId, approvals.map((row) => row.caseId), {
+        table: "hr_exit_approvals", parentColumn: "case_id", orderColumn: "step_order", labelColumn: "step_name",
+        actorColumns: ["acted_by", "assigned_user_id"], actedAtColumn: "acted_at", noteColumn: "comments"
+      });
+      return approvals.map((row) => ({ ...row, journey: approvalJourneySummary(row.requestedAt, row.requesterName, "Withdrawal review", journeys.get(row.caseId) ?? []) }));
+    }
+    throw new Error(casesResult.error.message);
+  }
+  const approvals = (casesResult.data ?? []).map((exitCase) => {
+    const employee = one(exitCase.employees);
+    const contractor = one(exitCase.contractors);
+    return {
+      id: exitCase.id,
+      caseId: exitCase.id,
+      caseNumber: exitCase.case_number,
+      requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
+      requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? "",
+      profileType: exitCase.worker_type === "contractor" ? "contractor" : "employee",
+      requestedLastWorkingDate: exitCase.requested_last_working_date,
+      reason: exitCase.employee_reason ?? "No additional comment",
+      requestedAt: exitCase.withdrawal_requested_at ?? exitCase.submitted_at
+    };
+  });
+  const journeys = await loadApprovalJourneySteps(account.companyId, approvals.map((row) => row.caseId), {
+    table: "hr_exit_approvals", parentColumn: "case_id", orderColumn: "step_order", labelColumn: "step_name",
+    actorColumns: ["acted_by", "assigned_user_id"], actedAtColumn: "acted_at", noteColumn: "comments"
+  });
+  return approvals.map((row) => ({ ...row, journey: approvalJourneySummary(row.requestedAt, row.requesterName, "Withdrawal review", journeys.get(row.caseId) ?? []) }));
+}
+
+export async function decideConnectExitWithdrawal(account: ConnectAccount, caseIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
+  const actorUserId = await approverUserId(account);
+  if (!actorUserId) throw new Error("A linked People login is required to review an exit withdrawal.");
+  const caseId = clean(caseIdValue);
+  const decision = clean(decisionValue);
+  const note = clean(noteValue);
+  if (!/^[0-9a-f-]{36}$/i.test(caseId) || !["approved", "rejected"].includes(decision)) throw new Error("Choose Accept withdrawal or Keep exit open.");
+  if (decision === "rejected" && note.length < 3) throw new Error("Add a short note when keeping the exit open.");
+  const caseResult = await db().from("hr_exit_cases").select("*").eq("company_id", account.companyId).eq("id", caseId).maybeSingle();
+  if (caseResult.error || !caseResult.data) throw new Error(caseResult.error?.message ?? "Exit case was not found.");
+  const exitCase = caseResult.data;
+  if (exitCase.status !== "withdrawal_requested") throw new Error("This withdrawal request is no longer pending.");
+  let reviewerId = exitCase.withdrawal_reviewer_user_id as string | null;
+  if (!reviewerId) {
+    const firstApproved = await db().from("hr_exit_approvals")
+      .select("assigned_user_id,acted_by")
+      .eq("company_id", account.companyId)
+      .eq("case_id", caseId)
+      .eq("is_required", true)
+      .eq("status", "approved")
+      .order("step_order")
+      .limit(1)
+      .maybeSingle();
+    if (firstApproved.error) throw new Error(firstApproved.error.message);
+    reviewerId = firstApproved.data?.acted_by ?? firstApproved.data?.assigned_user_id ?? null;
+  }
+  if (reviewerId !== actorUserId) throw new Error("Only the first manager who approved this exit can review the withdrawal.");
+  const now = new Date().toISOString();
+  if (decision === "approved") {
+    const withdrawn = await db().from("hr_exit_cases").update({
+      status: "withdrawn",
+      current_stage: "closed",
+      withdrawal_reviewer_user_id: actorUserId,
+      reviewed_by: actorUserId,
+      reviewed_at: now,
+      updated_at: now
+    }).eq("company_id", account.companyId).eq("id", caseId).eq("status", "withdrawal_requested");
+    if (withdrawn.error) throw new Error(withdrawn.error.message);
+    const skipped = await db().from("hr_exit_approvals").update({ status: "skipped", updated_at: now })
+      .eq("company_id", account.companyId).eq("case_id", caseId).in("status", ["pending", "waiting"]);
+    if (skipped.error && !/does not exist|schema cache/i.test(skipped.error.message)) throw new Error(skipped.error.message);
+    await db().from("hr_exit_events").insert({
+      company_id: account.companyId,
+      case_id: caseId,
+      event_code: "WITHDRAWN",
+      title: "Withdrawal accepted — resignation withdrawn",
+      actor_name: account.name ?? "Approver",
+      details: { note: note || null, reviewed_by: actorUserId }
+    });
+    await notifyConnectExitOutcome({ companyId: account.companyId, caseId, event: "CASE_REJECTED" }).catch(() => undefined);
+    return "Withdrawal accepted. The exit case is withdrawn and the requester can see the updated status in One.";
+  }
+  const restoreStatus = String(exitCase.status_before_withdrawal ?? "submitted");
+  const restored = await db().from("hr_exit_cases").update({
+    status: restoreStatus,
+    withdrawal_reviewer_user_id: null,
+    withdrawal_requested_at: null,
+    status_before_withdrawal: null,
+    updated_at: now
+  }).eq("company_id", account.companyId).eq("id", caseId).eq("status", "withdrawal_requested");
+  if (restored.error) throw new Error(restored.error.message);
+  await db().from("hr_exit_events").insert({
+    company_id: account.companyId,
+    case_id: caseId,
+    event_code: "WITHDRAWAL_DECLINED",
+    title: "Withdrawal request declined — exit remains open",
+    actor_name: account.name ?? "Approver",
+    details: { note, restored_status: restoreStatus }
+  });
+  return "Withdrawal declined. The exit request remains open.";
+}
+
 async function workerDisplay(companyId: string, workerType: string, workerId: string) {
   if (workerType === "employee") {
     const result = await db().from("employees").select("full_name,employee_code").eq("id", workerId).maybeSingle();
@@ -508,23 +899,26 @@ async function workerDisplay(companyId: string, workerType: string, workerId: st
   return { name: result.data?.full_name ?? "Team member", code: result.data?.dropx_id ?? "" };
 }
 
-export async function listConnectRosterSwapApprovals(account: ConnectAccount) {
-  const actorUserId = await approverUserId(account);
-  if (!actorUserId) return [];
+export async function listConnectRosterSwapApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
+  const actorUserIds = await approverUserIds(account);
+  if (!actorUserIds.length) return [];
   const result = await db().from("hr_roster_swap_requests")
-    .select("id,roster_date,status,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,requester_day_type,partner_day_type,requester_shift_id,partner_shift_id,requester_note,partner_note,requested_at")
+    .select("id,roster_date,status,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,requester_day_type,partner_day_type,requester_shift_id,partner_shift_id,requester_note,partner_note,requested_at,partner_decided_at,manager_decided_at")
     .eq("company_id", account.companyId)
-    .eq("approver_user_id", actorUserId)
+    .in("approver_user_id", actorUserIds)
     .eq("status", "pending_manager")
     .order("requested_at", { ascending: false });
   if (result.error) throw new Error(result.error.message);
-  const shiftIds = [...new Set((result.data ?? []).flatMap((row) => [row.requester_shift_id, row.partner_shift_id]).filter(Boolean))] as string[];
+  // Shift swaps route only to the requester's immediate manager. Show only when the
+  // requester is inside the selected Immediate reportees / Entire team scope.
+  const scoped = (result.data ?? []).filter((row) => connectReporteeMatches(reportees, row.requester_worker_type, row.requester_worker_id));
+  const shiftIds = [...new Set(scoped.flatMap((row) => [row.requester_shift_id, row.partner_shift_id]).filter(Boolean))] as string[];
   const shiftsResult = shiftIds.length
     ? await db().from("hr_shifts").select("id,name,code,start_time,end_time").in("id", shiftIds)
     : { data: [], error: null };
   if (shiftsResult.error) throw new Error(shiftsResult.error.message);
   const shifts = new Map((shiftsResult.data ?? []).map((shift) => [shift.id, shift]));
-  return Promise.all((result.data ?? []).map(async (row) => {
+  return Promise.all(scoped.map(async (row) => {
     const [requester, partner] = await Promise.all([
       workerDisplay(account.companyId, row.requester_worker_type, row.requester_worker_id),
       workerDisplay(account.companyId, row.partner_worker_type, row.partner_worker_id)
@@ -544,7 +938,19 @@ export async function listConnectRosterSwapApprovals(account: ConnectAccount) {
       requesterShift,
       partnerShift,
       requesterNote: row.requester_note,
-      partnerNote: row.partner_note
+      partnerNote: row.partner_note,
+      journey: approvalJourneySummary(row.requested_at, requester.name, "Manager approval", [
+        {
+          id: `${row.id}:partner`, order: 1, label: "Partner confirmation",
+          status: row.partner_decided_at ? "approved" : "pending", actorName: partner.name,
+          actedAt: row.partner_decided_at, note: row.partner_note
+        },
+        {
+          id: `${row.id}:manager`, order: 2, label: "Manager approval",
+          status: row.manager_decided_at ? row.status : "pending", actorName: account.name ?? "Assigned manager",
+          actedAt: row.manager_decided_at, note: null
+        }
+      ])
     };
   }));
 }
@@ -592,6 +998,38 @@ async function notifyRosterSwapWorkers(input: {
   ]);
 }
 
+type RosterSwapDecisionRow = {
+  status: string;
+  approver_user_id: string | null;
+  roster_date: string;
+  requester_worker_type: string;
+  requester_worker_id: string;
+  partner_worker_type: string;
+  partner_worker_id: string;
+};
+
+function normalizeRosterSwapDecision(value: unknown): RosterSwapDecisionRow | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const status = clean(row.status);
+  const rosterDate = clean(row.roster_date);
+  const requesterWorkerType = clean(row.requester_worker_type);
+  const requesterWorkerId = clean(row.requester_worker_id);
+  const partnerWorkerType = clean(row.partner_worker_type);
+  const partnerWorkerId = clean(row.partner_worker_id);
+  if (!status || !rosterDate || !requesterWorkerType || !requesterWorkerId || !partnerWorkerType || !partnerWorkerId) return null;
+  const approverUserId = clean(row.approver_user_id);
+  return {
+    status,
+    approver_user_id: /^[0-9a-f-]{36}$/i.test(approverUserId) ? approverUserId : null,
+    roster_date: rosterDate,
+    requester_worker_type: requesterWorkerType,
+    requester_worker_id: requesterWorkerId,
+    partner_worker_type: partnerWorkerType,
+    partner_worker_id: partnerWorkerId
+  };
+}
+
 export async function decideConnectRosterSwapApproval(account: ConnectAccount, requestIdValue: unknown, decisionValue: unknown, noteValue: unknown) {
   const actorUserId = await approverUserId(account);
   if (!actorUserId) throw new Error("A linked People login is required to approve a shift swap.");
@@ -602,6 +1040,8 @@ export async function decideConnectRosterSwapApproval(account: ConnectAccount, r
   if (decision !== "approved" && decision !== "rejected") throw new Error("Choose Approve or Reject.");
   const accept = decision === "approved";
 
+  // Keep the dedicated manager wrapper (fixed in People migration). Do not call
+  // hr_review_roster_swap from Connect — People owns that path.
   const rpc = await db().rpc("hr_manager_decide_roster_swap", {
     p_company_id: account.companyId,
     p_request_id: requestId,
@@ -610,10 +1050,25 @@ export async function decideConnectRosterSwapApproval(account: ConnectAccount, r
     p_note: note || null
   });
   if (!rpc.error) {
+    const decided = normalizeRosterSwapDecision(rpc.data);
+    if (!decided) throw new Error("Shift swap was updated, but the response could not be read. Refresh and confirm the status.");
+    // Single-step immediate-manager route: never escalate to a next approver from Connect.
+    await notifyRosterSwapWorkers({
+      companyId: account.companyId,
+      requesterWorkerType: decided.requester_worker_type,
+      requesterWorkerId: decided.requester_worker_id,
+      partnerWorkerType: decided.partner_worker_type,
+      partnerWorkerId: decided.partner_worker_id,
+      requestId,
+      rosterDate: decided.roster_date,
+      approved: accept
+    });
     return accept ? "Shift swap approved." : "Shift swap rejected.";
   }
   const missingRpc = /Could not find the function|schema cache|does not exist/i.test(rpc.error.message);
-  if (!missingRpc) throw new Error(rpc.error.message);
+  if (!missingRpc) {
+    throw new Error(userFacingError(rpc.error.message, "Unable to update this shift swap. Please try again."));
+  }
 
   const current = await db().from("hr_roster_swap_requests")
     .select("id,status,approver_user_id,roster_date,requester_entry_id,partner_entry_id,requester_worker_type,requester_worker_id,partner_worker_type,partner_worker_id,requester_shift_id,partner_shift_id,requester_day_type,partner_day_type")
@@ -845,7 +1300,7 @@ export async function resubmitConnectReturnedRoster(account: ConnectAccount, pla
   const planId = clean(planIdValue);
   if (!/^[0-9a-f-]{36}$/i.test(planId)) throw new Error("Choose a valid roster.");
   const plan = await db().from("hr_roster_plans")
-    .select("id,status,location_id,effective_from,created_by")
+    .select("id,status,location_id,effective_from,created_by,roster_kind")
     .eq("company_id", account.companyId)
     .eq("id", planId)
     .maybeSingle();
@@ -868,7 +1323,7 @@ export async function resubmitConnectReturnedRoster(account: ConnectAccount, pla
   const approvalRequired = Boolean(policy.data?.approval_required ?? settings.data?.roster_approval_required ?? true);
   const now = new Date().toISOString();
   if (!approvalRequired) {
-    if (plan.data.location_id && plan.data.effective_from) {
+    if (plan.data.roster_kind === "recurring_weekly" && plan.data.location_id && plan.data.effective_from) {
       await db().from("hr_roster_plans").update({ superseded_at: plan.data.effective_from }).eq("company_id", account.companyId).eq("location_id", plan.data.location_id).eq("roster_kind", "recurring_weekly").eq("status", "approved").is("superseded_at", null).neq("id", planId);
     }
     const published = await db().from("hr_roster_plans").update({ status: "approved", submitted_at: now, submitted_by: actorUserId, decided_at: now, decision_note: resubmitNote || "Resubmitted from DropX One", updated_by: actorUserId, updated_at: now }).eq("company_id", account.companyId).eq("id", planId).eq("status", "returned");
