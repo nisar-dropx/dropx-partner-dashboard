@@ -4,6 +4,7 @@ import { CalendarDays, ChevronDown, ChevronRight, Download, IndianRupee, Receipt
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectAdvances } from "./connect-advances";
+import { ConnectWorkforceJoining } from "./connect-workforce-joining";
 
 type PaymentData = {
   period: string;
@@ -76,10 +77,11 @@ export function ConnectWorkforcePayments({ account }: { account: AppAccount }) {
     </header>
     <nav aria-label="Payment section" className="dx-workforce-tabs">
       {earningsAllowed ? <button className={tab === "earnings" ? "active" : ""} onClick={() => setTab("earnings")}><IndianRupee />Live earnings</button> : null}
-      {earningsAllowed ? <button className={tab === "statements" ? "active" : ""} onClick={() => setTab("statements")}><ReceiptText />Monthly statements</button> : null}
+      {earningsAllowed ? <button className={tab === "statements" ? "active" : ""} onClick={() => setTab("statements")}><ReceiptText />Payment statements</button> : null}
       {advancesAllowed ? <button className={tab === "advances" ? "active" : ""} onClick={() => setTab("advances")}><WalletCards />Advances</button> : null}
       {rateCardAllowed ? <button className={tab === "rate-card" ? "active" : ""} onClick={() => setTab("rate-card")}><ReceiptText />Rate card</button> : null}
     </nav>
+    {tab === "earnings" && earningsAllowed ? <ConnectWorkforceJoining key={`${account.profileType}:${account.id}`} account={account} /> : null}
     {tab === "advances" && advancesAllowed ? <ConnectAdvances account={account} /> : null}
     {tab !== "advances" && loading ? <div className="dx-loader"><span /><small>Loading your payment details…</small></div> : null}
     {tab !== "advances" && error ? <div className="dx-alert error">{error}<button onClick={() => void load()}><RefreshCw />Retry</button></div> : null}

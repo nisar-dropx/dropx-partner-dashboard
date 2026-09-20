@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireConnectAccount } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { workforcePaymentMonth } from "@/lib/workforce-payment-period";
 
 type Mapping = {
   id: string;
@@ -18,15 +19,6 @@ function relationName(value: Mapping["providers"] | Mapping["payment_methods"]) 
   return row?.name ?? null;
 }
 
-function monthRange(now = new Date()) {
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const from = `${year}-${String(month + 1).padStart(2, "0")}-01`;
-  const to = `${year}-${String(month + 2).padStart(2, "0")}-01`;
-  const label = new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(new Date(year, month, 1));
-  return { from, to, label };
-}
-
 export async function GET(request: NextRequest) {
   try {
     if (!supabaseAdmin) throw new Error("Payments are unavailable right now.");
@@ -34,6 +26,7 @@ export async function GET(request: NextRequest) {
     const profileType = request.nextUrl.searchParams.get("profileType") as "employee" | "workforce" | "field_executive" | "contractor" | "vendor" | "worker";
     const account = await requireConnectAccount(profileType, accountId);
     if (account.workspace !== "workforce") throw new Error("This payment view is available in the Workforce workspace only.");
+    if (!account.pageAccess.some(code => ["earnings", "rate_card"].includes(code))) return NextResponse.json({error:"Payments are not enabled for this account."},{status:403,headers:{"Cache-Control":"private, no-store"}});
 
     const sourceIds = new Set([account.id]);
     if (account.profileType === "workforce") {
@@ -54,7 +47,7 @@ export async function GET(request: NextRequest) {
     const mappings = ((mappingResult.data ?? []) as Array<Mapping & { field_executive_id?: string | null; contractor_id?: string | null; employee_id?: string | null }>)
       .filter((mapping) => [mapping.workforce_id, mapping.field_executive_id, mapping.contractor_id, mapping.employee_id].some((id) => id && sourceIds.has(String(id))));
     const providerMemberIds = [...new Set(mappings.map((mapping) => mapping.provider_member_id).filter((id): id is string => Boolean(id)))];
-    const period = monthRange();
+    const period = workforcePaymentMonth();
     const dailyResult = providerMemberIds.length
       ? await supabaseAdmin.from("cps_shipment_daily")
         .select("work_date,provider_employee_id,total_delivery,amazon_delivery,swa_delivery,c_return,mfn,mfn_return,da_total_pay,del_rate,c_return_rate,mfn_rate,mfn_return_rate")
