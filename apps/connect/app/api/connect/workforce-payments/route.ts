@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireConnectAccount } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { workforcePaymentMonth } from "@/lib/workforce-payment-period";
+import {paymentMappingForDay} from "@/lib/workforce-payment-mapping";
 import { workforcePaymentStatus } from "@/lib/workforce-payment-status";
 
 type Mapping = {
@@ -11,7 +12,8 @@ type Mapping = {
   effective_from: string | null;
   effective_to: string | null;
   payment_values: Record<string, unknown> | null;
-  providers?: { name?: string | null } | Array<{ name?: string | null }> | null;
+  providers?: { name?: string | null; code?:string|null } | Array<{ name?: string | null;code?:string|null }> | null;
+  stations?: {station_code?:string|null} | Array<{station_code?:string|null}> | null;
   payment_methods?: { name?: string | null } | Array<{ name?: string | null }> | null;
 };
 
@@ -29,29 +31,33 @@ export async function GET(request: NextRequest) {
     if (account.workspace !== "workforce") throw new Error("This payment view is available in the Workforce workspace only.");
     if (!account.pageAccess.some(code => ["earnings", "rate_card"].includes(code))) return NextResponse.json({error:"Payments are not enabled for this account."},{status:403,headers:{"Cache-Control":"private, no-store"}});
 
-    const sourceIds = new Set([account.id]);
+    const identityFilters:string[] = account.profileType==="workforce" ? [`workforce_id.eq.${account.id}`] : [];
+    const legacyColumns:Record<string,string>={employee:"employee_id",contractor:"contractor_id",field_executive:"field_executive_id"};
+    if(legacyColumns[account.profileType])identityFilters.push(`and(workforce_id.is.null,${legacyColumns[account.profileType]}.eq.${account.id})`);
     if (account.profileType === "workforce") {
       const source = await supabaseAdmin.from("workforce")
-        .select("source_profile_id")
+        .select("source_profile_id,source_profile_type")
         .eq("company_id", account.companyId)
         .eq("id", account.id)
         .maybeSingle();
-      if (!source.error && source.data?.source_profile_id) sourceIds.add(String(source.data.source_profile_id));
+      if(source.error) throw new Error("Your Workforce identity could not be verified.");
+      if(source.data?.source_profile_id && legacyColumns[source.data.source_profile_type])identityFilters.push(`and(workforce_id.is.null,${legacyColumns[source.data.source_profile_type]}.eq.${source.data.source_profile_id})`);
     }
 
+    const period = workforcePaymentMonth();
     const mappingResult = await supabaseAdmin.from("field_executive_provider_mappings")
-      .select("id,provider_member_id,effective_from,effective_to,payment_values,providers(name),payment_methods(name),workforce_id,field_executive_id,contractor_id,employee_id")
+      .select("id,provider_member_id,effective_from,effective_to,payment_values,providers(name,code),stations(station_code),payment_methods(name),workforce_id,field_executive_id,contractor_id,employee_id")
       .eq("company_id", account.companyId)
-      .eq("status", "active");
+      .neq("status", "cancelled").lt("effective_from",period.to).or(`effective_to.is.null,effective_to.gte.${period.from}`)
+      .or(identityFilters.length ? identityFilters.join(","):"id.eq.00000000-0000-0000-0000-000000000000").order("effective_from",{ascending:false}).limit(1000);
     if (mappingResult.error) throw new Error("We could not load your payment mapping. Please try again.");
 
-    const mappings = ((mappingResult.data ?? []) as Array<Mapping & { field_executive_id?: string | null; contractor_id?: string | null; employee_id?: string | null }>)
-      .filter((mapping) => [mapping.workforce_id, mapping.field_executive_id, mapping.contractor_id, mapping.employee_id].some((id) => id && sourceIds.has(String(id))));
+    if((mappingResult.data ?? []).length>=1000) throw new Error("Too many mapping versions to reconcile safely. Please contact Workforce.");
+    const mappings = (mappingResult.data ?? []) as Mapping[];
     const providerMemberIds = [...new Set(mappings.map((mapping) => mapping.provider_member_id).filter((id): id is string => Boolean(id)))];
-    const period = workforcePaymentMonth();
     const dailyResult = providerMemberIds.length
       ? await supabaseAdmin.from("cps_shipment_daily")
-        .select("work_date,provider_employee_id,total_delivery,amazon_delivery,swa_delivery,c_return,mfn,mfn_return,da_total_pay,del_rate,c_return_rate,mfn_rate,mfn_return_rate")
+        .select("work_date,station_code,client,provider_employee_id,total_delivery,amazon_delivery,swa_delivery,c_return,mfn,mfn_return,da_total_pay,del_rate,c_return_rate,mfn_rate,mfn_return_rate")
         .eq("company_id", account.companyId)
         .in("provider_employee_id", providerMemberIds)
         .gte("work_date", period.from)
@@ -62,12 +68,10 @@ export async function GET(request: NextRequest) {
 
     type RateLine = { code: string; label: string; count: number; rate: number; amount: number; sharedRate?: boolean };
     type Day = { date: string; deliveries: number; amazonDeliveries: number; swaDeliveries: number; cReturns: number; mfn: number; mfnReturns: number; earnings: number; rateLines: Map<string, RateLine> };
-    const paymentRates = new Map<string, Record<string, unknown>>();
-    for (const mapping of mappings) paymentRates.set(String(mapping.provider_member_id ?? ""), mapping.payment_values ?? {});
-    const mappedRate = (providerMemberId: unknown, storedRate: unknown, keys: string[]) => {
+    const mappedRate = (mapping: Mapping, storedRate: unknown, keys: string[]) => {
       const current = Number(storedRate ?? 0);
       if (Number.isFinite(current) && current > 0) return current;
-      const values = paymentRates.get(String(providerMemberId ?? "")) ?? {};
+      const values = mapping.payment_values ?? {};
       for (const key of keys) {
         const candidate = Number(values[key] ?? 0);
         if (Number.isFinite(candidate) && candidate > 0) return candidate;
@@ -76,6 +80,8 @@ export async function GET(request: NextRequest) {
     };
     const dailyByDate = new Map<string, Day>();
     for (const row of dailyResult.data ?? []) {
+      const mapping=paymentMappingForDay(mappings,row);
+      if(!mapping) continue;
       const date = String(row.work_date ?? "");
       const current = dailyByDate.get(date) ?? { date, deliveries: 0, amazonDeliveries: 0, swaDeliveries: 0, cReturns: 0, mfn: 0, mfnReturns: 0, earnings: 0, rateLines: new Map<string, RateLine>() };
       current.deliveries += Number(row.total_delivery ?? (Number(row.amazon_delivery ?? 0) + Number(row.swa_delivery ?? 0)));
@@ -93,14 +99,14 @@ export async function GET(request: NextRequest) {
         previous.amount += count * rate;
         current.rateLines.set(key, previous);
       };
-      const deliveryRate = mappedRate(row.provider_employee_id, row.del_rate, ["DELIVERY", "AMAZON_DELIVERY"]);
+      const deliveryRate = mappedRate(mapping, row.del_rate, ["DELIVERY", "AMAZON_DELIVERY"]);
       addLine("delivery", "Delivery", Number(row.amazon_delivery ?? 0), deliveryRate);
       // The current Amazon feed supplies one SWA total. It uses the configured delivery
       // rate until the upstream file supplies separate SWA Prepaid / COD counts.
-      addLine("swa_delivery", "SWA delivery", Number(row.swa_delivery ?? 0), mappedRate(row.provider_employee_id, row.del_rate, ["SWA_DELIVERY", "SWA", "DELIVERY", "AMAZON_DELIVERY"]), true);
-      addLine("c_return", "C-return", Number(row.c_return ?? 0), mappedRate(row.provider_employee_id, row.c_return_rate, ["CRETURN", "C_RETURN", "CUSTOMER_RETURN"]));
-      addLine("mfn", "MFN", Number(row.mfn ?? 0), mappedRate(row.provider_employee_id, row.mfn_rate, ["MFN", "SELLER_PICKUP"]));
-      addLine("mfn_return", "MFN return", Number(row.mfn_return ?? 0), mappedRate(row.provider_employee_id, row.mfn_return_rate, ["MFN_RETURN", "SELLER_RETURN", "SLLLER_RETURN"]));
+      addLine("swa_delivery", "SWA delivery", Number(row.swa_delivery ?? 0), mappedRate(mapping, row.del_rate, ["SWA_DELIVERY", "SWA", "DELIVERY", "AMAZON_DELIVERY"]), true);
+      addLine("c_return", "C-return", Number(row.c_return ?? 0), mappedRate(mapping, row.c_return_rate, ["CRETURN", "C_RETURN", "CUSTOMER_RETURN"]));
+      addLine("mfn", "MFN", Number(row.mfn ?? 0), mappedRate(mapping, row.mfn_rate, ["MFN", "SELLER_PICKUP"]));
+      addLine("mfn_return", "MFN return", Number(row.mfn_return ?? 0), mappedRate(mapping, row.mfn_return_rate, ["MFN_RETURN", "SELLER_RETURN", "SLLLER_RETURN"]));
       dailyByDate.set(date, current);
     }
     const daily = [...dailyByDate.values()].map((row) => ({ ...row, rateLines: [...row.rateLines.values()] })).sort((left, right) => right.date.localeCompare(left.date));
