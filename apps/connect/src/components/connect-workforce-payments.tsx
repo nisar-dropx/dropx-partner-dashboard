@@ -13,6 +13,11 @@ type PaymentData = {
   rateCard: Array<{ code: string; rate: number; providerMemberId: string | null; effectiveFrom: string | null; effectiveTo: string | null }>;
 };
 
+type EarningsData = {
+  summary: { grossAmount: number };
+  earnings: Array<{ daily: Array<{ date: string; amount: number }> }>;
+};
+
 type Tab = "earnings" | "advances" | "rate-card";
 const date = (value: string | null) => value ? new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(new Date(`${value}T00:00:00`)) : "—";
 const money = (value: number) => `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -32,10 +37,22 @@ export function ConnectWorkforcePayments({ account }: { account: AppAccount }) {
     setLoading(true); setError("");
     try {
       const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
-      const response = await fetch(`/api/connect/workforce-payments?${query}`, { cache: "no-store" });
-      const payload = await response.json();
+      const [response, earningsResponse] = await Promise.all([
+        fetch(`/api/connect/workforce-payments?${query}`, { cache: "no-store" }),
+        fetch(`/api/connect/earnings?${query}`, { cache: "no-store" })
+      ]);
+      const [payload, earningsPayload] = await Promise.all([response.json(), earningsResponse.json()]);
       if (!response.ok) throw new Error(payload.error || "Unable to load earnings.");
-      setData(payload);
+      const calculated = earningsResponse.ok ? earningsPayload as EarningsData : null;
+      const earningsByDate = new Map<string, number>();
+      for (const mapping of calculated?.earnings ?? []) for (const row of mapping.daily) {
+        earningsByDate.set(row.date, (earningsByDate.get(row.date) ?? 0) + Number(row.amount ?? 0));
+      }
+      setData({
+        ...payload,
+        summary: { ...payload.summary, earnings: calculated?.summary.grossAmount ?? payload.summary.earnings },
+        daily: payload.daily.map((row: PaymentData["daily"][number]) => ({ ...row, earnings: earningsByDate.get(row.date) ?? row.earnings }))
+      });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to load earnings.");
     } finally { setLoading(false); }
@@ -60,10 +77,10 @@ export function ConnectWorkforcePayments({ account }: { account: AppAccount }) {
     {tab !== "advances" && error ? <div className="dx-alert error">{error}<button onClick={() => void load()}><RefreshCw />Retry</button></div> : null}
     {tab === "earnings" && earningsAllowed && data && !loading && !error ? <>
       {!hasMap ? <section className="dx-workforce-empty"><i><Route /></i><div><strong>Payment mapping is being set up</strong><p>Your profile is active, but it is not yet connected to a provider ID and rate card. Your station team can complete the mapping before live earnings appear here.</p></div></section> : <>
-        <section className="dx-workforce-payment-hero"><span><small>{data.period}</small><strong>{money(data.summary.earnings)}</strong><em>Recorded earnings</em></span><button onClick={() => setTab("rate-card")}>View rate card <ChevronRight /></button></section>
+        <section className="dx-workforce-payment-hero"><span><small>{data.period}</small><strong>{money(data.summary.earnings)}</strong><em>Estimated live earnings</em></span><button onClick={() => setTab("rate-card")}>View rate card <ChevronRight /></button></section>
         <section className="dx-workforce-payment-stats"><article><Route /><span><strong>{data.summary.deliveries.toLocaleString("en-IN")}</strong><small>Deliveries</small></span></article><article><CalendarDays /><span><strong>{data.summary.workingDays}</strong><small>Active days</small></span></article><article><IndianRupee /><span><strong>{date(data.summary.latestDate)}</strong><small>Latest import</small></span></article></section>
         <section className="dx-workforce-ledger"><header><div><small>Daily view</small><h2>This month&apos;s earnings</h2></div><button onClick={() => void load()} aria-label="Refresh earnings"><RefreshCw /></button></header>{data.daily.length ? <div>{data.daily.map((row) => <article key={row.date}><span><strong>{date(row.date)}</strong><small>{row.deliveries.toLocaleString("en-IN")} deliveries</small></span><b>{money(row.earnings)}</b></article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>No imported delivery data yet</strong><small>New Amazon delivery imports will show here after they are mapped and processed.</small></div>}</section>
-        <p className="dx-workforce-payment-note">Recorded earnings reflect processed delivery data and remain subject to the payout review cycle.</p>
+        <p className="dx-workforce-payment-note">Live earnings use imported delivery data and your active rate card. Final payout remains subject to the payout review cycle.</p>
       </>}
     </> : null}
     {tab === "rate-card" && rateCardAllowed && data && !loading && !error ? <>
