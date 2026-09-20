@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
     const period = monthRange();
     const dailyResult = providerMemberIds.length
       ? await supabaseAdmin.from("cps_shipment_daily")
-        .select("work_date,provider_employee_id,total_delivery,amazon_delivery,swa_delivery,c_return,mfn,mfn_return,da_total_pay")
+        .select("work_date,provider_employee_id,total_delivery,amazon_delivery,swa_delivery,c_return,mfn,mfn_return,da_total_pay,del_rate,c_return_rate,mfn_rate,mfn_return_rate")
         .eq("company_id", account.companyId)
         .in("provider_employee_id", providerMemberIds)
         .gte("work_date", period.from)
@@ -66,10 +66,12 @@ export async function GET(request: NextRequest) {
       : { data: [], error: null };
     if (dailyResult.error) throw new Error("We could not load your live earnings. Please try again.");
 
-    const dailyByDate = new Map<string, { date: string; deliveries: number; amazonDeliveries: number; swaDeliveries: number; cReturns: number; mfn: number; mfnReturns: number; earnings: number }>();
+    type RateLine = { code: string; label: string; count: number; rate: number; amount: number; sharedRate?: boolean };
+    type Day = { date: string; deliveries: number; amazonDeliveries: number; swaDeliveries: number; cReturns: number; mfn: number; mfnReturns: number; earnings: number; rateLines: Map<string, RateLine> };
+    const dailyByDate = new Map<string, Day>();
     for (const row of dailyResult.data ?? []) {
       const date = String(row.work_date ?? "");
-      const current = dailyByDate.get(date) ?? { date, deliveries: 0, amazonDeliveries: 0, swaDeliveries: 0, cReturns: 0, mfn: 0, mfnReturns: 0, earnings: 0 };
+      const current = dailyByDate.get(date) ?? { date, deliveries: 0, amazonDeliveries: 0, swaDeliveries: 0, cReturns: 0, mfn: 0, mfnReturns: 0, earnings: 0, rateLines: new Map<string, RateLine>() };
       current.deliveries += Number(row.total_delivery ?? (Number(row.amazon_delivery ?? 0) + Number(row.swa_delivery ?? 0)));
       current.amazonDeliveries += Number(row.amazon_delivery ?? 0);
       current.swaDeliveries += Number(row.swa_delivery ?? 0);
@@ -77,9 +79,25 @@ export async function GET(request: NextRequest) {
       current.mfn += Number(row.mfn ?? 0);
       current.mfnReturns += Number(row.mfn_return ?? 0);
       current.earnings += Number(row.da_total_pay ?? 0);
+      const addLine = (code: string, label: string, count: number, rate: number, sharedRate = false) => {
+        if (!count) return;
+        const key = `${code}:${rate}`;
+        const previous = current.rateLines.get(key) ?? { code, label, count: 0, rate, amount: 0, sharedRate };
+        previous.count += count;
+        previous.amount += count * rate;
+        current.rateLines.set(key, previous);
+      };
+      const deliveryRate = Number(row.del_rate ?? 0);
+      addLine("amazon_delivery", "Amazon delivery", Number(row.amazon_delivery ?? 0), deliveryRate);
+      // The current Amazon feed supplies one SWA total. It uses the configured delivery
+      // rate until the upstream file supplies separate SWA Prepaid / COD counts.
+      addLine("swa_delivery", "SWA delivery", Number(row.swa_delivery ?? 0), deliveryRate, true);
+      addLine("c_return", "C-return", Number(row.c_return ?? 0), Number(row.c_return_rate ?? 0));
+      addLine("mfn", "MFN", Number(row.mfn ?? 0), Number(row.mfn_rate ?? 0));
+      addLine("mfn_return", "MFN return", Number(row.mfn_return ?? 0), Number(row.mfn_return_rate ?? 0));
       dailyByDate.set(date, current);
     }
-    const daily = [...dailyByDate.values()].sort((left, right) => right.date.localeCompare(left.date));
+    const daily = [...dailyByDate.values()].map((row) => ({ ...row, rateLines: [...row.rateLines.values()] })).sort((left, right) => right.date.localeCompare(left.date));
     const payrollItems = account.profileType === "workforce"
       ? await supabaseAdmin.from("workforce_payroll_items")
         .select("id,payroll_run_id,shipment_count,work_days,base_amount,incentive_amount,adjustment_amount,deduction_amount,gross_amount,net_amount,status")
