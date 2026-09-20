@@ -421,7 +421,8 @@ export async function approvePaymentRequest(formData: FormData) {
         current_approver_user_id: null,
         current_approver_role_id: null,
         current_approver_role_ids: [],
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        updated_by: authorization.userId
       });
   } else {
     const target = await nextApprover(companyId, finalRoleIds, request.location_id);
@@ -432,7 +433,8 @@ export async function approvePaymentRequest(formData: FormData) {
         current_approver_user_id: target.userId,
         current_approver_role_id: target.roleId,
         current_approver_role_ids: finalRoleIds,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        updated_by: authorization.userId
       }, {
         status: "pending",
         approval_status: `${roleCode}_APPROVED`,
@@ -440,7 +442,8 @@ export async function approvePaymentRequest(formData: FormData) {
         current_approver_user_id: target.userId,
         current_approver_role_id: target.roleId,
         current_approver_role_ids: finalRoleIds,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        updated_by: authorization.userId
       });
   }
 
@@ -491,7 +494,8 @@ export async function rejectPaymentRequest(formData: FormData) {
       current_approver_user_id: null,
       current_approver_role_id: null,
       current_approver_role_ids: [],
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
+        updated_by: authorization.userId
     });
 
   revalidatePath("/payments/approvals");
@@ -540,14 +544,16 @@ export async function returnPaymentRequest(formData: FormData) {
       current_approver_user_id: null,
       current_approver_role_id: null,
       current_approver_role_ids: [],
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
+        updated_by: authorization.userId
     }, {
         status: "pending",
         approval_status: "RETURNED",
         current_approver_user_id: null,
         current_approver_role_id: null,
         current_approver_role_ids: [],
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        updated_by: authorization.userId
       });
 
   revalidatePath("/payments/approvals");

@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import {canProcessPayment} from "@/lib/payment-processing-policy";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -13,6 +14,7 @@ type PaymentBankRow = {
 };
 
 type RequestRow = {
+  location_id: string | null;
   id: string;
   request_no: string;
   location_code: string;
@@ -99,7 +101,8 @@ async function markRequestsProcessing(companyId: string, requestIds: string[], a
     status: "processing",
     approval_status: "PROCESSING",
     processing_started_at: now,
-    updated_at: now
+    updated_at: now,
+    updated_by: actorUserId
   };
   const { error } = await supabaseAdmin
     .from("payment_requests")
@@ -132,7 +135,7 @@ export async function GET(request: Request) {
   try {
     const authorization = await getAuthorization();
     if (!authorization) return Response.json({ error: "Unauthorized" }, { status: 401 });
-    if (!hasPermission(authorization, "payment_process", "access")) {
+    if (!hasPermission(authorization, "payment_process", "edit") || authorization.readOnly) {
       return Response.json({ error: "Permission required" }, { status: 403 });
     }
     const companyId = requireCompanyId(authorization);
@@ -173,6 +176,7 @@ export async function GET(request: Request) {
       .select(`
         id,
         request_no,
+        location_id,
         location_code,
         amount,
         amount_requested,
@@ -202,6 +206,7 @@ export async function GET(request: Request) {
 
     const requests = ((data ?? []) as unknown as RequestRow[])
       .filter(isReadyForPaymentProcess)
+      .filter(item=>canProcessPayment(authorization,item,canSeeAllFinalApproved))
       .filter((item) => {
         if (canSeeAllFinalApproved) return true;
         const isReturnedToThisUser = String(item.approval_status ?? "").toUpperCase() === "RE_APPROVED" && item.current_approver_user_id === authorization.userId;

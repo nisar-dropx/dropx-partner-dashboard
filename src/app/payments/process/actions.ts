@@ -1,6 +1,7 @@
 "use server";
 
 import * as XLSX from "xlsx";
+import {canProcessPayment} from "@/lib/payment-processing-policy";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { isCompanyOwner, requirePagePermission } from "@/lib/authorization";
@@ -21,6 +22,8 @@ type BankFinalizeRow = {
 };
 
 type PaymentRequestFinalizeRow = {
+  location_id: string | null;
+  payment_process_role_ids: string[] | null;
   id: string;
   request_no: string;
   amount: number | null;
@@ -230,11 +233,12 @@ export async function updatePaymentProcessStatus(
 
     const { data: request, error } = await supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, approval_cycle, processing_started_at")
+      .select("location_id, payment_process_role_ids, status, id, request_no, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, approval_cycle, processing_started_at")
       .eq("company_id", companyId)
       .eq("id", requestId)
       .single();
     if (error || !request) throw new Error("Payment request was not found.");
+    if (!canProcessPayment(authorization,request,isCompanyOwner(authorization))) throw new Error("This approved payment is not available for your processing role and station scope.");
     if (!isCompanyOwner(authorization) && String(request.approval_status ?? "").toUpperCase() === "RE_APPROVED" && request.current_approver_user_id !== authorization.userId && !(request.current_approver_role_ids ?? []).some((roleId: string) => authorization.effectiveRoleIds.includes(roleId))) {
       throw new Error("This returned request is assigned to another processor.");
     }
@@ -251,7 +255,8 @@ export async function updatePaymentProcessStatus(
         status: "processing",
         approval_status: "PROCESSING",
         processing_started_at: request.processing_started_at ?? now,
-        updated_at: now
+        updated_at: now,
+        updated_by: authorization.userId
       });
       await insertPaymentApprovalLog({
         company_id: companyId,
@@ -284,7 +289,8 @@ export async function updatePaymentProcessStatus(
         bank_processing_remarks: remarks,
         processing_started_at: request.processing_started_at ?? now,
         processed_at: now,
-        updated_at: now
+        updated_at: now,
+        updated_by: authorization.userId
       });
       await insertPaymentApprovalLog({
         company_id: companyId,
@@ -316,7 +322,8 @@ export async function updatePaymentProcessStatus(
         bank_processing_remarks: remarks,
         current_approver_user_id: null,
         current_approver_role_id: null,
-        updated_at: now
+        updated_at: now,
+        updated_by: authorization.userId
       });
       await insertBankDecisionLog(
         companyId,
@@ -353,7 +360,8 @@ export async function updatePaymentProcessStatus(
       bank_processing_remarks: remarks,
       current_approver_user_id: null,
       current_approver_role_id: null,
-      updated_at: now
+      updated_at: now,
+        updated_by: authorization.userId
     });
     await insertBankDecisionLog(companyId, request, `Returned: ${remarks}`, authorization.userId, authorization.roleId);
     await sendPaymentNotification({
@@ -400,7 +408,7 @@ export async function finalizePaymentProcess(formData: FormData) {
     const requestNos = Array.from(new Set(bankRows.map((row) => row.requestNo).filter(Boolean)));
     const { data, error } = await supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, amount, amount_requested, payment_mode, bank_account_no, beneficiary_account_no, beneficiary_account_number, ifsc, beneficiary_ifsc, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, approval_cycle")
+      .select("location_id, payment_process_role_ids, status, id, request_no, amount, amount_requested, payment_mode, bank_account_no, beneficiary_account_no, beneficiary_account_number, ifsc, beneficiary_ifsc, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, approval_cycle")
       .eq("company_id", companyId)
       .in("request_no", requestNos);
     if (error) throw new Error(error.message);
@@ -423,6 +431,8 @@ export async function finalizePaymentProcess(formData: FormData) {
         skippedCount += 1;
         continue;
       }
+      if (!canProcessPayment(authorization,request,isCompanyOwner(authorization))) { skippedCount += 1; continue; }
+      if (normalizeMatch(row.status) === "PAID" && !row.utrCin) { skippedCount += 1; continue; }
       const isMatch = normalizeMatch(row.creditAccount) === normalizeMatch(expectedAccount(request)) &&
         normalizeMatch(row.ifsc) === normalizeMatch(expectedIfsc(request)) &&
         amountMatches(row.debitAmount, expectedAmount(request));
@@ -440,7 +450,8 @@ export async function finalizePaymentProcess(formData: FormData) {
           bank_status: "Paid",
           bank_processing_remarks: row.remarks || null,
           processed_at: now,
-          updated_at: now
+          updated_at: now,
+        updated_by: authorization.userId
         });
         await insertPaymentApprovalLog({
           company_id: companyId,
@@ -463,7 +474,8 @@ export async function finalizePaymentProcess(formData: FormData) {
           bank_processing_remarks: row.remarks || null,
           current_approver_user_id: null,
           current_approver_role_id: null,
-          updated_at: now
+          updated_at: now,
+        updated_by: authorization.userId
         });
         await insertBankDecisionLog(companyId, request, remarks, authorization.userId, authorization.roleId);
         await sendPaymentNotification({
