@@ -24,7 +24,7 @@ type SwapRequest = {
   requesterDayType: "working" | "weekly_off";
   partnerDayType: "working" | "weekly_off";
 };
-type RosterPayload = { days: RosterDay[]; requests: SwapRequest[]; leadHours: number; viewDays?: number };
+type RosterPayload = { days: RosterDay[]; requests: SwapRequest[]; leadHours: number; viewDays?: number; readOnly?: boolean; source?: "workforce"; operatingPincode?: string | null };
 
 function displayDate(value: string) {
   return new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "2-digit", month: "short" }).format(new Date(`${value}T00:00:00`));
@@ -269,8 +269,8 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
         <div className="dx-roster-summary" aria-label="Roster summary">
           <div>
             <small>Next shift</small>
-            <strong>{nextWorking ? shiftLabel(nextWorking.shift, nextWorking.dayType) : "—"}</strong>
-            <em>{nextWorking ? displayDate(nextWorking.date) : "No upcoming shift"}</em>
+            <strong>{nextWorking ? data?.source === "workforce" ? "Operating day" : shiftLabel(nextWorking.shift, nextWorking.dayType) : "—"}</strong>
+            <em>{nextWorking ? data?.source === "workforce" ? `Pincode ${data.operatingPincode || "to be assigned"}` : displayDate(nextWorking.date) : "No upcoming shift"}</em>
           </div>
           <div>
             <small>Rest days</small>
@@ -286,7 +286,7 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
       ) : null}
 
       {!loading && !days.length ? (
-        <div className="dx-empty"><CalendarDays /><strong>No roster published yet</strong><small>Your upcoming shifts will appear here once the roster is published.</small></div>
+        <div className="dx-empty"><CalendarDays /><strong>{data?.source === "workforce" ? "No Workforce shift assigned yet" : "No roster published yet"}</strong><small>{data?.source === "workforce" ? "Your Workforce manager can assign your shift in Associate Rostering. Once saved, it will appear here automatically." : "Your upcoming shifts will appear here once the roster is published."}</small></div>
       ) : null}
 
       {!loading ? (
@@ -317,15 +317,15 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
                       </div>
                       <div className="dx-roster-shift">
                         <span>
-                          <strong>{isOff ? "Weekly off" : day.shift?.name || "Working day"}</strong>
+                          <strong>{isOff ? "Weekly off" : data?.source === "workforce" ? "Operating day" : day.shift?.name || "Working day"}</strong>
                           <small>{monthLabel(day.date)}{isToday ? " · Today" : ""}{day.isProjected ? " · Planned" : ""}</small>
                         </span>
                         <em className={isOff ? "off" : "shift"}>
                           <Clock3 />
-                          {shiftLabel(day.shift, day.dayType)}
+                          {data?.source === "workforce" && !isOff ? `Pincode ${data.operatingPincode || "to be assigned"}` : shiftLabel(day.shift, day.dayType)}
                         </em>
                       </div>
-                      <button
+                      {!data?.readOnly ? <button
                         aria-label={`${swapActionLabel(day)} for ${displayDate(day.date)}`}
                         className={canRequest ? "swap" : "muted"}
                         disabled={!canRequest}
@@ -334,7 +334,7 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
                       >
                         <ArrowLeftRight />
                         <span>{canRequest ? "Swap" : "Locked"}</span>
-                      </button>
+                      </button> : null}
                     </article>
                   );
                 })}
@@ -343,8 +343,8 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
           )) : (
             <div className="dx-roster-empty">
               <CalendarDays />
-              <strong>Your roster is not configured</strong>
-              <small>Contact your HR or manager.</small>
+              <strong>{data?.source === "workforce" ? "Your Workforce shift is not configured" : "Your roster is not configured"}</strong>
+              <small>{data?.source === "workforce" ? "Ask your Workforce manager to assign a shift in Associate Rostering." : "Contact your HR or manager."}</small>
             </div>
           )}
         </div>

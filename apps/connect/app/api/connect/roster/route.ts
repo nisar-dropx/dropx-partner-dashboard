@@ -18,6 +18,13 @@ type SwapRow = {
   requester_day_type: "working" | "weekly_off"; partner_day_type: "working" | "weekly_off";
   roster_date: string; status: string; requester_note: string | null; partner_note: string | null; requested_at: string;
 };
+type WorkforceOperatingSchedule = {
+  id: string;
+  operating_pincode: string;
+  weekly_off_day: number;
+  effective_from: string;
+  effective_to: string | null;
+};
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -423,8 +430,67 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   return { days, leadHours, requests, self: { workerType, workerId: account.id }, viewDays: ROSTER_VIEW_DAYS };
 }
 
+/**
+ * Delivery Associates work by operating area, rather than clock shifts. This
+ * is a read-only view of the Workforce-owned pincode and weekly-off schedule.
+ */
+async function workforceRosterPayload(account: ConnectAccount) {
+  const start = todayIndia();
+  const end = addDays(start, ROSTER_VIEW_DAYS - 1);
+  const assignments = await db().from("workforce_operating_schedules")
+    .select("id,operating_pincode,weekly_off_day,effective_from,effective_to")
+    .eq("company_id", account.companyId)
+    .eq("workforce_id", account.id)
+    .lte("effective_from", end)
+    .or(`effective_to.is.null,effective_to.gte.${start}`)
+    .order("effective_from", { ascending: false });
+  if (assignments.error) throw new Error(assignments.error.message);
+
+  const schedule = (assignments.data ?? []) as unknown as WorkforceOperatingSchedule[];
+  const days = Array.from({ length: ROSTER_VIEW_DAYS }, (_, offset) => {
+    const date = addDays(start, offset);
+    const assignment = schedule.find((item) =>
+      item.effective_from <= date && (!item.effective_to || item.effective_to >= date)
+    );
+    if (!assignment) return null;
+    const isWeeklyOff = new Date(`${date}T00:00:00Z`).getUTCDay() === Number(assignment.weekly_off_day);
+    return {
+      id: `workforce:${assignment.id}:${date}`,
+      date,
+      dayType: isWeeklyOff ? "weekly_off" as const : "working" as const,
+      locationId: null,
+      shift: null,
+      isProjected: date > start,
+      canSwap: false,
+      partners: []
+    };
+  }).filter(Boolean);
+
+  return {
+    days,
+    leadHours: 0,
+    requests: [],
+    self: { workerType: "workforce", workerId: account.id },
+    viewDays: ROSTER_VIEW_DAYS,
+    readOnly: true,
+    source: "workforce" as const,
+    operatingPincode: schedule.find((item) => item.effective_from <= start && (!item.effective_to || item.effective_to >= start))?.operating_pincode ?? null
+  };
+}
+
 export async function GET(request: Request) {
-  try { const { account, workerType, identities } = await accountFrom(new URL(request.url)); return NextResponse.json(await rosterPayload(account, workerType, identities), { headers: { "Cache-Control": "private, no-store" } }); }
+  try {
+    const url = new URL(request.url);
+    const accountId = clean(url.searchParams.get("accountId"));
+    const profileType = clean(url.searchParams.get("profileType"));
+    if (profileType === "workforce") {
+      if (!accountId) throw new Error("Select your Workforce account.");
+      const account = await requireConnectAccount("workforce", accountId);
+      return NextResponse.json(await workforceRosterPayload(account), { headers: { "Cache-Control": "private, no-store" } });
+    }
+    const { account, workerType, identities } = await accountFrom(url);
+    return NextResponse.json(await rosterPayload(account, workerType, identities), { headers: { "Cache-Control": "private, no-store" } });
+  }
   catch (error) { return NextResponse.json({ error: userFacingError(error, "Unable to load roster.") }, { status: 400 }); }
 }
 
