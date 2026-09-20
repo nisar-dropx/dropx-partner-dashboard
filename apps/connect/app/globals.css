@@ -8711,11 +8711,43 @@ tr:last-child td {
   min-height: 65dvh;
 }
 
-/* Workforce starts with pay and action; attendance remains available but secondary. */
+/* Workforce starts with pay and action. Attendance is intentionally one compact
+   utility at the bottom, not a People-style daily scorecard. */
 .dx-workforce-dashboard > .dx-workforce-dashboard-pay { order: 1; }
 .dx-workforce-dashboard > .dx-dashboard-actions { order: 2; }
-.dx-workforce-dashboard > .dx-workforce-attendance-summary { order: 4; }
-.dx-workforce-dashboard > .dx-workforce-attendance { order: 5; }
+.dx-workforce-dashboard > .dx-workforce-attendance-compact { order: 6; }
+
+.dx-workforce-attendance-compact {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 18px;
+  gap: 11px;
+  align-items: center;
+  width: 100%;
+  padding: 13px 15px;
+  color: #344054;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #e4e7ec;
+  border-radius: 14px;
+}
+
+.dx-workforce-attendance-compact > i {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: #667085;
+  background: #f2f4f7;
+  border-radius: 11px;
+}
+
+.dx-workforce-attendance-compact > i svg,
+.dx-workforce-attendance-compact > svg { width: 18px; }
+.dx-workforce-attendance-compact > svg { color: #98a2b3; }
+.dx-workforce-attendance-compact > span { display: grid; gap: 2px; }
+.dx-workforce-attendance-compact small { color: #667085; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.dx-workforce-attendance-compact strong { color: #101828; font-size: 13px; }
+.dx-workforce-attendance-compact em { overflow: hidden; color: #667085; font-size: 11px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 
 .dx-dashboard-greeting {
   padding: 2px 2px 4px;

@@ -507,7 +507,7 @@ export function ConnectDashboard({
       {!workforce ? <span className="dx-live-chip"><i />Live</span> : null}
     </header>
 
-    <section className={`dx-dashboard-card today${workforce ? " dx-workforce-attendance" : ""}`}>
+    {!workforce ? <section className="dx-dashboard-card today">
       <header><div><small>Today</small><h2>Attendance</h2></div><Pill text={todayStatus} tone={statusTone} /></header>
       {today?.scheduledStart && today.scheduledStart !== "--:--" ? <p className="dx-dashboard-shift-expectation">
         <CalendarClock />
@@ -525,7 +525,7 @@ export function ConnectDashboard({
         <ChevronRight />
       </button> : null}
       {attendanceAllowed ? <button className="dx-dashboard-link" onClick={onAttendance}>View attendance <ChevronRight /></button> : null}
-    </section>
+    </section> : null}
 
     {alerts.length ? <section className="dx-dashboard-card">
       <h2>Requires attention</h2>
@@ -543,7 +543,7 @@ export function ConnectDashboard({
       </div>
     </section> : null}
 
-    <section className={`dx-dashboard-card dx-dashboard-summary-card${workforce ? " dx-workforce-attendance-summary" : ""}`}>
+    {!workforce ? <section className="dx-dashboard-card dx-dashboard-summary-card">
       <header><div><small>This month</small><h2>Summary</h2></div></header>
       <div className="dx-dashboard-metrics">
         <Metric icon={<CheckCircle2 />} label="Full day" value={fullDayCount} tone="green" />
@@ -561,7 +561,7 @@ export function ConnectDashboard({
         <span><b>{attendanceRate}%</b><small>Attendance score · {totalHours} hrs</small></span>
         <i aria-label={`${attendanceRate}% attendance rate`}><b style={{ width: `${attendanceRate}%` }} /></i>
       </div>
-    </section>
+    </section> : null}
 
     {workforce && pageAccess.includes("earnings") ? <section className="dx-dashboard-card dx-workforce-dashboard-pay">
       <header><div><small>My pay · {paymentSummary?.period || "This month"}</small><h2>Live earnings</h2></div><button onClick={(event) => { event.stopPropagation(); onPayments(); }}>View all <ChevronRight /></button></header>
@@ -595,6 +595,12 @@ export function ConnectDashboard({
         <ChevronRight />
       </button>
     </section> : null}
+
+    {workforce && attendanceAllowed ? <button className="dx-workforce-attendance-compact" onClick={onAttendance}>
+      <i><Fingerprint /></i>
+      <span><small>Attendance</small><strong>{todayStatus === "no record" ? "No attendance update today" : todayStatus}</strong><em>View attendance and any exceptions</em></span>
+      <ChevronRight />
+    </button> : null}
 
     {!workforce && profileAllowed ? <button className="dx-dashboard-profile dx-dashboard-profile-status" onClick={onProfile}>
       <i><UserRound /></i>
