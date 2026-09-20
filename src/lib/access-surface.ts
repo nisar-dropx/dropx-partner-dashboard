@@ -21,6 +21,7 @@ export const opsAccessPageCodes = [
   "ops_unplanned_leaves",
   "ops_offboarding_checklist",
   "ops_salary_hold",
+  "ops_workforce_losses",
   "ops_rostering",
   "daily_submission",
   "cod",
