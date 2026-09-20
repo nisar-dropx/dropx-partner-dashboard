@@ -39,6 +39,7 @@ export const accessPages = [
   { code: "ops_offboarding_checklist", name: "Team Ops · Offboarding Checklist", sort_order: 85 },
   { code: "ops_salary_hold", name: "Team Ops · Salary Hold", sort_order: 86 },
   { code: "ops_workforce_losses", name: "Team Ops · Workforce Loss Claims", sort_order: 87 },
+  { code: "ops_workforce_mileage", name: "Team Ops · Workforce Mileage Claims", sort_order: 88 },
   { code: "ops_rostering", name: "Rostering", sort_order: 85 },
   { code: "service_network", name: "Network Planning", sort_order: 92 },
   { code: "service_network_master", name: "Network Planning Master", sort_order: 93 },
