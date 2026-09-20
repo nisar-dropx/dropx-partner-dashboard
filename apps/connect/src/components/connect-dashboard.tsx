@@ -121,6 +121,18 @@ function workMinutes(value: string) {
   return match ? Number(match[1]) * 60 + Number(match[2]) : 0;
 }
 
+function workforceMotivation(role: string | null | undefined) {
+  const normalized = String(role ?? "").toLowerCase();
+  const messages = normalized.includes("sort")
+    ? ["Your accuracy keeps every handover moving.", "Every sorted parcel keeps the station on time.", "The details you get right power a great shift."]
+    : normalized.includes("clean")
+      ? ["Your work makes every shift safer and better.", "Care in the station keeps the whole team moving.", "A well-kept station supports every successful delivery."]
+      : normalized.includes("driver") || normalized.includes("dcd") || normalized.includes("odcd") || normalized.includes("delivery")
+        ? ["Every safe delivery builds trust, one doorstep at a time.", "A steady route and a safe ride make a great day.", "The miles you cover connect people to what matters."]
+        : ["Your work keeps the station moving forward.", "A good shift is built one task at a time.", "The work you do today powers tomorrow's deliveries."];
+  return messages[Math.floor(Date.now() / 86_400_000) % messages.length];
+}
+
 function parseDate(value = "") {
   const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   const local = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
@@ -351,8 +363,15 @@ export function ConnectDashboard({
     }
     let cancelled = false;
     const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
-    fetch(`/api/connect/workforce-payments?${query}`, { cache: "no-store" })
-      .then(async (response) => response.ok ? response.json() : null)
+    Promise.all([
+      fetch(`/api/connect/workforce-payments?${query}`, { cache: "no-store" }),
+      fetch(`/api/connect/earnings?${query}`, { cache: "no-store" })
+    ])
+      .then(async ([paymentsResponse, earningsResponse]) => {
+        const payments = paymentsResponse.ok ? await paymentsResponse.json() as WorkforcePaymentSummary : null;
+        const earnings = earningsResponse.ok ? await earningsResponse.json() as { summary?: { grossAmount?: number } } : null;
+        return payments ? { ...payments, summary: { ...payments.summary, earnings: earnings?.summary?.grossAmount ?? payments.summary.earnings } } : null;
+      })
       .then((payload) => { if (!cancelled) setPaymentSummary(payload); })
       .catch(() => { if (!cancelled) setPaymentSummary(null); });
     return () => { cancelled = true; };
@@ -481,7 +500,7 @@ export function ConnectDashboard({
         <small className="dx-page-eyebrow">{workforce ? "Workforce" : "Today"} · {todayLabel}</small>
         <h1>{greeting}, {firstName}</h1>
         <p className="dx-dashboard-motivation" aria-live="polite">
-          {workforce ? "Shift, attendance and work updates in one place." : motivation || "A fresh moment is ready for thoughtful progress."}
+          {workforce ? workforceMotivation(account.role) : motivation || "A fresh moment is ready for thoughtful progress."}
         </p>
       </div>
       <span className="dx-live-chip"><i /> {workforce ? "Workforce" : "Live"}</span>
