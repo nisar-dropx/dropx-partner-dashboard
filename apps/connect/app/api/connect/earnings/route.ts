@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 import {loadOwnAdjustmentLedger} from '@/lib/workforce-own-adjustments';
+import {allocateOwnDailyCards,type DailyCardSource} from '@/lib/workforce-daily-card';
 
 export const dynamic='force-dynamic';
 
@@ -41,7 +42,7 @@ export async function GET(request: Request) {
     const mappings = mappingResult.data ?? []; const stationIds = [...new Set(mappings.map((row) => row.station_id).filter(Boolean))]; const memberIds = [...new Set(mappings.map((row) => row.provider_member_id).filter(Boolean))];
     const [stationsResult, metricsResult, allocationsResult, workforceResult, rateCardsResult, adjustments] = await Promise.all([
       stationIds.length ? db().from("stations").select("id,station_code,location_model_id").eq("company_id", account.companyId).in("id", stationIds) : Promise.resolve({ data: [], error: null }),
-      memberIds.length ? db().from("cps_shipment_daily").select("provider_employee_id,work_date,station_code,client,total_activity,amazon_delivery,swa_delivery,total_delivery,c_return,mfn,mfn_return").eq("company_id", account.companyId).in("provider_employee_id", memberIds).gte("work_date", from).lte("work_date", to) : Promise.resolve({ data: [], error: null }),
+      memberIds.length ? db().from("cps_shipment_daily").select("id,provider_employee_id,work_date,station_code,client,total_activity,amazon_delivery,swa_delivery,total_delivery,c_return,mfn,mfn_return").eq("company_id", account.companyId).in("provider_employee_id", memberIds).gte("work_date", from).lte("work_date", to) : Promise.resolve({ data: [], error: null }),
       db().from("payment_field_provider_metrics").select("provider_id,provider_model_id,provider_production_metrics(source_key),payment_fields(code,label,field_type)").eq("company_id", account.companyId),
       account.profileType === "workforce" ? db().from("workforce").select("designation_id,location_id").eq("company_id", account.companyId).eq("id", account.id).maybeSingle() : Promise.resolve({ data: null, error: null }),
       db().from("workforce_rate_cards").select("id,provider_id,station_id,designation_id,pay_type,effective_from,effective_to,delivery_rate,return_rate,mfn_rate,mfn_return_rate,fuel_rate,fixed_amount,guarantee_amount,status,approved_at").eq("company_id", account.companyId).neq("status", "draft").lte("effective_from", to).or(`effective_to.is.null,effective_to.gte.${from}`),
@@ -53,18 +54,13 @@ export async function GET(request: Request) {
     const workforce = workforceResult.data as { designation_id?: string | null; location_id?: string | null } | null;
     if(mappings.length>=1000 || (metricsResult.data ?? []).length>=1000 || (allocationsResult.data ?? []).length>=1000 || (rateCardsResult.data ?? []).length>=1000) throw new Error("Too many earning records to reconcile safely. Please contact Workforce.");
     const cards = (rateCardsResult.data ?? []).filter(card=>card.status==="active" || (["paused","closed"].includes(card.status) && card.approved_at && card.effective_to));
-    const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
     const cardFor = (mapping: any, workDate: string) => cards
       .filter((card: any) => card.provider_id === mapping.provider_id && (!card.station_id || card.station_id === mapping.station_id) && (!card.designation_id || card.designation_id === workforce?.designation_id) && String(card.effective_from) <= workDate && (!card.effective_to || String(card.effective_to) >= workDate))
       .sort((left: any, right: any) => ((right.station_id ? 2 : 0) + (right.designation_id ? 1 : 0)) - ((left.station_id ? 2 : 0) + (left.designation_id ? 1 : 0)) || String(right.effective_from).localeCompare(String(left.effective_from)))[0] ?? null;
-    const cardAmount = (card: any, row: Record<string, unknown>) => {
-      const deliveries = metricValue(row, "total_delivery"); const activities = Number(row.total_activity ?? deliveries); const variable = deliveries * number(card.delivery_rate) + metricValue(row, "customer_return") * number(card.return_rate) + metricValue(row, "seller_pickup") * number(card.mfn_rate) + metricValue(row, "seller_return") * number(card.mfn_return_rate) + deliveries * number(card.fuel_rate);
-      if (card.pay_type === "fixed_daily") return activities > 0 ? number(card.fixed_amount) : 0;
-      if (card.pay_type === "fixed_monthly") { const [year, month] = String(row.work_date).split("-").map(Number); return activities > 0 ? number(card.fixed_amount) / new Date(Date.UTC(year, month, 0)).getUTCDate() : 0; }
-      if (card.pay_type === "per_activity") return activities * number(card.delivery_rate) + deliveries * number(card.fuel_rate);
-      if (card.pay_type === "hybrid") return Math.max(variable, number(card.guarantee_amount));
-      return variable;
-    };
+    const dailyCardAmounts=allocateOwnDailyCards((metricsResult.data??[]).flatMap(row=>{
+      const mapping=paymentMappingForDay(mappings,row),card=mapping?cardFor(mapping,String(row.work_date)):null;
+      return card?[{row:row as DailyCardSource,card}]:[];
+    }));
     const earnings = mappings.map((mapping: any) => {
       const station: any = stationById.get(mapping.station_id); const daily = (dailyByMember.get(String(mapping.provider_member_id)) ?? []).filter((row) => paymentMappingForDay(mappings,row as {work_date:string;provider_employee_id:string;station_code:string;client:string})?.id === mapping.id);
       const productionRules = (allocationsResult.data ?? []).filter((allocation: any) => allocation.provider_id === mapping.provider_id && (!allocation.provider_model_id || allocation.provider_model_id === station?.location_model_id)).flatMap((allocation: any) => {
@@ -72,12 +68,13 @@ export async function GET(request: Request) {
         const rate = Number(mapping.payment_values?.[field.code] ?? 0); return [{ label: field.label || field.code, source: metric.source_key, rate }];
       });
       const production = productionRules.map((rule: any) => { const count = daily.reduce((sum, row) => sum + metricValue(row, rule.source), 0); return { label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; });
-      const dailyEarnings = daily.map((row) => { const production = productionRules.map((rule: any) => { const count = metricValue(row, rule.source); return { label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; }); const card = cardFor(mapping, String(row.work_date)); return { date: String(row.work_date), production, amount: card ? cardAmount(card, row) : production.reduce((sum: number, line: any) => sum + line.amount, 0) }; });
-      const baseAmount = dailyEarnings.reduce((sum: number, line) => sum + line.amount, 0); const additions = 0;
+      const dailyEarnings = daily.map((row) => { const production = productionRules.map((rule: any) => { const count = metricValue(row, rule.source); return { label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; }); const card = cardFor(mapping, String(row.work_date)); return { date: String(row.work_date), production, amount: card ? dailyCardAmounts.get(String(row.id))! : production.reduce((sum: number, line: any) => sum + line.amount, 0) }; });
+      const baseAmount = Math.round(dailyEarnings.reduce((sum: number, line) => sum + line.amount, 0)*100)/100; const additions = 0;
       return { id: mapping.id, location: station?.station_code ?? "-", provider: first(mapping.providers)?.name ?? "-", model: station?.location_model_id ? "Mapped model" : "All models", paymentMethod: first(mapping.payment_methods)?.name ?? "-", workDays: new Set(daily.map((row) => String(row.work_date))).size, production, daily: dailyEarnings, baseAmount, additions, grossAmount: baseAmount + additions };
     });
     const summary = earnings.reduce((total, row) => ({ workDays: total.workDays + row.workDays, baseAmount: total.baseAmount + row.baseAmount, additions: total.additions + row.additions, grossAmount: total.grossAmount + row.grossAmount }), { workDays: 0, baseAmount: 0, additions: 0, grossAmount: 0 });
     summary.workDays=new Set(earnings.flatMap(row=>row.daily.map(day=>day.date))).size;
+    summary.baseAmount=Math.round(summary.baseAmount*100)/100;
     // Posted adjustments remain part of this period's estimate exactly once. Statements are
     // a separate historical record, never added again and never treated as outstanding dues.
     summary.additions=adjustments.summary.additions;

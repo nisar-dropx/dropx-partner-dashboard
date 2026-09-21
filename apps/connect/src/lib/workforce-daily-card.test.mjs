@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {readFileSync} from 'node:fs';
+import ts from 'typescript';
+const compiled=ts.transpileModule(readFileSync(new URL('./workforce-daily-card.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {allocateOwnDailyCards:allocate}=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const card={id:'card',pay_type:'fixed_daily',fixed_amount:800,guarantee_amount:800,delivery_rate:12,return_rate:0,mfn_rate:0,mfn_return_rate:0,fuel_rate:0};
+const row=(id,qty=10,o={})=>({id,work_date:'2026-09-01',total_delivery:qty,total_activity:qty,c_return:0,mfn:0,mfn_return:0,...o});
+const sum=m=>[...m.values()].reduce((a,b)=>a+b,0);
+test('two provider source rows share a single daily guarantee and exact cents',()=>{const m=allocate([{row:row('a',10),card},{row:row('b',50),card}]);assert.deepEqual([...m.entries()],[['a',133.33],['b',666.67]]);assert.equal(sum(m),800);});
+test('monthly base uses actual month length once per day, including leap years',()=>{const c={...card,pay_type:'fixed_monthly',fixed_amount:31000};assert.equal(sum(allocate([{row:row('a'),card:c},{row:row('b'),card:c}])),1033.33);assert.equal(sum(allocate([{row:row('a',1,{work_date:'2024-02-01'}),card:{...c,fixed_amount:29000}},{row:row('b',1,{work_date:'2024-02-01'}),card:{...c,fixed_amount:29000}}])),1000);});
+test('hybrid pools daily variable work before applying one guarantee',()=>{const c={...card,pay_type:'hybrid'};assert.equal(sum(allocate([{row:row('a',10),card:c},{row:row('b',50),card:c}])),800);assert.equal(sum(allocate([{row:row('a',50),card:c},{row:row('b',50),card:c}])),1200);});
+test('dates and distinct rate-card versions never pool together',()=>{assert.equal(sum(allocate([{row:row('a'),card},{row:row('b',10,{work_date:'2026-09-02'}),card},{row:row('c'),card:{...card,id:'different'}}])),2400);});
+test('per-activity and shipment formulas retain variable-rate semantics',()=>{assert.equal(sum(allocate([{row:row('a',10),card:{...card,pay_type:'per_shipment',fuel_rate:2}},{row:row('b',20),card:{...card,pay_type:'per_shipment',fuel_rate:2}}])),420);assert.equal(sum(allocate([{row:row('a',10,{total_activity:15}),card:{...card,pay_type:'per_activity',fuel_rate:2}}])),200);});
+test('empty or zero-activity fixed-pay sources cannot invent worked-day pay',()=>{assert.equal(sum(allocate([])),0);assert.equal(sum(allocate([{row:row('a',0),card},{row:row('b',0),card}])),0);});
+test('duplicates, invalid dates, bad counts and unsupported rates fail closed',()=>{assert.throws(()=>allocate([{row:row('a'),card},{row:row('a'),card}]),/Duplicate/);for(const changed of [{work_date:'2026-02-30'},{total_activity:'NaN'},{total_delivery:-1}])assert.throws(()=>allocate([{row:row('a',10,changed),card}]));assert.throws(()=>allocate([{row:row('a'),card:{...card,pay_type:'unknown'}}]));assert.throws(()=>allocate([{row:row('a'),card:{...card,fixed_amount:Infinity}}]));});
+test('source ordering does not change allocated cents or mutate input',()=>{const input=[{row:row('b',50),card},{row:row('a',10),card}],before=JSON.stringify(input);assert.deepEqual([...allocate(input)].sort(),[...allocate([...input].reverse())].sort());assert.equal(JSON.stringify(input),before);});

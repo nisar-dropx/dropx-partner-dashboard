@@ -8,6 +8,8 @@ import {renderToStaticMarkup} from 'react-dom/server';
 
 const compiled=ts.transpileModule(readFileSync(new URL('./workforce-own-adjustments.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {ownAdjustmentLedger,loadOwnAdjustmentLedger}=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const dailyCompiled=ts.transpileModule(readFileSync(new URL('./workforce-daily-card.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {allocateOwnDailyCards}=await import(`data:text/javascript;base64,${Buffer.from(dailyCompiled).toString('base64')}`);
 const from='2026-09-01',to='2026-09-30';
 const row=(overrides={})=>({id:'claim-1',company_id:'company',workforce_id:'person',adjustment_type:'earning',category:'reimbursement',amount:'200.00',effective_date:'2026-09-12',status:'approved',requested_at:'2026-09-10T09:00:00Z',reviewed_at:'2026-09-11T09:00:00Z',payroll_run_id:null,...overrides});
 const account={id:'person',companyId:'company',profileType:'workforce',workspace:'workforce',pageAccess:['earnings']};
@@ -111,17 +113,18 @@ test('unbounded or unexpectedly scoped results are rejected',async()=>{
  await assert.rejects(loadOwnAdjustmentLedger(other,account,from,to),/scope/);
 });
 
-function earningsRoute(db,authenticate=async()=>account){
+function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null){
  const source=readFileSync(new URL('../../app/api/connect/earnings/route.ts',import.meta.url),'utf8');
  const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}};
  const imports={
-  '@/lib/workforce-payment-mapping':{paymentMappingForDay:()=>null},
+  '@/lib/workforce-payment-mapping':{paymentMappingForDay:resolveMapping},
   '@/lib/workforce-payment-period':{workforcePaymentMonth:()=>({from})},
   'next/server':{NextResponse:{json:(body,init)=>new Response(JSON.stringify(body),{...init,headers:{'Content-Type':'application/json',...init?.headers}})}},
   '../../../../src/lib/connect-auth':{requireConnectAccount:authenticate},
   '../../../../src/lib/supabase-admin':{supabaseAdmin:db},
-  '@/lib/workforce-own-adjustments':{loadOwnAdjustmentLedger}
+  '@/lib/workforce-own-adjustments':{loadOwnAdjustmentLedger},
+  '@/lib/workforce-daily-card':{allocateOwnDailyCards}
  };
  new Function('require','exports',output)(name=>{assert.ok(imports[name],`unexpected import ${name}`);return imports[name];},module.exports);
  return module.exports.GET;
@@ -148,6 +151,16 @@ test('route fails closed on adjustment lookup error, never returns partial finan
  const response=await earningsRoute(db)(request()),body=await response.json();
  assert.equal(response.status,400);assert.match(body.error,/could not be loaded/);assert.equal('summary' in body,false);
  assert.equal(response.headers.get('cache-control'),'private, no-store');
+});
+test('route shares fixed daily pay across provider IDs but retains each ID trace',async()=>{
+ const card={id:'card',provider_id:'provider',station_id:'station',designation_id:null,pay_type:'fixed_daily',effective_from:from,effective_to:to,status:'active',fixed_amount:800,guarantee_amount:0,delivery_rate:0,return_rate:0,mfn_rate:0,mfn_return_rate:0,fuel_rate:0};
+ const mappings=['A','B'].map(id=>({id,provider_member_id:id,provider_id:'provider',station_id:'station',providers:{name:'Provider'},payment_methods:{name:'Fixed daily'}}));
+ const source=mappings.map((m,n)=>({id:'source-'+n,provider_employee_id:m.id,work_date:from,station_code:'TEST',client:'Provider',total_delivery:n?50:10,total_activity:n?50:10,c_return:0,mfn:0,mfn_return:0}));
+ const db=database(q=>({data:q.table==='workforce'?{id:'person'}:q.table==='field_executive_provider_mappings'?mappings:q.table==='cps_shipment_daily'?source:q.table==='stations'?[{id:'station',station_code:'TEST'}]:q.table==='workforce_rate_cards'?[card]:[],error:null}));
+ const response=await earningsRoute(db,async()=>account,(all,row)=>all.find(m=>m.provider_member_id===row.provider_employee_id))(request()),body=await response.json();
+ assert.equal(response.status,200);assert.equal(body.earnings.length,2);assert.equal(body.summary.workDays,1);assert.equal(body.summary.baseAmount,800);assert.equal(body.summary.netAmount,800);
+ assert.deepEqual(body.earnings.map(e=>e.baseAmount),[133.33,666.67]);
+ assert.ok(db.calls.filter(q=>q.table==='cps_shipment_daily').every(q=>operation(q,'eq','company_id','company')));
 });
 
 test('client guard contract: keyed accounts, latest response only, no silent imported-pay fallback',()=>{
