@@ -26,7 +26,7 @@ const packageName = value("packageName");
 const apkUrl = value("apkUrl");
 const expectedHash = value("apkSha256");
 
-assert(packageName === "com.dropxlogistics.onetracker", "release package is incorrect");
+assert(packageName === "com.dropxlogistics.one", "release package is incorrect");
 assert(apkUrl === `/downloads/DropX-One-Tracker-${version}.apk`, "APK URL must remain versioned");
 assert(/^[a-f0-9]{64}$/.test(expectedHash), "APK SHA-256 is missing or malformed");
 
