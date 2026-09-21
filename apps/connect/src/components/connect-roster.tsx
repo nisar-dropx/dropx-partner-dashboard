@@ -244,8 +244,9 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
     <section className="dx-roster">
       <header className="dx-page-intro">
         <small>My work plan</small>
-        <h1>{data?.source === "workforce" ? "Operating schedule" : "Roster"}</h1>
-        <p>{data?.source === "workforce"
+        <h1>{!data ? "Work plan" : data.source === "workforce" ? "Operating schedule" : "Roster"}</h1>
+        <p>{!data ? "Your schedule will appear once it has been verified."
+          : data.source === "workforce"
           ? `Next ${data?.viewDays ?? (days.length || 7)} days · operating pincode and weekly off.`
           : `Next ${data?.viewDays ?? (days.length || 7)} days · shift times and swap requests.`}</p>
       </header>
@@ -263,7 +264,7 @@ export function ConnectRoster({ account, active = true }: { account: AppAccount;
         </div>
       ) : null}
 
-      {loading ? <div className="dx-loader"><span /><small>Loading roster…</small></div> : null}
+      {loading ? <div className="dx-loader" role="status"><span /><small>Loading your work plan…</small></div> : null}
 
       {!loading && days.length ? (
         <div className="dx-roster-summary" aria-label="Roster summary">
