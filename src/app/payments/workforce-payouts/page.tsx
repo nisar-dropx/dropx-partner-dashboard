@@ -33,6 +33,11 @@ const metricValue = (row: any, source: string) => source === "amazon_delivery" ?
   : source === "seller_pickup" ? Number(row.mfn ?? 0)
   : source === "seller_return" ? Number(row.mfn_return ?? 0)
   : 0;
+const productionLabel = (code: string, fallback: string) => code === "DELIVERY" ? "Delivery"
+  : code === "CRETURN" ? "C-return"
+  : code === "SELLER_PICKUP" ? "MFN"
+  : code === "SLLLER_RETURN" ? "MFN return"
+  : fallback;
 
 async function loadRows(companyId: string, authorization: AuthorizationContext, fromDate: string, toDate: string) {
   if (!supabaseAdmin) return { rows: [] as WorkforcePayoutRow[], error: "Database connection is not configured." };
@@ -79,20 +84,24 @@ async function loadRows(companyId: string, authorization: AuthorizationContext, 
   const panAadhaarLinkedByWorkforceId = new Map((panAadhaarResult.data ?? []).map((row: any) => [row.account_id, row.verified === true]));
   const rows = mappings.map((mapping: any) => {
     const sourceId = mapping.workforce_id || mapping.contractor_id || mapping.employee_id || mapping.field_executive_id; const worker = workerBySource.get(sourceId); const location: any = locationById.get(mapping.station_id); const model: any = modelById.get(location?.location_model_id); const providerDailyRows = metricsByProviderMember.get(mapping.provider_member_id) ?? []; const providerMemberName = providerDailyRows.find((daily) => String(daily.provider_employee_name ?? "").trim())?.provider_employee_name ?? "-";
-    let baseAmount = 0; let production = 0;
-    const productionBreakdown: WorkforcePayoutRow["productionBreakdown"] = [];
-    allocations.filter((item: any) => item.provider_id === mapping.provider_id && (!item.provider_model_id || item.provider_model_id === location?.location_model_id)).forEach((item: any) => {
+    const eligibleDaily = providerDailyRows.filter((daily) => daily.work_date >= mapping.effective_from && (!mapping.effective_to || daily.work_date <= mapping.effective_to));
+    const productionRules = allocations.filter((item: any) => item.provider_id === mapping.provider_id && (!item.provider_model_id || item.provider_model_id === location?.location_model_id)).flatMap((item: any) => {
       const field: any = Array.isArray(item.payment_fields) ? item.payment_fields[0] : item.payment_fields; const metric: any = Array.isArray(item.provider_production_metrics) ? item.provider_production_metrics[0] : item.provider_production_metrics;
-      if (!field?.code || field.field_type !== "production" || !metric?.source_key) return;
-      const count = providerDailyRows.filter((daily) => daily.work_date >= mapping.effective_from && (!mapping.effective_to || daily.work_date <= mapping.effective_to)).reduce((sum, daily) => sum + metricValue(daily, metric.source_key), 0);
-      const rate = Number(mapping.payment_values?.[field.code] ?? 0); const amount = count * rate;
-      production += count; baseAmount += amount;
-      productionBreakdown.push({ code: field.code, label: field.label || field.code, count, rate, amount });
+      if (!field?.code || field.field_type !== "production" || !metric?.source_key) return [];
+      return [{ code: String(field.code), label: productionLabel(String(field.code), String(field.label || field.code)), source: String(metric.source_key), rate: Number(mapping.payment_values?.[field.code] ?? 0) }];
     });
+    const dailyBreakdown: WorkforcePayoutRow["dailyBreakdown"] = [...new Set(eligibleDaily.map((daily) => String(daily.work_date)))].sort().reverse().map((date) => {
+      const rows = eligibleDaily.filter((daily) => String(daily.work_date) === date);
+      const lines = productionRules.map((rule) => { const count = rows.reduce((sum, daily) => sum + metricValue(daily, rule.source), 0); return { code: rule.code, label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; });
+      return { date, lines, baseAmount: lines.reduce((sum, line) => sum + line.amount, 0) };
+    });
+    const productionBreakdown: WorkforcePayoutRow["productionBreakdown"] = productionRules.map((rule) => { const count = dailyBreakdown.reduce((sum, day) => sum + (day.lines.find((line) => line.code === rule.code)?.count ?? 0), 0); return { code: rule.code, label: rule.label, count, rate: rule.rate, amount: count * rule.rate }; });
+    const production = productionBreakdown.reduce((sum, line) => sum + line.count, 0);
+    const baseAmount = productionBreakdown.reduce((sum, line) => sum + line.amount, 0);
     const categoryCode = mapping.contractor_id ? "contractors" : mapping.employee_id ? "employees" : "workforce";
     const deductionBreakdown = calculateAutomaticDeductionLines(baseAmount, automaticDeductions, { categoryCode, panNumber: panBySource.get(sourceId) }); const deductions = deductionBreakdown.reduce((sum, line) => sum + line.amount, 0); const panAadhaarLinked = mapping.workforce_id ? panAadhaarLinkedByWorkforceId.get(mapping.workforce_id) === true : false;
     const additions = 0; const grossPayment = baseAmount + additions;
-    return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, productionBreakdown, baseAmount, additions, grossPayment, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment - deductions, status: production > 0 ? "Ready for review" : "Awaiting production" } satisfies WorkforcePayoutRow;
+    return { id: mapping.id, dropxId: worker?.dropx_id ?? "-", name: worker?.full_name ?? "Unlinked workforce", providerMemberId: mapping.provider_member_id ?? "-", providerMemberName, locationId: mapping.station_id, location: location?.station_code ?? "-", provider: mapping.providers?.name ?? "-", model: model ? `${model.code} - ${model.name}` : "All models", paymentMethod: mapping.payment_methods?.name ?? "-", production, productionBreakdown, dailyBreakdown, baseAmount, additions, grossPayment, deductions, deductionBreakdown, panAadhaarStatus: panAadhaarLinked ? "LINKED" : "NOT LINKED", netAmount: grossPayment - deductions, status: production > 0 ? "Ready for review" : "Awaiting production" } satisfies WorkforcePayoutRow;
   });
   return { rows, error: null };
 }

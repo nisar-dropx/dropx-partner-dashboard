@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
     const providerMemberIds = [...new Set(mappings.map((mapping) => mapping.provider_member_id).filter((id): id is string => Boolean(id)))];
     const dailyResult = providerMemberIds.length
       ? await supabaseAdmin.from("cps_shipment_daily")
-        .select("work_date,station_code,client,provider_employee_id,total_delivery,amazon_delivery,swa_delivery,c_return,mfn,mfn_return,da_total_pay,del_rate,c_return_rate,mfn_rate,mfn_return_rate")
+        .select("work_date,station_code,client,provider_employee_id,provider_employee_name,total_delivery,amazon_delivery,swa_delivery,c_return,mfn,mfn_return,da_total_pay,del_rate,c_return_rate,mfn_rate,mfn_return_rate")
         .eq("company_id", account.companyId)
         .in("provider_employee_id", providerMemberIds)
         .gte("work_date", period.from)
@@ -67,8 +67,9 @@ export async function GET(request: NextRequest) {
       : { data: [], error: null };
     if (dailyResult.error) throw new Error("We could not load your live earnings. Please try again.");
 
-    type RateLine = { code: string; label: string; count: number; rate: number; amount: number; sharedRate?: boolean };
-    type Day = { date: string; deliveries: number; amazonDeliveries: number; swaDeliveries: number; cReturns: number; mfn: number; mfnReturns: number; earnings: number; rateLines: Map<string, RateLine> };
+    type RateLine = { code: string; label: string; count: number; rate: number; amount: number };
+    type ProviderDay = { providerMemberId: string; providerMemberName: string | null; deliveries: number; cReturns: number; mfn: number; mfnReturns: number; earnings: number; rateLines: Map<string, RateLine> };
+    type Day = { date: string; deliveries: number; amazonDeliveries: number; swaDeliveries: number; cReturns: number; mfn: number; mfnReturns: number; earnings: number; rateLines: Map<string, RateLine>; providers: Map<string, ProviderDay> };
     const mappedRate = (mapping: Mapping, storedRate: unknown, keys: string[]) => {
       const current = Number(storedRate ?? 0);
       if (Number.isFinite(current) && current > 0) return current;
@@ -79,38 +80,51 @@ export async function GET(request: NextRequest) {
       }
       return 0;
     };
+    const mergeLine = (target: Map<string, RateLine>, line: RateLine) => {
+      const key = `${line.code}:${line.rate}`;
+      const current = target.get(key) ?? { ...line, count: 0, amount: 0 };
+      current.count += line.count;
+      current.amount += line.amount;
+      target.set(key, current);
+    };
     const dailyByDate = new Map<string, Day>();
     for (const row of dailyResult.data ?? []) {
       const mapping=paymentMappingForDay(mappings,row);
       if(!mapping) continue;
       const date = String(row.work_date ?? "");
-      const current = dailyByDate.get(date) ?? { date, deliveries: 0, amazonDeliveries: 0, swaDeliveries: 0, cReturns: 0, mfn: 0, mfnReturns: 0, earnings: 0, rateLines: new Map<string, RateLine>() };
-      current.deliveries += Number(row.total_delivery ?? (Number(row.amazon_delivery ?? 0) + Number(row.swa_delivery ?? 0)));
+      const deliveries = Number(row.total_delivery ?? (Number(row.amazon_delivery ?? 0) + Number(row.swa_delivery ?? 0)));
+      const cReturns = Number(row.c_return ?? 0);
+      const mfn = Number(row.mfn ?? 0);
+      const mfnReturns = Number(row.mfn_return ?? 0);
+      const earnings = Number(row.da_total_pay ?? 0);
+      const lines: RateLine[] = [
+        { code: "delivery", label: "Delivery", count: deliveries, rate: mappedRate(mapping, row.del_rate, ["DELIVERY", "AMAZON_DELIVERY"]), amount: 0 },
+        { code: "c_return", label: "C-return", count: cReturns, rate: mappedRate(mapping, row.c_return_rate, ["CRETURN", "C_RETURN", "CUSTOMER_RETURN"]), amount: 0 },
+        { code: "mfn", label: "MFN", count: mfn, rate: mappedRate(mapping, row.mfn_rate, ["MFN", "SELLER_PICKUP"]), amount: 0 },
+        { code: "mfn_return", label: "MFN return", count: mfnReturns, rate: mappedRate(mapping, row.mfn_return_rate, ["MFN_RETURN", "SELLER_RETURN", "SLLLER_RETURN"]), amount: 0 }
+      ].map((line) => ({ ...line, amount: line.count * line.rate }));
+      const current = dailyByDate.get(date) ?? { date, deliveries: 0, amazonDeliveries: 0, swaDeliveries: 0, cReturns: 0, mfn: 0, mfnReturns: 0, earnings: 0, rateLines: new Map<string, RateLine>(), providers: new Map<string, ProviderDay>() };
+      current.deliveries += deliveries;
       current.amazonDeliveries += Number(row.amazon_delivery ?? 0);
       current.swaDeliveries += Number(row.swa_delivery ?? 0);
-      current.cReturns += Number(row.c_return ?? 0);
-      current.mfn += Number(row.mfn ?? 0);
-      current.mfnReturns += Number(row.mfn_return ?? 0);
-      current.earnings += Number(row.da_total_pay ?? 0);
-      const addLine = (code: string, label: string, count: number, rate: number, sharedRate = false) => {
-        if (!count) return;
-        const key = `${code}:${rate}`;
-        const previous = current.rateLines.get(key) ?? { code, label, count: 0, rate, amount: 0, sharedRate };
-        previous.count += count;
-        previous.amount += count * rate;
-        current.rateLines.set(key, previous);
-      };
-      const deliveryRate = mappedRate(mapping, row.del_rate, ["DELIVERY", "AMAZON_DELIVERY"]);
-      addLine("delivery", "Delivery", Number(row.amazon_delivery ?? 0), deliveryRate);
-      // The current Amazon feed supplies one SWA total. It uses the configured delivery
-      // rate until the upstream file supplies separate SWA Prepaid / COD counts.
-      addLine("swa_delivery", "SWA delivery", Number(row.swa_delivery ?? 0), mappedRate(mapping, row.del_rate, ["SWA_DELIVERY", "SWA", "DELIVERY", "AMAZON_DELIVERY"]), true);
-      addLine("c_return", "C-return", Number(row.c_return ?? 0), mappedRate(mapping, row.c_return_rate, ["CRETURN", "C_RETURN", "CUSTOMER_RETURN"]));
-      addLine("mfn", "MFN", Number(row.mfn ?? 0), mappedRate(mapping, row.mfn_rate, ["MFN", "SELLER_PICKUP"]));
-      addLine("mfn_return", "MFN return", Number(row.mfn_return ?? 0), mappedRate(mapping, row.mfn_return_rate, ["MFN_RETURN", "SELLER_RETURN", "SLLLER_RETURN"]));
+      current.cReturns += cReturns;
+      current.mfn += mfn;
+      current.mfnReturns += mfnReturns;
+      current.earnings += earnings;
+      lines.forEach((line) => mergeLine(current.rateLines, line));
+      const providerMemberId = String(row.provider_employee_id ?? mapping.provider_member_id ?? "");
+      const provider = current.providers.get(providerMemberId) ?? { providerMemberId, providerMemberName: row.provider_employee_name ? String(row.provider_employee_name) : null, deliveries: 0, cReturns: 0, mfn: 0, mfnReturns: 0, earnings: 0, rateLines: new Map<string, RateLine>() };
+      provider.deliveries += deliveries;
+      provider.cReturns += cReturns;
+      provider.mfn += mfn;
+      provider.mfnReturns += mfnReturns;
+      provider.earnings += earnings;
+      if (!provider.providerMemberName && row.provider_employee_name) provider.providerMemberName = String(row.provider_employee_name);
+      lines.forEach((line) => mergeLine(provider.rateLines, line));
+      current.providers.set(providerMemberId, provider);
       dailyByDate.set(date, current);
     }
-    const daily = [...dailyByDate.values()].map((row) => ({ ...row, rateLines: [...row.rateLines.values()] })).sort((left, right) => right.date.localeCompare(left.date));
+    const daily = [...dailyByDate.values()].map((row) => ({ ...row, rateLines: [...row.rateLines.values()], providers: [...row.providers.values()].map((provider) => ({ ...provider, rateLines: [...provider.rateLines.values()] })).sort((left, right) => left.providerMemberId.localeCompare(right.providerMemberId)) })).sort((left, right) => right.date.localeCompare(left.date));
     const mtdLines = new Map<string, RateLine>();
     for (const day of daily) for (const line of day.rateLines) {
       const key = `${line.code}:${line.rate}`;

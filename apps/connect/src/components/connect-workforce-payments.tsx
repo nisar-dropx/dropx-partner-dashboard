@@ -12,13 +12,14 @@ import {ConnectPayIncentives} from './connect-pay-incentives';
 import type {OwnIncentiveSummary} from '@/lib/workforce-own-incentives';
 import {reconcileOwnProduction,type OwnProductionDay} from '@/lib/own-production-breakdown';
 import {ConnectProductionBreakdown} from './connect-production-breakdown';
+import {ConnectDailyPaymentBreakdown,type DailyPaymentProvider} from './connect-daily-payment-breakdown';
 import paymentStyles from './connect-workforce-payments.module.css';
 
 type PaymentData = {
   period: string;
   mapping: Array<{ id: string; providerMemberId: string | null; provider: string | null; paymentMethod: string | null; effectiveFrom: string | null; effectiveTo: string | null }>;
   summary: { deliveries: number; earnings: number; workingDays: number; latestDate: string | null; rateLines: Array<{ code: string; label: string; count: number; rate: number; amount: number; sharedRate?: boolean }> };
-  daily: Array<{ date: string; deliveries: number; amazonDeliveries: number; swaDeliveries: number; cReturns: number; mfn: number; mfnReturns: number; earnings: number; rateLines: Array<{ code: string; label: string; count: number; rate: number; amount: number; sharedRate?: boolean }> }>;
+  daily: Array<{ date: string; deliveries: number; amazonDeliveries: number; swaDeliveries: number; cReturns: number; mfn: number; mfnReturns: number; earnings: number; rateLines: Array<{ code: string; label: string; count: number; rate: number; amount: number }>; providers: DailyPaymentProvider[] }>;
   statements: Array<{ id: string; runNumber: string; periodStart: string; periodEnd: string; status: string; statusLabel: string; paymentDate: string | null; paymentReference: string | null; shipments: number; workingDays: number; baseAmount: number; incentiveAmount: number; adjustmentAmount: number; deductionAmount: number; grossAmount: number; netAmount: number }>;
   rateCard: Array<{ code: string; rate: number; providerMemberId: string | null; effectiveFrom: string | null; effectiveTo: string | null }>;
 };
@@ -104,6 +105,7 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
   const entries = useMemo(() => data?.rateCard ?? [], [data]);
   const productionDays=calculated?.earnings.flatMap(earning=>earning.daily)??[];
   const dailyProduction=calculated?reconcileOwnProduction(calculated.earnings,calculated.summary):[];
+  const paymentDayByDate = useMemo(() => new Map((data?.daily ?? []).map((day) => [day.date, day])), [data]);
   const statementLabel = (start: string, end: string) => `${new Intl.DateTimeFormat("en-IN", { month: "short", year: "numeric" }).format(new Date(`${start}T00:00:00`))} · ${date(start)} – ${date(end)}`;
   const downloadStatement = (statementId: string) => {
     const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType, statementId });
@@ -132,7 +134,7 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
         {calculated?<ConnectPayAdjustments ledger={calculated.adjustments}/>:null}
         <ConnectPayIncentives incentives={calculated.incentives}/>
         <section className="dx-workforce-mtd-breakdown"><header><h2>Earnings breakdown</h2></header><ConnectProductionBreakdown days={productionDays}/></section>
-<section className={`dx-workforce-ledger ${paymentStyles.ledger}`}><header><h2>Daily earnings</h2><button onClick={() => void load()} aria-label="Refresh earnings"><RefreshCw /></button></header>{dailyProduction.length ? <div>{dailyProduction.map(row=><article className={expandedDate===row.date?'expanded':''} key={row.date}><button aria-expanded={expandedDate===row.date} className="dx-workforce-day" onClick={()=>setExpandedDate(current=>current===row.date?'':row.date)} type="button"><span><strong>{date(row.date)}</strong><small>{row.deliveries.toLocaleString('en-IN')} deliveries</small></span><b>{money(row.amount)}<ChevronDown/></b></button>{expandedDate===row.date?<ConnectProductionBreakdown days={productionDays.filter(day=>day.date===row.date)}/>:null}</article>)}</div>:<div className="dx-empty"><ReceiptText/><strong>No delivery data yet</strong></div>}</section>
+<section className={`dx-workforce-ledger ${paymentStyles.ledger}`}><header><h2>Daily earnings</h2><button onClick={() => void load()} aria-label="Refresh earnings"><RefreshCw /></button></header>{dailyProduction.length ? <div>{dailyProduction.map(row=>{const detail=paymentDayByDate.get(row.date);return <article className={expandedDate===row.date?'expanded':''} key={row.date}><button aria-expanded={expandedDate===row.date} className="dx-workforce-day" onClick={()=>setExpandedDate(current=>current===row.date?'':row.date)} type="button"><span><strong>{date(row.date)}</strong><small>{row.deliveries.toLocaleString('en-IN')} deliveries</small></span><b>{money(row.amount)}<ChevronDown/></b></button>{expandedDate===row.date?(detail?.providers.length?<ConnectDailyPaymentBreakdown associateName={account.name??account.reference??"Associate"} providers={detail.providers}/>:<ConnectProductionBreakdown days={productionDays.filter(day=>day.date===row.date)}/>):null}</article>})}</div>:<div className="dx-empty"><ReceiptText/><strong>No delivery data yet</strong></div>}</section>
       </>}
       {calculated&&!hasMap?<ConnectPayAdjustments ledger={calculated.adjustments}/>:null}
     </> : null}
