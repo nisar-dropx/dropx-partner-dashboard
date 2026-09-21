@@ -12,6 +12,17 @@
   min-width: 0;
 }
 
+.page :global(.dx-workforce-mtd-breakdown) > header,
+.page :global(.dx-workforce-ledger) > header,
+.page :global(.dx-workforce-statements) > header {
+  padding-block: 14px;
+}
+
+.page :global(.dx-workforce-payment-note) {
+  margin-top: -7px;
+  font-size: 10px;
+}
+
 .ledger.ledger > div > article {
   display: block;
   padding: 0;

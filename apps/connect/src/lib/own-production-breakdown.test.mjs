@@ -25,12 +25,13 @@ test('monthly mismatch fails while legitimate negative net and empty production 
  for(const x of [{baseAmount:801},{incentiveAmount:181},{netAmount:1156},{netAmount:1155.001},{netAmount:NaN}])assert.throws(()=>reconcileOwnProduction([{daily:days()}],{...summary,...x}));
  assert.deepEqual(reconcileOwnProduction([],{baseAmount:0,incentiveAmount:0,additions:0,deductionAmount:25,netAmount:-25}),[]);
 });
-test('rendered breakdown uses calculated amounts and an explicit effective basis',()=>{
+test('rendered breakdown uses calculated amounts and a compact combined-ID basis',()=>{
  const source=readFileSync(new URL('../components/connect-production-breakdown.tsx',import.meta.url),'utf8');
  const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,module={exports:{}},require=createRequire(import.meta.url);
  new Function('require','exports',output)(name=>name==='@/lib/own-production-breakdown'?{ownProductionBreakdown}:name.endsWith('.module.css')?{}:require(name),module.exports);
  const html=renderToStaticMarkup(createElement(module.exports.ConnectProductionBreakdown,{days:days()}));
- for(const text of ['Fixed daily pay','₹800','₹180','₹980','not paid once per ID','not a paid balance'])assert.ok(html.includes(text),text);
+ for(const text of ['Fixed daily pay','₹800','₹180','₹980','combined across IDs'])assert.ok(html.includes(text),text);
+ for(const repeatedHelp of ['not paid once per ID','not a paid balance'])assert.ok(!html.includes(repeatedHelp),repeatedHelp);
  assert.doesNotMatch(html,/×/);
  for(const path of ['../components/connect-workforce-payments.tsx','../components/connect-my-earnings.tsx']){
   const ui=readFileSync(new URL(path,import.meta.url),'utf8');assert.match(ui,/ConnectProductionBreakdown/);assert.match(ui,/reconcileOwnProduction/);assert.doesNotMatch(ui,/rateLines\.map|production\.map/);

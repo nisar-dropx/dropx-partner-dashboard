@@ -14,20 +14,18 @@ export function ConnectPayAdjustments({ledger}:{ledger:OwnAdjustmentLedger}) {
  const [filter,setFilter]=useState('all'),[page,setPage]=useState(0);
  const rows=useMemo(()=>ledger.entries.filter(row=>filter==='all'||row.status===filter),[ledger.entries,filter]);
  const currentPage=Math.min(page,Math.max(0,Math.ceil(rows.length/25)-1));
- if(!ledger.available)return <section className={styles.panel}><h2>Adjustments need an account link</h2><p>Your delivery estimate is available, but Workforce must link this profile before adjustments can be reconciled. This is not a confirmed payout.</p></section>;
+ if(!ledger.available)return <section className={styles.panel}><h2>Adjustments unavailable</h2><p>Ask Workforce to link this profile.</p></section>;
  return <section className={styles.panel} aria-label="My payment adjustments">
-  <header><div><small>Payment details</small><h2>Adjustments &amp; mileage</h2><p>Shown by posting month. Only approved amounts are included in the estimate.</p></div>
+  <header><h2>Adjustments</h2>
    <label>Status<select value={filter} onChange={event=>{setFilter(event.target.value);setPage(0);}}><option value="all">All statuses</option>{Object.entries(labels).map(([value,text])=><option key={value} value={value}>{text}</option>)}</select></label>
   </header>
-  <dl className={styles.totals}><div><dt>Approved additions</dt><dd>{money(ledger.summary.additions)}</dd></div><div><dt>Approved deductions</dt><dd>{money(ledger.summary.deductions)}</dd></div><div><dt>Awaiting review</dt><dd>{ledger.summary.pendingCount}</dd></div></dl>
+  <dl className={styles.totals}><div><dt>Additions</dt><dd>{money(ledger.summary.additions)}</dd></div><div><dt>Deductions</dt><dd>{money(ledger.summary.deductions)}</dd></div><div><dt>Pending</dt><dd>{ledger.summary.pendingCount}</dd></div></dl>
   {rows.length ? <ul className={styles.list}>{rows.slice(currentPage*25,(currentPage+1)*25).map(row=><li key={row.id}>
    <div className={styles.row}><strong>{categories[row.category]??'Payment adjustment'}</strong><b>{row.kind==='deduction'?'−':'+'}{money(row.amount)}</b></div>
    <div className={styles.row}><span>Posting date · {day(row.postingDate)}</span><span className={styles.status} data-status={row.status}>{labels[row.status]}</span></div>
    {row.mileage ? <p>Work date · {day(row.mileage.workDate)} · {row.mileage.kilometres.toLocaleString('en-IN')} km × {money(row.mileage.ratePerKm)}/km</p> : null}
    <small>Submitted {time(row.requestedAt)} IST{row.reviewedAt?` · Reviewed ${time(row.reviewedAt)} IST`:''}</small>
-   <p className={styles.note}>{row.status==='posted'?'Included once in this estimate and assigned to payroll. Check your statement for payment progress.':row.includedInEstimate?'Included in the estimate; not confirmation of payment.':'Not included in the payment estimate.'}</p>
-  </li>)}</ul> : <p className={styles.empty}>{filter==='all'?'No payment adjustments posted for this month.':'No adjustments match this status.'}</p>}
+  </li>)}</ul> : <p className={styles.empty}>{filter==='all'?'No adjustments this month.':'No matching adjustments.'}</p>}
   {rows.length>25 ? <nav className={styles.pager} aria-label="Adjustment pages"><button type="button" disabled={!currentPage} onClick={()=>setPage(currentPage-1)}>Previous</button><span>{currentPage+1} / {Math.ceil(rows.length/25)}</span><button type="button" disabled={(currentPage+1)*25>=rows.length} onClick={()=>setPage(currentPage+1)}>Next</button></nav> : null}
-  <p className={styles.note}>This monthly estimate is not your unpaid balance. Confirmed statements remain the record of payroll and Finance payment progress.</p>
  </section>;
 }

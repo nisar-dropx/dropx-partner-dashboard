@@ -57,12 +57,13 @@ test('empty results are genuinely zero and excessive values fail',()=>{
  assert.deepEqual(calculate([]).summary,{amount:0,campaigns:[]});
  assert.throws(()=>calculate([row({total_delivery:100})],[campaign({rate_value:Number.MAX_SAFE_INTEGER})]),/range/);
 });
-test('associate incentive display is explicit about estimates and daily aggregation',()=>{
+test('associate incentive display is compact and keeps the useful breakdown',()=>{
  const source=readFileSync(new URL('../components/connect-pay-incentives.tsx',import.meta.url),'utf8');
  const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,module={exports:{}},require=createRequire(import.meta.url);
  new Function('require','exports',output)(name=>name.endsWith('.module.css')?{card:'card',note:'note'}:require(name),module.exports);
  const render=value=>renderToStaticMarkup(createElement(module.exports.ConnectPayIncentives,{incentives:value}));
  const html=render(calculate([row({total_delivery:50})]).summary);
- for(const text of ['Production incentives','Campaign breakdown','₹60','1 qualifying day','Daily thresholds and caps','not payment confirmation'])assert.ok(html.includes(text),text);
- assert.match(render(calculate([]).summary),/No eligible production incentives/);
+ for(const text of ['Incentives','View breakdown','₹60','1 qualifying day'])assert.ok(html.includes(text),text);
+ for(const repeatedHelp of ['Daily thresholds and caps','not payment confirmation'])assert.ok(!html.includes(repeatedHelp),repeatedHelp);
+ assert.match(render(calculate([]).summary),/None this month/);
 });

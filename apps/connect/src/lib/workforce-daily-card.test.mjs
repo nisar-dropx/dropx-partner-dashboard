@@ -23,3 +23,8 @@ test('payment layout isolates shared dashboard column spans at every breakpoint'
   assert.match(styles, /\.page\s*>\s*\*\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/);
   assert.match(styles, /\.page\s*>\s*\*\s*\{[^}]*min-width:\s*0/);
 });
+test('payment page keeps recurring financial help concise', () => {
+  const source = readFileSync(new URL('../components/connect-workforce-payments.tsx', import.meta.url), 'utf8');
+  for (const text of ['tap for break-up', 'Final payout remains subject', 'These are provider-mapping reference rates']) assert.equal(source.includes(text), false);
+  for (const text of ['Statements', 'Earnings breakdown', 'Daily earnings']) assert.equal(source.includes(text), true);
+});

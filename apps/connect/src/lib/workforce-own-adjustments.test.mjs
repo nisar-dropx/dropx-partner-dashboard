@@ -213,14 +213,15 @@ function renderLedger(value){
 }
 test('associate component renders original/posting dates and distinguishes payroll from paid',()=>{
  const html=renderLedger(ledger([row({status:'posted',payroll_run_id:'run'})],[mileage({work_date:'2026-08-31'})]));
- for(const text of ['Travel reimbursement','31 Aug 2026','12 Sept 2026','40 km','In payroll','Check your statement for payment progress','not your unpaid balance'])assert.ok(html.includes(text),text);
+ for(const text of ['Travel reimbursement','31 Aug 2026','12 Sept 2026','40 km','In payroll'])assert.ok(html.includes(text),text);
+ for(const repeatedHelp of ['Check your statement for payment progress','not your unpaid balance'])assert.ok(!html.includes(repeatedHelp),repeatedHelp);
  assert.equal(html.includes('SECRET'),false);
 });
 test('component distinguishes unlinked identity, genuine empty result and pending claim',()=>{
- assert.match(renderLedger({available:false,entries:[],summary:{}}),/Workforce must link this profile/);
- assert.match(renderLedger(ledger([])),/No payment adjustments posted for this month/);
+ assert.match(renderLedger({available:false,entries:[],summary:{}}),/Ask Workforce to link this profile/);
+ assert.match(renderLedger(ledger([])),/No adjustments this month/);
  const pending=renderLedger(ledger([row({status:'pending',reviewed_at:null})]));
- assert.match(pending,/Awaiting review/);assert.match(pending,/Not included in the payment estimate/);
+ assert.match(pending,/Awaiting review/);assert.doesNotMatch(pending,/Not included in the payment estimate/);
 });
 test('component limits initial rows to one page with accessible controls',()=>{
  const html=renderLedger(ledger(Array.from({length:26},(_,id)=>row({id:String(id)}))));
