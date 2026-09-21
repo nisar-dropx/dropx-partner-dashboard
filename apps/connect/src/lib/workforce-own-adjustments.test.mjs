@@ -163,6 +163,7 @@ test('route shares fixed daily pay across provider IDs but retains each ID trace
  const response=await earningsRoute(db,async()=>account,(all,row)=>all.find(m=>m.provider_member_id===row.provider_employee_id))(request()),body=await response.json();
  assert.equal(response.status,200);assert.equal(body.earnings.length,2);assert.equal(body.summary.workDays,1);assert.equal(body.summary.baseAmount,800);assert.equal(body.summary.netAmount,800);
  assert.deepEqual(body.earnings.map(e=>e.baseAmount),[133.33,666.67]);
+ assert.equal(body.earnings[0].daily[0].calculationSource,'workforce_rate_card');assert.equal(body.earnings[0].daily[0].payType,'fixed_daily');assert.equal(body.earnings[0].daily[0].deliveries,10);
  assert.ok(db.calls.filter(q=>q.table==='cps_shipment_daily').every(q=>operation(q,'eq','company_id','company')));
 });
 

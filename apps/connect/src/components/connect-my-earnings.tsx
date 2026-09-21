@@ -7,10 +7,12 @@ import type {OwnAdjustmentLedger} from '@/lib/workforce-own-adjustments';
 import {workforcePaymentMonth} from '@/lib/workforce-payment-period';
 import {ConnectPayIncentives} from './connect-pay-incentives';
 import type {OwnIncentiveSummary} from '@/lib/workforce-own-incentives';
+import {reconcileOwnProduction,type OwnProductionDay} from '@/lib/own-production-breakdown';
+import {ConnectProductionBreakdown} from './connect-production-breakdown';
 
 type Account = { id: string; profileType: string };
 type ProductionLine = { label: string; count: number; rate: number; amount: number };
-type DailyEarning = { id:string;date: string; amount: number; baseAmount:number;incentiveAmount:number;production: ProductionLine[] };
+type DailyEarning = OwnProductionDay & {production: ProductionLine[]};
 type Earning = { id: string; location: string; provider: string; model: string; paymentMethod: string; workDays: number; production: ProductionLine[]; daily: DailyEarning[]; baseAmount: number; additions: number; grossAmount: number };
 type Payload = { month: string; earnings: Earning[];adjustments:OwnAdjustmentLedger;incentives:OwnIncentiveSummary; summary: { workDays: number; baseAmount: number;incentiveAmount:number; additions: number; grossAmount: number;deductionAmount:number;netAmount:number } };
 
@@ -39,6 +41,7 @@ function MyEarnings({ account }: { account: Account }) {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to load earnings.");
       if(payload.month!==month||!payload.adjustments||!Array.isArray(payload.incentives?.campaigns)||!Number.isFinite(payload.summary?.incentiveAmount)||!Number.isFinite(payload.summary?.netAmount))throw new Error('Your payment estimate could not be reconciled. Please retry.');
+      reconcileOwnProduction(payload.earnings,payload.summary);
       if(version!==generation.current)return;
       setData(payload);
     } catch (reason) { if(version===generation.current)setError(reason instanceof Error ? reason.message : "Unable to load earnings."); }
@@ -73,13 +76,13 @@ function MyEarnings({ account }: { account: Account }) {
       <ConnectPayIncentives incentives={data.incentives}/>
       {rows.length && view === "monthly" ? <div className="dx-earnings-list">{rows.map((earning) => <article key={earning.id}>
         <header><span><strong>{earning.location}</strong><small>{earning.provider}</small></span><b>{money(earning.grossAmount)}</b></header>
-        <div className="dx-earnings-meta"><span>{earning.paymentMethod}</span><span>{earning.workDays} work day{earning.workDays === 1 ? "" : "s"}</span></div>
-        <div className="dx-earnings-lines">{earning.production.map((line) => <div key={line.label}><span><strong>{line.label}</strong><small>{line.count.toLocaleString("en-IN")} × {money(line.rate)}</small></span><b>{money(line.amount)}</b></div>)}</div>
+        <div className="dx-earnings-meta"><span>Provider mapping: {earning.paymentMethod}</span><span>{earning.workDays} work day{earning.workDays === 1 ? "" : "s"}</span></div>
+        <ConnectProductionBreakdown days={earning.daily}/>
         <footer><span>Production pay <b>{money(earning.baseAmount)}</b></span><span>Production incentives <b>{money(earning.additions)}</b></span></footer>
       </article>)}</div> : null}
       {rows.length && view === "daily" ? <div className="dx-earnings-list">{rows.flatMap((earning) => earning.daily.map((day) => ({ ...day, location: earning.location }))).sort((left, right) => right.date.localeCompare(left.date)).map((day) => <article key={day.id}>
         <header><span><strong>{new Date(`${day.date}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</strong><small>{day.location}</small></span><b>{money(day.amount)}</b></header>
-        <div className="dx-earnings-lines">{day.production.map((line) => <div key={line.label}><span><strong>{line.label}</strong><small>{line.count.toLocaleString("en-IN")} × {money(line.rate)}</small></span><b>{money(line.amount)}</b></div>)}</div>
+        <ConnectProductionBreakdown days={[day]}/>
         <footer><span>Production {money(day.baseAmount)}</span><span>Production incentives {money(day.incentiveAmount)}</span></footer>
       </article>)}</div> : null}
       {!rows.length ? <div className="dx-advance-empty"><IndianRupee /><strong>No production activity for this month</strong></div> : null}
