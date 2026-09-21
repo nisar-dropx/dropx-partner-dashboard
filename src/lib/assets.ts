@@ -86,7 +86,7 @@ export async function loadAssetRegister(context: FinanceContext) {
     if ((data ?? []).length < 1000) break;
   }
   const typeResult = await context.db.from("asset_types")
-    .select("id,category_id,name,code,asset_code_prefix,asset_categories!asset_types_category_id_fkey(name)")
+    .select("id,category_id,name,code,asset_code_prefix,asset_categories!asset_types_company_id_category_id_fkey(name)")
     .eq("company_id", context.companyId).eq("is_active", true).order("name");
   if (typeResult.error) throw new Error("Unable to load asset types.");
   const typeById = new Map((typeResult.data ?? []).map((type: Record<string, unknown>) => {
