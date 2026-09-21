@@ -77,9 +77,11 @@ export async function registerAsset(input: unknown) {
     const locationId = nullable(item.location_id, 36);
     const ownershipType = text(item.ownership_type, 16).toLowerCase();
     const condition = text(item.condition, 16).toLowerCase();
+    const gstRate = amount(item.gst_rate, "GST rate");
     if (!categoryName || !typeName) throw new Error("Category and asset type are required.");
     if (!ownership.has(ownershipType)) throw new Error("Choose owned, rented or leased.");
     if (!conditions.has(condition)) throw new Error("Choose a valid asset condition.");
+    if (gstRate && Number(gstRate) > 100) throw new Error("GST rate cannot exceed 100%.");
     if (locationId && !context.locations.some((location) => location.id === locationId)) throw new Error("This location is outside your Finance scope.");
     const rentalVendor = text(item.rental_vendor_name, 160);
     const rentalStartsOn = date(item.rental_starts_on);
@@ -93,7 +95,7 @@ export async function registerAsset(input: unknown) {
       company_id: context.companyId, asset_type_id: type.id, asset_code: assetCode, barcode_value: assetCode,
       location_id: locationId, manufacturer: nullable(item.manufacturer), model: nullable(item.model), serial_number: nullable(item.serial_number),
       purchase_order_number: nullable(item.purchase_order_number), invoice_number: nullable(item.invoice_number), purchase_date: date(item.purchase_date),
-      purchase_value: amount(item.purchase_value, "Taxable/base value"), gst_rate: amount(item.gst_rate, "GST rate"), gst_amount: amount(item.gst_amount, "GST amount"), total_value: amount(item.total_value, "Total landed value"), warranty_expiry_date: date(item.warranty_expiry_date), vendor_name: nullable(item.vendor_name),
+      purchase_value: amount(item.purchase_value, "Taxable/base value"), gst_rate: gstRate, gst_amount: amount(item.gst_amount, "GST amount"), total_value: amount(item.total_value, "Total landed value"), warranty_expiry_date: date(item.warranty_expiry_date), vendor_name: nullable(item.vendor_name),
       ownership_type: ownershipType, status: "available", condition, notes: nullable(item.notes, 1000), created_by: context.authorization.userId, updated_by: context.authorization.userId,
     }).select("id").single();
     if (created.error) throw new Error("Unable to save this asset.");
