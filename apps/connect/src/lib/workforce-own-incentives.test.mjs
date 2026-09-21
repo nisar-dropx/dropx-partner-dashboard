@@ -59,8 +59,8 @@ test('empty results are genuinely zero and excessive values fail',()=>{
 });
 test('associate incentive display is explicit about estimates and daily aggregation',()=>{
  const source=readFileSync(new URL('../components/connect-pay-incentives.tsx',import.meta.url),'utf8');
- const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,module={exports:{}};
- new Function('require','exports',output)(createRequire(import.meta.url),module.exports);
+ const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,module={exports:{}},require=createRequire(import.meta.url);
+ new Function('require','exports',output)(name=>name.endsWith('.module.css')?{card:'card',note:'note'}:require(name),module.exports);
  const render=value=>renderToStaticMarkup(createElement(module.exports.ConnectPayIncentives,{incentives:value}));
  const html=render(calculate([row({total_delivery:50})]).summary);
  for(const text of ['Production incentives','Campaign breakdown','₹60','1 qualifying day','Daily thresholds and caps','not payment confirmation'])assert.ok(html.includes(text),text);
