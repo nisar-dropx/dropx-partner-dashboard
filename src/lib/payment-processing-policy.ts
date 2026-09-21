@@ -7,7 +7,11 @@ export function canProcessPayment(scope:Scope,request:Request,owner:boolean) {
   const roles=scope.effectiveRoleIds.length ? scope.effectiveRoleIds : scope.roleId ? [scope.roleId]:[];
   if(!owner && !(request.payment_process_role_ids ?? []).some(id=>roles.includes(id))) return false;
   const status=String(request.status ?? "").toLowerCase();
-  if(!["approved","processing","owner_approved"].includes(status)) return false;
+  // A processor return is resubmitted without repeating completed approvals.
+  // Only RE_APPROVED resubmissions can re-enter processing, and the assigned
+  // processor check below still applies. Ordinary resubmissions stay blocked.
+  const processorResubmission = status === "resubmitted" && request.approval_status === "RE_APPROVED";
+  if(!["approved","processing","owner_approved"].includes(status) && !processorResubmission) return false;
   if(!owner && request.approval_status==="RE_APPROVED" && request.current_approver_user_id!==scope.userId && !(request.current_approver_role_ids ?? []).some(id=>roles.includes(id))) return false;
   return true;
 }
