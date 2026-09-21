@@ -1,4 +1,4 @@
-package com.dropxlogistics.onetracker.location;
+package com.dropxlogistics.one.location;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -62,8 +62,10 @@ public class LocationTrackingService extends Service {
   private static final String TAG = "DropxOneLocation";
   private static final String CHANNEL_ID = "dropx_one_location_tracking";
   private static final String LOCATION_OFF_CHANNEL_ID = "dropx_one_location_off_alert";
+  private static final String INTEGRITY_RISK_CHANNEL_ID = "dropx_one_integrity_risk_alert";
   private static final int NOTIFICATION_ID = 4471;
   private static final int LOCATION_OFF_NOTIFICATION_ID = 4472;
+  private static final int INTEGRITY_RISK_NOTIFICATION_ID = 4473;
   /** How often GPS is sampled and the cheap live-position endpoint is posted to. */
   private static final long LIVE_INTERVAL_MS = 30 * 1000;
   /** Matches HEARTBEAT_MIN_INTERVAL_MS on the server — client-side throttle for the heavier call. */
@@ -148,6 +150,58 @@ public class LocationTrackingService extends Service {
       .setOngoing(true)
       .setContentIntent(openLocationSettings)
       .build();
+  }
+
+  /**
+   * Shown when the server's heartbeat response confirms it opened an attendance_integrity_flags
+   * row for this shift (see postHeartbeat's integrityRiskFlagId check) — i.e. HRMS has already
+   * recorded the risk, this is just making sure the worker sees it too, immediately, on the
+   * device that caused it. Swipe-dismissible (unlike the location-off alert): dismissing this
+   * doesn't undo the HRMS flag or retroactively fix today's attendance, so there's no ongoing
+   * problem state to force the worker to acknowledge the way there is with Location being off.
+   */
+  private void showIntegrityRiskAlert(boolean developerMode, boolean mockLocation, boolean vpnSuspected) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      NotificationManager manager = getSystemService(NotificationManager.class);
+      NotificationChannel channel = new NotificationChannel(
+        INTEGRITY_RISK_CHANNEL_ID,
+        "DropX One alerts",
+        NotificationManager.IMPORTANCE_HIGH
+      );
+      channel.setDescription("Shown when a device signal (mock location, developer mode, VPN) puts today's attendance at risk.");
+      manager.createNotificationChannel(channel);
+    }
+
+    java.util.List<String> reasons = new java.util.ArrayList<>();
+    if (mockLocation) reasons.add("fake/mock location");
+    if (developerMode) reasons.add("developer mode");
+    if (vpnSuspected) reasons.add("VPN");
+    String reasonText = String.join(" and ", reasons);
+
+    Intent openApp = new Intent(this, com.dropxlogistics.one.MainActivity.class);
+    PendingIntent contentIntent = PendingIntent.getActivity(this, 2, openApp, PendingIntent.FLAG_IMMUTABLE);
+
+    Notification notification = new NotificationCompat.Builder(this, INTEGRITY_RISK_CHANNEL_ID)
+      .setContentTitle("Attendance at risk")
+      .setContentText("Detected " + reasonText + " — turn it off now or today's attendance may be marked absent.")
+      .setStyle(new NotificationCompat.BigTextStyle().bigText(
+        "Detected " + reasonText + " while you're clocked in. This has been logged to HRMS. " +
+        "Turn it off now — continuing like this may result in today's attendance being marked absent."
+      ))
+      .setSmallIcon(getApplicationInfo().icon)
+      .setPriority(NotificationCompat.PRIORITY_HIGH)
+      .setAutoCancel(true)
+      .setContentIntent(contentIntent)
+      .build();
+    NotificationManagerCompat.from(this).notify(INTEGRITY_RISK_NOTIFICATION_ID, notification);
+  }
+
+  private static String readStream(java.io.InputStream in) {
+    try (java.util.Scanner scanner = new java.util.Scanner(in, StandardCharsets.UTF_8).useDelimiter("\\A")) {
+      return scanner.hasNext() ? scanner.next() : "";
+    } catch (Exception e) {
+      return null;
+    }
   }
 
   private void startLocationUpdates() {
@@ -262,15 +316,32 @@ public class LocationTrackingService extends Service {
       // Same anti-fraud signals the web-page heartbeat already sends (see IntegritySignals
       // in attendance-gps.ts) — the server already scores/flags on these, this just wires
       // the native side up to detect them too instead of always reporting a clean signal.
+      // vpnSuspected is one the web page always hardcodes to false (browsers have no API for
+      // this); Android's ConnectivityManager can actually detect it, so the native app reports
+      // a real value here even though the server-side field already existed unused.
       boolean developerModeOn = android.provider.Settings.Secure.getInt(
         getContentResolver(),
         android.provider.Settings.Secure.DEVELOPMENT_SETTINGS_ENABLED,
         0
       ) != 0;
+      // A separate sub-toggle from Developer Options as a whole (ADB_ENABLED can in principle
+      // differ from DEVELOPMENT_SETTINGS_ENABLED on some OEM builds/Android versions), and
+      // worth checking on its own: sideloaded fake-GPS apps that don't register as an official
+      // Android "mock location app" (so isFromMockProvider() below doesn't catch them) are
+      // most commonly installed via adb install with USB debugging on, so this is a useful
+      // independent signal even when mockLocation itself comes back false.
+      boolean usbDebuggingOn = android.provider.Settings.Global.getInt(
+        getContentResolver(),
+        android.provider.Settings.Global.ADB_ENABLED,
+        0
+      ) != 0;
       boolean mockLocation = location.isFromMockProvider();
+      boolean vpnSuspected = isVpnActive();
       String integritySignals = "{\"clientPlatform\":\"android-native\""
         + ",\"developerMode\":" + developerModeOn
+        + ",\"usbDebugging\":" + usbDebuggingOn
         + ",\"mockLocation\":" + mockLocation
+        + ",\"vpnSuspected\":" + vpnSuspected
         + "}";
 
       StringBuilder body = new StringBuilder();
@@ -293,12 +364,43 @@ public class LocationTrackingService extends Service {
         Log.w(TAG, "Location heartbeat rejected, status=" + status);
       } else {
         Log.i(TAG, "Location heartbeat sent (" + location.getLatitude() + "," + location.getLongitude() + "), status=" + status);
+        // The one and only place this is written — see TrackingPrefs.lastHeartbeatAt()'s doc
+        // for why MainActivity relies on this to detect the service having died unexpectedly.
+        TrackingPrefs.setLastHeartbeatAt(this, System.currentTimeMillis());
+        String responseBody = readStream(connection.getInputStream());
+        // The server (route.ts) opens an attendance_integrity_flags row — visible to HRMS —
+        // whenever this heartbeat's mockLocation/developerMode/vpnSuspected signals are true,
+        // and echoes that back as integrityRiskFlagId. Surface the same warning locally too,
+        // rather than relying on the worker to notice it in HRMS after the fact: the mock/dev
+        // signals above are self-reported by this device, so it can raise the alert the instant
+        // it sends them instead of waiting on a round trip the worker never sees.
+        if (responseBody != null && responseBody.contains("\"integrityRiskFlagId\":\"")) {
+          showIntegrityRiskAlert(developerModeOn, mockLocation, vpnSuspected);
+        } else {
+          NotificationManagerCompat.from(this).cancel(INTEGRITY_RISK_NOTIFICATION_ID);
+        }
       }
     } catch (Exception e) {
       Log.w(TAG, "Location heartbeat failed, will retry on next interval.", e);
     } finally {
       if (connection != null) connection.disconnect();
     }
+  }
+
+  /**
+   * True if the active network path is (or includes) a VPN interface. Checked fresh on every
+   * heartbeat rather than cached, since a worker can connect/disconnect a VPN mid-shift.
+   * ACTIVE_NETWORK_STATE is already a normal, non-dangerous permission every app effectively
+   * has access to, so this needs no extra permission grant beyond what's already declared.
+   */
+  private boolean isVpnActive() {
+    android.net.ConnectivityManager connectivityManager =
+      (android.net.ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+    if (connectivityManager == null) return false;
+    android.net.Network activeNetwork = connectivityManager.getActiveNetwork();
+    if (activeNetwork == null) return false;
+    android.net.NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(activeNetwork);
+    return capabilities != null && capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN);
   }
 
   private static void appendField(StringBuilder body, String key, String value) {
@@ -323,7 +425,7 @@ public class LocationTrackingService extends Service {
       manager.createNotificationChannel(channel);
     }
 
-    Intent openApp = new Intent(this, com.dropxlogistics.onetracker.MainActivity.class);
+    Intent openApp = new Intent(this, com.dropxlogistics.one.MainActivity.class);
     PendingIntent contentIntent = PendingIntent.getActivity(
       this,
       0,

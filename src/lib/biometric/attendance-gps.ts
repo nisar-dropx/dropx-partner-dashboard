@@ -48,6 +48,12 @@ export type IntegritySignals = {
   accuracyM?: number | null;
   mockLocation?: boolean | null;
   developerMode?: boolean | null;
+  // USB debugging (ADB) can in principle be toggled independently of Developer Options as a
+  // whole on some OEM builds, and is what most sideloaded fake-GPS apps require to install in
+  // the first place — checked as its own signal because it can catch a spoofed location that
+  // isFromMockProvider() misses (an app that fakes GPS without registering as an official
+  // Android mock-location provider). Android-native only; the web page has no API for this.
+  usbDebugging?: boolean | null;
   vpnSuspected?: boolean | null;
   clientPlatform?: string | null;
   clientUserAgent?: string | null;
@@ -155,6 +161,10 @@ export function evaluateIntegrity(signals: IntegritySignals, accuracyM: number |
   if (signals.developerMode === true) {
     reasons.push("developer_mode");
     score -= 20;
+  }
+  if (signals.usbDebugging === true) {
+    reasons.push("usb_debugging");
+    score -= 15;
   }
   if (signals.vpnSuspected === true) {
     reasons.push("vpn_suspected");

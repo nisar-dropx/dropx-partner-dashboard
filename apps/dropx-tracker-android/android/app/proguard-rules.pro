@@ -28,13 +28,14 @@
 # the device otherwise. Capacitor's own AAR may already cover this, but relying on that
 # without verifying it (can't inspect a release build's WebView console the way a debug
 # build's can be) isn't worth the risk for a location-tracking feature.
--keep class com.dropxlogistics.onetracker.location.DropxOnePlugin { *; }
+-keep class com.dropxlogistics.one.location.DropxOnePlugin { *; }
 -keepclassmembers class * extends com.getcapacitor.Plugin {
     @com.getcapacitor.annotation.PluginMethod public *;
 }
--keep class com.dropxlogistics.onetracker.location.LocationTrackingService { *; }
--keep class com.dropxlogistics.onetracker.location.BootReceiver { *; }
--keep class com.dropxlogistics.onetracker.MainActivity { *; }
+-keep class com.dropxlogistics.one.location.LocationTrackingService { *; }
+-keep class com.dropxlogistics.one.location.BootReceiver { *; }
+-keep class com.dropxlogistics.one.location.TrackingInterruptionReporter { *; }
+-keep class com.dropxlogistics.one.MainActivity { *; }
 
 # play-services-location and androidx.work also do some of their own reflection-based
 # component lookup (Services/Receivers started by class reference from the manifest).

@@ -1,4 +1,4 @@
-package com.dropxlogistics.onetracker.location;
+package com.dropxlogistics.one.location;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -16,8 +16,10 @@ final class TrackingPrefs {
   private static final String KEY_SERVER_URL = "serverUrl";
   private static final String KEY_ENABLED = "locationTrackingEnabled";
   private static final String KEY_RUNNING = "trackingRunning";
-  private static final String KEY_REQUESTED_INITIAL_PERMISSION = "requestedInitialLocationPermission";
+  private static final String KEY_SHOWN_INITIAL_CONSENT = "requestedInitialLocationPermission";
   private static final String KEY_REQUESTED_BATTERY_EXEMPTION = "requestedBatteryExemption";
+  private static final String KEY_LAST_HEARTBEAT_AT = "lastHeartbeatAt";
+  private static final String KEY_INTERRUPTION_REPORTED_FOR_HEARTBEAT_AT = "interruptionReportedForHeartbeatAt";
 
   private TrackingPrefs() {}
 
@@ -58,12 +60,12 @@ final class TrackingPrefs {
     return prefs(context).getString(KEY_SERVER_URL, "");
   }
 
-  static boolean hasRequestedInitialLocationPermission(Context context) {
-    return prefs(context).getBoolean(KEY_REQUESTED_INITIAL_PERMISSION, false);
+  static boolean hasShownInitialConsent(Context context) {
+    return prefs(context).getBoolean(KEY_SHOWN_INITIAL_CONSENT, false);
   }
 
-  static void setRequestedInitialLocationPermission(Context context, boolean requested) {
-    prefs(context).edit().putBoolean(KEY_REQUESTED_INITIAL_PERMISSION, requested).apply();
+  static void setShownInitialConsent(Context context, boolean shown) {
+    prefs(context).edit().putBoolean(KEY_SHOWN_INITIAL_CONSENT, shown).apply();
   }
 
   static boolean hasRequestedBatteryExemption(Context context) {
@@ -72,5 +74,32 @@ final class TrackingPrefs {
 
   static void setRequestedBatteryExemption(Context context, boolean requested) {
     prefs(context).edit().putBoolean(KEY_REQUESTED_BATTERY_EXEMPTION, requested).apply();
+  }
+
+  /**
+   * Written by LocationTrackingService on every successful heartbeat POST — the single
+   * source of truth MainActivity's onResume gate reads to notice the service died without
+   * TrackingPrefs itself ever being told (force-stop, an OEM battery killer, a crash) — see
+   * MainActivity.checkForTrackingInterruption().
+   */
+  static void setLastHeartbeatAt(Context context, long epochMs) {
+    prefs(context).edit().putLong(KEY_LAST_HEARTBEAT_AT, epochMs).apply();
+  }
+
+  static long lastHeartbeatAt(Context context) {
+    return prefs(context).getLong(KEY_LAST_HEARTBEAT_AT, 0L);
+  }
+
+  /**
+   * Guards against reporting the exact same interruption gap more than once — MainActivity
+   * checks on every resume, which would otherwise re-report the same stale lastHeartbeatAt
+   * repeatedly until the next real heartbeat lands.
+   */
+  static boolean hasReportedInterruptionFor(Context context, long heartbeatAtEpochMs) {
+    return prefs(context).getLong(KEY_INTERRUPTION_REPORTED_FOR_HEARTBEAT_AT, -1L) == heartbeatAtEpochMs;
+  }
+
+  static void setReportedInterruptionFor(Context context, long heartbeatAtEpochMs) {
+    prefs(context).edit().putLong(KEY_INTERRUPTION_REPORTED_FOR_HEARTBEAT_AT, heartbeatAtEpochMs).apply();
   }
 }

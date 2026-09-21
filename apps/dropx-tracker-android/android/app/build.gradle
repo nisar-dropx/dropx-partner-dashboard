@@ -14,15 +14,24 @@ if (hasReleaseSigning) {
 }
 
 android {
-    namespace "com.dropxlogistics.onetracker"
+    // Ships as an update to the existing live Play Store listing (package com.dropxlogistics.one,
+    // developer "DropX One" in Play Console) rather than as a new, separate app. namespace
+    // (the Java package, matching src/main/java/com/dropxlogistics/one/) and applicationId
+    // below are kept identical on purpose — an earlier version of this build let them diverge
+    // (namespace stayed "onetracker" while applicationId was "one"), which caused a confusing
+    // debug/release package mismatch. Signing must use that listing's original upload key
+    // (see android/keystore.properties, gitignored).
+    namespace "com.dropxlogistics.one"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.dropxlogistics.onetracker"
+        applicationId "com.dropxlogistics.one"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // major*10000 + minor*100 + patch, matching apps/dropx-one-android's convention.
-        versionCode 10001
-        versionName "1.0.1"
+        // Highest versionCode ever uploaded to this listing was 9 (4.0.3, rejected 31 Aug 2026
+        // for missing background-location disclosure — this app's consent dialog fixes that).
+        // Must strictly exceed 9 even though that release was never approved.
+        versionCode 10
+        versionName "4.1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

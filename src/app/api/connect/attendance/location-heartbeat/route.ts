@@ -147,6 +147,38 @@ export async function POST(request: NextRequest) {
       throw new Error(sampleInsert.error.message);
     }
 
+    // Mock location / developer mode / VPN are the strongest fraud signals evaluateIntegrity
+    // scores (see its score deductions) — unlike outside-station-over-limit below, these are
+    // real-time device tampering signs, not a distance/time threshold, so a single occurrence
+    // during an open shift is worth flagging immediately rather than waiting for a pattern.
+    // Reuses the exact same attendance_integrity_flags table and openIntegrityFlag() HRMS
+    // reviewers already see outside-station and other punch-time flags through.
+    let integrityRiskFlagId: string | null = null;
+    if (integritySignals.mockLocation === true || integritySignals.developerMode === true) {
+      const riskReasons = integrity.reasons.filter((reason) =>
+        reason === "mock_location" || reason === "developer_mode" || reason === "vpn_suspected"
+      );
+      const flag = await openIntegrityFlag({
+        companyId: worker.companyId,
+        enrolmentId: worker.enrolmentId,
+        profileType: worker.profileType,
+        profileId: worker.profileId,
+        locationId: station?.id ?? worker.locationId,
+        punchDate: shift.punchDate,
+        flagType: "integrity_risk",
+        severity: "high",
+        message: `${worker.fullName || worker.dropxId}'s device reported ${riskReasons.join(", ")} during an open shift — continuing this will mark today's attendance absent.`,
+        details: {
+          reasons: riskReasons,
+          signals: integritySignals,
+          score: integrity.score,
+          lat,
+          lng
+        }
+      });
+      integrityRiskFlagId = flag.id;
+    }
+
     const outsideMs = await continuousOutsideMs({
       companyId: worker.companyId,
       enrolmentId: worker.enrolmentId,
@@ -192,6 +224,11 @@ export async function POST(request: NextRequest) {
       outsideMs,
       outsidePolicy: policy,
       outsideFlagId,
+      integrityRiskFlagId,
+      integrity: {
+        score: integrity.score,
+        reasons: integrity.reasons
+      },
       shift: {
         punchDate: shift.punchDate,
         inTime: shift.inTime.toISOString(),

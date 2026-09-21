@@ -9,7 +9,10 @@ import type { CapacitorConfig } from "@capacitor/cli";
  * which connect-native-bridge.tsx already calls today.
  */
 const config: CapacitorConfig = {
-  appId: "com.dropxlogistics.onetracker",
+  // Ships as an update to the existing live Play Store listing (com.dropxlogistics.one) —
+  // must match android/app/build.gradle's applicationId AND namespace, and the Java package
+  // the native source actually lives in (com.dropxlogistics.one) — all kept identical.
+  appId: "com.dropxlogistics.one",
   appName: "DropX One",
   webDir: "www",
   server: {

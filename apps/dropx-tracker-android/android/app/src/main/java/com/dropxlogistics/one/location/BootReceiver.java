@@ -1,4 +1,4 @@
-package com.dropxlogistics.onetracker.location;
+package com.dropxlogistics.one.location;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
