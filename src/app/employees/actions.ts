@@ -651,11 +651,11 @@ async function parseBulkWorkbook(fileValue: FormDataEntryValue | null) {
 
   return rawRows.map((row, index) => {
     const rowNumber = index + 2;
-    const fullName = cellText(row, ["Full name", "Full Name"]);
+    const fullName = cellText(row, ["Full name", "Full Name"]).replace(/[^A-Za-z ]+/g, "").replace(/\s+/g, " ").trim().toUpperCase();
     const mobile = cellText(row, ["Mob no", "Mobile", "Mobile number", "Mob number"]).replace(/\D/g, "");
     const locationCode = cellText(row, ["Location", "Location code"]).toUpperCase();
     const designationCode = cellText(row, ["Designation code", "Delisignation code", "Designation"]).toUpperCase();
-    if (!fullName) throw new Error(`Row ${rowNumber}: Full name is required.`);
+    if (!fullName || !/^[A-Z]+(?: [A-Z]+)*$/.test(fullName)) throw new Error(`Row ${rowNumber}: Full name is required and must contain letters only.`);
     if (!/^\d{6,15}$/.test(mobile)) throw new Error(`Row ${rowNumber}: Mobile number must contain 6 to 15 digits.`);
     if (!locationCode) throw new Error(`Row ${rowNumber}: Location is required.`);
     if (!designationCode) throw new Error(`Row ${rowNumber}: Designation code is required.`);
