@@ -10,6 +10,8 @@ const compiled=ts.transpileModule(readFileSync(new URL('./workforce-own-adjustme
 const {ownAdjustmentLedger,loadOwnAdjustmentLedger}=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 const dailyCompiled=ts.transpileModule(readFileSync(new URL('./workforce-daily-card.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {allocateOwnDailyCards}=await import(`data:text/javascript;base64,${Buffer.from(dailyCompiled).toString('base64')}`);
+const incentiveCompiled=ts.transpileModule(readFileSync(new URL('./workforce-own-incentives.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {ownIncentives}=await import(`data:text/javascript;base64,${Buffer.from(incentiveCompiled).toString('base64')}`);
 const from='2026-09-01',to='2026-09-30';
 const row=(overrides={})=>({id:'claim-1',company_id:'company',workforce_id:'person',adjustment_type:'earning',category:'reimbursement',amount:'200.00',effective_date:'2026-09-12',status:'approved',requested_at:'2026-09-10T09:00:00Z',reviewed_at:'2026-09-11T09:00:00Z',payroll_run_id:null,...overrides});
 const account={id:'person',companyId:'company',profileType:'workforce',workspace:'workforce',pageAccess:['earnings']};
@@ -124,7 +126,8 @@ function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null)
   '../../../../src/lib/connect-auth':{requireConnectAccount:authenticate},
   '../../../../src/lib/supabase-admin':{supabaseAdmin:db},
   '@/lib/workforce-own-adjustments':{loadOwnAdjustmentLedger},
-  '@/lib/workforce-daily-card':{allocateOwnDailyCards}
+  '@/lib/workforce-daily-card':{allocateOwnDailyCards},
+  '@/lib/workforce-own-incentives':{ownIncentives}
  };
  new Function('require','exports',output)(name=>{assert.ok(imports[name],`unexpected import ${name}`);return imports[name];},module.exports);
  return module.exports.GET;
@@ -142,7 +145,7 @@ test('route reconciles adjustments without provider mappings and preserves state
  const response=await earningsRoute(db)(request()),body=await response.json();
  assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'private, no-store');
  assert.equal(response.headers.get('vary'),'Cookie');assert.equal(body.earnings.length,0);
- assert.deepEqual(body.summary,{workDays:0,baseAmount:0,additions:200,grossAmount:200,deductionAmount:25,netAmount:175});
+ assert.deepEqual(body.summary,{workDays:0,baseAmount:0,additions:200,grossAmount:200,incentiveAmount:0,deductionAmount:25,netAmount:175});
  assert.equal(body.adjustments.summary.pendingCount,1);
  assert.equal(db.calls.some(q=>['workforce_payroll_items','payment_requests'].includes(q.table)),false);
 });
@@ -163,6 +166,30 @@ test('route shares fixed daily pay across provider IDs but retains each ID trace
  assert.ok(db.calls.filter(q=>q.table==='cps_shipment_daily').every(q=>operation(q,'eq','company_id','company')));
 });
 
+test('route reconciles daily incentives and adjustments separately without leaking policy rows',async()=>{
+ const mappings=['A','B'].map(id=>({id,provider_member_id:id,provider_id:'provider',station_id:'station',providers:{name:'Provider'},payment_methods:{name:'Fixed daily'}}));
+ const sources=mappings.map((m,n)=>({id:'source-'+n,provider_employee_id:m.id,work_date:from,station_code:'TEST',client:'Provider',total_delivery:n?50:10,total_activity:n?50:10,c_return:0,mfn:0,mfn_return:0}));
+ const card={id:'card',provider_id:'provider',station_id:'station',designation_id:null,pay_type:'fixed_daily',effective_from:from,effective_to:to,status:'active',fixed_amount:800};
+ const campaign={id:'campaign',company_id:'company',name:'Approved reward',provider_id:'provider',station_id:'station',designation_id:'DA',metric:'total_delivery',calculation_type:'per_unit_above_threshold',threshold_value:45,rate_value:12,flat_amount:0,maximum_amount:null,effective_from:from,effective_to:to,status:'active',approved_at:'2026-08-31T00:00:00Z',owner_note:'PRIVATE'};
+ const db=database(q=>({data:q.table==='workforce'?{id:'person',designation_id:'DA'}:q.table==='field_executive_provider_mappings'?mappings:q.table==='cps_shipment_daily'?sources:q.table==='stations'?[{id:'station',station_code:'TEST'}]:q.table==='workforce_rate_cards'?[card]:q.table==='workforce_incentive_campaigns'?[campaign]:q.table==='workforce_adjustments'?[row(),row({id:'deduction',adjustment_type:'deduction',amount:25})]:[],error:null}));
+ const response=await earningsRoute(db,async()=>account,(all,row)=>all.find(m=>m.provider_member_id===row.provider_employee_id))(request()),body=await response.json();
+ assert.equal(response.status,200);assert.deepEqual(body.summary,{workDays:1,baseAmount:800,additions:200,grossAmount:1180,incentiveAmount:180,deductionAmount:25,netAmount:1155});
+ assert.equal(body.earnings.reduce((sum,e)=>sum+e.grossAmount,0),980);assert.equal(body.earnings.flatMap(e=>e.daily).reduce((sum,e)=>sum+e.amount,0),980);
+ assert.equal(body.incentives.amount,180);assert.equal(body.incentives.campaigns[0].workDays,1);assert.equal(JSON.stringify(body).includes('PRIVATE'),false);
+ const query=db.calls.find(q=>q.table==='workforce_incentive_campaigns');assert.ok(operation(query,'eq','company_id','company'));assert.ok(operation(query,'gte','effective_to',from));assert.ok(operation(query,'lte','effective_from',to));
+ assert.equal(db.calls.some(q=>['payment_requests','workforce_payroll_items'].includes(q.table)),false);
+});
+test('incentive lookup failure cannot silently return a partial estimate',async()=>{
+ const db=database(q=>({data:q.table==='workforce'?{id:'person'}:[],error:q.table==='workforce_incentive_campaigns'?{message:'PRIVATE DB DETAIL'}:null}));
+ const response=await earningsRoute(db)(request()),body=await response.json();
+ assert.equal(response.status,400);assert.match(body.error,/incentive estimate could not be verified/);assert.equal(JSON.stringify(body).includes('PRIVATE'),false);assert.equal('summary' in body,false);assert.equal(response.headers.get('cache-control'),'private, no-store');
+});
+test('legacy incentive designation context uses exact canonical source and company, not raw legacy identity',async()=>{
+ const db=database(q=>({data:q.table==='workforce'?{id:'person',designation_id:'DA'}:[],error:null}));
+ const response=await earningsRoute(db,async()=>({...account,profileType:'contractor',id:'legacy'}))(request());assert.equal(response.status,200);
+ const query=db.calls.find(q=>q.table==='workforce'&&operation(q,'select','id,designation_id,location_id'));
+ for(const [method,...args] of [['eq','company_id','company'],['eq','source_profile_type','contractor'],['eq','source_profile_id','legacy'],['is','deleted_at',null],['neq','migration_state','reclassified']])assert.ok(operation(query,method,...args));
+});
 test('client guard contract: keyed accounts, latest response only, no silent imported-pay fallback',()=>{
  const payments=readFileSync(new URL('../components/connect-workforce-payments.tsx',import.meta.url),'utf8');
  const monthly=readFileSync(new URL('../components/connect-my-earnings.tsx',import.meta.url),'utf8');

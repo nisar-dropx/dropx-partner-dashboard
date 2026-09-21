@@ -8,6 +8,8 @@ import { ConnectWorkforceJoining } from "./connect-workforce-joining";
 import {ConnectPayAdjustments} from './connect-pay-adjustments';
 import type {OwnAdjustmentLedger} from '@/lib/workforce-own-adjustments';
 import {paymentSectionResult} from '@/lib/payment-section-result';
+import {ConnectPayIncentives} from './connect-pay-incentives';
+import type {OwnIncentiveSummary} from '@/lib/workforce-own-incentives';
 
 type PaymentData = {
   period: string;
@@ -19,7 +21,8 @@ type PaymentData = {
 };
 
 type EarningsData = {
-  summary: { grossAmount: number; netAmount:number; baseAmount:number; additions:number; deductionAmount:number };
+  summary: { grossAmount: number; netAmount:number; baseAmount:number; incentiveAmount:number; additions:number; deductionAmount:number };
+  incentives:OwnIncentiveSummary;
   adjustments:OwnAdjustmentLedger;
   earnings: Array<{ daily: Array<{ date: string; amount: number }> }>;
 };
@@ -67,7 +70,7 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
           const payload=await response.json();
           if(!response.ok)throw new Error(payload.error||'Unable to reconcile your payment estimate. Please retry.');
           const result=payload as EarningsData;
-          if(!result.adjustments||!Number.isFinite(result.summary?.netAmount)||!Array.isArray(result.earnings)||result.earnings.some(m=>!Array.isArray(m.daily)||m.daily.some(r=>!Number.isFinite(r.amount))))throw new Error('Your payment estimate could not be reconciled. Please retry.');
+          if(!result.adjustments||!result.incentives||!Array.isArray(result.incentives.campaigns)||!Number.isFinite(result.summary?.incentiveAmount)||!Number.isFinite(result.summary?.netAmount)||!Array.isArray(result.earnings)||result.earnings.some(m=>!Array.isArray(m.daily)||m.daily.some(r=>!Number.isFinite(r.amount))))throw new Error('Your payment estimate could not be reconciled. Please retry.');
           return result;
         },'Unable to reconcile your payment estimate. Please retry.')
       ]);
@@ -118,12 +121,13 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
     {tab === "earnings" && earningsAllowed && data && calculated && !loading && !visibleError ? <>
       {!hasMap ? <section className="dx-workforce-empty"><i><Route /></i><div><strong>Payment mapping is being set up</strong><p>Your profile is active, but it is not yet connected to a provider ID and rate card. Your station team can complete the mapping before live earnings appear here.</p></div></section> : <>
         <section className="dx-workforce-payment-hero"><span><small>{data.period}</small><strong>{money(data.summary.earnings)}</strong><em>Estimated live earnings</em></span>{rateCardAllowed?<button onClick={() => setTab("rate-card")}>View rate card <ChevronRight /></button>:null}</section>
-        {calculated?<p className="dx-workforce-payment-note">Production {money(calculated.summary.baseAmount)} + approved additions {money(calculated.summary.additions)} − approved deductions {money(calculated.summary.deductionAmount)}. An estimate, not your unpaid balance.</p>:null}
+        {calculated?<p className="dx-workforce-payment-note">Production {money(calculated.summary.baseAmount)} + incentives {money(calculated.summary.incentiveAmount)} + approved additions {money(calculated.summary.additions)} − approved deductions {money(calculated.summary.deductionAmount)}. An estimate, not your unpaid balance.</p>:null}
         <section className="dx-workforce-payment-stats"><article><Route /><span><strong>{data.summary.deliveries.toLocaleString("en-IN")}</strong><small>Deliveries</small></span></article><article><CalendarDays /><span><strong>{data.summary.workingDays}</strong><small>Active days</small></span></article><article><IndianRupee /><span><strong>{date(data.summary.latestDate)}</strong><small>Latest import</small></span></article></section>
         {calculated?<ConnectPayAdjustments ledger={calculated.adjustments}/>:null}
+        <ConnectPayIncentives incentives={calculated.incentives}/>
         <section className="dx-workforce-mtd-breakdown"><header><div><small>Month to date</small><h2>Activity &amp; earnings break-up</h2><p>Your deliveries and the payment estimate for each activity this month.</p></div></header>{data.summary.rateLines.length ? <div>{data.summary.rateLines.map((line) => <article key={`${line.code}:${line.rate}`}><span><strong>{line.label}</strong><small>{line.sharedRate ? "Included at the delivery rate" : "Payment rate"}</small></span><b>{line.count.toLocaleString("en-IN")} × {money(line.rate)}<em>{money(line.amount)}</em></b></article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>Activity details are not available yet</strong><small>Your payment estimate will update when the next shipment import is processed.</small></div>}</section>
         <section className="dx-workforce-ledger"><header><div><small>Daily view</small><h2>This month&apos;s earnings</h2></div><button onClick={() => void load()} aria-label="Refresh earnings"><RefreshCw /></button></header>{data.daily.length ? <div>{data.daily.map((row) => <article className={expandedDate === row.date ? "expanded" : ""} key={row.date}><button aria-expanded={expandedDate === row.date} className="dx-workforce-day" onClick={() => setExpandedDate((current) => current === row.date ? "" : row.date)} type="button"><span><strong>{date(row.date)}</strong><small>{row.deliveries.toLocaleString("en-IN")} total deliveries · tap for break-up</small></span><b>{money(row.earnings)}<ChevronDown /></b></button>{expandedDate === row.date ? <div className="dx-workforce-rate-breakdown">{row.rateLines.length ? row.rateLines.map((line) => <div key={`${line.code}:${line.rate}`}><span><strong>{line.label}</strong><small>{line.sharedRate ? "Included at the delivery rate" : "Payment rate"}</small></span><b>{line.count.toLocaleString("en-IN")} × {money(line.rate)}<em>{money(line.amount)}</em></b></div>) : <small>Activity details will appear after the next shipment import.</small>}</div> : null}</article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>No imported delivery data yet</strong><small>New Amazon delivery imports will show here after they are mapped and processed.</small></div>}</section>
-        <p className="dx-workforce-payment-note">Daily activity shows production only. The monthly estimate includes approved adjustments; training pay and other payroll-only entitlements are confirmed in your statement. Final payout remains subject to payroll and Finance review.</p>
+        <p className="dx-workforce-payment-note">Daily totals include production and eligible production incentives. The monthly estimate also includes approved adjustments; training pay and other payroll-only entitlements are confirmed in your statement. Final payout remains subject to payroll and Finance review.</p>
       </>}
       {calculated&&!hasMap?<ConnectPayAdjustments ledger={calculated.adjustments}/>:null}
     </> : null}

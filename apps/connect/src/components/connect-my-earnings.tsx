@@ -5,12 +5,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {ConnectPayAdjustments} from './connect-pay-adjustments';
 import type {OwnAdjustmentLedger} from '@/lib/workforce-own-adjustments';
 import {workforcePaymentMonth} from '@/lib/workforce-payment-period';
+import {ConnectPayIncentives} from './connect-pay-incentives';
+import type {OwnIncentiveSummary} from '@/lib/workforce-own-incentives';
 
 type Account = { id: string; profileType: string };
 type ProductionLine = { label: string; count: number; rate: number; amount: number };
-type DailyEarning = { date: string; amount: number; production: ProductionLine[] };
+type DailyEarning = { id:string;date: string; amount: number; baseAmount:number;incentiveAmount:number;production: ProductionLine[] };
 type Earning = { id: string; location: string; provider: string; model: string; paymentMethod: string; workDays: number; production: ProductionLine[]; daily: DailyEarning[]; baseAmount: number; additions: number; grossAmount: number };
-type Payload = { month: string; earnings: Earning[];adjustments:OwnAdjustmentLedger; summary: { workDays: number; baseAmount: number; additions: number; grossAmount: number;deductionAmount:number;netAmount:number } };
+type Payload = { month: string; earnings: Earning[];adjustments:OwnAdjustmentLedger;incentives:OwnIncentiveSummary; summary: { workDays: number; baseAmount: number;incentiveAmount:number; additions: number; grossAmount: number;deductionAmount:number;netAmount:number } };
 
 function money(value: number) { return `₹${Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`; }
 function monthLabel(value: string) { return new Date(`${value}-01T00:00:00`).toLocaleDateString("en-IN", { month: "long", year: "numeric" }); }
@@ -36,14 +38,14 @@ function MyEarnings({ account }: { account: Account }) {
       const response = await fetch(`/api/connect/earnings?${query}`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Unable to load earnings.");
-      if(payload.month!==month||!payload.adjustments||!Number.isFinite(payload.summary?.netAmount))throw new Error('Your payment estimate could not be reconciled. Please retry.');
+      if(payload.month!==month||!payload.adjustments||!Array.isArray(payload.incentives?.campaigns)||!Number.isFinite(payload.summary?.incentiveAmount)||!Number.isFinite(payload.summary?.netAmount))throw new Error('Your payment estimate could not be reconciled. Please retry.');
       if(version!==generation.current)return;
       setData(payload);
     } catch (reason) { if(version===generation.current)setError(reason instanceof Error ? reason.message : "Unable to load earnings."); }
     finally { if(version===generation.current)setLoading(false); }
   }, [account.id, account.profileType, month]);
   useEffect(() => { void load();return()=>{generation.current++;}; }, [load]);
-  const summary = data?.summary ?? { workDays: 0, baseAmount: 0, additions: 0, grossAmount: 0,deductionAmount:0,netAmount:0 };
+  const summary = data?.summary ?? { workDays: 0, baseAmount: 0,incentiveAmount:0, additions: 0, grossAmount: 0,deductionAmount:0,netAmount:0 };
   const rows = useMemo(() => data?.earnings ?? [], [data]);
 
   return <section className="dx-earnings">
@@ -61,21 +63,24 @@ function MyEarnings({ account }: { account: Account }) {
       <div className="dx-earnings-summary">
         <article><small>Work days</small><strong>{summary.workDays}</strong></article>
         <article><small>Production pay</small><strong>{money(summary.baseAmount)}</strong></article>
+        <article><small>Production incentives</small><strong>{money(summary.incentiveAmount)}</strong></article>
         <article><small>Additional pay</small><strong>{money(summary.additions)}</strong></article>
         <article><small>Approved deductions</small><strong>{money(summary.deductionAmount)}</strong></article>
         <article className="total"><small>Estimated earnings</small><strong>{money(summary.netAmount)}</strong></article>
       </div>
-      <p className="dx-workforce-payment-note">Production + approved additions − approved deductions. This is not your unpaid balance. Training pay and other payroll-only entitlements are confirmed in statements.</p>
+      <p className="dx-workforce-payment-note">Production + eligible incentives + approved additions − approved deductions. This is not your unpaid balance. Training pay and other payroll-only entitlements are confirmed in statements.</p>
       <ConnectPayAdjustments key={month} ledger={data.adjustments}/>
+      <ConnectPayIncentives incentives={data.incentives}/>
       {rows.length && view === "monthly" ? <div className="dx-earnings-list">{rows.map((earning) => <article key={earning.id}>
         <header><span><strong>{earning.location}</strong><small>{earning.provider}</small></span><b>{money(earning.grossAmount)}</b></header>
         <div className="dx-earnings-meta"><span>{earning.paymentMethod}</span><span>{earning.workDays} work day{earning.workDays === 1 ? "" : "s"}</span></div>
         <div className="dx-earnings-lines">{earning.production.map((line) => <div key={line.label}><span><strong>{line.label}</strong><small>{line.count.toLocaleString("en-IN")} × {money(line.rate)}</small></span><b>{money(line.amount)}</b></div>)}</div>
-        <footer><span>Production pay <b>{money(earning.baseAmount)}</b></span><span>Additional pay <b>{money(earning.additions)}</b></span></footer>
+        <footer><span>Production pay <b>{money(earning.baseAmount)}</b></span><span>Production incentives <b>{money(earning.additions)}</b></span></footer>
       </article>)}</div> : null}
-      {rows.length && view === "daily" ? <div className="dx-earnings-list">{rows.flatMap((earning) => earning.daily.map((day) => ({ ...day, location: earning.location }))).sort((left, right) => right.date.localeCompare(left.date)).map((day) => <article key={`${day.location}-${day.date}`}>
+      {rows.length && view === "daily" ? <div className="dx-earnings-list">{rows.flatMap((earning) => earning.daily.map((day) => ({ ...day, location: earning.location }))).sort((left, right) => right.date.localeCompare(left.date)).map((day) => <article key={day.id}>
         <header><span><strong>{new Date(`${day.date}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</strong><small>{day.location}</small></span><b>{money(day.amount)}</b></header>
         <div className="dx-earnings-lines">{day.production.map((line) => <div key={line.label}><span><strong>{line.label}</strong><small>{line.count.toLocaleString("en-IN")} × {money(line.rate)}</small></span><b>{money(line.amount)}</b></div>)}</div>
+        <footer><span>Production {money(day.baseAmount)}</span><span>Production incentives {money(day.incentiveAmount)}</span></footer>
       </article>)}</div> : null}
       {!rows.length ? <div className="dx-advance-empty"><IndianRupee /><strong>No production activity for this month</strong></div> : null}
     </>:null}
