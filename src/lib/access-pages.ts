@@ -3,6 +3,7 @@ import { workforceCategoryPageCode, workforceCategoryPagePrefix } from "@/lib/dy
 
 export const accessPages = [
   {code:'ops_notification_settings',name:'Ops Settings · Notifications',sort_order:133},
+  { code: "asset_audits", name: "Asset Audit Register", sort_order: 115 },
   { code: "dashboard", name: "Command Center", sort_order: 10 },
   { code: "people_all", name: "All People", sort_order: 20 },
   { code: "people_review", name: "Profile Review", sort_order: 29 },
