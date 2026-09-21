@@ -33,6 +33,18 @@ function optional(value: FormDataEntryValue | null) {
   return text || null;
 }
 
+function normalizeFullName(value: FormDataEntryValue | null) {
+  const text = required(value, "Full name")
+    .replace(/[^A-Za-z ]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+  if (!text || !/^[A-Z]+(?: [A-Z]+)*$/.test(text)) {
+    throw new Error("Full name can contain only letters and spaces.");
+  }
+  return text;
+}
+
 function employeesRedirect(params: { edit?: string; error?: string; notice?: string }): never {
   cookies().set("dropx_employees_flash", JSON.stringify(params), {
     httpOnly: true,
@@ -145,7 +157,7 @@ export async function createEmployee(formData: FormData) {
   if (!supabaseAdmin) employeesRedirect({ error: "Supabase service role key is not configured." });
 
   try {
-    const fullName = required(formData.get("full_name"), "Full name");
+    const fullName = normalizeFullName(formData.get("full_name"));
     const mobileCountryCode = cleanCountryCode(formData.get("mobile_country_code"));
     const mobile = required(formData.get("mobile"), "Mobile number").replace(/\D/g, "");
     const email = optional(formData.get("email"))?.toLowerCase() ?? null;
@@ -312,7 +324,7 @@ export async function updateEmployee(formData: FormData) {
 
   try {
     const id = required(formData.get("id"), "Employee");
-    const fullName = required(formData.get("full_name"), "Full name");
+    const fullName = normalizeFullName(formData.get("full_name"));
     const mobileCountryCode = cleanCountryCode(formData.get("mobile_country_code"));
     const mobile = required(formData.get("mobile"), "Mobile number").replace(/\D/g, "");
     const email = optional(formData.get("email"))?.toLowerCase() ?? null;
