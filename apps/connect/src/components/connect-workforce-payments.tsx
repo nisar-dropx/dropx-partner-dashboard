@@ -7,6 +7,7 @@ import { ConnectAdvances } from "./connect-advances";
 import { ConnectWorkforceJoining } from "./connect-workforce-joining";
 import {ConnectPayAdjustments} from './connect-pay-adjustments';
 import type {OwnAdjustmentLedger} from '@/lib/workforce-own-adjustments';
+import {paymentSectionResult} from '@/lib/payment-section-result';
 
 type PaymentData = {
   period: string;
@@ -41,36 +42,49 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
   const [tab, setTab] = useState<Tab>(firstTab);
   const [data, setData] = useState<PaymentData | null>(null);
   const [error, setError] = useState("");
+  const [estimateError, setEstimateError] = useState("");
   const [loading, setLoading] = useState(true);
   const [expandedDate, setExpandedDate] = useState("");
   const [calculated,setCalculated]=useState<EarningsData|null>(null);
   const generation=useRef(0);
   const load = useCallback(async () => {
     const version=++generation.current;
-    setLoading(true); setError("");setData(null);setCalculated(null);setExpandedDate('');
+    setLoading(true); setError("");setEstimateError('');setData(null);setCalculated(null);setExpandedDate('');
     if(!earningsAllowed&&!rateCardAllowed){setLoading(false);return;}
     try {
       const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
-      const [response, earningsResponse] = await Promise.all([
-        fetch(`/api/connect/workforce-payments?${query}`, { cache: "no-store" }),
-        earningsAllowed?fetch(`/api/connect/earnings?${query}`, { cache: "no-store" }):Promise.resolve(null)
+      const [details, estimate] = await Promise.all([
+        paymentSectionResult(async()=>{
+          const response=await fetch(`/api/connect/workforce-payments?${query}`,{cache:'no-store'});
+          const payload=await response.json();
+          if(!response.ok)throw new Error(payload.error||'Unable to load payment statements and rate details.');
+          if(!payload.summary||!Array.isArray(payload.mapping)||!Array.isArray(payload.daily)||!Array.isArray(payload.statements)||!Array.isArray(payload.rateCard))throw new Error('Payment details could not be verified. Please retry.');
+          return payload as PaymentData;
+        },'Unable to load payment details.'),
+        paymentSectionResult(async()=>{
+          if(!earningsAllowed)return null;
+          const response=await fetch(`/api/connect/earnings?${query}`,{cache:'no-store'});
+          const payload=await response.json();
+          if(!response.ok)throw new Error(payload.error||'Unable to reconcile your payment estimate. Please retry.');
+          const result=payload as EarningsData;
+          if(!result.adjustments||!Number.isFinite(result.summary?.netAmount)||!Array.isArray(result.earnings)||result.earnings.some(m=>!Array.isArray(m.daily)||m.daily.some(r=>!Number.isFinite(r.amount))))throw new Error('Your payment estimate could not be reconciled. Please retry.');
+          return result;
+        },'Unable to reconcile your payment estimate. Please retry.')
       ]);
-      const [payload, earningsPayload] = await Promise.all([response.json(), earningsResponse?.json()??Promise.resolve(null)]);
-      if (!response.ok) throw new Error(payload.error || "Unable to load earnings.");
-      if(earningsResponse&&!earningsResponse.ok)throw new Error(earningsPayload?.error||'Unable to reconcile your payment estimate. Please retry.');
-      const calculated = earningsPayload as EarningsData|null;
-      if(earningsAllowed&&(!calculated?.adjustments||!Number.isFinite(calculated.summary?.netAmount)))throw new Error('Your payment estimate could not be reconciled. Please retry.');
+      if(version!==generation.current)return;
+      setError(details.error);setEstimateError(estimate.error);
+      const payload=details.data,calculated=estimate.data;
       const earningsByDate = new Map<string, number>();
       for (const mapping of calculated?.earnings ?? []) for (const row of mapping.daily) {
         earningsByDate.set(row.date, (earningsByDate.get(row.date) ?? 0) + Number(row.amount ?? 0));
       }
       if(version!==generation.current)return;
       setCalculated(calculated);
-      setData({
+      setData(payload?{
         ...payload,
         summary: { ...payload.summary, earnings: calculated?.summary.netAmount ?? payload.summary.earnings },
         daily: payload.daily.map((row: PaymentData["daily"][number]) => ({ ...row, earnings: calculated?(earningsByDate.get(row.date)??0):row.earnings }))
-      });
+      }:null);
     } catch (reason) {
       if(version===generation.current)setError(reason instanceof Error ? reason.message : "Unable to load earnings.");
     } finally { if(version===generation.current)setLoading(false); }
@@ -78,6 +92,7 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
   useEffect(() => { void load();return()=>{generation.current++;}; }, [load]);
   useEffect(() => { if (((tab === "earnings"||tab==='statements') && !earningsAllowed) || (tab === "advances" && !advancesAllowed) || (tab === "rate-card" && !rateCardAllowed)) setTab(firstTab); }, [advancesAllowed, earningsAllowed, firstTab, rateCardAllowed, tab]);
   const mapping = data?.mapping[0];
+  const visibleError=error||(tab==='earnings'?estimateError:'');
   const hasMap = Boolean(data?.mapping.length);
   const entries = useMemo(() => data?.rateCard ?? [], [data]);
   const statementLabel = (start: string, end: string) => `${new Intl.DateTimeFormat("en-IN", { month: "short", year: "numeric" }).format(new Date(`${start}T00:00:00`))} · ${date(start)} – ${date(end)}`;
@@ -99,8 +114,8 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
     {tab === "earnings" && earningsAllowed ? <ConnectWorkforceJoining key={`${account.profileType}:${account.id}`} account={account} /> : null}
     {tab === "advances" && advancesAllowed ? <ConnectAdvances account={account} /> : null}
     {tab !== "advances" && loading ? <div className="dx-loader"><span /><small>Loading your payment details…</small></div> : null}
-    {tab !== "advances" && error ? <div className="dx-alert error">{error}<button onClick={() => void load()}><RefreshCw />Retry</button></div> : null}
-    {tab === "earnings" && earningsAllowed && data && !loading && !error ? <>
+    {tab !== "advances" && visibleError ? <div role="alert" className="dx-alert error">{visibleError}{tab==='earnings'&&estimateError&&!error?<p>Your confirmed payment statements and rate card remain available in their tabs.</p>:null}<button onClick={() => void load()}><RefreshCw />Retry</button></div> : null}
+    {tab === "earnings" && earningsAllowed && data && calculated && !loading && !visibleError ? <>
       {!hasMap ? <section className="dx-workforce-empty"><i><Route /></i><div><strong>Payment mapping is being set up</strong><p>Your profile is active, but it is not yet connected to a provider ID and rate card. Your station team can complete the mapping before live earnings appear here.</p></div></section> : <>
         <section className="dx-workforce-payment-hero"><span><small>{data.period}</small><strong>{money(data.summary.earnings)}</strong><em>Estimated live earnings</em></span>{rateCardAllowed?<button onClick={() => setTab("rate-card")}>View rate card <ChevronRight /></button>:null}</section>
         {calculated?<p className="dx-workforce-payment-note">Production {money(calculated.summary.baseAmount)} + approved additions {money(calculated.summary.additions)} − approved deductions {money(calculated.summary.deductionAmount)}. An estimate, not your unpaid balance.</p>:null}

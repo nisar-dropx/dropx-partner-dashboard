@@ -169,8 +169,9 @@ test('client guard contract: keyed accounts, latest response only, no silent imp
  for(const source of [payments,monthly]){
   assert.match(source,/key=\{`\$\{/);assert.match(source,/version!==generation.current/);assert.match(source,/generation.current\+\+/);assert.match(source,/setData\(null\)/);
  }
- assert.match(payments,/earningsResponse&&!earningsResponse.ok\)throw/);
- assert.match(payments,/earningsAllowed\?fetch\(`/);
+ assert.match(payments,/if\(!response.ok\)throw new Error\(payload.error\|\|'Unable to reconcile your payment estimate/);
+ assert.match(payments,/if\(!earningsAllowed\)return null;/);
+ assert.match(payments,/data && calculated && !loading && !visibleError/);
  assert.match(monthly,/data\?\.month===month/);
  assert.match(payments,/ConnectPayAdjustments ledger=\{calculated.adjustments\}/);
 });
