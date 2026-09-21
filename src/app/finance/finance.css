@@ -15,3 +15,4 @@
 .fin-rental-document-history summary { cursor: pointer; font-weight: 600; }
 .fin-rental-document-history ul { padding-left: 20px; }
 .fin-rental-document-history li { margin: 10px 0; overflow-wrap: anywhere; }
+.asset-label{display:inline-flex;align-items:center;max-width:130px;background:#fff;border:1px solid #d8e0ea;border-radius:5px;padding:2px}.asset-label svg{width:126px;height:34px}.asset-label-row{display:flex;align-items:center;gap:8px;margin-top:8px}.asset-form-heading{font-size:15px;margin:24px 0 12px;color:#26364c}@media print{.app-sidebar,.topbar,.page-head,.fin-toolbar,.fin-filters,.button{display:none!important}.fin-table{font-size:10px}.asset-label{border:0}.fin-table td,.fin-table th{padding:7px}}

@@ -25,6 +25,7 @@ export const financeNavItems: NavItem[] = [
     children: [
       { code: "finance_pricing", label: "Pricing Master", href: "/master/pricing" },
       { code: "finance_rent", label: "Rent Master", href: "/master/rent" },
+      { code: "finance_assets", label: "Asset Register", href: "/master/assets" },
       { code: "payment_methods", label: "Payment Methods", href: "/master/payment-methods" },
       { code: "master_payment_banks", label: "Payment Banks", href: "/master/payment-banks" },
       { code: "master_payment_heads", label: "Payment Heads", href: "/master/payment-heads" },

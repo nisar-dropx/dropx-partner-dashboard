@@ -100,6 +100,7 @@ export default async function FinanceDashboardPage() {
   ].filter((item) => hasPermission(authorization, item.code, "access"));
   const adminLinks = [
     { code: "finance_pricing", label: "Pricing Master", href: "/master/pricing" },
+    { code: "finance_assets", label: "Asset master register", href: "/master/assets" },
     { code: "finance_revenue", label: "Business Performance", href: "/finance/business?tab=revenue" },
     { code: "finance_pnl", label: "Profit & Loss", href: "/finance/business?tab=pnl" },
     { code: "master_payment_heads", label: "Payment heads", href: "/master/payment-heads" },
