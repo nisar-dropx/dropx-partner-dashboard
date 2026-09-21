@@ -110,7 +110,7 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
     window.open(`/api/connect/workforce-payment-statement?${query}`, "_blank", "noopener,noreferrer");
   };
 
-  return <section className="dx-workforce-payments">
+  return <section className={`dx-workforce-payments ${paymentStyles.page}`}>
     <header className="dx-page-intro">
       <small>My pay</small><h1>Payments</h1><p>See live earnings, payment advances and published mapping rates in one place.</p>
     </header>

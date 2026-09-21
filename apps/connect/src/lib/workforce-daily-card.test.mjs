@@ -15,3 +15,11 @@ test('per-activity and shipment formulas retain variable-rate semantics',()=>{as
 test('empty or zero-activity fixed-pay sources cannot invent worked-day pay',()=>{assert.equal(sum(allocate([])),0);assert.equal(sum(allocate([{row:row('a',0),card},{row:row('b',0),card}])),0);});
 test('duplicates, invalid dates, bad counts and unsupported rates fail closed',()=>{assert.throws(()=>allocate([{row:row('a'),card},{row:row('a'),card}]),/Duplicate/);for(const changed of [{work_date:'2026-02-30'},{total_activity:'NaN'},{total_delivery:-1}])assert.throws(()=>allocate([{row:row('a',10,changed),card}]));assert.throws(()=>allocate([{row:row('a'),card:{...card,pay_type:'unknown'}}]));assert.throws(()=>allocate([{row:row('a'),card:{...card,fixed_amount:Infinity}}]));});
 test('source ordering does not change allocated cents or mutate input',()=>{const input=[{row:row('b',50),card},{row:row('a',10),card}],before=JSON.stringify(input);assert.deepEqual([...allocate(input)].sort(),[...allocate([...input].reverse())].sort());assert.equal(JSON.stringify(input),before);});
+test('payment layout isolates shared dashboard column spans at every breakpoint', () => {
+  const source = readFileSync(new URL('../components/connect-workforce-payments.tsx', import.meta.url), 'utf8');
+  const styles = readFileSync(new URL('../components/connect-workforce-payments.module.css', import.meta.url), 'utf8');
+  assert.match(source, /dx-workforce-payments \$\{paymentStyles\.page\}/);
+  assert.match(styles, /\.page\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(styles, /\.page\s*>\s*\*\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/);
+  assert.match(styles, /\.page\s*>\s*\*\s*\{[^}]*min-width:\s*0/);
+});

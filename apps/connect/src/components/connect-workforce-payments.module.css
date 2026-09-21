@@ -1,3 +1,17 @@
+.page {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  min-width: 0;
+}
+
+/* Shared dashboard cards carry desktop column spans. Payments is a vertical
+   flow: contain every section in its single explicit track, including cards
+   reused from the dashboard, so they cannot create implicit columns. */
+.page > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
 .ledger.ledger > div > article {
   display: block;
   padding: 0;
