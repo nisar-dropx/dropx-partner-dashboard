@@ -36,3 +36,10 @@ test('rendered breakdown uses calculated amounts and an explicit effective basis
   const ui=readFileSync(new URL(path,import.meta.url),'utf8');assert.match(ui,/ConnectProductionBreakdown/);assert.match(ui,/reconcileOwnProduction/);assert.doesNotMatch(ui,/rateLines\.map|production\.map/);
  }
 });
+test('daily detail stacks below its header despite legacy ledger styles',()=>{
+ const ui=readFileSync(new URL('../components/connect-workforce-payments.tsx',import.meta.url),'utf8');
+ const css=readFileSync(new URL('../components/connect-workforce-payments.module.css',import.meta.url),'utf8');
+ assert.match(ui,/dx-workforce-ledger \$\{paymentStyles\.ledger\}/);
+ assert.match(css,/\.ledger\.ledger\s*>\s*div\s*>\s*article\s*\{\s*display:\s*block;\s*padding:\s*0;/);
+ assert.match(css,/:focus-visible/);
+});
