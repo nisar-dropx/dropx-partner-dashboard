@@ -12,6 +12,8 @@ const dailyCompiled=ts.transpileModule(readFileSync(new URL('./workforce-daily-c
 const {allocateOwnDailyCards}=await import(`data:text/javascript;base64,${Buffer.from(dailyCompiled).toString('base64')}`);
 const incentiveCompiled=ts.transpileModule(readFileSync(new URL('./workforce-own-incentives.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {ownIncentives}=await import(`data:text/javascript;base64,${Buffer.from(incentiveCompiled).toString('base64')}`);
+const personalCompiled=ts.transpileModule(readFileSync(new URL('./personal-payment-card.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const {personalPaymentCard}=await import(`data:text/javascript;base64,${Buffer.from(personalCompiled).toString('base64')}`);
 const from='2026-09-01',to='2026-09-30';
 const row=(overrides={})=>({id:'claim-1',company_id:'company',workforce_id:'person',adjustment_type:'earning',category:'reimbursement',amount:'200.00',effective_date:'2026-09-12',status:'approved',requested_at:'2026-09-10T09:00:00Z',reviewed_at:'2026-09-11T09:00:00Z',payroll_run_id:null,...overrides});
 const account={id:'person',companyId:'company',profileType:'workforce',workspace:'workforce',pageAccess:['earnings']};
@@ -127,6 +129,7 @@ function earningsRoute(db,authenticate=async()=>account,resolveMapping=()=>null)
   '../../../../src/lib/supabase-admin':{supabaseAdmin:db},
   '@/lib/workforce-own-adjustments':{loadOwnAdjustmentLedger},
   '@/lib/workforce-daily-card':{allocateOwnDailyCards},
+  '@/lib/personal-payment-card':{personalPaymentCard},
   '@/lib/workforce-own-incentives':{ownIncentives}
  };
  new Function('require','exports',output)(name=>{assert.ok(imports[name],`unexpected import ${name}`);return imports[name];},module.exports);

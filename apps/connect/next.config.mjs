@@ -3,6 +3,7 @@ const nextConfig = {
   compress: true,
   // Allow Connect API routes to reuse monorepo root libs (attendance reports, etc.).
   experimental: {
+    outputFileTracingIncludes: {"/api/connect/payout-slip": ["./assets/report-fonts/**/*"]},
     externalDir: true,
     optimizePackageImports: ["lucide-react"]
   },

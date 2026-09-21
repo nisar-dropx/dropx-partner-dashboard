@@ -26,5 +26,5 @@ test('payment layout isolates shared dashboard column spans at every breakpoint'
 test('payment page keeps recurring financial help concise', () => {
   const source = readFileSync(new URL('../components/connect-workforce-payments.tsx', import.meta.url), 'utf8');
   for (const text of ['tap for break-up', 'Final payout remains subject', 'These are provider-mapping reference rates']) assert.equal(source.includes(text), false);
-  for (const text of ['Statements', 'Earnings breakdown', 'Daily earnings']) assert.equal(source.includes(text), true);
+  for (const text of ['Payouts', 'Earnings breakdown', 'Daily earnings']) assert.equal(source.includes(text), true);
 });

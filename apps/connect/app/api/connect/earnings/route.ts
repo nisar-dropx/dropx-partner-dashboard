@@ -1,4 +1,5 @@
 import {paymentMappingForDay} from "@/lib/workforce-payment-mapping";
+import {personalPaymentCard} from '@/lib/personal-payment-card';
 import {workforcePaymentMonth} from "@/lib/workforce-payment-period";
 import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
@@ -38,7 +39,7 @@ export async function GET(request: Request) {
       if(source.data?.source_profile_id && columns[source.data.source_profile_type])filters.push(`and(workforce_id.is.null,${columns[source.data.source_profile_type]}.eq.${source.data.source_profile_id})`);
     }
     const identityFilter=filters.length ? filters.join(","):"id.eq.00000000-0000-0000-0000-000000000000";
-    const mappingResult = await db().from("field_executive_provider_mappings").select("id,provider_member_id,station_id,provider_id,workforce_id,contractor_id,employee_id,field_executive_id,payment_method_id,payment_values,effective_from,effective_to,providers(name,code),stations(station_code),payment_methods(name)").eq("company_id", account.companyId).neq("status", "cancelled").lte("effective_from",to).or(`effective_to.is.null,effective_to.gte.${from}`).or(identityFilter);
+    const mappingResult = await db().from("field_executive_provider_mappings").select("id,provider_member_id,station_id,provider_id,workforce_id,contractor_id,employee_id,field_executive_id,payment_method_id,payment_values,pay_type,effective_from,effective_to,providers(name,code),stations(station_code),payment_methods(name)").eq("company_id", account.companyId).neq("status", "cancelled").lte("effective_from",to).or(`effective_to.is.null,effective_to.gte.${from}`).or(identityFilter);
     if (mappingResult.error) throw new Error(mappingResult.error.message);
     const mappings = mappingResult.data ?? []; const stationIds = [...new Set(mappings.map((row) => row.station_id).filter(Boolean))]; const memberIds = [...new Set(mappings.map((row) => row.provider_member_id).filter(Boolean))];
     let canonicalQuery=db().from('workforce').select('id,designation_id,location_id').eq('company_id',account.companyId).is('deleted_at',null).neq('migration_state','reclassified');
@@ -63,7 +64,7 @@ export async function GET(request: Request) {
       return mapping?[{...row,provider_id:mapping.provider_id,station_id:mapping.station_id} as IncentiveSource]:[];
     })});
     const cards = (rateCardsResult.data ?? []).filter(card=>card.status==="active" || (["paused","closed"].includes(card.status) && card.approved_at && card.effective_to));
-    const cardFor = (mapping: any, workDate: string) => cards
+    const cardFor = (mapping: any, workDate: string) => personalPaymentCard(mapping) ?? cards
       .filter((card: any) => card.provider_id === mapping.provider_id && (!card.station_id || card.station_id === mapping.station_id) && (!card.designation_id || card.designation_id === workforce?.designation_id) && String(card.effective_from) <= workDate && (!card.effective_to || String(card.effective_to) >= workDate))
       .sort((left: any, right: any) => ((right.station_id ? 2 : 0) + (right.designation_id ? 1 : 0)) - ((left.station_id ? 2 : 0) + (left.designation_id ? 1 : 0)) || String(right.effective_from).localeCompare(String(left.effective_from)))[0] ?? null;
     const dailyCardAmounts=allocateOwnDailyCards((metricsResult.data??[]).flatMap(row=>{

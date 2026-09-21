@@ -14,6 +14,7 @@ import {reconcileOwnProduction,type OwnProductionDay} from '@/lib/own-production
 import {ConnectProductionBreakdown} from './connect-production-breakdown';
 import {ConnectDailyPaymentBreakdown,type DailyPaymentProvider} from './connect-daily-payment-breakdown';
 import paymentStyles from './connect-workforce-payments.module.css';
+import {AssociatePayouts} from './associate-payouts';
 
 type PaymentData = {
   period: string;
@@ -114,18 +115,18 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
 
   return <section className={`dx-workforce-payments ${paymentStyles.page}`}>
     <header className="dx-page-intro">
-      <small>My pay</small><h1>Payments</h1><p>Earnings, statements, advances and rates.</p>
+      <small>My pay</small><h1>Payments</h1><p>Live earnings and period payouts.</p>
     </header>
     <nav aria-label="Payment section" className="dx-workforce-tabs">
       {earningsAllowed ? <button className={tab === "earnings" ? "active" : ""} onClick={() => setTab("earnings")}><IndianRupee />Live earnings</button> : null}
-      {earningsAllowed ? <button className={tab === "statements" ? "active" : ""} onClick={() => setTab("statements")}><ReceiptText />Statements</button> : null}
+      {earningsAllowed ? <button className={tab === "statements" ? "active" : ""} onClick={() => setTab("statements")}><ReceiptText />Payouts</button> : null}
       {advancesAllowed ? <button className={tab === "advances" ? "active" : ""} onClick={() => setTab("advances")}><WalletCards />Advances</button> : null}
       {rateCardAllowed ? <button className={tab === "rate-card" ? "active" : ""} onClick={() => setTab("rate-card")}><ReceiptText />Rate card</button> : null}
     </nav>
     {tab === "earnings" && earningsAllowed ? <ConnectWorkforceJoining key={`${account.profileType}:${account.id}`} account={account} /> : null}
     {tab === "advances" && advancesAllowed ? <ConnectAdvances account={account} /> : null}
-    {tab !== "advances" && loading ? <div className="dx-loader"><span /><small>Loading your payment details…</small></div> : null}
-    {tab !== "advances" && visibleError ? <div role="alert" className="dx-alert error">{visibleError}{tab==='earnings'&&estimateError&&!error?<p>Your confirmed payment statements and rate card remain available in their tabs.</p>:null}<button onClick={() => void load()}><RefreshCw />Retry</button></div> : null}
+    {tab !== "advances" && tab !== "statements" && loading ? <div className="dx-loader"><span /><small>Loading your payment details…</small></div> : null}
+    {tab !== "advances" && tab !== "statements" && visibleError ? <div role="alert" className="dx-alert error">{visibleError}{tab==='earnings'&&estimateError&&!error?<p>Your payouts and rate card remain available in their tabs.</p>:null}<button onClick={() => void load()}><RefreshCw />Retry</button></div> : null}
     {tab === "earnings" && earningsAllowed && data && calculated && !loading && !visibleError ? <>
       {!hasMap ? <section className="dx-workforce-empty"><i><Route /></i><div><strong>Payment mapping is being set up</strong><p>Your profile is active, but it is not yet connected to a provider ID and rate card. Your station team can complete the mapping before live earnings appear here.</p></div></section> : <>
         <section className="dx-workforce-payment-hero"><span><small>{data.period}</small><strong>{money(data.summary.earnings)}</strong><em>Estimated live earnings</em></span>{rateCardAllowed?<button onClick={() => setTab("rate-card")}>View rate card <ChevronRight /></button>:null}</section>
@@ -138,7 +139,7 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
       </>}
       {calculated&&!hasMap?<ConnectPayAdjustments ledger={calculated.adjustments}/>:null}
     </> : null}
-    {tab === "statements" && earningsAllowed && data && !loading && !error ? <section className="dx-workforce-statements"><header><h2>Statements</h2></header>{data.statements.length ? <div>{data.statements.map((statement) => <article key={statement.id}><div><span><strong>{statementLabel(statement.periodStart, statement.periodEnd)}</strong><em className={statement.status}>{statement.statusLabel}</em></span><small>{statement.shipments.toLocaleString("en-IN")} shipments · {statement.workingDays} active days{statement.paymentReference ? ` · Ref ${statement.paymentReference}` : ""}</small><dl><div><dt>Base</dt><dd>{money(statement.baseAmount)}</dd></div><div><dt>Incentives</dt><dd>{money(statement.incentiveAmount)}</dd></div><div><dt>Adjustments</dt><dd>{money(statement.adjustmentAmount)}</dd></div><div><dt>Deductions</dt><dd>-{money(statement.deductionAmount)}</dd></div></dl></div><aside><strong>{money(statement.netAmount)}</strong><small>{statement.paymentDate ? `Paid ${date(statement.paymentDate)}` : "Awaiting disbursal"}</small><button onClick={() => downloadStatement(statement.id)} type="button"><Download />Open statement</button></aside></article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>No statements yet</strong></div>}</section> : null}
+    {tab === "statements" && earningsAllowed ? <AssociatePayouts key={`${account.profileType}:${account.id}`} accountId={account.id} profileType={account.profileType}/> : null}
     {tab === "rate-card" && rateCardAllowed && data && !loading && !error ? <>
       <p className="dx-workforce-payment-note">Reference rates for your active provider mapping.</p>
       {!hasMap ? <section className="dx-workforce-empty"><i><ReceiptText /></i><div><strong>No active rate card yet</strong><p>Once your provider ID is mapped, the applicable station rate card will appear here.</p></div></section> : <section className="dx-workforce-rate-card"><header><small>Active mapping</small><h2>{mapping?.paymentMethod || "Rate card"}</h2><p>{mapping?.provider ? `${mapping.provider} · ` : ""}Provider ID {mapping?.providerMemberId || "—"}</p></header><div className="dx-workforce-rate-meta"><span>Effective from <b>{date(mapping?.effectiveFrom ?? null)}</b></span><span>Valid to <b>{date(mapping?.effectiveTo ?? null)}</b></span></div>{entries.length ? <div className="dx-workforce-rate-lines">{entries.map((entry, index) => <article key={`${entry.code}:${index}`}><span><strong>{label(entry.code)}</strong><small>{entry.providerMemberId ? `Provider ID ${entry.providerMemberId}` : "Active mapping"}</small></span><b>{money(entry.rate)}</b></article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>Rate details are not published yet</strong><small>Your payment mapping is active. The station can publish rate details when they are ready.</small></div>}</section>}

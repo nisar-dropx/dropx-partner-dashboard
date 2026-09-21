@@ -39,6 +39,7 @@ const attendanceReports: NavItem = { code: "ops_attendance_reports", label: "Tea
   { code: "ops_salary_hold", label: "People Salary Hold", href: "/attendance/salary-hold" },
   { code: "ops_salary_hold", label: "Workforce Payment Holds", href: "/attendance/workforce-holds" },
   { code: "ops_workforce_losses", label: "Station Loss Claims", href: "/attendance/workforce-losses" },
+  { code: "ops_workforce_losses", label: "Payout disputes", href: "/attendance/payout-review" },
   { code: "ops_workforce_mileage", label: "Mileage Claims", href: "/attendance/workforce-mileage" }
 ] };
 

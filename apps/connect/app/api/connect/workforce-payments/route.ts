@@ -4,10 +4,13 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { workforcePaymentMonth } from "@/lib/workforce-payment-period";
 import {paymentMappingForDay} from "@/lib/workforce-payment-mapping";
 import { workforcePaymentStatus } from "@/lib/workforce-payment-status";
+import {personalPaymentCard} from '@/lib/personal-payment-card';
+import {allocateOwnDailyCards} from '@/lib/workforce-daily-card';
 export const dynamic='force-dynamic';
 
 type Mapping = {
   id: string;
+  pay_type?:string|null;
   workforce_id?: string | null;
   provider_member_id: string | null;
   effective_from: string | null;
@@ -47,7 +50,7 @@ export async function GET(request: NextRequest) {
 
     const period = workforcePaymentMonth();
     const mappingResult = await supabaseAdmin.from("field_executive_provider_mappings")
-      .select("id,provider_member_id,effective_from,effective_to,payment_values,providers(name,code),stations(station_code),payment_methods(name),workforce_id,field_executive_id,contractor_id,employee_id")
+      .select("id,provider_member_id,effective_from,effective_to,payment_values,pay_type,providers(name,code),stations(station_code),payment_methods(name),workforce_id,field_executive_id,contractor_id,employee_id")
       .eq("company_id", account.companyId)
       .neq("status", "cancelled").lt("effective_from",period.to).or(`effective_to.is.null,effective_to.gte.${period.from}`)
       .or(identityFilters.length ? identityFilters.join(","):"id.eq.00000000-0000-0000-0000-000000000000").order("effective_from",{ascending:false}).limit(1000);
@@ -58,7 +61,7 @@ export async function GET(request: NextRequest) {
     const providerMemberIds = [...new Set(mappings.map((mapping) => mapping.provider_member_id).filter((id): id is string => Boolean(id)))];
     const dailyResult = providerMemberIds.length
       ? await supabaseAdmin.from("cps_shipment_daily")
-        .select("work_date,station_code,client,provider_employee_id,provider_employee_name,total_delivery,amazon_delivery,swa_delivery,c_return,mfn,mfn_return,da_total_pay,del_rate,c_return_rate,mfn_rate,mfn_return_rate")
+        .select("id,work_date,station_code,client,provider_employee_id,provider_employee_name,total_activity,total_delivery,amazon_delivery,swa_delivery,c_return,mfn,mfn_return,da_total_pay,del_rate,c_return_rate,mfn_rate,mfn_return_rate")
         .eq("company_id", account.companyId)
         .in("provider_employee_id", providerMemberIds)
         .gte("work_date", period.from)
@@ -71,7 +74,7 @@ export async function GET(request: NextRequest) {
     type ProviderDay = { providerMemberId: string; providerMemberName: string | null; deliveries: number; cReturns: number; mfn: number; mfnReturns: number; earnings: number; rateLines: Map<string, RateLine> };
     type Day = { date: string; deliveries: number; amazonDeliveries: number; swaDeliveries: number; cReturns: number; mfn: number; mfnReturns: number; earnings: number; rateLines: Map<string, RateLine>; providers: Map<string, ProviderDay> };
     const mappedRate = (mapping: Mapping, storedRate: unknown, keys: string[]) => {
-      const current = Number(storedRate ?? 0);
+      const current = Number(mapping.payment_values?.DROPX_PERSONAL_TERMS)===1?0:Number(storedRate ?? 0);
       if (Number.isFinite(current) && current > 0) return current;
       const values = mapping.payment_values ?? {};
       for (const key of keys) {
@@ -88,6 +91,7 @@ export async function GET(request: NextRequest) {
       target.set(key, current);
     };
     const dailyByDate = new Map<string, Day>();
+    const personalAmounts=allocateOwnDailyCards((dailyResult.data||[]).flatMap(row=>{const m=paymentMappingForDay(mappings,row),card=m?personalPaymentCard(m):null;return card?[{row,card}]:[];}));
     for (const row of dailyResult.data ?? []) {
       const mapping=paymentMappingForDay(mappings,row);
       if(!mapping) continue;
@@ -96,7 +100,7 @@ export async function GET(request: NextRequest) {
       const cReturns = Number(row.c_return ?? 0);
       const mfn = Number(row.mfn ?? 0);
       const mfnReturns = Number(row.mfn_return ?? 0);
-      const earnings = Number(row.da_total_pay ?? 0);
+      const earnings = personalAmounts.get(row.id) ?? Number(row.da_total_pay ?? 0);
       const lines: RateLine[] = [
         { code: "delivery", label: "Delivery", count: deliveries, rate: mappedRate(mapping, row.del_rate, ["DELIVERY", "AMAZON_DELIVERY"]), amount: 0 },
         { code: "c_return", label: "C-return", count: cReturns, rate: mappedRate(mapping, row.c_return_rate, ["CRETURN", "C_RETURN", "CUSTOMER_RETURN"]), amount: 0 },
@@ -168,7 +172,7 @@ export async function GET(request: NextRequest) {
       }];
     });
     const rateCard = mappings.flatMap((mapping) => Object.entries(mapping.payment_values ?? {})
-      .filter(([, value]) => Number.isFinite(Number(value)))
+      .filter(([key, value]) => !key.startsWith('DROPX_') && Number.isFinite(Number(value)))
       .map(([code, value]) => ({ code, rate: Number(value), providerMemberId: mapping.provider_member_id, effectiveFrom: mapping.effective_from, effectiveTo: mapping.effective_to })));
 
     return NextResponse.json({
