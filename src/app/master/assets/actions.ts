@@ -54,10 +54,11 @@ async function typeForInput(context: Awaited<ReturnType<typeof financeContext>>,
   const categoryId = category.data?.id;
   if (!categoryId) throw new Error("Unable to resolve this asset category.");
   const typeCode = assetPrefix(typeName);
+  const assetCodePrefix = assetPrefix(`${categoryCode.slice(0, 3)}${typeCode.slice(0, 5)}`);
   let type = await context.db.from("asset_types").select("id,asset_code_prefix").eq("company_id", context.companyId).eq("category_id", categoryId).eq("code", typeCode).maybeSingle();
   if (type.error) throw new Error("Unable to load asset types.");
   if (!type.data) {
-    const created = await context.db.from("asset_types").insert({ company_id: context.companyId, category_id: categoryId, code: typeCode, name: typeName, asset_code_prefix: typeCode, created_by: context.authorization.userId, updated_by: context.authorization.userId }).select("id,asset_code_prefix").single();
+    const created = await context.db.from("asset_types").insert({ company_id: context.companyId, category_id: categoryId, code: typeCode, name: typeName, asset_code_prefix: assetCodePrefix, created_by: context.authorization.userId, updated_by: context.authorization.userId }).select("id,asset_code_prefix").single();
     if (created.error) throw new Error("Unable to create this asset type.");
     type = created;
   }
@@ -92,7 +93,7 @@ export async function registerAsset(input: unknown) {
       company_id: context.companyId, asset_type_id: type.id, asset_code: assetCode, barcode_value: assetCode,
       location_id: locationId, manufacturer: nullable(item.manufacturer), model: nullable(item.model), serial_number: nullable(item.serial_number),
       purchase_order_number: nullable(item.purchase_order_number), invoice_number: nullable(item.invoice_number), purchase_date: date(item.purchase_date),
-      purchase_value: amount(item.purchase_value, "Purchase value"), warranty_expiry_date: date(item.warranty_expiry_date), vendor_name: nullable(item.vendor_name),
+      purchase_value: amount(item.purchase_value, "Taxable/base value"), gst_rate: amount(item.gst_rate, "GST rate"), gst_amount: amount(item.gst_amount, "GST amount"), total_value: amount(item.total_value, "Total landed value"), warranty_expiry_date: date(item.warranty_expiry_date), vendor_name: nullable(item.vendor_name),
       ownership_type: ownershipType, status: "available", condition, notes: nullable(item.notes, 1000), created_by: context.authorization.userId, updated_by: context.authorization.userId,
     }).select("id").single();
     if (created.error) throw new Error("Unable to save this asset.");
@@ -138,7 +139,7 @@ export async function bulkRegisterAssets(form: FormData) {
         category_name: cell(row, ["Category"]), type_name: cell(row, ["Asset type", "Type"]), location_id: locationId || "",
         ownership_type: String(cell(row, ["Ownership", "Ownership type"]) || "owned").toLowerCase(), condition: String(cell(row, ["Condition"]) || "good").toLowerCase(),
         manufacturer: cell(row, ["Manufacturer", "Make"]), model: cell(row, ["Model"]), serial_number: cell(row, ["Serial number", "Serial", "Chassis number"]),
-        invoice_number: cell(row, ["Invoice number", "Invoice"]), purchase_order_number: cell(row, ["Purchase order number", "PO number"]), purchase_date: spreadsheetDate(cell(row, ["Purchase date"])), purchase_value: cell(row, ["Purchase value", "Purchase value inr"]), vendor_name: cell(row, ["Vendor", "Supplier"]), notes: cell(row, ["Notes"]),
+        invoice_number: cell(row, ["Invoice number", "Invoice"]), purchase_order_number: cell(row, ["Purchase order number", "PO number"]), purchase_date: spreadsheetDate(cell(row, ["Purchase date"])), purchase_value: cell(row, ["Taxable base value", "Purchase value", "Purchase value inr"]), gst_rate: cell(row, ["GST rate", "GST rate percent"]), gst_amount: cell(row, ["GST amount"]), total_value: cell(row, ["Total landed value", "Total value"]), vendor_name: cell(row, ["Vendor", "Supplier"]), notes: cell(row, ["Notes"]),
         rental_vendor_name: cell(row, ["Rental vendor"]), rental_agreement_number: cell(row, ["Agreement number"]), rental_invoice_number: cell(row, ["Rental invoice"]), rental_rate: cell(row, ["Rental rate", "Rate"]), rental_billing_frequency: String(cell(row, ["Billing frequency", "Frequency"]) || "monthly").toLowerCase(), rental_security_deposit: cell(row, ["Security deposit"]), rental_starts_on: spreadsheetDate(cell(row, ["Rental starts on", "Starts on"])), rental_ends_on: spreadsheetDate(cell(row, ["Rental ends on", "Ends on"])), rental_notice_period_days: cell(row, ["Notice days", "Notice period days"]),
       };
       const saved = await registerAsset(input);
