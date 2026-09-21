@@ -15,6 +15,45 @@ function clean(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
 }
 
+export async function saveOutsideStationPolicy(formData: FormData) {
+  const authorization = await getAuthorization();
+  if (!authorization) throw new Error("Login required.");
+  const companyId = requireCompanyId(authorization);
+  if (!hasPermission(authorization, "attendance_integrity", "edit")) {
+    throw new Error("Not allowed to change this policy.");
+  }
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+
+  const enabled = clean(formData.get("outside_station_tracking_enabled")) === "true";
+  const minutesRaw = clean(formData.get("outside_station_allowance_minutes"));
+  const minutes = Number(minutesRaw);
+  if (!Number.isFinite(minutes) || minutes < 0 || minutes > 480) {
+    integrityRedirect(formData, "error", "Enter an allowance between 0 and 480 minutes.");
+    return;
+  }
+
+  // hr_company_settings has other columns this form doesn't know about (biometric/roster
+  // settings live on the same row) — only ever .update() the two this form owns, never
+  // upsert/insert, so a company without a row yet gets a clear error instead of a new row
+  // silently missing whatever defaults its other columns should have had.
+  const update = await supabaseAdmin
+    .from("hr_company_settings")
+    .update({
+      outside_station_tracking_enabled: enabled,
+      outside_station_allowance_minutes: Math.round(minutes)
+    })
+    .eq("company_id", companyId)
+    .select("company_id");
+  if (update.error) throw new Error(update.error.message);
+  if (!update.data?.length) {
+    integrityRedirect(formData, "error", "No company settings row exists yet — contact engineering to initialize it.");
+    return;
+  }
+
+  revalidatePath("/attendance/integrity");
+  integrityRedirect(formData, "notice", "Outside-station policy updated.");
+}
+
 function integrityRedirect(formData: FormData, kind: "error" | "notice", message: string) {
   const requested = clean(formData.get("return_to"));
   const returnTo = requested.startsWith("/attendance/integrity") ? requested.split("?")[0] : "/attendance/integrity";

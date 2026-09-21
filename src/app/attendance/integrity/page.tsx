@@ -6,10 +6,12 @@ import { getAuthorization, hasPermission, type AuthorizationContext } from "@/li
 import { requireCompanyId } from "@/lib/company-scope";
 import { isSupabaseAdminConfigured, supabaseAdmin } from "@/lib/supabase-admin";
 import { redirect } from "next/navigation";
+import { SearchableSelect } from "@/components/searchable-select";
 import {
   approveAttendanceIntegrityFlag,
   dismissAttendanceIntegrityFlag,
-  reviewAttendanceLocationPackage
+  reviewAttendanceLocationPackage,
+  saveOutsideStationPolicy
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -177,11 +179,13 @@ export default async function AttendanceIntegrityPage({
   let flags: FlagRow[] = [];
   let reviews: ReviewRow[] = [];
   let loadError = "";
+  let outsideStationTrackingEnabled = true;
+  let outsideStationAllowanceMinutes = 60;
 
   if (!isSupabaseAdminConfigured || !supabaseAdmin) {
     loadError = "Supabase service role key is not configured.";
   } else {
-    const [flagsResult, reviewsResult] = await Promise.all([
+    const [flagsResult, reviewsResult, policyResult] = await Promise.all([
       supabaseAdmin
         .from("attendance_integrity_flags")
         .select("id, enrolment_id, profile_type, profile_id, punch_date, flag_type, severity, message, status, created_at, details, location_id")
@@ -195,7 +199,12 @@ export default async function AttendanceIntegrityPage({
         .eq("company_id", companyId)
         .eq("status", "pending")
         .order("created_at", { ascending: false })
-        .limit(100)
+        .limit(100),
+      supabaseAdmin
+        .from("hr_company_settings")
+        .select("outside_station_tracking_enabled, outside_station_allowance_minutes")
+        .eq("company_id", companyId)
+        .maybeSingle()
     ]);
     if (flagsResult.error || reviewsResult.error) {
       loadError = flagsResult.error?.message || reviewsResult.error?.message || "Unable to load integrity queue.";
@@ -210,6 +219,10 @@ export default async function AttendanceIntegrityPage({
         flags = flags.filter((row) => row.profile_id && allowed.has(row.profile_id));
         reviews = reviews.filter((row) => allowed.has(row.profile_id));
       }
+    }
+    if (!policyResult.error && policyResult.data) {
+      outsideStationTrackingEnabled = policyResult.data.outside_station_tracking_enabled !== false;
+      outsideStationAllowanceMinutes = Number(policyResult.data.outside_station_allowance_minutes ?? 60);
     }
   }
 
@@ -226,12 +239,53 @@ export default async function AttendanceIntegrityPage({
       {searchParams?.error ? <div className="panel"><p style={{ color: "var(--danger, #b42318)" }}>{searchParams.error}</p></div> : null}
       {searchParams?.notice ? <div className="panel"><p>{searchParams.notice}</p></div> : null}
       {loadError ? <div className="panel"><p className="subtle">{loadError}</p></div> : null}
+
+      {!managedProfileIds && !loadError ? (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <h2>Outside-station policy</h2>
+              <p className="subtle">
+                How long a worker can stay beyond the station radius (default 50m) during a shift before it opens a review flag.
+              </p>
+            </div>
+          </div>
+          <form action={saveOutsideStationPolicy} className="form-grid two">
+            <input type="hidden" name="return_to" value="/attendance/integrity" />
+            <label>Track time outside the station
+              <SearchableSelect
+                name="outside_station_tracking_enabled"
+                options={[{ value: "true", label: "Enabled" }, { value: "false", label: "Disabled" }]}
+                defaultValue={String(outsideStationTrackingEnabled)}
+                placeholder="Select"
+                required
+                disabled={!canEdit}
+              />
+            </label>
+            <label>Allowed minutes outside per shift
+              <input
+                className="field"
+                inputMode="numeric"
+                name="outside_station_allowance_minutes"
+                required
+                defaultValue={outsideStationAllowanceMinutes}
+                disabled={!canEdit}
+              />
+            </label>
+            <div className="form-actions span-2 align-right">
+              <SubmitButton disabled={!canEdit} disabledText="View only">Save policy</SubmitButton>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
       <div className="panel">
         <div className="panel-head">
           <div>
             <h2>{managedProfileIds ? "My team flags" : "People location flags"}</h2>
             <p className="subtle">
-              Outside-zone flags open after the phone stays beyond the station radius (default 50m) for more than 30 minutes during a shift.
+              Outside-zone flags open after the phone stays beyond the station radius (default 50m) for more than{" "}
+              {outsideStationAllowanceMinutes} minutes during a shift.
             </p>
           </div>
           <div className="button-row">
