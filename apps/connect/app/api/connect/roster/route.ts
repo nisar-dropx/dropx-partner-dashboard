@@ -9,7 +9,7 @@ import { workforceOperatingDays } from "../../../../src/lib/workforce-operating-
 type WorkerType = "employee" | "contractor";
 type WorkerIdentity = { workerType: WorkerType; workerId: string };
 type Shift = { id: string; name: string; code: string; start_time: string; end_time: string };
-type PlanMeta = { status: string; roster_kind?: string; effective_from?: string; superseded_at?: string | null; revision_no?: number | null };
+type PlanMeta = { id?: string; status: string; roster_kind?: string; effective_from?: string; superseded_at?: string | null; revision_no?: number | null; updated_at?: string | null };
 type Entry = { id: string; company_id: string; plan_id: string; worker_type: WorkerType; worker_id: string; roster_date: string; day_type: "working" | "weekly_off"; shift_id: string | null; location_id: string | null; hr_shifts?: Shift | Shift[] | null; hr_roster_plans?: PlanMeta | PlanMeta[] | null };
 type SwapRow = {
   id: string; requester_entry_id: string; partner_entry_id: string;
@@ -190,7 +190,7 @@ async function expandRecurringOwnEntries(account: ConnectAccount, workerType: Wo
   if (!locationId) return [...byDate.values()].sort((left, right) => left.roster_date.localeCompare(right.roster_date));
 
   const patternResults = await Promise.all(identities.map((identity) => db().from("hr_roster_entries")
-    .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
+    .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(id,status,roster_kind,effective_from,superseded_at,revision_no,updated_at)")
     .eq("company_id", account.companyId).eq("worker_type", identity.workerType).eq("worker_id", identity.workerId)
     .eq("location_id", locationId)
     .eq("hr_roster_plans.status", "approved")
@@ -231,7 +231,7 @@ async function expandRecurringOwnEntries(account: ConnectAccount, workerType: Wo
 async function expandRecurringColleagueEntries(companyId: string, locations: string[], start: string, direct: Entry[]) {
   if (!locations.length) return direct;
   const patternResult = await db().from("hr_roster_entries")
-    .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
+    .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(id,status,roster_kind,effective_from,superseded_at,revision_no,updated_at)")
     .eq("company_id", companyId).in("location_id", locations)
     .eq("hr_roster_plans.status", "approved")
     .eq("hr_roster_plans.roster_kind", "recurring_weekly");
@@ -321,7 +321,7 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   const start = todayIndia();
   const end = addDays(start, ROSTER_VIEW_DAYS - 1);
   const entryResults = await Promise.all(identities.map((identity) => db().from("hr_roster_entries")
-    .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
+    .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(id,status,roster_kind,effective_from,superseded_at,revision_no,updated_at)")
     .eq("company_id", account.companyId).eq("worker_type", identity.workerType).eq("worker_id", identity.workerId)
     .gte("roster_date", start).lte("roster_date", end).eq("hr_roster_plans.status", "approved").order("roster_date")));
   const entryError = entryResults.find((result) => result.error)?.error;
@@ -332,7 +332,7 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   let colleagueEntries: Entry[] = [];
   if (locations.length) {
     const colleagues = await db().from("hr_roster_entries")
-      .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
+      .select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(id,status,roster_kind,effective_from,superseded_at,revision_no,updated_at)")
       .eq("company_id", account.companyId).in("location_id", locations).gte("roster_date", start).lte("roster_date", end).eq("hr_roster_plans.status", "approved");
     if (colleagues.error) throw new Error(colleagues.error.message);
     const preferredColleagues = [...preferActiveRosterRowsByKey(
@@ -489,7 +489,7 @@ export async function POST(request: Request) {
     if ((requesterSelection && requesterSelection.date !== requestedDate) || (partnerSelection && partnerSelection.date !== requestedDate)) throw new Error("The selected recurring shift does not match this date.");
     const requesterSourceId = requesterSelection?.sourceEntryId ?? requesterEntryId;
     const partnerSourceId = partnerSelection?.sourceEntryId ?? partnerEntryId;
-    const entries = await db().from("hr_roster_entries").select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)").eq("company_id", account.companyId).in("id", [requesterSourceId, partnerSourceId]);
+    const entries = await db().from("hr_roster_entries").select("id,company_id,plan_id,worker_type,worker_id,roster_date,day_type,shift_id,location_id,hr_shifts(id,name,code,start_time,end_time),hr_roster_plans!inner(id,status,roster_kind,effective_from,superseded_at,revision_no,updated_at)").eq("company_id", account.companyId).in("id", [requesterSourceId, partnerSourceId]);
     if (entries.error || entries.data?.length !== 2) throw new Error(entries.error?.message ?? "One of the roster entries is unavailable.");
     const requester = entries.data.find((item) => item.id === requesterSourceId) as unknown as Entry;
     const partner = entries.data.find((item) => item.id === partnerSourceId) as unknown as Entry;

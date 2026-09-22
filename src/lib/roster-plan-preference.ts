@@ -1,9 +1,11 @@
 export type RosterPlanPreference = {
+  id?: string | null;
   status?: string | null;
   roster_kind?: string | null;
   effective_from?: string | null;
   superseded_at?: string | null;
   revision_no?: number | null;
+  updated_at?: string | null;
 };
 
 /** Normalize shift clocks to HH:MM (preserves minutes; pads single-digit hours). */
@@ -25,6 +27,17 @@ export function isRosterPlanActiveOn(plan: RosterPlanPreference | null | undefin
   return true;
 }
 
+/**
+ * Ties on roster_kind/revision_no/effective_from happen for real: two
+ * approved, non-superseded dated plans can legitimately cover the exact
+ * same station/week (e.g. a stale "reopen the current plan" lookup that
+ * missed it and minted a fresh one instead). Without a further tiebreak,
+ * callers using these comparators fell back to whatever arbitrary order
+ * Supabase happened to return rows in, which could surface a stale
+ * duplicate instead of the one actually last published. updated_at
+ * (touched on every publish/decide), then id, make the choice
+ * deterministic and prefer the most recent one.
+ */
 export function compareRosterPlanPreference(
   left: RosterPlanPreference | null | undefined,
   right: RosterPlanPreference | null | undefined
@@ -33,7 +46,11 @@ export function compareRosterPlanPreference(
   if (datedOrder) return datedOrder;
   const revisionOrder = Number(right?.revision_no ?? 0) - Number(left?.revision_no ?? 0);
   if (revisionOrder) return revisionOrder;
-  return String(right?.effective_from ?? "").localeCompare(String(left?.effective_from ?? ""));
+  const effectiveFromOrder = String(right?.effective_from ?? "").localeCompare(String(left?.effective_from ?? ""));
+  if (effectiveFromOrder) return effectiveFromOrder;
+  const updatedAtOrder = String(right?.updated_at ?? "").localeCompare(String(left?.updated_at ?? ""));
+  if (updatedAtOrder) return updatedAtOrder;
+  return String(right?.id ?? "").localeCompare(String(left?.id ?? ""));
 }
 
 /** Prefer dated over recurring, then highest revision / latest effective_from, skipping superseded plans. */

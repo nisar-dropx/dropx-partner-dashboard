@@ -324,7 +324,7 @@ export async function loadWorkerShiftWindow({
 
   const roster = await supabaseAdmin
     .from("hr_roster_entries")
-    .select("day_type, hr_shifts(start_time, end_time, break_minutes), hr_roster_plans(status,roster_kind,effective_from,superseded_at,revision_no)")
+    .select("day_type, hr_shifts(start_time, end_time, break_minutes), hr_roster_plans(id,status,roster_kind,effective_from,superseded_at,revision_no,updated_at)")
     .eq("company_id", companyId)
     .eq("worker_id", workerId)
     .eq("roster_date", workDate)
@@ -620,7 +620,7 @@ async function loadAttendanceScheduleContext({
     workerIds.length
       ? supabaseAdmin
         .from("hr_roster_entries")
-        .select(`worker_id, roster_date, day_type, hr_shifts(${shiftColumns}), hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)`)
+        .select(`worker_id, roster_date, day_type, hr_shifts(${shiftColumns}), hr_roster_plans!inner(id,status,roster_kind,effective_from,superseded_at,revision_no,updated_at)`)
         .eq("company_id", companyId)
         .eq("hr_roster_plans.status", "approved")
         .eq("hr_roster_plans.roster_kind", "dated")

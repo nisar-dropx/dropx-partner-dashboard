@@ -1,6 +1,6 @@
 import "server-only";
 import type { CodLocationRow } from "@/lib/ops-pulse/cod";
-import { formatShiftClock } from "@/lib/roster-plan-preference";
+import { compareRosterPlanPreference, formatShiftClock } from "@/lib/roster-plan-preference";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type Relation<T> = T | T[] | null | undefined;
@@ -257,7 +257,7 @@ export async function loadOpsStationManpower(
       .eq("company_id", companyId).eq("punch_date", asOf).eq("calculated", true)
       .in("enrolment_id", enrolmentIds).order("punch_time", { ascending: true }).limit(5000) : Promise.resolve({ data: [], error: null }),
     workerIds.length ? admin.from("hr_roster_entries")
-      .select("worker_type,worker_id,roster_date,day_type,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes),hr_roster_plans!inner(status,roster_kind,effective_from,superseded_at,revision_no)")
+      .select("worker_type,worker_id,roster_date,day_type,hr_shifts(id,name,code,start_time,end_time,grace_in_minutes,grace_out_minutes),hr_roster_plans!inner(id,status,roster_kind,effective_from,superseded_at,revision_no,updated_at)")
       .eq("company_id", companyId).eq("roster_date", asOf).in("worker_id", workerIds).eq("hr_roster_plans.status", "approved").eq("hr_roster_plans.roster_kind", "dated").limit(5000) : Promise.resolve({ data: [], error: null }),
     admin.from("hr_roster_plans")
       .select("id,status,roster_kind,effective_from,superseded_at,revision_no,location_id,hr_roster_plan_locations(location_id)")
@@ -346,10 +346,13 @@ export async function loadOpsStationManpower(
         && (!plan.effective_from || plan.effective_from <= asOf)
         && (!plan.superseded_at || asOf < plan.superseded_at);
     }).sort((left, right) => {
-      const leftPlan = relation(left.hr_roster_plans as Relation<{ roster_kind: string | null; effective_from: string | null; revision_no: number | null }>);
-      const rightPlan = relation(right.hr_roster_plans as Relation<{ roster_kind: string | null; effective_from: string | null; revision_no: number | null }>);
-      const datedOrder = Number(rightPlan?.roster_kind === "dated") - Number(leftPlan?.roster_kind === "dated");
-      return datedOrder || Number(rightPlan?.revision_no ?? 0) - Number(leftPlan?.revision_no ?? 0) || String(rightPlan?.effective_from ?? "").localeCompare(String(leftPlan?.effective_from ?? ""));
+      // Ties on roster_kind/revision_no/effective_from happen for real when
+      // two approved dated plans briefly cover the same week - updated_at
+      // then id make the pick deterministic and prefer the most recently
+      // published one instead of an arbitrary row order.
+      const leftPlan = relation(left.hr_roster_plans as Relation<{ id: string | null; roster_kind: string | null; effective_from: string | null; revision_no: number | null; updated_at: string | null }>);
+      const rightPlan = relation(right.hr_roster_plans as Relation<{ id: string | null; roster_kind: string | null; effective_from: string | null; revision_no: number | null; updated_at: string | null }>);
+      return compareRosterPlanPreference(leftPlan, rightPlan);
     })[0];
     const rosterShift = roster?.day_type === "working" ? relation(roster.hr_shifts as Relation<Shift>) : null;
     const shift = rosterShift;

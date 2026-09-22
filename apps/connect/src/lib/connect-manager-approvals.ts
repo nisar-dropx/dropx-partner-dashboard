@@ -52,6 +52,47 @@ function clean(value: unknown) {
   return String(value ?? "").trim();
 }
 
+/**
+ * A dated (date-scoped) roster deliberately does not supersede the recurring
+ * weekly baseline used for other weeks - but two approved dated rosters
+ * covering the SAME week for the SAME station are different versions of the
+ * same one-off change, and only the newest should ever display as "Current".
+ * Marks any earlier approved dated version whose own week overlaps the
+ * replacement's week as superseded by the replacement. Mirrors HRMS's own
+ * supersedeApprovedDatedRosterVersions (dropx-hrms/src/app/(hrms)/rostering/actions.ts)
+ * - this Connect approval pipeline previously had no equivalent call at all
+ * for dated plans (only recurring_weekly ones), which let duplicate
+ * "current" approved dated plans for the same station/week accumulate
+ * whenever a roster was approved through Connect rather than HRMS.
+ */
+async function supersedeApprovedDatedRosterVersions(
+  companyId: string,
+  locationId: string,
+  replacementPlanId: string,
+  periodStart: string,
+  periodEnd: string
+) {
+  const existing = await db().from("hr_roster_plans")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("location_id", locationId)
+    .eq("roster_kind", "dated")
+    .eq("status", "approved")
+    .is("superseded_at", null)
+    .neq("id", replacementPlanId)
+    .lte("period_start", periodEnd)
+    .gte("period_end", periodStart);
+  if (existing.error) throw new Error(existing.error.message);
+  if (!(existing.data ?? []).length) return;
+
+  const ended = await db().from("hr_roster_plans")
+    .update({ superseded_at: new Date().toISOString().slice(0, 10) })
+    .eq("company_id", companyId)
+    .in("id", (existing.data ?? []).map((version) => version.id))
+    .is("superseded_at", null);
+  if (ended.error) throw new Error(ended.error.message);
+}
+
 const TEAM_LEAD_DESIGNATION_CODES = new Set(["TL", "ATL", "TEAM_LEAD", "ASST_TEAM_LEAD"]);
 
 function isTeamLeadManagerAssignment(
@@ -577,14 +618,18 @@ export async function decideConnectRosterApproval(account: ConnectAccount, planI
   if (decision !== "approved" && note.length < 3) throw new Error("Add a decision note when returning or rejecting a roster.");
   const now = new Date().toISOString();
   if (!stepId) {
-    const legacy = await db().from("hr_roster_plans").select("id,location_id,effective_from,status,approver_user_id,roster_kind")
+    const legacy = await db().from("hr_roster_plans").select("id,location_id,effective_from,period_start,period_end,status,approver_user_id,roster_kind")
       .eq("company_id", account.companyId).eq("id", planId).eq("status", "pending_approval").maybeSingle();
     if (legacy.error || !legacy.data || legacy.data.approver_user_id !== actorUserId) throw new Error(legacy.error?.message ?? "This roster approval is no longer assigned to you.");
-    if (decision === "approved" && legacy.data.roster_kind === "recurring_weekly" && legacy.data.location_id && legacy.data.effective_from) {
-      const ended = await db().from("hr_roster_plans").update({ superseded_at: legacy.data.effective_from })
-        .eq("company_id", account.companyId).eq("location_id", legacy.data.location_id).eq("roster_kind", "recurring_weekly")
-        .eq("status", "approved").is("superseded_at", null).neq("id", planId);
-      if (ended.error) throw new Error(ended.error.message);
+    if (decision === "approved" && legacy.data.location_id) {
+      if (legacy.data.roster_kind === "recurring_weekly" && legacy.data.effective_from) {
+        const ended = await db().from("hr_roster_plans").update({ superseded_at: legacy.data.effective_from })
+          .eq("company_id", account.companyId).eq("location_id", legacy.data.location_id).eq("roster_kind", "recurring_weekly")
+          .eq("status", "approved").is("superseded_at", null).neq("id", planId);
+        if (ended.error) throw new Error(ended.error.message);
+      } else if (legacy.data.roster_kind === "dated" && legacy.data.period_start && legacy.data.period_end) {
+        await supersedeApprovedDatedRosterVersions(account.companyId, legacy.data.location_id, planId, legacy.data.period_start, legacy.data.period_end);
+      }
     }
     const update = await db().from("hr_roster_plans").update({ status: decision, decision_note: note || "Approved", decided_at: now, approver_user_id: null })
       .eq("company_id", account.companyId).eq("id", planId).eq("status", "pending_approval");
@@ -592,7 +637,7 @@ export async function decideConnectRosterApproval(account: ConnectAccount, planI
     return `Weekly roster ${decision}.`;
   }
   const stepResult = await db().from("hr_roster_approval_steps")
-    .select("id,stage_no,stage_type,approver_user_id,status,hr_roster_plans!inner(id,location_id,effective_from,status,roster_kind)")
+    .select("id,stage_no,stage_type,approver_user_id,status,hr_roster_plans!inner(id,location_id,effective_from,period_start,period_end,status,roster_kind)")
     .eq("company_id", account.companyId).eq("plan_id", planId).eq("id", stepId).maybeSingle();
   if (stepResult.error || !stepResult.data || stepResult.data.status !== "pending") throw new Error(stepResult.error?.message ?? "This roster approval is no longer pending.");
   const step = stepResult.data;
@@ -632,6 +677,8 @@ export async function decideConnectRosterApproval(account: ConnectAccount, planI
   if (plan.roster_kind === "recurring_weekly") {
     const ended = await db().from("hr_roster_plans").update({ superseded_at: plan.effective_from }).eq("company_id", account.companyId).eq("location_id", plan.location_id).eq("roster_kind", "recurring_weekly").eq("status", "approved").is("superseded_at", null).neq("id", planId);
     if (ended.error) throw new Error(ended.error.message);
+  } else if (plan.roster_kind === "dated" && plan.period_start && plan.period_end) {
+    await supersedeApprovedDatedRosterVersions(account.companyId, plan.location_id, planId, plan.period_start, plan.period_end);
   }
   const published = await db().from("hr_roster_plans").update({ status: "approved", decision_note: note || "All approvals complete", decided_at: now, approver_user_id: null }).eq("company_id", account.companyId).eq("id", planId).eq("status", "pending_approval");
   if (published.error) throw new Error(published.error.message);

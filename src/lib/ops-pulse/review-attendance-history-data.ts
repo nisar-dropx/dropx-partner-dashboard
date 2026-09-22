@@ -3,9 +3,10 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { CodLocationRow } from "./cod";
 import { loadReviewUtrDiscipline } from "./review-operations-data";
 import { attendanceHistoryDates, classifyAttendanceDay, type ReviewAttendanceHistory } from "./review-attendance-history";
+import { compareRosterPlanPreference } from "@/lib/roster-plan-preference";
 
 type Shift = { name: string; start_time: string; end_time: string; grace_in_minutes: number | null };
-type Plan = { id: string; roster_kind: string; effective_from: string; superseded_at: string | null; revision_no: number | null; location_id?: string | null; hr_roster_plan_locations?: {location_id:string}[] };
+type Plan = { id: string; roster_kind: string; effective_from: string; superseded_at: string | null; revision_no: number | null; updated_at?: string | null; location_id?: string | null; hr_roster_plan_locations?: {location_id:string}[] };
 type Roster = { plan_id: string; worker_type: string; worker_id: string; roster_date: string; day_type: string; hr_shifts: Shift | Shift[] | null; hr_roster_plans?: Plan | Plan[] | null };
 type Profile = { id: string; biometric_id: string | null; location_id: string | null; date_of_join: string | null; last_working_date: string | null };
 type Attendance = { id: string; punch_date: string; employee_id: string | null; contractor_id: string | null; worker_type: string | null; enrolment_id: string; in_time: string | null; out_time: string | null; work_minutes: number | null; punch_count: number | null; status: string | null };
@@ -17,7 +18,11 @@ function rosterFor(rows: Roster[], type: string, id: string, day: string) {
   return rows.filter(r=>{
     const p=one(r.hr_roster_plans); return r.worker_type===type && r.worker_id===id && p && (!p.effective_from||p.effective_from<=day) && (!p.superseded_at||day<p.superseded_at)
       && (p.roster_kind==="dated" ? r.roster_date===day : weekday(r.roster_date)===weekday(day));
-  }).sort((a,b)=>{const x=one(a.hr_roster_plans)!,y=one(b.hr_roster_plans)!;return Number(y.roster_kind==="dated")-Number(x.roster_kind==="dated") || Number(y.revision_no??0)-Number(x.revision_no??0) || String(y.effective_from??"").localeCompare(String(x.effective_from??""));})[0];
+  // Ties on roster_kind/revision_no/effective_from happen for real when two
+  // approved dated plans briefly cover the same week - updated_at then id
+  // (via compareRosterPlanPreference) make the pick deterministic instead
+  // of an arbitrary row order.
+  }).sort((a,b)=>compareRosterPlanPreference(one(a.hr_roster_plans), one(b.hr_roster_plans)))[0];
 }
 async function all<T>(query: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: {message:string} | null }>): Promise<T[]> {
   const rows: T[] = [];
@@ -47,7 +52,7 @@ export async function loadReviewAttendanceHistory(companyId: string, station: Co
     contractorIds.length ? all<Profile>((a,b)=>db.from("contractors").select("id,biometric_id,location_id,date_of_join,last_working_date").eq("company_id",companyId).in("id",contractorIds).order("id").range(a,b)) : [],
     all((a,b)=>db.from("hr_engagements").select("id,worker_type,employee_id,contractor_id,start_date,end_date").eq("company_id",companyId).or(workerFilters).lte("start_date",date).or(`end_date.is.null,end_date.gte.${from}`).order("id").range(a,b)),
     all<Plan>((a,b)=>db.from("hr_roster_plans").select("id,roster_kind,effective_from,superseded_at,revision_no,location_id,hr_roster_plan_locations(location_id)").eq("company_id",companyId).eq("status","approved").eq("roster_kind","recurring_weekly").lte("effective_from",date).or(`superseded_at.is.null,superseded_at.gt.${from}`).order("id").range(a,b)),
-    all<Roster>((a,b)=>db.from("hr_roster_entries").select("plan_id,worker_type,worker_id,roster_date,day_type,hr_shifts(name,start_time,end_time,grace_in_minutes),hr_roster_plans!inner(id,roster_kind,effective_from,superseded_at,revision_no)").eq("company_id",companyId).in("worker_id",ids).gte("roster_date",dateOffset(from,-1)).lte("roster_date",date).eq("hr_roster_plans.status","approved").eq("hr_roster_plans.roster_kind","dated").order("id").range(a,b)),
+    all<Roster>((a,b)=>db.from("hr_roster_entries").select("plan_id,worker_type,worker_id,roster_date,day_type,hr_shifts(name,start_time,end_time,grace_in_minutes),hr_roster_plans!inner(id,roster_kind,effective_from,superseded_at,revision_no,updated_at)").eq("company_id",companyId).in("worker_id",ids).gte("roster_date",dateOffset(from,-1)).lte("roster_date",date).eq("hr_roster_plans.status","approved").eq("hr_roster_plans.roster_kind","dated").order("id").range(a,b)),
     all((a,b)=>db.from("hr_leave_requests").select("employee_id,contractor_id,start_date,end_date,status").eq("company_id",companyId).or(workerFilters).lte("start_date",date).gte("end_date",from).order("id").range(a,b))
   ]);
   const profiles = new Map<string, Profile>([...employees.map(p=>[`employee:${p.id}`,p] as const), ...contractors.map(p=>[`contractor:${p.id}`,p] as const)]);
