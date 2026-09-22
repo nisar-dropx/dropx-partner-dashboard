@@ -304,7 +304,7 @@ export function approvalStepsFromSnapshot(value: unknown): ApprovalStepRow[] {
     const candidates = Array.isArray(row.candidates)
       ? row.candidates.map((candidate) => {
           const item = candidate as { role_id?: unknown; scope?: unknown };
-          const scope = item.scope === "station" || item.scope === "cluster" || item.scope === "company" ? item.scope : "company";
+          const scope: ApprovalStepCandidate["scope"] = item.scope === "station" || item.scope === "cluster" || item.scope === "company" ? item.scope : "company";
           return { role_id: String(item.role_id ?? "").trim(), scope };
         }).filter((candidate) => candidate.role_id)
       : [];
