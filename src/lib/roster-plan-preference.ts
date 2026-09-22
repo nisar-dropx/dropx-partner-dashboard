@@ -20,9 +20,22 @@ export function shiftClockMinutes(value: string | null | undefined) {
   return match ? Number(match[1]) * 60 + Number(match[2]) : null;
 }
 
+/**
+ * A "dated" plan's relevance for a date is scoped by which hr_roster_entries
+ * rows exist for it (already filtered by the caller's own roster_date query) -
+ * unlike a "recurring_weekly" baseline, which applies indefinitely from
+ * effective_from until superseded_at and genuinely needs that cutoff to know
+ * which of possibly several revisions currently governs a given date. Applying
+ * the superseded_at window to a dated plan too meant a stale value left over
+ * from an earlier edit-and-republish cycle (e.g. a plan reopened, realigned to
+ * a brand new period, and republished, but never had its old superseded_at
+ * cleared) could silently exclude that plan's own current, correct entries -
+ * even though nothing else was ever actually superseding it for that date.
+ */
 export function isRosterPlanActiveOn(plan: RosterPlanPreference | null | undefined, asOf: string) {
   if (!plan || plan.status !== "approved") return false;
   if (plan.effective_from && plan.effective_from > asOf) return false;
+  if (plan.roster_kind === "dated") return true;
   if (plan.superseded_at && !(asOf < plan.superseded_at)) return false;
   return true;
 }
