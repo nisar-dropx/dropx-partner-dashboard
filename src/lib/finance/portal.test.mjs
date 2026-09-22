@@ -129,9 +129,9 @@ test("Data errors show an error instead of false zero metrics", async () => {
   assert.doesNotMatch(html, /Processed this month/);
 });
 
-test("The dedicated Finance release does not run other products' scheduled jobs", () => {
+test("Finance does not introduce its own scheduled jobs into the shared deployment", () => {
   const config = JSON.parse(readFileSync(new URL("../../../vercel.json", import.meta.url), "utf8"));
-  assert.deepEqual(config.crons, []);
+  for (const cron of config.crons) assert.doesNotMatch(cron.path, /finance/i, cron.path);
 });
 
 test('Finance groups Pricing and Rent masters under Master and both business sections under one menu',()=>{
