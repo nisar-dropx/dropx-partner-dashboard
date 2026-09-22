@@ -124,13 +124,13 @@ function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociat
   return <div className="performance-associate-popover">
     <ReviewDetailsClose label="Close associate delivery details"/>
     <div className="performance-associate-popover-scroll">
-      <div className="performance-associate-popover-head"><span>Associate</span><span>Delivered</span><span>Assigned</span><span>Payment scheme</span><span>Current rate card</span></div>
+      <div className="performance-associate-popover-head"><span>Associate</span><span>Delivered</span><span>Assigned</span><span>Payment scheme</span><span>Delivery rate</span></div>
       <div className="performance-associate-popover-body">{rows.length ? rows.map((person) => <div className="performance-associate-row" key={`${person.associateId}-${person.name}`}>
         <span><strong>{person.name}</strong><small>{person.associateId}</small></span>
         <b>{person.delivered.toLocaleString("en-IN")}</b>
         <b>{person.assigned && person.assigned > 0 ? person.assigned.toLocaleString("en-IN", { maximumFractionDigits: 1 }) : "—"}</b>
         <span>{person.paymentScheme || "—"}</span>
-        <span>{person.rateCard || "—"}</span>
+        <span>{person.deliveryRate == null ? "—" : `₹${person.deliveryRate.toLocaleString("en-IN", { maximumFractionDigits: 2 })} / delivery`}</span>
       </div>) : <p>No associate-level delivery rows are available for this date.</p>}</div>
     </div>
     <div className="performance-associate-popover-foot"><span>{rows.length} delivering associate{rows.length === 1 ? "" : "s"}</span><b>{total.toLocaleString("en-IN")} total delivered</b></div>

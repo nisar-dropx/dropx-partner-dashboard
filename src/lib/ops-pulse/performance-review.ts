@@ -208,6 +208,7 @@ export type PerformanceOperationalSnapshot = {
 export type PerformanceAssociateDelivery = {
   assigned: number | null;
   associateId: string;
+  deliveryRate: number | null;
   delivered: number;
   /** Same-month delivery total and active delivery days, for review drill-downs. */
   mtdActiveDays: number;
@@ -371,19 +372,32 @@ function readablePayType(value: unknown) {
   return raw.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function associateRateCard(row: Record<string, unknown>) {
-  const rates: string[] = [];
-  const add = (label: string, value: unknown) => {
-    const amount = numberOrNull(value);
-    if (amount != null && amount > 0) rates.push(`${label} ₹${amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`);
-  };
-  add("Delivery", row.del_rate);
-  add("C-return", row.c_return_rate);
-  add("MFN", row.mfn_rate);
-  add("MFN return", row.mfn_return_rate);
-  add("MG", row.mg_salary);
-  add("Fuel", row.fuel_rate);
-  return rates.length ? rates.join(" · ") : null;
+function mappedDeliveryRate(mapping: Record<string, unknown> | undefined, components: Array<Record<string, unknown>>) {
+  if (!mapping) return null;
+  const legacy = numberOrNull(mapping.delivery_rate);
+  if (legacy != null && legacy > 0) return legacy;
+  const values = mapping.payment_values && typeof mapping.payment_values === "object" && !Array.isArray(mapping.payment_values)
+    ? mapping.payment_values as Record<string, unknown>
+    : {};
+  for (const component of components) {
+    const field = one(component.payment_fields as Relation<Record<string, unknown>>);
+    const code = String(field?.code ?? component.component_code ?? "").trim();
+    const source = normalized((field?.provider_calculation_sources as Record<string, unknown> | null)?.amazon ?? field?.calculation_source ?? code);
+    const isProduction = component.component_type === "production" || normalized(field?.calculation_type) === "COUNT_X_RATE";
+    // A rate is only displayed when it pays Amazon delivery (not C-return,
+    // MFN, fuel or an MG); this is the exact per-package figure requested.
+    if (!isProduction || !["DELIVERY", "AMAZONDELIVERY"].includes(source)) continue;
+    const rate = numberOrNull(values[code] ?? values[String(component.component_code ?? "")] );
+    if (rate != null && rate > 0) return rate;
+  }
+  // Older payment methods did not persist a calculation source. Their
+  // delivery component is still safely identifiable by its code.
+  for (const [code, value] of Object.entries(values)) {
+    if (!/DELIVERY|DEL[_ ]?RATE|PER[_ ]?PACKET/i.test(code) || /RETURN|MFN|FUEL|MG|GUARANTEE/i.test(code)) continue;
+    const rate = numberOrNull(value);
+    if (rate != null && rate > 0) return rate;
+  }
+  return null;
 }
 
 export async function loadPerformanceOperationalSnapshots(companyId: string, sourceDate: string, locations: CodLocationRow[]) {
@@ -418,6 +432,27 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
   ]);
   const error = costResult.error ?? monthCostResult.error ?? breakupResult.error ?? shipmentResult.error ?? detailResult.error ?? capacityResult.error ?? monthCapacityResult.error ?? headsResult.error ?? openingResult.error ?? monthShipmentResult.error;
   if (error) return { rows: empty, error: error.message };
+  const providerMemberIds = [...new Set((shipmentResult.data ?? []).map((row) => String(row.provider_employee_id ?? "").trim()).filter(Boolean))];
+  const mappingsResult = providerMemberIds.length
+    ? await supabaseAdmin.from("field_executive_provider_mappings")
+      .select("provider_member_id,station_id,effective_from,effective_to,payment_method_id,payment_values,delivery_rate")
+      .eq("company_id", companyId).eq("status", "active").in("provider_member_id", providerMemberIds)
+    : { data: [], error: null };
+  if (mappingsResult.error) return { rows: empty, error: mappingsResult.error.message };
+  const methodIds = [...new Set((mappingsResult.data ?? []).map((mapping) => mapping.payment_method_id).filter(Boolean))] as string[];
+  const componentsResult = methodIds.length
+    ? await supabaseAdmin.from("payment_method_components")
+      .select("payment_method_id,component_code,component_type,payment_fields(code,calculation_type,calculation_source,provider_calculation_sources)")
+      .in("payment_method_id", methodIds).eq("is_active", true)
+    : { data: [], error: null };
+  if (componentsResult.error) return { rows: empty, error: componentsResult.error.message };
+  const stationIdByCode = new Map(locations.map((location) => [location.station_code, location.id]));
+  const componentsByMethod = new Map<string, Array<Record<string, unknown>>>();
+  (componentsResult.data ?? []).forEach((component) => {
+    const entries = componentsByMethod.get(component.payment_method_id) ?? [];
+    entries.push(component as Record<string, unknown>);
+    componentsByMethod.set(component.payment_method_id, entries);
+  });
   const adHocHeads = (headsResult.data ?? []).filter(isAdHocHead);
   const adHocHeadIds = adHocHeads.map((head) => head.id);
   const adHocHeadById = new Map(adHocHeads.map((head) => [head.id, head]));
@@ -432,7 +467,6 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     end: String(row.opening_window_end ?? "10:00:00"),
     start: String(row.opening_window_start ?? "02:00:00")
   }]));
-  const stationIdByCode = new Map(locations.map((location) => [location.station_code, location.id]));
   const blank = (code: string): PerformanceOperationalSnapshot => {
     const opening = openingByStationId.get(stationIdByCode.get(code) ?? "") ?? { end: "10:00:00", start: "02:00:00" };
     return ({
@@ -538,6 +572,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       const person = people.get(associateId) ?? {
         assigned: null,
         associateId: String(row.driver_id || "—"),
+        deliveryRate: null,
         delivered: 0,
         mtdActiveDays: 0,
         mtdDelivered: 0,
@@ -583,6 +618,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       const person = people.get(associateId) ?? {
         assigned: null,
         associateId: String(row.provider_employee_id || "—"),
+        deliveryRate: null,
         delivered: 0,
         mtdActiveDays: 0,
         mtdDelivered: 0,
@@ -598,7 +634,16 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       person.name = String(row.dropx_name || row.provider_employee_name || person.name);
       person.paymentScheme = readablePayType(row.pay_type) ?? person.paymentScheme;
       person.paymentSetupStatus = String(row.mapping_status || "").trim() || person.paymentSetupStatus;
-      person.rateCard = associateRateCard(row as Record<string, unknown>) ?? person.rateCard;
+      const importedRate = numberOrNull(row.del_rate);
+      const mapping = (mappingsResult.data ?? []).find((candidate) =>
+        String(candidate.provider_member_id ?? "").trim().toUpperCase() === String(row.provider_employee_id ?? "").trim().toUpperCase()
+        && (!candidate.station_id || candidate.station_id === stationIdByCode.get(row.station_code))
+        && String(candidate.effective_from ?? "") <= sourceDate
+        && (!candidate.effective_to || String(candidate.effective_to) >= sourceDate)
+      );
+      const mappedRate = mappedDeliveryRate(mapping as Record<string, unknown> | undefined, mapping?.payment_method_id ? componentsByMethod.get(mapping.payment_method_id) ?? [] : []);
+      person.deliveryRate = importedRate != null && importedRate > 0 ? importedRate : mappedRate ?? person.deliveryRate;
+      person.rateCard = person.deliveryRate != null ? `₹${person.deliveryRate.toLocaleString("en-IN", { maximumFractionDigits: 2 })} / delivery` : null;
       const totalPay = numberOrNull(row.da_total_pay);
       if (totalPay != null && (person.paymentScheme || person.rateCard || totalPay > 0)) person.totalPay = (person.totalPay ?? 0) + totalPay;
       people.set(associateId, person);
@@ -638,6 +683,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       .map((person) => ({
         assigned: person.assigned,
         associateId: person.associateId,
+        deliveryRate: person.deliveryRate,
         delivered: person.delivered,
         mtdActiveDays: person.mtdActiveDays,
         mtdDelivered: person.mtdDelivered,
