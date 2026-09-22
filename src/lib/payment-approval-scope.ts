@@ -1,5 +1,7 @@
 import type { AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { matchesCurrentPaymentAssignee } from "@/lib/payment-stage-policy";
+import { initialApprovalReadyIds } from "@/lib/payment-initial-approval-gate";
 
 export type PaymentApprovalScopeRequest = {
   id: string;
@@ -47,19 +49,12 @@ export async function getPaymentApprovalEligibility(companyId: string, authoriza
       continue;
     }
 
-    if (request.current_approver_user_id === authorization.userId) {
-      eligibleIds.add(request.id);
-      continue;
-    }
-
-    const roleMatch = Boolean(request.current_approver_role_id && authorization.effectiveRoleIds.includes(request.current_approver_role_id))
-      || (request.current_approver_role_ids ?? []).some((roleId) => authorization.effectiveRoleIds.includes(roleId));
-    if (!roleMatch) continue;
+    if (!matchesCurrentPaymentAssignee(authorization.userId, authorization.effectiveRoleIds, request)) continue;
     if (request.location_model_id && modelIds && !modelIds.has(request.location_model_id)) continue;
     eligibleIds.add(request.id);
   }
 
-  return eligibleIds;
+  return initialApprovalReadyIds(companyId, [...eligibleIds], supabaseAdmin);
 }
 
 export async function canActOnPaymentRequest(companyId: string, authorization: AuthorizationContext, request: PaymentApprovalScopeRequest) {

@@ -88,7 +88,7 @@ export type PaymentEmailResult =
 
 const defaultTemplates: Record<PaymentEmailEventType, Pick<TemplateRow, "subject_template" | "body_template" | "to_recipients" | "cc_recipients">> = {
   payment_request: {
-    to_recipients: ["location_manager", "final_approver", "payment_processor"],
+    to_recipients: ["current_approver"],
     cc_recipients: ["requester"],
     subject_template: "Payment approval required · {{request_no}}",
     body_template: "{{requester_name}} requested {{amount}} for {{payment_head}} at {{location_code}}. Open Ops or DropX One to approve or reject."
@@ -114,7 +114,7 @@ const defaultTemplates: Record<PaymentEmailEventType, Pick<TemplateRow, "subject
 };
 
 const allowedRecipientsByEvent: Record<PaymentEmailEventType, string[]> = {
-  payment_request: ["requester", "location_manager", "final_approver", "payment_processor"],
+  payment_request: ["requester", "current_approver", "location_manager", "final_approver", "payment_processor"],
   payment_approve: [
     "requester",
     "location_manager",

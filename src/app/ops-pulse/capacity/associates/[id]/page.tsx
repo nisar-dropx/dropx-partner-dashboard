@@ -33,9 +33,15 @@ type DeliveryTotals = {
   mfnReturn: number;
   assigned: number;
   officialDelivery: number;
+  variablePay: number;
+  salaryPay: number;
+  fuelPay: number;
+  totalPay: number;
+  payType: string;
+  mappingStatus: string;
 };
 function emptyTotals(): DeliveryTotals {
-  return { amazon: 0, smd: 0, smd2: 0, swa: 0, returned: 0, mfn: 0, mfnReturn: 0, assigned: 0, officialDelivery: 0 };
+  return { amazon: 0, smd: 0, smd2: 0, swa: 0, returned: 0, mfn: 0, mfnReturn: 0, assigned: 0, officialDelivery: 0, variablePay: 0, salaryPay: 0, fuelPay: 0, totalPay: 0, payType: "Not configured", mappingStatus: "Unmapped" };
 }
 function addBreakdown(total: DeliveryTotals, row: CapacityDeliveryBreakdown) {
   total.amazon += num(row.base_amazon_delivery);
@@ -47,6 +53,12 @@ function addBreakdown(total: DeliveryTotals, row: CapacityDeliveryBreakdown) {
   total.mfnReturn += num(row.mfn_return);
   total.assigned += num(row.assigned_count);
   total.officialDelivery += officialBreakdownDeliveryCount(row);
+  total.variablePay += num(row.variable_pay);
+  total.salaryPay += num(row.mg_pay);
+  total.fuelPay += num(row.fuel_pay);
+  total.totalPay += num(row.da_total_pay);
+  total.payType = row.pay_type || total.payType;
+  total.mappingStatus = row.mapping_status || total.mappingStatus;
   return total;
 }
 
@@ -94,10 +106,18 @@ export default async function AssociateCapacityPage({ params, searchParams }: { 
     mfn: total.mfn + row.mfn,
     mfnReturn: total.mfnReturn + row.mfnReturn,
     assigned: total.assigned + row.assigned,
-    officialDelivery: total.officialDelivery + row.officialDelivery
+    officialDelivery: total.officialDelivery + row.officialDelivery,
+    variablePay: total.variablePay + row.variablePay,
+    salaryPay: total.salaryPay + row.salaryPay,
+    fuelPay: total.fuelPay + row.fuelPay,
+    totalPay: total.totalPay + row.totalPay,
+    payType: row.payType,
+    mappingStatus: row.mappingStatus
   }), emptyTotals());
   const total = officialTotals.officialDelivery;
   const average = daily.length ? total / daily.length : 0;
+  const cpsShipmentCount = officialTotals.amazon + officialTotals.returned;
+  const costPerShipment = cpsShipmentCount ? officialTotals.totalPay / cpsShipmentCount : null;
   const peak = Math.max(0, ...daily.map((row) => row.officialDelivery));
   const safe = ruleResult.rows.find((rule) => rule.stationCode === station)?.maxSafeSpr ?? 70;
   const name = requestedName || rows.find((row) => row.provider_employee_name)?.provider_employee_name || id;
@@ -132,6 +152,11 @@ export default async function AssociateCapacityPage({ params, searchParams }: { 
       <article><span>C-return</span><strong>{fmt(officialTotals.returned)}</strong><small>Reference only · excluded from SPR</small></article>
       <article><span>MFN forward</span><strong>{fmt(officialTotals.mfn)}</strong><small>Reference only · excluded from SPR</small></article>
       <article><span>MFN return</span><strong>{fmt(officialTotals.mfnReturn)}</strong><small>Reference only · excluded from SPR</small></article>
+    </section>
+    <section className="panel">
+      <div className="panel-head"><div><h2>Cost per shipment evidence</h2><p className="subtle">CPS = all calculated pay for the selected range ÷ (Amazon delivery + C-return). MFN is excluded from the denominator.</p></div><strong>{costPerShipment == null ? "Payment not mapped" : `₹${fmt(costPerShipment, 2)}`}</strong></div>
+      <div className="performance-summary-grid"><article><span>Variable pay</span><strong>₹{fmt(officialTotals.variablePay, 2)}</strong><small>Delivery and C-return rate components</small></article><article><span>Salary / MG</span><strong>₹{fmt(officialTotals.salaryPay, 2)}</strong><small>Effective-dated daily accrual</small></article><article><span>Fuel pay</span><strong>₹{fmt(officialTotals.fuelPay, 2)}</strong><small>Included when configured</small></article><article><span>Total paid</span><strong>₹{fmt(officialTotals.totalPay, 2)}</strong><small>{officialTotals.payType} · {officialTotals.mappingStatus}</small></article></div>
+      <div className="table-wrap"><table className="capacity-daily-table"><thead><tr><th>Date</th><th>Delivery</th><th>C-return</th><th>Total count</th><th>Variable pay</th><th>Salary / MG</th><th>Fuel pay</th><th>Total paid</th><th>Daily CPS</th></tr></thead><tbody>{daily.map((row) => { const count = row.amazon + row.returned; const cps = count ? row.totalPay / count : null; return <tr key={`cps-${row.date}`}><td>{row.date.split("-").reverse().join("/")}</td><td>{fmt(row.amazon)}</td><td>{fmt(row.returned)}</td><td><strong>{fmt(count)}</strong></td><td>₹{fmt(row.variablePay, 2)}</td><td>₹{fmt(row.salaryPay, 2)}</td><td>₹{fmt(row.fuelPay, 2)}</td><td>₹{fmt(row.totalPay, 2)}</td><td>{cps == null ? "—" : `₹${fmt(cps, 2)}`}</td></tr>; })}<tr><td><strong>Total</strong></td><td>{fmt(officialTotals.amazon)}</td><td>{fmt(officialTotals.returned)}</td><td><strong>{fmt(cpsShipmentCount)}</strong></td><td>₹{fmt(officialTotals.variablePay, 2)}</td><td>₹{fmt(officialTotals.salaryPay, 2)}</td><td>₹{fmt(officialTotals.fuelPay, 2)}</td><td>₹{fmt(officialTotals.totalPay, 2)}</td><td><strong>{costPerShipment == null ? "—" : `₹${fmt(costPerShipment, 2)}`}</strong></td></tr></tbody></table></div>
     </section>
     <section className="panel">
       <div className="panel-head"><div><h2>Daily Amazon delivery trend</h2><p className="subtle">Official associate count from Amazon Daily Shipment Count. Other activity is reference only.</p></div></div>

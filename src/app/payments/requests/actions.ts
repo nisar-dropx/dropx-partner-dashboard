@@ -14,6 +14,7 @@ import { validatePaymentQuestionDate } from "@/lib/payment-question-date-rules";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover, roleIdsWithPageEditAccess } from "@/lib/position-access";
 import { loadApprovalSteps, resolveInitialApprovalTarget, resolveStepApprover, type ApprovalStepRow } from "@/lib/payment-approval-steps";
+import { initialStageStatus } from "@/lib/payment-stage-policy";
 import { insertPaymentApprovalLog } from "../approvals/actions";
 
 function clean(value: FormDataEntryValue | null) {
@@ -291,12 +292,9 @@ export async function createExpenseRequest(formData: FormData) {
       currentApprovalRoleIds = target.currentApprovalRoleIds;
       currentStepOrder = target.currentStepOrder;
       totalSteps = target.totalSteps;
-      // See the identical comment in createPaymentRequest: a required step
-      // can land here with no resolvable candidate (sole role-holder on
-      // leave, or no one assigned to this station's region), which must be
-      // flagged explicitly rather than mislabeled "APPROVED" and left
-      // invisible to every approver.
-      approvalStatus = !target.approver ? "NO_APPROVER_CONFIGURED" : target.currentStepOrder > 1 ? "APPROVED" : "PENDING";
+      // A missing assignment must not create an invisible pending request.
+      if (!target.approver) throw new Error("No active initial approver is assigned for this station and payment head. Ask an administrator to correct Payment Approvals in Master; this request has not been submitted.");
+      approvalStatus = initialStageStatus(target.approver);
       const lastStep = approvalSteps[approvalSteps.length - 1];
       finalApprovalRoleIds = lastStep?.candidates.map((candidate) => candidate.role_id) ?? [];
       finalApprovalRoleId = finalApprovalRoleIds[0] ?? null;
@@ -540,14 +538,9 @@ export async function createPaymentRequest(formData: FormData) {
       currentApprovalRoleIds = target.currentApprovalRoleIds;
       currentStepOrder = target.currentStepOrder;
       totalSteps = target.totalSteps;
-      // A required step can land here with no resolvable candidate (e.g. the
-      // only person holding that role is on leave, or no one is assigned to
-      // this station's region at all) - matches approvePaymentRequest's
-      // advanceApproval branch, which flags this explicitly rather than
-      // reusing the "step > 1 means something upstream was approved" guess,
-      // which would otherwise mislabel a silently-skipped/unresolved step as
-      // "APPROVED" and leave the request invisible to every approver.
-      approvalStatus = !target.approver ? "NO_APPROVER_CONFIGURED" : target.currentStepOrder > 1 ? "APPROVED" : "PENDING";
+      // Step order is not evidence of an earlier approval.
+      if (!target.approver) throw new Error("No active initial approver is assigned for this station and payment head. Ask an administrator to correct Payment Approvals in Master; this request has not been submitted.");
+      approvalStatus = initialStageStatus(target.approver);
       const lastStep = approvalSteps[approvalSteps.length - 1];
       finalApprovalRoleIds = lastStep?.candidates.map((candidate) => candidate.role_id) ?? [];
       finalApprovalRoleId = finalApprovalRoleIds[0] ?? null;

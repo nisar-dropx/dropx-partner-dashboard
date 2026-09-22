@@ -53,6 +53,7 @@ const eventMap: Record<string, { eventType: PaymentEmailEventType; title: string
 
 const requestRecipientOptions = [
   { label: "Requester", value: "requester" },
+  { label: "Current approver (assigned stage)", value: "current_approver" },
   { label: "Reporting Manager", value: "location_manager" },
   { label: "Final approver", value: "final_approver" },
   { label: "Payment processor", value: "payment_processor" }

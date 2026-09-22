@@ -3,6 +3,8 @@ import { currentAccessSurface } from "@/lib/access-surface";
 import { canAccessPaymentLocation } from "@/lib/payment-approval-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { loadPeopleExceptionCount } from "@/lib/people-exception-count";
+import { matchesCurrentPaymentAssignee } from "@/lib/payment-stage-policy";
+import { initialApprovalReadyIds } from "@/lib/payment-initial-approval-gate";
 
 export type PaymentNotificationItem = {
   key: string;
@@ -144,9 +146,7 @@ function addItem(items: PaymentNotificationItem[], key: string, label: string, d
 
 function isAssignedToCurrentUser(request: PaymentNotificationRequest, authorization: AuthorizationContext) {
   if (!canAccessPaymentLocation(authorization, request.location_id)) return false;
-  if (request.current_approver_user_id === authorization.userId) return true;
-  return Boolean(request.current_approver_role_id && authorization.effectiveRoleIds.includes(request.current_approver_role_id)) ||
-    (request.current_approver_role_ids ?? []).some((roleId) => authorization.effectiveRoleIds.includes(roleId));
+  return matchesCurrentPaymentAssignee(authorization.userId, authorization.effectiveRoleIds, request);
 }
 
 async function loadPeopleReviewCount(authorization: AuthorizationContext) {
@@ -303,10 +303,10 @@ async function loadPaymentNotificationSnapshotUncached(authorization: Authorizat
   }
 
   if (hasPermission(authorization, "payment_approvals", "access")) {
-    badges.payment_approvals = requests
+    const assignedApprovals = requests
       .filter((request) => isAssignedToCurrentUser(request, authorization))
-      .filter(isPendingApproval)
-      .length;
+      .filter(isPendingApproval);
+    badges.payment_approvals = (await initialApprovalReadyIds(authorization.companyId!, assignedApprovals.map(request => request.id), supabaseAdmin)).size;
     addItem(
       items,
       "payment_approvals",
