@@ -16,6 +16,8 @@
     "plugins": [{ "name": "next" }],
     "paths": {
       "@/lib/biometric/*": ["../../src/lib/biometric/*"],
+      "@/lib/app-notifications": ["../../src/lib/app-notifications.ts"],
+      "@/lib/attendance-punch-notice": ["../../src/lib/attendance-punch-notice.ts"],
       "@/lib/attendance-regularization-workflow": ["../../src/lib/attendance-regularization-workflow.ts"],
       "@/lib/attendance-pay-day": ["../../src/lib/attendance-pay-day.ts"],
       "@/lib/connect-attendance-notifications": ["../../src/lib/connect-attendance-notifications.ts"],

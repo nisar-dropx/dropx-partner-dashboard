@@ -93,6 +93,22 @@ public class LocationTrackingService extends Service {
   // per COMPLIANCE_INTERVAL_MS (10 min) rather than the worker-visible cadence requested here.
   private final Handler integrityCheckHandler = new Handler(Looper.getMainLooper());
   private Runnable integrityCheckRunnable;
+  /**
+   * Debounce counters for refreshLocationEnabledAlert()/refreshInternetEnabledAlert() — a
+   * single bad tick's OS reading (LocationManagerCompat.isLocationEnabled() or
+   * ConnectivityManager's active-network check) can be a one-off blip rather than a real,
+   * sustained problem: the OS briefly reports location/network unready for a tick right around
+   * a Location/internet toggle settling, or right after LocationTrackingService itself restarts
+   * (observed happening around reconnects, when connect-native-bridge.tsx's polling sync
+   * re-triggers configureAttendance()/startBackgroundLocation()). Reporting on the very first
+   * bad tick turned exactly those transients into real, wrongly-created attendance_integrity_flags
+   * rows for a worker whose location/internet were genuinely fine. Requiring the SAME problem on
+   * CONSECUTIVE_BAD_TICKS_THRESHOLD consecutive ticks before alerting/reporting filters those
+   * out while still catching a real outage within one extra tick's delay.
+   */
+  private static final int CONSECUTIVE_BAD_TICKS_THRESHOLD = 2;
+  private int consecutiveLocationOffTicks = 0;
+  private int consecutiveInternetOffTicks = 0;
 
   @Override
   public void onCreate() {
@@ -165,16 +181,19 @@ public class LocationTrackingService extends Service {
     boolean enabled = locationManager != null && LocationManagerCompat.isLocationEnabled(locationManager);
     NotificationManagerCompat notifications = NotificationManagerCompat.from(this);
     if (enabled) {
+      consecutiveLocationOffTicks = 0;
       notifications.cancel(LOCATION_OFF_NOTIFICATION_ID);
-    } else {
-      // notify() with the same id replaces the existing notification rather than stacking a
-      // new one — safe to call unconditionally on every integrity-check tick, and is what
-      // makes this "repeat" every tick instead of firing once on the MODE_CHANGED_ACTION
-      // broadcast alone (that broadcast only fires on a state CHANGE, so a worker who leaves
-      // Location off for the whole shift would otherwise only ever see it once).
-      notifications.notify(LOCATION_OFF_NOTIFICATION_ID, buildLocationOffAlert());
-      reportProblemToHrms("location_off", "Location is turned off");
+      return;
     }
+    consecutiveLocationOffTicks++;
+    if (consecutiveLocationOffTicks < CONSECUTIVE_BAD_TICKS_THRESHOLD) return;
+    // notify() with the same id replaces the existing notification rather than stacking a
+    // new one — safe to call unconditionally on every integrity-check tick, and is what
+    // makes this "repeat" every tick instead of firing once on the MODE_CHANGED_ACTION
+    // broadcast alone (that broadcast only fires on a state CHANGE, so a worker who leaves
+    // Location off for the whole shift would otherwise only ever see it once).
+    notifications.notify(LOCATION_OFF_NOTIFICATION_ID, buildLocationOffAlert());
+    reportProblemToHrms("location_off", "Location is turned off");
   }
 
   private Notification buildLocationOffAlert() {
@@ -224,6 +243,7 @@ public class LocationTrackingService extends Service {
     boolean connected = isInternetConnected();
     NotificationManagerCompat notifications = NotificationManagerCompat.from(this);
     if (connected) {
+      consecutiveInternetOffTicks = 0;
       notifications.cancel(INTERNET_OFF_NOTIFICATION_ID);
       // Every reportProblemToHrms() attempt made while offline necessarily fails (there's no
       // network path to send it over), and refreshInternetEnabledAlert() only calls it from the
@@ -238,11 +258,13 @@ public class LocationTrackingService extends Service {
         TrackingPrefs.setInternetOffPendingHrmsReport(this, false);
         reportProblemToHrms("internet_off", "Internet was turned off and is now back on");
       }
-    } else {
-      notifications.notify(INTERNET_OFF_NOTIFICATION_ID, buildInternetOffAlert());
-      TrackingPrefs.setInternetOffPendingHrmsReport(this, true);
-      reportProblemToHrms("internet_off", "Internet is turned off");
+      return;
     }
+    consecutiveInternetOffTicks++;
+    if (consecutiveInternetOffTicks < CONSECUTIVE_BAD_TICKS_THRESHOLD) return;
+    notifications.notify(INTERNET_OFF_NOTIFICATION_ID, buildInternetOffAlert());
+    TrackingPrefs.setInternetOffPendingHrmsReport(this, true);
+    reportProblemToHrms("internet_off", "Internet is turned off");
   }
 
   private boolean isInternetConnected() {

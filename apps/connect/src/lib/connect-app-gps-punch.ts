@@ -3,6 +3,7 @@ import "server-only";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { ConnectAttendanceWorker } from "@/lib/connect-attendance-worker";
 import { loadLatestBiometricPunchNeedingLocation } from "@/lib/connect-biometric-punch-location";
+import { createAttendancePunchNotification } from "@/lib/app-notifications";
 
 const APP_GPS_DEVICE_SERIAL = "APP_GPS";
 const FALLBACK_GEOFENCE_RADIUS_M = 50;
@@ -752,6 +753,24 @@ export async function insertConnectAppGpsPunch({
       console.error("Unable to rebuild attendance after GPS punch:", error);
     });
   }
+
+  // Confirms the punch was actually received — otherwise a worker whose punch silently failed
+  // (network blip, server error swallowed upstream) and one whose punch succeeded look
+  // identical from the app's own UI alone. Delivers as both a push to the device and an
+  // in-app notification (createAppNotification's own delivery, unchanged here). Best-effort:
+  // a notification failure must never fail the punch itself, which is already recorded above.
+  await createAttendancePunchNotification({
+    accountId: worker.profileId,
+    companyId: worker.companyId,
+    enrolmentId: worker.enrolmentId,
+    profileType: worker.profileType,
+    punchDate,
+    punchId: insert.data.id as string,
+    punchOrder: nextOrder,
+    punchTime: punchAt
+  }).catch((error) => {
+    console.error("Unable to send punch confirmation notification:", error);
+  });
 
   const flagIds: string[] = [];
   if (holdForReview) {
