@@ -317,7 +317,7 @@ async function notifyWorker(input: { companyId: string; workerType: WorkerType; 
   await db().from("mob_app_notifications").upsert({ company_id: input.companyId, recipient_profile_type: input.workerType, recipient_account_id: input.workerId, event_code: input.event, source_key: input.sourceKey, title: input.title, body: input.body, route: "roster", data: input.data ?? {}, push_status: "not_configured" }, { onConflict: "company_id,event_code,source_key,recipient_account_id", ignoreDuplicates: true });
 }
 
-async function rosterPayload(account: ConnectAccount, workerType: WorkerType, identities: WorkerIdentity[]) {
+async function rosterPayload(account: ConnectAccount, workerType: WorkerType, identities: WorkerIdentity[], debug = false) {
   const start = todayIndia();
   const end = addDays(start, ROSTER_VIEW_DAYS - 1);
   const entryResults = await Promise.all(identities.map((identity) => db().from("hr_roster_entries")
@@ -327,7 +327,15 @@ async function rosterPayload(account: ConnectAccount, workerType: WorkerType, id
   const entryError = entryResults.find((result) => result.error)?.error;
   if (entryError) throw new Error(entryError.message);
   const directEntries = entryResults.flatMap((result) => result.data ?? []) as unknown as Entry[];
+  // TEMP DEBUG - remove after diagnosing wrong-shift report
+  if (debug) {
+    console.log("[roster-debug] companyId=", account.companyId, "identities=", JSON.stringify(identities), "start=", start);
+    console.log("[roster-debug] directEntries for", start, "=", JSON.stringify(directEntries.filter((e) => e.roster_date === start)));
+  }
   const own = await expandRecurringOwnEntries(account, workerType, identities, start, directEntries);
+  if (debug) {
+    console.log("[roster-debug] own (post-expand) for", start, "=", JSON.stringify(own.filter((e) => e.roster_date === start)));
+  }
   const locations = [...new Set(own.map((entry) => entry.location_id).filter(Boolean))] as string[];
   let colleagueEntries: Entry[] = [];
   if (locations.length) {
@@ -473,7 +481,9 @@ export async function GET(request: Request) {
       return NextResponse.json(await workforceRosterPayload(account), { headers: { "Cache-Control": "private, no-store" } });
     }
     const { account, workerType, identities } = await accountFrom(url);
-    return NextResponse.json(await rosterPayload(account, workerType, identities), { headers: { "Cache-Control": "private, no-store" } });
+    // TEMP DEBUG - remove after diagnosing wrong-shift report
+    const debug = url.searchParams.get("debug") === "1";
+    return NextResponse.json(await rosterPayload(account, workerType, identities, debug), { headers: { "Cache-Control": "private, no-store" } });
   }
   catch (error) { return NextResponse.json({ error: userFacingError(error, "Unable to load roster.") }, { status: 400 }); }
 }
