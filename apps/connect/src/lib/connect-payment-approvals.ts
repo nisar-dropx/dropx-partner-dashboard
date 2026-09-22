@@ -2,6 +2,8 @@ import "server-only";
 
 import { supabaseAdmin } from "./supabase-admin";
 import { advanceApproval, loadApprovalSteps, type ApproverTarget } from "./payment-approval-steps";
+import { initialApprovalReadyIds } from "../../../../src/lib/payment-initial-approval-gate";
+import { isPendingPaymentApproval } from "../../../../src/lib/payment-stage-policy";
 
 function db() {
   if (!supabaseAdmin) throw new Error("Database configuration is unavailable.");
@@ -116,10 +118,8 @@ export async function listConnectPaymentApprovals(companyId: string, actorUserId
 
   let query = db()
     .from("payment_requests")
-    .select("id, request_no, location_id, location_code, amount, amount_requested, remarks, created_at, requested_by, current_approver_user_id, current_approver_role_id, current_approver_role_ids, stations(location_model_id), payment_heads(name), payment_request_answers(id)")
-    .eq("company_id", companyId)
-    .in("status", ["pending", "resubmitted"])
-    .not("current_approver_user_id", "is", null);
+    .select("id, request_no, status, approval_status, location_id, location_code, amount, amount_requested, remarks, created_at, requested_by, current_approver_user_id, current_approver_role_id, current_approver_role_ids, stations(location_model_id), payment_heads(name), payment_request_answers(id)")
+    .eq("company_id", companyId);
 
   const orParts = [`current_approver_user_id.in.(${actorUserIds.join(",")})`];
   if (roleIds.length) {
@@ -131,13 +131,16 @@ export async function listConnectPaymentApprovals(companyId: string, actorUserId
   const result = await query.order("created_at", { ascending: true });
   if (result.error) throw new Error(result.error.message);
 
-  const scoped = (result.data ?? []).filter((row) => {
-    if (row.current_approver_user_id && actorUserIds.includes(row.current_approver_user_id)) return true;
+  const assigned = (result.data ?? []).filter((row) => {
+    if (!isPendingPaymentApproval(row.status, row.approval_status)) return false;
+    if (row.current_approver_user_id) return actorUserIds.includes(row.current_approver_user_id);
     const station = Array.isArray(row.stations) ? row.stations[0] : row.stations;
     const locationModelId = station?.location_model_id ?? null;
     const roleCandidates = [row.current_approver_role_id, ...(row.current_approver_role_ids ?? [])].filter(Boolean) as string[];
     return roleCandidates.some((roleId) => roleCoversLocation(roleScopes, roleId, row.location_id, locationModelId));
   });
+  const readyIds = await initialApprovalReadyIds(companyId, assigned.map(row => row.id), db());
+  const scoped = assigned.filter(row => readyIds.has(row.id));
 
   const requesterIds = [...new Set(scoped.map((row) => row.requested_by).filter(Boolean))] as string[];
   const requesters = requesterIds.length
@@ -177,19 +180,20 @@ type RequestRow = {
 async function loadOwnedRequest(companyId: string, requestId: string, actorUserIds: string[], roleScopes: Map<string, ActorRoleScope>): Promise<RequestRow> {
   const result = await db()
     .from("payment_requests")
-    .select("id, company_id, location_id, payment_head_id, current_step_order, current_approver_user_id, current_approver_role_id, current_approver_role_ids, approval_cycle, status, stations(location_model_id)")
+    .select("id, company_id, location_id, payment_head_id, current_step_order, current_approver_user_id, current_approver_role_id, current_approver_role_ids, approval_cycle, status, approval_status, stations(location_model_id)")
     .eq("id", requestId)
     .eq("company_id", companyId)
     .single();
   if (result.error || !result.data) throw new Error("Payment request not found.");
-  if (!["pending", "resubmitted"].includes(String(result.data.status))) throw new Error("This request has already been decided.");
+  if (!isPendingPaymentApproval(result.data.status, result.data.approval_status)) throw new Error("This request has already been decided.");
 
   const station = Array.isArray(result.data.stations) ? result.data.stations[0] : result.data.stations;
   const locationModelId = station?.location_model_id ?? null;
   const isOwnerMatch = Boolean(result.data.current_approver_user_id && actorUserIds.includes(result.data.current_approver_user_id));
   const roleCandidates = [result.data.current_approver_role_id, ...(result.data.current_approver_role_ids ?? [])].filter(Boolean) as string[];
-  const isRoleMatch = roleCandidates.some((roleId) => roleCoversLocation(roleScopes, roleId, result.data.location_id, locationModelId));
+  const isRoleMatch = !result.data.current_approver_user_id && roleCandidates.some((roleId) => roleCoversLocation(roleScopes, roleId, result.data.location_id, locationModelId));
   if (!isOwnerMatch && !isRoleMatch) throw new Error("This request is not pending with you.");
+  if (!(await initialApprovalReadyIds(companyId, [requestId], db())).has(requestId)) throw new Error("Initial approval must be completed before this request can be approved at this stage.");
 
   return result.data;
 }

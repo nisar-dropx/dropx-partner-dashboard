@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover, roleIdsWithPageEditAccess } from "@/lib/position-access";
+import { resolveInitialStage } from "@/lib/payment-stage-policy";
 
 export type ApprovalStepCandidate = { role_id: string; scope: "station" | "cluster" | "company" };
 export type ApprovalStepRow = {
@@ -7,6 +8,7 @@ export type ApprovalStepRow = {
   step_order: number;
   candidates: ApprovalStepCandidate[];
   is_required: boolean;
+  has_local_candidates?: boolean;
 };
 export type ApproverTarget = { userId: string; roleId: string } | null;
 
@@ -32,6 +34,7 @@ export async function loadApprovalSteps(companyId: string, paymentHeadId: string
 
   return rows.map((row) => ({
     ...row,
+    has_local_candidates: row.candidates.some(candidate => candidate.scope !== "company"),
     candidates: row.candidates.filter((candidate) => editableRoleIds.has(candidate.role_id))
   }));
 }
@@ -121,27 +124,6 @@ async function candidateUserIds(companyId: string, roleId: string, scope: "stati
 }
 
 /**
- * Only leave, business trips, weekly-offs and "not linked to an active HRMS
- * engagement" gate approval availability - the shift start/end time is
- * deliberately NOT compared against the current time. Payment approvers are
- * managers/leadership, not shift workers; comparing wall-clock time against a
- * roster shift window (meant for station staff) incorrectly marked people
- * "unavailable" the moment their nominal shift ended, even when they were
- * demonstrably still working.
- */
-async function isApproverAvailable(companyId: string, userId: string) {
-  if (!supabaseAdmin) return true;
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
-  const result = await supabaseAdmin.rpc("hr_approval_email_workday", { p_company_id: companyId, p_user_id: userId, p_date: today });
-  // Availability is a courtesy skip, not a hard gate: if the RPC is missing,
-  // errors, or returns nothing (e.g. this company has no HRMS roster data),
-  // fall back to treating the person as available rather than blocking the request.
-  if (result.error || !result.data?.length) return true;
-  const dayType = result.data[0]?.day_type;
-  return dayType === "working";
-}
-
-/**
  * hr_approval_delegations (HRMS) is auto-populated when a manager's business
  * trip or leave request is finally approved, pointing at their own reporting
  * manager for the trip/leave dates - workflow-agnostic, so it also governs
@@ -197,11 +179,11 @@ async function redirectThroughDelegation(companyId: string, target: { userId: st
 }
 
 /**
- * Resolves the first available, active approver for one step: tries each
+ * Resolves the first active approver for one step: tries each
  * candidate role in the step's configured order, and within a role, prefers
  * an org_positions-based assignment (acting cover first) before falling back
- * to company_product_memberships - then skips anyone currently on leave or
- * off-roster per the shared HRMS availability RPC.
+ * to company_product_memberships. Roster availability never removes approval
+ * responsibility: use an explicit delegate or keep the request with its manager.
  */
 export async function resolveStepApprover(companyId: string, step: ApprovalStepRow, locationId: string | null | undefined): Promise<ApproverTarget> {
   if (!supabaseAdmin) return null;
@@ -209,7 +191,7 @@ export async function resolveStepApprover(companyId: string, step: ApprovalStepR
   for (const candidate of step.candidates) {
     const scopedLocationId = candidate.scope === "company" ? null : locationId;
     const positionApprover = await findPositionApprover(companyId, [candidate.role_id], scopedLocationId);
-    if (positionApprover && await isApproverAvailable(companyId, positionApprover.userId)) return redirectThroughDelegation(companyId, positionApprover);
+    if (positionApprover) return redirectThroughDelegation(companyId, positionApprover);
 
     const userIds = await candidateUserIds(companyId, candidate.role_id, candidate.scope, locationId);
     if (!userIds.length) continue;
@@ -224,7 +206,7 @@ export async function resolveStepApprover(companyId: string, step: ApprovalStepR
     if (profiles.error) throw new Error(profiles.error.message);
 
     for (const profile of profiles.data ?? []) {
-      if (await isApproverAvailable(companyId, profile.id)) return redirectThroughDelegation(companyId, { userId: profile.id, roleId: candidate.role_id });
+      return redirectThroughDelegation(companyId, { userId: profile.id, roleId: candidate.role_id });
     }
   }
 
@@ -247,27 +229,13 @@ export type InitialApprovalTarget = {
  * later walk it forward.
  */
 export async function resolveInitialApprovalTarget(companyId: string, steps: ApprovalStepRow[], locationId: string | null | undefined): Promise<InitialApprovalTarget> {
-  const ordered = [...steps].sort((left, right) => left.step_order - right.step_order);
-  for (const step of ordered) {
-    const approver = await resolveStepApprover(companyId, step, locationId);
-    if (approver) {
-      return {
-        approver,
-        currentStepOrder: step.step_order,
-        currentApprovalRoleIds: step.candidates.map((candidate) => candidate.role_id),
-        totalSteps: ordered.length
-      };
-    }
-    if (step.is_required) {
-      return {
-        approver: null,
-        currentStepOrder: step.step_order,
-        currentApprovalRoleIds: step.candidates.map((candidate) => candidate.role_id),
-        totalSteps: ordered.length
-      };
-    }
-  }
-  return { approver: null, currentStepOrder: ordered.length || 1, currentApprovalRoleIds: [], totalSteps: ordered.length };
+  const { step, approver } = await resolveInitialStage(steps, step => resolveStepApprover(companyId, step, locationId));
+  return {
+    approver,
+    currentStepOrder: step?.step_order ?? 1,
+    currentApprovalRoleIds: approver ? [approver.roleId] : step?.candidates.map(candidate => candidate.role_id) ?? [],
+    totalSteps: steps.length
+  };
 }
 
 export type AdvanceResult = {

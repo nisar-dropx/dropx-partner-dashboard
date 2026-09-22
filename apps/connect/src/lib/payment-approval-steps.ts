@@ -82,13 +82,6 @@ async function candidateUserIds(companyId: string, roleId: string, scope: "stati
     .map((row) => row.user_id);
 }
 
-async function isApproverAvailable(companyId: string, userId: string) {
-  if (!supabaseAdmin) return true;
-  const result = await supabaseAdmin.rpc("hr_approval_email_is_working", { p_company_id: companyId, p_user_id: userId });
-  if (result.error) return true;
-  return result.data !== false;
-}
-
 async function redirectThroughDelegation(companyId: string, target: { userId: string; roleId: string }): Promise<{ userId: string; roleId: string }> {
   if (!supabaseAdmin) return target;
   const today = new Date().toISOString().slice(0, 10);
@@ -141,7 +134,7 @@ export async function resolveStepApprover(companyId: string, step: ApprovalStepR
   for (const candidate of step.candidates) {
     const scopedLocationId = candidate.scope === "company" ? null : locationId;
     const positionApprover = await findPositionApprover(companyId, [candidate.role_id], scopedLocationId);
-    if (positionApprover && await isApproverAvailable(companyId, positionApprover.userId)) return redirectThroughDelegation(companyId, positionApprover);
+    if (positionApprover) return redirectThroughDelegation(companyId, positionApprover);
 
     const userIds = await candidateUserIds(companyId, candidate.role_id, candidate.scope, locationId);
     if (!userIds.length) continue;
@@ -156,7 +149,7 @@ export async function resolveStepApprover(companyId: string, step: ApprovalStepR
     if (profiles.error) throw new Error(profiles.error.message);
 
     for (const profile of profiles.data ?? []) {
-      if (await isApproverAvailable(companyId, profile.id)) return redirectThroughDelegation(companyId, { userId: profile.id, roleId: candidate.role_id });
+      return redirectThroughDelegation(companyId, { userId: profile.id, roleId: candidate.role_id });
     }
   }
 
