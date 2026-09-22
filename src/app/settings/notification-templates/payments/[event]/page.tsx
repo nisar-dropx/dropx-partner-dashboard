@@ -8,7 +8,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { paymentEmailDefaultTemplates, type PaymentEmailEventType } from "@/lib/payment-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { savePaymentNotificationTemplate } from "./actions";
+import { savePaymentNotificationTemplate, sendMissedPaymentReminders } from "./actions";
 import { defaultPaymentWorkHours, type PaymentWorkHours } from "@/lib/payment-reminder-policy";
 
 type TemplateRow = {
@@ -256,6 +256,7 @@ function ApprovalRecipientSection({
 }
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export default async function PaymentNotificationTemplatePage({
   params
@@ -431,6 +432,10 @@ export default async function PaymentNotificationTemplatePage({
               </div>
             ) : null}
           </form>
+          {eventConfig.eventType === "payment_request" && permission.canEdit ? <form action={sendMissedPaymentReminders} className="panel-body">
+            <p className="subtle">One-off catch-up for all currently assigned approvers in this company. Sends missing/overdue reminders now, including outside work hours. Already scheduled, not-yet-due requests are not resent.</p>
+            <SubmitButton>Send missed reminders now</SubmitButton>
+          </form> : null}
         </section>
       ) : null}
     </AppShell>

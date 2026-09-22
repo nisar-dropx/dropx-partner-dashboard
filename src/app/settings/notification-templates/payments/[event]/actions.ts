@@ -5,11 +5,45 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { type PaymentEmailEventType } from "@/lib/payment-email-notifications";
+import { sendPaymentApprovalReminder, type PaymentEmailEventType } from "@/lib/payment-email-notifications";
+import { isPendingPaymentApproval } from "@/lib/payment-stage-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { validatePaymentWorkHours } from "@/lib/payment-reminder-policy";
 
 const allowedEvents = new Set(["payment_request", "payment_approve", "payment_return", "payment_reject"]);
+
+// Administrator-requested catch-up is explicit, company-scoped, and still
+// respects due times and the shared lease. It may run outside working hours.
+export async function sendMissedPaymentReminders() {
+  const authorization = await requirePagePermission("app_settings", "edit");
+  const companyId = requireCompanyId(authorization);
+  let notice = "";
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase is not configured.");
+    const pending = await supabaseAdmin.from("payment_requests").select("id,status,approval_status")
+      .eq("company_id", companyId).not("current_approver_user_id", "is", null)
+      .not("status", "in", "(approved,processed,processing,returned,rejected,cancelled)")
+      .or(`email_next_reminder_at.is.null,email_next_reminder_at.lte.${new Date().toISOString()}`)
+      .order("email_next_reminder_at", { ascending: true, nullsFirst: true }).limit(200);
+    if (pending.error) throw new Error(pending.error.message);
+    const rows = (pending.data ?? []).filter(row => isPendingPaymentApproval(row.status, row.approval_status));
+    const deadline = Date.now() + 40_000;
+    let sent = 0, checked = 0;
+    const reasons: string[] = [];
+    for (const row of rows) {
+      if (Date.now() > deadline) break;
+      const result = await sendPaymentApprovalReminder(companyId, row.id, { catchUp: true });
+      checked++;
+      if (result.sent) sent++; else reasons.push(result.reason);
+    }
+    notice = `${sent} reminder emails accepted for sending; ${rows.length - checked} still to check.${reasons.length ? ` Skipped: ${[...new Set(reasons)].join("; ")}` : ""}`;
+    revalidatePath(eventPath("payment_request"));
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    redirectWithFlash("payment_request", { error: error instanceof Error ? error.message : "Catch-up failed" });
+  }
+  redirectWithFlash("payment_request", { notice });
+}
 const baseRecipients = ["requester", "current_approver", "location_manager", "final_approver", "payment_processor"];
 const allowedRecipients = new Set([
   ...baseRecipients,
