@@ -54,6 +54,11 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Required for the selfie/face-match punch flow (a plain getUserMedia() camera request
+         from the website, not our native plugin) — without this declared here, the WebView's
+         camera permission request is auto-denied with no OS prompt ever shown at all, which is
+         exactly the "Camera permission denied" error the selfie screen shows immediately. -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <!-- Normal (non-dangerous) permission, no runtime prompt — needed by
          LocationTrackingService.isVpnActive() to check for an active VPN transport. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
