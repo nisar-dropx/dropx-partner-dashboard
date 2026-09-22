@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type SendEmailParams = {
+  timeoutMs?: number;
   body: string;
   cc?: string[];
   companyId?: string;
@@ -77,7 +78,7 @@ function loadEnvEmailConfig(): EmailConfig {
   };
 }
 
-export async function sendEmail({ body, cc = [], companyId, subject, to, html, messageId, inReplyTo, references }: SendEmailParams) {
+export async function sendEmail({ body, cc = [], companyId, subject, to, html, messageId, inReplyTo, references, timeoutMs }: SendEmailParams) {
   const recipients = Array.from(new Set(to.map((email) => email.trim().toLowerCase()).filter(Boolean)));
   const ccRecipients = Array.from(new Set(cc.map((email) => email.trim().toLowerCase()).filter(Boolean)));
   if (!recipients.length) throw new Error("No email recipients found.");
@@ -85,6 +86,7 @@ export async function sendEmail({ body, cc = [], companyId, subject, to, html, m
   const config = await loadDbEmailConfig(companyId) ?? loadEnvEmailConfig();
 
   const transporter = nodemailer.createTransport({
+    ...(timeoutMs ? { connectionTimeout: timeoutMs, greetingTimeout: timeoutMs, socketTimeout: timeoutMs } : {}),
     host: config.host,
     port: config.port,
     secure: config.port === 465 || (config.secure && config.port !== 587),

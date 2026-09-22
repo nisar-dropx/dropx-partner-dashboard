@@ -7,6 +7,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { type PaymentEmailEventType } from "@/lib/payment-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { validatePaymentWorkHours } from "@/lib/payment-reminder-policy";
 
 const allowedEvents = new Set(["payment_request", "payment_approve", "payment_return", "payment_reject"]);
 const baseRecipients = ["requester", "current_approver", "location_manager", "final_approver", "payment_processor"];
@@ -82,6 +83,15 @@ export async function savePaymentNotificationTemplate(formData: FormData) {
   const companyId = requireCompanyId(authorization);
   try {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const reminderSettings = eventType === "payment_request" ? {
+      reminder_interval_minutes: Number(formData.get("reminder_interval_minutes")),
+      thread_by_station_month: formData.get("thread_by_station_month") === "on",
+      reminder_work_hours: validatePaymentWorkHours({ timezone: required(formData.get("reminder_timezone"), "Timezone"),
+        start: required(formData.get("reminder_start"), "Start time"), end: required(formData.get("reminder_end"), "End time"),
+        days: formData.getAll("reminder_days").map(Number) })
+    } : {};
+    if (eventType === "payment_request" && (!Number.isInteger(reminderSettings.reminder_interval_minutes) || reminderSettings.reminder_interval_minutes! < 15 || reminderSettings.reminder_interval_minutes! > 1440))
+      throw new Error("Reminder interval must be between 15 and 1440 minutes.");
     const toRecipients = eventType === "payment_approve"
       ? [
           ...prefixedRecipients(formData, "initial", "to_recipients"),
@@ -134,6 +144,7 @@ export async function savePaymentNotificationTemplate(formData: FormData) {
       : null;
 
     const { error } = await (supabaseAdmin.from("payment_notification_templates") as any).upsert({
+      ...reminderSettings,
       company_id: companyId,
       event_type: eventType,
       is_enabled: eventType === "payment_approve"
@@ -158,6 +169,12 @@ export async function savePaymentNotificationTemplate(formData: FormData) {
       updated_at: new Date().toISOString()
     }, { onConflict: "company_id,event_type" });
     if (error) throw new Error(error.message);
+    if (eventType === "payment_request") {
+      const reminder = await supabaseAdmin.from("payment_notification_templates").upsert({ company_id: companyId, event_type: "payment_reminder",
+        is_enabled: formData.get("reminders_enabled") === "on", to_recipients: ["current_approver"], cc_recipients: [],
+        subject_template: "{{station_month}}", body_template: "Review the pending payment and Approve, Return or Reject.", ...reminderSettings }, { onConflict: "company_id,event_type" });
+      if (reminder.error) throw new Error(reminder.error.message);
+    }
 
     revalidatePath("/settings/notification-templates/email");
     revalidatePath(eventPath(eventType));

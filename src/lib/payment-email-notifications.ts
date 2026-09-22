@@ -1,11 +1,12 @@
-import { sendEmail } from "@/lib/email";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
 import { approvalEmailCard } from "@/lib/approval-email-card";
+import { deliverPaymentMail, loadPaymentMailPolicy } from "@/lib/payment-mail-delivery";
+import { isPendingPaymentApproval } from "@/lib/payment-stage-policy";
 
 const PAYMENT_APPROVALS_URL = "https://ops.dropxlogistics.com/payments/approvals";
 
-function paymentEmailHtml(eventType: PaymentEmailEventType, values: Record<string, string>, reminderNumber?: number) {
+function paymentEmailHtml(eventType: PaymentEmailEventType, values: Record<string, string>, reminderNumber?: number, reminderInterval = 90) {
   const heading = `${values.request_no} · ${values.requester_name}`;
   const infoValue = `${values.amount} · ${values.location_code}`;
   const isReminder = Boolean(reminderNumber);
@@ -60,7 +61,7 @@ function paymentEmailHtml(eventType: PaymentEmailEventType, values: Record<strin
       "Find the payment request in the approvals list.",
       "Review the amount, payment head and location, then Approve, Return or Reject."
     ],
-    footer: isReminder ? "Reminders are sent every 90 minutes until this request is approved, returned or rejected." : undefined
+    footer: isReminder ? `Reminders are sent every ${reminderInterval} minutes during configured work hours until this approval stage is completed, returned or rejected.` : undefined
   });
 }
 
@@ -490,7 +491,8 @@ export async function sendPaymentNotification({
     const messageId = `<dropx.payment.${request.id}.${(request.email_send_count ?? 0) + 1}@partner.dropxlogistics.com>`;
     const lastMessageId = request.email_last_message_id ?? null;
     const rootMessageId = request.email_root_message_id ?? null;
-    const result = await sendEmail({
+    return await deliverPaymentMail({ companyId, requestId, expectedApprover: request.current_approver_user_id,
+      eventType, mail: {
       body: render(bodyTemplate, values),
       html: paymentEmailHtml(eventType, values),
       cc,
@@ -500,16 +502,7 @@ export async function sendPaymentNotification({
       messageId,
       inReplyTo: lastMessageId ?? undefined,
       references: lastMessageId ? [...new Set([rootMessageId, lastMessageId].filter((id): id is string => Boolean(id)))] : undefined
-    });
-    await supabaseAdmin.from("payment_requests").update({
-      email_root_message_id: rootMessageId ?? result.messageId ?? messageId,
-      email_last_message_id: result.messageId ?? messageId,
-      email_send_count: (request.email_send_count ?? 0) + 1,
-      // A decision (approve/reject/return) closes the thread; only a still-pending
-      // request should get another reminder scheduled.
-      email_next_reminder_at: eventType === "payment_request" && request.current_approver_user_id ? new Date(Date.now() + 90 * 60_000).toISOString() : null
-    }).eq("company_id", companyId).eq("id", request.id);
-    return { sent: true, cc, to };
+    }});
   } catch (error) {
     console.error("Payment email notification failed", error);
     return skipped(error instanceof Error ? error.message : "Payment email notification failed.");
@@ -523,7 +516,7 @@ export async function sendPaymentNotification({
  * still waiting), but always threads onto the existing conversation - never
  * a fresh email - and is skipped once the request is no longer pending.
  */
-export async function sendPaymentApprovalReminder(companyId: string, requestId: string): Promise<PaymentEmailResult> {
+export async function sendPaymentApprovalReminder(companyId: string, requestId: string, options: { catchUp?: boolean } = {}): Promise<PaymentEmailResult> {
   try {
     if (!supabaseAdmin) return skipped("Supabase service role key is not configured.");
     const template = await loadTemplate(companyId, "payment_request");
@@ -541,7 +534,7 @@ export async function sendPaymentApprovalReminder(companyId: string, requestId: 
       .eq("id", requestId)
       .maybeSingle();
     if (requestError || !request) throw new Error(requestError?.message ?? "Payment request not found.");
-    if (!["pending", "resubmitted"].includes(String(request.status)) || !request.current_approver_user_id) {
+    if (!isPendingPaymentApproval(request.status, request.approval_status) || !request.current_approver_user_id) {
       await supabaseAdmin.from("payment_requests").update({ email_next_reminder_at: null }).eq("company_id", companyId).eq("id", request.id);
       return skipped("This payment request is no longer awaiting approval.");
     }
@@ -575,15 +568,10 @@ export async function sendPaymentApprovalReminder(companyId: string, requestId: 
       status: clean(request.approval_status || request.status || "-")
     };
 
-    const to = uniqueEmails(await resolveRecipientEmails({
-      actor: null, currentApprover, finalApprovers, location: locationResult.data, paymentProcessors, requester,
-      selected: template.to_recipients ?? []
-    }));
+    // All stages: target only the named current approver, never future approvers.
+    const to = uniqueEmails([currentApprover?.email ?? ""]);
     if (!to.length) return skipped("No To recipients were resolved for this payment reminder.");
-    const cc = uniqueEmails(await resolveRecipientEmails({
-      actor: null, currentApprover, finalApprovers, location: locationResult.data, paymentProcessors, requester,
-      selected: template.cc_recipients ?? []
-    })).filter((email) => !to.includes(email));
+    const cc: string[] = [];
 
     const reminderNumber = request.email_send_count ?? 1;
     const subject = `Reminder ${reminderNumber}: ${render(template.subject_template, values)}`;
@@ -591,20 +579,15 @@ export async function sendPaymentApprovalReminder(companyId: string, requestId: 
     const messageId = `<dropx.payment.${request.id}.${(request.email_send_count ?? 0) + 1}@partner.dropxlogistics.com>`;
     const lastMessageId = request.email_last_message_id ?? null;
     const rootMessageId = request.email_root_message_id ?? null;
-    const result = await sendEmail({
+    const policy = await loadPaymentMailPolicy(companyId);
+    return await deliverPaymentMail({ companyId, requestId, expectedApprover: request.current_approver_user_id,
+      eventType: "payment_reminder", reminder: true, catchUp: options.catchUp, mail: {
       body, cc, companyId, subject, to,
-      html: paymentEmailHtml("payment_request", values, reminderNumber),
+      html: paymentEmailHtml("payment_request", values, Math.max(1, reminderNumber), policy.interval),
       messageId,
       inReplyTo: lastMessageId ?? undefined,
       references: lastMessageId ? [...new Set([rootMessageId, lastMessageId].filter((id): id is string => Boolean(id)))] : undefined
-    });
-    await supabaseAdmin.from("payment_requests").update({
-      email_root_message_id: rootMessageId ?? result.messageId ?? messageId,
-      email_last_message_id: result.messageId ?? messageId,
-      email_send_count: (request.email_send_count ?? 0) + 1,
-      email_next_reminder_at: new Date(Date.now() + 90 * 60_000).toISOString()
-    }).eq("company_id", companyId).eq("id", request.id);
-    return { sent: true, cc, to };
+    }});
   } catch (error) {
     console.error("Payment reminder email failed", error);
     return skipped(error instanceof Error ? error.message : "Payment reminder email failed.");

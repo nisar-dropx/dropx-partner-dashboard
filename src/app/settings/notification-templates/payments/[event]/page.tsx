@@ -9,8 +9,13 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { paymentEmailDefaultTemplates, type PaymentEmailEventType } from "@/lib/payment-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { savePaymentNotificationTemplate } from "./actions";
+import { defaultPaymentWorkHours, type PaymentWorkHours } from "@/lib/payment-reminder-policy";
 
 type TemplateRow = {
+  reminder_interval_minutes?: number;
+  reminder_work_hours?: PaymentWorkHours;
+  thread_by_station_month?: boolean;
+  reminders_enabled?: boolean;
   body_template: string;
   cc_recipients: string[];
   custom_cc_emails: string[];
@@ -107,12 +112,14 @@ async function loadTemplate(companyId: string, eventType: PaymentEmailEventType)
   if (!supabaseAdmin) return { template: defaultTemplate(eventType), error: "Supabase service role key is not configured." };
   const result = await supabaseAdmin
     .from("payment_notification_templates")
-    .select("is_enabled, initial_is_enabled, final_is_enabled, to_recipients, cc_recipients, custom_to_emails, custom_cc_emails, subject_template, body_template, initial_subject_template, initial_body_template, final_subject_template, final_body_template")
+    .select("is_enabled, initial_is_enabled, final_is_enabled, to_recipients, cc_recipients, custom_to_emails, custom_cc_emails, subject_template, body_template, initial_subject_template, initial_body_template, final_subject_template, final_body_template, reminder_interval_minutes, reminder_work_hours, thread_by_station_month")
     .eq("company_id", companyId)
     .eq("event_type", eventType)
     .maybeSingle();
   if (result.error) return { template: defaultTemplate(eventType), error: result.error.message };
-  return { template: { ...defaultTemplate(eventType), ...(result.data ?? {}) } as TemplateRow, error: null as string | null };
+  const reminder = await supabaseAdmin.from("payment_notification_templates").select("is_enabled").eq("company_id", companyId).eq("event_type", "payment_reminder").maybeSingle();
+  if (reminder.error) return { template: defaultTemplate(eventType), error: reminder.error.message };
+  return { template: { ...defaultTemplate(eventType), ...(result.data ?? {}), reminders_enabled: reminder.data?.is_enabled ?? false } as TemplateRow, error: null as string | null };
 }
 
 async function loadUserOptions(companyId: string): Promise<EmailRecipientOption[]> {
@@ -283,6 +290,7 @@ export default async function PaymentNotificationTemplatePage({
   const initialBodyTemplate = template.initial_body_template || template.body_template;
   const finalSubjectTemplate = template.final_subject_template || template.subject_template;
   const finalBodyTemplate = template.final_body_template || template.body_template;
+  const workHours = template.reminder_work_hours ?? defaultPaymentWorkHours;
 
   return (
     <AppShell active="Settings" pageCode="app_settings">
@@ -322,6 +330,21 @@ export default async function PaymentNotificationTemplatePage({
           </div>
           <form action={savePaymentNotificationTemplate} className="notification-template-form">
             <input name="event_type" type="hidden" value={eventConfig.eventType} />
+            {eventConfig.eventType === "payment_request" ? <fieldset className="settings-subpanel" disabled={!permission.canEdit}>
+              <h3>Approval reminders — all locations and current approvers</h3>
+              <label className="check-row"><input type="checkbox" name="reminders_enabled" defaultChecked={template.reminders_enabled} /> Enable recurring reminders</label>
+              <label className="check-row"><input type="checkbox" name="thread_by_station_month" defaultChecked={template.thread_by_station_month !== false} /> One station/month thread for requests, decisions and reminders</label>
+              <p className="subtle">Only the current approver is reminded. Stops on final approval, return or rejection. Subject: QLDA Payment Request September 2026. Monthly threading overrides the subject below.</p>
+              <div className="form-grid">
+                <label>Interval (minutes)<input className="field" type="number" min="15" max="1440" name="reminder_interval_minutes" defaultValue={template.reminder_interval_minutes ?? 90} required /></label>
+                <label>Timezone<input className="field" name="reminder_timezone" defaultValue={workHours.timezone} required /></label>
+                <label>Work hours start<input className="field" type="time" name="reminder_start" defaultValue={workHours.start} required /></label>
+                <label>Work hours end<input className="field" type="time" name="reminder_end" defaultValue={workHours.end} required /></label>
+              </div>
+              <div className="notification-recipient-options">{["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((day,index) =>
+                <label className="check-row" key={day}><input type="checkbox" name="reminder_days" value={index} defaultChecked={workHours.days.includes(index)} />{day}</label>)}</div>
+              <p className="subtle">Reminders due after closing are deferred to the next opening time. Pending requests with a missing schedule are recovered automatically.</p>
+            </fieldset> : null}
             {eventConfig.eventType !== "payment_approve" ? (
               <label className="toggle-field">
                 <input defaultChecked={template.is_enabled} disabled={!permission.canEdit} name="is_enabled" type="checkbox" />
