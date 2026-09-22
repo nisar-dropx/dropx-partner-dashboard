@@ -1,12 +1,15 @@
 package com.dropxlogistics.one.location;
 
 import android.content.Context;
+import android.util.Log;
 import android.webkit.CookieManager;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Scanner;
 import java.util.concurrent.Executors;
 
 /**
@@ -26,6 +29,7 @@ import java.util.concurrent.Executors;
  * that was never reported at all).
  */
 public final class TrackingInterruptionReporter {
+  private static final String TAG = "DropxOneLocation";
   private static final long HEARTBEAT_INTERVAL_MS = 10 * 60 * 1000;
 
   private TrackingInterruptionReporter() {}
@@ -74,12 +78,29 @@ public final class TrackingInterruptionReporter {
       try (OutputStream out = connection.getOutputStream()) {
         out.write(body.getBytes(StandardCharsets.UTF_8));
       }
-      connection.getResponseCode(); // drain the response; result isn't otherwise used
-    } catch (Exception ignored) {
+      int status = connection.getResponseCode();
+      InputStream responseStream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+      String responseBody = readStream(responseStream);
+      if (status >= 400) {
+        Log.w(TAG, "Tracking interruption report rejected, status=" + status + ", body=" + responseBody);
+      } else {
+        Log.i(TAG, "Tracking interruption reported (gap=" + gapMinutes + "min), status=" + status + ", body=" + responseBody);
+      }
+    } catch (Exception e) {
       // Best-effort — if this fails, the gap is simply never reported. Nothing meaningful to
       // retry against without risking duplicate flags once the worker reopens the app again.
+      Log.w(TAG, "Tracking interruption report failed to send.", e);
     } finally {
       if (connection != null) connection.disconnect();
+    }
+  }
+
+  private static String readStream(InputStream in) {
+    if (in == null) return "";
+    try (Scanner scanner = new Scanner(in, StandardCharsets.UTF_8).useDelimiter("\\A")) {
+      return scanner.hasNext() ? scanner.next() : "";
+    } catch (Exception e) {
+      return "";
     }
   }
 }
