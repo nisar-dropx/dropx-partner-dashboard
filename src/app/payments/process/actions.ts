@@ -360,6 +360,7 @@ export async function updatePaymentProcessStatus(
       bank_processing_remarks: remarks,
       current_approver_user_id: null,
       current_approver_role_id: null,
+      current_approver_role_ids: [],
       updated_at: now
     });
     await insertBankDecisionLog(companyId, request, `Returned: ${remarks}`, authorization.userId, authorization.roleId);
@@ -443,6 +444,9 @@ export async function finalizePaymentProcess(formData: FormData) {
         await updatePaymentRequest(companyId, request.id, {
           status: "processed",
           approval_status: "PROCESSED",
+            current_approver_user_id: null,
+            current_approver_role_id: null,
+            current_approver_role_ids: [],
           utr_cin: row.utrCin || null,
           bank_status: "Paid",
           bank_processing_remarks: row.remarks || null,
@@ -470,6 +474,7 @@ export async function finalizePaymentProcess(formData: FormData) {
           bank_processing_remarks: row.remarks || null,
           current_approver_user_id: null,
           current_approver_role_id: null,
+          current_approver_role_ids: [],
           updated_at: now
         });
         await insertBankDecisionLog(companyId, request, remarks, authorization.userId, authorization.roleId);
