@@ -6,7 +6,7 @@ import { isEddCronHost } from "@/lib/ops-pulse/edd-cron-scope";
 import { isPendingPaymentApproval } from "@/lib/payment-stage-policy";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
