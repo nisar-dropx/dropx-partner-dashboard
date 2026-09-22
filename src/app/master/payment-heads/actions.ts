@@ -7,7 +7,7 @@ import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { serializePaymentFileGroups } from "@/lib/payment-file-types";
 import { normalizePaymentModes } from "@/lib/payment-modes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { syncPaymentHeadApprovalSteps } from "@/lib/payment-approval-steps";`nimport { syncPaymentHeadApprovalSteps } from "@/lib/payment-approval-steps";
+import { syncPaymentHeadApprovalSteps } from "@/lib/payment-approval-steps";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
