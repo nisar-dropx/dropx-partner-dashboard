@@ -250,6 +250,9 @@ export async function updatePaymentProcessStatus(
       await updatePaymentRequest(companyId, requestId, {
         status: "processing",
         approval_status: "PROCESSING",
+        current_approver_user_id: null,
+        current_approver_role_id: null,
+        current_approver_role_ids: [],
         processing_started_at: request.processing_started_at ?? now,
         updated_at: now
       });
@@ -279,6 +282,9 @@ export async function updatePaymentProcessStatus(
       await updatePaymentRequest(companyId, requestId, {
         status: "processed",
         approval_status: "PROCESSED",
+        current_approver_user_id: null,
+        current_approver_role_id: null,
+        current_approver_role_ids: [],
         utr_cin: remarks,
         bank_status: "Paid",
         bank_processing_remarks: remarks,
@@ -316,6 +322,7 @@ export async function updatePaymentProcessStatus(
         bank_processing_remarks: remarks,
         current_approver_user_id: null,
         current_approver_role_id: null,
+        current_approver_role_ids: [],
         updated_at: now
       });
       await insertBankDecisionLog(
