@@ -1,0 +1,227 @@
+.reimbursement-master {
+  display: grid;
+  gap: 16px;
+  color: #243047;
+}
+.reimbursement-master nav,
+.rm-panel > header,
+.rm-editor > header,
+.rm-editor footer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+.reimbursement-master nav {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+.reimbursement-master button {
+  border: 1px solid #dce2eb;
+  background: white;
+  border-radius: 9px;
+  padding: 10px 14px;
+  min-height: 42px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.reimbursement-master button[aria-pressed="true"] {
+  background: #fff1e9;
+  color: #bd3d18;
+  border-color: #fdba91;
+}
+.reimbursement-master button.primary {
+  background: #ed491c;
+  color: white;
+  border-color: #ed491c;
+}
+.reimbursement-master button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.rm-note {
+  background: #f4f7fb;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.rm-panel {
+  background: white;
+  border: 1px solid #e3e8ef;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.rm-panel > header {
+  padding: 16px;
+}
+.reimbursement-master input,
+.reimbursement-master select {
+  padding: 10px;
+  border: 1px solid #dce2eb;
+  border-radius: 8px;
+  min-height: 42px;
+  max-width: 100%;
+  background: white;
+  color: inherit;
+}
+.rm-panel > header input {
+  width: 360px;
+}
+.rm-table {
+  overflow: auto;
+}
+.rm-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.rm-table th,
+.rm-table td {
+  text-align: left;
+  padding: 14px;
+  border-bottom: 1px solid #edf0f5;
+  font-size: 13px;
+}
+.rm-table th {
+  background: #f8fafc;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.reimbursement-master small {
+  display: block;
+  color: #66758c;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.rm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: #14233988;
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+.rm-editor {
+  width: min(740px, 100%);
+  max-height: 90dvh;
+  overflow: auto;
+  border-radius: 16px;
+  background: white;
+  padding: 22px;
+}
+.rm-editor h2 {
+  font-size: 19px;
+  margin: 0;
+}
+.rm-editor form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 24px;
+}
+.rm-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.rm-editor .wide {
+  grid-column: 1/-1;
+}
+.rm-editor .rm-check {
+  flex-direction: row;
+  align-items: center;
+}
+.rm-check input {
+  min-height: auto;
+}
+.rm-error {
+  color: #b91c1c;
+}
+.rm-editor footer {
+  justify-content: flex-end;
+}
+@media (max-width: 640px) {
+  .rm-editor form {
+    grid-template-columns: 1fr;
+  }
+  .rm-editor {
+    padding: 16px;
+    max-height: 94dvh;
+  }
+  .rm-backdrop {
+    padding: 10px;
+  }
+  .rm-panel > header {
+    flex-wrap: wrap;
+  }
+  .rm-panel > header input {
+    width: 100%;
+  }
+  .rm-editor h2 {
+    font-size: 17px;
+  }
+}
+.rm-policy-document {
+  margin: 0 0 18px;
+}
+.rm-policy-document h2 {
+  margin: 0 0 5px;
+  font-size: 17px;
+}
+.rm-policy-document p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+}
+.rm-policy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.rm-policy-actions a {
+  padding: 8px 10px;
+  color: #b43b1e;
+  font-weight: 600;
+}
+.rm-document-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 18px;
+}
+.rm-document-form label {
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.rm-document-form input,
+.rm-editor textarea {
+  border: 1px solid #dbe2ec;
+  border-radius: 8px;
+  padding: 10px;
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+}
+.rm-document-form .rm-note,
+.rm-document-form .rm-policy-actions {
+  grid-column: 1 / -1;
+}
+.rm-policy-document details {
+  padding: 12px 18px;
+}
+@media (max-width: 640px) {
+  .rm-document-form {
+    grid-template-columns: 1fr;
+  }
+  .rm-policy-document header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

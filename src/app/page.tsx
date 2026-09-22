@@ -4,6 +4,8 @@ import { firstAllowedHref } from "@/lib/app-navigation";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { firstAllowedPeopleHref, hasPeoplePortalAccess } from "@/lib/people/navigation";
 import { isPeopleHostName } from "@/lib/people/surface";
+import { firstAllowedFinanceHref, hasFinancePortalAccess } from "@/lib/finance/navigation";
+import { isFinanceHostName } from "@/lib/finance/surface";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -28,6 +30,10 @@ export default async function DashboardPage() {
   if (host === "connect.dropxlogistics.com") redirect("/connect");
   const authorization = await getAuthorization();
   if (!authorization) redirect("/login");
+  if (isFinanceHostName(host)) {
+    if (!hasFinancePortalAccess(authorization)) redirect("/unauthorized?page=finance_portal&reason=access");
+    redirect(firstAllowedFinanceHref(authorization) ?? "/unauthorized?page=finance_portal&reason=access");
+  }
   if (isPeopleHostName(host)) {
     if (!hasPeoplePortalAccess(authorization)) redirect("/unauthorized?page=people_portal&reason=access");
     redirect(firstAllowedPeopleHref(authorization) ?? "/unauthorized?page=people_portal&reason=access");

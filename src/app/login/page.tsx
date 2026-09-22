@@ -12,6 +12,8 @@ import { firstAllowedOpsHref } from "@/lib/ops-pulse/navigation";
 import { safePeopleNextPath } from "@/lib/people/auth";
 import { firstAllowedPeopleHref, hasPeoplePortalAccess } from "@/lib/people/navigation";
 import { isPeopleHostName } from "@/lib/people/surface";
+import { firstAllowedFinanceHref, hasFinancePortalAccess } from "@/lib/finance/navigation";
+import { isFinanceHostName, safeFinanceNextPath } from "@/lib/finance/surface";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { signInWithGoogle } from "./actions";
 
@@ -25,6 +27,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     "";
   const isOpsHost = host === "ops.dropxlogistics.com";
   const isPeopleHost = isPeopleHostName(host);
+  const isFinanceHost = isFinanceHostName(host);
   const supabase = createServerSupabaseClient(undefined, isOpsHost ? true : undefined);
   const { data } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
   if (data.user) {
@@ -48,6 +51,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       const requestedPath = safePeopleNextPath(searchParams?.next);
       redirect(requestedPath === "/"
         ? firstAllowedPeopleHref(authorization) ?? "/unauthorized?page=people_portal&reason=access"
+        : requestedPath);
+    }
+    if (isFinanceHost) {
+      if (!authorization || !hasFinancePortalAccess(authorization)) {
+        redirect("/unauthorized?page=finance_portal&reason=access");
+      }
+      const requestedPath = safeFinanceNextPath(searchParams?.next);
+      redirect(requestedPath === "/"
+        ? firstAllowedFinanceHref(authorization) ?? "/unauthorized?page=finance_portal&reason=access"
         : requestedPath);
     }
     redirect(authorization
@@ -77,17 +89,17 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
   return (
     <main className="login-page">
-      <DocumentTitle pageName="Login" />
+      <DocumentTitle pageName="Login" productName={isFinanceHost ? "DropX Finance" : undefined} />
       <section className="login-panel">
         <img className="login-logo" src="/dropx-logo.png" alt="DropX" />
         <div className="login-copy">
-          <h1>Sign in to DropX Dashboard</h1>
+          <h1>Sign in to {isFinanceHost ? "DropX Finance" : "DropX Dashboard"}</h1>
           <p>Sign in with your Google account</p>
         </div>
 
         {message ? <div className="login-error">{message}</div> : null}
         <form className="google-signin-form" action={signInWithGoogle}>
-          <input name="next" type="hidden" value={searchParams?.next ?? ""} />
+          <input name="next" type="hidden" value={isFinanceHost ? safeFinanceNextPath(searchParams?.next) : searchParams?.next ?? ""} />
           <SubmitButton className="google-asset-button" pendingText="Opening Google">
             <img
               className="google-signin-asset"
