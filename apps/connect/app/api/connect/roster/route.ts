@@ -481,8 +481,10 @@ export async function GET(request: Request) {
       return NextResponse.json(await workforceRosterPayload(account), { headers: { "Cache-Control": "private, no-store" } });
     }
     const { account, workerType, identities } = await accountFrom(url);
-    // TEMP DEBUG - remove after diagnosing wrong-shift report
-    const debug = url.searchParams.get("debug") === "1";
+    // TEMP DEBUG - remove after diagnosing wrong-shift report. Hardcoded to one
+    // account id (no URL change needed) since the page's own fetch doesn't pass
+    // through query params.
+    const debug = url.searchParams.get("debug") === "1" || account.id === "e06aeb2f-3a88-4a03-a349-7fdf3527c722";
     return NextResponse.json(await rosterPayload(account, workerType, identities, debug), { headers: { "Cache-Control": "private, no-store" } });
   }
   catch (error) { return NextResponse.json({ error: userFacingError(error, "Unable to load roster.") }, { status: 400 }); }
