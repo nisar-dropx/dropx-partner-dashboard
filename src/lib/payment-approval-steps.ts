@@ -295,3 +295,41 @@ export async function advanceApproval(companyId: string, steps: ApprovalStepRow[
 
   return { done: true, nextStepOrder: null, approver: null, noApproverConfigured: false };
 }
+
+/** A request keeps this serialized route for its whole lifecycle. */
+export function approvalStepsFromSnapshot(value: unknown): ApprovalStepRow[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((raw) => {
+    const row = raw as { id?: unknown; step_order?: unknown; candidates?: unknown; is_required?: unknown };
+    const candidates = Array.isArray(row.candidates)
+      ? row.candidates.map((candidate) => {
+          const item = candidate as { role_id?: unknown; scope?: unknown };
+          const scope = item.scope === "station" || item.scope === "cluster" || item.scope === "company" ? item.scope : "company";
+          return { role_id: String(item.role_id ?? "").trim(), scope };
+        }).filter((candidate) => candidate.role_id)
+      : [];
+    return { id: String(row.id ?? ""), step_order: Number(row.step_order) || 0, candidates, is_required: Boolean(row.is_required) };
+  }).filter((row) => row.step_order > 0 && row.candidates.length > 0).sort((left, right) => left.step_order - right.step_order);
+}
+
+export async function loadRequestApprovalSteps(companyId: string, paymentHeadId: string, snapshot: unknown): Promise<ApprovalStepRow[]> {
+  const stored = approvalStepsFromSnapshot(snapshot);
+  return stored.length ? stored : loadApprovalSteps(companyId, paymentHeadId);
+}
+
+/** Keep the Payment Head master fields and the executable route in sync. */
+export async function syncPaymentHeadApprovalSteps(companyId: string, paymentHeadId: string, initialRoleIds: string[], finalRoleIds: string[]) {
+  if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
+  const unique = (ids: string[]) => [...new Set(ids.filter(Boolean))];
+  const initial = unique(initialRoleIds);
+  const final = unique(finalRoleIds);
+  const steps = [
+    ...(initial.length ? [{ step_order: 1, candidates: initial.map((role_id) => ({ role_id, scope: "station" })), is_required: true }] : []),
+    ...(final.length ? [{ step_order: initial.length ? 2 : 1, candidates: final.map((role_id) => ({ role_id, scope: "company" })), is_required: true }] : [])
+  ];
+  const removed = await supabaseAdmin.from("payment_head_approval_steps").delete().eq("company_id", companyId).eq("payment_head_id", paymentHeadId);
+  if (removed.error) throw new Error(removed.error.message);
+  if (!steps.length) return;
+  const inserted = await supabaseAdmin.from("payment_head_approval_steps").insert(steps.map((step) => ({ company_id: companyId, payment_head_id: paymentHeadId, ...step })));
+  if (inserted.error) throw new Error(inserted.error.message);
+}

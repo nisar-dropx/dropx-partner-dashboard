@@ -7,6 +7,7 @@ import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { serializePaymentFileGroups } from "@/lib/payment-file-types";
 import { normalizePaymentModes } from "@/lib/payment-modes";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { syncPaymentHeadApprovalSteps } from "@/lib/payment-approval-steps";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -180,6 +181,8 @@ async function createPaymentHeadUnsafe(formData: FormData) {
     if (questionError) throw new Error(questionError.message);
   }
 
+  await syncPaymentHeadApprovalSteps(companyId, head.id, initialApprovalRoleIds, finalApprovalRoleIds);
+
   revalidatePath("/master/payment-heads");
 }
 
@@ -289,6 +292,7 @@ async function updatePaymentHeadUnsafe(formData: FormData) {
       .eq("company_id", companyId);
     if (archiveError) throw new Error(archiveError.message);
   }
+  await syncPaymentHeadApprovalSteps(companyId, id, initialApprovalRoleIds, finalApprovalRoleIds);
 
   revalidatePath("/master/payment-heads");
   redirect("/master/payment-heads");

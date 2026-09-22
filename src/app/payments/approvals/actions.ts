@@ -8,7 +8,7 @@ import { canActOnPaymentRequest } from "@/lib/payment-approval-scope";
 import { sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
-import { advanceApproval, loadApprovalSteps } from "@/lib/payment-approval-steps";
+import { advanceApproval, loadRequestApprovalSteps } from "@/lib/payment-approval-steps";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -375,7 +375,7 @@ export async function approvePaymentRequest(formData: FormData) {
   const comments = clean(formData.get("comments"));
   const { data: request, error } = await supabaseAdmin
     .from("payment_requests")
-    .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, current_step_order, current_approver_user_id, current_approver_role_id, current_approver_role_ids, final_approval_role_id, final_approval_role_ids, stations ( location_model_id )")
+    .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, current_step_order, current_approver_user_id, current_approver_role_id, current_approver_role_ids, final_approval_role_id, final_approval_role_ids, approval_steps_snapshot, stations ( location_model_id )")
     .eq("id", requestId)
     .eq("company_id", companyId)
     .single();
@@ -403,7 +403,7 @@ export async function approvePaymentRequest(formData: FormData) {
     comments
   }, companyId);
 
-  const steps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id) : [];
+  const steps = request.payment_head_id ? await loadRequestApprovalSteps(companyId, request.payment_head_id, request.approval_steps_snapshot) : [];
   const storedStepOrder = Number(request.current_step_order) || 1;
 
   if (steps.length) {
