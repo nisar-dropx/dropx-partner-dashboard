@@ -21,6 +21,7 @@ final class TrackingPrefs {
   private static final String KEY_LAST_HEARTBEAT_AT = "lastHeartbeatAt";
   private static final String KEY_INTERRUPTION_REPORTED_FOR_HEARTBEAT_AT = "interruptionReportedForHeartbeatAt";
   private static final String KEY_INTEGRITY_CHECK_INTERVAL_SECONDS = "integrityCheckIntervalSeconds";
+  private static final String KEY_INTERNET_OFF_PENDING_HRMS_REPORT = "internetOffPendingHrmsReport";
 
   private TrackingPrefs() {}
 
@@ -116,5 +117,23 @@ final class TrackingPrefs {
 
   static void setReportedInterruptionFor(Context context, long heartbeatAtEpochMs) {
     prefs(context).edit().putLong(KEY_INTERRUPTION_REPORTED_FOR_HEARTBEAT_AT, heartbeatAtEpochMs).apply();
+  }
+
+  /**
+   * See LocationTrackingService.refreshInternetEnabledAlert() — set true the moment an
+   * internet_off report attempt is made while offline, cleared only after the guaranteed
+   * follow-up report succeeds once connectivity is confirmed back. Persisted rather than kept
+   * as a field on the Service instance because the service can be torn down and restarted
+   * (observed happening around a reconnect, when connect-native-bridge.tsx's polling sync
+   * re-triggers configureAttendance()/startBackgroundLocation()) before its next tick would
+   * have fired the recovery report — an in-memory flag would silently lose that outage record
+   * across the restart exactly the way the original unpersisted "retry on next tick" comment did.
+   */
+  static boolean isInternetOffPendingHrmsReport(Context context) {
+    return prefs(context).getBoolean(KEY_INTERNET_OFF_PENDING_HRMS_REPORT, false);
+  }
+
+  static void setInternetOffPendingHrmsReport(Context context, boolean pending) {
+    prefs(context).edit().putBoolean(KEY_INTERNET_OFF_PENDING_HRMS_REPORT, pending).apply();
   }
 }

@@ -225,10 +225,22 @@ public class LocationTrackingService extends Service {
     NotificationManagerCompat notifications = NotificationManagerCompat.from(this);
     if (connected) {
       notifications.cancel(INTERNET_OFF_NOTIFICATION_ID);
+      // Every reportProblemToHrms() attempt made while offline necessarily fails (there's no
+      // network path to send it over), and refreshInternetEnabledAlert() only calls it from the
+      // !connected branch — so without this, an outage would leave HRMS with zero record that
+      // it ever happened, even though the worker did see the local alert. TrackingPrefs' flag
+      // (not a field on this Service — see its own doc for why) flips true the moment a send
+      // attempt is made below; this fires exactly one follow-up report on the first tick
+      // connectivity is confirmed back, so HRMS always gets at least one record of the outage
+      // regardless of how many of the offline attempts failed to send or whether the service
+      // itself got torn down and restarted in between.
+      if (TrackingPrefs.isInternetOffPendingHrmsReport(this)) {
+        TrackingPrefs.setInternetOffPendingHrmsReport(this, false);
+        reportProblemToHrms("internet_off", "Internet was turned off and is now back on");
+      }
     } else {
       notifications.notify(INTERNET_OFF_NOTIFICATION_ID, buildInternetOffAlert());
-      // Can't reach the server to log this the normal way (that's the whole problem) — queued
-      // for the next tick where connectivity is back, see reportProblemToHrms()'s retry queue.
+      TrackingPrefs.setInternetOffPendingHrmsReport(this, true);
       reportProblemToHrms("internet_off", "Internet is turned off");
     }
   }
@@ -283,9 +295,12 @@ public class LocationTrackingService extends Service {
    * tracking-interruption endpoint TrackingInterruptionReporter posts to — reused rather than
    * adding a third endpoint, since the server-side handling (open/refresh an integrity_risk
    * flag tied to the open shift) is identical regardless of which problem caused the gap.
-   * Best-effort and silent on failure by design (matches TrackingInterruptionReporter): if
-   * this fails because internet is the actual problem, there's nothing to usefully retry
-   * beyond just letting the next tick (which re-checks connectivity first) try again.
+   * Best-effort and silent on failure here by design (matches TrackingInterruptionReporter):
+   * while internet is actually off every send attempt necessarily fails, and each tick's own
+   * still-offline attempt is the real retry for that case. The one attempt this can't retry by
+   * itself is the last one made right as the outage ends — see refreshInternetEnabledAlert()'s
+   * internetOffPendingHrmsReport flag, which covers that gap with one guaranteed follow-up
+   * report on the first tick connectivity is confirmed back.
    */
   private void reportProblemToHrms(String reasonCode, String reasonLabel) {
     String serverUrl = TrackingPrefs.serverUrl(this);
@@ -317,10 +332,12 @@ public class LocationTrackingService extends Service {
           out.write(body.getBytes(StandardCharsets.UTF_8));
         }
         int status = connection.getResponseCode();
+        java.io.InputStream responseStream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+        String responseBody = readStream(responseStream);
         if (status >= 400) {
-          Log.w(TAG, "Problem report (" + reasonCode + ") rejected, status=" + status);
+          Log.w(TAG, "Problem report (" + reasonCode + ") rejected, status=" + status + ", body=" + responseBody);
         } else {
-          Log.i(TAG, "Problem report (" + reasonCode + ") sent, status=" + status);
+          Log.i(TAG, "Problem report (" + reasonCode + ") sent, status=" + status + ", body=" + responseBody);
         }
       } catch (Exception e) {
         Log.w(TAG, "Problem report (" + reasonCode + ") failed to send.", e);
@@ -408,8 +425,16 @@ public class LocationTrackingService extends Service {
         if (location != null) uploadLocation(location);
       });
     } catch (SecurityException e) {
-      Log.w(TAG, "Location permission missing when starting updates.", e);
-      stopSelf();
+      // Deliberately NOT stopSelf() here — this used to kill the entire foreground service,
+      // including startIntegrityCheckLoop()'s repeating location_off/internet_off detection,
+      // for the exact scenario that loop exists to catch (GPS access failing mid-shift). A
+      // worker who has Location genuinely off then got silently untracked instead of alerted,
+      // with LocationTrackingService itself vanishing from dumpsys with no crash trace. Location
+      // updates just don't happen until the next onStartCommand (e.g. the worker re-granting
+      // permission triggers connect-native-bridge.tsx's poll to call startBackgroundLocation()
+      // again) — everything else in this service, especially the integrity-check loop, keeps
+      // running regardless.
+      Log.w(TAG, "Location permission missing when starting updates — GPS updates paused, service stays up.", e);
     }
   }
 
