@@ -66,6 +66,12 @@ export type ShipmentCountAssociateDay = {
   swa_delivery: number | string | null;
   c_return: number | string | null;
   total_delivery: number | string | null;
+  variable_pay: number | string | null;
+  mg_pay: number | string | null;
+  fuel_pay: number | string | null;
+  da_total_pay: number | string | null;
+  pay_type: string | null;
+  mapping_status: string | null;
 };
 
 export type CapacityDeliveryBreakdown = {
@@ -86,6 +92,12 @@ export type CapacityDeliveryBreakdown = {
   smd_delivery: number;
   smd2_delivery: number;
   base_amazon_delivery: number;
+  variable_pay: number | string | null;
+  mg_pay: number | string | null;
+  fuel_pay: number | string | null;
+  da_total_pay: number | string | null;
+  pay_type: string | null;
+  mapping_status: string | null;
 };
 
 type ShipmentAuditRow = {
@@ -192,7 +204,7 @@ export async function loadShipmentCountAssociateDays(companyId: string, stationC
     for (;;) {
       const result = await supabaseAdmin!
         .from("cps_shipment_daily")
-        .select("client,station_code,work_date,provider_employee_id,provider_employee_name,amazon_delivery,swa_delivery,c_return,total_delivery")
+        .select("client,station_code,work_date,provider_employee_id,provider_employee_name,amazon_delivery,swa_delivery,c_return,total_delivery,variable_pay,mg_pay,fuel_pay,da_total_pay,pay_type,mapping_status")
         .eq("company_id", companyId)
         .in("station_code", codes)
         .gte("work_date", from)
@@ -281,7 +293,7 @@ async function loadCapacityDeliverySource(companyId: string, stationCodes: strin
     for (;;) {
       const result = await supabaseAdmin!
         .from("cps_shipment_daily")
-        .select("source_batch_id,station_code,work_date,provider_employee_id,provider_employee_name,shipment_type,assigned_count,amazon_delivery,swa_delivery,c_return,mfn,mfn_return,total_delivery,total_activity")
+        .select("source_batch_id,station_code,work_date,provider_employee_id,provider_employee_name,shipment_type,assigned_count,amazon_delivery,swa_delivery,c_return,mfn,mfn_return,total_delivery,total_activity,variable_pay,mg_pay,fuel_pay,da_total_pay,pay_type,mapping_status")
         .eq("company_id", companyId)
         .in("station_code", codes)
         .gte("work_date", from)

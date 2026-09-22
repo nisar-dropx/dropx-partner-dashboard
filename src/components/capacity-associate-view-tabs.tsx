@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { PendingLink } from "@/components/pending-link";
 
-export function CapacityAssociateViewTabs({ active }: { active: "productivity" | "recommendations" }) {
+export function CapacityAssociateViewTabs({ active }: { active: "productivity" | "recommendations" | "low-productivity" }) {
   const searchParams = useSearchParams();
 
   function href(view: "productivity" | "recommendations") {
@@ -22,6 +22,9 @@ export function CapacityAssociateViewTabs({ active }: { active: "productivity" |
     </PendingLink>
     <PendingLink className={active === "recommendations" ? "active" : ""} disableWhenCurrent href={href("recommendations")}>
       SPR recommendations
+    </PendingLink>
+    <PendingLink className={active === "low-productivity" ? "active" : ""} disableWhenCurrent href="/ops-pulse/capacity/associates/low-productivity">
+      Low productivity associates
     </PendingLink>
   </nav>;
 }
