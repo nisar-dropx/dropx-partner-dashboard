@@ -209,6 +209,9 @@ export type PerformanceAssociateDelivery = {
   assigned: number | null;
   associateId: string;
   delivered: number;
+  /** Same-month delivery total and active delivery days, for review drill-downs. */
+  mtdActiveDays: number;
+  mtdDelivered: number;
   name: string;
   paymentScheme: string | null;
   paymentSetupStatus: string | null;
@@ -389,7 +392,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
   const stationCodes = locations.map((location) => location.station_code);
   const locationIds = locations.map((location) => location.id);
   const monthFrom = `${sourceDate.slice(0, 7)}-01`;
-  const [costResult, monthCostResult, breakupResult, shipmentResult, detailResult, capacityResult, monthCapacityResult, headsResult, openingResult, manpowerResult] = await Promise.all([
+  const [costResult, monthCostResult, breakupResult, shipmentResult, detailResult, capacityResult, monthCapacityResult, headsResult, openingResult, manpowerResult, monthShipmentResult] = await Promise.all([
     supabaseAdmin.from("cps_station_daily")
       .select("station_code,total_delivery,total_cost,overall_cps,da_pay_cost,da_cps").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("cps_station_daily")
@@ -408,9 +411,12 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     supabaseAdmin.from("payment_heads").select("id,code,name").eq("company_id", companyId),
     supabaseAdmin.from("ops_performance_station_settings")
       .select("station_id,opening_window_start,opening_window_end").eq("company_id", companyId).in("station_id", locationIds),
-    loadOpsStationManpower(companyId, locations, sourceDate).catch(() => null)
+    loadOpsStationManpower(companyId, locations, sourceDate).catch(() => null),
+    supabaseAdmin.from("cps_shipment_daily")
+      .select("station_code,work_date,provider_employee_id,provider_employee_name,dropx_name,total_delivery")
+      .eq("company_id", companyId).gte("work_date", monthFrom).lte("work_date", sourceDate).in("station_code", stationCodes)
   ]);
-  const error = costResult.error ?? monthCostResult.error ?? breakupResult.error ?? shipmentResult.error ?? detailResult.error ?? capacityResult.error ?? monthCapacityResult.error ?? headsResult.error ?? openingResult.error;
+  const error = costResult.error ?? monthCostResult.error ?? breakupResult.error ?? shipmentResult.error ?? detailResult.error ?? capacityResult.error ?? monthCapacityResult.error ?? headsResult.error ?? openingResult.error ?? monthShipmentResult.error;
   if (error) return { rows: empty, error: error.message };
   const adHocHeads = (headsResult.data ?? []).filter(isAdHocHead);
   const adHocHeadIds = adHocHeads.map((head) => head.id);
@@ -533,6 +539,8 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
         assigned: null,
         associateId: String(row.driver_id || "—"),
         delivered: 0,
+        mtdActiveDays: 0,
+        mtdDelivered: 0,
         hasDetailedDelivery: true,
         name: String(row.driver_name || row.driver_id || "Unidentified associate"),
         paymentScheme: null,
@@ -576,6 +584,8 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
         assigned: null,
         associateId: String(row.provider_employee_id || "—"),
         delivered: 0,
+        mtdActiveDays: 0,
+        mtdDelivered: 0,
         hasDetailedDelivery: false,
         name: String(row.dropx_name || row.provider_employee_name || row.provider_employee_id || "Unidentified associate"),
         paymentScheme: null,
@@ -594,6 +604,27 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       people.set(associateId, person);
     }
   });
+  // The review remains anchored to the selected day.  MTD values are only
+  // attached to associates visible on that day, so an old assignment cannot
+  // appear as a current below-minimum allocation exception.
+  const mtdDaysByAssociate = new Map<string, Set<string>>();
+  (monthShipmentResult.data ?? []).forEach((row) => {
+    const associateId = normalized(row.provider_employee_id) || `NAME_${normalized(row.dropx_name || row.provider_employee_name)}`;
+    const people = associateId ? associatesByStation.get(row.station_code) : null;
+    const person = associateId ? people?.get(associateId) : null;
+    const delivered = numberOrNull(row.total_delivery) ?? 0;
+    if (!person || delivered <= 0) return;
+    person.mtdDelivered += delivered;
+    const key = `${row.station_code}|${associateId}`;
+    const days = mtdDaysByAssociate.get(key) ?? new Set<string>();
+    days.add(String(row.work_date));
+    mtdDaysByAssociate.set(key, days);
+  });
+  for (const [stationCode, people] of associatesByStation) {
+    for (const [associateId, person] of people) {
+      person.mtdActiveDays = mtdDaysByAssociate.get(`${stationCode}|${associateId}`)?.size ?? 0;
+    }
+  }
   stationCodes.forEach((code) => {
     const current = empty.get(code)!;
     const detailDrivers = detailFeByStation.get(code)?.size ?? 0;
@@ -608,6 +639,8 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
         assigned: person.assigned,
         associateId: person.associateId,
         delivered: person.delivered,
+        mtdActiveDays: person.mtdActiveDays,
+        mtdDelivered: person.mtdDelivered,
         name: person.name,
         paymentScheme: person.paymentScheme,
         paymentSetupStatus: person.paymentSetupStatus,

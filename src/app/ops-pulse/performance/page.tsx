@@ -24,6 +24,7 @@ import { filterLocationsByReviewCluster, legacyConnectionsFromReview, reviewClus
 import { loadPeopleOperationalHierarchy } from "@/lib/people-operational-hierarchy";
 import { ACTIVE_DAILY_PERFORMANCE_SOURCE, ACTIVE_DAILY_PERFORMANCE_SOURCE_LABEL, selectActiveDailyBatchRows, selectStationDailyRow } from "@/lib/performance-source-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { loadCapacityRules } from "@/lib/ops-pulse/capacity";
 
 export const dynamic = "force-dynamic";
 
@@ -428,9 +429,15 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
     ?? deskLocations.find((location) => activeReviewCodes.has(stationCode(location.station_code)))
     ?? deskLocations[0]
     ?? null;
-  const operationalResult = selectedReviewLocation
-    ? await loadPerformanceOperationalSnapshots(companyId, selectedDate, [selectedReviewLocation])
-    : { rows: new Map(), error: "No permitted station is available." };
+  const [operationalResult, capacityRules] = selectedReviewLocation
+    ? await Promise.all([
+      loadPerformanceOperationalSnapshots(companyId, selectedDate, [selectedReviewLocation]),
+      loadCapacityRules(companyId)
+    ])
+    : [{ rows: new Map(), error: "No permitted station is available." }, { rows: [], error: null }];
+  const allocationTarget = selectedReviewLocation
+    ? capacityRules.rows.find((rule) => stationCode(rule.stationCode) === stationCode(selectedReviewLocation.station_code))?.targetSpr ?? 40
+    : 40;
   // Two People assignments tie for Cluster Manager at this station — surface it instead of
   // silently picking one, so a genuinely ambiguous org-chart entry doesn't look like a
   // wrong-CM bug in the cluster filter.
@@ -558,6 +565,7 @@ export default async function PerformancePage({ searchParams }: { searchParams?:
               fuelPay: 0, mgSalaryPay: 0, mtdCost: 0, mtdCps: null, mtdDelivery: 0, overallCps: null,
               salaryDaCost: 0, salaryDaCps: null, unmappedFeCount: 0, variableDaPay: 0
             }}
+            allocationTarget={allocationTarget}
             sourceBatchId={selectedReviewRow?.batch_id ?? null}
             sourceType={selectedReviewRow?.source_type ?? "operational_data"}
             sourceWeek={selectedDailyWeek}

@@ -242,6 +242,28 @@
 .performance-review-desk .performance-opening-popover p,.performance-review-desk .performance-opening-popover p b { font-size: 12px; }
 .performance-review-desk .performance-associate-popover :is(.performance-associate-popover-head,.performance-associate-row span,.performance-associate-row strong,.performance-associate-row b,.performance-associate-popover-foot) { font-size: 12px; }
 .performance-review-desk .performance-associate-popover-scroll { border: 1px solid #e2e8f0; border-radius: 8px; }
+.performance-review-desk .allocation-risk-badge,.performance-review-desk .allocation-good-badge { padding: 3px 6px; border-radius: 999px; font-size: 10px; font-weight: 800; }
+.performance-review-desk .allocation-risk-badge { color: #9f1239; background: #fff1f2; }
+.performance-review-desk .allocation-good-badge { color: #166534; background: #dcfce7; }
+.performance-allocation-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 3px 0 10px; }
+.performance-allocation-heading strong,.performance-allocation-heading small { display: block; }
+.performance-allocation-heading small { margin-top: 4px; color: #64748b; font-size: 11px; }
+.performance-allocation-heading > b { flex: 0 0 auto; border-radius: 999px; padding: 5px 8px; color: #9a3412; background: #fff1e5; font-size: 11px; }
+.performance-allocation-list { border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+.performance-allocation-associate { border-top: 1px solid #edf0f4; }
+.performance-allocation-associate:first-child { border-top: 0; }
+.performance-allocation-associate > summary { display: grid; grid-template-columns: minmax(160px,1fr) auto auto; align-items: center; gap: 10px; padding: 10px; cursor: pointer; list-style: none; }
+.performance-allocation-associate > summary::-webkit-details-marker { display: none; }
+.performance-allocation-associate summary strong,.performance-allocation-associate summary small { display: block; }
+.performance-allocation-associate summary small { margin-top: 2px; color: #64748b; font-size: 10px; }
+.performance-allocation-associate summary > b { font-size: 14px; }
+.performance-allocation-associate summary em { border-radius: 999px; padding: 4px 6px; color: #9f1239; background: #fff1f2; font-size: 10px; font-style: normal; font-weight: 750; }
+.performance-allocation-associate-detail { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; padding: 10px; background: #f8fafc; }
+.performance-allocation-associate-detail > div { min-width: 0; padding: 8px; border: 1px solid #e2e8f0; border-radius: 7px; background: #fff; }
+.performance-allocation-associate-detail span,.performance-allocation-associate-detail strong,.performance-allocation-associate-detail small { display: block; }
+.performance-allocation-associate-detail span,.performance-allocation-associate-detail small { color: #64748b; font-size: 10px; }
+.performance-allocation-associate-detail strong { margin: 3px 0; font-size: 14px; overflow-wrap: anywhere; }
+@media(max-width:700px) { .performance-allocation-associate-detail { grid-template-columns: 1fr; } .performance-allocation-associate > summary { grid-template-columns: minmax(0,1fr) auto; } .performance-allocation-associate summary em { grid-column: 1/-1; justify-self: start; } }
 .review-details-close-row { display: flex; justify-content: flex-end; position: sticky; top: 0; z-index: 5; padding: 6px 0; background: #fff; }
 .performance-review-desk .review-details-close { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #dce2ea; border-radius: 7px; min-height: 36px; padding: 6px 11px; color: #475569; background: #fff; font: inherit; font-size: 12px; cursor: pointer; }
 .review-details-close span { font-size: 18px; line-height: 1; }

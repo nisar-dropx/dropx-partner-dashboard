@@ -96,6 +96,7 @@ type Props = {
   sourceType: string;
   sourceWeek: number;
   steps: PerformanceReviewStep[];
+  allocationTarget: number;
 };
 
 function money(value: number | null | undefined, digits = 0) {
@@ -136,10 +137,30 @@ function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociat
   </div>;
 }
 
+function BelowMinimumAllocationBreakdown({ rows, target, date }: { rows: PerformanceAssociateDelivery[]; target: number; date: string }) {
+  const belowTarget = rows.filter((person) => person.delivered < target).sort((left, right) => left.delivered - right.delivered || left.name.localeCompare(right.name));
+  return <div className="performance-associate-popover performance-allocation-popover">
+    <ReviewDetailsClose label="Close below-minimum allocation details"/>
+    <div className="performance-allocation-heading"><div><strong>Below minimum allocation</strong><small>{belowTarget.length} associate{belowTarget.length === 1 ? "" : "s"} below {target.toLocaleString("en-IN")} deliveries on {formatDashboardDate(date)}</small></div><b>Target {target.toLocaleString("en-IN")}</b></div>
+    {belowTarget.length ? <div className="performance-allocation-list">{belowTarget.map((person) => {
+      const mtdAverage = person.mtdActiveDays ? person.mtdDelivered / person.mtdActiveDays : null;
+      return <ReviewDetails className="performance-allocation-associate" key={`${person.associateId}-${person.name}`}>
+        <summary><span><strong>{person.name}</strong><small>{person.associateId}</small></span><b>{person.delivered.toLocaleString("en-IN")}</b><em>Below {target.toLocaleString("en-IN")}</em></summary>
+        <div className="performance-allocation-associate-detail">
+          <div><span>{formatDashboardDate(date)}</span><strong>{person.delivered.toLocaleString("en-IN")}</strong><small>Selected-day allocation</small></div>
+          <div><span>MTD average</span><strong>{mtdAverage == null ? "—" : mtdAverage.toFixed(1)}</strong><small>{person.mtdDelivered.toLocaleString("en-IN")} deliveries / {person.mtdActiveDays} active days</small></div>
+          <div><span>Payment setup</span><strong>{person.paymentScheme || "—"}</strong><small>{person.rateCard || "Rate card not mapped"}</small></div>
+        </div>
+      </ReviewDetails>;
+    })}</div> : <p className="review-empty">No associates are below the configured minimum allocation.</p>}
+  </div>;
+}
+
 export function PerformanceReviewDesk(props: Props) {
   const { canAdd, canCompleteStep, canEdit, canEditConnections, canComment, programManager, reviewerEditReopened, isOriginalReviewer, connections, updates, reviewChain, date, error, items, locations, metrics, notice, previousReviews, review, reviews, selectedLocation, snapshot, sourceBatchId, sourceType, sourceWeek, steps } = props;
   const selectedCode = selectedLocation.station_code;
   const deliveryAvailable = snapshot.deliveryDataAvailable !== false;
+  const belowMinimumAllocation = snapshot.associateDeliveries.filter((person) => person.delivered < props.allocationTarget);
   const deliveryLabel = deliveryAvailable ? snapshot.deliveredCount.toLocaleString("en-IN") : "Data not loaded";
   const selectedStationKey = stationKey(selectedCode);
   const previousStationReviews = previousReviews.filter((entry) => stationKey(entry.station_code) === selectedStationKey);
@@ -269,7 +290,7 @@ export function PerformanceReviewDesk(props: Props) {
         <div className="panel-head"><div><span className="performance-review-kicker">01 · PERFORMANCE</span><h2>Station performance</h2><p className="subtle">Uploaded Amazon metrics, opening discipline and action ownership in one review.</p></div><div className="review-history-actions"><TrendButton group="performance" metric="metric_health" label="Performance"/><strong className={misses.length ? "review-risk" : "review-good"}>{misses.length} exception{misses.length === 1 ? "" : "s"}</strong></div></div>
         <div className="performance-review-facts">
           <ReviewDetails className="performance-fact-card" name="performance-review-fact"><summary><span>Delivered · view split</span><strong>{deliveryLabel}</strong><small>{deliveryAvailable ? `${snapshot.associateDeliveries.length} delivering associates · selected day` : "Selected-day delivery import unavailable"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></ReviewDetails>
-          <ReviewDetails className="performance-fact-card" name="performance-review-fact"><summary><span>Average allocation · view split</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{deliveryAvailable ? `${snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / ${snapshot.activeFeCount} active FEs` : "Selected-day delivery import unavailable"}</small></summary><AssociateDeliveryBreakdown rows={snapshot.associateDeliveries} total={snapshot.deliveredCount}/></ReviewDetails>
+          <ReviewDetails className="performance-fact-card" name="performance-review-fact"><summary><span>Average allocation · view split</span><strong>{snapshot.averageAllocation == null ? "—" : snapshot.averageAllocation.toFixed(1)}</strong><small>{deliveryAvailable ? <>{snapshot.deliveredCount.toLocaleString("en-IN")} deliveries / {snapshot.activeFeCount} active FEs <b className={belowMinimumAllocation.length ? "allocation-risk-badge" : "allocation-good-badge"}>{belowMinimumAllocation.length} below {props.allocationTarget.toLocaleString("en-IN")} minimum</b></> : "Selected-day delivery import unavailable"}</small></summary><BelowMinimumAllocationBreakdown rows={snapshot.associateDeliveries} target={props.allocationTarget} date={date}/></ReviewDetails>
           <PerformanceOpeningCard snapshot={snapshot}/>
           <PerformanceEddClearanceCard key={`${selectedCode}-${date}`} data={props.eddClearance} stationCode={selectedCode}/>
           <PerformanceUtrDisciplineCard data={props.utrDiscipline} date={date}/>
