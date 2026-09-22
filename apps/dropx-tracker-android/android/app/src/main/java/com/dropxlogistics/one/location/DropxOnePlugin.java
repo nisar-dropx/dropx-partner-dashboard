@@ -216,6 +216,21 @@ public class DropxOnePlugin extends Plugin {
 
   @PluginMethod
   public void startBackgroundLocation(PluginCall call) {
+    // Reads permission state directly against the OS (same as hasMandatoryLocationAccess()),
+    // not via Capacitor's getPermissionState()/requestPermissionForAlias() — this method is
+    // invoked repeatedly from connect-native-bridge.tsx's polling sync effect, and once the
+    // MainActivity overlay has already obtained "Allow all the time" (the overwhelmingly common
+    // case on every poll after the first), routing through Capacitor's PluginCall-bound
+    // permission machinery here needlessly risked two concurrent permission requests against
+    // the same alias overlapping — which crashed getPermissionStates() with a
+    // NullPointerException (see configureAttendance()'s comment for the same race in a
+    // different call). Only the true first-grant path below still uses Capacitor's
+    // PluginCall-based request/callback flow, since that one genuinely needs to hand a result
+    // back to JS once the user responds to the OS dialog.
+    if (hasMandatoryLocationAccess(getContext())) {
+      startServiceAndResolve(call);
+      return;
+    }
     if (getPermissionState("location") != PermissionState.GRANTED) {
       requestPermissionForAlias("location", call, "locationPermissionCallback");
       return;
