@@ -20,6 +20,7 @@ final class TrackingPrefs {
   private static final String KEY_REQUESTED_BATTERY_EXEMPTION = "requestedBatteryExemption";
   private static final String KEY_LAST_HEARTBEAT_AT = "lastHeartbeatAt";
   private static final String KEY_INTERRUPTION_REPORTED_FOR_HEARTBEAT_AT = "interruptionReportedForHeartbeatAt";
+  private static final String KEY_INTEGRITY_CHECK_INTERVAL_SECONDS = "integrityCheckIntervalSeconds";
 
   private TrackingPrefs() {}
 
@@ -27,13 +28,27 @@ final class TrackingPrefs {
     return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
   }
 
-  static void save(Context context, String accountId, String profileType, String serverUrl, boolean enabled) {
+  static void save(
+    Context context,
+    String accountId,
+    String profileType,
+    String serverUrl,
+    boolean enabled,
+    int integrityCheckIntervalSeconds
+  ) {
     prefs(context).edit()
       .putString(KEY_ACCOUNT_ID, accountId)
       .putString(KEY_PROFILE_TYPE, profileType)
       .putString(KEY_SERVER_URL, serverUrl)
       .putBoolean(KEY_ENABLED, enabled)
+      .putInt(KEY_INTEGRITY_CHECK_INTERVAL_SECONDS, integrityCheckIntervalSeconds)
       .apply();
+  }
+
+  /** Admin-editable at /attendance/integrity (hr_company_settings.integrity_check_interval_seconds). */
+  static int integrityCheckIntervalSeconds(Context context) {
+    int seconds = prefs(context).getInt(KEY_INTEGRITY_CHECK_INTERVAL_SECONDS, 30);
+    return seconds >= 15 && seconds <= 600 ? seconds : 30;
   }
 
   static void setRunning(Context context, boolean running) {

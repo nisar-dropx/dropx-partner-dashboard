@@ -11,8 +11,13 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.location.Location;
 import android.location.LocationManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
 import android.webkit.CookieManager;
@@ -62,10 +67,12 @@ public class LocationTrackingService extends Service {
   private static final String TAG = "DropxOneLocation";
   private static final String CHANNEL_ID = "dropx_one_location_tracking";
   private static final String LOCATION_OFF_CHANNEL_ID = "dropx_one_location_off_alert";
+  private static final String INTERNET_OFF_CHANNEL_ID = "dropx_one_internet_off_alert";
   private static final String INTEGRITY_RISK_CHANNEL_ID = "dropx_one_integrity_risk_alert";
   private static final int NOTIFICATION_ID = 4471;
   private static final int LOCATION_OFF_NOTIFICATION_ID = 4472;
   private static final int INTEGRITY_RISK_NOTIFICATION_ID = 4473;
+  private static final int INTERNET_OFF_NOTIFICATION_ID = 4474;
   /** How often GPS is sampled and the cheap live-position endpoint is posted to. */
   private static final long LIVE_INTERVAL_MS = 30 * 1000;
   /** Matches HEARTBEAT_MIN_INTERVAL_MS on the server — client-side throttle for the heavier call. */
@@ -77,6 +84,15 @@ public class LocationTrackingService extends Service {
   private String sessionId;
   private BroadcastReceiver locationModeReceiver;
   private long lastComplianceHeartbeatAt = 0L;
+
+  // Repeating self-check (interval admin-editable, see TrackingPrefs.integrityCheckIntervalSeconds)
+  // that re-notifies AND re-logs to HRMS on every tick while a problem persists — location off,
+  // internet off, or developer mode / USB debugging / mock location on. Distinct from
+  // postHeartbeat()'s mock/dev/VPN reporting above, which only fires alongside a real GPS fix
+  // (so it's silent if Location itself is off, exactly the gap this loop closes) and only once
+  // per COMPLIANCE_INTERVAL_MS (10 min) rather than the worker-visible cadence requested here.
+  private final Handler integrityCheckHandler = new Handler(Looper.getMainLooper());
+  private Runnable integrityCheckRunnable;
 
   @Override
   public void onCreate() {
@@ -103,10 +119,45 @@ public class LocationTrackingService extends Service {
   public int onStartCommand(Intent intent, int flags, int startId) {
     startForeground(NOTIFICATION_ID, buildNotification());
     startLocationUpdates();
-    refreshLocationEnabledAlert();
+    startIntegrityCheckLoop();
     // START_STICKY: if the OS kills this process under memory pressure, restart it with
     // a null intent — onStartCommand re-reads TrackingPrefs itself, so tracking resumes.
     return START_STICKY;
+  }
+
+  /**
+   * Runs immediately, then re-schedules itself every TrackingPrefs.integrityCheckIntervalSeconds()
+   * for as long as the service is alive — reads that pref fresh on every tick (not cached at
+   * loop-start) so an admin changing it in HRMS takes effect on this worker's very next check
+   * without needing the app reopened. Only one loop ever runs per service instance: if this is
+   * called again (onStartCommand can fire more than once per service lifetime, e.g. a second
+   * startBackgroundLocation() call), the pending callback is cancelled first.
+   */
+  private void startIntegrityCheckLoop() {
+    if (integrityCheckRunnable != null) {
+      integrityCheckHandler.removeCallbacks(integrityCheckRunnable);
+    }
+    integrityCheckRunnable = () -> {
+      runIntegrityCheck();
+      long intervalMs = TrackingPrefs.integrityCheckIntervalSeconds(this) * 1000L;
+      integrityCheckHandler.postDelayed(integrityCheckRunnable, intervalMs);
+    };
+    integrityCheckHandler.post(integrityCheckRunnable);
+  }
+
+  /**
+   * The actual per-tick check: Location on/off and Internet on/off are both re-evaluated and
+   * re-notified/re-reported every tick while the problem persists (not just once) — refreshLocationEnabledAlert()
+   * and refreshInternetEnabledAlert() below both unconditionally notify() (not just on a
+   * state change), which on Android replaces the existing notification with a fresh one, and
+   * both post to HRMS on every call where the problem is present. Developer mode / USB
+   * debugging / mock location are already checked on every real heartbeat (postHeartbeat());
+   * this loop doesn't duplicate that GPS-dependent path, since a location fix might arrive
+   * less often than this loop runs.
+   */
+  private void runIntegrityCheck() {
+    refreshLocationEnabledAlert();
+    refreshInternetEnabledAlert();
   }
 
   private void refreshLocationEnabledAlert() {
@@ -116,7 +167,13 @@ public class LocationTrackingService extends Service {
     if (enabled) {
       notifications.cancel(LOCATION_OFF_NOTIFICATION_ID);
     } else {
+      // notify() with the same id replaces the existing notification rather than stacking a
+      // new one — safe to call unconditionally on every integrity-check tick, and is what
+      // makes this "repeat" every tick instead of firing once on the MODE_CHANGED_ACTION
+      // broadcast alone (that broadcast only fires on a state CHANGE, so a worker who leaves
+      // Location off for the whole shift would otherwise only ever see it once).
       notifications.notify(LOCATION_OFF_NOTIFICATION_ID, buildLocationOffAlert());
+      reportProblemToHrms("location_off", "Location is turned off");
     }
   }
 
@@ -142,14 +199,135 @@ public class LocationTrackingService extends Service {
     return new NotificationCompat.Builder(this, LOCATION_OFF_CHANNEL_ID)
       .setContentTitle("DropX One")
       .setContentText("Location is turned off — tap to turn it back on")
+      .setStyle(new NotificationCompat.BigTextStyle().bigText(
+        "Location is turned off while you're clocked in. This is being logged to HRMS — turn it " +
+        "back on now or today's attendance may be marked absent."
+      ))
       .setSmallIcon(getApplicationInfo().icon)
       .setPriority(NotificationCompat.PRIORITY_HIGH)
       // Not swipe-dismissible on purpose — this only goes away once Location is back on
-      // (refreshLocationEnabledAlert cancels it from the MODE_CHANGED_ACTION receiver above),
-      // not because the worker dismissed the warning without fixing it.
+      // (refreshLocationEnabledAlert cancels it once isLocationEnabled() is true again), not
+      // because the worker dismissed the warning without fixing it.
       .setOngoing(true)
       .setContentIntent(openLocationSettings)
       .build();
+  }
+
+  /**
+   * Mirrors refreshLocationEnabledAlert() for the internet-off case: Location being on doesn't
+   * imply the device has a working network path, and a heartbeat/live-position POST with no
+   * internet fails silently from the worker's point of view (postLivePosition/postHeartbeat
+   * above only log a warning, they don't surface anything on-device) — this makes that failure
+   * visible and logs it, the same way losing Location itself already is.
+   */
+  private void refreshInternetEnabledAlert() {
+    boolean connected = isInternetConnected();
+    NotificationManagerCompat notifications = NotificationManagerCompat.from(this);
+    if (connected) {
+      notifications.cancel(INTERNET_OFF_NOTIFICATION_ID);
+    } else {
+      notifications.notify(INTERNET_OFF_NOTIFICATION_ID, buildInternetOffAlert());
+      // Can't reach the server to log this the normal way (that's the whole problem) — queued
+      // for the next tick where connectivity is back, see reportProblemToHrms()'s retry queue.
+      reportProblemToHrms("internet_off", "Internet is turned off");
+    }
+  }
+
+  private boolean isInternetConnected() {
+    ConnectivityManager connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+    if (connectivityManager == null) return true; // fail open — don't alarm on a service lookup failure
+    Network activeNetwork = connectivityManager.getActiveNetwork();
+    if (activeNetwork == null) return false;
+    NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(activeNetwork);
+    return capabilities != null
+      && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+      && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+  }
+
+  private Notification buildInternetOffAlert() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      NotificationManager manager = getSystemService(NotificationManager.class);
+      NotificationChannel channel = new NotificationChannel(
+        INTERNET_OFF_CHANNEL_ID,
+        "DropX One alerts",
+        NotificationManager.IMPORTANCE_HIGH
+      );
+      channel.setDescription("Shown when internet access is off and DropX One can't report attendance/location.");
+      manager.createNotificationChannel(channel);
+    }
+
+    PendingIntent openNetworkSettings = PendingIntent.getActivity(
+      this,
+      3,
+      new Intent(Settings.ACTION_WIRELESS_SETTINGS),
+      PendingIntent.FLAG_IMMUTABLE
+    );
+
+    return new NotificationCompat.Builder(this, INTERNET_OFF_CHANNEL_ID)
+      .setContentTitle("DropX One")
+      .setContentText("Internet is turned off — tap to turn it back on")
+      .setStyle(new NotificationCompat.BigTextStyle().bigText(
+        "Internet access is off while you're clocked in, so attendance/location can't be reported. " +
+        "This will be logged to HRMS once connection is back — turn it on now or today's attendance " +
+        "may be marked absent."
+      ))
+      .setSmallIcon(getApplicationInfo().icon)
+      .setPriority(NotificationCompat.PRIORITY_HIGH)
+      .setOngoing(true)
+      .setContentIntent(openNetworkSettings)
+      .build();
+  }
+
+  /**
+   * Reports a persisting problem (location_off / internet_off) to HRMS via the same
+   * tracking-interruption endpoint TrackingInterruptionReporter posts to — reused rather than
+   * adding a third endpoint, since the server-side handling (open/refresh an integrity_risk
+   * flag tied to the open shift) is identical regardless of which problem caused the gap.
+   * Best-effort and silent on failure by design (matches TrackingInterruptionReporter): if
+   * this fails because internet is the actual problem, there's nothing to usefully retry
+   * beyond just letting the next tick (which re-checks connectivity first) try again.
+   */
+  private void reportProblemToHrms(String reasonCode, String reasonLabel) {
+    String serverUrl = TrackingPrefs.serverUrl(this);
+    String accountId = TrackingPrefs.accountId(this);
+    String profileType = TrackingPrefs.profileType(this);
+    if (serverUrl.isEmpty() || accountId.isEmpty() || profileType.isEmpty()) return;
+
+    uploadExecutor.execute(() -> {
+      HttpURLConnection connection = null;
+      try {
+        URL endpoint = new URL(serverUrl.replaceAll("/$", "") + "/api/connect/attendance/tracking-interruption");
+        connection = (HttpURLConnection) endpoint.openConnection();
+        connection.setRequestMethod("POST");
+        connection.setConnectTimeout(10_000);
+        connection.setReadTimeout(10_000);
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=utf-8");
+
+        String cookie = CookieManager.getInstance().getCookie(serverUrl);
+        if (cookie != null && !cookie.isEmpty()) {
+          connection.setRequestProperty("Cookie", cookie);
+        }
+
+        String body = "accountId=" + URLEncoder.encode(accountId, "UTF-8")
+          + "&profileType=" + URLEncoder.encode(profileType, "UTF-8")
+          + "&reasonCode=" + URLEncoder.encode(reasonCode, "UTF-8")
+          + "&reasonLabel=" + URLEncoder.encode(reasonLabel, "UTF-8");
+        try (OutputStream out = connection.getOutputStream()) {
+          out.write(body.getBytes(StandardCharsets.UTF_8));
+        }
+        int status = connection.getResponseCode();
+        if (status >= 400) {
+          Log.w(TAG, "Problem report (" + reasonCode + ") rejected, status=" + status);
+        } else {
+          Log.i(TAG, "Problem report (" + reasonCode + ") sent, status=" + status);
+        }
+      } catch (Exception e) {
+        Log.w(TAG, "Problem report (" + reasonCode + ") failed to send.", e);
+      } finally {
+        if (connection != null) connection.disconnect();
+      }
+    });
   }
 
   /**
@@ -394,13 +572,12 @@ public class LocationTrackingService extends Service {
    * has access to, so this needs no extra permission grant beyond what's already declared.
    */
   private boolean isVpnActive() {
-    android.net.ConnectivityManager connectivityManager =
-      (android.net.ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+    ConnectivityManager connectivityManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
     if (connectivityManager == null) return false;
-    android.net.Network activeNetwork = connectivityManager.getActiveNetwork();
+    Network activeNetwork = connectivityManager.getActiveNetwork();
     if (activeNetwork == null) return false;
-    android.net.NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(activeNetwork);
-    return capabilities != null && capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN);
+    NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(activeNetwork);
+    return capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
   }
 
   private static void appendField(StringBuilder body, String key, String value) {
@@ -453,10 +630,15 @@ public class LocationTrackingService extends Service {
       unregisterReceiver(locationModeReceiver);
       locationModeReceiver = null;
     }
-    // The alert is specifically about tracking being unable to run right now — once the
-    // service itself has stopped (tracking turned off from the app, not from Location
-    // settings), the warning no longer applies either.
+    if (integrityCheckRunnable != null) {
+      integrityCheckHandler.removeCallbacks(integrityCheckRunnable);
+      integrityCheckRunnable = null;
+    }
+    // These alerts are specifically about tracking being unable to run right now — once the
+    // service itself has stopped (tracking turned off from the app, not from Location/internet
+    // settings), the warnings no longer apply either.
     NotificationManagerCompat.from(this).cancel(LOCATION_OFF_NOTIFICATION_ID);
+    NotificationManagerCompat.from(this).cancel(INTERNET_OFF_NOTIFICATION_ID);
     uploadExecutor.shutdown();
   }
 

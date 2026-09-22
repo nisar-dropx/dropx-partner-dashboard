@@ -56,13 +56,19 @@ public class DropxOnePlugin extends Plugin {
     String profileType = call.getString("profileType", "");
     String serverUrl = call.getString("serverUrl", "");
     boolean locationTrackingEnabled = Boolean.TRUE.equals(call.getBoolean("locationTrackingEnabled", false));
+    // Admin-editable at /attendance/integrity (hr_company_settings.integrity_check_interval_seconds),
+    // sent down through connect-native-bridge.tsx on every sync — 30s fallback matches that
+    // column's own DB default in case the JS side sends something malformed/missing.
+    int integrityCheckIntervalSeconds = (int) Math.round(
+      call.getDouble("integrityCheckIntervalSeconds", 30.0).doubleValue()
+    );
 
     if (accountId.isEmpty() || profileType.isEmpty() || serverUrl.isEmpty()) {
       call.reject("accountId, profileType and serverUrl are required.");
       return;
     }
 
-    TrackingPrefs.save(getContext(), accountId, profileType, serverUrl, locationTrackingEnabled);
+    TrackingPrefs.save(getContext(), accountId, profileType, serverUrl, locationTrackingEnabled, integrityCheckIntervalSeconds);
 
     // Resolve immediately rather than keeping this PluginCall alive across the modal consent
     // dialog below. connect-native-bridge.tsx awaits configureAttendance() and then immediately

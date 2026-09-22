@@ -32,15 +32,23 @@ export async function saveOutsideStationPolicy(formData: FormData) {
     return;
   }
 
+  const intervalRaw = clean(formData.get("integrity_check_interval_seconds"));
+  const intervalSeconds = Number(intervalRaw);
+  if (!Number.isFinite(intervalSeconds) || intervalSeconds < 15 || intervalSeconds > 600) {
+    integrityRedirect(formData, "error", "Enter a check interval between 15 and 600 seconds.");
+    return;
+  }
+
   // hr_company_settings has other columns this form doesn't know about (biometric/roster
-  // settings live on the same row) — only ever .update() the two this form owns, never
+  // settings live on the same row) — only ever .update() the columns this form owns, never
   // upsert/insert, so a company without a row yet gets a clear error instead of a new row
   // silently missing whatever defaults its other columns should have had.
   const update = await supabaseAdmin
     .from("hr_company_settings")
     .update({
       outside_station_tracking_enabled: enabled,
-      outside_station_allowance_minutes: Math.round(minutes)
+      outside_station_allowance_minutes: Math.round(minutes),
+      integrity_check_interval_seconds: Math.round(intervalSeconds)
     })
     .eq("company_id", companyId)
     .select("company_id");

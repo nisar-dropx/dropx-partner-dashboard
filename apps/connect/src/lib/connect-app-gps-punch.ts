@@ -443,6 +443,7 @@ export async function loadConnectPunchStatus(worker: ConnectAttendanceWorker) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
   const stationSettings = await resolveStationAttendanceSettings(worker.locationId);
+  const integrityCheckIntervalSeconds = await loadIntegrityCheckIntervalSeconds(worker.companyId);
   const shift = await loadOpenShift({
     companyId: worker.companyId,
     enrolmentId: worker.enrolmentId
@@ -539,10 +540,31 @@ export async function loadConnectPunchStatus(worker: ConnectAttendanceWorker) {
     openFlags: openFlagsForClient,
     attendanceSettings: {
       locationTrackingEnabled: stationSettings.locationTrackingEnabled,
-      integrityFlagsEnabled: stationSettings.integrityFlagsEnabled
+      integrityFlagsEnabled: stationSettings.integrityFlagsEnabled,
+      integrityCheckIntervalSeconds
     },
     latestBiometricPunch
   };
+}
+
+/**
+ * How often (seconds) the Android app re-checks and, while a problem persists, re-notifies
+ * the worker and re-logs to HRMS for: location off, internet off, developer mode / USB
+ * debugging / mock location. Company-wide (not per-station, unlike locationTrackingEnabled
+ * above) — admin-editable at /attendance/integrity, see hr_company_settings.
+ * integrity_check_interval_seconds. Defaults to 30s if the row/column can't be read, matching
+ * the column's own DB default, so a missing settings row never silently disables repeat checks.
+ */
+async function loadIntegrityCheckIntervalSeconds(companyId: string): Promise<number> {
+  if (!supabaseAdmin) return 30;
+  const result = await supabaseAdmin
+    .from("hr_company_settings")
+    .select("integrity_check_interval_seconds")
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (result.error || !result.data) return 30;
+  const seconds = Number(result.data.integrity_check_interval_seconds);
+  return Number.isFinite(seconds) && seconds >= 15 && seconds <= 600 ? seconds : 30;
 }
 
 async function openIntegrityFlag({

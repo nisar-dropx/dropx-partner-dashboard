@@ -23,6 +23,7 @@ type DropxOnePlugin = {
     profileType: string;
     serverUrl: string;
     locationTrackingEnabled: boolean;
+    integrityCheckIntervalSeconds: number;
   }) => Promise<void>;
   startBackgroundLocation?: () => Promise<void>;
   stopBackgroundLocation?: () => Promise<void>;
@@ -39,6 +40,7 @@ type PushNotificationsPlugin = {
 
 type AttendanceTrackingState = {
   shouldTrack: boolean;
+  integrityCheckIntervalSeconds: number;
 };
 
 function capacitor(): CapacitorLike | undefined {
@@ -74,20 +76,29 @@ function pushPlugin(): PushNotificationsPlugin | null {
  * from that first punch-in.
  */
 function shouldRunBackgroundTracking(payload: {
-  attendanceSettings?: { locationTrackingEnabled?: boolean };
+  attendanceSettings?: { locationTrackingEnabled?: boolean; integrityCheckIntervalSeconds?: number };
   shift?: { inTime?: string | null };
 } | null): AttendanceTrackingState {
+  // Admin-editable at /attendance/integrity (hr_company_settings.integrity_check_interval_seconds);
+  // 30s here is only the fallback if the server payload is missing/malformed, matching that
+  // column's own DB default so a read failure never silently disables repeat checks.
+  const integrityCheckIntervalSeconds =
+    typeof payload?.attendanceSettings?.integrityCheckIntervalSeconds === "number"
+      && payload.attendanceSettings.integrityCheckIntervalSeconds >= 15
+      ? payload.attendanceSettings.integrityCheckIntervalSeconds
+      : 30;
+
   const locationTrackingEnabled = payload?.attendanceSettings?.locationTrackingEnabled === true;
   if (!locationTrackingEnabled) {
-    return { shouldTrack: false };
+    return { shouldTrack: false, integrityCheckIntervalSeconds };
   }
 
   const inTime = payload?.shift?.inTime ? String(payload.shift.inTime) : "";
   if (!inTime) {
-    return { shouldTrack: false };
+    return { shouldTrack: false, integrityCheckIntervalSeconds };
   }
 
-  return { shouldTrack: true };
+  return { shouldTrack: true, integrityCheckIntervalSeconds };
 }
 
 async function registerPushToken(account: AppAccount, token: string) {
@@ -114,7 +125,8 @@ async function syncAttendanceContext(account: AppAccount, state: AttendanceTrack
     accountId: account.id,
     profileType: account.profileType,
     serverUrl,
-    locationTrackingEnabled: state.shouldTrack
+    locationTrackingEnabled: state.shouldTrack,
+    integrityCheckIntervalSeconds: state.integrityCheckIntervalSeconds
   });
   if (state.shouldTrack) {
     await plugin.startBackgroundLocation?.();
@@ -131,11 +143,11 @@ async function readAttendanceTrackingState(account: AppAccount): Promise<Attenda
     );
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload) {
-      return { shouldTrack: false };
+      return { shouldTrack: false, integrityCheckIntervalSeconds: 30 };
     }
     return shouldRunBackgroundTracking(payload);
   } catch {
-    return { shouldTrack: false };
+    return { shouldTrack: false, integrityCheckIntervalSeconds: 30 };
   }
 }
 

@@ -181,6 +181,7 @@ export default async function AttendanceIntegrityPage({
   let loadError = "";
   let outsideStationTrackingEnabled = true;
   let outsideStationAllowanceMinutes = 60;
+  let integrityCheckIntervalSeconds = 30;
 
   if (!isSupabaseAdminConfigured || !supabaseAdmin) {
     loadError = "Supabase service role key is not configured.";
@@ -202,7 +203,7 @@ export default async function AttendanceIntegrityPage({
         .limit(100),
       supabaseAdmin
         .from("hr_company_settings")
-        .select("outside_station_tracking_enabled, outside_station_allowance_minutes")
+        .select("outside_station_tracking_enabled, outside_station_allowance_minutes, integrity_check_interval_seconds")
         .eq("company_id", companyId)
         .maybeSingle()
     ]);
@@ -223,6 +224,7 @@ export default async function AttendanceIntegrityPage({
     if (!policyResult.error && policyResult.data) {
       outsideStationTrackingEnabled = policyResult.data.outside_station_tracking_enabled !== false;
       outsideStationAllowanceMinutes = Number(policyResult.data.outside_station_allowance_minutes ?? 60);
+      integrityCheckIntervalSeconds = Number(policyResult.data.integrity_check_interval_seconds ?? 30);
     }
   }
 
@@ -246,7 +248,8 @@ export default async function AttendanceIntegrityPage({
             <div>
               <h2>Outside-station policy</h2>
               <p className="subtle">
-                How long a worker can stay beyond the station radius (default 50m) during a shift before it opens a review flag.
+                How long a worker can stay beyond the station radius (default 50m) during a shift before it opens a review flag,
+                and how often the DropX One app re-checks for a problem device state.
               </p>
             </div>
           </div>
@@ -271,6 +274,20 @@ export default async function AttendanceIntegrityPage({
                 defaultValue={outsideStationAllowanceMinutes}
                 disabled={!canEdit}
               />
+            </label>
+            <label className="span-2">Device check interval (seconds)
+              <input
+                className="field"
+                inputMode="numeric"
+                name="integrity_check_interval_seconds"
+                required
+                defaultValue={integrityCheckIntervalSeconds}
+                disabled={!canEdit}
+              />
+              <span className="subtle">
+                How often the app re-checks and, while a problem persists, re-notifies the worker and re-logs to HRMS for:
+                location turned off, internet turned off, or developer mode / USB debugging / mock location enabled. 15–600 seconds.
+              </span>
             </label>
             <div className="form-actions span-2 align-right">
               <SubmitButton disabled={!canEdit} disabledText="View only">Save policy</SubmitButton>
