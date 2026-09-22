@@ -6,7 +6,7 @@ import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { serializePaymentFileGroups } from "@/lib/payment-file-types";
 import { normalizePaymentModes } from "@/lib/payment-modes";
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { supabaseAdmin } from "@/lib/supabase-admin";`r`nimport { syncPaymentHeadApprovalSteps } from "@/lib/payment-approval-steps";`nimport { syncPaymentHeadApprovalSteps } from "@/lib/payment-approval-steps";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
