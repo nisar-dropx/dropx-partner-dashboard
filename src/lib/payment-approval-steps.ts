@@ -308,7 +308,7 @@ export function approvalStepsFromSnapshot(value: unknown): ApprovalStepRow[] {
           return { role_id: String(item.role_id ?? "").trim(), scope };
         }).filter((candidate) => candidate.role_id)
       : [];
-    return { id: String(row.id ?? "") || undefined, step_order: Number(row.step_order) || 0, candidates, is_required: Boolean(row.is_required) };
+    return { id: String(row.id ?? ""), step_order: Number(row.step_order) || 0, candidates, is_required: Boolean(row.is_required) };
   }).filter((row) => row.step_order > 0 && row.candidates.length > 0).sort((left, right) => left.step_order - right.step_order);
 }
 
