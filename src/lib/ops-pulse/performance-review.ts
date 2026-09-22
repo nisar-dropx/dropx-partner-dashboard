@@ -212,6 +212,7 @@ export type PerformanceAssociateDelivery = {
   delivered: number;
   /** Same-month delivery total and active delivery days, for review drill-downs. */
   mtdActiveDays: number;
+  mtdDailyAllocations: PerformanceAssociateDailyAllocation[];
   mtdDelivered: number;
   name: string;
   paymentScheme: string | null;
@@ -219,6 +220,8 @@ export type PerformanceAssociateDelivery = {
   rateCard: string | null;
   totalPay: number | null;
 };
+
+export type PerformanceAssociateDailyAllocation = { date: string; delivered: number };
 
 export type PerformanceCostRequest = {
   amount: number;
@@ -406,7 +409,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
   const stationCodes = locations.map((location) => location.station_code);
   const locationIds = locations.map((location) => location.id);
   const monthFrom = `${sourceDate.slice(0, 7)}-01`;
-  const [costResult, monthCostResult, breakupResult, shipmentResult, detailResult, capacityResult, monthCapacityResult, headsResult, openingResult, manpowerResult, monthShipmentResult] = await Promise.all([
+  const [costResult, monthCostResult, breakupResult, shipmentResult, detailResult, capacityResult, monthCapacityResult, headsResult, openingResult, manpowerResult, monthShipmentResult, monthDetailResult] = await Promise.all([
     supabaseAdmin.from("cps_station_daily")
       .select("station_code,total_delivery,total_cost,overall_cps,da_pay_cost,da_cps").eq("company_id", companyId).eq("work_date", sourceDate).in("station_code", stationCodes),
     supabaseAdmin.from("cps_station_daily")
@@ -428,9 +431,12 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
     loadOpsStationManpower(companyId, locations, sourceDate).catch(() => null),
     supabaseAdmin.from("cps_shipment_daily")
       .select("station_code,work_date,provider_employee_id,provider_employee_name,dropx_name,total_delivery")
-      .eq("company_id", companyId).gte("work_date", monthFrom).lte("work_date", sourceDate).in("station_code", stationCodes)
+      .eq("company_id", companyId).gte("work_date", monthFrom).lte("work_date", sourceDate).in("station_code", stationCodes),
+    supabaseAdmin.from("delivered_shipment_facts")
+      .select("station_code,work_date,driver_id,driver_name,package_count").eq("company_id", companyId)
+      .gte("work_date", monthFrom).lte("work_date", sourceDate).in("station_code", stationCodes)
   ]);
-  const error = costResult.error ?? monthCostResult.error ?? breakupResult.error ?? shipmentResult.error ?? detailResult.error ?? capacityResult.error ?? monthCapacityResult.error ?? headsResult.error ?? openingResult.error ?? monthShipmentResult.error;
+  const error = costResult.error ?? monthCostResult.error ?? breakupResult.error ?? detailResult.error ?? capacityResult.error ?? monthCapacityResult.error ?? headsResult.error ?? openingResult.error ?? monthShipmentResult.error ?? monthDetailResult.error;
   if (error) return { rows: empty, error: error.message };
   const providerMemberIds = [...new Set((shipmentResult.data ?? []).map((row) => String(row.provider_employee_id ?? "").trim()).filter(Boolean))];
   const mappingsResult = providerMemberIds.length
@@ -549,7 +555,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       subHead: row.sub_head || "Operating cost"
     });
   });
-  type MutableAssociate = PerformanceAssociateDelivery & { hasDetailedDelivery: boolean };
+  type MutableAssociate = PerformanceAssociateDelivery & { hasDetailedDelivery: boolean; mtdDetailByDate: Map<string, number>; mtdFallbackByDate: Map<string, number> };
   const associatesByStation = new Map<string, Map<string, MutableAssociate>>();
   const associateMap = (stationCode: string) => {
     const existing = associatesByStation.get(stationCode);
@@ -575,7 +581,10 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
         deliveryRate: null,
         delivered: 0,
         mtdActiveDays: 0,
+        mtdDailyAllocations: [],
         mtdDelivered: 0,
+        mtdDetailByDate: new Map(),
+        mtdFallbackByDate: new Map(),
         hasDetailedDelivery: true,
         name: String(row.driver_name || row.driver_id || "Unidentified associate"),
         paymentScheme: null,
@@ -621,7 +630,10 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
         deliveryRate: null,
         delivered: 0,
         mtdActiveDays: 0,
+        mtdDailyAllocations: [],
         mtdDelivered: 0,
+        mtdDetailByDate: new Map(),
+        mtdFallbackByDate: new Map(),
         hasDetailedDelivery: false,
         name: String(row.dropx_name || row.provider_employee_name || row.provider_employee_id || "Unidentified associate"),
         paymentScheme: null,
@@ -649,25 +661,36 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
       people.set(associateId, person);
     }
   });
-  // The review remains anchored to the selected day.  MTD values are only
-  // attached to associates visible on that day, so an old assignment cannot
-  // appear as a current below-minimum allocation exception.
-  const mtdDaysByAssociate = new Map<string, Set<string>>();
+  // Prefer the package-level delivery ledger for the MTD drill-down. It uses
+  // the same driver identity as the selected-day allocation, unlike a payment
+  // mapping that may have changed part way through the month.
+  (monthDetailResult.data ?? []).forEach((row) => {
+    const associateId = normalized(row.driver_id) || `NAME_${normalized(row.driver_name)}`;
+    const person = associateId ? associatesByStation.get(row.station_code)?.get(associateId) : null;
+    const delivered = numberOrNull(row.package_count) ?? 1;
+    if (!person || delivered <= 0) return;
+    const date = String(row.work_date);
+    person.mtdDetailByDate.set(date, (person.mtdDetailByDate.get(date) ?? 0) + delivered);
+  });
+  // Payment shipment rows remain the fallback for associates whose daily
+  // package-level detail was not imported for the selected month.
   (monthShipmentResult.data ?? []).forEach((row) => {
     const associateId = normalized(row.provider_employee_id) || `NAME_${normalized(row.dropx_name || row.provider_employee_name)}`;
     const people = associateId ? associatesByStation.get(row.station_code) : null;
     const person = associateId ? people?.get(associateId) : null;
     const delivered = numberOrNull(row.total_delivery) ?? 0;
     if (!person || delivered <= 0) return;
-    person.mtdDelivered += delivered;
-    const key = `${row.station_code}|${associateId}`;
-    const days = mtdDaysByAssociate.get(key) ?? new Set<string>();
-    days.add(String(row.work_date));
-    mtdDaysByAssociate.set(key, days);
+    const date = String(row.work_date);
+    person.mtdFallbackByDate.set(date, (person.mtdFallbackByDate.get(date) ?? 0) + delivered);
   });
-  for (const [stationCode, people] of associatesByStation) {
-    for (const [associateId, person] of people) {
-      person.mtdActiveDays = mtdDaysByAssociate.get(`${stationCode}|${associateId}`)?.size ?? 0;
+  for (const people of associatesByStation.values()) {
+    for (const person of people.values()) {
+      const daily = person.mtdDetailByDate.size ? person.mtdDetailByDate : person.mtdFallbackByDate;
+      person.mtdDailyAllocations = [...daily.entries()]
+        .map(([date, delivered]) => ({ date, delivered }))
+        .sort((left, right) => right.date.localeCompare(left.date));
+      person.mtdActiveDays = person.mtdDailyAllocations.length;
+      person.mtdDelivered = person.mtdDailyAllocations.reduce((sum, day) => sum + day.delivered, 0);
     }
   }
   stationCodes.forEach((code) => {
@@ -686,6 +709,7 @@ export async function loadPerformanceOperationalSnapshots(companyId: string, sou
         deliveryRate: person.deliveryRate,
         delivered: person.delivered,
         mtdActiveDays: person.mtdActiveDays,
+        mtdDailyAllocations: person.mtdDailyAllocations,
         mtdDelivered: person.mtdDelivered,
         name: person.name,
         paymentScheme: person.paymentScheme,

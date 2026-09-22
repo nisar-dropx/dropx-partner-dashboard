@@ -142,14 +142,13 @@ function BelowMinimumAllocationBreakdown({ rows, target, date }: { rows: Perform
   return <div className="performance-associate-popover performance-allocation-popover">
     <ReviewDetailsClose label="Close below-minimum allocation details"/>
     <div className="performance-allocation-heading"><div><strong>Below minimum allocation</strong><small>{belowTarget.length} associate{belowTarget.length === 1 ? "" : "s"} below {target.toLocaleString("en-IN")} deliveries on {formatDashboardDate(date)}</small></div><b>Target {target.toLocaleString("en-IN")}</b></div>
-    {belowTarget.length ? <div className="performance-allocation-list">{belowTarget.map((person) => {
+    {belowTarget.length ? <div className="performance-allocation-list"><div className="performance-allocation-table-head"><span>Associate</span><span>{formatDashboardDate(date)}</span><span>Status</span></div>{belowTarget.map((person) => {
       const mtdAverage = person.mtdActiveDays ? person.mtdDelivered / person.mtdActiveDays : null;
       return <ReviewDetails className="performance-allocation-associate" key={`${person.associateId}-${person.name}`}>
         <summary><span><strong>{person.name}</strong><small>{person.associateId}</small></span><b>{person.delivered.toLocaleString("en-IN")}</b><em>Below {target.toLocaleString("en-IN")}</em></summary>
         <div className="performance-allocation-associate-detail">
-          <div><span>{formatDashboardDate(date)}</span><strong>{person.delivered.toLocaleString("en-IN")}</strong><small>Selected-day allocation</small></div>
-          <div><span>MTD average</span><strong>{mtdAverage == null ? "—" : mtdAverage.toFixed(1)}</strong><small>{person.mtdDelivered.toLocaleString("en-IN")} deliveries / {person.mtdActiveDays} active days</small></div>
-          <div><span>Payment setup</span><strong>{person.paymentScheme || "—"}</strong><small>{person.rateCard || "Rate card not mapped"}</small></div>
+          <div className="performance-allocation-mtd-summary"><span>MTD average allocation</span><strong>{mtdAverage == null ? "—" : mtdAverage.toFixed(1)}</strong><small>{person.mtdDelivered.toLocaleString("en-IN")} deliveries / {person.mtdActiveDays} active days · Target {target.toLocaleString("en-IN")}</small></div>
+          <div className="performance-allocation-daily-table"><div><span>Date</span><span>Deliveries</span></div>{person.mtdDailyAllocations.length ? person.mtdDailyAllocations.map((day) => <div key={day.date}><span>{formatDashboardDate(day.date)}</span><b>{day.delivered.toLocaleString("en-IN")}</b></div>) : <p>No MTD delivery ledger is available for this associate.</p>}</div>
         </div>
       </ReviewDetails>;
     })}</div> : <p className="review-empty">No associates are below the configured minimum allocation.</p>}
