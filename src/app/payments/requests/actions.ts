@@ -13,7 +13,7 @@ import { hasSubmittedPaymentDetails } from "@/lib/payment-details";
 import { validatePaymentQuestionDate } from "@/lib/payment-question-date-rules";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover, roleIdsWithPageEditAccess } from "@/lib/position-access";
-import { loadApprovalSteps, resolveInitialApprovalTarget, resolveStepApprover, type ApprovalStepRow } from "@/lib/payment-approval-steps";
+import { loadApprovalSteps, loadRequestApprovalSteps, resolveInitialApprovalTarget, resolveStepApprover, type ApprovalStepRow } from "@/lib/payment-approval-steps";
 import { insertPaymentApprovalLog } from "../approvals/actions";
 
 function clean(value: FormDataEntryValue | null) {
@@ -296,7 +296,7 @@ export async function createExpenseRequest(formData: FormData) {
       // leave, or no one assigned to this station's region), which must be
       // flagged explicitly rather than mislabeled "APPROVED" and left
       // invisible to every approver.
-      approvalStatus = !target.approver ? "NO_APPROVER_CONFIGURED" : target.currentStepOrder > 1 ? "APPROVED" : "PENDING";
+      approvalStatus = !target.approver ? "NO_APPROVER_CONFIGURED" : "PENDING";
       const lastStep = approvalSteps[approvalSteps.length - 1];
       finalApprovalRoleIds = lastStep?.candidates.map((candidate) => candidate.role_id) ?? [];
       finalApprovalRoleId = finalApprovalRoleIds[0] ?? null;
@@ -547,7 +547,7 @@ export async function createPaymentRequest(formData: FormData) {
       // reusing the "step > 1 means something upstream was approved" guess,
       // which would otherwise mislabel a silently-skipped/unresolved step as
       // "APPROVED" and leave the request invisible to every approver.
-      approvalStatus = !target.approver ? "NO_APPROVER_CONFIGURED" : target.currentStepOrder > 1 ? "APPROVED" : "PENDING";
+      approvalStatus = !target.approver ? "NO_APPROVER_CONFIGURED" : "PENDING";
       const lastStep = approvalSteps[approvalSteps.length - 1];
       finalApprovalRoleIds = lastStep?.candidates.map((candidate) => candidate.role_id) ?? [];
       finalApprovalRoleId = finalApprovalRoleIds[0] ?? null;
@@ -1010,7 +1010,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
 
     const { data: request, error: requestError } = await admin
       .from("payment_requests")
-      .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle")
+      .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, approval_steps_snapshot")
       .eq("id", requestId)
       .eq("company_id", companyId)
       .single();
@@ -1050,7 +1050,7 @@ export async function resubmitExpenseRequest(formData: FormData) {
       throw new Error("Only returned requests can be resubmitted.");
     }
 
-    const approvalSteps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id) : [];
+    const approvalSteps = request.payment_head_id ? await loadRequestApprovalSteps(companyId, request.payment_head_id, request.approval_steps_snapshot) : [];
 
     let approver: ApproverTarget;
     let currentApprovalRoleIds: string[];
@@ -1226,7 +1226,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
 
     const { data: request, error: requestError } = await admin
       .from("payment_requests")
-      .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, processed_at, utr_cin")
+      .select("id, location_id, payment_head_id, requested_by, status, approval_status, approval_cycle, processed_at, utr_cin, approval_steps_snapshot")
       .eq("id", requestId)
       .eq("company_id", companyId)
       .single();
@@ -1297,7 +1297,7 @@ export async function resubmitPaymentRequest(formData: FormData) {
     let currentApprovalRoleIds: string[] = [];
     let currentApprovalStep = 1;
     const paymentProcessRoleIds = (headResult.data.payment_process_role_ids ?? []) as string[];
-    const approvalSteps: ApprovalStepRow[] = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id) : [];
+    const approvalSteps: ApprovalStepRow[] = request.payment_head_id ? await loadRequestApprovalSteps(companyId, request.payment_head_id, request.approval_steps_snapshot) : [];
 
     const returnedRoleId = latestReturnedApproval?.approver_role_id ?? null;
     const returnedByProcessor = String(latestReturnedApproval?.role_code ?? "").toUpperCase() === "BANK" ||
