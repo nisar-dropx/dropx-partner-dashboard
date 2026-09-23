@@ -32,6 +32,7 @@ import type { ReactNode } from "react";
 import { buildDisciplineRca, isDisciplineRcaKey, missingDisciplineReasons } from "@/lib/ops-pulse/review-discipline-rca";
 import { buildCodRca, COD_REMARK_KEY, isCodRemarkKey, missingCodRemark } from "@/lib/ops-pulse/review-cod-rca";
 const isReasonOnlyKey = (key: string) => isDisciplineRcaKey(key) || isCodRemarkKey(key);
+const MINIMUM_ALLOCATION_EXCEPTION_DELIVERIES = 5;
 
 export type ReviewMetric = {
   actual: number | null;
@@ -138,10 +139,10 @@ function AssociateDeliveryBreakdown({ rows, total }: { rows: PerformanceAssociat
 }
 
 function BelowMinimumAllocationBreakdown({ rows, target, date }: { rows: PerformanceAssociateDelivery[]; target: number; date: string }) {
-  const belowTarget = rows.filter((person) => person.delivered < target).sort((left, right) => left.delivered - right.delivered || left.name.localeCompare(right.name));
+  const belowTarget = rows.filter((person) => person.delivered > MINIMUM_ALLOCATION_EXCEPTION_DELIVERIES && person.delivered < target).sort((left, right) => left.delivered - right.delivered || left.name.localeCompare(right.name));
   return <div className="performance-associate-popover performance-allocation-popover">
     <ReviewDetailsClose label="Close below-minimum allocation details"/>
-    <div className="performance-allocation-heading"><div><strong>Below minimum allocation</strong><small>{belowTarget.length} associate{belowTarget.length === 1 ? "" : "s"} below {target.toLocaleString("en-IN")} deliveries on {formatDashboardDate(date)}</small></div><b>Target {target.toLocaleString("en-IN")}</b></div>
+    <div className="performance-allocation-heading"><div><strong>Below minimum allocation</strong><small>{belowTarget.length} associate{belowTarget.length === 1 ? "" : "s"} below {target.toLocaleString("en-IN")} deliveries on {formatDashboardDate(date)} · ≤{MINIMUM_ALLOCATION_EXCEPTION_DELIVERIES} deliveries excluded</small></div><b>Target {target.toLocaleString("en-IN")}</b></div>
     {belowTarget.length ? <div className="performance-allocation-list"><div className="performance-allocation-table-head"><span>Associate</span><span>{formatDashboardDate(date)}</span><span>Status</span></div>{belowTarget.map((person) => {
       const mtdAverage = person.mtdActiveDays ? person.mtdDelivered / person.mtdActiveDays : null;
       return <ReviewDetails className="performance-allocation-associate" key={`${person.associateId}-${person.name}`}>
@@ -159,7 +160,7 @@ export function PerformanceReviewDesk(props: Props) {
   const { canAdd, canCompleteStep, canEdit, canEditConnections, canComment, programManager, reviewerEditReopened, isOriginalReviewer, connections, updates, reviewChain, date, error, items, locations, metrics, notice, previousReviews, review, reviews, selectedLocation, snapshot, sourceBatchId, sourceType, sourceWeek, steps } = props;
   const selectedCode = selectedLocation.station_code;
   const deliveryAvailable = snapshot.deliveryDataAvailable !== false;
-  const belowMinimumAllocation = snapshot.associateDeliveries.filter((person) => person.delivered < props.allocationTarget);
+  const belowMinimumAllocation = snapshot.associateDeliveries.filter((person) => person.delivered > MINIMUM_ALLOCATION_EXCEPTION_DELIVERIES && person.delivered < props.allocationTarget);
   const deliveryLabel = deliveryAvailable ? snapshot.deliveredCount.toLocaleString("en-IN") : "Data not loaded";
   const selectedStationKey = stationKey(selectedCode);
   const previousStationReviews = previousReviews.filter((entry) => stationKey(entry.station_code) === selectedStationKey);
