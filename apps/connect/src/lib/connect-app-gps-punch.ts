@@ -3,7 +3,7 @@ import "server-only";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { ConnectAttendanceWorker } from "@/lib/connect-attendance-worker";
 import { loadLatestBiometricPunchNeedingLocation } from "@/lib/connect-biometric-punch-location";
-import { createAttendancePunchNotification } from "@/lib/app-notifications";
+import { createAppNotification, createAttendancePunchNotification } from "@/lib/app-notifications";
 
 const APP_GPS_DEVICE_SERIAL = "APP_GPS";
 const FALLBACK_GEOFENCE_RADIUS_M = 50;
@@ -752,25 +752,32 @@ export async function insertConnectAppGpsPunch({
     await rebuildAttendanceDay(worker.companyId, worker.enrolmentId, punchDate).catch((error) => {
       console.error("Unable to rebuild attendance after GPS punch:", error);
     });
-  }
 
-  // Confirms the punch was actually received — otherwise a worker whose punch silently failed
-  // (network blip, server error swallowed upstream) and one whose punch succeeded look
-  // identical from the app's own UI alone. Delivers as both a push to the device and an
-  // in-app notification (createAppNotification's own delivery, unchanged here). Best-effort:
-  // a notification failure must never fail the punch itself, which is already recorded above.
-  await createAttendancePunchNotification({
-    accountId: worker.profileId,
-    companyId: worker.companyId,
-    enrolmentId: worker.enrolmentId,
-    profileType: worker.profileType,
-    punchDate,
-    punchId: insert.data.id as string,
-    punchOrder: nextOrder,
-    punchTime: punchAt
-  }).catch((error) => {
-    console.error("Unable to send punch confirmation notification:", error);
-  });
+    // Confirms the punch was actually received — otherwise a worker whose punch silently failed
+    // (network blip, server error swallowed upstream) and one whose punch succeeded look
+    // identical from the app's own UI alone. Delivers as both a push to the device and an
+    // in-app notification (createAppNotification's own delivery, unchanged here). Only sent for
+    // the non-flagged path: createAttendancePunchNotification reads the attendance day's
+    // computed outcome (in_time/lateMinutes/workHours/status) via loadAttendanceReportRows,
+    // which rebuildAttendanceDay above is what actually keeps current — for a holdForReview
+    // punch that rebuild never runs (attendance only updates once a manager approves the
+    // pending selfie review), so calling this here read stale data from a PREVIOUS punch and
+    // produced a wrong, confusing notification (e.g. "Checkout updated · Absent" attached to a
+    // brand new punch-in). Best-effort: a notification failure must never fail the punch
+    // itself, which is already recorded above.
+    await createAttendancePunchNotification({
+      accountId: worker.profileId,
+      companyId: worker.companyId,
+      enrolmentId: worker.enrolmentId,
+      profileType: worker.profileType,
+      punchDate,
+      punchId: insert.data.id as string,
+      punchOrder: nextOrder,
+      punchTime: punchAt
+    }).catch((error) => {
+      console.error("Unable to send punch confirmation notification:", error);
+    });
+  }
 
   const flagIds: string[] = [];
   if (holdForReview) {
@@ -799,6 +806,22 @@ export async function insertConnectAppGpsPunch({
       }
     });
     if (pendingFlag.id) flagIds.push(pendingFlag.id);
+
+    // The rich punch-outcome confirmation above is skipped for this path on purpose (see its
+    // own comment) — this is its replacement: confirms the punch itself was received, without
+    // claiming an attendance outcome (in_time/status/worked hours) that doesn't exist yet,
+    // since nothing gets calculated until a manager approves the pending selfie review.
+    await createAppNotification({
+      accountId: worker.profileId,
+      companyId: worker.companyId,
+      data: { punchDate, punchId: insert.data.id, punchOrder: nextOrder, flagIds },
+      eventCode: "attendance_location_flagged",
+      profileType: worker.profileType,
+      sourceKey: `pending-selfie-punch:${insert.data.id}`,
+      variables: { date: punchDate.split("-").reverse().join("/") }
+    }).catch((error) => {
+      console.error("Unable to send pending-review punch notification:", error);
+    });
   }
 
   return {
