@@ -27,12 +27,16 @@ import org.json.JSONObject;
 public class MarkNotificationReadReceiver extends BroadcastReceiver {
   public static final String EXTRA_NOTIFICATION_ID = "notificationId";
   public static final String EXTRA_SHOWN_NOTIFICATION_ID = "shownNotificationId";
+  // Set by DropxNotificationListenerService instead of EXTRA_NOTIFICATION_ID — see its own
+  // comment on why it can't recover the specific mob_app_notifications row id.
+  public static final String EXTRA_MARK_ALL = "markAll";
 
   @Override
   public void onReceive(Context context, Intent intent) {
     String notificationId = intent.getStringExtra(EXTRA_NOTIFICATION_ID);
+    boolean markAll = intent.getBooleanExtra(EXTRA_MARK_ALL, false);
     int shownNotificationId = intent.getIntExtra(EXTRA_SHOWN_NOTIFICATION_ID, -1);
-    if (notificationId == null || notificationId.isEmpty()) return;
+    if (!markAll && (notificationId == null || notificationId.isEmpty())) return;
 
     String serverUrl = TrackingPrefs.serverUrl(context);
     String accountId = TrackingPrefs.accountId(context);
@@ -68,7 +72,11 @@ public class MarkNotificationReadReceiver extends BroadcastReceiver {
           JSONObject body = new JSONObject();
           body.put("accountId", accountId);
           body.put("profileType", profileType);
-          body.put("notificationId", notificationId);
+          if (markAll) {
+            body.put("markAll", true);
+          } else {
+            body.put("notificationId", notificationId);
+          }
           try (OutputStream out = connection.getOutputStream()) {
             out.write(body.toString().getBytes(StandardCharsets.UTF_8));
           }

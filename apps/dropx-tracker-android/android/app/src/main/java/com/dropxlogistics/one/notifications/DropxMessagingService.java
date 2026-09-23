@@ -10,6 +10,7 @@ import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import com.dropxlogistics.one.MainActivity;
+import com.dropxlogistics.one.R;
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
 import java.util.Map;
@@ -71,10 +72,11 @@ public class DropxMessagingService extends FirebaseMessagingService {
       .setContentTitle(title)
       .setContentText(body)
       .setStyle(new NotificationCompat.BigTextStyle().bigText(body))
-      .setSmallIcon(getApplicationInfo().icon)
+      .setSmallIcon(R.mipmap.ic_notification)
       .setColor(0xFFF5A623)
       .setAutoCancel(true)
       .setPriority(NotificationCompat.PRIORITY_HIGH)
+      .setGroupSummary(false)
       .setContentIntent(contentIntent);
 
     // Only a real mob_app_notifications row (not e.g. a plain informational push with no
@@ -89,7 +91,15 @@ public class DropxMessagingService extends FirebaseMessagingService {
         markReadIntent,
         PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
       );
-      builder.addAction(0, "Mark as read", markReadPendingIntent);
+      // Action icons are held to the SAME white-silhouette-on-transparent requirement as the
+      // small icon (see ic_notification's own generation comment) — a 0 (no icon) resource was
+      // silently dropped by the notification shade on at least one device tested, and the
+      // app's own full-color launcher icon (getApplicationInfo().icon) is equally invalid here
+      // for the same reason it can't be the small icon either. R.mipmap.ic_notification is a
+      // real, correctly-formatted resource; most modern Android versions only render the action
+      // TEXT and ignore this icon visually, but it still has to resolve to something valid or
+      // the whole action can be dropped rather than just shown without an icon.
+      builder.addAction(R.mipmap.ic_notification, "Mark as read", markReadPendingIntent);
       Log.i(TAG, "Added mark-as-read action for notificationId=" + notificationId);
     } else {
       Log.w(TAG, "No notificationId in data payload; skipping mark-as-read action.");

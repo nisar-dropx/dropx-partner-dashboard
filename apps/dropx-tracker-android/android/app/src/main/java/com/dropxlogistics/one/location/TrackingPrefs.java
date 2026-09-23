@@ -22,6 +22,7 @@ public final class TrackingPrefs {
   private static final String KEY_INTERRUPTION_REPORTED_FOR_HEARTBEAT_AT = "interruptionReportedForHeartbeatAt";
   private static final String KEY_INTEGRITY_CHECK_INTERVAL_SECONDS = "integrityCheckIntervalSeconds";
   private static final String KEY_INTERNET_OFF_PENDING_HRMS_REPORT = "internetOffPendingHrmsReport";
+  private static final String KEY_REQUESTED_NOTIFICATION_LISTENER_ACCESS = "requestedNotificationListenerAccess";
 
   private TrackingPrefs() {}
 
@@ -93,6 +94,15 @@ public final class TrackingPrefs {
 
   static void setRequestedBatteryExemption(Context context, boolean requested) {
     prefs(context).edit().putBoolean(KEY_REQUESTED_BATTERY_EXEMPTION, requested).apply();
+  }
+
+  /** Read by MainActivity — see its own comment on why this is asked at most once per install. */
+  public static boolean hasRequestedNotificationListenerAccess(Context context) {
+    return prefs(context).getBoolean(KEY_REQUESTED_NOTIFICATION_LISTENER_ACCESS, false);
+  }
+
+  public static void setRequestedNotificationListenerAccess(Context context, boolean requested) {
+    prefs(context).edit().putBoolean(KEY_REQUESTED_NOTIFICATION_LISTENER_ACCESS, requested).apply();
   }
 
   /**

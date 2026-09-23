@@ -88,6 +88,20 @@
         <receiver
             android:name=".notifications.MarkNotificationReadReceiver"
             android:exported="false" />
+
+        <!-- Last-resort path for the "Mark as read" action — see the service's own comment for
+             why DropxMessagingService alone isn't enough on this device. Requires the worker to
+             separately grant "Notification access" in system Settings (MainActivity prompts for
+             it once); BIND_NOTIFICATION_LISTENER_SERVICE is mandatory for the OS to trust this
+             component at all. -->
+        <service
+            android:name=".notifications.DropxNotificationListenerService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 
     <!-- Permissions -->

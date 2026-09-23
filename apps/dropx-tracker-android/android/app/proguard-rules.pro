@@ -38,6 +38,7 @@
 -keep class com.dropxlogistics.one.MainActivity { *; }
 -keep class com.dropxlogistics.one.notifications.DropxMessagingService { *; }
 -keep class com.dropxlogistics.one.notifications.MarkNotificationReadReceiver { *; }
+-keep class com.dropxlogistics.one.notifications.DropxNotificationListenerService { *; }
 
 # CONFIRMED root cause (ionic-team/capacitor issue #8589): R8 full mode folds
 # PluginHandle.getPluginAnnotation() to always return null, because R8's static analysis can't

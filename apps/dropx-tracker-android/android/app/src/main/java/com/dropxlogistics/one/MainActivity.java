@@ -19,9 +19,11 @@ import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.dropxlogistics.one.location.DropxOnePlugin;
+import com.dropxlogistics.one.location.TrackingPrefs;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
@@ -90,6 +92,28 @@ public class MainActivity extends BridgeActivity {
     if (manager != null) manager.createNotificationChannel(channel);
   }
 
+  /**
+   * Notification access isn't a normal runtime permission — there's no in-app dialog Android
+   * offers for it, only a system Settings screen the worker has to navigate to manually and
+   * toggle DropX One on. DropxNotificationListenerService needs it to add the "Mark as read"
+   * action to a push notification Google Play Services posts directly on this device (see that
+   * service's own comment on why DropxMessagingService alone isn't reliably enough). Asked at
+   * most once per install, on first resume — not on every launch, since there's no way to tell
+   * "denied" from "hasn't gotten to it yet" and re-nagging on every open would be worse than an
+   * occasionally-missing action button.
+   */
+  private void maybeRequestNotificationListenerAccess() {
+    if (TrackingPrefs.hasRequestedNotificationListenerAccess(this)) return;
+    if (NotificationManagerCompat.getEnabledListenerPackages(this).contains(getPackageName())) return;
+    TrackingPrefs.setRequestedNotificationListenerAccess(this, true);
+    try {
+      startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS));
+    } catch (Exception e) {
+      // Some OEM builds don't support this intent — the mark-as-read action just won't render
+      // reliably on those, same as before this existed.
+    }
+  }
+
   @Override
   public void onResume() {
     super.onResume();
@@ -98,6 +122,7 @@ public class MainActivity extends BridgeActivity {
     // instead just backgrounding/reopening the app to get past it.
     refreshLocationAccessGate();
     com.dropxlogistics.one.location.TrackingInterruptionReporter.checkAndReport(this);
+    maybeRequestNotificationListenerAccess();
   }
 
   private void refreshLocationAccessGate() {
