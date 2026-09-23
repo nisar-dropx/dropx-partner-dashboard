@@ -162,6 +162,7 @@ export function ConnectNativeBridge({ account }: { account: AppAccount | null })
     if (!isNativeApp() || !account) return;
 
     let cancelled = false;
+    let pushListener: { remove: () => void } | undefined;
 
     const sync = async () => {
       const state = await readAttendanceTrackingState(account);
@@ -169,16 +170,26 @@ export function ConnectNativeBridge({ account }: { account: AppAccount | null })
       await syncAttendanceContext(account, state);
     };
 
-    // Push notification registration (PushNotificationsPlugin.requestPermissions()/register())
-    // is disabled for now: it reliably crashes the release build with a NullPointerException
-    // inside Capacitor's own Bridge.getPermissionStates() — plugin.getPluginHandle()
-    // .getPluginAnnotation() comes back null at runtime for this plugin specifically. Reproduced
-    // consistently across several proguard-rule attempts and confirmed absent only on an
-    // unminified debug build, so it's a release-build-only Capacitor/R8 interaction still being
-    // root-caused rather than a bug in this app's own code. Until that's resolved, sync() below
-    // only calls DropxOnePlugin (attendance tracking), never pushPlugin() — the in-app
-    // notification bell (createAppNotification's own delivery) is unaffected either way.
-    sync().catch(() => undefined);
+    // Re-enabled: the crash (Capacitor's Bridge.getPermissionStates() throwing a
+    // NullPointerException on plugin.getPluginHandle().getPluginAnnotation()) was
+    // ionic-team/capacitor issue #8589 — R8 full mode folds that getter to always return null
+    // because it can't see PluginHandle's constructor actually assigns it via reflection.
+    // Fixed with the documented proguard-rules.pro keep rules for PluginHandle's annotation
+    // fields, not app code, so no JS-side workaround is needed any more.
+    const boot = async () => {
+      await sync();
+      const push = pushPlugin();
+      if (!push) return;
+      const permission = await push.requestPermissions();
+      if (permission.receive !== "granted" || cancelled) return;
+      await push.register();
+      pushListener = await push.addListener("registration", async (event) => {
+        if (!event.value || cancelled) return;
+        await registerPushToken(account, event.value);
+      });
+    };
+
+    boot().catch(() => undefined);
     const interval = window.setInterval(() => {
       sync().catch(() => undefined);
     }, POLL_MS);
@@ -186,6 +197,7 @@ export function ConnectNativeBridge({ account }: { account: AppAccount | null })
     return () => {
       cancelled = true;
       window.clearInterval(interval);
+      pushListener?.remove();
       dropxOnePlugin()?.stopBackgroundLocation?.().catch(() => undefined);
     };
   }, [account?.id, account?.profileType]);

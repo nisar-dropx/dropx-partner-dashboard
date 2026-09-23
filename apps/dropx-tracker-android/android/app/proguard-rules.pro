@@ -37,24 +37,29 @@
 -keep class com.dropxlogistics.one.location.TrackingInterruptionReporter { *; }
 -keep class com.dropxlogistics.one.MainActivity { *; }
 
-# getPermissionStates() (called by every plugin's checkPermissions()/requestPermissions(), our
-# own and any bundled Capacitor plugin like @capacitor/push-notifications) reads the
-# @CapacitorPlugin/@Permission ANNOTATIONS on a plugin class via reflection to know what
-# permissions/aliases it declares — the method-name keep rule above doesn't cover that, since
-# R8 can strip annotation metadata even off a class/method it otherwise keeps intact.
+# CONFIRMED root cause (ionic-team/capacitor issue #8589): R8 full mode folds
+# PluginHandle.getPluginAnnotation() to always return null, because R8's static analysis can't
+# see that the pluginAnnotation field is actually set via clazz.getAnnotation(...) reflection
+# inside PluginHandle's constructor — from R8's point of view nothing ever writes a non-null
+# value to that field, so it "optimizes" the getter to unconditionally return null. Every
+# plugin's checkPermissions()/requestPermissions() then crashes Bridge.getPermissionStates()
+# with a NullPointerException the instant it reads that null annotation, exactly what was
+# reproduced here — confirmed happening only on release/minified builds, never on an unminified
+# debug build. None of the -keep class {*;} rules tried before this fixed it because they keep
+# METHODS and the CLASS shape, not R8's field-value inference specifically. This is the actual
+# documented fix: explicitly keep PluginHandle's relevant fields/methods as a unit so R8 can no
+# longer treat pluginAnnotation as provably-always-null.
+-keep @interface com.getcapacitor.annotation.**
+-keep @interface com.getcapacitor.PluginMethod
+-keepclassmembers class com.getcapacitor.PluginHandle {
+  java.lang.Class pluginClass;
+  com.getcapacitor.annotation.CapacitorPlugin pluginAnnotation;
+  com.getcapacitor.NativePlugin legacyPluginAnnotation;
+  com.getcapacitor.annotation.CapacitorPlugin getPluginAnnotation();
+}
 -keepattributes *Annotation*
 -keep @com.getcapacitor.annotation.CapacitorPlugin class * { *; }
-
-# PushNotificationsPlugin.requestPermissions(PluginCall) overrides Plugin's own same-named,
-# same-signature, identically-@PluginMethod-annotated method — a plain -keep on the class (even
-# with { *; }) still let R8's optimizer merge/devirtualize that override away in testing (it was
-# confirmed absent from the R8 mapping/seeds output, and crashed getPermissionStates() with a
-# NullPointerException on every release build, but never an unminified debug build). Disabling
-# optimization for just this plugin's class (still allowed to be renamed/shrunk elsewhere, just
-# not restructured) is what actually kept the real override intact and resolved it.
 -keep class com.capacitorjs.plugins.pushnotifications.** { *; }
--keepclassmembers class com.capacitorjs.plugins.pushnotifications.** { *; }
--keep,allowshrinking,allowobfuscation class com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin
 
 # play-services-location and androidx.work also do some of their own reflection-based
 # component lookup (Services/Receivers started by class reference from the manifest).
