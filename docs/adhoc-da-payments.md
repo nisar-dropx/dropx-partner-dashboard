@@ -1,6 +1,6 @@
 # Adhoc DA / Wishmaster payments
 
-- Applies to new **Payment Requests**, payment head `ADHOC_DA`; Expense Requests are unchanged.
+- Applies to new **Payment Requests** and **Submit payment details** for approved requests, payment head `ADHOC_DA`. The initial Expense Request form is unchanged. Existing prior-approval requirements remain enforced; the DA is captured at the payment step even when that modal is opened from the expense register.
 - Select a station, delivery work date, and DA name/provider ID. Search matches both name and ID. Options come from `cps_shipment_daily` for exactly that company/station/date.
 - One canonical Workforce mapping must exist for the provider/station/work date. Missing, ambiguous and scientific-notation identities fail closed. Fix the source import or Workforce Provider Mapping, not the payment beneficiary name, to resolve these.
 - Database snapshots identity and work date. Returned requests retain that identity. For an incorrect selection, cancel the unpaid request and create a corrected one.

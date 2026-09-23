@@ -271,6 +271,7 @@ export function PaymentRequestForm({
         </label>
       </div>
       {blockedByExpenseApproval ? <p className="payment-form-warning" role="alert">Required Expense Approval</p> : null}
+      {blockedByExpenseApproval && selectedHead?.code === "ADHOC_DA" ? <p className="subtle">This head requires prior expense approval. After approval, use Submit payment details to select the DA / Provider ID. DA selection belongs to the payment step, not the initial expense request.</p> : null}
       {showBankDetails && selectedHead?.code === "ADHOC_DA" ? <AdhocDaFields key={selectedLocationId} locationId={selectedLocationId} /> : null}
       {showBankDetails ? (
         <>

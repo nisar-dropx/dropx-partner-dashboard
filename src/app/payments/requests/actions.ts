@@ -873,11 +873,16 @@ export async function submitPaymentBankDetails(formData: FormData) {
 
     const { data: headData, error: headError } = await admin
       .from("payment_heads")
-      .select("id, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
+      .select("id, code, supported_payment_modes, payment_head_questions (id, question_text, answer_type, dropdown_options, is_required, field_stage, sort_order, date_rule, date_days)")
       .eq("id", request.payment_head_id)
       .eq("company_id", companyId)
       .single();
     if (headError || !headData) throw new Error("Payment head not found for this company.");
+    const adhocFields = headData.code === "ADHOC_DA" ? {
+      source_system: "OPS_ADHOC_DA",
+      adhoc_shipment_id: required(formData.get("adhoc_shipment_id"), "DA name / Provider ID"),
+      adhoc_work_date: required(formData.get("adhoc_work_date"), "Delivery work date")
+    } : {};
     if (!normalizePaymentModes(headData.supported_payment_modes).includes(paymentMode)) {
       throw new Error("The selected payment method is not supported by this payment head.");
     }
@@ -943,6 +948,7 @@ export async function submitPaymentBankDetails(formData: FormData) {
     const { error: updateError } = await admin
       .from("payment_requests")
       .update({
+        ...adhocFields,
         amount: Number(amountText),
         payment_mode: paymentMode,
         payment_portal: paymentMode === "upi_payment" ? "UPI" : paymentPortal,

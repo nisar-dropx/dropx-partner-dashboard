@@ -68,5 +68,14 @@ assert.equal(carried.effective_date.toISOString().slice(0,10),'2026-10-01','Late
 // Ordinary adjustments with NULL references remain unaffected.
 await db.exec(`insert into workforce_adjustments(company_id,workforce_id,amount,status,category) values('${company}','${worker}',1,'pending','other'); update workforce_adjustments set amount=2 where external_reference is null; delete from workforce_adjustments where external_reference is null;`);
 assert.equal(await count(),2);
+// The live head requires expense approval. Identity is added only when an
+// already-approved request reaches Submit payment details, not at expense intake.
+const legacy=await insert({request_no:'EXP1',source_system:null,adhoc_shipment_id:null,adhoc_work_date:null,status:'approved'});
+assert.equal(legacy.adhoc_workforce_id,null);
+await db.query("update payment_requests set source_system='OPS_ADHOC_DA',adhoc_shipment_id=$1,adhoc_work_date='2026-09-10' where id=$2",[shipment,legacy.id]);
+assert.equal((await db.query('select adhoc_workforce_id from payment_requests where id=$1',[legacy.id])).rows[0].adhoc_workforce_id,worker);
+assert.equal(await count(),2,'Adding payment details is not proof of payment');
+await db.query("update payment_requests set status='processed' where id=$1",[legacy.id]);
+assert.equal(await count(),3);
 await db.close();
 console.log('PASS Adhoc DA SQL: station/date/company validation, exact mapping, unpaid exclusion, one-time paid recovery, immutable audit, payroll gate, late carry-forward and unrelated adjustments.');

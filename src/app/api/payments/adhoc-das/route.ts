@@ -25,7 +25,10 @@ export async function GET(request: Request) {
       const key = JSON.stringify([row.client, row.provider_employee_id, row.provider_employee_name]);
       if (!options.has(key)) options.set(key, { value: row.id, label: `${row.provider_employee_name || "Unnamed DA"} — ${row.provider_employee_id}`, helper: `${row.client} · ${station.data.station_code}` });
     }
-    if ((result.data?.length ?? 0) < 1000) return Response.json({ options: [...options.values()].sort((a, b) => a.label.localeCompare(b.label)) }, { headers: { "Cache-Control": "no-store" } });
+    if ((result.data?.length ?? 0) < 1000) {
+      const latest = options.size ? null : await supabaseAdmin.from("cps_shipment_daily").select("work_date").eq("company_id", company).eq("station_code", station.data.station_code).order("work_date", { ascending: false }).limit(1).maybeSingle();
+      return Response.json({ options: [...options.values()].sort((a, b) => a.label.localeCompare(b.label)), latestDate: latest?.data?.work_date || null }, { headers: { "Cache-Control": "no-store" } });
+    }
   }
   return Response.json({ error: "Too many records for one station/day. Contact support." }, { status: 422 });
 }

@@ -8,10 +8,11 @@ export function AdhocDaFields({ locationId }: { locationId: string }) {
   const [options, setOptions] = useState<SearchableSelectOption[]>([]);
   const [selected, setSelected] = useState("");
   const [message, setMessage] = useState("");
+  const [latestDate, setLatestDate] = useState("");
   const [loading, setLoading] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
-    setOptions([]); setSelected(""); setMessage("");
+    setOptions([]); setSelected(""); setMessage(""); setLatestDate("");
     if (!locationId || !date) return;
     setLoading(true);
     fetch(`/api/payments/adhoc-das?${new URLSearchParams({ location: locationId, date })}`, { signal: controller.signal, cache: "no-store" })
@@ -20,6 +21,7 @@ export function AdhocDaFields({ locationId }: { locationId: string }) {
         if (!response.ok) throw new Error(body.error || "Unable to load station DAs.");
         if (!controller.signal.aborted) {
           setOptions(body.options);
+          setLatestDate(body.latestDate || "");
           if (!body.options.length) setMessage("No shipment data for this station/date. Import the daily shipment count first.");
         }
       }).catch(error => { if (!controller.signal.aborted) setMessage(error.message); })
@@ -34,6 +36,7 @@ export function AdhocDaFields({ locationId }: { locationId: string }) {
     </div>
     {!locationId ? <p>Select a location first.</p> : null}
     {message ? <p role="alert">{message}</p> : null}
+    {latestDate && latestDate !== date ? <p className="subtle">Latest available shipment date: {latestDate}. <button type="button" className="button secondary compact" onClick={() => setDate(latestDate)}>Use this work date</button></p> : null}
     <p className="subtle">IDs come from this station’s daily shipment count on the selected work date. A valid Workforce mapping is required. Only processed/paid amounts are deducted once from payroll; pending or rejected requests are not deducted.</p>
   </fieldset>;
 }

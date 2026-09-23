@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/app-shell";
+import { AdhocDaFields } from "@/components/adhoc-da-fields";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import { PageHead } from "@/components/page-head";
 import { PaymentRequestForm } from "@/components/payment-request-form";
@@ -460,6 +461,7 @@ export default async function PaymentRequestsPage({
                 defaultIfsc={bankRequest.ifsc}
                 savedContacts={savedContacts}
               />
+              {bankHead?.code === "ADHOC_DA" && bankRequest.location_id ? <AdhocDaFields locationId={bankRequest.location_id} /> : null}
               {bankQuestions.length ? (
                 <>
                   <div className="section-divider" />

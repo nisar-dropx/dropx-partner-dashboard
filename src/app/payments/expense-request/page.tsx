@@ -2,6 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import { PageHead } from "@/components/page-head";
 import { PaymentBeneficiaryFields } from "@/components/payment-beneficiary-fields";
+import { AdhocDaFields } from "@/components/adhoc-da-fields";
 import { PaymentRequestForm } from "@/components/payment-request-form";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
@@ -544,6 +545,7 @@ export default async function ExpenseRequestPage({
                 defaultIfsc={bankRequest.ifsc}
                 savedContacts={savedContacts}
               />
+              {bankHead?.code === "ADHOC_DA" && bankRequest.location_id ? <AdhocDaFields locationId={bankRequest.location_id} /> : null}
               {bankQuestions.length ? (
                 <>
                   <div className="section-divider" />
