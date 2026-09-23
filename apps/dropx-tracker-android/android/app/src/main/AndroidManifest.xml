@@ -9,6 +9,22 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
+        <!-- FirebaseMessagingService reads these for any push notification that doesn't
+             explicitly set android.notification.icon/color itself (e.g. a plain data-only
+             message, or one sent from Firebase Console directly) — without this, Android falls
+             back to the app's full-color launcher icon shrunk into a plain white circle/blob,
+             which is what showed up before this was added. ic_notification is the white
+             silhouette generated from ic_launcher_foreground's brand mark. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_notification" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/dropx_brand" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="dropx_one_notifications" />
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:name=".MainActivity"

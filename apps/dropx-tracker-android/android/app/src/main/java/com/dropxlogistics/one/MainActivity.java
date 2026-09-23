@@ -1,8 +1,11 @@
 package com.dropxlogistics.one;
 
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -46,6 +49,8 @@ public class MainActivity extends BridgeActivity {
     registerPlugin(DropxOnePlugin.class);
     super.onCreate(savedInstanceState);
 
+    createPushNotificationChannel();
+
     // The status bar icons (clock/battery/signal) default to light (white-ish), meant for a
     // dark backdrop. This app's header is light (#fff/#fbf8f3), so light icons render at
     // near-zero contrast — not literally invisible, just unreadable — which read as "that
@@ -63,6 +68,26 @@ public class MainActivity extends BridgeActivity {
     WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
 
     showStartupOverlay();
+  }
+
+  /**
+   * Must exist before the FIRST push notification arrives, or Android silently falls back to a
+   * generic system channel (no custom icon/color/name — this was reproduced live: the fallback
+   * channel is literally named "fcm_fallback_notification_channel"). AndroidManifest.xml's
+   * com.google.firebase.messaging.default_notification_channel_id meta-data tells
+   * FirebaseMessagingService to route pushes here, but creating the channel itself is still
+   * this app's job — Firebase doesn't do it automatically.
+   */
+  private void createPushNotificationChannel() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+    NotificationChannel channel = new NotificationChannel(
+      "dropx_one_notifications",
+      "DropX One notifications",
+      NotificationManager.IMPORTANCE_HIGH
+    );
+    channel.setDescription("Punch confirmations, approvals, and other DropX One alerts.");
+    NotificationManager manager = getSystemService(NotificationManager.class);
+    if (manager != null) manager.createNotificationChannel(channel);
   }
 
   @Override

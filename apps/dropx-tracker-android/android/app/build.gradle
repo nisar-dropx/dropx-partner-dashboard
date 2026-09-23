@@ -30,8 +30,8 @@ android {
         // Highest versionCode ever uploaded to this listing was 9 (4.0.3, rejected 31 Aug 2026
         // for missing background-location disclosure — this app's consent dialog fixes that).
         // Must strictly exceed 9 even though that release was never approved.
-        versionCode 20
-        versionName "4.3.1"
+        versionCode 21
+        versionName "4.3.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

@@ -9,4 +9,7 @@
     <color name="colorPrimary">#f9f5fc</color>
     <color name="colorPrimaryDark">#f9f5fc</color>
     <color name="colorAccent">#e73f2e</color>
+    <!-- Tint applied to the white notification-icon silhouette in the status bar/shade — the
+         orange from the DropX pin logo, so a push notification reads as DropX at a glance. -->
+    <color name="dropx_brand">#F5A623</color>
 </resources>

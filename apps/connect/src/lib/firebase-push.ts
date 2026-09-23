@@ -133,7 +133,15 @@ export async function deliverNotificationPush(notification: PushNotification) {
                 priority: "high",
                 notification: {
                   channel_id: "dropx_one_notifications",
-                  sound: "default"
+                  sound: "default",
+                  // Matches MainActivity.createPushNotificationChannel()'s channel and the
+                  // white-silhouette icon/brand color set as AndroidManifest.xml's
+                  // default_notification_icon/_color — set explicitly here too so the
+                  // notification still looks right even for a client that predates the channel
+                  // being created (falls back to the manifest defaults either way; this is
+                  // just not leaving it to chance).
+                  icon: "ic_notification",
+                  color: "#F5A623"
                 }
               }
             }
