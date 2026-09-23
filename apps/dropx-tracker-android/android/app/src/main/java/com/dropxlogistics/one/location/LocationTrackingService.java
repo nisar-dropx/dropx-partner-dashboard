@@ -174,6 +174,17 @@ public class LocationTrackingService extends Service {
   private void runIntegrityCheck() {
     refreshLocationEnabledAlert();
     refreshInternetEnabledAlert();
+    // Some OEMs (reproduced on a Motorola/MTK device) let the worker swipe away the ongoing
+    // "Active" tracking notification from the shade even with setOngoing(true) — the
+    // foreground service itself keeps running underneath (Android doesn't tie the two
+    // together as tightly as setOngoing(true) implies on those OEMs), but with no visible
+    // notification the worker has no way to tell tracking is still on, and onTaskRemoved()'s
+    // restart-the-service fix doesn't help here since the service never actually died. Calling
+    // startForeground() again with the same notification ID re-posts it if it's gone, and is a
+    // safe no-op if it's still showing — piggybacking on this loop's own interval means it
+    // reappears within one tick (matches the location/internet-off alerts' own tick cadence)
+    // instead of needing a separate timer just for this.
+    startForeground(NOTIFICATION_ID, buildNotification());
   }
 
   private void refreshLocationEnabledAlert() {

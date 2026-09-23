@@ -37,6 +37,25 @@
 -keep class com.dropxlogistics.one.location.TrackingInterruptionReporter { *; }
 -keep class com.dropxlogistics.one.MainActivity { *; }
 
+# getPermissionStates() (called by every plugin's checkPermissions()/requestPermissions(), our
+# own and any bundled Capacitor plugin like @capacitor/push-notifications) reads the
+# @CapacitorPlugin/@Permission ANNOTATIONS on a plugin class via reflection to know what
+# permissions/aliases it declares — the method-name keep rule above doesn't cover that, since
+# R8 can strip annotation metadata even off a class/method it otherwise keeps intact.
+-keepattributes *Annotation*
+-keep @com.getcapacitor.annotation.CapacitorPlugin class * { *; }
+
+# PushNotificationsPlugin.requestPermissions(PluginCall) overrides Plugin's own same-named,
+# same-signature, identically-@PluginMethod-annotated method — a plain -keep on the class (even
+# with { *; }) still let R8's optimizer merge/devirtualize that override away in testing (it was
+# confirmed absent from the R8 mapping/seeds output, and crashed getPermissionStates() with a
+# NullPointerException on every release build, but never an unminified debug build). Disabling
+# optimization for just this plugin's class (still allowed to be renamed/shrunk elsewhere, just
+# not restructured) is what actually kept the real override intact and resolved it.
+-keep class com.capacitorjs.plugins.pushnotifications.** { *; }
+-keepclassmembers class com.capacitorjs.plugins.pushnotifications.** { *; }
+-keep,allowshrinking,allowobfuscation class com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin
+
 # play-services-location and androidx.work also do some of their own reflection-based
 # component lookup (Services/Receivers started by class reference from the manifest).
 -keep class com.google.android.gms.location.** { *; }
