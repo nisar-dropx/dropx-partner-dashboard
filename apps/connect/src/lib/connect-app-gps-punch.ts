@@ -700,7 +700,14 @@ export async function insertConnectAppGpsPunch({
   if (existing.error) throw new Error(existing.error.message);
   const nextOrder = (existing.data?.length ?? 0) + 1;
   const stationSettings = await resolveStationAttendanceSettings(locationId);
-  const holdForReview = stationSettings.integrityFlagsEnabled;
+  // integrityFlagsEnabled turns the check ON for this station, but previously held EVERY punch
+  // for manager selfie-review regardless of whether anything was actually wrong with it — a
+  // clean punch from inside the geofence with good GPS, no mock location, no developer mode and
+  // no VPN got the same "pending approval" treatment as a genuinely suspicious one. Now only
+  // holds when evaluateIntegrity() (computed above from the client's own reported signals plus
+  // GPS accuracy) actually found a reason to flag it; a clean punch goes straight through, same
+  // as if the station setting were off entirely.
+  const holdForReview = stationSettings.integrityFlagsEnabled && integrity.isRisk;
   const employeeId = worker.profileType === "employee" ? worker.profileId : null;
   const fieldExecutiveId = worker.profileType === "field_executive" || worker.profileType === "workforce"
     ? worker.profileId
