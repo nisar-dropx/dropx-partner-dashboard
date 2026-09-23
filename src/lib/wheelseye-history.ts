@@ -24,13 +24,14 @@ export async function loadWheelseyeMovement(accessToken: string, vehicle: string
   upstream.searchParams.set("fromTime", String(fromTime));
   upstream.searchParams.set("toTime", String(toTime));
 
-  const response = await fetch(upstream, { cache: "no-store" });
+  const response = await fetch(upstream, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
   const payload = await response.json().catch(() => null);
   if (!response.ok || payload?.success === false) {
     throw new Error(payload?.message || "Unable to load Wheelseye movement.");
   }
 
-  const rawPoints: WheelseyeHistoryPoint[] = Array.isArray(payload?.Vehicle) ? payload.Vehicle : [];
+  if (!Array.isArray(payload?.Vehicle)) throw new Error("GPS provider returned an unexpected history response.");
+  const rawPoints: WheelseyeHistoryPoint[] = payload.Vehicle;
   const normalized = rawPoints
     .map((point) => ({
       lat: Number(point.latitude),
@@ -39,7 +40,8 @@ export async function loadWheelseyeMovement(accessToken: string, vehicle: string
       epoch: Number(point.dttimeInEpoch || point.createdDateInEpoch || 0),
       ignition: point.ignition === true || point.ignition === 1
     }))
-    .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng))
+    .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng) &&
+      Math.abs(point.lat) <= 90 && Math.abs(point.lng) <= 180 && (point.lat !== 0 || point.lng !== 0))
     .sort((a, b) => a.epoch - b.epoch);
 
   const points = normalized.map((point) => ({ lat: point.lat, lng: point.lng }));

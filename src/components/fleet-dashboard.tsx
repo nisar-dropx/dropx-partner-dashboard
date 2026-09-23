@@ -1,5 +1,6 @@
 "use client";
 
+import { FleetReports } from "@/components/fleet-daily-report";
 import { Activity, Download, Eye, Fuel, Gauge, MoreVertical, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { SearchableSelect, type SearchableSelectOption } from "@/components/searchable-select";
@@ -353,7 +354,7 @@ export function FleetDashboard({
           />
         ) : null}
         {mode === "Fuel Log" ? <FuelLog canUpload={Boolean(tabPermissions["Fuel Log"]?.canAdd || tabPermissions["Fuel Log"]?.canEdit)} error={summary.fuelError ?? undefined} rows={fuelRows} onUploaded={refreshFleet} /> : null}
-        {mode === "Report" ? <FleetReport rows={fuelRows} /> : null}
+        {mode === "Report" ? <FleetReports fuelReports={<FleetFuelReport rows={fuelRows} />} /> : null}
         {mode === "Live GPS" ? <LiveGps rows={summary.gpsLive ?? []} /> : null}
         {mode === "Maintenance" ? <Maintenance rows={summary.maintenance ?? []} /> : null}
       </section>
@@ -1517,7 +1518,7 @@ function FuelLog({
   );
 }
 
-function FleetReport({ rows }: { rows: FuelRow[] }) {
+function FleetFuelReport({ rows }: { rows: FuelRow[] }) {
   const [reportType, setReportType] = useState<FuelReportType>("transactions");
   const [vehicles, setVehicles] = useState<string[]>([]);
   const [stations, setStations] = useState<string[]>([]);

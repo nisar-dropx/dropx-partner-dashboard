@@ -1,0 +1,73 @@
+.fleet-report-workspace { padding: 18px; background: #f7f8fb; }
+.daily-report-switch { display: flex; gap: 6px; border-bottom: 1px solid #dfe4eb; margin-bottom: 24px; padding-bottom: 12px; }
+.daily-report-switch button { display: inline-flex; align-items: center; gap: 7px; border: 1px solid transparent; background: transparent; padding: 10px 14px; border-radius: 8px; color: #526075; font-weight: 700; cursor: pointer; }
+.daily-report-switch button[aria-pressed="true"] { color: #b93815; background: #fff0e9; border-color: #ffcdb9; }
+.daily-fleet-report { color: #1b263b; }
+.daily-report-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
+.daily-eyebrow { color: #c34620; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+.daily-report-heading h2 { margin: 5px 0 6px; font-size: 26px; letter-spacing: -.035em; }
+.daily-report-heading p, .daily-results-heading p { color: #69758a; font-size: 12px; line-height: 1.5; }
+.daily-fleet-report .fleet-btn { display: inline-flex; justify-content: center; align-items: center; gap: 7px; min-height: 38px; white-space: nowrap; }
+.daily-fleet-report button:disabled, .daily-fleet-report input:disabled, .daily-fleet-report select:disabled { opacity: .5; cursor: not-allowed; }
+.daily-fleet-report :is(button,input,select,summary):focus-visible { outline: 3px solid #feb08b; outline-offset: 2px; }
+.daily-filter-card { padding: 18px; border: 1px solid #e1e6ee; background: #fff; border-radius: 12px; box-shadow: 0 2px 3px #15233b03; }
+.daily-quick-ranges { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-bottom: 16px; }
+.daily-quick-ranges button { background: #f5f7fa; border: 1px solid #e1e6ee; border-radius: 6px; color: #465269; padding: 6px 12px; font-size: 11px; cursor: pointer; }
+.daily-quick-ranges span { margin-left: auto; color: #788397; font-size: 10px; }
+.daily-date-range { display: grid; grid-template-columns: minmax(145px,1fr) minmax(145px,1fr) auto minmax(220px,2fr); gap: 12px; align-items: end; }
+.daily-fleet-report label { display: grid; gap: 6px; font-size: 11px; font-weight: 700; color: #586479; }
+.daily-fleet-report input, .daily-fleet-report select { box-sizing: border-box; width: 100%; min-width: 0; height: 38px; border: 1px solid #dce2eb; border-radius: 7px; padding: 8px 10px; background: #fff; color: #253147; font: inherit; font-weight: 500; }
+.daily-search > span { position: relative; display: flex; align-items: center; }
+.daily-search svg { position: absolute; left: 11px; color: #8b94a5; }
+.daily-search input { padding-left: 35px; }
+.daily-select-filters { display: grid; grid-template-columns: repeat(4,minmax(130px,1fr)) auto; align-items: end; gap: 12px; margin-top: 15px; }
+.daily-clear { background: none; border: none; height: 38px; color: #a34426; font-size: 11px; cursor: pointer; text-decoration: underline; }
+.daily-form-error, .daily-error { color: #b42318; padding-top: 10px; font-size: 12px; }
+.daily-filter-note, .daily-freshness { color: #737e91; font-size: 11px; line-height: 1.6; margin-top: 10px; }
+.daily-error { background: #fff1f0; padding: 16px; margin-top: 16px; border-radius: 8px; }
+.daily-error button { margin-left: 10px; }
+.daily-loading { padding: 48px 20px; text-align: center; color: #69758a; font-size: 13px; }
+.daily-metrics { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; margin: 18px 0; }
+.daily-metrics article { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 18px; border: 1px solid #e2e6ee; border-radius: 10px; background: #fff; }
+.daily-metrics article > svg { grid-column: 2; grid-row: 1; color: #8994a6; }
+.daily-metrics article > span { grid-column: 1; grid-row: 1; color: #66748a; font-size: 11px; }
+.daily-metrics strong { grid-column: 1 / -1; font-size: 27px; font-weight: 800; letter-spacing: -.035em; }
+.daily-metrics strong small { font-size: 12px; font-weight: 600; color: #7b8698; letter-spacing: 0; }
+.daily-metrics p { grid-column: 1 / -1; color: #8390a3; font-size: 10px; }
+.daily-metrics article.daily-metric-warning { background: #fff9ed; border-color: #f0dfbd; }
+.daily-metric-warning strong, .daily-metrics .daily-metric-warning > svg { color: #a76112; }
+.daily-data-note { border-left: 3px solid #bdcde1; border-radius: 0 6px 6px 0; background: #eef3f9; padding: 12px 15px; margin-bottom: 22px; }
+.daily-data-note strong { font-size: 11px; color: #42516a; }
+.daily-data-note p { margin-top: 5px; font-size: 11px; line-height: 1.6; color: #68768c; }
+.daily-results-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; }
+.daily-results-heading h3 { font-size: 15px; margin-bottom: 4px; }
+.daily-refresh-actions { display: flex; gap: 7px; }
+.daily-sync-message { margin: 12px 0; padding: 12px; border: 1px solid #d5e1f3; background: #edf4ff; color: #375984; border-radius: 8px; font-size: 12px; }
+.daily-table-scroll { overflow-x: auto; border: 1px solid #e0e5ed; border-radius: 10px; margin-top: 14px; background: #fff; }
+.daily-table { width: 100%; min-width: 1110px; border-collapse: collapse; font-size: 12px; }
+.daily-table th { padding: 13px 12px; text-align: left; background: #edf1f7; color: #526079; font-size: 10px; white-space: nowrap; border-bottom: 1px solid #dce3ed; }
+.daily-table th button { display: grid; grid-template-columns: 1fr auto; column-gap: 5px; row-gap: 5px; border: 0; padding: 0; background: none; color: inherit; font: inherit; font-weight: 750; text-align: left; cursor: pointer; }
+.daily-table th small { display: block; grid-column: 1 / -1; font-size: 9px; font-weight: 400; color: #8390a2; }
+.daily-table th[aria-sort="ascending"], .daily-table th[aria-sort="descending"] { color: #ba451f; background: #fff1e9; }
+.daily-table td { padding: 14px 12px; border-bottom: 1px solid #edf0f5; vertical-align: top; white-space: nowrap; }
+.daily-table tbody tr:nth-child(even) { background: #fafbfe; }
+.daily-table tbody tr:hover { background: #f4f7fc; }
+.daily-table td > small { display: block; font-size: 10px; margin-top: 5px; color: #8792a2; }
+.daily-table .daily-number { text-align: right; font-variant-numeric: tabular-nums; }
+.daily-table .daily-distance { font-weight: 750; color: #23334c; }
+.daily-status { border-radius: 5px; padding: 5px 7px; display: inline-block; font-size: 10px; font-weight: 700; }
+.daily-status.ready { color: #237252; background: #e7f5ee; }
+.daily-status.gps_missing { color: #a55d0c; background: #fff1d9; }
+.daily-status.fuel_missing, .daily-status.not_applicable { color: #68758b; background: #eef1f6; }
+.daily-table td > .daily-provisional { color: #b86a12; }
+.daily-table summary { color: #395e91; cursor: pointer; font-size: 11px; }
+.daily-table dl { min-width: 180px; margin: 12px 0 0; white-space: normal; font-size: 10px; }
+.daily-table dt { color: #7c899e; margin-top: 8px; }
+.daily-table dd { margin: 3px 0 0; color: #34435c; }
+.daily-pagination { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 0; font-size: 11px; color: #798498; }
+.daily-pagination label { display: flex; align-items: center; gap: 8px; }
+.daily-pagination select { width: 66px; height: 32px; }
+.daily-pagination > div { display: flex; align-items: center; gap: 12px; }
+.daily-pagination button { padding: 7px 12px; border: 1px solid #dce3eb; border-radius: 6px; background: #fff; color: #465976; cursor: pointer; }
+@media(max-width:1100px) { .daily-date-range { grid-template-columns: 1fr 1fr auto; } .daily-search { grid-column: 1 / -1; } .daily-select-filters { grid-template-columns: repeat(2,minmax(0,1fr)); } .daily-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media(max-width:560px) { .fleet-report-workspace { padding: 12px; } .daily-report-heading { align-items: flex-start; flex-direction: column; } .daily-report-heading h2 { font-size: 22px; } .daily-filter-card { padding: 12px; } .daily-date-range { grid-template-columns: 1fr 1fr; } .daily-date-range > button { grid-column: 1 / -1; } .daily-select-filters { gap: 10px; } .daily-quick-ranges span { flex-basis: 100%; } .daily-metrics article { padding: 12px; } .daily-metrics strong { font-size: 23px; } .daily-metrics article > svg { display: none; } .daily-report-switch button { padding: 8px; font-size: 11px; } .daily-refresh-actions { flex-wrap: wrap; } }
