@@ -10,8 +10,19 @@ const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata'}).format(new 
 const jobs=Array.from({length:38},(_,i)=>['stock','outcomes'].map(source=>({station_code:'S'+i,source,due:true,lease_token:null,source_at:null,last_error:null}))).flat();
 let active=0, peak=0, mode='fail', finishes=0, claimLoss=0, finishLoss=0;
 let cacheMode='missing', cacheAt=null, livePulls=0;
+// Run-lock state for edd_try_acquire_refresh_run/edd_release_refresh_run —
+// mirrors the real row-based lease in ops_review_edd_refresh_run_lock.
+// Kept separate from `jobs`' own per-station lease/claim logic (tested
+// above): the run-lock guards a whole refreshReviewSources() invocation,
+// the job leases guard individual station claims within it. This test
+// deliberately runs two full invocations concurrently to prove the job
+// leases alone keep peak claims <= 2 even without the run-lock rejecting
+// the second invocation outright, so the mock always grants the lock
+// rather than mimicking real single-run exclusivity.
 const db={
   async rpc(name,args){
+    if(name==='edd_try_acquire_refresh_run')return {data:true,error:null};
+    if(name==='edd_release_refresh_run')return {data:null,error:null};
     if(name==='edd_claim_review_source'){
       const existing=jobs.find(j=>j.lease_token===args.p_token);
       if(existing)return {data:[{...existing}],error:null};

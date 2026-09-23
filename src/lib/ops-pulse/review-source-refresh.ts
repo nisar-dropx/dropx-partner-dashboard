@@ -6,6 +6,21 @@ import { fetchEddStation, fetchEddPerformanceStation, refreshEddStation, refresh
 import { stationEddToday } from "./station-edd";
 
 type RefreshJob = { station_code: string; source: "stock" | "outcomes"; lease_token: string };
+// One stable shape for every return path (both skips and the real run), so
+// callers can use the same optional-chaining on failedSources/waitingStations
+// regardless of which branch returned. Skip branches only fill `skipped`.
+export type RefreshReviewSourcesResult = {
+  refreshed: number;
+  skipped?: string;
+  attempted?: number;
+  reusedSnapshots?: number;
+  failedSources?: string[];
+  trackedStations?: number;
+  freshStations?: number;
+  waitingStations?: string[];
+  retryingSources?: number;
+  targetRefreshMinutes?: number;
+};
 export function reviewRefreshError(error: unknown) {
   const code = error && typeof error === "object" && "code" in error ? error.code : null;
   if (code === "SESSION_UNAVAILABLE" || code === "LOGIN_IN_PROGRESS") return "login_busy";
@@ -31,7 +46,7 @@ export function freshReviewSource(job: Pick<RefreshJob, "station_code" | "source
 /** Database-backed queue: all tracked stations, two global HTTP lanes, 15-minute
  * success cadence, persistent retries and expired-lease recovery. The minute
  * cron is a recovery tick, NOT a full-network Amazon refresh every minute. */
-export async function refreshReviewSources(now = new Date()) {
+export async function refreshReviewSources(now = new Date()): Promise<RefreshReviewSourcesResult> {
   const day = stationEddToday(now);
   if (now.getTime() < Date.parse(`${day}T05:30:00+05:30`)) return { refreshed: 0, skipped: "Before 05:30 IST" };
   if (!supabaseAdmin) throw Error("EDD refresh queue database is unavailable.");
