@@ -135,6 +135,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
     <AppShellFrame
       desktopActions={topActions}
       mobileActions={topActions}
+      mobileBrand={isOpsHost ? <OpsPulseBrand /> : undefined}
       sidebar={(
         <aside className="sidebar">
           <div className="brand">

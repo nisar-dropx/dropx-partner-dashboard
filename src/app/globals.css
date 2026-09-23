@@ -903,6 +903,9 @@ a {
   outline-offset: 2px;
 }
 
+.mobile-topbar .ops-brand-lockup { padding: 0; border: 0; gap: 6px; }
+.mobile-topbar .ops-brand-copy small { display: none; }
+
 .mobile-brand-logo {
   width: 104px;
   height: 38px;

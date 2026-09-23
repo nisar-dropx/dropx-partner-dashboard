@@ -10,13 +10,14 @@ type AppShellFrameProps = {
   children: ReactNode;
   desktopActions: ReactNode;
   mobileActions: ReactNode;
+  mobileBrand?: ReactNode;
   sidebar: ReactNode;
 };
 
 const flashQueryKeyPattern = /^(?:error|notice|success|sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 const compoundFlashQueryKeyPattern = /_(?:sent|saved|deleted|added|initialized|updated|created|uploaded)$/i;
 
-export function AppShellFrame({ children, desktopActions, mobileActions, sidebar }: AppShellFrameProps) {
+export function AppShellFrame({ children, desktopActions, mobileActions, mobileBrand, sidebar }: AppShellFrameProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -64,7 +65,7 @@ export function AppShellFrame({ children, desktopActions, mobileActions, sidebar
         >
           {sidebarOpen ? <X size={21} strokeWidth={2.4} /> : <Menu size={21} strokeWidth={2.4} />}
         </button>
-        <img className="mobile-brand-logo" src="/dropx-logo.png" alt="DropX" />
+        {mobileBrand ?? <img className="mobile-brand-logo" src="/dropx-logo.png" alt="DropX" />}
         <div className="mobile-top-actions">{mobileActions}</div>
       </header>
 
