@@ -55,7 +55,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
     : { locations: [], error: null };
   const opsContext = resolveOperatingContext(opsLocationsResult.locations);
   const baseShellNavItems = isOpsHost
-    ? opsNavItemsForMode(opsContext.mode)
+    ? opsNavItemsForMode(opsContext.mode, authorization)
     : isPeopleHost
       ? peopleNavItems
       : isFinanceHost

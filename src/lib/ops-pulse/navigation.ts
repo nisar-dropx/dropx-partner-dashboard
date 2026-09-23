@@ -1,6 +1,7 @@
 import { fleetNavItem, type NavItem } from "@/lib/app-navigation";
 import { hasPermission, isCompanyOwner, type AuthorizationContext } from "@/lib/authorization";
 import type { OperatingMode } from "@/lib/ops-pulse/operating-context";
+import { canAccessDailyCodPending } from "@/lib/ops-pulse/cod-pending-access";
 
 const commonStart: NavItem[] = [
   { code: "ops_pulse", label: "Command Center", href: "/", icon: "#" },
@@ -146,14 +147,15 @@ function modelOperations(mode: OperatingMode): NavItem {
 
 const eddDashboard: NavItem = { code: "edd_dashboard", label: "Delivery Performance", href: "/edd", icon: "E" };
 
-export function opsNavItemsForMode(mode: OperatingMode): NavItem[] {
-  return [...commonStart, modelOperations(mode), eddDashboard, businessDocuments, payments, cps, fleetNavItem, attendanceReports, reports, ...administration];
+export function opsNavItemsForMode(mode: OperatingMode, authorization?: AuthorizationContext): NavItem[] {
+  const items=[...commonStart, modelOperations(mode), eddDashboard, businessDocuments, payments, cps, fleetNavItem, attendanceReports, reports, ...administration];
+  return items.map(item=>item.children?{...item,children:item.children.filter(child=>child.href!=='/cod/pending'||Boolean(authorization&&canAccessDailyCodPending(authorization)))}:item);
 }
 
 export function firstAllowedOpsHref(authorization: AuthorizationContext) {
   if (isCompanyOwner(authorization)) return "/";
   const candidates = [
-    ...opsNavItemsForMode("amazon_edsp"),
+    ...opsNavItemsForMode("amazon_edsp", authorization),
     modelOperations("amazon_now"),
     modelOperations("flipkart_odh_mdh")
   ];

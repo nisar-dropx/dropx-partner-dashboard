@@ -1,6 +1,8 @@
 import {CodAgeingReport} from '@/components/cod-ageing-report';
 import {loadCodAgeing} from '@/lib/ops-pulse/cod-ageing-data';
 import Link from 'next/link';
+import {redirect} from 'next/navigation';
+import {canAccessDailyCodPending} from '@/lib/ops-pulse/cod-pending-access';
 import {Fragment} from 'react';
 import {PageHead} from '@/components/page-head';
 import {CodSectionTabs} from '@/components/cod-section-tabs';
@@ -14,6 +16,7 @@ export const dynamic='force-dynamic';
 type Params={date?:string;location?:string;client?:string;status?:string;detail?:string};
 export default async function CodPendingPage({searchParams={}}:{searchParams?:Params}){
  const auth=await requirePagePermission('cod_reports','access'),company=requireCompanyId(auth);
+ if(!canAccessDailyCodPending(auth))redirect('/unauthorized?page=cod_pending&reason=access');
  const date=searchParams.date||todayKolkata(),status=searchParams.status||'all';
  let rows:CodPendingRow[]=[],error='';
  try{if(!validReportDate(date))throw new Error('Choose a valid deposit date.');if(!supabaseAdmin)throw new Error('Database unavailable.');rows=await loadCodPendingReport(supabaseAdmin,company,auth.locationScopeIds,auth.hasAllLocationAccess,date);}catch(e){console.error('COD pending report failed',e);error=validReportDate(date)?'The complete report could not be loaded. Please retry; no partial totals are shown.':'Choose a valid deposit date.';}

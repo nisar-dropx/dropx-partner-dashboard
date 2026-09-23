@@ -43,6 +43,9 @@ const morning=digest.buildCodDigestMessages(rows,source,recipients,date,'morning
 assert.equal(evening.subject,morning.subject);assert.match(evening.html,/2026-09-01/);assert.match(morning.html,/9:00 AM follow-up/);assert.equal(evening.scope.sourceBatchId,morning.scope.sourceBatchId);assert.ok(!evening.html.includes('GNTI'));assert.ok(!evening.html.includes('999999'));
 assert.equal(digest.buildCodDigestMessages(rows,{...source,stations:[]},recipients,date,'morning',evening.subject).length,1,'Each recipient gets the daily uploaded/not-uploaded status report, including all-complete confirmation');
 assert.match(evening.html,/YES — uploaded/);
+const locationMail=digest.buildCodDigestMessages(rows,source,[{...recipients[0],canViewPendingReport:false}],date,'morning',evening.subject)[0];
+assert.ok(locationMail.html.includes('/cod/submission?deposit_date='+date));
+assert.ok(!locationMail.html.includes('/cod/pending'));
 assert.equal(rows.find(r=>r.station.id==='s1').slipUploaded,true);
 assert.equal(rows.find(r=>r.station.id==='s2').slipUploaded,false);
 const delivery=compile('src/lib/portal-digest-delivery.ts',{'server-only':{},'./timeout-fetch':{timeoutFetch:f=>f},'./adhoc-digest-scope':{},'./cod-pending-mail-scope':{},'./ops-pulse/cod-pending-data':{}});
@@ -65,14 +68,21 @@ let filters=[];const fakeDb={from(table){const q={};for(const method of ['select
 const ageData=compile('src/lib/ops-pulse/cod-ageing-data.ts',{'server-only':{},'./review-cod':{},'./cod-pending-data':data,'./cod-pending':policy,'./cod-ageing':ageing});
 const loaded=await ageData.loadCodAgeing(fakeDb,'company',date,['NLRC']);assert.equal(loaded.dataDate,'2026-09-01');assert.equal(loaded.batchId,'batch1');assert.ok(filters.some(f=>f[1]==='lte'&&f[2]==='completed_at'&&f[3]==='2026-09-02T20:30:00+05:30'));
 console.log('PASS COD: missing stations, deposit-date matching, proof, short/excess, duplicates, deadlines, late uploads, scope, safe exports, D-1 ageing, >2-day alerts, pinned source cutoff, monthly email subject and both reminder windows.');
+const access=compile('src/lib/ops-pulse/cod-pending-access.ts',{'@/lib/authorization':{hasPermission:a=>a.allowed}});
+for(const roleCode of ['LOCATION','OPERATIONS_LOCATION','PEOPLE_LOCATION'])assert.equal(access.canAccessDailyCodPending({allowed:true,roleCode}),false);
+assert.equal(access.canAccessDailyCodPending({allowed:true,roleCode:'OPERATIONS_CM'}),true);
+assert.equal(access.canAccessDailyCodPending({allowed:true,roleCode:'OPERATIONS_CM',effectiveRoleCodes:['OPERATIONS_LOCATION']}),false);
 let auth=null;
 const api=compile('src/app/api/ops-pulse/cod/pending/export/route.ts',{
- '@/lib/authorization':{getAuthorization:async()=>auth,hasPermission:a=>a.allowed},'@/lib/supabase-admin':{supabaseAdmin:{}},'@/lib/ops-pulse/cod-pending-data':{loadCodPendingReport:async()=>rows},'@/lib/ops-pulse/cod-pending':policy,'@/lib/ops-pulse/cod-ageing-data':{},'@/lib/ops-pulse/cod-ageing':ageing
+ '@/lib/authorization':{getAuthorization:async()=>auth},'@/lib/ops-pulse/cod-pending-access':access,'@/lib/supabase-admin':{supabaseAdmin:{}},'@/lib/ops-pulse/cod-pending-data':{loadCodPendingReport:async()=>rows},'@/lib/ops-pulse/cod-pending':policy,'@/lib/ops-pulse/cod-ageing-data':{},'@/lib/ops-pulse/cod-ageing':ageing
 });
 const req=(q)=>new Request('https://ops.example/api/ops-pulse/cod/pending/export?'+q);
 assert.equal((await api.GET(req('date='+date))).status,401);
 auth={allowed:false};assert.equal((await api.GET(req('date='+date))).status,403);
-auth={allowed:true,companyId:'company',hasAllLocationAccess:false,locationScopeIds:['s1']};
+auth={allowed:true,companyId:'company',hasAllLocationAccess:true,locationScopeIds:[],roleCode:'OPERATIONS_LOCATION'};
+assert.equal((await api.GET(req('date='+date))).status,403,'Location account cannot export even with all-station scope');
+assert.equal((await api.GET(req('date='+date+'&type=ageing'))).status,403);
+auth={allowed:true,companyId:'company',hasAllLocationAccess:false,locationScopeIds:['s1'],roleCode:'OPERATIONS_CM'};
 assert.equal((await api.GET(req('date=2026-02-30'))).status,400);
 assert.equal((await api.GET(req('date='+date+'&location=s2'))).status,403);
 const downloaded=await api.GET(req('date='+date+'&location=s1&status=all'));assert.equal(downloaded.status,200);assert.ok((await downloaded.text()).includes('NLRC'));

@@ -1,13 +1,14 @@
 import {loadCodAgeing} from '@/lib/ops-pulse/cod-ageing-data';
 import {codAgeingCsv} from '@/lib/ops-pulse/cod-ageing';
-import {getAuthorization,hasPermission} from '@/lib/authorization';
+import {getAuthorization} from '@/lib/authorization';
+import {canAccessDailyCodPending} from '@/lib/ops-pulse/cod-pending-access';
 import {supabaseAdmin} from '@/lib/supabase-admin';
 import {loadCodPendingReport} from '@/lib/ops-pulse/cod-pending-data';
 import {codPendingCsv,filterCodPendingRows,validReportDate} from '@/lib/ops-pulse/cod-pending';
 export const dynamic='force-dynamic';
 export async function GET(request:Request){
  const auth=await getAuthorization();if(!auth)return Response.json({error:'Authentication required.'},{status:401});
- if(!hasPermission(auth,'cod_reports','access'))return Response.json({error:'COD report access required.'},{status:403});
+ if(!canAccessDailyCodPending(auth))return Response.json({error:'Daily COD Pending is not available for this account.'},{status:403});
  const p=new URL(request.url).searchParams,date=p.get('date')||'',location=p.get('location')||'';
  if(!validReportDate(date))return Response.json({error:'Choose a valid report date.'},{status:400});
  if(location&&!auth.hasAllLocationAccess&&!auth.locationScopeIds.includes(location))return Response.json({error:'Station access denied.'},{status:403});

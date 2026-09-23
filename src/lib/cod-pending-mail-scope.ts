@@ -2,7 +2,7 @@ import 'server-only';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {pagedCodRows} from './ops-pulse/cod-pending-data';
 import type {PendingStation} from './ops-pulse/cod-pending';
-export type CodMailRecipient={email:string;name:string;stationIds:string[]};
+export type CodMailRecipient={email:string;name:string;stationIds:string[];canViewPendingReport?:boolean};
 type Membership={user_id:string;role_id:string;has_all_location_access:boolean;location_scope_ids:string[]|null};
 type Role={id:string;code:string;location_access_mode:string|null};
 type Profile={id:string;email:string|null;full_name:string|null};
@@ -14,7 +14,7 @@ export function resolveCodRecipients(stations:PendingStation[],memberships:Membe
   const all=userMemberships.some(m=>m.has_all_location_access)||userRoles.some(r=>r.location_access_mode==='all_locations'||r.code==='OWNER');
   const ids=new Set(userMemberships.flatMap(m=>m.location_scope_ids||[]));
   const allowed=stations.filter(s=>all||ids.has(s.id)||(userRoles.some(r=>r.code==='LOCATION')&&s.station_email?.trim().toLowerCase()===email));
-  if(!allowed.length)continue;const prior=byEmail.get(email);byEmail.set(email,{email,name:profile.full_name||email,stationIds:[...new Set([...(prior?.stationIds||[]),...allowed.map(s=>s.id)])].sort()});
+  if(!allowed.length)continue;const prior=byEmail.get(email);byEmail.set(email,{email,name:profile.full_name||email,canViewPendingReport:(prior?.canViewPendingReport!==false)&&!userRoles.some(r=>/(^|_)LOCATION$/.test(r.code.trim().toUpperCase())),stationIds:[...new Set([...(prior?.stationIds||[]),...allowed.map(s=>s.id)])].sort()});
  }
  return [...byEmail.values()];
 }

@@ -45,6 +45,7 @@ export type AuthorizationContext = {
   companyName: string | null;
   email: string | null;
   effectiveRoleIds: string[];
+  effectiveRoleCodes?: string[];
   fullName: string | null;
   hasAllLocationAccess: boolean;
   isMasterCompany: boolean;
@@ -279,6 +280,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
   let isMasterCompany = effectiveEmail === "nisar@dropxlogistics.com";
   let isMasterOwner = Boolean(profile.is_master_owner) || effectiveEmail === "nisar@dropxlogistics.com";
   let roleCode: string | null = null;
+  let effectiveRoleCodes: string[] = [];
   let effectiveRoleIds: string[] = profile.role_id ? [profile.role_id] : [];
   let primaryRoleId: string | null = profile.role_id ?? null;
   const accessSurface = currentAdminAccessSurface();
@@ -352,6 +354,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
       .in("id", effectiveRoleIds);
     if (rolesResult.error) return null;
     const roles = rolesResult.data ?? [];
+    effectiveRoleCodes = roles.map(role => String(role.code ?? "").trim().toUpperCase());
     const primaryRole = roles.find((role) => role.id === primaryRoleId) ?? roles[0] ?? null;
     roleName = primaryRole?.name ?? null;
     roleCode = String(primaryRole?.code ?? "").trim().toUpperCase() || null;
@@ -450,6 +453,7 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
     companyName,
     email: isPreview ? profile.email ?? null : data.user.email ?? null,
     effectiveRoleIds,
+    effectiveRoleCodes,
     fullName: profile.full_name,
     hasAllLocationAccess,
     isMasterCompany,

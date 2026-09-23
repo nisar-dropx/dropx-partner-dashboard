@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { PendingLink } from "@/components/pending-link";
+import { useCodPendingAccess } from "@/components/cod-pending-access-provider";
 
 const codSections = [
   { href: "/cod/executive-reconciliation", key: "executive-reconciliation", label: "Executive Reconciliation", visible: true },
@@ -15,10 +16,11 @@ const codSections = [
 
 export function CodSectionTabs({ active }: { active: typeof codSections[number]["key"] }) {
   const pathname = usePathname();
+  const canViewPending = useCodPendingAccess();
 
   return (
     <section className="tabs" aria-label="COD sections">
-      {codSections.filter((section) => section.visible).map((section) => {
+      {codSections.filter((section) => section.visible && (section.key !== "pending" || canViewPending)).map((section) => {
         const isActive =
           active === section.key ||
           pathname === section.href ||
