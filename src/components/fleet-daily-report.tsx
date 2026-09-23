@@ -7,7 +7,7 @@ import './fleet-daily-report.css';
 
 const numeric = (value: number | null, digits = 1) => value === null ? '—' : value.toLocaleString('en-IN', { maximumFractionDigits: digits });
 const dateLabel = (date: string | null) => date ? `${date.slice(8, 10)}/${date.slice(5, 7)}/${date.slice(0, 4)}` : 'Not available';
-const statusLabel = { ready: 'Distance + fuel', gps_missing: 'Distance unavailable', fuel_missing: 'No fuel recorded', not_applicable: 'Km/L not applicable' };
+const statusLabel = { gps_review: 'GPS needs review', ready: 'Distance + fuel', gps_missing: 'Distance unavailable', fuel_missing: 'No fuel recorded', not_applicable: 'Km/L not applicable' };
 const columns: Array<{ key: SortColumn; label: string; unit?: string }> = [
   { key: 'date', label: 'Date', unit: 'IST' }, { key: 'vehicle_no', label: 'Vehicle' }, { key: 'station_code', label: 'Station', unit: 'Current allocation' },
   { key: 'km', label: 'Distance', unit: 'km' }, { key: 'litres', label: 'Fuel purchased', unit: 'litres' }, { key: 'fuelAmount', label: 'Fuel spend', unit: '₹' },
@@ -90,15 +90,15 @@ export function DailyFleetReportView() {
     const pairs = rows.map(row => ({ vehicle: row.vehicle_no, date: row.date }));
     const controller = new AbortController(); syncController.current = controller;
     setSyncing(true); setSyncMessage('Connecting to GPS…');
-    let done = 0, updated = 0, missing = 0, failed = 0;
+    let done = 0, updated = 0, missing = 0, failed = 0, review = 0;
     try {
       for (let start = 0; start < pairs.length; start += 12) {
         if (controller.signal.aborted) break;
         const response = await fetch('/api/fleet/daily-report/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal, body: JSON.stringify({ pairs: pairs.slice(start, start + 12) }) });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'GPS refresh failed.');
-        for (const item of data.results) { done++; if (item.status === 'updated') updated++; else if (item.status === 'no_data') missing++; else failed++; }
-        setSyncMessage(`Checked ${done} of ${pairs.length} vehicle-days · ${updated} updated · ${missing} without GPS data · ${failed} failed`);
+        for (const item of data.results) { done++; if (item.status === 'updated') updated++; else if (item.status === 'no_data') missing++; else if (item.status === 'needs_review') review++; else failed++; }
+        setSyncMessage(`Checked ${done} of ${pairs.length} vehicle-days · ${updated} updated · ${missing} without GPS data · ${review} need GPS review · ${failed} failed`);
       }
     } catch (error) {
       setSyncMessage(controller.signal.aborted ? `Refresh stopped after ${done} vehicle-days. Saved results are retained.` : `${error instanceof Error ? error.message : 'GPS refresh failed.'} ${updated} vehicle-days were saved.`);
@@ -136,7 +136,7 @@ export function DailyFleetReportView() {
         <article><Gauge size={18} /><span>Estimated mileage</span><strong>{numeric(totals.matchedLitres ? totals.matchedKm / totals.matchedLitres : null, 2)} <small>km/L</small></strong><p>Days with both distance and fuel</p></article>
         <article className={totals.missing ? 'daily-metric-warning' : ''}><CircleAlert size={18} /><span>Distance unavailable</span><strong>{totals.missing}</strong><p>Vehicle-days needing GPS data</p></article>
       </section>
-      <div className="daily-data-note"><strong>How mileage is calculated</strong><p>Estimated km/L = that day’s recorded kilometres ÷ fuel purchased that day. Purchases are not measured fuel consumption; refuelling timing can make this ratio vary. “—” means the data is unavailable. Km/L applies to petrol and diesel; CNG/EV consumption is not available in this feed. Today is provisional. Stations reflect current vehicle allocation.</p></div>
+      <div className="daily-data-note"><strong>How mileage is calculated</strong><p>Estimated km/L = that day’s recorded kilometres ÷ fuel purchased that day. Purchases are not measured fuel consumption; refuelling timing can make this ratio vary. “—” means the data is unavailable or GPS quality needs review. Suspect GPS distances are excluded from totals and mileage. Km/L applies to petrol and diesel; CNG/EV consumption is not available in this feed. Today is provisional. Stations reflect current vehicle allocation.</p></div>
       <div className="daily-results-heading"><div><h3>Daily vehicle register</h3><p>{dateLabel(range.from)}–{dateLabel(range.to)} · {new Set(rows.map(r => r.vehicle_no)).size} vehicles · {rows.length} vehicle-days</p></div><div className="daily-refresh-actions"><button type="button" className="fleet-btn ghost" disabled={loading || syncing} onClick={() => setVersion(v => v + 1)}>Reload report</button><button type="button" className="fleet-btn primary" onClick={refreshGps} disabled={refreshDisabled}><RefreshCw size={15} /> Refresh GPS</button>{syncing ? <button type="button" className="fleet-btn ghost" onClick={() => syncController.current?.abort()}>Stop</button> : null}</div></div>
       <p className="daily-freshness">Latest saved distance: {dateLabel(report.latestKmDate)} · Latest fuel date: {dateLabel(report.latestFuelDate)}. GPS refresh covers the filtered vehicles for up to 7 days at a time, within the last 31 days.</p>
       {syncMessage ? <div className="daily-sync-message" role="status" aria-live="polite">{syncMessage}</div> : null}
@@ -153,6 +153,6 @@ function DailyRow({ row }: { row: DailyFleetRow }) {
     <td><strong>{row.vehicle_no}</strong><small>{row.model} · {row.fuel_type}</small></td><td>{row.station_code}</td>
     <td className="daily-number daily-distance">{numeric(row.km)}</td><td className="daily-number">{numeric(row.litres, 2)}</td><td className="daily-number">{numeric(row.fuelAmount, 2)}</td><td className="daily-number">{numeric(row.mileage, 2)}</td><td className="daily-number">{numeric(row.costPerKm, 2)}</td>
     <td><span className={`daily-status ${row.dataStatus}`}>{statusLabel[row.dataStatus]}</span></td>
-    <td><details><summary>View details</summary><dl><dt>Distance source</dt><dd>{row.distanceSource ?? 'Not recorded'}</dd><dt>GPS points</dt><dd>{row.pointCount ?? '—'}</dd><dt>Last GPS refresh (IST)</dt><dd>{row.refreshedAt ? new Date(row.refreshedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'Not refreshed'}</dd><dt>Fuel transactions</dt><dd>{row.fuelTransactions}</dd><dt>Fuel providers</dt><dd>{row.fuelSources.join(', ') || 'Not recorded'}</dd></dl></details></td>
+    <td><details><summary>View details</summary><dl><dt>Distance source</dt><dd>{row.distanceSource ?? 'Not recorded'}</dd>{row.dataStatus === 'gps_review' ? <><dt>GPS quality</dt><dd>Implausible jumps detected. Verify the trip in Tracking. Raw distance: {numeric(row.rawKm)} km; excluded from totals.</dd></> : null}<dt>GPS points</dt><dd>{row.pointCount ?? '—'}</dd><dt>Last GPS refresh (IST)</dt><dd>{row.refreshedAt ? new Date(row.refreshedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'Not refreshed'}</dd><dt>Fuel transactions</dt><dd>{row.fuelTransactions}</dd><dt>Fuel providers</dt><dd>{row.fuelSources.join(', ') || 'Not recorded'}</dd></dl></details></td>
   </tr>;
 }

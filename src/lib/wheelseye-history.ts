@@ -14,6 +14,8 @@ export type WheelseyeMovementSummary = {
   movingMinutes: number;
   pointCount: number;
   lateNight: boolean;
+  distanceReliable: boolean;
+  rejectedSegments: number;
 };
 
 export async function loadWheelseyeMovement(accessToken: string, vehicle: string, date: string) {
@@ -46,11 +48,24 @@ export async function loadWheelseyeMovement(accessToken: string, vehicle: string
 
   const points = normalized.map((point) => ({ lat: point.lat, lng: point.lng }));
   const speeds = normalized.map((point) => point.speed);
+  let rejectedSegments = 0, suspiciousKm = 0;
+  for (let index = 1; index < normalized.length; index++) {
+    const a = normalized[index - 1], b = normalized[index];
+    const distance = haversineKm(a, b), seconds = b.epoch - a.epoch;
+    // Generous road-speed ceiling: flag corrupt history instead of presenting an invented correction.
+    if (distance > 0 && (seconds <= 0 || distance / seconds * 3600 > 160)) {
+      rejectedSegments++; suspiciousKm += distance;
+    }
+  }
+  const km = routeKm(points);
+  const distanceReliable = suspiciousKm <= Math.max(1, km * 0.05);
 
   return {
     points,
     summary: {
-      km: routeKm(points),
+      km,
+      distanceReliable,
+      rejectedSegments,
       maxSpeed: speeds.length ? Math.max(...speeds) : 0,
       movingMinutes: movingMinutes(normalized),
       pointCount: points.length,

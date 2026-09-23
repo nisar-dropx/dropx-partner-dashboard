@@ -32,11 +32,12 @@ export async function POST(request: Request) {
           // Read/update by company and primary key: the legacy unique key does not include company_id.
           const existing = await supabaseAdmin!.from('fleet_daily_km').select('id,calculated_at').eq('company_id', scope.companyId).eq('vehicle_no', pair.vehicle).eq('movement_date', pair.date).eq('source', 'wheelseye').maybeSingle();
           if (existing.error) return { ...pair, status: 'save_failed' };
-          const values = { km: movement.summary.km, point_count: movement.summary.pointCount, calculated_at: new Date().toISOString() };
+          const needsReview = movement.summary.distanceReliable === false;
+          const values = { raw_km: movement.summary.km, review_status: needsReview ? 'needs_review' : 'auto_approved', rejected_point_count: movement.summary.rejectedSegments ?? 0, algorithm_version: 'gps-quality-check-v1', km: movement.summary.km, point_count: movement.summary.pointCount, calculated_at: new Date().toISOString() };
           const saved = existing.data
             ? await supabaseAdmin!.from('fleet_daily_km').update(values).eq('company_id', scope.companyId).eq('id', existing.data.id).eq('calculated_at', existing.data.calculated_at).select('id')
             : await supabaseAdmin!.from('fleet_daily_km').insert({ ...values, company_id: scope.companyId, vehicle_no: pair.vehicle, movement_date: pair.date, source: 'wheelseye' }).select('id');
-          return { ...pair, status: saved.error || !saved.data?.length ? 'save_failed' : 'updated' };
+          return { ...pair, status: saved.error || !saved.data?.length ? 'save_failed' : needsReview ? 'needs_review' : 'updated' };
         } catch { return { ...pair, status: 'gps_failed' }; }
       }));
       results.push(...batch);
