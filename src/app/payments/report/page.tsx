@@ -13,6 +13,7 @@ type PaymentRequestRow = {
   location_code: string;
   payment_head_id: string;
   amount: number | null;
+  amount_requested: number | null;
   payment_mode: string | null;
   bank_account_no: string | null;
   ifsc: string | null;
@@ -26,6 +27,8 @@ type PaymentRequestRow = {
   current_approver_user_id: string | null;
   current_approver_role_id: string | null;
   current_approver_role_ids: string[] | null;
+  current_step_order: number | null;
+  total_steps: number | null;
   utr_cin: string | null;
   bank_status: string | null;
   bank_processing_remarks: string | null;
@@ -67,6 +70,12 @@ type ProfileRow = {
   email: string | null;
 };
 
+type RoleRow = {
+  id: string;
+  name: string | null;
+  code: string | null;
+};
+
 function firstRelation<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
@@ -89,6 +98,7 @@ async function loadPaymentReport(companyId: string, authorization: Authorization
       heads: [] as PaymentHeadRow[],
       logsByRequestId: new Map<string, PaymentReportLog[]>(),
       profilesById: new Map<string, ProfileRow>(),
+      rolesById: new Map<string, RoleRow>(),
       requests: [] as PaymentRequestRow[],
       error: "Supabase service role key is not configured."
     };
@@ -98,7 +108,7 @@ async function loadPaymentReport(companyId: string, authorization: Authorization
   let headsResult: any;
   let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, category, location_id, location_code, payment_head_id, amount, payment_mode, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, utr_cin, bank_status, bank_processing_remarks, processing_started_at, processed_at, requested_by, created_at, updated_at")
+      .select("id, request_no, category, location_id, location_code, payment_head_id, amount, amount_requested, payment_mode, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, current_step_order, total_steps, utr_cin, bank_status, bank_processing_remarks, processing_started_at, processed_at, requested_by, created_at, updated_at")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
   if (!authorization.hasAllLocationAccess) {
@@ -115,7 +125,7 @@ async function loadPaymentReport(companyId: string, authorization: Authorization
   if (requestsResult.error?.message.toLowerCase().includes("processing_started_at")) {
     let fallbackQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, category, location_id, location_code, payment_head_id, amount, payment_mode, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, utr_cin, bank_status, bank_processing_remarks, processed_at, requested_by, created_at, updated_at")
+      .select("id, request_no, category, location_id, location_code, payment_head_id, amount, amount_requested, payment_mode, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, supporting_document_path, status, approval_status, current_approver_user_id, current_approver_role_id, current_approver_role_ids, current_step_order, total_steps, utr_cin, bank_status, bank_processing_remarks, processed_at, requested_by, created_at, updated_at")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
     if (!authorization.hasAllLocationAccess) {
@@ -130,6 +140,7 @@ async function loadPaymentReport(companyId: string, authorization: Authorization
       heads: [] as PaymentHeadRow[],
       logsByRequestId: new Map<string, PaymentReportLog[]>(),
       profilesById: new Map<string, ProfileRow>(),
+      rolesById: new Map<string, RoleRow>(),
       requests: [] as PaymentRequestRow[],
       error
     };
@@ -166,6 +177,7 @@ async function loadPaymentReport(companyId: string, authorization: Authorization
       heads: [] as PaymentHeadRow[],
       logsByRequestId: new Map<string, PaymentReportLog[]>(),
       profilesById: new Map<string, ProfileRow>(),
+      rolesById: new Map<string, RoleRow>(),
       requests: [] as PaymentRequestRow[],
       error: answersResult.error?.message || logsResult.error?.message || "Unable to load payment report details."
     };
@@ -174,9 +186,14 @@ async function loadPaymentReport(companyId: string, authorization: Authorization
   const rawLogs = (logsResult.data ?? []) as ApprovalLogRow[];
   const userIds = Array.from(new Set([
     ...rawLogs.map((log) => log.approver_user_id).filter(Boolean),
-    ...requests.map((request) => request.requested_by).filter(Boolean)
+    ...requests.map((request) => request.requested_by).filter(Boolean),
+    ...requests.map((request) => request.current_approver_user_id).filter(Boolean)
   ])) as string[];
-  const roleIds = Array.from(new Set(rawLogs.map((log) => log.approver_role_id).filter(Boolean))) as string[];
+  const roleIds = Array.from(new Set([
+    ...rawLogs.map((log) => log.approver_role_id).filter(Boolean),
+    ...requests.map((request) => request.current_approver_role_id).filter(Boolean),
+    ...requests.flatMap((request) => request.current_approver_role_ids ?? [])
+  ])) as string[];
   const [profilesResult, rolesResult] = await Promise.all([
     userIds.length
       ? supabaseAdmin.from("profiles").select("id, full_name, email").eq("company_id", companyId).in("id", userIds)
@@ -192,13 +209,14 @@ async function loadPaymentReport(companyId: string, authorization: Authorization
       heads: [] as PaymentHeadRow[],
       logsByRequestId: new Map<string, PaymentReportLog[]>(),
       profilesById: new Map<string, ProfileRow>(),
+      rolesById: new Map<string, RoleRow>(),
       requests: [] as PaymentRequestRow[],
       error: profilesResult.error?.message || rolesResult.error?.message || "Unable to load payment report history."
     };
   }
 
   const profilesById = new Map(((profilesResult.data ?? []) as ProfileRow[]).map((profile) => [profile.id, profile]));
-  const rolesById = new Map((rolesResult.data ?? []).map((role) => [role.id, role]));
+  const rolesById = new Map(((rolesResult.data ?? []) as RoleRow[]).map((role) => [role.id, role]));
   const answersByRequestId = new Map<string, PaymentReportAnswer[]>();
   const logsByRequestId = new Map<string, PaymentReportLog[]>();
 
@@ -239,6 +257,7 @@ async function loadPaymentReport(companyId: string, authorization: Authorization
     heads: (headsResult.data ?? []) as PaymentHeadRow[],
     logsByRequestId,
     profilesById,
+    rolesById,
     requests,
     error: null
   };
@@ -250,9 +269,9 @@ export default async function PaymentReportPage() {
   const authorization = await requirePagePermission("payment_reports", "access");
   const companyId = requireCompanyId(authorization);
   const pagePermission = authorization.permissions.payment_reports;
-  const { answersByRequestId, heads, logsByRequestId, profilesById, requests, error } = await loadPaymentReport(companyId, authorization);
+  const { answersByRequestId, heads, logsByRequestId, profilesById, rolesById, requests, error } = await loadPaymentReport(companyId, authorization);
   const headById = new Map(heads.map((head) => [head.id, head]));
-  const totalAmount = requests.reduce((sum, request) => sum + Number(request.amount ?? 0), 0);
+  const totalAmount = requests.reduce((sum, request) => sum + Number(request.amount ?? request.amount_requested ?? 0), 0);
 
   return (
     <AppShell active="Payment Report" pageCode="payment_reports">
@@ -311,6 +330,7 @@ export default async function PaymentReportPage() {
                   payment_head_name: head?.name ?? "-",
                   payment_head_external_id: head?.external_id ?? "-",
                   amount: request.amount,
+                  amount_requested: request.amount_requested,
                   payment_mode: request.payment_mode,
                   account_holder_name: request.account_holder_name,
                   bank_account_no: request.bank_account_no,
@@ -324,6 +344,16 @@ export default async function PaymentReportPage() {
                   current_approver_user_id: request.current_approver_user_id,
                   current_approver_role_id: request.current_approver_role_id,
                   current_approver_role_ids: request.current_approver_role_ids,
+                  current_approver_name: request.current_approver_user_id ? profilesById.get(request.current_approver_user_id)?.full_name ?? null : null,
+                  current_approver_email: request.current_approver_user_id ? profilesById.get(request.current_approver_user_id)?.email ?? null : null,
+                  current_approver_role_names: Array.from(new Set([
+                    request.current_approver_role_id,
+                    ...(request.current_approver_role_ids ?? [])
+                  ].filter((roleId): roleId is string => Boolean(roleId))
+                    .map((roleId) => rolesById.get(roleId)?.name ?? rolesById.get(roleId)?.code)
+                    .filter((name): name is string => Boolean(name)))),
+                  current_step_order: request.current_step_order,
+                  total_steps: request.total_steps,
                   utr_cin: request.utr_cin,
                   bank_status: request.bank_status,
                   bank_processing_remarks: request.bank_processing_remarks,

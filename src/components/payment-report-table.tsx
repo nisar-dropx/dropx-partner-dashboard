@@ -35,6 +35,7 @@ export type PaymentReportRequest = {
   payment_head_name: string;
   payment_head_external_id: string;
   amount: number | null;
+  amount_requested: number | null;
   payment_mode: string | null;
   account_holder_name: string | null;
   bank_account_no: string | null;
@@ -48,6 +49,11 @@ export type PaymentReportRequest = {
   current_approver_user_id: string | null;
   current_approver_role_id: string | null;
   current_approver_role_ids: string[] | null;
+  current_approver_name: string | null;
+  current_approver_email: string | null;
+  current_approver_role_names: string[];
+  current_step_order: number | null;
+  total_steps: number | null;
   utr_cin: string | null;
   bank_status: string | null;
   bank_processing_remarks: string | null;
@@ -67,6 +73,23 @@ function formatAmount(amount: number | null) {
 
 function formatDate(value: string) {
   return formatDashboardDate(value);
+}
+
+function reportAmount(request: PaymentReportRequest) {
+  return request.amount ?? request.amount_requested;
+}
+
+function currentOwnerLabel(request: PaymentReportRequest) {
+  return request.current_approver_name ?? request.current_approver_email ?? "-";
+}
+
+function currentRoleLabel(request: PaymentReportRequest) {
+  return request.current_approver_role_names.length ? request.current_approver_role_names.join(", ") : "-";
+}
+
+function approvalStepLabel(request: PaymentReportRequest) {
+  if (!request.current_step_order) return "-";
+  return request.total_steps ? `${request.current_step_order} of ${request.total_steps}` : String(request.current_step_order);
 }
 
 function formatDateTime(value: string) {
@@ -275,7 +298,8 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
       const createdDate = request.created_at.slice(0, 10);
       const searchable = [request.request_no, request.location_code, request.payment_head_name, request.payment_head_external_id,
         request.account_holder_name, request.bank_account_no, request.ifsc, request.contact_no, request.email, request.utr_cin,
-        request.requested_by_name, request.requested_by_email].filter(Boolean).join(" ").toLowerCase();
+        request.requested_by_name, request.requested_by_email, request.current_approver_name, request.current_approver_email,
+        ...request.current_approver_role_names].filter(Boolean).join(" ").toLowerCase();
       return (!needle || searchable.includes(needle)) &&
         (!locationsSelected.length || locationsSelected.includes(request.location_code)) &&
         (!headsSelected.length || headsSelected.includes(request.payment_head_name)) &&
@@ -318,6 +342,7 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
           <thead>
             <tr>
                 <th>Request</th>
+                <th>Details</th>
                 <th>Request Type</th>
                 <th>Location</th>
               <th>Payment Head</th>
@@ -326,35 +351,38 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
               <th>Account Holder</th>
               <th>Bank Account</th>
               <th>IFSC</th>
+              <th>Current Owner</th>
+              <th>Approval Step</th>
               <th>Status</th>
               <th>Document</th>
               <th>Created</th>
-              <th>Action</th>
             </tr>
           </thead>
           <tbody>
             {visibleRequests.length ? visibleRequests.map((request) => (
               <tr key={request.id}>
                 <td><strong>{request.request_no}</strong></td>
+                <td>
+                  <button className="button secondary compact" onClick={() => setSelectedRequest(request)} type="button">
+                    View details
+                  </button>
+                </td>
                 <td>{requestTypeLabel(request)}</td>
                 <td>{request.location_code}</td>
                 <td>{request.payment_head_name}</td>
                 <td>{request.payment_head_external_id}</td>
-                <td>{formatAmount(request.amount)}</td>
+                <td>{formatAmount(reportAmount(request))}</td>
                 <td>{request.account_holder_name ?? "-"}</td>
                 <td>{request.bank_account_no ?? "-"}</td>
                 <td>{request.ifsc ?? "-"}</td>
+                <td>{currentOwnerLabel(request)}<br /><span className="subtle">{currentRoleLabel(request)}</span></td>
+                <td>{approvalStepLabel(request)}</td>
                 <td><StatusPill status={reportStatusLabel(request)} /></td>
                 <td>{request.supporting_document_path ? "Uploaded" : "-"}</td>
                 <td>{formatDate(request.created_at)}</td>
-                <td>
-                  <button className="button secondary compact" onClick={() => setSelectedRequest(request)} type="button">
-                    View
-                  </button>
-                </td>
               </tr>
             )) : (
-              <tr><td className="empty-cell" colSpan={13}>No payment requests found.</td></tr>
+              <tr><td className="empty-cell" colSpan={15}>No payment requests found.</td></tr>
             )}
           </tbody>
         </table>
@@ -376,9 +404,12 @@ export function PaymentReportTable({ requests }: { requests: PaymentReportReques
                 <label>Payment Head<input className="field" readOnly value={selectedRequest.payment_head_name} /></label>
                 <label>External ID<input className="field" readOnly value={selectedRequest.payment_head_external_id} /></label>
                 <label>Status<input className="field" readOnly value={reportStatusLabel(selectedRequest)} /></label>
-                <label>Amount<input className="field" readOnly value={formatAmount(selectedRequest.amount)} /></label>
+                <label>{selectedRequest.amount == null && selectedRequest.amount_requested != null ? "Estimated Amount" : "Amount"}<input className="field" readOnly value={formatAmount(reportAmount(selectedRequest))} /></label>
                 <label>Location<input className="field" readOnly value={selectedRequest.location_code} /></label>
                 <label>Created<input className="field" readOnly value={formatDate(selectedRequest.created_at)} /></label>
+                <label>Current Approver<input className="field" readOnly value={currentOwnerLabel(selectedRequest)} /></label>
+                <label>Responsible Role<input className="field" readOnly value={currentRoleLabel(selectedRequest)} /></label>
+                <label>Approval Step<input className="field" readOnly value={approvalStepLabel(selectedRequest)} /></label>
                 <label>UTR/CIN<input className="field" readOnly value={selectedRequest.utr_cin ?? "-"} /></label>
                 <label>Transfer Date<input className="field" readOnly value={selectedRequest.processed_at ? formatDate(selectedRequest.processed_at) : "-"} /></label>
                 <label>Bank Status<input className="field" readOnly value={selectedRequest.bank_status ?? "-"} /></label>
