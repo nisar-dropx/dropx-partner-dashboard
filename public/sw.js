@@ -1,9 +1,9 @@
-const CACHE_NAME = "dropx-opspulse-static-v1";
+const CACHE_NAME = "dropx-opspulse-static-v2";
 const PRE_CACHE = [
   "/manifest.webmanifest",
-  "/opspulse/icon-192.png",
-  "/opspulse/icon-512.png",
-  "/opspulse/icon-maskable-512.png"
+  "/opspulse/icon-192.png?v=2",
+  "/opspulse/icon-512.png?v=2",
+  "/opspulse/icon-maskable-512.png?v=2"
 ];
 
 self.addEventListener("install", (event) => {

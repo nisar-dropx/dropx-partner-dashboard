@@ -1,5 +1,6 @@
 "use client";
 
+import { OpsPulseBrand } from "@/components/ops-pulse-brand";
 import { useEffect, useState } from "react";
 import { Download, LockKeyhole, MonitorSmartphone, ShieldCheck } from "lucide-react";
 import { signInWithGoogle } from "@/app/login/actions";
@@ -39,10 +40,7 @@ export function OpsLoginPanel({ initialMessage, nextPath = "/" }: OpsLoginPanelP
         <div className="ops-login-brand">
           <img src="/dropx-logo.png" alt="DropX" />
           <span aria-hidden="true" />
-          <div>
-            <strong>OpsPulse</strong>
-            <small>Operations intelligence</small>
-          </div>
+          <OpsPulseBrand />
         </div>
         <div className="ops-login-story-copy">
           <span className="ops-login-kicker">ONE OPERATING VIEW</span>

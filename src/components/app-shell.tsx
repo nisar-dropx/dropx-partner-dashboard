@@ -1,3 +1,4 @@
+import { OpsPulseBrand } from "@/components/ops-pulse-brand";
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { signOut } from "@/app/login/actions";
@@ -139,17 +140,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
           <div className="brand">
             <img className="brand-logo" src="/dropx-logo.png" alt="DropX" />
             {isOpsHost ? (
-              <div className="ops-brand-lockup">
-                <span className="ops-brand-mark" aria-hidden="true">
-                  <svg viewBox="0 0 32 32" role="img">
-                    <path d="M4 17h5l2.7-7 4.2 14 3.4-10 2.2 3H28" />
-                  </svg>
-                </span>
-                <span className="ops-brand-copy">
-                  <strong>Ops<span>Pulse</span></strong>
-                  <small>Ops intelligence</small>
-                </span>
-              </div>
+              <OpsPulseBrand />
             ) : isPeopleHost ? (
               <div className="people-brand-lockup">
                 <strong>People</strong>

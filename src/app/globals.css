@@ -653,24 +653,11 @@ a {
 }
 
 .ops-brand-mark {
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
-  display: grid;
-  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  display: block;
   border-radius: 8px;
-  background: linear-gradient(145deg, #ff7a2f 0%, #e9481b 100%);
-  box-shadow: 0 5px 12px rgba(233, 72, 27, 0.22);
-}
-
-.ops-brand-mark svg {
-  width: 19px;
-  height: 19px;
-  fill: none;
-  stroke: #fff;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .ops-brand-copy {
@@ -18825,13 +18812,17 @@ td strong,
 }
 
 .ops-login-brand > span { width: 1px; height: 32px; background: rgba(255, 255, 255, .28); }
-.ops-login-brand div { display: grid; gap: 2px; }
+.ops-login-brand .ops-brand-lockup { padding: 0; border: 0; gap: 10px; }
+.ops-login-brand .ops-brand-mark { width: 38px; height: 38px; flex-basis: 38px; }
+.ops-login-brand .ops-brand-copy { gap: 5px; }
+.ops-login-brand .ops-brand-copy strong { color: #fff; }
+.ops-login-brand .ops-brand-copy strong span { color: #ffad7b; }
 .ops-login-brand strong { font-size: 18px; letter-spacing: -.02em; }
 .ops-login-brand small { color: rgba(255, 255, 255, .62); font-size: 9px; font-weight: 750; letter-spacing: .14em; text-transform: uppercase; }
 
 .ops-login-story-copy { max-width: 660px; padding: 64px 0; }
 .ops-login-kicker { color: var(--ops-orange); font-size: 10px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; }
-.ops-login-story-copy h1 { max-width: 600px; margin: 16px 0 20px; font-size: clamp(42px, 5.2vw, 76px); line-height: .98; letter-spacing: -.055em; }
+.ops-login-story-copy h1 { color: #fff; max-width: 600px; margin: 16px 0 20px; font-size: clamp(42px, 5.2vw, 76px); line-height: .98; letter-spacing: -.055em; }
 .ops-login-story-copy p { max-width: 580px; margin: 0; color: rgba(255, 255, 255, .7); font-size: clamp(15px, 1.25vw, 19px); line-height: 1.6; }
 
 .ops-login-proof { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 650px; }
@@ -18903,20 +18894,23 @@ td strong,
 @keyframes ops-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 900px) {
-  .ops-login-page { grid-template-columns: 1fr; background: linear-gradient(180deg, #111a2f 0 210px, #f5f6f9 210px); }
-  .ops-login-story { min-height: 210px; padding: 24px 22px 54px; background: transparent; }
+  .ops-login-page { grid-template-columns: 1fr; align-content: start; background: #f5f6f9; }
+  .ops-login-story { min-height: 210px; padding: 24px 22px 54px; background: #111a2f; }
   .ops-login-story-copy { padding: 30px 0 0; }
   .ops-login-story-copy h1 { max-width: 520px; margin: 10px 0 0; font-size: clamp(31px, 7.5vw, 48px); }
   .ops-login-story-copy p,
   .ops-login-proof { display: none; }
-  .ops-login-access { min-height: auto; margin-top: -34px; padding: 0 18px 30px; }
+  .ops-login-access { position: relative; z-index: 1; min-height: auto; margin-top: -34px; padding: 0 18px 30px; }
   .ops-login-card { border-radius: 19px; }
 }
 
 @media (max-width: 520px) {
   .ops-login-page { background-position: 0 0; }
   .ops-login-story { min-height: 190px; padding: 18px 16px 46px; }
+  .ops-login-brand { gap: 10px; }
   .ops-login-brand > img { width: 92px; height: 36px; }
+  .ops-login-brand .ops-brand-mark { width: 32px; height: 32px; flex-basis: 32px; }
+  .ops-login-brand .ops-brand-copy small { font-size: 6px; letter-spacing: .09em; }
   .ops-login-brand strong { font-size: 16px; }
   .ops-login-story-copy { padding-top: 22px; }
   .ops-login-story-copy h1 { max-width: 360px; font-size: 31px; line-height: 1.02; }
