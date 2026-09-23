@@ -15,11 +15,11 @@
 export const dropxOneRelease = {
   appName: "DropX One",
   packageName: "com.dropxlogistics.one",
-  version: "4.4.0",
-  versionCode: 22,
-  apkUrl: "/downloads/DropX-One-Tracker-4.4.0.apk",
-  apkSha256: "9ade93952f689bd0ffd65dd2a9b5b9c6edfdc554374f821e3f732d7c8bd60b99",
-  releasedAt: "2026-09-23T15:00:00+05:30",
+  version: "4.4.2",
+  versionCode: 24,
+  apkUrl: "/downloads/DropX-One-Tracker-4.4.2.apk",
+  apkSha256: "9241bd84876cc61d3c5c8caafebca98298ee9938521ef9707721031a497f9804",
+  releasedAt: "2026-09-23T18:30:00+05:30",
   rolloutPolicy: "coexist" as const,
   legacyPlayStorePackage: "com.dropxlogistics.one"
 };

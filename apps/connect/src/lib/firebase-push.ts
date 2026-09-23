@@ -71,13 +71,21 @@ async function firebaseAccessToken() {
 }
 
 function pushData(notification: PushNotification) {
+  // dropxTitle/dropxBody rather than plain title/body: not on FCM's actual reserved-key list
+  // (from/message_type/google.*/gcm.*) per Firebase's own docs, but this rules out — cheaply
+  // and safely — any device/OEM-level heuristic that treats a data-only message carrying keys
+  // named exactly "title"/"body" as notification-equivalent and auto-displays it before
+  // DropxMessagingService.onMessageReceived() ever runs, which is otherwise unexplained: the
+  // server is confirmed sending a genuinely data-only payload (push_status "sent", no
+  // "notification" block), yet the device shows a system-auto-generated notification with a
+  // Google-style FCM-Notification:<id> tag and zero log output from our own service.
   const values: Record<string, string> = {
     notificationId: notification.id,
     route: notification.route ?? "",
     profileType: notification.profileType,
     accountId: notification.accountId,
-    title: notification.title,
-    body: notification.body
+    dropxTitle: notification.title,
+    dropxBody: notification.body
   };
   for (const [key, value] of Object.entries(notification.data ?? {})) {
     values[key] = typeof value === "string" ? value : JSON.stringify(value);

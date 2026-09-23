@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.os.Build;
+import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import com.dropxlogistics.one.MainActivity;
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * covers the backgrounded case that used to fall through to Android's default handling.
  */
 public class DropxMessagingService extends FirebaseMessagingService {
+  private static final String TAG = "DropxMessagingService";
   private static final String CHANNEL_ID = "dropx_one_notifications";
   private static final AtomicInteger nextNotificationId = new AtomicInteger(5000);
 
@@ -33,14 +35,16 @@ public class DropxMessagingService extends FirebaseMessagingService {
     super.onMessageReceived(remoteMessage);
 
     Map<String, String> data = remoteMessage.getData();
+    Log.i(TAG, "onMessageReceived data=" + data
+      + " hasNotificationBlock=" + (remoteMessage.getNotification() != null));
     String title;
     String body;
     if (remoteMessage.getNotification() != null) {
       title = remoteMessage.getNotification().getTitle();
       body = remoteMessage.getNotification().getBody();
     } else {
-      title = data.get("title");
-      body = data.get("body");
+      title = data.get("dropxTitle");
+      body = data.get("dropxBody");
     }
     if (title == null) title = "DropX One";
     if (body == null) body = "";
@@ -86,6 +90,9 @@ public class DropxMessagingService extends FirebaseMessagingService {
         PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
       );
       builder.addAction(0, "Mark as read", markReadPendingIntent);
+      Log.i(TAG, "Added mark-as-read action for notificationId=" + notificationId);
+    } else {
+      Log.w(TAG, "No notificationId in data payload; skipping mark-as-read action.");
     }
 
     NotificationManagerCompat.from(this).notify(shownNotificationId, builder.build());
