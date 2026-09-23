@@ -163,8 +163,18 @@ export function ConnectNativeBridge({ account }: { account: AppAccount | null })
 
     let cancelled = false;
     let pushListener: { remove: () => void } | undefined;
+    // Guards against the interval below firing sync() -> configureAttendance()/
+    // startBackgroundLocation() (each its own DropxOne-plugin permission request) while
+    // push.requestPermissions() still has its OS permission dialog open — Capacitor's
+    // permission machinery is tied to whichever PluginCall is currently "in flight" for a
+    // given native call, and two different plugins' requests overlapping this way crashed
+    // getPermissionStates() with a NullPointerException (the exact same class of race
+    // documented on the native side in DropxOnePlugin.configureAttendance(), just between
+    // PushNotificationsPlugin and DropxOnePlugin instead of within one plugin).
+    let permissionRequestInFlight = false;
 
     const sync = async () => {
+      if (permissionRequestInFlight) return;
       const state = await readAttendanceTrackingState(account);
       if (cancelled) return;
       await syncAttendanceContext(account, state);
@@ -175,13 +185,30 @@ export function ConnectNativeBridge({ account }: { account: AppAccount | null })
 
       const push = pushPlugin();
       if (!push) return;
-      const permission = await push.requestPermissions();
-      if (permission.receive !== "granted" || cancelled) return;
-      await push.register();
-      pushListener = await push.addListener("registration", async (event) => {
-        if (!event.value || cancelled) return;
-        await registerPushToken(account, event.value);
-      });
+      // configureAttendance()'s first-run consent dialog and startBackgroundLocation()'s own
+      // Android permission dialogs run detached from the PluginCall sync() just awaited (see
+      // DropxOnePlugin.configureAttendance()'s own comment on why) — so sync() resolving does
+      // NOT mean DropxOnePlugin is done asking the OS for permissions yet. Starting a SECOND,
+      // unrelated plugin's permission request (PushNotificationsPlugin.requestPermissions())
+      // while that's still in flight hit the same getPermissionStates() NullPointerException
+      // this file's DropxOne-only race was fixed for, just between two different plugins
+      // instead of within one. A short delay here is a pragmatic guard against that window
+      // rather than a structural fix (there's no cross-plugin "permissions are idle" signal
+      // Capacitor exposes to await on instead).
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+      if (cancelled) return;
+      permissionRequestInFlight = true;
+      try {
+        const permission = await push.requestPermissions();
+        if (permission.receive !== "granted" || cancelled) return;
+        await push.register();
+        pushListener = await push.addListener("registration", async (event) => {
+          if (!event.value || cancelled) return;
+          await registerPushToken(account, event.value);
+        });
+      } finally {
+        permissionRequestInFlight = false;
+      }
     };
 
     boot().catch(() => undefined);
