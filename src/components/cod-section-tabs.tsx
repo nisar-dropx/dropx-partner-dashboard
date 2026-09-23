@@ -4,13 +4,13 @@ import { usePathname } from "next/navigation";
 import { PendingLink } from "@/components/pending-link";
 
 const codSections = [
-  { href: "/cod/pending", key: "pending", label: "Daily COD Pending", visible: true },
   { href: "/cod/executive-reconciliation", key: "executive-reconciliation", label: "Executive Reconciliation", visible: true },
   { href: "/cod/submission", key: "submission", label: "COD Submission", visible: true },
   { href: "/cod/reports", key: "reports", label: "COD Reports", visible: true },
   { href: "/cod/cash-in-associate", key: "cash-in-associate", label: "Cash In Associate", visible: true },
   { href: "/cod/validation", key: "validation", label: "Validation", visible: false },
-  { href: "/cod/portal-checks", key: "portal-checks", label: "Portal Checks", visible: false }
+  { href: "/cod/portal-checks", key: "portal-checks", label: "Portal Checks", visible: false },
+  { href: "/cod/pending", key: "pending", label: "Daily COD Pending", visible: true }
 ] as const;
 
 export function CodSectionTabs({ active }: { active: typeof codSections[number]["key"] }) {
