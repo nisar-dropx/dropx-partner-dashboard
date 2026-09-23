@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <application
         android:allowBackup="true"
@@ -65,6 +66,28 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!-- Replaces @capacitor/push-notifications' own MessagingService (removed just below)
+             so a "Mark as read" action button can be added when the app is backgrounded —
+             Android's default FCM handling (what @capacitor/push-notifications' service left in
+             place would fall through to) renders a plain system notification straight from the
+             message with no way to inject an action into it. tools:node="remove" is required:
+             the plugin's AAR declares its own <service> for this same intent-filter, and without
+             explicitly overriding it the manifest merger keeps BOTH, which would have delivered
+             every push notification twice. -->
+        <service
+            android:name="com.capacitorjs.plugins.pushnotifications.MessagingService"
+            tools:node="remove" />
+        <service
+            android:name=".notifications.DropxMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <receiver
+            android:name=".notifications.MarkNotificationReadReceiver"
+            android:exported="false" />
     </application>
 
     <!-- Permissions -->

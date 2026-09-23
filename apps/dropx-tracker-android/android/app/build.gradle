@@ -30,8 +30,8 @@ android {
         // Highest versionCode ever uploaded to this listing was 9 (4.0.3, rejected 31 Aug 2026
         // for missing background-location disclosure — this app's consent dialog fixes that).
         // Must strictly exceed 9 even though that release was never approved.
-        versionCode 21
-        versionName "4.3.2"
+        versionCode 22
+        versionName "4.4.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -80,6 +80,13 @@ dependencies {
     // DropxOnePlugin's always-on-in-background location tracking.
     implementation 'com.google.android.gms:play-services-location:21.3.0'
     implementation 'androidx.work:work-runtime:2.9.1'
+
+    // DropxMessagingService (notifications/): @capacitor/push-notifications already bundles
+    // firebase-messaging transitively through its own AAR, but that doesn't expose the classes
+    // to our own app-module source — FirebaseMessagingService/RemoteMessage aren't resolvable
+    // without this being a direct dependency here too.
+    implementation platform('com.google.firebase:firebase-bom:33.5.1')
+    implementation 'com.google.firebase:firebase-messaging'
 }
 
 apply from: 'capacitor.build.gradle'

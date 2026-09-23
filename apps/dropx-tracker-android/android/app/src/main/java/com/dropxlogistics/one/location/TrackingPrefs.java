@@ -9,7 +9,7 @@ import android.content.SharedPreferences;
  * WebView/JS) knows who it's posting pings for, and BootReceiver knows whether to
  * restart tracking after a reboot.
  */
-final class TrackingPrefs {
+public final class TrackingPrefs {
   private static final String PREFS_NAME = "dropx_one_tracking";
   private static final String KEY_ACCOUNT_ID = "accountId";
   private static final String KEY_PROFILE_TYPE = "profileType";
@@ -64,15 +64,18 @@ final class TrackingPrefs {
     return prefs(context).getBoolean(KEY_ENABLED, false);
   }
 
-  static String accountId(Context context) {
+  // Public: also read by com.dropxlogistics.one.notifications.MarkNotificationReadReceiver,
+  // which needs the same logged-in-worker identity to call the notifications API from a
+  // background notification-action tap.
+  public static String accountId(Context context) {
     return prefs(context).getString(KEY_ACCOUNT_ID, "");
   }
 
-  static String profileType(Context context) {
+  public static String profileType(Context context) {
     return prefs(context).getString(KEY_PROFILE_TYPE, "");
   }
 
-  static String serverUrl(Context context) {
+  public static String serverUrl(Context context) {
     return prefs(context).getString(KEY_SERVER_URL, "");
   }
 

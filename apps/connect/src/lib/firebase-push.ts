@@ -75,7 +75,9 @@ function pushData(notification: PushNotification) {
     notificationId: notification.id,
     route: notification.route ?? "",
     profileType: notification.profileType,
-    accountId: notification.accountId
+    accountId: notification.accountId,
+    title: notification.title,
+    body: notification.body
   };
   for (const [key, value] of Object.entries(notification.data ?? {})) {
     values[key] = typeof value === "string" ? value : JSON.stringify(value);
@@ -127,23 +129,16 @@ export async function deliverNotificationPush(notification: PushNotification) {
           body: JSON.stringify({
             message: {
               token: row.push_token,
-              notification: { title: notification.title, body: notification.body },
+              // Data-only on purpose — no top-level "notification" block. A message that HAS
+              // one is intercepted and auto-displayed by the OS before it ever reaches
+              // DropxMessagingService.onMessageReceived() while the app is backgrounded/killed
+              // (the exact case this exists for), so the app never gets a chance to build a
+              // notification with a "Mark as read" action on it. android.priority "high" is
+              // still required for a data-only message to be delivered promptly rather than
+              // batched/delayed — dropping it here was the actual cause of pushes arriving
+              // late instead of instantly.
               data: pushData(notification),
-              android: {
-                priority: "high",
-                notification: {
-                  channel_id: "dropx_one_notifications",
-                  sound: "default",
-                  // Matches MainActivity.createPushNotificationChannel()'s channel and the
-                  // white-silhouette icon/brand color set as AndroidManifest.xml's
-                  // default_notification_icon/_color — set explicitly here too so the
-                  // notification still looks right even for a client that predates the channel
-                  // being created (falls back to the manifest defaults either way; this is
-                  // just not leaving it to chance).
-                  icon: "ic_notification",
-                  color: "#F5A623"
-                }
-              }
+              android: { priority: "high" }
             }
           }),
           cache: "no-store"
