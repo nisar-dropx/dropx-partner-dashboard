@@ -58,7 +58,7 @@ begin
     new.requested_for_name:=new.adhoc_da_name||' / '||new.adhoc_provider_employee_id;
   end if;
   if lower(new.status) in ('processed','paid') and new.adhoc_adjustment_id is null then
-    paid_amount:=coalesce(new.amount_approved,new.amount,new.amount_requested);
+    paid_amount:=coalesce(new.amount,new.amount_requested);
     if paid_amount is null or paid_amount<=0 or paid_amount::text in ('NaN','Infinity','-Infinity') then raise exception 'A positive paid amount is required'; end if;
     actor:=coalesce(new.updated_by,new.current_approver_user_id);
     if actor is null then raise exception 'A payment processor is required for the deduction audit'; end if;

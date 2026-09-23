@@ -7,7 +7,7 @@ const shipment={station_code:'ERSE',client:'Amazon',provider_employee_id:'A001',
 test('multiple payments count delivery once and deduct only paid amounts',()=>{
  const result=adhocDaReport([payment,{...payment,id:'p2',request_no:'R2',status:'pending',adhoc_adjustment_id:null}], [shipment,{...shipment,station_code:'OTHER',total_delivery:999}], [{id:'a1',amount:90,effective_date:'2026-09-10',status:'approved',payroll_run_id:null}]);
  assert.equal(result.summary.length,1); assert.equal(result.summary[0]['Total delivered (selected range)'],25);
- assert.equal(result.summary[0]['Paid amount'],90); assert.equal(result.summary[0]['Requested amount'],200);
+ assert.equal(result.summary[0]['Paid amount'],100); assert.equal(result.summary[0]['Requested amount'],200);
  assert.equal(result.summary[0]['Recovery awaiting payroll'],90); assert.equal(result.details[1]['Paid amount'],0);
 });
 test('historical unlinked requests are explicit, never falsely attributed',()=>{

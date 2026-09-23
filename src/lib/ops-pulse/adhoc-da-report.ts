@@ -25,7 +25,7 @@ export function adhocDaReport(payments: AdhocPayment[], shipments: AdhocShipment
     const station = row.station_code || row.location_code || "", tracked = Boolean(row.adhoc_workforce_id);
     const groupKey = key(station, row.adhoc_client || "", row.adhoc_provider_employee_id || `UNLINKED:${row.id}`);
     const group = groups.get(groupKey) ?? { station, client: row.adhoc_client || "", providerId: row.adhoc_provider_employee_id || "UNLINKED", name: row.adhoc_da_name || "Historical request — DA not captured", workforceId: row.adhoc_workforce_id || "", requests: 0, requested: 0, paid: 0, recovered: 0, pending: 0, tracked };
-    const paid = isAdhocPaid(row.status) ? n(row.amount_approved ?? row.amount ?? row.amount_requested) : 0;
+    const paid = isAdhocPaid(row.status) ? n(row.amount ?? row.amount_requested) : 0;
     const deduction = row.adhoc_adjustment_id ? adjustmentById.get(row.adhoc_adjustment_id) : undefined;
     group.requests++; group.requested += n(row.amount_requested ?? row.amount); group.paid += paid;
     group.recovered += deduction?.status === "posted" ? n(deduction.amount) : 0;

@@ -25,6 +25,7 @@ insert into cps_shipment_daily values('${shipment}','${company}','ERSE','2026-09
 insert into field_executive_provider_mappings(company_id,station_id,provider_id,provider_member_id,workforce_id,effective_from,status) values('${company}','${station}','${provider}','A001','${worker}','2026-09-01','active');
 `);
 await db.exec(readFileSync(new URL('../supabase/migrations/20260923143000_adhoc_da_payment_tracking.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20260923144000_adhoc_da_bank_amount_alignment.sql',import.meta.url),'utf8'));
 const insert=async(overrides={})=>{
  const row={company_id:company,location_id:station,payment_head_id:head,source_system:'OPS_ADHOC_DA',adhoc_shipment_id:shipment,adhoc_work_date:'2026-09-10',request_no:'R1',amount:100,amount_requested:100,amount_approved:90,updated_by:actor,...overrides};
  const keys=Object.keys(row); return (await db.query(`insert into payment_requests(${keys.join(',')}) values(${keys.map((_,i)=>'$'+(i+1)).join(',')}) returning *`,Object.values(row))).rows[0];
@@ -48,7 +49,7 @@ await db.query("update payment_requests set status='pending' where id=$1",[unpai
 await db.query("update payment_requests set status='processed' where id=$1",[unpaid.id]);
 assert.equal(await count(),1);
 const adjustment=(await db.query('select * from workforce_adjustments')).rows[0];
-assert.equal(Number(adjustment.amount),90); assert.equal(adjustment.adjustment_type,'deduction'); assert.equal(adjustment.status,'approved');
+assert.equal(Number(adjustment.amount),100,'Recovery must match bank export, not the legacy approved amount'); assert.equal(adjustment.adjustment_type,'deduction'); assert.equal(adjustment.status,'approved');
 await db.query("update payment_requests set status='processed' where id=$1",[unpaid.id]);
 assert.equal(await count(),1,'Retry must not double recover');
 await assert.rejects(()=>db.query('update payment_requests set amount=200 where id=$1',[unpaid.id]),/cannot be changed/);
