@@ -94,6 +94,16 @@ async function parseWorkerResponse(response: Response, text: string) {
   return payload;
 }
 
+// Callers (e.g. the driver-reconciliation route) set maxDuration = 120 and
+// this function is retried once on a transient failure (postWorker below),
+// so each individual attempt gets well under half that budget. Without this,
+// a hung Cloudflare Worker call (stuck Amazon portal session, no response
+// either way) blocked here indefinitely until Vercel's own maxDuration
+// killed the whole function — surfacing as a bare FUNCTION_INVOCATION_TIMEOUT
+// with no useful error message, confirmed live 2026-09-23 on Executive
+// Reconciliation Step 1.
+const WORKER_FETCH_TIMEOUT_MS = 50_000;
+
 async function postWorkerOnce<T>(
   path: string,
   body: { stationCode: string; date: string } & Record<string, unknown>
@@ -104,19 +114,36 @@ async function postWorkerOnce<T>(
   }
 
   const { stationCode, date, ...rest } = body;
-  const response = await fetch(`${baseUrl}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-admin-key": adminKey
-    },
-    body: JSON.stringify({
-      ...rest,
-      stationCode: String(stationCode).trim().toUpperCase(),
-      date
-    }),
-    cache: "no-store"
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-key": adminKey
+      },
+      body: JSON.stringify({
+        ...rest,
+        stationCode: String(stationCode).trim().toUpperCase(),
+        date
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(WORKER_FETCH_TIMEOUT_MS)
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      // Not retried (see isRetryableWorkerError): we already waited the full
+      // local budget once, so retrying would spend the rest of the route's
+      // maxDuration on a second identical wait with no better odds, instead
+      // of returning promptly with an error the UI can show and let the
+      // person retry manually once the portal/session recovers.
+      throw new CashReconWorkerError(
+        `Cash recon worker did not respond within ${WORKER_FETCH_TIMEOUT_MS / 1000}s. The Amazon portal session may be stuck — try again in a minute.`,
+        { code: "worker_local_timeout", status: 504 }
+      );
+    }
+    throw error;
+  }
 
   const text = await response.text();
   return (await parseWorkerResponse(response, text)) as T;
@@ -135,13 +162,25 @@ async function getWorkerOnce<T>(path: string, query?: Record<string, string>): P
     }
   }
 
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    headers: {
-      "x-admin-key": adminKey
-    },
-    cache: "no-store"
-  });
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        "x-admin-key": adminKey
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(WORKER_FETCH_TIMEOUT_MS)
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new CashReconWorkerError(
+        `Cash recon worker did not respond within ${WORKER_FETCH_TIMEOUT_MS / 1000}s. The Amazon portal session may be stuck — try again in a minute.`,
+        { code: "worker_local_timeout", status: 504 }
+      );
+    }
+    throw error;
+  }
 
   const text = await response.text();
   return (await parseWorkerResponse(response, text)) as T;
@@ -168,7 +207,8 @@ function isGatewayTimeoutError(message: string, status?: number) {
   return normalized.includes("504") || normalized.includes("gateway timeout") || normalized.includes("gateway time-out");
 }
 
-function isRetryableWorkerError(message: string, status?: number) {
+function isRetryableWorkerError(message: string, status?: number, code?: string | null) {
+  if (code === "worker_local_timeout") return false;
   return isTransientPortalSessionError(message) || isTransientWorkerLimitError(message) || isGatewayTimeoutError(message, status);
 }
 
@@ -194,12 +234,15 @@ async function postWorker<T>(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const status = error instanceof CashReconWorkerError ? error.status : undefined;
+    const code = error instanceof CashReconWorkerError ? error.code : undefined;
     // First hit after idle often races Amazon portal login; one retry usually succeeds.
-    // A 504/502/503 (seen as "Unable to load drivers (504)" on Executive
-    // Reconciliation Step 1) is the same shape of transient failure — the
-    // worker or an intermediate gateway just didn't finish in time — so it
-    // gets one retry too instead of failing the whole step immediately.
-    if (!isRetryableWorkerError(message, status)) throw error;
+    // A fast 504/502/503 FROM THE WORKER (seen as "Unable to load drivers
+    // (504)" on Executive Reconciliation Step 1) is the same shape of
+    // transient failure — the worker or an intermediate gateway just didn't
+    // finish in time — so it gets one retry too instead of failing the whole
+    // step immediately. A worker_local_timeout (WE gave up waiting) is
+    // different and excluded from this — see isRetryableWorkerError.
+    if (!isRetryableWorkerError(message, status, code)) throw error;
     await new Promise((resolve) => setTimeout(resolve, isTransientWorkerLimitError(message) ? 2500 : 1500));
     return postWorkerOnce<T>(path, body);
   }
@@ -211,7 +254,8 @@ async function getWorker<T>(path: string, query?: Record<string, string>): Promi
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const status = error instanceof CashReconWorkerError ? error.status : undefined;
-    if (!isRetryableWorkerError(message, status)) throw error;
+    const code = error instanceof CashReconWorkerError ? error.code : undefined;
+    if (!isRetryableWorkerError(message, status, code)) throw error;
     await new Promise((resolve) => setTimeout(resolve, isTransientWorkerLimitError(message) ? 2500 : 1500));
     return getWorkerOnce<T>(path, query);
   }
