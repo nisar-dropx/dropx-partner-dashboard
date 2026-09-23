@@ -14,7 +14,7 @@ export async function GET(request:Request){
  try{
   if(!supabaseAdmin||!auth.companyId)throw new Error('Unavailable');
   const ageing=p.get('type')==='ageing';
-  const rows=filterCodPendingRows(await loadCodPendingReport(supabaseAdmin,auth.companyId,auth.locationScopeIds,auth.hasAllLocationAccess,date),{location,client:p.get('client')||'',status:ageing?'all':p.get('status')||'pending'});
+  const rows=filterCodPendingRows(await loadCodPendingReport(supabaseAdmin,auth.companyId,auth.locationScopeIds,auth.hasAllLocationAccess,date),{location,client:p.get('client')||'',status:ageing?'all':p.get('status')||'all'});
   let csv=codPendingCsv(rows);
   if(ageing){const detail=p.get('detail')||undefined;if(detail&&!rows.some(r=>r.station.station_code===detail))return Response.json({error:'Station access denied.'},{status:403});const source=await loadCodAgeing(supabaseAdmin,auth.companyId,date,rows.filter(r=>r.client==='amazon').map(r=>r.station.station_code));if(source.error)return Response.json({error:source.error},{status:503});csv=codAgeingCsv(source,detail);}
   return new Response(csv,{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="cod-${ageing?'ageing':'pending'}-${date}.csv"`,'Cache-Control':'private, no-store'}});

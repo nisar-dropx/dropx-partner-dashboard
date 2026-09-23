@@ -37,7 +37,9 @@ export function dueReportDate(control:DigestControl,now=new Date()) {
  const date=new Date(parts.year+"-"+parts.month+"-"+parts.day+"T12:00:00Z");
  date.setUTCDate(date.getUTCDate()+offset);
  const result=date.toISOString().slice(0,10);
- return result<String(control.config.first_report_date||"")?null:result;
+ if(result<String(control.config.first_report_date||""))return null;
+ const last=String(control.config.last_report_date||"");
+ return last&&result>last?null:result;
 }
 export function digestThreadKey(company:string,portal:string,event:string,email:string,month:string) {
  return createHash("sha256").update(JSON.stringify([company,portal,event,[email.toLowerCase()],[],month])).digest("hex");

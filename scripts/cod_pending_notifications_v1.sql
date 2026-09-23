@@ -6,8 +6,9 @@ select company_id,'ops','cod_pending_'||slot,'disabled',
  'OpsPulse | COD report | {{month}} {{year}}',
  jsonb_build_object('timezone','Asia/Kolkata','slot',slot,'schedule_time',send_time,
  'day_offset',day_offset,'thread_mode','monthly','email_domain',config->>'email_domain',
- 'delivery_ready',false,'delivery_window_minutes',30,'send_zero_cases',false,
- 'first_report_date',(now() at time zone 'Asia/Kolkata')::date::text)
+ 'delivery_ready',false,'delivery_window_minutes',30,'send_zero_cases',true,
+ 'first_report_date',(now() at time zone 'Asia/Kolkata')::date::text,
+ 'last_report_date',((now() at time zone 'Asia/Kolkata')::date + interval '1 month' - interval '1 day')::date::text)
 from public.portal_notification_controls
 cross join (values ('evening','20:30',0),('morning','09:00',-1)) slots(slot,send_time,day_offset)
 where portal='ops' and event_key='review_digest' and state='enabled'
