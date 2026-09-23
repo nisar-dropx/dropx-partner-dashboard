@@ -323,9 +323,22 @@ export async function resolveExpenseClaimRequestAssignees(account: ConnectAccoun
   if (!manager) {
     throw new Error("Configure an active reporting manager with a One/People login before requesting expense approval.");
   }
+
+  // The reporting manager is the required approver for an expense pre-request.
+  // Finance Head and Managing Partner are optional fallbacks. A stale optional
+  // configuration must not prevent a valid request (including a past-dated
+  // request) from reaching its confirmed reporting manager.
+  const optionalAssignee = async <T>(label: string, resolve: () => Promise<T | null>) => {
+    try {
+      return await resolve();
+    } catch (error) {
+      console.error(`Unable to resolve optional ${label} expense-request approver.`, error);
+      return null;
+    }
+  };
   const [financeHead, managingPartner] = await Promise.all([
-    resolveFinanceHeadApprover(account, identity),
-    resolveCompanyDesignationApprover(account.companyId, identity.today, "managing_partner", isManagingPartnerDesignation, identity.personId)
+    optionalAssignee("finance", () => resolveFinanceHeadApprover(account, identity)),
+    optionalAssignee("managing-partner", () => resolveCompanyDesignationApprover(account.companyId, identity.today, "managing_partner", isManagingPartnerDesignation, identity.personId))
   ]);
   const seenPersonIds = new Set([manager.approver_person_id]);
   const assignees = [manager];
