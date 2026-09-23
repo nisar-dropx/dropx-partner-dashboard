@@ -13,11 +13,18 @@
          android:windowLightStatusBar makes the time/signal/battery icons dark so they're
          actually visible against it. MainActivity.java's setAppearanceLightStatusBars(true)
          call does the same thing at runtime, but only after onCreate() runs; declaring it here
-         too means it's correct immediately, not just after that first frame. -->
+         too means it's correct immediately, not just after that first frame.
+         NOTE: statusBarColor itself is silently ignored on Android 15+ (targetSdk 35+, which
+         also enforces edge-to-edge unconditionally) — activity_main.xml's own
+         android:background is what actually paints the status-bar/nav-bar margin strip
+         MainActivity.applySystemBarInsetsToWebView() reserves on those OS versions. windowBackground
+         is still set here as the theme-level fallback so nothing shows through as the Material
+         default gray before that layout inflates or on pre-15 devices. -->
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <item name="android:windowBackground">@color/colorPrimaryDark</item>
         <item name="android:statusBarColor">@color/colorPrimaryDark</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>

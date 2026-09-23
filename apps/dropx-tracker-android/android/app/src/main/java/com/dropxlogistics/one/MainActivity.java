@@ -20,7 +20,10 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.core.app.NotificationManagerCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.dropxlogistics.one.location.DropxOnePlugin;
 import com.dropxlogistics.one.location.TrackingPrefs;
@@ -60,16 +63,55 @@ public class MainActivity extends BridgeActivity {
     // content behind the status bar is light makes it switch to dark icons instead.
     new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView()).setAppearanceLightStatusBars(true);
 
-    // Non-edge-to-edge (the pre-Capacitor-6 default): Android reserves the real status-bar
-    // AND navigation-bar space itself and draws the WebView strictly between them — the same
-    // layout the website already gets in a plain mobile browser. globals.css's --dx-safe-top
-    // and --dx-safe-bottom are both 0px for html.native-app for exactly this reason: with the
-    // OS already reserving the correct space on both edges (always accurate on every device,
-    // no measuring/injecting needed here), neither the header nor the bottom nav should add
-    // any padding of their own on top of that.
+    // Previously relied on Android reserving real status-bar/nav-bar space itself
+    // (setDecorFitsSystemWindows(true), matching globals.css's --dx-safe-top/--dx-safe-bottom
+    // both being 0px for html.native-app) — Android 15 (targetSdk 35+) enforces edge-to-edge
+    // unconditionally and silently ignores that call entirely, so the WebView started drawing
+    // under the status bar with no reserved space, colliding with it. setDecorFitsSystemWindows
+    // is kept here as a harmless no-op on 35+ (still correct on older OS versions this app's
+    // minSdk covers) — the actual fix is injecting the REAL inset sizes into the same CSS
+    // variables globals.css already reads, since the OS no longer reserves that space for us.
     WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+    applySystemBarInsetsToWebView();
 
     showStartupOverlay();
+  }
+
+  /**
+   * Reads the real status-bar/navigation-bar heights from the window insets and pushes them
+   * into --dx-safe-top/--dx-safe-bottom — the same CSS variables globals.css's
+   * html.native-app rules already read, previously hardcoded to 0px under the (now false on
+   * Android 15+) assumption that the OS reserves that space so the WebView never draws under
+   * either bar. Re-applied on every inset change (not just once at startup) since the values
+   * can change — rotation, a device with a notch/cutout, gesture-nav vs. 3-button-nav toggled
+   * in system settings, etc.
+   */
+  /**
+   * Android 15+ (targetSdk 35+) enforces edge-to-edge unconditionally and silently ignores
+   * setDecorFitsSystemWindows(true) — the WebView started drawing under the status/nav bars
+   * with no reserved space. globals.css's own env(safe-area-inset-top) / --dx-safe-top CSS
+   * plumbing was tried first and confirmed NOT to visually offset content despite injecting the
+   * correct values (a real WebView quirk: its Chromium compositor doesn't reliably honor a
+   * child element's padding/CSS insets driven from injected JS the way normal page CSS does).
+   * Margins on the WebView's own LayoutParams — which physically move/resize the Android View
+   * within its parent, independent of anything inside the page — is what Google's edge-to-edge
+   * migration guidance recommends and what actually worked here.
+   */
+  private void applySystemBarInsetsToWebView() {
+    View root = getWindow().getDecorView();
+    ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
+      Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+      if (getBridge() != null && getBridge().getWebView() != null) {
+        View webView = getBridge().getWebView();
+        ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) webView.getLayoutParams();
+        if (params != null) {
+          params.topMargin = systemBars.top;
+          params.bottomMargin = systemBars.bottom;
+          webView.setLayoutParams(params);
+        }
+      }
+      return insets;
+    });
   }
 
   /**
@@ -123,6 +165,23 @@ public class MainActivity extends BridgeActivity {
     refreshLocationAccessGate();
     com.dropxlogistics.one.location.TrackingInterruptionReporter.checkAndReport(this);
     maybeRequestNotificationListenerAccess();
+    // Re-applied on every resume, not just relying on the onCreate()-time listener firing once:
+    // ViewCompat.getRootWindowInsets() reads the most recently dispatched insets rather than
+    // forcing a fresh layout pass, so this is cheap, and covers a device where the inset
+    // listener's own callback timing raced the WebView's LayoutParams not existing yet.
+    if (getBridge() != null && getBridge().getWebView() != null) {
+      WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(getWindow().getDecorView());
+      if (insets != null) {
+        Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+        View webView = getBridge().getWebView();
+        ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) webView.getLayoutParams();
+        if (params != null) {
+          params.topMargin = systemBars.top;
+          params.bottomMargin = systemBars.bottom;
+          webView.setLayoutParams(params);
+        }
+      }
+    }
   }
 
   private void refreshLocationAccessGate() {

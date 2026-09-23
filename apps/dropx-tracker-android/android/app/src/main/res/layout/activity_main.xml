@@ -1,9 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- android:background is what actually shows in the status-bar/nav-bar margin area
+     MainActivity.applySystemBarInsetsToWebView() reserves above/below the WebView — Android
+     15+ (targetSdk 35+) enforces edge-to-edge and ignores android:statusBarColor entirely, so
+     that reserved strip is no longer painted by the theme's status-bar color at all; it's just
+     this root view's own background showing through, previously the default (near-white,
+     reported as looking different from the intended #f9f5fc). -->
 <androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/colorPrimaryDark"
     tools:context=".MainActivity">
 
     <WebView
