@@ -162,8 +162,14 @@ function isTransientWorkerLimitError(message: string) {
     || normalized.includes("worker exceeded");
 }
 
-function isRetryableWorkerError(message: string) {
-  return isTransientPortalSessionError(message) || isTransientWorkerLimitError(message);
+function isGatewayTimeoutError(message: string, status?: number) {
+  if (status === 504 || status === 502 || status === 503) return true;
+  const normalized = message.toLowerCase();
+  return normalized.includes("504") || normalized.includes("gateway timeout") || normalized.includes("gateway time-out");
+}
+
+function isRetryableWorkerError(message: string, status?: number) {
+  return isTransientPortalSessionError(message) || isTransientWorkerLimitError(message) || isGatewayTimeoutError(message, status);
 }
 
 /**
@@ -187,8 +193,13 @@ async function postWorker<T>(
     return await postWorkerOnce<T>(path, body);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const status = error instanceof CashReconWorkerError ? error.status : undefined;
     // First hit after idle often races Amazon portal login; one retry usually succeeds.
-    if (!isRetryableWorkerError(message)) throw error;
+    // A 504/502/503 (seen as "Unable to load drivers (504)" on Executive
+    // Reconciliation Step 1) is the same shape of transient failure — the
+    // worker or an intermediate gateway just didn't finish in time — so it
+    // gets one retry too instead of failing the whole step immediately.
+    if (!isRetryableWorkerError(message, status)) throw error;
     await new Promise((resolve) => setTimeout(resolve, isTransientWorkerLimitError(message) ? 2500 : 1500));
     return postWorkerOnce<T>(path, body);
   }
@@ -199,7 +210,8 @@ async function getWorker<T>(path: string, query?: Record<string, string>): Promi
     return await getWorkerOnce<T>(path, query);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (!isRetryableWorkerError(message)) throw error;
+    const status = error instanceof CashReconWorkerError ? error.status : undefined;
+    if (!isRetryableWorkerError(message, status)) throw error;
     await new Promise((resolve) => setTimeout(resolve, isTransientWorkerLimitError(message) ? 2500 : 1500));
     return getWorkerOnce<T>(path, query);
   }

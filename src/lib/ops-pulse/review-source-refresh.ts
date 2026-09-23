@@ -36,6 +36,26 @@ export async function refreshReviewSources(now = new Date()) {
   if (now.getTime() < Date.parse(`${day}T05:30:00+05:30`)) return { refreshed: 0, skipped: "Before 05:30 IST" };
   if (!supabaseAdmin) throw Error("EDD refresh queue database is unavailable.");
   const db = supabaseAdmin;
+  // The minute cron can outlive its own interval (the job deadline used to be
+  // 270s against a 60s tick). Without this guard, an overlapping tick would
+  // spawn its own two lanes and contend the SAME advisory lock a still-running
+  // tick already holds inside edd_claim_review_source, tripping statement
+  // timeouts. The lease is row-based (not pg_advisory_lock) because RPC calls
+  // are stateless over pooled connections and can't reliably hold a session lock.
+  const runToken = randomUUID();
+  // 200s: safely above the worst case of one in-flight 170s stock fetch plus
+  // margin, so a slow single iteration can't outlive its own lease and let a
+  // second cron tick in behind it.
+  const runLock = await db.rpc("edd_try_acquire_refresh_run", { p_token: runToken, p_lease_seconds: 200 });
+  if (runLock.error || runLock.data !== true) return { refreshed: 0, skipped: "Previous refresh still running" };
+  try {
+    return await runReviewSourceRefresh(db, day);
+  } finally {
+    await db.rpc("edd_release_refresh_run", { p_token: runToken });
+  }
+}
+
+async function runReviewSourceRefresh(db: NonNullable<typeof supabaseAdmin>, day: string) {
   // Both RPCs use the same token on retry. The database recognises an already
   // committed claim/completion, including when its HTTP response was lost.
   async function queueRpc(name: string, args: Record<string, unknown>) {
@@ -49,12 +69,14 @@ export async function refreshReviewSources(now = new Date()) {
     }
   }
   const failedSources: string[] = [];
-  const deadline = Date.now() + 270_000;
+  // Must fit inside the run-lock lease (see edd_try_acquire_refresh_run) so
+  // this tick releases the lock before a later cron tick could reclaim it.
+  const deadline = Date.now() + 180_000;
   let refreshed = 0, attempted = 0, reusedSnapshots = 0;
   const lanes = await Promise.allSettled(Array.from({ length: 2 }, async () => {
-    // Leave room for bounded database retries and the 170s stock request. Unclaimed
-    // jobs remain in Postgres; no location disappears when this process stops.
-    while (Date.now() < deadline - 250_000) {
+    // Unclaimed jobs remain in Postgres; no location disappears when this
+    // process stops early to respect the run-lock lease.
+    while (Date.now() < deadline) {
       if (stationEddToday(new Date()) !== day) break;
       const claim = await queueRpc("edd_claim_review_source", { p_token: randomUUID() });
       if (claim.error) throw Error("EDD refresh queue could not claim work.");

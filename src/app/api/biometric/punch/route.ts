@@ -431,16 +431,25 @@ async function storeReviewPunch({
 async function persistRawEvent(rawPayload: RawBiometricEventPayload) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
 
-  const result = rawPayload.middleware_raw_event_id
+  // The table carries two independent unique indexes: (company_id,
+  // middleware_raw_event_id) and (company_id, device_serial, trans_id). When
+  // both ids are present, upserting against only one target still throws a
+  // plain duplicate-key error if the OTHER index is the one that collides
+  // (Postgres only resolves the exact conflict target named in ON CONFLICT).
+  // Picking the trans_id target whenever it's available covers the
+  // device-retransmission case either id combination can hit; the
+  // conflict-target mismatch check below catches whatever the picked target
+  // doesn't cover.
+  const conflictTarget = rawPayload.trans_id
+    ? "company_id,device_serial,trans_id"
+    : rawPayload.middleware_raw_event_id
+    ? "company_id,middleware_raw_event_id"
+    : null;
+
+  const result = conflictTarget
     ? await supabaseAdmin
         .from("biometric_raw_events")
-        .upsert(rawPayload, { onConflict: "company_id,middleware_raw_event_id" })
-        .select("id")
-        .single()
-    : rawPayload.trans_id
-    ? await supabaseAdmin
-        .from("biometric_raw_events")
-        .upsert(rawPayload, { onConflict: "company_id,device_serial,trans_id" })
+        .upsert(rawPayload, { onConflict: conflictTarget })
         .select("id")
         .single()
     : await supabaseAdmin
@@ -451,9 +460,12 @@ async function persistRawEvent(rawPayload: RawBiometricEventPayload) {
 
   if (!result.error) return result.data.id as string;
 
+  // code 23505 = unique_violation. Match on the SQLSTATE code rather than
+  // free-text message/constraint-name matching, which silently stops working
+  // whenever the constraint is renamed or Postgres phrases the message
+  // differently.
   const isTransactionRetransmission = Boolean(
-    rawPayload.trans_id &&
-    /duplicate key|device_serial_trans_id/i.test(result.error.message)
+    rawPayload.trans_id && (result.error as { code?: string }).code === "23505"
   );
   if (!isTransactionRetransmission) throw new Error(result.error.message);
 

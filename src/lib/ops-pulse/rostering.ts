@@ -586,11 +586,23 @@ export async function loadOpsRosterWorkspace(companyId: string, location: CodLoc
   const plans = (planResult.data ?? []).map((row) => normalizePlan(row as Record<string, any>));
   const isOpsChannel = (plan: OpsRosterPlan) => plan.planningChannel === "ops" || plan.planningChannel == null;
   const openPlan = plans.find((plan) => ["draft", "returned", "pending_approval"].includes(plan.status) && isOpsChannel(plan)) ?? null;
+  // A one-off approved "dated" plan for the current week (e.g. a specific override
+  // like "HO · 2026-09-21 → 2026-09-27, APPROVED DATE-SCOPED ROSTER") takes priority
+  // over the recurring weekly baseline for that same week — matching HRMS's own
+  // loadRosterWeekReadOnly selection order (openDraft ?? activeBaseline ??
+  // scheduledBaseline ?? approvedDated). This branch was missing entirely here, so
+  // Ops silently fell through to the recurring pattern and displayed the wrong
+  // shift whenever a dated override existed for the viewed week — confirmed live
+  // 2026-09-23 against HRMS's People workspace showing the correct dated roster
+  // for the same week/station.
+  const approvedDated = plans.find((plan) =>
+    plan.status === "approved" && plan.rosterKind === "dated" && !plan.supersededAt
+    && plan.periodStart && plan.periodEnd && plan.periodStart <= today && today <= plan.periodEnd);
   const approved = plans
     .filter((plan) => plan.status === "approved" && plan.rosterKind === "recurring_weekly" && plan.effectiveFrom)
     .sort((left, right) => String(right.effectiveFrom).localeCompare(String(left.effectiveFrom)));
   const activePlan = approved.find((plan) => String(plan.effectiveFrom) <= today && (!plan.supersededAt || today < plan.supersededAt)) ?? null;
-  const selectedPlan = openPlan ?? activePlan ?? approved[0] ?? null;
+  const selectedPlan = openPlan ?? approvedDated ?? activePlan ?? approved[0] ?? null;
   return {
     today,
     people,

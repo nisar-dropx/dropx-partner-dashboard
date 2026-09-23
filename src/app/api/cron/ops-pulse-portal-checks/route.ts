@@ -93,6 +93,30 @@ async function markRun(id: string, update: Record<string, unknown>) {
     .eq("id", id);
 }
 
+/** Atomically claims a run for this tick by moving it out of the claimable
+ * statuses. Two overlapping minute-ticks racing the same run.id will only
+ * have one succeed here (Postgres serializes the two UPDATE...WHERE
+ * statements), so the loser sees zero affected rows and skips the run
+ * instead of double-processing it. Plain markRun(status: "Running") had no
+ * such guard. */
+async function claimRun(run: PortalRun) {
+  if (!supabaseAdmin) return false;
+  const { data, error } = await supabaseAdmin
+    .from("ops_portal_check_runs")
+    .update({
+      status: "Running",
+      error_message: null,
+      last_checked_at: new Date().toISOString(),
+      attempt_count: Number(run.attempt_count ?? 0) + 1,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", run.id)
+    .in("status", ["Queued", "Manual Review", "Error"])
+    .select("id");
+  if (error) return false;
+  return (data ?? []).length > 0;
+}
+
 async function logRun(run: PortalRun, eventType: string, message: string, payload: Record<string, unknown> = {}) {
   if (!supabaseAdmin) return;
   await supabaseAdmin.from("ops_portal_check_events").insert({
@@ -315,19 +339,15 @@ async function processRun(run: PortalRun, workerUrl: string, workerSecret: strin
     return { error: 1, ok: 0 };
   }
 
+  const claimed = await claimRun(run);
+  if (!claimed) return { error: 0, ok: 0 };
+
   const sccCredentials = await loadSccCredentials(run.company_id);
   const username = setting.portal_username || sccCredentials?.username || null;
   const password = sccCredentials?.password || null;
   const loginUrl = setting.portal_login_url || sccCredentials?.loginUrl || "https://www.amazonlogistics.eu/station/dashboard/workitemsvisibility";
   const driverReconciliationUrl = setting.amazon_driver_recon_url || sccCredentials?.urls.driver_reconciliation || "https://www.amazonlogistics.eu/station/dashboard/driverreconciliation";
   const bankDepositsUrl = setting.amazon_bank_deposit_url || sccCredentials?.urls.bank_deposits || "https://www.amazonlogistics.eu/station/dashboard/bankdeposits";
-
-  await markRun(run.id, {
-    status: "Running",
-    error_message: null,
-    last_checked_at: new Date().toISOString(),
-    attempt_count: Number(run.attempt_count ?? 0) + 1
-  });
 
   const requestBody = {
     run_id: run.id,
