@@ -1,3 +1,4 @@
+import {buildCodPendingDigest} from '@/lib/cod-pending-digest';
 import {cronAuthorized,processPortalDigests} from '@/lib/portal-digest-delivery';
 import {buildReviewDigest} from '@/lib/review-digest';
 import {isEddCronHost} from '@/lib/ops-pulse/edd-cron-scope';
@@ -15,8 +16,11 @@ export async function GET(request:Request){
   const results=await Promise.allSettled([processPortalDigests('ops','review_digest',buildReviewDigest),processPerformanceDataUpdates(),processPortalDigests('ops','adhoc_usage_digest',buildAdHocDigest),processPayoutReviewNotifications()]);
   const reports=results.map((result,index)=>result.status==='fulfilled'?result.value:{errors:[`${['Review digest','Performance update','Ad hoc digest'][index]} processing failed`]});
   results.forEach(result=>{if(result.status==='rejected')console.error('Ops notification worker failed',result.reason instanceof Error?result.reason.message:'Unknown error');});
+  const codEvening=await processPortalDigests('ops','cod_pending_evening',buildCodPendingDigest);
+  const codMorning=await processPortalDigests('ops','cod_pending_morning',buildCodPendingDigest);
+  reports.push(codEvening,codMorning);
   console.info('Ops notifications completed',JSON.stringify(reports));
-  return Response.json({reviewDigest:reports[0],performanceDataUpdated:reports[1],adHocDigest:reports[2],payoutReview:reports[3]},{status:reports.some(r=>r.errors.length)?500:200});
+  return Response.json({reviewDigest:reports[0],performanceDataUpdated:reports[1],adHocDigest:reports[2],payoutReview:reports[3],codEvening,codMorning},{status:reports.some(r=>r.errors.length)?500:200});
  }
  catch(error){console.error('Ops recurring notification failed',error instanceof Error?error.message:'Unknown error');return Response.json({error:'Notification processing failed. Check server logs.'},{status:500});}
 }

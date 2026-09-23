@@ -3,6 +3,8 @@ import {createClient, type SupabaseClient} from "@supabase/supabase-js";
 import {createHash, timingSafeEqual} from "node:crypto";
 import nodemailer from "nodemailer";
 import {timeoutFetch} from "./timeout-fetch";
+import {loadCodMailRecipients} from "./cod-pending-mail-scope";
+import {loadCodPendingReport} from "./ops-pulse/cod-pending-data";
 import {loadAdHocMailScope} from "./adhoc-digest-scope";
 
 export type DigestControl = {company_id:string;portal:"people"|"ops";event_key:string;state:string;paused_until:string|null;subject_template:string|null;config:Record<string,unknown>};
@@ -28,6 +30,8 @@ export function dueReportDate(control:DigestControl,now=new Date()) {
  const timezone=String(control.config.timezone||"Asia/Kolkata");
  const parts=Object.fromEntries(new Intl.DateTimeFormat("en-CA",{timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(now).map(p=>[p.type,p.value]));
  if(!/^\d{2}:\d{2}$/.test(String(control.config.schedule_time))||parts.hour+":"+parts.minute<String(control.config.schedule_time))return null;
+ const window=Number(control.config.delivery_window_minutes);
+ if(Number.isFinite(window)&&window>0){const [h,m]=String(control.config.schedule_time).split(":").map(Number);if(Number(parts.hour)*60+Number(parts.minute)>h*60+m+window)return null;}
  const offset=Number(control.config.day_offset);
  if(!Number.isInteger(offset)||offset>0||offset < -7)throw new Error("Invalid report-day offset");
  const date=new Date(parts.year+"-"+parts.month+"-"+parts.day+"T12:00:00Z");
@@ -59,6 +63,7 @@ export async function processPortalDigests(portal:"people"|"ops",eventKey:string
 
 /** Shared SMTP/thread/receipt handling; event queues have independent claim eligibility. */
 export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"|"ops",summary:DeliverySummary,claimRpc:"portal_claim_digest"|"portal_claim_ops_data_updates"="portal_claim_digest") {
+ const codScopes=new Map<string,Promise<Awaited<ReturnType<typeof loadCodMailRecipients>>>>();
  const claimed=await db.rpc(claimRpc,claimRpc==="portal_claim_digest"?{p_portal:portal,p_limit:80}:{p_limit:80});
  if(claimed.error)throw new Error(claimed.error.message);
  for(let offset=0;offset<(claimed.data||[]).length;offset+=4) {
@@ -70,10 +75,24 @@ export async function deliverPortalDigestQueue(db:SupabaseClient,portal:"people"
      db.from("portal_notification_controls").select("*").eq("company_id",delivery.company_id).eq("portal",portal).eq("event_key",delivery.event_key).single(),
      db.from("email_notification_settings").select("is_enabled,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass,smtp_from,from_name").eq("company_id",delivery.company_id).eq("id",true).single(),
      db.from("profiles").select("id").eq("company_id",delivery.company_id).eq("is_active",true).ilike("email",delivery.recipient_email).limit(1),
-     db.from("portal_digest_threads").select("*").eq("company_id",delivery.company_id).eq("portal",portal).eq("event_key",delivery.event_key).eq("recipient_email",delivery.recipient_email).eq("report_month",delivery.report_date.slice(0,7)).maybeSingle()
+     db.from("portal_digest_threads").select("*").eq("company_id",delivery.company_id).eq("portal",portal).in("event_key",delivery.event_key.startsWith("cod_pending_")?["cod_pending_evening","cod_pending_morning"]:[delivery.event_key]).eq("recipient_email",delivery.recipient_email).eq("report_month",delivery.report_date.slice(0,7)).order("last_sent_at",{ascending:false}).limit(1).maybeSingle()
     ]);
     const error=controlResult.error||smtpResult.error||profileResult.error||threadResult.error;
     if(error)throw new Error(error.message);
+    if(delivery.event_key.startsWith('cod_pending_')) {
+     if(dueReportDate(controlResult.data as DigestControl)!==delivery.report_date)throw new Error('COD reminder delivery window ended; held for verification.');
+     const scopeKey=delivery.company_id+':'+delivery.report_date;
+     if(!codScopes.has(scopeKey))codScopes.set(scopeKey,(async()=>{
+      const rows=await loadCodPendingReport(db,delivery.company_id,[],true,delivery.report_date);
+      return loadCodMailRecipients(db,delivery.company_id,rows.map(row=>row.station),String(controlResult.data.config.email_domain||""));
+     })());
+     const recipients=await codScopes.get(scopeKey)!;
+     const recipient=recipients.find(row=>row.email===delivery.recipient_email);
+     const saved=await db.from('portal_digest_deliveries').select('scope_summary').eq('id',delivery.id).single();
+     if(saved.error)throw new Error(saved.error.message);
+     const ids=saved.data.scope_summary?.stationIds;
+     if(!recipient||!Array.isArray(ids)||!ids.length||ids.some((id:string)=>!recipient.stationIds.includes(id)))throw new Error('Recipient COD access changed; reminder held.');
+    }
     if(delivery.event_key.startsWith('adhoc_usage_digest')) {
      const scope=await loadAdHocMailScope(db,delivery.company_id,String(controlResult.data.config.email_domain||""));
      const recipient=scope.recipients.find(row=>row.email===delivery.recipient_email);

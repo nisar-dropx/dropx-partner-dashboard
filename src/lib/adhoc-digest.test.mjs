@@ -101,7 +101,7 @@ test("no message for recipients without a previous-day van; MTD-only and DA-only
 });
 
 test("8am IST trigger reports yesterday and retains the previous month on the first", () => {
-  const delivery = compile("./portal-digest-delivery.ts", { "server-only": {}, "./timeout-fetch": {}, "./adhoc-digest-scope": scope });
+  const delivery = compile("./portal-digest-delivery.ts", { "server-only": {}, "./timeout-fetch": {}, "./cod-pending-mail-scope": {}, "./ops-pulse/cod-pending-data": {}, "./adhoc-digest-scope": scope });
   const control = { state: "enabled", config: { delivery_ready: true, timezone: "Asia/Kolkata", schedule_time: "08:00", day_offset: -1, first_report_date: "2026-09-12" } };
   assert.equal(delivery.dueReportDate(control, new Date("2026-09-13T02:29:59Z")), null);
   assert.equal(delivery.dueReportDate(control, new Date("2026-09-13T02:30:00Z")), "2026-09-12");
@@ -126,7 +126,7 @@ test("delivery holds an email when the saved station is removed from the recipie
   let sent = false;
   const updates = [];
   const module = compile("./portal-digest-delivery.ts", {
-    "server-only": {}, "./timeout-fetch": {},
+    "server-only": {}, "./timeout-fetch": {}, "./cod-pending-mail-scope": {}, "./ops-pulse/cod-pending-data": {},
     "nodemailer": { createTransport: () => { sent = true; throw Error("must not send"); } },
     "./adhoc-digest-scope": { loadAdHocMailScope: async () => ({ recipients: [{ email: "a@example.com", stationIds: ["a"] }] }) }
   });

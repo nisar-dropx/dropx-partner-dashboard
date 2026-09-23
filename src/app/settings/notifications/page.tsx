@@ -1,3 +1,4 @@
+import {CodNotificationSettings} from '@/components/cod-notification-settings';
 import {AppShell} from '@/components/app-shell';
 import {PageHead} from '@/components/page-head';
 import {DigestSettingsForm} from '@/components/digest-settings-form';
@@ -17,6 +18,7 @@ export default async function NotificationSettings({searchParams}:{searchParams?
  if(control.error||history.error||dataUpdate.error||updateHistory.error)throw new Error('Notification settings are temporarily unavailable.');
  return <AppShell active="Notifications" pageCode="ops_notification_settings"><PageHead title="Notifications" eyebrow="Ops Pulse settings" subtitle="Performance updates and daily review status · portal-run, individually scoped emails."/>
  {searchParams?.error?<p role="alert">{searchParams.error}</p>:searchParams?.saved?<p role="status">Notification settings saved.</p>:null}
+ <CodNotificationSettings companyId={company} auth={auth}/>
  <PerformanceDataUpdateSettings control={dataUpdate.data} action={savePerformanceDataUpdateSettings} canEdit={hasPermission(auth,'ops_notification_settings','edit')} receipts={updateHistory.data||[]}/>
  <section className="panel" style={{padding:24}}><h2>Daily performance review status</h2><p>Each recipient sees only their mapped locations. Pending locations first, with pending reviewers and review layers; completed locations follow. Proxy reviews identify who reviewed and on whose behalf.</p><p>Included operation models: {String((control.data.config.included_models||[]).join(', '))}. Other models are excluded from this mail.</p></section>
  <DigestSettingsForm control={control.data} action={saveDigestSettings} canEdit={hasPermission(auth,'ops_notification_settings','edit')} receipts={history.data||[]}/></AppShell>;
