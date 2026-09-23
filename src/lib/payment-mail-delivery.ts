@@ -4,6 +4,19 @@ import { sendEmail } from "@/lib/email";
 import { isPendingPaymentApproval } from "@/lib/payment-stage-policy";
 import { defaultPaymentWorkHours, nextPaymentReminder, paymentThreadMonth, validatePaymentWorkHours, withinPaymentWorkHours, type PaymentWorkHours } from "@/lib/payment-reminder-policy";
 
+type PaymentStageRoles = {
+  current_approver_role_id?: string | null;
+  current_approver_role_ids?: string[] | null;
+  payment_process_role_ids?: string[] | null;
+};
+
+/** Finance/payment-processing is an execution queue, not an approval queue. */
+export function isPaymentProcessingStage(request: PaymentStageRoles) {
+  const processorRoles = new Set(request.payment_process_role_ids ?? []);
+  if (request.current_approver_role_id && processorRoles.has(request.current_approver_role_id)) return true;
+  return (request.current_approver_role_ids ?? []).some(roleId => processorRoles.has(roleId));
+}
+
 export async function loadPaymentMailPolicy(companyId: string) {
   const { data, error } = await supabaseAdmin!.from("payment_notification_templates")
     .select("event_type,is_enabled,reminder_interval_minutes,thread_by_station_month,reminder_work_hours")
@@ -29,7 +42,7 @@ export async function deliverPaymentMail(input: {
   if (input.reminder && !policy.enabled) return { sent: false as const, reason: "Reminders disabled" };
   if (input.reminder && !input.catchUp && !withinPaymentWorkHours(new Date(), policy.hours))
     return { sent: false as const, reason: "Outside configured work hours" };
-  const readRequest = () => db.from("payment_requests").select("id,location_id,location_code,status,approval_status,current_approver_user_id,email_next_reminder_at,email_send_count,email_root_message_id,email_last_message_id")
+  const readRequest = () => db.from("payment_requests").select("id,location_id,location_code,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,payment_process_role_ids,email_next_reminder_at,email_send_count,email_root_message_id,email_last_message_id")
     .eq("company_id", input.companyId).eq("id", input.requestId).single();
   const initial = await readRequest();
   if (initial.error) throw new Error(initial.error.message);
@@ -51,6 +64,10 @@ export async function deliverPaymentMail(input: {
     const request = fresh.data;
     const pending = Boolean(request.current_approver_user_id && isPendingPaymentApproval(request.status, request.approval_status));
     if (request.current_approver_user_id !== input.expectedApprover) return { sent: false as const, reason: "Approver changed; retry with current assignment" };
+    if (input.reminder && isPaymentProcessingStage(request)) {
+      await db.from("payment_requests").update({ email_next_reminder_at: null }).eq("company_id", input.companyId).eq("id", input.requestId);
+      return { sent: false as const, reason: "Finance processing stages do not receive approval reminders" };
+    }
     if (input.reminder && (!pending || (request.email_next_reminder_at && Date.parse(request.email_next_reminder_at) > Date.now())))
       return { sent: false as const, reason: "Decision completed or reminder not due" };
     // An interrupted SMTP operation cannot safely be retried automatically.
@@ -78,7 +95,8 @@ export async function deliverPaymentMail(input: {
     const afterSend = await readRequest();
     if (afterSend.error) throw new Error(afterSend.error.message);
     const stillPending = Boolean(afterSend.data.current_approver_user_id && isPendingPaymentApproval(afterSend.data.status, afterSend.data.approval_status));
-    const nextDue = stillPending && policy.enabled ? nextPaymentReminder(sentAt, policy.interval, policy.hours) : null;
+    const nextDue = stillPending && policy.enabled && !isPaymentProcessingStage(afterSend.data)
+      ? nextPaymentReminder(sentAt, policy.interval, policy.hours) : null;
     const updated = await db.from("payment_requests").update({ email_root_message_id: root || result.messageId,
       email_last_message_id: result.messageId, email_send_count: (request.email_send_count ?? 0) + 1, email_next_reminder_at: nextDue })
       .eq("company_id", input.companyId).eq("id", input.requestId);

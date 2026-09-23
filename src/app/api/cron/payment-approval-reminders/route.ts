@@ -4,6 +4,7 @@ import { sendPaymentApprovalReminder } from "@/lib/payment-email-notifications";
 import { sendPaymentAdvanceReminder } from "@/lib/payment-advance-email-notifications";
 import { isEddCronHost } from "@/lib/ops-pulse/edd-cron-scope";
 import { isPendingPaymentApproval } from "@/lib/payment-stage-policy";
+import { isPaymentProcessingStage } from "@/lib/payment-mail-delivery";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -40,7 +41,7 @@ async function processReminders(request: Request, catchUp: boolean) {
   if (!supabaseAdmin) return NextResponse.json({ error: "Supabase service role key is not configured." }, { status: 500 });
 
   const [paymentDue, advanceDue] = await Promise.all([
-    supabaseAdmin.from("payment_requests").select("id, company_id, status, approval_status")
+    supabaseAdmin.from("payment_requests").select("id, company_id, status, approval_status, current_approver_role_id, current_approver_role_ids, payment_process_role_ids")
       .not("current_approver_user_id", "is", null)
       .not("status", "in", "(approved,processed,processing,returned,rejected,cancelled)")
       .or(`email_next_reminder_at.is.null,email_next_reminder_at.lte.${new Date().toISOString()}`)
@@ -56,7 +57,9 @@ async function processReminders(request: Request, catchUp: boolean) {
   // can never starve the other within this function's time budget - if the
   // budget runs out, both tables have made partial progress, not just one.
   const queue: Array<{ kind: "payment" | "advance"; companyId: string; requestId: string }> = [];
-  const payments = (paymentDue.data ?? []).filter(row => isPendingPaymentApproval(row.status, row.approval_status));
+  const payments = (paymentDue.data ?? []).filter(row =>
+    isPendingPaymentApproval(row.status, row.approval_status) && !isPaymentProcessingStage(row)
+  );
   const advances = catchUp ? [] : advanceDue.data ?? [];
   const maxLength = Math.max(payments.length, advances.length);
   for (let index = 0; index < maxLength; index += 1) {

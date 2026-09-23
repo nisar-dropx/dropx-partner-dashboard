@@ -9,6 +9,7 @@ import { sendPaymentApprovalReminder, type PaymentEmailEventType } from "@/lib/p
 import { isPendingPaymentApproval } from "@/lib/payment-stage-policy";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { validatePaymentWorkHours } from "@/lib/payment-reminder-policy";
+import { isPaymentProcessingStage } from "@/lib/payment-mail-delivery";
 
 const allowedEvents = new Set(["payment_request", "payment_approve", "payment_return", "payment_reject"]);
 
@@ -20,13 +21,15 @@ export async function sendMissedPaymentReminders() {
   let notice = "";
   try {
     if (!supabaseAdmin) throw new Error("Supabase is not configured.");
-    const pending = await supabaseAdmin.from("payment_requests").select("id,status,approval_status")
+    const pending = await supabaseAdmin.from("payment_requests").select("id,status,approval_status,current_approver_role_id,current_approver_role_ids,payment_process_role_ids")
       .eq("company_id", companyId).not("current_approver_user_id", "is", null)
       .not("status", "in", "(approved,processed,processing,returned,rejected,cancelled)")
       .or(`email_next_reminder_at.is.null,email_next_reminder_at.lte.${new Date().toISOString()}`)
       .order("email_next_reminder_at", { ascending: true, nullsFirst: true }).limit(200);
     if (pending.error) throw new Error(pending.error.message);
-    const rows = (pending.data ?? []).filter(row => isPendingPaymentApproval(row.status, row.approval_status));
+    const rows = (pending.data ?? []).filter(row =>
+      isPendingPaymentApproval(row.status, row.approval_status) && !isPaymentProcessingStage(row)
+    );
     const deadline = Date.now() + 40_000;
     let sent = 0, checked = 0;
     const reasons: string[] = [];
