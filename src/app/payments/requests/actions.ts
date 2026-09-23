@@ -519,7 +519,10 @@ export async function createPaymentRequest(formData: FormData) {
     const approvalSteps = await loadApprovalSteps(companyId, paymentHeadId);
 
     const requestNo = await nextPaymentRequestNo(companyId);
-    const workDate = new Date().toISOString().slice(0, 10);
+    const isAdhocDa = headResult.data.code === "ADHOC_DA";
+    const adhocShipmentId = isAdhocDa ? required(formData.get("adhoc_shipment_id"), "DA name / Provider ID") : null;
+    const workDate = isAdhocDa ? required(formData.get("adhoc_work_date"), "Delivery work date") : new Date().toISOString().slice(0, 10);
+    if (isAdhocDa && (!/^[a-f0-9-]{36}$/i.test(adhocShipmentId!) || !/^\d{4}-\d{2}-\d{2}$/.test(workDate))) throw new Error("Select a valid DA and work date.");
     const legacyAccountValue = bankAccountNo ?? paymentReference ?? paymentPortal ?? locationResult.data.station_code;
     const legacyIfscValue = ifsc ?? (isUpiPayment ? "UPI" : "ONLINE");
     const legacyHolderValue = accountHolderName ?? verifiedUpiHolderName ?? submittedUpiHolderName ?? paymentPortal ?? "Online Payment";
@@ -574,6 +577,7 @@ export async function createPaymentRequest(formData: FormData) {
     }
 
     const requestPayload = withCompany({
+      ...(isAdhocDa ? { source_system: "OPS_ADHOC_DA", adhoc_shipment_id: adhocShipmentId, adhoc_work_date: workDate } : {}),
       request_no: requestNo,
       location_id: locationResult.data.id,
       location_code: locationResult.data.station_code,
@@ -680,6 +684,9 @@ export async function createPaymentRequest(formData: FormData) {
         continue;
       }
       const missingSchemaColumn = schemaMissingColumn(error.message);
+      if (isAdhocDa && missingSchemaColumn && ["source_system", "adhoc_shipment_id", "adhoc_work_date"].includes(missingSchemaColumn)) {
+        throw new Error("Adhoc DA tracking is not ready. No request was saved; contact support to complete the database migration.");
+      }
       if (missingSchemaColumn && missingSchemaColumn in requestPayload) {
         delete requestPayload[missingSchemaColumn];
         continue;

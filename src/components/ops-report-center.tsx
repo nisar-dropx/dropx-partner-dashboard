@@ -40,6 +40,7 @@ export function OpsReportCenter({ stations }: { stations: Station[] }) {
       <div className="ops-report-description"><strong>{report.title}</strong><span>{report.description}</span></div>
     </div>
     <div className="ops-report-parameters">
+      <label>Quick month<input type="month" onChange={(event) => { const month = event.target.value; if (!/^\d{4}-\d{2}$/.test(month)) return; const end = new Date(`${month}-01T00:00:00Z`); end.setUTCMonth(end.getUTCMonth() + 1); end.setUTCDate(0); setFrom(`${month}-01`); setTo(end.toISOString().slice(0, 10)); }} /></label>
       <label>From<input type="date" value={from} onChange={(event) => setFrom(event.target.value)}/></label>
       <label>To<input type="date" value={to} onChange={(event) => setTo(event.target.value)}/></label>
       {needsSingleStation ? <label className="station-select">Station<select value={singleStation} onChange={(event) => setSingleStation(event.target.value)}>{stations.map((station) => <option key={station.code} value={station.code}>{station.code} · {station.name}</option>)}</select></label> :

@@ -39,6 +39,9 @@ type PaymentHeadRow = {
 };
 type PaymentRequestRow = {
   id: string;
+  adhoc_da_name: string | null;
+  adhoc_provider_employee_id: string | null;
+  adhoc_work_date: string | null;
   request_no: string;
   location_id: string | null;
   location_code: string;
@@ -190,7 +193,7 @@ async function loadPaymentRequestData(companyId: string, authorization: Authoriz
       .order("code");
   let requestsQuery = supabaseAdmin
       .from("payment_requests")
-      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, payment_mode, payment_portal, payment_reference, created_at")
+      .select("id, request_no, location_id, location_code, payment_head_id, amount, amount_requested, bank_account_no, ifsc, account_holder_name, contact_no, email, remarks, status, approval_status, requested_by, payment_mode, payment_portal, payment_reference, created_at, adhoc_da_name, adhoc_provider_employee_id, adhoc_work_date")
       .eq("company_id", companyId)
       .not("amount", "is", null)
       .order("created_at", { ascending: false });
@@ -388,7 +391,7 @@ export default async function PaymentRequestsPage({
                   const head = headById.get(request.payment_head_id);
                   return (
                     <tr key={request.id}>
-                      <td><strong>{request.request_no}</strong></td>
+                      <td><strong>{request.request_no}</strong>{request.adhoc_provider_employee_id ? <div><small>{request.adhoc_da_name} · {request.adhoc_provider_employee_id}<br />Work date: {request.adhoc_work_date}</small></div> : null}</td>
                       <td>{request.location_code}</td>
                       <td>{head?.name ?? "-"}</td>
                       <td>{request.amount_requested == null ? "-" : `Rs ${Number(request.amount_requested).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`}</td>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { AdhocDaFields } from "./adhoc-da-fields";
 import { AutoGrowTextarea } from "@/components/auto-grow-textarea";
 import { PaymentContactPicker } from "@/components/payment-contact-picker";
 import { SearchableSelect, type SearchableSelectOption } from "@/components/searchable-select";
@@ -112,6 +113,7 @@ export function PaymentRequestForm({
   submitLabel = "Submit request"
 }: PaymentRequestFormProps) {
   const [selectedHeadId, setSelectedHeadId] = useState("");
+  const [selectedLocationId, setSelectedLocationId] = useState("");
   const [amountText, setAmountText] = useState("");
   const [paymentMode, setPaymentMode] = useState<PaymentMode>("account_transfer");
   const [bankAccountNo, setBankAccountNo] = useState("");
@@ -257,7 +259,7 @@ export function PaymentRequestForm({
       <div className="form-grid three">
         <label>
           Location
-          <SearchableSelect name="location_id" options={locationOptions} placeholder="Select location" required />
+          <SearchableSelect name="location_id" options={locationOptions} placeholder="Select location" required onValueChange={setSelectedLocationId} />
         </label>
         <label>
           Payment Head
@@ -269,6 +271,7 @@ export function PaymentRequestForm({
         </label>
       </div>
       {blockedByExpenseApproval ? <p className="payment-form-warning" role="alert">Required Expense Approval</p> : null}
+      {showBankDetails && selectedHead?.code === "ADHOC_DA" ? <AdhocDaFields key={selectedLocationId} locationId={selectedLocationId} /> : null}
       {showBankDetails ? (
         <>
           <div className="payment-mode-switch" role="radiogroup" aria-label="Payment mode">

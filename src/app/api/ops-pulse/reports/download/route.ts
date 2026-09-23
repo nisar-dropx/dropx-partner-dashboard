@@ -3,6 +3,7 @@ import { requireCompanyId } from "@/lib/company-scope";
 import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { isOpsReportType } from "@/lib/ops-pulse/report-catalog";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { adhocDaReport, type AdhocPayment, type AdhocShipment, type AdhocAdjustment } from "@/lib/ops-pulse/adhoc-da-report";
 import * as XLSX from "xlsx";
 
 export const dynamic = "force-dynamic";
@@ -66,6 +67,31 @@ export async function GET(request: Request) {
   const codes = stationScope((url.searchParams.get("stations") ?? "").split(",").filter(Boolean), permittedCodes);
   if (!codes.length) return Response.json({ error: "No permitted stations." }, { status: 403 });
   const suffix = `${from}-to-${to}.csv`;
+
+  if (type === "adhoc_da") {
+    const head = await db.from("payment_heads").select("id").eq("company_id", companyId).eq("code", "ADHOC_DA").maybeSingle();
+    if (head.error || !head.data) return Response.json({ error: "Adhoc DA payment head is unavailable." }, { status: 503 });
+    const locationIds = locations.locations.filter(row => codes.includes(row.station_code)).map(row => row.id);
+    const payments = await allRows<AdhocPayment>((start, end) => db.from("payment_requests")
+      .select("id,request_no,location_id,station_code,location_code,work_date,created_at,status,amount,amount_requested,amount_approved,processed_at,paid_at,utr_cin,adhoc_work_date,adhoc_da_name,adhoc_client,adhoc_provider_employee_id,adhoc_workforce_id,adhoc_adjustment_id")
+      .eq("company_id", companyId).eq("payment_head_id", head.data!.id).in("location_id", locationIds).gte("work_date", from).lte("work_date", to).order("work_date").order("id").range(start, end));
+    if (payments.error) return Response.json({ error: "Adhoc payment report could not be loaded." }, { status: 503 });
+    const shipments = await allRows<AdhocShipment>((start, end) => db.from("cps_shipment_daily")
+      .select("station_code,client,provider_employee_id,work_date,amazon_delivery,total_delivery").eq("company_id", companyId).in("station_code", codes).gte("work_date", from).lte("work_date", to).order("id").range(start, end));
+    if (shipments.error) return Response.json({ error: "Delivery counts could not be loaded; report stopped." }, { status: 503 });
+    const ids = [...new Set(payments.data.map(row => row.adhoc_adjustment_id).filter((id): id is string => Boolean(id)))];
+    const adjustments: AdhocAdjustment[] = [];
+    for (let offset = 0; offset < ids.length; offset += 100) {
+      const result = await db.from("workforce_adjustments").select("id,amount,effective_date,status,payroll_run_id").eq("company_id", companyId).in("id", ids.slice(offset, offset + 100));
+      if (result.error) return Response.json({ error: "Payroll recoveries could not be loaded; report stopped." }, { status: 503 });
+      adjustments.push(...result.data);
+    }
+    const report = adhocDaReport(payments.data, shipments.data, adjustments);
+    return workbookResponse([
+      { name: "DA summary", rows: report.summary }, { name: "Payment details", rows: report.details },
+      { name: "Read me", rows: [{ "Period": `${from} to ${to}`, "Date basis": "Delivery work date, not bank payment date", "Delivered count": "Shipment totals for the selected range, counted once per station/client/provider ID", "Recovery": "Posted means included in a payroll snapshot, not that payroll has been paid", "History": "Unlinked historical payments are shown but never automatically deducted" }] }
+    ], `adhoc-da-${from}-to-${to}.xlsx`);
+  }
 
   if (type === "shipment_station" || type === "shipment_pincode" || type === "shipment_promise" || type === "station_360") {
     const facts = await allRows((start, end) => db.from("delivered_shipment_facts")

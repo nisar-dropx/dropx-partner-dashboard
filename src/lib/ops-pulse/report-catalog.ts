@@ -1,4 +1,5 @@
 export const opsReportCatalog = [
+  { type: "adhoc_da", group: "Payments", title: "Adhoc DA / Wishmaster payments", description: "Work-date range: station, DA/provider ID, delivered count, requested/paid amounts and one-time payroll recovery. Includes payment-level audit details.", format: "Excel" },
   { type: "shipment_station", group: "Shipments", title: "Station shipment summary", description: "Day-level delivered volume, road IDs, SPR and small/volumetric mix.", format: "CSV" },
   { type: "shipment_pincode", group: "Shipments", title: "Pincode volume & size mix", description: "Station and pincode volume with small, volumetric and unclassified percentages.", format: "CSV" },
   { type: "shipment_promise", group: "Shipments", title: "Customer promise", description: "Station and pincode promise-date performance with early, on-promise and late volume.", format: "CSV" },
