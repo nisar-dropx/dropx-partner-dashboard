@@ -689,6 +689,32 @@ public class LocationTrackingService extends Service {
     uploadExecutor.shutdown();
   }
 
+  /**
+   * Fires when the worker swipes DropX One away from the recent-apps list (task removal) —
+   * distinct from onDestroy(), which also runs afterward as the service actually tears down.
+   * On several OEMs (this was reported and reproduced on a Motorola/MTK device), swiping the
+   * ongoing "Active" notification's owning task away stops the WHOLE foreground service despite
+   * setOngoing(true), and nothing then restarts it until the worker manually reopens the app —
+   * silently ending attendance tracking mid-shift with no warning. START_STICKY alone doesn't
+   * cover this case: it only restarts a service the OS kills for memory pressure, not one that
+   * stopped because its owning task was explicitly removed. Explicitly re-launching the service
+   * here (only if tracking was actually meant to be running, per TrackingPrefs — mirrors
+   * BootReceiver's own guard) is what makes tracking survive being swiped away, exactly the
+   * "runs from punch-in for the whole shift regardless of what the worker does to the app"
+   * guarantee this whole service exists for.
+   */
+  @Override
+  public void onTaskRemoved(Intent rootIntent) {
+    super.onTaskRemoved(rootIntent);
+    if (!TrackingPrefs.locationTrackingEnabled(this)) return;
+    Intent restartIntent = new Intent(getApplicationContext(), LocationTrackingService.class);
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      getApplicationContext().startForegroundService(restartIntent);
+    } else {
+      getApplicationContext().startService(restartIntent);
+    }
+  }
+
   @Nullable
   @Override
   public IBinder onBind(Intent intent) {
