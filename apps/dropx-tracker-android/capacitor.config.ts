@@ -20,7 +20,18 @@ const config: CapacitorConfig = {
     androidScheme: "https"
   },
   android: {
-    allowMixedContent: false
+    allowMixedContent: false,
+    // Google rejected a release for "Device and Network Abuse policy: causing users to
+    // download/install applications from unknown sources" — the actual trigger was the login
+    // page's own APK-download banner (ConnectAppInstallCard, meant for browser visitors so they
+    // can sideload this app before it existed on Play, or if Play access breaks). It was already
+    // hidden client-side for in-app viewers via a Capacitor-in-UA sniff, but the underlying HTML
+    // still contained the download link/button regardless — Play's review tooling doesn't
+    // necessarily execute that client-side check, so it saw the link as present. This appended
+    // UA token lets the server (see apps/connect's WorkspaceLayout) detect the native app
+    // DEFINITIVELY via a header, before rendering anything, and omit that link's markup
+    // entirely for native-app requests rather than just hiding it after the fact.
+    appendUserAgent: "DropXOneNative/1"
   }
 };
 
