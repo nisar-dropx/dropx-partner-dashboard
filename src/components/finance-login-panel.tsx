@@ -16,7 +16,7 @@ export function FinanceLoginPanel({ initialMessage, nextPath }: { initialMessage
           <div className="fin-story-top"><span className="fin-eyebrow">PRECISION IN EVERY STEP</span><ArrowUpRight size={24} aria-hidden="true" /></div>
           <h1 id="fin-story-title">Every payment.<br /><em>Accounted for.</em></h1>
           <p className="fin-story-description">From the first approval to the final reconciliation. A clear view of the finances that keep DropX moving.</p>
-          <div className="fin-ledger" aria-label="Finance workflow">
+          <div className="fin-ledger" role="group" aria-label="Finance workflow">
             <div className="fin-ledger-heading"><span>THE FLOW OF FINANCE</span><span>01 — 03</span></div>
             <div className="fin-ledger-row"><span className="fin-step">01</span><div><strong>Review with context</strong><p>Requests, supporting details and approvals.</p></div><Check size={18} aria-hidden="true" /></div>
             <div className="fin-ledger-row"><span className="fin-step">02</span><div><strong>Move payments forward</strong><p>Payment readiness and payout processing.</p></div><Check size={18} aria-hidden="true" /></div>

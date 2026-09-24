@@ -2,7 +2,7 @@ import Image from "next/image";
 
 export function FinanceProductBrand() {
   return (
-    <span className="fin-product-brand" aria-label="Fin · Finance workspace">
+    <span className="fin-product-brand" role="img" aria-label="Fin · Finance workspace">
       <Image src="/finance-brand/fin-mark.png" alt="" width={36} height={36} />
       <span><strong>Fin</strong><small>FINANCE</small></span>
     </span>
