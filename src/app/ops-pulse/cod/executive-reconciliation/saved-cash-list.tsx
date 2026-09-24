@@ -166,6 +166,50 @@ function denominationSubtotal(totals: DenominationTotals, otherAmount: number) {
   return denominations.reduce((sum, [name, , amount]) => sum + totals[name] * amount, otherAmount);
 }
 
+function DenominationSummaryRow({
+  tone,
+  title,
+  total,
+  counts,
+  otherAmount
+}: {
+  tone: "received" | "returned";
+  title: string;
+  total: number;
+  counts: DenominationTotals;
+  otherAmount: number;
+}) {
+  const hasAny = denominations.some(([name]) => counts[name] > 0) || otherAmount > 0;
+  return (
+    <div className={`denom-summary-row ${tone}`}>
+      <div className="denom-summary-row-head">
+        <span className="denom-summary-row-title">{title}</span>
+        <strong className="denom-summary-row-total">{formatAmount(total)}</strong>
+      </div>
+      {hasAny ? (
+        <div className="denomination-grid">
+          {denominations.map(([name, label, amount]) => counts[name] > 0 ? (
+            <div className="denomination-summary-chip" key={`${tone}-${name}`}>
+              <span className="denomination-chip-label">₹{label}</span>
+              <strong>× {counts[name]}</strong>
+              <span className="denomination-summary-chip-amount">{formatAmount(counts[name] * amount)}</span>
+            </div>
+          ) : null)}
+          {otherAmount ? (
+            <div className="denomination-summary-chip other">
+              <span className="denomination-chip-label">Other</span>
+              <strong>—</strong>
+              <span className="denomination-summary-chip-amount">{formatAmount(otherAmount)}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <p className="denom-summary-row-empty">None {tone === "received" ? "received" : "returned"} yet.</p>
+      )}
+    </div>
+  );
+}
+
 function TotalDenominationsSummary({ rows }: { rows: ExecutiveReconciliationViewRow[] }) {
   if (!rows.length) return null;
   const { received, returned, receivedOther, returnedOther } = totalDenominations(rows);
@@ -173,61 +217,20 @@ function TotalDenominationsSummary({ rows }: { rows: ExecutiveReconciliationView
   const returnedTotal = denominationSubtotal(returned, returnedOther);
   const finalTotal = Number((receivedTotal - returnedTotal).toFixed(2));
   return (
-    <details className="cash-breakdown total-denominations-summary" open>
+    <details className="total-denominations-summary" open>
       <summary>
-        Total denominations
-        <span className="subtle">{rows.length} associate{rows.length === 1 ? "" : "s"} saved</span>
+        <span className="total-denominations-summary-title">
+          Total denominations
+          <span className="subtle">{rows.length} associate{rows.length === 1 ? "" : "s"} saved</span>
+        </span>
+        <span className="total-denominations-summary-hero">
+          <span>Final total</span>
+          <strong>{formatAmount(finalTotal)}</strong>
+        </span>
       </summary>
-      <div className="cash-breakdown-grid">
-        <div className="cash-breakdown-section received">
-          <div className="cash-breakdown-section-head">
-            <strong>Received from associates</strong>
-            <span className="cash-breakdown-subtotal">{formatAmount(receivedTotal)}</span>
-          </div>
-          <div className="denomination-grid">
-            {denominations.map(([name, label, amount]) => (
-              <div className="denomination-summary-chip" key={`total-received-${name}`}>
-                <span className="denomination-chip-label">₹{label}</span>
-                <strong>{received[name]}</strong>
-                <span className="denomination-summary-chip-amount">{formatAmount(received[name] * amount)}</span>
-              </div>
-            ))}
-            {receivedOther ? (
-              <div className="denomination-summary-chip other">
-                <span className="denomination-chip-label">Other</span>
-                <strong>—</strong>
-                <span className="denomination-summary-chip-amount">{formatAmount(receivedOther)}</span>
-              </div>
-            ) : null}
-          </div>
-        </div>
-        <div className="cash-breakdown-section returned">
-          <div className="cash-breakdown-section-head">
-            <strong>Returned to associates</strong>
-            <span className="cash-breakdown-subtotal">{formatAmount(returnedTotal)}</span>
-          </div>
-          <div className="denomination-grid">
-            {denominations.map(([name, label, amount]) => (
-              <div className="denomination-summary-chip" key={`total-returned-${name}`}>
-                <span className="denomination-chip-label">₹{label}</span>
-                <strong>{returned[name]}</strong>
-                <span className="denomination-summary-chip-amount">{formatAmount(returned[name] * amount)}</span>
-              </div>
-            ))}
-            {returnedOther ? (
-              <div className="denomination-summary-chip other">
-                <span className="denomination-chip-label">Other</span>
-                <strong>—</strong>
-                <span className="denomination-summary-chip-amount">{formatAmount(returnedOther)}</span>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </div>
-      <div className="cash-live-status matched total-denominations-final">
-        <span>Total received <strong>{formatAmount(receivedTotal)}</strong></span>
-        <span>Total returned <strong>{formatAmount(returnedTotal)}</strong></span>
-        <span className="cash-live-result">Final total <strong>{formatAmount(finalTotal)}</strong></span>
+      <div className="denom-summary-rows">
+        <DenominationSummaryRow tone="received" title="Received from associates" total={receivedTotal} counts={received} otherAmount={receivedOther} />
+        <DenominationSummaryRow tone="returned" title="Returned to associates" total={returnedTotal} counts={returned} otherAmount={returnedOther} />
       </div>
     </details>
   );
