@@ -9,6 +9,7 @@ import {
   canUseRosterLocation,
   indiaToday,
   canApproveOpsRosterHr,
+  findWeekOffCapViolation,
   loadOpsRosterCapabilities,
   loadOpsRosteringPolicy,
   resolveOpsRosterApprovalRoute,
@@ -498,6 +499,12 @@ export async function saveOpsRosterAssignments(input: { planId: string; changes:
       }
     }
 
+    const weekOffViolation = await findWeekOffCapViolation(companyId, planId, [...unique.values()]);
+    if (weekOffViolation) {
+      const person = manpower.people.find((item) => item.workerType === weekOffViolation.workerType && item.id === weekOffViolation.workerId);
+      return { ok: false, message: `${person?.name ?? "This person"} already has a week off in the week of ${weekOffViolation.weekStart}. Only 1 week off is allowed per week.` };
+    }
+
     const touched = await db().from("hr_roster_plans")
       .update({ updated_by: authorization.userId, updated_at: new Date().toISOString() })
       .eq("company_id", companyId)
@@ -904,6 +911,14 @@ export async function importOpsRosterWorkbook(formData: FormData): Promise<Actio
       };
     }
     if (upserts.length + removals.length > 25_000) return { ok: false, message: "The workbook exceeds 25,000 roster cells." };
+
+    const weekOffViolation = await findWeekOffCapViolation(companyId, plan.id, [
+      ...upserts.map((row) => ({ workerType: row.worker_type as "employee" | "contractor", workerId: row.worker_id, date: row.roster_date, dayType: row.day_type })),
+      ...removals.map((row) => ({ workerType: row.workerType as "employee" | "contractor", workerId: row.workerId, date: row.date, remove: true }))
+    ]);
+    if (weekOffViolation) {
+      return { ok: false, message: `Nothing imported. A person already has (or the file assigns) more than 1 week off in the week of ${weekOffViolation.weekStart}. Only 1 week off is allowed per week.` };
+    }
 
     const touched = await db().from("hr_roster_plans")
       .update({ updated_by: authorization.userId, updated_at: new Date().toISOString() })

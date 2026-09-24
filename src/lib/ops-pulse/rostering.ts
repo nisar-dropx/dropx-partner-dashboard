@@ -6,6 +6,7 @@ import type { CodLocationRow } from "@/lib/ops-pulse/cod";
 import { loadOpsStationManpower } from "@/lib/ops-pulse/station-manpower";
 import { normalizeRosterChangeDeadlineHour } from "@/lib/roster-change-deadline";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { mondayFor } from "@/lib/weekly-roster";
 
 type WorkerType = "employee" | "contractor";
 type StageType = "level_1" | "level_2" | "hr";
@@ -117,6 +118,68 @@ export type OpsRosterApproval = {
 function db() {
   if (!supabaseAdmin) throw new Error("Database service is unavailable.");
   return supabaseAdmin;
+}
+
+function addDaysIso(value: string, days: number) { const date = new Date(`${value}T00:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); }
+
+export type PendingWeekOffChange = { workerType: WorkerType; workerId: string; date: string; dayType?: "working" | "weekly_off"; remove?: boolean };
+
+/**
+ * Enforces at most one "weekly_off" day per ISO Mon-Sun week per worker, across
+ * both existing hr_roster_entries rows and a batch of pending changes not yet
+ * saved. Shares the hr_roster_entries table with the HRMS app, so this mirrors
+ * the equivalent guard in dropx-hrms/src/lib/rostering.ts.
+ */
+export async function findWeekOffCapViolation(
+  companyId: string,
+  planId: string,
+  changes: PendingWeekOffChange[]
+): Promise<{ workerType: WorkerType; workerId: string; weekStart: string } | null> {
+  const weekOffChanges = changes.filter((change) => !change.remove && change.dayType === "weekly_off");
+  if (!weekOffChanges.length) return null;
+
+  const weeksByWorker = new Map<string, Set<string>>();
+  for (const change of weekOffChanges) {
+    const key = `${change.workerType}:${change.workerId}`;
+    const weekStart = mondayFor(change.date);
+    const set = weeksByWorker.get(key) ?? new Set<string>();
+    set.add(weekStart);
+    weeksByWorker.set(key, set);
+  }
+
+  const changedByWorkerDate = new Map<string, "working" | "weekly_off" | "removed">();
+  for (const change of changes) {
+    changedByWorkerDate.set(`${change.workerType}:${change.workerId}:${change.date}`, change.remove ? "removed" : change.dayType ?? "working");
+  }
+
+  for (const [key, weekStarts] of weeksByWorker) {
+    const [workerType, workerId] = key.split(":") as [WorkerType, string];
+    for (const weekStart of weekStarts) {
+      const weekEnd = addDaysIso(weekStart, 6);
+      const { data, error } = await db()
+        .from("hr_roster_entries")
+        .select("roster_date, day_type")
+        .eq("company_id", companyId)
+        .eq("plan_id", planId)
+        .eq("worker_type", workerType)
+        .eq("worker_id", workerId)
+        .gte("roster_date", weekStart)
+        .lte("roster_date", weekEnd);
+      if (error) throw new Error(error.message);
+
+      const effectiveDayTypeByDate = new Map<string, "working" | "weekly_off">();
+      for (const row of data ?? []) effectiveDayTypeByDate.set(row.roster_date, row.day_type as "working" | "weekly_off");
+      for (let cursor = weekStart; cursor <= weekEnd; cursor = addDaysIso(cursor, 1)) {
+        const override = changedByWorkerDate.get(`${workerType}:${workerId}:${cursor}`);
+        if (override === "removed") effectiveDayTypeByDate.delete(cursor);
+        else if (override) effectiveDayTypeByDate.set(cursor, override);
+      }
+
+      const weekOffCount = [...effectiveDayTypeByDate.values()].filter((value) => value === "weekly_off").length;
+      if (weekOffCount > 1) return { workerType, workerId, weekStart };
+    }
+  }
+  return null;
 }
 
 export function indiaToday() {
