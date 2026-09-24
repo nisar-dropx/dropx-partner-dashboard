@@ -93,7 +93,7 @@ async function approvalPayload(companyId: string, userIds: string[]) {
 async function preRequestApprovalPayload(companyId: string, userIds: string[]) {
   if (!userIds.length) return [];
   const result = await db().from("hr_expense_claim_request_assignees")
-    .select("id,request_id,assignee_role,status,approver_user_id,hr_expense_claim_requests(id,request_no,purpose,estimated_amount,trip_from,trip_to,notes,status,created_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id))")
+    .select("id,request_id,assignee_role,status,approver_user_id,hr_expense_claim_requests(id,request_no,purpose,purpose_code,estimated_amount,trip_from,trip_to,notes,expected_expenses,status,created_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id))")
     .eq("company_id", companyId).in("approver_user_id", userIds).eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
   const userIdSet = new Set(userIds);
@@ -122,6 +122,14 @@ async function preRequestApprovalPayload(companyId: string, userIds: string[]) {
       status: row.status,
       request: {
         ...request,
+        // The purpose/estimated_amount/notes shown here were previously the
+        // ONLY detail the approver saw for a pre-spend Request - the expense-
+        // head breakdown the requester actually entered on submission
+        // (expected_expenses) was captured but never selected/shown at
+        // approval time. Normalized the same way the requester's own "My
+        // Requests" listing already does (see normalizeExpectedExpenses usage
+        // further down in this file).
+        expected_expenses: normalizeExpectedExpenses(request.expected_expenses),
         requesterName: employee?.full_name ?? contractor?.full_name ?? "Team member",
         requesterCode: employee?.employee_code ?? contractor?.dropx_id ?? ""
       }

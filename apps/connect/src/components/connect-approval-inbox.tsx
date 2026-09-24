@@ -13,6 +13,7 @@ import { ConnectReturnedRosterEditor } from "./connect-returned-roster-editor";
 import { userFacingError } from "@/lib/user-facing-error";
 import { useKeepAliveRefresh } from "@/lib/use-keep-alive-refresh";
 import { expensePolicyMessage, type ExpensePolicyQuote } from "@/lib/reimbursement-policy";
+import { EXPECTED_EXPENSE_KEYS, sumExpectedExpenses, type ExpectedExpenses } from "@/lib/expense-request-form";
 
 type ApprovalJourney = {
   submittedAt: string | null;
@@ -116,6 +117,7 @@ type PreRequestApproval = {
     trip_from?: string | null;
     trip_to?: string | null;
     notes?: string | null;
+    expected_expenses?: ExpectedExpenses | null;
     created_at: string;
     requesterName: string;
     requesterCode: string;
@@ -1843,6 +1845,23 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
                   ) : null}
                   {approval.request.notes ? <div><dt>Notes</dt><dd>{approval.request.notes}</dd></div> : null}
                 </dl>
+                {/* Why the estimated amount is what it is - the expense-head
+                    breakdown the requester entered on submission, previously
+                    captured but never shown to the approver (only the single
+                    total was visible). */}
+                {approval.request.expected_expenses && Object.values(approval.request.expected_expenses).some((amount) => Number(amount) > 0) ? (
+                  <dl className="dx-approval-facts">
+                    {Object.entries(approval.request.expected_expenses)
+                      .filter(([, amount]) => Number(amount) > 0)
+                      .map(([key, amount]) => (
+                        <div key={key}>
+                          <dt>{EXPECTED_EXPENSE_KEYS.find((entry) => entry.key === key)?.label ?? "Expense head"}</dt>
+                          <dd>{money(amount)}</dd>
+                        </div>
+                      ))}
+                    <div><dt>Estimated total</dt><dd>{money(sumExpectedExpenses(approval.request.expected_expenses))}</dd></div>
+                  </dl>
+                ) : null}
                 <ApprovalJourneyCell journey={approval.journey} submittedAt={approval.request.created_at} submittedBy={approval.request.requesterName} currentStep={statusLabel(approval.assignee_role)} />
                 <ApprovalNote id={`pre:${approval.request.id}`} notes={notes} onChange={(value) => setNote(`pre:${approval.request.id}`, value)} placeholder="Required when rejecting" />
                 <ApprovalToolbar
