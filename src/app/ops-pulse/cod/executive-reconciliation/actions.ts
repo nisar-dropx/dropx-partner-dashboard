@@ -13,7 +13,7 @@ import {
 import { requirePagePermission, type AuthorizationContext } from "@/lib/authorization";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { finalizeCodClosure, notifyCodManager } from "@/lib/ops-pulse/cod-day-closure";
-import { addCashEntryException, clearCashEntryExceptionIfAny } from "@/lib/ops-pulse/cash-entry-exceptions";
+import { addCashEntryException, clearCashEntryExceptionIfAny, loadOpenCashEntryExceptions } from "@/lib/ops-pulse/cash-entry-exceptions";
 import { canAccessCodAudit, writeCodAudit } from "@/lib/ops-pulse/cod-audit";
 import { fetchLiabilitySummary, fetchRemittance, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 
@@ -1280,6 +1280,23 @@ export async function confirmDriverReconForDeposit(formData: FormData) {
     });
     revalidatePath(pagePath);
     revalidatePath(publicPagePath);
+
+    // Guard documented at requestCashEntryException's own comment but never actually
+    // enforced here: Step 2 -> Step 3 must stay blocked while any Step 1 "will submit
+    // later" exception is still open for this station-day, regardless of the CIA-pending
+    // check above passing. Without this, driver validation could pass through to Deposit &
+    // summary while an associate's cash was never entered - page.tsx's own server-side
+    // activeStep recompute would eventually bounce the user back on next load, but the
+    // button itself gave no warning and could navigate there first.
+    const openExceptions = await loadOpenCashEntryExceptions(companyId, businessDate, [station.id]);
+    if (openExceptions.error) throw new Error(openExceptions.error);
+    if (openExceptions.rows.length > 0) {
+      const names = openExceptions.rows.map((row) => row.associateName).join(", ");
+      const message = `${openExceptions.rows.length} associate${openExceptions.rows.length === 1 ? "" : "s"} still need${openExceptions.rows.length === 1 ? "s" : ""} their cash entered before continuing: ${names}. Enter their cash on Cash sheet first.`;
+      if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
+      redirectWithFlash({ error: message }, withStep(returnHref, 2));
+    }
+
     const notice = stillPending
       ? "Feedback recorded. Deposit & summary is unlocked; pending Cash In Associate stays visible."
       : "Driver validation cleared. Continue to Deposit & summary.";
