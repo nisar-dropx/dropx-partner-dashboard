@@ -260,36 +260,19 @@ export function DriverReconCashPanel({
   }
 
   return (
-    <div className="driver-recon-cash-panel">
-      <div className="portal-check-progress">
-        <div>
-          <span>Cash recon · Driver validation</span>
-          <strong>{statusLabel}</strong>
-        </div>
-        <div>
-          <span>Pending drivers</span>
-          <strong>{summary ? summary.pendingCount : "—"}</strong>
-        </div>
-        <div>
-          <span>Today CIA pending</span>
-          <strong>{summary ? `₹${currency(summary.pendingAmount)}` : "—"}</strong>
-        </div>
-        <div>
-          <span>Last checked</span>
-          <strong>{loading ? "Checking…" : checkedLabel}</strong>
-        </div>
-      </div>
-
-      <p className="subtle" style={{ marginTop: 10 }}>
-        Today&apos;s Cash In Associate belongs on this page — denomination on the cash sheet does not hide it.
-        If it is still open after counting, record feedback here before Deposit & summary.
+    <div className="driver-recon-cash-panel driver-recon-cash-panel-v2">
+      <p className="subtle driver-recon-intro">
+        Today&apos;s Cash In Associate belongs here — counting denominations on the cash sheet does not clear it.
+        If it is still open, record feedback below before Deposit &amp; summary.
       </p>
-
-      <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <StatusPill status={statusLabel} />
-        <span className="subtle">
-          {payload?.sessionSource ? `Source · ${payload.sessionSource}` : "Uses ageing Cash In Associate for this date"}
-        </span>
+      <div className="driver-recon-status-row">
+        <div className="driver-recon-status-headline">
+          <StatusPill status={statusLabel} />
+          <span className="subtle">
+            {payload?.sessionSource ? `Source · ${payload.sessionSource}` : "Uses ageing Cash In Associate for this date"}
+            {" · Last checked "}{loading ? "Checking…" : checkedLabel}
+          </span>
+        </div>
         <button
           className="button secondary"
           type="button"
@@ -300,12 +283,18 @@ export function DriverReconCashPanel({
         </button>
       </div>
 
+      <div className="driver-recon-stat-strip">
+        <div><span>Drivers checked</span><strong>{summary ? summary.driverCount : "—"}</strong></div>
+        <div><span>Pending drivers</span><strong>{summary ? summary.pendingCount : "—"}</strong></div>
+        <div><span>Today CIA pending</span><strong>{summary ? `₹${currency(summary.pendingAmount)}` : "—"}</strong></div>
+      </div>
+
       {error ? (
         <p className="field-error">{error}</p>
       ) : null}
 
       {summary && summary.pendingRows.length ? (
-        <div className="table-wrap" style={{ marginTop: 12 }}>
+        <div className="table-wrap driver-recon-pending-table">
           <table>
             <thead>
               <tr>
@@ -337,15 +326,15 @@ export function DriverReconCashPanel({
           </table>
         </div>
       ) : summary && !loading ? (
-        <p className="subtle" style={{ marginTop: 10 }}>
+        <p className="driver-recon-all-clear">
           No Cash In Associate pending across {summary.driverCount} driver{summary.driverCount === 1 ? "" : "s"}.
         </p>
       ) : null}
 
       {cashSubmitted && !alreadyUnlocked && summary && !loading ? (
-        <div className="cash-submission-card" style={{ marginTop: 16 }}>
-          <div>
-            <span>Continue to Deposit & summary</span>
+        <div className={`driver-recon-confirm-card ${summary.cleared ? "cleared" : "pending"}`}>
+          <div className="driver-recon-confirm-head">
+            <span>Continue to Deposit &amp; summary</span>
             <strong>{summary.cleared ? "No CIA pending" : `₹${currency(summary.pendingAmount)} still pending`}</strong>
             <small>
               {summary.cleared
@@ -354,7 +343,7 @@ export function DriverReconCashPanel({
             </small>
           </div>
           {!summary.cleared ? (
-            <label style={{ display: "block", marginTop: 12 }}>
+            <label className="driver-recon-feedback-label">
               Feedback
               <textarea
                 className="field"
@@ -366,7 +355,7 @@ export function DriverReconCashPanel({
               />
             </label>
           ) : null}
-          <div className="form-actions" style={{ marginTop: 12 }}>
+          <div className="form-actions driver-recon-confirm-actions">
             <button
               className="button"
               type="button"
@@ -385,8 +374,8 @@ export function DriverReconCashPanel({
       ) : null}
 
       {alreadyUnlocked ? (
-        <p className="subtle" style={{ marginTop: 12 }}>
-          Driver validation is complete. Deposit & summary is unlocked.
+        <p className="driver-recon-all-clear">
+          Driver validation is complete. Deposit &amp; summary is unlocked.
         </p>
       ) : null}
     </div>

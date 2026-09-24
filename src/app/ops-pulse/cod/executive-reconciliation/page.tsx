@@ -471,11 +471,11 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
             </div>
             <div className="panel-body">
               {(activeStep === 2 || activeStep === 3) && stationCashExceptions.length ? (
-                <div className="alert warn" style={{ marginBottom: 14 }}>
+                <div className="alert warn recon-pending-checklist">
                   <strong>
                     Recon pending — {stationCashExceptions.length} associate{stationCashExceptions.length === 1 ? "" : "s"} will submit cash later
                   </strong>
-                  <div className="table-wrap" style={{ marginTop: 8 }}>
+                  <div className="table-wrap">
                     <table>
                       <thead>
                         <tr><th>Associate</th><th>Expected</th><th>Reason</th><th>Raised by</th><th></th></tr>
@@ -487,14 +487,16 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                             <td>{formatAmount(exception.expectedAmount)}</td>
                             <td>{exception.reason}</td>
                             <td>{exception.createdByName ?? "-"} · {formatDateTime(exception.createdAt)}</td>
-                            <td><a href={stepHref(1)}>Enter cash now</a></td>
+                            <td><a className="recon-pending-checklist-link" href={stepHref(1)}>Enter cash now</a></td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                  <p className="subtle" style={{ marginTop: 8, marginBottom: 0 }}>
-                    Deposit & summary and final submission stay locked until every excepted associate&apos;s cash is entered on the cash sheet.
+                  <p className="subtle recon-pending-checklist-note">
+                    {activeStep === 2
+                      ? "Continuing to Deposit & summary stays blocked until every associate above has cash entered on the cash sheet."
+                      : "Deposit & summary and final submission stay locked until every excepted associate’s cash is entered on the cash sheet."}
                   </p>
                 </div>
               ) : null}
@@ -514,7 +516,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
               </div>
               {defaultLocationId ? (
                 <>
-                  <section className={`cash-submission-card ${currentVarianceType} ${activeStep !== 2 ? "reconciliation-step-hidden" : ""}`}>
+                  <section className={`cash-submission-card cash-submission-card-primary ${currentVarianceType} ${activeStep !== 2 ? "reconciliation-step-hidden" : ""}`}>
                     <div>
                       <span>Cash submission</span>
                       <strong>{currentVarianceLabel}</strong>

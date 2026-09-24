@@ -12399,6 +12399,162 @@ tbody tr:hover td {
   font-size: 11px;
 }
 
+/*
+ * Driver validation (Step 2) redesign: page.tsx's "Cash submission" card
+ * (submitting the cash sheet's COD amount, cash-submission-card-primary) and
+ * DriverReconCashPanel's confirm card (driver-recon-confirm-card, a
+ * different action - confirming driver reconciliation) previously used the
+ * identical .cash-submission-card visual treatment stacked directly on top
+ * of each other, reading as one repeated block rather than two distinct
+ * steps. A slightly bolder left accent distinguishes the primary COD
+ * submission action from the driver-recon confirm step below it, without
+ * touching either card's actual submit logic.
+ */
+.cash-submission-card-primary {
+  border-left: 3px solid #16a34a;
+}
+
+.cash-submission-card-primary.short {
+  border-left-color: #dc2626;
+}
+
+.cash-submission-card-primary.excess {
+  border-left-color: #ea580c;
+}
+
+.recon-pending-checklist {
+  margin-bottom: 14px;
+}
+
+.recon-pending-checklist .table-wrap {
+  margin-top: 8px;
+}
+
+.recon-pending-checklist-note {
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+
+.recon-pending-checklist-link {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.driver-recon-cash-panel-v2 {
+  display: grid;
+  gap: 12px;
+}
+
+.driver-recon-intro {
+  margin: 0;
+}
+
+.driver-recon-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.driver-recon-status-headline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.driver-recon-stat-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.driver-recon-stat-strip > div {
+  display: grid;
+  gap: 3px;
+}
+
+.driver-recon-stat-strip span {
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.driver-recon-stat-strip strong {
+  color: #1e293b;
+  font-size: 15px;
+}
+
+.driver-recon-pending-table {
+  margin: 0;
+}
+
+.driver-recon-all-clear {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  background: #f0fdf4;
+  color: #14532d;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.driver-recon-confirm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  background: #f0fdf4;
+}
+
+.driver-recon-confirm-card.pending {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.driver-recon-confirm-head {
+  display: grid;
+  gap: 3px;
+}
+
+.driver-recon-confirm-head > span {
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.driver-recon-confirm-head > strong {
+  color: #172033;
+  font-size: 15px;
+}
+
+.driver-recon-confirm-head > small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.driver-recon-feedback-label {
+  display: block;
+  margin-top: 4px;
+}
+
+.driver-recon-confirm-actions {
+  margin-top: 4px;
+}
+
 .cash-submit-confirm {
   display: flex;
   align-items: center;
