@@ -12968,6 +12968,78 @@ tbody tr:hover td {
 }
 
 /*
+ * "Tech issue" control — visually distinct from .exception-trigger (danger
+ * tone instead of warn) since it represents a blocking technical problem,
+ * not a routine "will submit later" — and opens a modal (photo upload
+ * doesn't fit inline in a table row the way the exception form does).
+ */
+.tech-issue-trigger {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  padding: 5px 11px;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 800;
+  transition: background-color .15s ease, border-color .15s ease;
+}
+
+.tech-issue-trigger:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+.tech-issue-open-badge {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  padding: 5px 11px;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  background: #fef2f2;
+  color: #7f1d1d;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.tech-issue-modal {
+  width: min(480px, calc(100vw - 32px));
+}
+
+.tech-issue-field-label {
+  display: block;
+  margin-top: 10px;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tech-issue-field-label:first-of-type {
+  margin-top: 0;
+}
+
+.tech-issue-field-label .field {
+  margin-top: 4px;
+}
+
+.tech-issue-resolve-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.tech-issue-resolve-cell .field-error {
+  margin: 0;
+  font-size: 11px;
+}
+
+.tech-issue-checklist {
+  margin-top: 10px;
+}
+
+/*
  * Chip layout uses explicit flexbox + a dedicated label span (not a bare text node)
  * so it never depends on grid auto-placement or on beating the pre-existing generic
  * ".cash-breakdown-grid label" rule's specificity — the label text lives in its own

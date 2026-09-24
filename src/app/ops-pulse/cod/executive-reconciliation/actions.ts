@@ -14,6 +14,7 @@ import { requirePagePermission, type AuthorizationContext } from "@/lib/authoriz
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { finalizeCodClosure, notifyCodManager } from "@/lib/ops-pulse/cod-day-closure";
 import { addCashEntryException, clearCashEntryExceptionIfAny, loadOpenCashEntryExceptions } from "@/lib/ops-pulse/cash-entry-exceptions";
+import { loadOpenTechIssues, notifyTechIssueOpened, raiseTechIssue, resolveTechIssue } from "@/lib/ops-pulse/cod-tech-issues";
 import { canAccessCodAudit, writeCodAudit } from "@/lib/ops-pulse/cod-audit";
 import { fetchLiabilitySummary, fetchRemittance, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 
@@ -1297,6 +1298,17 @@ export async function confirmDriverReconForDeposit(formData: FormData) {
       redirectWithFlash({ error: message }, withStep(returnHref, 2));
     }
 
+    // Same guard for open tech issues (not business_date-scoped — a tech issue raised on
+    // an earlier day still blocks today until someone resolves it).
+    const openTechIssues = await loadOpenTechIssues(companyId, [station.id]);
+    if (openTechIssues.error) throw new Error(openTechIssues.error);
+    if (openTechIssues.rows.length > 0) {
+      const names = openTechIssues.rows.map((row) => row.associateName).join(", ");
+      const message = `${openTechIssues.rows.length} associate${openTechIssues.rows.length === 1 ? "" : "s"} still ${openTechIssues.rows.length === 1 ? "has" : "have"} an open tech issue: ${names}. Resolve it before continuing.`;
+      if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
+      redirectWithFlash({ error: message }, withStep(returnHref, 2));
+    }
+
     const notice = stillPending
       ? "Feedback recorded. Deposit & summary is unlocked; pending Cash In Associate stays visible."
       : "Driver validation cleared. Continue to Deposit & summary.";
@@ -1373,6 +1385,121 @@ export async function requestCashEntryException(formData: FormData): Promise<Cas
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "Unable to add cash entry exception.";
+    if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
+    redirectWithFlash({ error: message }, returnHref);
+  }
+}
+
+/**
+ * Tech issue: an associate's cash entry can't be completed because of a
+ * technical problem (device/app/network) rather than the associate simply
+ * being unavailable ("will submit later" -> requestCashEntryException). This
+ * carries forward every day (not just today) until someone resolves it - see
+ * raiseTechIssue/loadOpenTechIssues in cod-tech-issues.ts for why no daily
+ * business_date scoping is used for its open/resolved identity.
+ */
+export async function raiseCodTechIssue(formData: FormData): Promise<CashEntryActionResult | void> {
+  const authorization = await requirePagePermission("cod_executive_reconciliation", "edit");
+  const companyId = requireCompanyId(authorization);
+  const clientResponse = wantsClientResponse(formData);
+  const returnHref = safeReturnHref(formData.get("return_href"));
+  try {
+    if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
+    const businessDate = required(formData.get("business_date"), "Business date");
+    const locationId = required(formData.get("location_id"), "Station");
+    const providerEmployeeId = required(formData.get("provider_employee_id"), "Associate").trim();
+    const associateName = clean(formData.get("associate_name")) || providerEmployeeId;
+    const remarks = required(formData.get("remarks"), "Remarks");
+    const photo = formData.get("photo");
+
+    const station = await stationForInput(companyId, locationId, null);
+    assertLocationAccess(authorization, station.id);
+    await assertClosureEditable(companyId, businessDate, station.id);
+
+    const issue = await raiseTechIssue({
+      companyId,
+      businessDate,
+      locationId: station.id,
+      stationCode: station.station_code,
+      providerEmployeeId,
+      associateName,
+      remarks,
+      photo,
+      createdBy: authorization.userId,
+      createdByName: authorization.fullName || authorization.email
+    });
+
+    await notifyTechIssueOpened({
+      companyId,
+      locationId: station.id,
+      stationCode: station.station_code,
+      associateName,
+      remarks
+    }).catch((error) => {
+      // Notifying the reporting manager must never block raising the issue itself.
+      console.error("raiseCodTechIssue: notifyTechIssueOpened failed", error instanceof Error ? error.message : error);
+    });
+
+    await writeCodAudit({
+      action: "Tech issue raised",
+      after: { provider_employee_id: providerEmployeeId, associate_name: associateName, remarks, tech_issue_id: issue.id },
+      authorization,
+      businessDate,
+      locationId: station.id,
+      providerEmployeeId,
+      associateName,
+      stationCode: station.station_code
+    });
+
+    revalidatePath(pagePath);
+    revalidatePath(publicPagePath);
+    const notice = `Tech issue recorded for ${associateName}. Their cash entry stays on hold until it is resolved — this carries forward to every day until then.`;
+    const nextHref = withStep(returnHref, 2);
+    if (clientResponse) return { ok: true, notice, nextHref } satisfies CashEntryActionResult;
+    redirectWithFlash({ notice }, nextHref);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    const message = error instanceof Error ? error.message : "Unable to record the tech issue.";
+    if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
+    redirectWithFlash({ error: message }, returnHref);
+  }
+}
+
+export async function resolveCodTechIssue(formData: FormData): Promise<CashEntryActionResult | void> {
+  const authorization = await requirePagePermission("cod_executive_reconciliation", "edit");
+  const companyId = requireCompanyId(authorization);
+  const clientResponse = wantsClientResponse(formData);
+  const returnHref = safeReturnHref(formData.get("return_href"));
+  try {
+    const issueId = required(formData.get("tech_issue_id"), "Tech issue");
+    const locationId = required(formData.get("location_id"), "Station");
+    const station = await stationForInput(companyId, locationId, null);
+    assertLocationAccess(authorization, station.id);
+
+    await resolveTechIssue({
+      companyId,
+      id: issueId,
+      resolvedBy: authorization.userId,
+      resolvedByName: authorization.fullName || authorization.email
+    });
+
+    await writeCodAudit({
+      action: "Tech issue resolved",
+      after: { tech_issue_id: issueId },
+      authorization,
+      businessDate: todayKolkata(),
+      locationId: station.id,
+      stationCode: station.station_code
+    });
+
+    revalidatePath(pagePath);
+    revalidatePath(publicPagePath);
+    const notice = "Tech issue resolved. The attached photo has been removed.";
+    if (clientResponse) return { ok: true, notice } satisfies CashEntryActionResult;
+    redirectWithFlash({ notice }, returnHref);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    const message = error instanceof Error ? error.message : "Unable to resolve the tech issue.";
     if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
     redirectWithFlash({ error: message }, returnHref);
   }

@@ -28,6 +28,7 @@ import {
 import { LiveCacheRefresh } from "./live-cache-refresh";
 import { loadCodDayClosures, loadCodManagerNotifications } from "@/lib/ops-pulse/cod-day-closure";
 import { loadOpenCashEntryExceptions } from "@/lib/ops-pulse/cash-entry-exceptions";
+import { loadOpenTechIssues } from "@/lib/ops-pulse/cod-tech-issues";
 import { canAccessCodAudit, loadCodAuditRows } from "@/lib/ops-pulse/cod-audit";
 import { PortalCheckProgress } from "./portal-check-progress";
 import { DriverReconCashPanel } from "./driver-recon-cash-panel";
@@ -43,7 +44,8 @@ import { CashCollectionWorkspace } from "./cash-collection-workspace";
 import {
   CashStepGateProvider,
   ContinueToDriverValidation,
-  DriverValidationNavLink
+  DriverValidationNavLink,
+  ResolveTechIssueButton
 } from "./cash-step-gate";
 import { SavedCashList } from "./saved-cash-list";
 
@@ -194,7 +196,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
   const cashReconReady = isCashReconWorkerConfigured();
   const automationReady = cashReconReady && isSupabaseAdminConfigured;
   const auditAllowed = canAccessCodAudit(authorization);
-  const [closures, managerNotifications, auditRows, portalRunsResult, cashEntryExceptionsResult] = await Promise.all([
+  const [closures, managerNotifications, auditRows, portalRunsResult, cashEntryExceptionsResult, techIssuesResult] = await Promise.all([
     loadCodDayClosures(companyId, result.businessDate, result.locations.map((location) => location.id)),
     loadCodManagerNotifications(companyId, result.locations.map((location) => location.id)),
     auditAllowed
@@ -204,7 +206,8 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
       checkDate: result.businessDate,
       locationId: defaultLocationId
     }),
-    loadOpenCashEntryExceptions(companyId, result.businessDate, result.locations.map((location) => location.id))
+    loadOpenCashEntryExceptions(companyId, result.businessDate, result.locations.map((location) => location.id)),
+    loadOpenTechIssues(companyId, result.locations.map((location) => location.id))
   ]);
   // Open "will submit later" exceptions for this station-day. Step 1 -> 2 can proceed with
   // these open; Step 2 -> 3 and final submission stay blocked until they clear (auto-cleared
@@ -212,6 +215,10 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
   const stationCashExceptions = cashEntryExceptionsResult.rows.filter((row) => row.locationId === defaultLocationId);
   const exceptedProviderIds = new Set(stationCashExceptions.map((row) => row.providerEmployeeId.trim().toUpperCase()));
   const allCashEntriesResolved = stationCashExceptions.length === 0;
+  // Open tech issues for this station — NOT scoped to today's business_date, so an issue
+  // raised on an earlier day still carries forward and blocks Step 2 -> 3 today.
+  const stationTechIssues = techIssuesResult.rows.filter((row) => row.locationId === defaultLocationId);
+  const openTechIssueProviderIds = new Set(stationTechIssues.map((row) => row.providerEmployeeId.trim().toUpperCase()));
   const driverRun = portalRunsResult.rows.find((run) => run.check_type === "driver_reconciliation");
   const depositRun = portalRunsResult.rows.find((run) => run.check_type === "prepared_deposit");
   const hasActivePortalCheck = [driverRun, depositRun].some((run) =>
@@ -372,6 +379,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
         <CashStepGateProvider
           initialRequired={initialRequiredAssociates}
           initialExceptedProviderIds={Array.from(exceptedProviderIds)}
+          initialOpenTechIssueProviderIds={Array.from(openTechIssueProviderIds)}
           mode={cashReconReady ? "cash-recon" : "legacy"}
           savedCount={savedRows.length}
           savedEntries={savedRows.map((row) => ({
@@ -497,6 +505,46 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                     {activeStep === 2
                       ? "Continuing to Deposit & summary stays blocked until every associate above has cash entered on the cash sheet."
                       : "Deposit & summary and final submission stay locked until every excepted associate’s cash is entered on the cash sheet."}
+                  </p>
+                </div>
+              ) : null}
+              {(activeStep === 2 || activeStep === 3) && stationTechIssues.length ? (
+                <div className="alert danger recon-pending-checklist tech-issue-checklist">
+                  <strong>
+                    Tech issue — {stationTechIssues.length} associate{stationTechIssues.length === 1 ? "" : "s"} on hold
+                  </strong>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr><th>Associate</th><th>Opened</th><th>Remarks</th><th>Raised by</th><th>Photo</th><th></th></tr>
+                      </thead>
+                      <tbody>
+                        {stationTechIssues.map((issue) => (
+                          <tr key={issue.id}>
+                            <td><strong>{issue.associateName}</strong></td>
+                            <td>{issue.openedBusinessDate}</td>
+                            <td>{issue.remarks}</td>
+                            <td>{issue.createdByName ?? "-"} · {formatDateTime(issue.createdAt)}</td>
+                            <td>
+                              {issue.photoStoragePath ? (
+                                <a className="recon-pending-checklist-link" href={`/api/ops-pulse/cod/tech-issues/${issue.id}/photo`} target="_blank" rel="noreferrer">View photo</a>
+                              ) : "—"}
+                            </td>
+                            <td>
+                              {permission.canEdit ? (
+                                <ResolveTechIssueButton techIssueId={issue.id} locationId={defaultLocationId ?? issue.locationId} returnHref={returnHref} />
+                              ) : null}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="subtle recon-pending-checklist-note">
+                    {activeStep === 2
+                      ? "Continuing to Deposit & summary stays blocked until every tech issue above is resolved."
+                      : "Deposit & summary and final submission stay locked until every tech issue above is resolved."}
+                    {" "}This carries forward every day until resolved — the station&apos;s reporting manager has been notified.
                   </p>
                 </div>
               ) : null}

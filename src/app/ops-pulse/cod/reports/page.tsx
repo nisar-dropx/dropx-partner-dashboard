@@ -35,6 +35,7 @@ import {
   type CodDayClosure
 } from "@/lib/ops-pulse/cod-day-closure";
 import { isSupabaseAdminConfigured } from "@/lib/supabase-admin";
+import { loadTechIssuesForReport } from "@/lib/ops-pulse/cod-tech-issues";
 
 type SearchParams = {
   client?: string;
@@ -303,7 +304,17 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
   // To date filter when set, otherwise yesterday (the latest day that should be fully closed).
   const focusDate = toDate || yesterday;
 
-  const [closuresResult, cashActivityResult] = await Promise.all([
+  // Tech-issue history range: default to the last 30 days ending today when no
+  // explicit From/To filter is set, so "Open tech issues" doesn't require a date
+  // filter to show anything useful (an issue can be open for many days).
+  const techIssueFromDate = fromDate || (() => {
+    const date = new Date(`${yesterday}T00:00:00Z`);
+    date.setUTCDate(date.getUTCDate() - 29);
+    return date.toISOString().slice(0, 10);
+  })();
+  const techIssueToDate = toDate || yesterday;
+
+  const [closuresResult, cashActivityResult, techIssuesResult] = await Promise.all([
     selectedClient === "flipkart"
       ? Promise.resolve({ rows: [] as CodDayClosure[], error: null as string | null })
       // finalOnly: false — station-day register needs to show in-progress stations too,
@@ -314,8 +325,10 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
           locationId: locationFilter || undefined,
           finalOnly: false
         }),
-    loadCodCashActivity(companyId, scopedLocationIds, focusDate)
+    loadCodCashActivity(companyId, scopedLocationIds, focusDate),
+    loadTechIssuesForReport(companyId, scopedLocationIds, techIssueFromDate, techIssueToDate)
   ]);
+  const openTechIssues = techIssuesResult.rows.filter((row) => row.status === "Open");
 
   const setupError = submissionsResult.error && isMissingCodSetup({ message: submissionsResult.error })
     ? submissionsResult.error
@@ -515,6 +528,53 @@ export default async function CodReportsPage({ searchParams }: { searchParams?: 
             <div className="metric-card"><span>Verified</span><strong>{verified}</strong><small>Matched / portal verified</small></div>
             <div className="metric-card"><span>Issues</span><strong>{issues}</strong><small>Short / Excess / Rejected</small></div>
             <div className="metric-card"><span>ER vs deposited</span><strong>{formatAmount(varianceTotal)}</strong><small>Deposited − ER collected</small></div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <h2>Open tech issues</h2>
+                <p className="subtle">
+                  Cash entries on hold for a technical problem, visible here for every station in scope — carries forward
+                  from the day it was raised until resolved. Remarks and the attached photo are visible below.
+                </p>
+              </div>
+              <span className="count-badge">{openTechIssues.length} open</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Station</th>
+                    <th>Associate</th>
+                    <th>Opened</th>
+                    <th>Remarks</th>
+                    <th>Raised by</th>
+                    <th>Photo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {openTechIssues.length ? openTechIssues.map((issue) => (
+                    <tr key={issue.id}>
+                      <td><strong>{issue.stationCode}</strong></td>
+                      <td>{issue.associateName}</td>
+                      <td>{formatDate(issue.openedBusinessDate)}</td>
+                      <td>{issue.remarks}</td>
+                      <td>{issue.createdByName ?? "-"} · {formatDateTime(issue.createdAt)}</td>
+                      <td>
+                        {issue.photoStoragePath ? (
+                          <a href={`/api/ops-pulse/cod/tech-issues/${issue.id}/photo`} rel="noreferrer" target="_blank">View</a>
+                        ) : (
+                          <span className="subtle">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr><td className="empty-cell" colSpan={6}>No open tech issues in the current scope.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </section>
 
           <section className="panel">

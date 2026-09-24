@@ -25,3 +25,13 @@ export async function requestCashEntryException(formData: FormData): Promise<Cas
   const actions = await import("./actions");
   return actions.requestCashEntryException(formData);
 }
+
+export async function raiseCodTechIssue(formData: FormData): Promise<CashEntryActionResult | void> {
+  const actions = await import("./actions");
+  return actions.raiseCodTechIssue(formData);
+}
+
+export async function resolveCodTechIssue(formData: FormData): Promise<CashEntryActionResult | void> {
+  const actions = await import("./actions");
+  return actions.resolveCodTechIssue(formData);
+}
