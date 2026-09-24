@@ -5,6 +5,7 @@ import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { getWheelseyeAccessToken } from "@/lib/wheelseye";
+import { saveDailyWheelseyeKm } from "@/lib/fleet/gps-storage";
 import { loadWheelseyeMovement } from "@/lib/wheelseye-history";
 
 type FuelProvider = "IOC" | "BPCL";
@@ -225,15 +226,7 @@ async function syncWheelseyeKm(rows: Array<{ vehicle_no: string; transaction_dat
   for (const row of uniquePairs) {
     try {
       const movement = await loadWheelseyeMovement(token, row.vehicle_no, row.transaction_date);
-      await supabaseAdmin.from("fleet_daily_km").upsert({
-        company_id: companyId,
-        vehicle_no: row.vehicle_no,
-        movement_date: row.transaction_date,
-        km: movement.summary.km,
-        point_count: movement.summary.pointCount,
-        source: "wheelseye",
-        calculated_at: new Date().toISOString()
-      }, { onConflict: "vehicle_no,movement_date,source" });
+      await saveDailyWheelseyeKm(companyId, row.vehicle_no, row.transaction_date, movement.summary);
     } catch {
       // Fuel import should not fail when one vehicle has no WheelEye movement for that day.
     }

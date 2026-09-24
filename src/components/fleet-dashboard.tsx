@@ -132,6 +132,10 @@ type RouteHistory = {
     movingMinutes: number;
     pointCount: number;
     lateNight: boolean;
+    distanceReliable?: boolean;
+    quality?: string;
+    qualityReason?: string;
+    rawKm?: number;
   };
 };
 
@@ -1752,7 +1756,9 @@ function TrackingView({
         ) : null}
         {route?.summary ? (
           <div className="fleet-stat-list">
-            <Stat label="Route KM" value={formatNumber(route.summary.km)} />
+            <Stat label="Route KM" value={route.summary.distanceReliable === false ? "Needs review" : formatNumber(route.summary.km)} />
+            {route.summary.quality === "filtered" ? <Stat label="GPS quality" value="Filtered" /> : null}
+            {route.summary.qualityReason ? <p className="fleet-empty small">{route.summary.qualityReason}</p> : null}
             <Stat label="Max Speed" value={`${formatNumber(route.summary.maxSpeed)} km/h`} />
             <Stat label="Moving Minutes" value={formatNumber(route.summary.movingMinutes)} />
             <Stat label="Points" value={formatNumber(route.summary.pointCount)} />

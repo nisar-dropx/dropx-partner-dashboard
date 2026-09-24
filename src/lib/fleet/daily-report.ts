@@ -1,11 +1,11 @@
 export type ReportVehicle = { vehicle_no: string; station_code: string; model: string; fuel_type: string; status?: string | null };
-export type KmRecord = { vehicle_no: string; movement_date: string; km: number | string | null; source: string; point_count: number | null; calculated_at: string; review_status?: string; raw_km?: number | string | null };
+export type KmRecord = { vehicle_no: string; movement_date: string; km: number | string | null; source: string; point_count: number | null; calculated_at: string; review_status?: string; raw_km?: number | string | null; accepted_point_count?: number; rejected_point_count?: number; stationary_point_count?: number; algorithm_version?: string };
 export type FuelRecord = { vehicle_no: string; transaction_date: string; fuel_quantity: number | string; fuel_amount: number | string; provider: string };
 export type DailyFleetRow = ReportVehicle & {
   date: string; km: number | null; litres: number | null; fuelAmount: number | null;
   mileage: number | null; costPerKm: number | null; fuelTransactions: number;
   distanceSource: string | null; pointCount: number | null; refreshedAt: string | null;
-  fuelSources: string[]; rawKm: number | null; dataStatus: 'gps_review' | 'ready' | 'gps_missing' | 'fuel_missing' | 'not_applicable'; provisional: boolean;
+  fuelSources: string[]; rawKm: number | null; gpsQuality: string | null; acceptedPoints: number | null; rejectedPoints: number | null; stationaryPoints: number | null; dataStatus: 'gps_review' | 'ready' | 'gps_missing' | 'fuel_missing' | 'not_applicable'; provisional: boolean;
 };
 export type DailyFleetReport = {
   from: string; to: string; generatedAt: string; rows: DailyFleetRow[]; vehicles: ReportVehicle[];
@@ -68,6 +68,7 @@ export function buildDailyFleetRows(vehicles: ReportVehicle[], kmRows: KmRecord[
       fuelTransactions: fuel?.count ?? 0, distanceSource: distance?.source ?? null,
       pointCount: distance?.point_count ?? null, refreshedAt: distance?.calculated_at ?? null,
       fuelSources: [...(fuel?.providers ?? [])].sort(), rawKm: distance?.raw_km == null ? null : Number(distance.raw_km),
+      gpsQuality: distance?.review_status ?? null, acceptedPoints: distance?.accepted_point_count ?? null, rejectedPoints: distance?.rejected_point_count ?? null, stationaryPoints: distance?.stationary_point_count ?? null,
       dataStatus: distance?.review_status === 'needs_review' ? 'gps_review' as const : km === null ? 'gps_missing' as const : !liquidFuel ? 'not_applicable' as const : !fuel || fuel.litres <= 0 ? 'fuel_missing' as const : 'ready' as const,
       provisional: date === today }];
   }));
@@ -90,8 +91,8 @@ export function dailyFleetCsv(rows: DailyFleetRow[]) {
   };
   const number = (value: number | null) => value === null ? '' : Number(value.toFixed(2));
   const data = [
-    ['Date (IST)', 'Vehicle', 'Current station', 'Model', 'Fuel type', 'Distance (km)', 'Fuel purchased (L)', 'Fuel spend (INR)', 'Estimated km/L (distance / fuel purchased)', 'Fuel cost/km (INR)', 'Fuel transactions', 'Data status', 'Day status', 'Distance source', 'GPS points', 'GPS refreshed at', 'Fuel providers'],
-    ...rows.map(row => [row.date, row.vehicle_no, row.station_code, row.model, row.fuel_type, number(row.km), number(row.litres), number(row.fuelAmount), number(row.mileage), number(row.costPerKm), row.fuelTransactions, row.dataStatus === 'gps_review' ? 'GPS needs review' : row.dataStatus === 'gps_missing' ? 'Distance unavailable' : row.dataStatus === 'fuel_missing' ? 'No fuel recorded' : row.dataStatus === 'not_applicable' ? 'Km/L not applicable' : 'Distance + fuel available', row.provisional ? 'In progress' : 'Completed day', row.distanceSource, row.pointCount, row.refreshedAt, row.fuelSources.join(', ')])
+    ['Date (IST)', 'Vehicle', 'Current station', 'Model', 'Fuel type', 'Distance (km)', 'Fuel purchased (L)', 'Fuel spend (INR)', 'Estimated km/L (distance / fuel purchased)', 'Fuel cost/km (INR)', 'Fuel transactions', 'Data status', 'Day status', 'Distance source', 'GPS points', 'GPS refreshed at', 'Fuel providers', 'GPS quality', 'Raw GPS distance (km, before filtering)', 'Moving/accepted GPS points', 'Invalid/outlier GPS points', 'Stationary GPS points'],
+    ...rows.map(row => [row.date, row.vehicle_no, row.station_code, row.model, row.fuel_type, number(row.km), number(row.litres), number(row.fuelAmount), number(row.mileage), number(row.costPerKm), row.fuelTransactions, row.dataStatus === 'gps_review' ? 'GPS needs review' : row.dataStatus === 'gps_missing' ? 'Distance unavailable' : row.dataStatus === 'fuel_missing' ? 'No fuel recorded' : row.dataStatus === 'not_applicable' ? 'Km/L not applicable' : 'Distance + fuel available', row.provisional ? 'In progress' : 'Completed day', row.distanceSource, row.pointCount, row.refreshedAt, row.fuelSources.join(', '), row.gpsQuality === 'auto_corrected' ? 'GPS filtered' : row.gpsQuality === 'needs_review' ? 'GPS needs review' : '', number(row.rawKm), row.acceptedPoints, row.rejectedPoints, row.stationaryPoints])
   ];
   return '\uFEFF' + data.map(row => row.map(cell).join(',')).join('\r\n');
 }
