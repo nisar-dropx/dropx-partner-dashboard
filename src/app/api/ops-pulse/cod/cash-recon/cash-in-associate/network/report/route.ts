@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { getAuthorization } from "@/lib/authorization";
+import { requireCompanyId } from "@/lib/company-scope";
 import { requireCiaApi } from "@/lib/ops-pulse/cia-access";
+import { loadCodLocations } from "@/lib/ops-pulse/cod";
 import { fetchCiaNetwork } from "@/lib/ops-pulse/cash-recon-worker";
 import { workbookResponse } from "@/lib/report-workbook";
 
@@ -13,7 +16,19 @@ export async function GET() {
     if (denied) return denied;
 
     const payload = await fetchCiaNetwork();
-    const rows = payload.stations.map((station) => ({
+    let stations = payload.stations;
+
+    // Same scoping as the page/network endpoint — do not let a location-
+    // scoped user download every station's numbers via this report either.
+    const authorization = await getAuthorization();
+    if (authorization && !authorization.hasAllLocationAccess) {
+      const companyId = requireCompanyId(authorization);
+      const { locations } = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess);
+      const scopedStationCodes = new Set(locations.map((location) => String(location.station_code ?? "").trim().toUpperCase()));
+      stations = stations.filter((station) => scopedStationCodes.has(String(station.stationCode ?? "").trim().toUpperCase()));
+    }
+
+    const rows = stations.map((station) => ({
       Station: station.stationCode,
       Status: station.status,
       Error: station.error ?? "",

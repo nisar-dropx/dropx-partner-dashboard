@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
 import { requireCompanyId } from "@/lib/company-scope";
@@ -20,6 +21,24 @@ export default async function CashInAssociateStationPage({
   const rawCode = String(params.stationCode ?? params.station ?? "").trim();
   const stationCode = decodeURIComponent(rawCode).trim().toUpperCase();
 
+  // Resolve the requested station against the viewer's OWN scoped location list
+  // first, before fetching any CIA data for it — loadCodLocations already
+  // filters to authorization.locationScopeIds unless hasAllLocationAccess, so a
+  // station outside that list simply won't be found here, and previously that
+  // silently fell through to still fetching + displaying its CIA data anyway.
+  // A location-scoped user could browse any station's cash data by URL.
+  const locationsResult = await loadCodLocations(
+    companyId,
+    authorization.locationScopeIds,
+    authorization.hasAllLocationAccess
+  );
+  const location = locationsResult.locations.find(
+    (entry: CodLocationRow) => String(entry.station_code ?? "").trim().toUpperCase() === stationCode
+  );
+  if (stationCode && !location) {
+    redirect("/unauthorized?page=cod_cash_in_associate&action=access");
+  }
+
   let error: string | null = null;
   let payload: Awaited<ReturnType<typeof fetchCiaStation>> | null = null;
 
@@ -39,14 +58,6 @@ export default async function CashInAssociateStationPage({
   }
 
   const displayCode = String(payload?.stationCode || stationCode || "").trim().toUpperCase();
-  const locationsResult = await loadCodLocations(
-    companyId,
-    authorization.locationScopeIds,
-    authorization.hasAllLocationAccess
-  );
-  const location = locationsResult.locations.find(
-    (entry: CodLocationRow) => String(entry.station_code ?? "").trim().toUpperCase() === displayCode
-  );
   const stationName = String(location?.station_name ?? "").trim();
   const stationTitle = location
     ? (location.station_name

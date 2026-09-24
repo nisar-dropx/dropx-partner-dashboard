@@ -96,7 +96,12 @@ export function CiaNetworkClient({
   windowTo,
   runStatus,
   initialRefreshProgress = null,
-  backgroundCron = null
+  backgroundCron = null,
+  // Network-wide "Refresh all stations" kicks off a refresh across every
+  // station in the company, not just the viewer's own — only shown to
+  // users with unrestricted location access. A location-scoped user still
+  // gets the per-row "Refresh" for their own station(s) below.
+  hasAllLocationAccess = true
 }: {
   stations: CiaStationRow[];
   asOfDate: string;
@@ -105,6 +110,7 @@ export function CiaNetworkClient({
   runStatus?: string | null;
   initialRefreshProgress?: CiaRefreshProgress | null;
   backgroundCron?: CiaBackgroundCron | null;
+  hasAllLocationAccess?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -410,17 +416,19 @@ export function CiaNetworkClient({
               {pending && !refreshingAll && !refreshingStation ? <Loader2 size={16} className="cia-spin" /> : <RefreshCw size={16} />}
               Update numbers
             </button>
-            <button
-              type="button"
-              className="button cia-refresh-all"
-              disabled={busy}
-              onClick={() => void handleFullRefresh()}
-            >
-              {refreshingAll ? <Loader2 size={16} className="cia-spin" /> : <RefreshCw size={16} />}
-              {refreshingAll
-                ? (refreshActive ? "Refreshing…" : "Starting…")
-                : "Refresh all stations"}
-            </button>
+            {hasAllLocationAccess ? (
+              <button
+                type="button"
+                className="button cia-refresh-all"
+                disabled={busy}
+                onClick={() => void handleFullRefresh()}
+              >
+                {refreshingAll ? <Loader2 size={16} className="cia-spin" /> : <RefreshCw size={16} />}
+                {refreshingAll
+                  ? (refreshActive ? "Refreshing…" : "Starting…")
+                  : "Refresh all stations"}
+              </button>
+            ) : null}
           </div>
         </div>
       </section>
