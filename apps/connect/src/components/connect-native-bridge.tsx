@@ -72,18 +72,28 @@ function pushPlugin(): PushNotificationsPlugin | null {
  * 1. Station location tracking is ON (People → Location Attendance master), and
  * 2. Worker has punched IN at least once today (first biometric punch).
  *
- * Keeps sending even after punch-out, until LOCATION_TRACKING_MS (9h) has passed since that
- * first punch-in — matching the server's own cutoff (see location-heartbeat/route.ts, which
- * silently discards anything sent past that window). trackingWindowElapsed is computed
- * server-side, in the punch endpoint's own response, off that same constant, rather than
- * duplicating the 9-hour number here where it could drift out of sync. Previously this only
- * checked whether inTime existed at all (never how long ago), so the native background service
- * kept running — draining GPS/battery and showing the "Active" notification — indefinitely past
- * that 9-hour window even though every sample it sent was already being discarded server-side.
+ * Stops as soon as EITHER of these hits, whichever comes first:
+ * - trackingWindowElapsed: LOCATION_TRACKING_MS (9h) has passed since the first punch-in today —
+ *   matches the server's own cutoff (see location-heartbeat/route.ts, which silently discards
+ *   anything sent past that window). Computed server-side in the punch endpoint's response, off
+ *   that same constant, rather than duplicating the 9-hour number here where it could drift out
+ *   of sync.
+ * - !shift.open: a FINAL punch-out is recorded for today — the same state that produces the
+ *   "Checkout updated · <status>" / "Punch-out captured" notification (see
+ *   attendance-punch-notice.ts). loadOpenShift() (attendance-gps.ts) only sets open=false when
+ *   the latest punch is a closing punch-out with no later punch-in, so a worker who punches out
+ *   and back in again mid-day correctly keeps tracking running — open flips back to true on that
+ *   next punch-in — rather than stopping on every punch-out regardless of whether it's final.
+ *
+ * Previously this only checked whether inTime existed at all (neither how long ago nor whether
+ * the shift had actually closed), so the native background service kept running — draining
+ * GPS/battery and showing the "Active" notification — long after either signal should have
+ * stopped it, in one reported case well past a shift the worker had already fully checked out
+ * of with HRMS attendance flags cleared.
  */
 function shouldRunBackgroundTracking(payload: {
   attendanceSettings?: { locationTrackingEnabled?: boolean; integrityCheckIntervalSeconds?: number };
-  shift?: { inTime?: string | null; trackingWindowElapsed?: boolean };
+  shift?: { inTime?: string | null; open?: boolean; trackingWindowElapsed?: boolean };
 } | null): AttendanceTrackingState {
   // Admin-editable at /attendance/integrity (hr_company_settings.integrity_check_interval_seconds);
   // 30s here is only the fallback if the server payload is missing/malformed, matching that
@@ -104,6 +114,9 @@ function shouldRunBackgroundTracking(payload: {
     return { shouldTrack: false, integrityCheckIntervalSeconds };
   }
   if (payload?.shift?.trackingWindowElapsed) {
+    return { shouldTrack: false, integrityCheckIntervalSeconds };
+  }
+  if (payload?.shift?.open === false) {
     return { shouldTrack: false, integrityCheckIntervalSeconds };
   }
 
