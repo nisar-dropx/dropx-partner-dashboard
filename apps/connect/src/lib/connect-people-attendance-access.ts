@@ -91,23 +91,58 @@ export async function loadConnectAccessibleWorkforceIds(account: ConnectAccount,
   if (!scope.canFinalize) {
     return { employeeIds: new Set<string>(), contractorIds: new Set<string>(), allowAll: false };
   }
-  if (scope.allLocations) {
-    // Company grant — same as People allLocations (full workforce in scope).
-    return { employeeIds: null as Set<string> | null, contractorIds: null as Set<string> | null, allowAll: true };
-  }
-  if (!scope.locationIds.length) {
+  if (!scope.allLocations && !scope.locationIds.length) {
     return { employeeIds: new Set<string>(), contractorIds: new Set<string>(), allowAll: false };
   }
 
-  const [employees, contractors] = await Promise.all([
-    db().from("employees").select("id").eq("company_id", account.companyId).eq("is_active", true).is("deleted_at", null).in("location_id", scope.locationIds),
-    db().from("contractors").select("id").eq("company_id", account.companyId).eq("is_active", true).is("deleted_at", null).in("location_id", scope.locationIds)
+  // Match People's source registers even for company-wide reviewers. An all-
+  // location grant must never include Workforce requests or deleted profiles.
+  // Inactive (but not deleted) People profiles retain historical HR requests.
+  const loadWorkers = async (table: "employees" | "contractors", workerType: "employee" | "contractor") => {
+    const rows: Array<{ id: string; location_id: string | null }> = [];
+    for (let from = 0; ; from += 1000) {
+      const result = await db().from(table).select("id,location_id")
+        .eq("company_id", account.companyId).is("deleted_at", null)
+        .order("id").range(from, from + 999);
+      if (result.error) throw new Error(result.error.message);
+      rows.push(...(result.data ?? []));
+      if ((result.data ?? []).length < 1000) break;
+    }
+    if (scope.allLocations) return new Set(rows.map(row => row.id));
+    const locations = new Map(rows.map(row => [row.id, row.location_id]));
+    const workerColumn = workerType === "employee" ? "employee_id" : "contractor_id";
+    const today = todayInIndia();
+    for (let from = 0; from < rows.length; from += 100) {
+      const engagements = await db().from("hr_engagements")
+        .select("id,employee_id,contractor_id").eq("company_id", account.companyId)
+        .eq("worker_type", workerType).eq("status", "active")
+        .in(workerColumn, rows.slice(from, from + 100).map(row => row.id));
+      if (engagements.error) throw new Error(engagements.error.message);
+      const items = engagements.data ?? [];
+      if (!items.length) continue;
+      const assignments = await db().from("hr_work_assignments")
+        .select("engagement_id,location_id,effective_from").eq("company_id", account.companyId)
+        .eq("is_primary", true).in("engagement_id", items.map(row => row.id))
+        .lte("effective_from", today).or(`effective_to.is.null,effective_to.gte.${today}`)
+        .order("effective_from", { ascending: false });
+      if (assignments.error) throw new Error(assignments.error.message);
+      const workerByEngagement = new Map(items.map(row => [row.id, row[workerColumn]]));
+      const seen = new Set<string>();
+      for (const assignment of assignments.data ?? []) {
+        const id = workerByEngagement.get(assignment.engagement_id);
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        locations.set(id, assignment.location_id ?? locations.get(id) ?? null);
+      }
+    }
+    return new Set(rows.filter(row => scope.locationIds.includes(locations.get(row.id) ?? "")).map(row => row.id));
+  };
+  const [employeeIds, contractorIds] = await Promise.all([
+    loadWorkers("employees", "employee"), loadWorkers("contractors", "contractor")
   ]);
-  if (employees.error) throw new Error(employees.error.message);
-  if (contractors.error) throw new Error(contractors.error.message);
   return {
-    employeeIds: new Set((employees.data ?? []).map((row) => row.id)),
-    contractorIds: new Set((contractors.data ?? []).map((row) => row.id)),
+    employeeIds,
+    contractorIds,
     allowAll: false
   };
 }
@@ -117,6 +152,7 @@ export function connectWorkforceMatches(
   profileType: string,
   profileId: string
 ) {
+  if (profileType !== "employee" && profileType !== "contractor") return false;
   if (access.allowAll) return true;
   if (profileType === "employee") return Boolean(access.employeeIds?.has(profileId));
   if (profileType === "contractor") return Boolean(access.contractorIds?.has(profileId));
