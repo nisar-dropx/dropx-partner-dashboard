@@ -179,6 +179,7 @@ async function loadDailyKm(companyId: string) {
     .from("fleet_daily_km")
     .select("vehicle_no, movement_date, km")
     .eq("company_id", companyId)
+    .neq("review_status", "needs_review")
     .order("movement_date", { ascending: false })
     .limit(5000);
 

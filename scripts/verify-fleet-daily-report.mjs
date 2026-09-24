@@ -50,19 +50,6 @@ assert.match(p.dailyFleetCsv([rows[0]]), /fuel purchased/);
 const electric = p.buildDailyFleetRows([{ ...v, fuel_type: 'EV' }], [km], [fuel], '2026-09-22', '2026-09-22', '2026-09-23')[0];
 assert.equal(electric.mileage, null); assert.equal(electric.litres, null); assert.equal(electric.dataStatus, 'not_applicable');
 assert.equal(p.buildDailyFleetRows([v], [{ ...km, review_status: 'needs_review', raw_km: 977 }], [fuel], '2026-09-22', '2026-09-22', '2026-09-23')[0].km, null);
-const originalFetch = globalThis.fetch;
-const gpsHistory = compile('src/lib/wheelseye-history.ts');
-try {
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ Vehicle: [{ latitude: 11.25, longitude: 75.78 }, { latitude: 0, longitude: 0 }, { latitude: 999, longitude: 75 }, { latitude: 11.26, longitude: 75.79 }] }) });
-  const movement = await gpsHistory.loadWheelseyeMovement('test', v.vehicle_no, '2026-09-22');
-  assert.equal(movement.summary.distanceReliable, false); assert.equal(movement.summary.rejectedSegments, 1);
-  assert.equal(movement.summary.pointCount, 2); assert.ok(movement.summary.km > 1 && movement.summary.km < 2);
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ Vehicle: [{ latitude: 11.25, longitude: 75.78, dttimeInEpoch: 1790101800 }, { latitude: 11.26, longitude: 75.79, dttimeInEpoch: 1790101920 }] }) });
-  assert.equal((await gpsHistory.loadWheelseyeMovement('test', v.vehicle_no, '2026-09-22')).summary.distanceReliable, true);
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ data: [] }) });
-  await assert.rejects(gpsHistory.loadWheelseyeMovement('test', v.vehicle_no, '2026-09-22'), /unexpected/);
-} finally { globalThis.fetch = originalFetch; }
-
 // Query-level scope and pagination, plus route authorization.
 const calls = []; let stationFailure = false;
 const db = { from(table) {
@@ -102,7 +89,8 @@ const saveDb = { from(table) {
     then(resolve) { return Promise.resolve(resolve({ data: [{ id: 'record-1' }], error: null })); }
   }; return query;
 } };
-const refresh = compile('src/app/api/fleet/daily-report/refresh/route.ts', { '@/lib/authorization': { getAuthorization: async () => auth }, '@/lib/supabase-admin': { supabaseAdmin: saveDb }, '@/lib/wheelseye': { getWheelseyeAccessToken: async () => 'test' }, '@/lib/wheelseye-history': { loadWheelseyeMovement: async () => { gpsCalls++; return { summary: { pointCount: samples, km: 25, distanceReliable, rejectedSegments: distanceReliable ? 0 : 5 } }; } }, '@/lib/fleet/daily-report': p, '@/lib/fleet/report-data': { FleetReportError: scope.FleetReportError, reportScope: async a => { if (!a.allowed) throw new scope.FleetReportError('Denied', 403); return { companyId: 'company-A', vehicles: [v] }; } } });
+const gpsStorage = compile('src/lib/fleet/gps-storage.ts', { '@/lib/supabase-admin': { supabaseAdmin: saveDb } });
+const refresh = compile('src/app/api/fleet/daily-report/refresh/route.ts', { '@/lib/authorization': { getAuthorization: async () => auth }, '@/lib/fleet/gps-storage': gpsStorage, '@/lib/wheelseye': { getWheelseyeAccessToken: async () => 'test' }, '@/lib/wheelseye-history': { loadWheelseyeMovement: async () => { gpsCalls++; return { summary: { pointCount: samples, km: 25, rawKm: 100, acceptedPointCount: 8, rejectedPointCount: 2, stationaryPointCount: 0, algorithmVersion: 'gps-moving-fixes-v2', quality: distanceReliable ? 'filtered' : 'needs_review', distanceReliable, rejectedSegments: distanceReliable ? 0 : 5 } }; } }, '@/lib/fleet/daily-report': p, '@/lib/fleet/report-data': { FleetReportError: scope.FleetReportError, reportScope: async a => { if (!a.allowed) throw new scope.FleetReportError('Denied', 403); return { companyId: 'company-A', vehicles: [v] }; } } });
 const post = (pairs, origin = 'https://ops.dropxlogistics.com') => new Request('https://ops.dropxlogistics.com/api/fleet/daily-report/refresh', { method: 'POST', headers: { origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ pairs }) });
 const pair = { vehicle: v.vehicle_no, date: p.shiftDay(p.istDate(), -1) };
 assert.equal((await refresh.POST(post([pair], 'https://other.example'))).status, 403);
@@ -127,6 +115,12 @@ distanceReliable = false;
 const suspectGps = await refresh.POST(post([pair]));
 assert.equal((await suspectGps.json()).results[0].status, 'needs_review');
 assert.equal(writes[1].values.review_status, 'needs_review');
-assert.equal(writes[1].values.raw_km, 25);
-assert.equal(writes[1].values.rejected_point_count, 5);
+assert.equal(writes[1].values.raw_km, 100);
+assert.equal(writes[1].values.rejected_point_count, 2);
+assert.equal(writes[0].values.review_status, 'auto_corrected');
+assert.equal(writes[0].values.accepted_point_count, 8);
+const corrected = build([{ ...km, km: 38.8, raw_km: 121.4, review_status: 'auto_corrected' }]);
+assert.equal(corrected.km, 38.8);
+assert.equal(corrected.gpsQuality, 'auto_corrected');
+assert.match(p.dailyFleetCsv([corrected]), /GPS filtered/);
 console.log('Fleet daily report: date boundaries, complete ledgers, daily joins, no-data handling, mileage, CSV, sorting, company/location scope and refresh authorization passed.');

@@ -35,6 +35,16 @@ const memberships=[{user_id:'u',role_id:'r',has_all_location_access:false,locati
 assert.deepEqual(scope.resolveCodRecipients([station,other],memberships,roles,profiles,new Set(['r']),'example.com')[0].stationIds,['s1']);
 assert.equal(scope.resolveCodRecipients([station],memberships,roles,profiles,new Set(),'example.com').length,0);
 assert.equal(scope.resolveCodRecipients([station],memberships,roles,profiles,new Set(['r']),'other.com').length,0);
+const nowStore={...station,id:'now',station_code:'TCC3',station_email:'store@example.com',location_models:{code:'NOW',name:'NOW'}};
+for(const location_models of [{code:'NOW'},[{code:'NOW'}],{name:'Amazon Now'},{code:'AMAZON_NOW'}])assert.equal(scope.isAmazonNowMailStation({...nowStore,location_models}),true);
+assert.equal(scope.isAmazonNowMailStation(station),false);
+const nowOnly=[{...memberships[0],location_scope_ids:['now']}];
+assert.equal(scope.resolveCodRecipients([station,nowStore],nowOnly,roles,profiles,new Set(['r']),'example.com').length,0,'Amazon Now-only manager gets no COD mail');
+const mixedMembership=[{...memberships[0],location_scope_ids:['now','s1']}];
+assert.deepEqual(scope.resolveCodRecipients([station,nowStore],mixedMembership,roles,profiles,new Set(['r']),'example.com')[0].stationIds,['s1'],'Mixed manager receives only non-Now stations');
+const allMembership=[{...memberships[0],has_all_location_access:true}];
+assert.deepEqual(scope.resolveCodRecipients([station,nowStore],allMembership,roles,profiles,new Set(['r']),'example.com')[0].stationIds,['s1'],'Company-wide report also excludes Amazon Now');
+assert.equal(scope.resolveCodRecipients([station,nowStore],allMembership,roles,[{...profiles[0],email:' STORE@example.com '}],new Set(['r']),'example.com').length,0,'Amazon Now store mailbox is excluded even with broad access');
 const digest=compile('src/lib/cod-pending-digest.ts',{'./ops-pulse/cod-pending-data':{},'./ops-pulse/cod-ageing-data':{},'./ops-pulse/cod-ageing':ageing,'./cod-pending-mail-scope':scope});
 const source={uploadDate:date,dataDate:'2026-09-01',batchId:'batch1',importedAt:'2026-09-02T08:30:00Z',fileName:'file.csv',error:null,stations:[age,{...age,stationCode:'GNTI',total:999999}]};
 const recipients=[{email:'user@example.com',name:'User',stationIds:['s1']}];
@@ -108,4 +118,6 @@ const sent=await sendModule.deliverPortalDigestQueue(mailDb,'ops',{queued:0,acce
 assert.equal(sent.accepted,1);assert.equal(mailOptions.inReplyTo,'<evening-last@example.com>');assert.deepEqual(mailOptions.references,['<evening-root@example.com>','<evening-last@example.com>']);assert.ok(threadFilters.some(f=>f[0]==='in'&&f[1]==='event_key'&&f[2].includes('cod_pending_evening')));
 mailOptions=null;responses.portal_digest_deliveries={scope_summary:{stationIds:['s2']}};
 const held=await sendModule.deliverPortalDigestQueue(mailDb,'ops',{queued:0,accepted:0,uncertain:0,skipped:0,errors:[]});assert.equal(held.skipped,1);assert.equal(mailOptions,null);
+responses.portal_digest_deliveries={scope_summary:{stationIds:['s1','now']}};
+const staleNow=await sendModule.deliverPortalDigestQueue(mailDb,'ops',{queued:0,accepted:0,uncertain:0,skipped:0,errors:[]});assert.equal(staleNow.skipped,1);assert.equal(mailOptions,null,'Previously queued Amazon Now content must not reach SMTP');
 console.log('PASS COD delivery: evening/morning share monthly thread; removed station scope prevents SMTP.');

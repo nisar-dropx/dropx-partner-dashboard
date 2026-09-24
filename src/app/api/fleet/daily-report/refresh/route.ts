@@ -1,5 +1,5 @@
 import { getAuthorization } from '@/lib/authorization';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { saveDailyWheelseyeKm } from '@/lib/fleet/gps-storage';
 import { getWheelseyeAccessToken } from '@/lib/wheelseye';
 import { loadWheelseyeMovement } from '@/lib/wheelseye-history';
 import { validDate, istDate, shiftDay } from '@/lib/fleet/daily-report';
@@ -21,23 +21,14 @@ export async function POST(request: Request) {
     const allowed = new Set(scope.vehicles.map(v => v.vehicle_no));
     if (pairs.some(p => !allowed.has(p.vehicle))) throw new FleetReportError('One or more vehicles are outside your permitted locations.', 403);
     const token = await getWheelseyeAccessToken(scope.companyId);
-    if (!token || !supabaseAdmin) throw new FleetReportError('GPS connection is unavailable. Check WheelsEye settings.', 503);
+    if (!token) throw new FleetReportError('GPS connection is unavailable. Check WheelsEye settings.', 503);
     const results: Array<{ vehicle: string; date: string; status: string }> = [];
     const unique = [...new Map(pairs.map(p => [`${p.vehicle}|${p.date}`, p])).values()];
     for (let offset = 0; offset < unique.length; offset += 3) {
       const batch = await Promise.all(unique.slice(offset, offset + 3).map(async pair => {
         try {
           const movement = await loadWheelseyeMovement(token, pair.vehicle, pair.date);
-          if (movement.summary.pointCount < 2) return { ...pair, status: 'no_data' };
-          // Read/update by company and primary key: the legacy unique key does not include company_id.
-          const existing = await supabaseAdmin!.from('fleet_daily_km').select('id,calculated_at').eq('company_id', scope.companyId).eq('vehicle_no', pair.vehicle).eq('movement_date', pair.date).eq('source', 'wheelseye').maybeSingle();
-          if (existing.error) return { ...pair, status: 'save_failed' };
-          const needsReview = movement.summary.distanceReliable === false;
-          const values = { raw_km: movement.summary.km, review_status: needsReview ? 'needs_review' : 'auto_approved', rejected_point_count: movement.summary.rejectedSegments ?? 0, algorithm_version: 'gps-quality-check-v1', km: movement.summary.km, point_count: movement.summary.pointCount, calculated_at: new Date().toISOString() };
-          const saved = existing.data
-            ? await supabaseAdmin!.from('fleet_daily_km').update(values).eq('company_id', scope.companyId).eq('id', existing.data.id).eq('calculated_at', existing.data.calculated_at).select('id')
-            : await supabaseAdmin!.from('fleet_daily_km').insert({ ...values, company_id: scope.companyId, vehicle_no: pair.vehicle, movement_date: pair.date, source: 'wheelseye' }).select('id');
-          return { ...pair, status: saved.error || !saved.data?.length ? 'save_failed' : needsReview ? 'needs_review' : 'updated' };
+          return { ...pair, status: await saveDailyWheelseyeKm(scope.companyId, pair.vehicle, pair.date, movement.summary) };
         } catch { return { ...pair, status: 'gps_failed' }; }
       }));
       results.push(...batch);

@@ -73,3 +73,5 @@
 @media(max-width:560px) { .fleet-report-workspace { padding: 12px; } .daily-report-heading { align-items: flex-start; flex-direction: column; } .daily-report-heading h2 { font-size: 22px; } .daily-filter-card { padding: 12px; } .daily-date-range { grid-template-columns: 1fr 1fr; } .daily-date-range > button { grid-column: 1 / -1; } .daily-select-filters { gap: 10px; } .daily-quick-ranges span { flex-basis: 100%; } .daily-metrics article { padding: 12px; } .daily-metrics strong { font-size: 23px; } .daily-metrics article > svg { display: none; } .daily-report-switch button { padding: 8px; font-size: 11px; } .daily-refresh-actions { flex-wrap: wrap; } }
 
 .daily-status.gps_review { background: #fef2f2; color: #b91c1c; }
+
+.daily-table .daily-gps-filtered { color: #0369a1; font-weight: 600; }

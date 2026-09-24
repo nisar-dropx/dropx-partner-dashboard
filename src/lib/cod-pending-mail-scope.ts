@@ -6,14 +6,24 @@ export type CodMailRecipient={email:string;name:string;stationIds:string[];canVi
 type Membership={user_id:string;role_id:string;has_all_location_access:boolean;location_scope_ids:string[]|null};
 type Role={id:string;code:string;location_access_mode:string|null};
 type Profile={id:string;email:string|null;full_name:string|null};
+export function isAmazonNowMailStation(station:PendingStation) {
+ const values=(relation:unknown)=>{const row=(Array.isArray(relation)?relation[0]:relation) as {code?:string;name?:string}|null;return [row?.code,row?.name].map(value=>String(value||'').trim().toUpperCase().replace(/[_-]+/g,' ').replace(/\s+/g,' '));};
+ const models=values(station.location_models),providers=values(station.providers);
+ return models.includes('NOW')||[...models,...providers].some(value=>value==='AMAZON NOW');
+}
 export function resolveCodRecipients(stations:PendingStation[],memberships:Membership[],roles:Role[],profiles:Profile[],permittedRoles:Set<string>,domain:string){
+ // Apply the same exclusion when preparing a report and immediately before SMTP.
+ // Store mailboxes stay excluded even if their account has a wider location scope.
+ const nowMailboxes=new Set(stations.filter(isAmazonNowMailStation).map(s=>s.station_email?.trim().toLowerCase()).filter(Boolean));
+ const mailStations=stations.filter(s=>!isAmazonNowMailStation(s));
  const byEmail=new Map<string,CodMailRecipient>();
  for(const profile of profiles){const email=String(profile.email||'').trim().toLowerCase();if(!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email)||email.split('@')[1]!==domain.toLowerCase())continue;
+  if(nowMailboxes.has(email))continue;
   const userMemberships=memberships.filter(m=>m.user_id===profile.id),userRoles=roles.filter(r=>userMemberships.some(m=>m.role_id===r.id));
   if(!userRoles.some(r=>r.code==='OWNER'||permittedRoles.has(r.id)))continue;
   const all=userMemberships.some(m=>m.has_all_location_access)||userRoles.some(r=>r.location_access_mode==='all_locations'||r.code==='OWNER');
   const ids=new Set(userMemberships.flatMap(m=>m.location_scope_ids||[]));
-  const allowed=stations.filter(s=>all||ids.has(s.id)||(userRoles.some(r=>r.code==='LOCATION')&&s.station_email?.trim().toLowerCase()===email));
+  const allowed=mailStations.filter(s=>all||ids.has(s.id)||(userRoles.some(r=>r.code==='LOCATION')&&s.station_email?.trim().toLowerCase()===email));
   if(!allowed.length)continue;const prior=byEmail.get(email);byEmail.set(email,{email,name:profile.full_name||email,canViewPendingReport:(prior?.canViewPendingReport!==false)&&!userRoles.some(r=>/(^|_)LOCATION$/.test(r.code.trim().toUpperCase())),stationIds:[...new Set([...(prior?.stationIds||[]),...allowed.map(s=>s.id)])].sort()});
  }
  return [...byEmail.values()];
