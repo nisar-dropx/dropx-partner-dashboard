@@ -53,14 +53,14 @@ async function selectedAccount(request: Request, body?: Record<string, unknown>,
 async function approvalPayload(companyId: string, userIds: string[]) {
   if (!userIds.length) return [];
   const result = await db().from("hr_expense_approval_steps")
-    .select("id,claim_id,step_order,step_name,stage_code,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
+    .select("id,claim_id,step_order,step_name,stage_code,status,hr_expense_claims(id,claim_no,purpose,total_claimed,trip_from,trip_to,status,current_step,submitted_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id),hr_expense_items(finance_policy_snapshot,id,expense_date,merchant,description,amount,hr_expense_categories(id,name,code)),hr_expense_attachments(id,item_id,file_name,content_type,storage_path))")
     .eq("company_id", companyId).in("approver_user_id", userIds).eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
   // Claim steps are assigned explicitly (RM / finance head). Do not require org-chart reportee scope —
   // finance L2 is often outside the claimant's reporting tree.
   const rows = await Promise.all((result.data ?? []).flatMap((step) => {
     const claim = relation(step.hr_expense_claims);
-    if (!claim) return [];
+    if (!claim || claim.status !== "pending_approval" || claim.current_step !== step.step_order) return [];
     const employee = relation(claim.employees);
     const contractor = relation(claim.contractors);
     return [(async () => ({
@@ -84,34 +84,16 @@ async function approvalPayload(companyId: string, userIds: string[]) {
   }));
 }
 
-/**
- * A pre-request assigned to a Finance Head/Managing Partner (an org-wide fallback
- * approver, not the requester's direct manager) belongs in "My Team" only when that
- * same viewer is ALSO the requester's reporting_manager for this specific request -
- * otherwise it belongs in the broader "All Team" oversight view instead.
- */
+/** Same current-owner rule as People and the decision RPC; oversight is read-only. */
 async function preRequestApprovalPayload(companyId: string, userIds: string[]) {
   if (!userIds.length) return [];
   const result = await db().from("hr_expense_claim_request_assignees")
     .select("id,request_id,assignee_role,status,approver_user_id,hr_expense_claim_requests(id,request_no,purpose,purpose_code,estimated_amount,trip_from,trip_to,notes,expected_expenses,status,created_at,employee_id,contractor_id,employees(full_name,employee_code),contractors(full_name,dropx_id))")
-    .eq("company_id", companyId).in("approver_user_id", userIds).eq("status", "pending").order("created_at");
+    .eq("company_id", companyId).in("approver_user_id", userIds).eq("assignee_role", "reporting_manager").eq("status", "pending").order("created_at");
   if (result.error) throw new Error(result.error.message);
-  const userIdSet = new Set(userIds);
-  const reportingManagerUserIdsByRequest = new Map<string, Set<string>>();
-  for (const row of result.data ?? []) {
-    if (row.assignee_role !== "reporting_manager") continue;
-    const set = reportingManagerUserIdsByRequest.get(row.request_id) ?? new Set<string>();
-    set.add(row.approver_user_id);
-    reportingManagerUserIdsByRequest.set(row.request_id, set);
-  }
   const rows = (result.data ?? []).flatMap((row) => {
     const request = relation(row.hr_expense_claim_requests);
     if (!request || request.status !== "pending") return [];
-    if (row.assignee_role !== "reporting_manager") {
-      const managers = reportingManagerUserIdsByRequest.get(row.request_id);
-      const viewerIsManagerHere = managers ? [...managers].some((managerId) => userIdSet.has(managerId)) : false;
-      if (!viewerIsManagerHere) return [];
-    }
     const employee = relation(request.employees);
     const contractor = relation(request.contractors);
     return [{
@@ -608,8 +590,7 @@ async function submitPreRequest(form: FormData, account: ConnectAccount) {
   if (rpc.error) throw new Error(rpc.error.message);
 
   const estimateLabel = `Rs ${estimatedAmount.toLocaleString("en-IN")}`;
-  // Finance Head and Managing Partner are eligible to approve in parallel, but only the
-  // reporting manager is notified - the other two are a fallback, not the expected approver.
+  // The manager owns the estimate. Finance is notified later by the claim workflow.
   const notifiedAssignees = assignees.filter((assignee) => assignee.assignee_role === "reporting_manager");
   await Promise.all(notifiedAssignees.map((assignee) => notifyExpenseUser({
     companyId: account.companyId,

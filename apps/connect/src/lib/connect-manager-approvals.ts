@@ -8,7 +8,7 @@ import {
   loadConnectAccessibleWorkforceIds,
   loadConnectAttendanceApproveScope
 } from "./connect-people-attendance-access";
-import { connectReporteeMatches, type ConnectReporteeAccess } from "./connect-reportee-scope";
+import { type ConnectReporteeAccess } from "./connect-reportee-scope";
 import { notifyConnectExitOutcome, notifyExitApprovalRequired } from "./connect-exit-notifications";
 import { todayInIndia } from "./india-date";
 import { supabaseAdmin } from "./supabase-admin";
@@ -236,7 +236,7 @@ export async function listConnectAttendanceApprovals(account: ConnectAccount, _r
   return rows.map((row) => ({ ...row, journey: approvalJourneySummary(row.createdAt, row.workerName, row.stepName, journeys.get(row.requestId) ?? []) }));
 }
 
-export async function listConnectAttendanceHrApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
+export async function listConnectAttendanceHrApprovals(account: ConnectAccount, _reportees: ConnectReporteeAccess) {
   const scope = await loadConnectAttendanceApproveScope(account);
   if (!scope.canFinalize) return [];
   const access = await loadConnectAccessibleWorkforceIds(account, scope);
@@ -249,11 +249,9 @@ export async function listConnectAttendanceHrApprovals(account: ConnectAccount, 
     .order("created_at");
   if (requestsResult.error) throw new Error(requestsResult.error.message);
 
-  // Immediate reportees / Entire team toggle applies to HR finalization too —
-  // only show workers inside the selected reporting scope (not the full attendance grant).
+  // HR queues follow the existing People approval grant, not personal reportees.
   const rows = (requestsResult.data ?? []).filter((request) =>
     connectWorkforceMatches(access, String(request.profile_type), String(request.profile_id))
-    && connectReporteeMatches(reportees, request.profile_type, request.profile_id)
   );
 
   const filtered = [];
@@ -946,7 +944,7 @@ async function workerDisplay(companyId: string, workerType: string, workerId: st
   return { name: result.data?.full_name ?? "Team member", code: result.data?.dropx_id ?? "" };
 }
 
-export async function listConnectRosterSwapApprovals(account: ConnectAccount, reportees: ConnectReporteeAccess) {
+export async function listConnectRosterSwapApprovals(account: ConnectAccount, _reportees: ConnectReporteeAccess) {
   const actorUserIds = await approverUserIds(account);
   if (!actorUserIds.length) return [];
   const result = await db().from("hr_roster_swap_requests")
@@ -956,9 +954,8 @@ export async function listConnectRosterSwapApprovals(account: ConnectAccount, re
     .eq("status", "pending_manager")
     .order("requested_at", { ascending: false });
   if (result.error) throw new Error(result.error.message);
-  // Shift swaps route only to the requester's immediate manager. Show only when the
-  // requester is inside the selected Immediate reportees / Entire team scope.
-  const scoped = (result.data ?? []).filter((row) => connectReporteeMatches(reportees, row.requester_worker_type, row.requester_worker_id));
+  // Explicit assignment remains actionable even if reporting lines subsequently change.
+  const scoped = result.data ?? [];
   const shiftIds = [...new Set(scoped.flatMap((row) => [row.requester_shift_id, row.partner_shift_id]).filter(Boolean))] as string[];
   const shiftsResult = shiftIds.length
     ? await db().from("hr_shifts").select("id,name,code,start_time,end_time").in("id", shiftIds)

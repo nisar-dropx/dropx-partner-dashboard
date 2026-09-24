@@ -37,16 +37,17 @@ const checks = [
       && !attendanceManagerList.includes("connectReporteeMatches")
       && attendanceHrList.includes("loadConnectAttendanceApproveScope")
       && attendanceHrList.includes("connectWorkforceMatches")
-      && attendanceHrList.includes("connectReporteeMatches(reportees")
-      && rosterSwapList.includes("connectReporteeMatches(reportees"),
-    "manager attendance is assignee-scoped; HR finalization uses attendance.approve scope filtered by selected reportees"
+      && !attendanceHrList.includes("connectReporteeMatches")
+      && rosterSwapList.includes('.in("approver_user_id", actorUserIds)')
+      && !rosterSwapList.includes("connectReporteeMatches"),
+    "assigned approvals and permission-scoped HR queues are never hidden by a reporting-tree filter"
   ],
   [
     approvals.includes("Steps are assigned explicitly")
       && approvals.includes("matchesReportee: () => true")
-      && approvals.includes("listConnectWfhHrApprovals(account, matchesReportee)")
-      && approvals.includes("connectReporteeMatches(reportees, profileType, profileId)"),
-    "leave and WFH manager queues are assignee-scoped; WFH/Business Trip HR finalization follows selected reportees"
+      && approvals.includes("listConnectWfhHrApprovals(account)")
+      && approvals.includes("listConnectBusinessTripHrApprovals(account)"),
+    "leave/WFH/travel assignments and HR queues remain independent of oversight filters"
   ],
   [
     reimbursements.includes('.in("approver_user_id", userIds)')

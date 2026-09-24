@@ -1189,7 +1189,7 @@ export function ConnectApprovalInbox({ account, active = true, initialSection }:
           </button>
         </div>
         <p>{reporteeScope === "immediate"
-          ? "Direct reports, plus requests assigned to you."
+          ? "Assigned requests and authorised HR reviews. Team filters apply to oversight only."
           : "Your full reporting team, plus requests assigned to you."}</p>
       </div>
     {error ? <div className="dx-alert error">{error}</div> : null}

@@ -3,7 +3,7 @@ import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/
 import { resolveConnectActorUserId, resolveConnectActorUserIds } from "../../../../src/lib/connect-approver-identity";
 import { listConnectAttendanceApprovals, listConnectAttendanceHrApprovals, decideConnectAttendanceApproval, decideConnectAttendanceHrApproval, listConnectRosterApprovals, decideConnectRosterApproval, listConnectRosterSwapApprovals, decideConnectRosterSwapApproval, listConnectReturnedRosters, resubmitConnectReturnedRoster, listConnectExitApprovals, decideConnectExitApproval, listConnectExitWithdrawalApprovals, decideConnectExitWithdrawal } from "../../../../src/lib/connect-manager-approvals";
 import { listConnectLocationSupportPackages, reviewConnectLocationSupportPackage } from "../../../../src/lib/connect-location-integrity";
-import { connectReporteeMatches, loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
+import { loadConnectReporteeAccess, normalizeConnectReporteeScope } from "../../../../src/lib/connect-reportee-scope";
 import { decideConnectWfhApproval, decideConnectWfhHrApproval, listConnectWfhApprovals, listConnectWfhHrApprovals } from "../../../../src/lib/connect-wfh-data";
 import { decideConnectBusinessTripApproval, decideConnectBusinessTripHrApproval, listConnectBusinessTripApprovals, listConnectBusinessTripHrApprovals } from "../../../../src/lib/connect-business-trip-data";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
@@ -91,8 +91,6 @@ export async function GET(request: Request) {
     const scope = normalizeConnectReporteeScope(new URL(request.url).searchParams.get("reporteeScope"));
     const reportees = await loadConnectReporteeAccess(account, scope);
     const approverUserIds = await resolveConnectActorUserIds(account);
-    const matchesReportee = (profileType: string, profileId: string | null) =>
-      connectReporteeMatches(reportees, profileType, profileId);
     const [leaveApprovals, wfhApprovals, wfhHrApprovals, businessTripApprovals, businessTripHrApprovals, locationSupportPackages, attendanceApprovals, attendanceHrApprovals, rosterApprovals, rosterSwapApprovals, returnedRosters, exitApprovals, exitWithdrawalApprovals, payAdvanceApprovals, paymentApprovals] = await Promise.all([
       listLeaveApprovals(account),
       approverUserIds.length
@@ -103,7 +101,7 @@ export async function GET(request: Request) {
             matchesReportee: () => true
           })
         : Promise.resolve([]),
-      listConnectWfhHrApprovals(account, matchesReportee),
+      listConnectWfhHrApprovals(account),
       approverUserIds.length
         ? listConnectBusinessTripApprovals({
             companyId: account.companyId,
@@ -111,7 +109,7 @@ export async function GET(request: Request) {
             matchesReportee: () => true
           })
         : Promise.resolve([]),
-      listConnectBusinessTripHrApprovals(account, matchesReportee),
+      listConnectBusinessTripHrApprovals(account),
       listConnectLocationSupportPackages(account, reportees),
       listConnectAttendanceApprovals(account, reportees),
       listConnectAttendanceHrApprovals(account, reportees),
