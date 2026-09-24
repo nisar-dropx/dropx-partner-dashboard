@@ -72,12 +72,18 @@ function pushPlugin(): PushNotificationsPlugin | null {
  * 1. Station location tracking is ON (People → Location Attendance master), and
  * 2. Worker has punched IN at least once today (first biometric punch).
  *
- * Keeps sending even after punch-out. The server stops storing samples after 9 hours
- * from that first punch-in.
+ * Keeps sending even after punch-out, until LOCATION_TRACKING_MS (9h) has passed since that
+ * first punch-in — matching the server's own cutoff (see location-heartbeat/route.ts, which
+ * silently discards anything sent past that window). trackingWindowElapsed is computed
+ * server-side, in the punch endpoint's own response, off that same constant, rather than
+ * duplicating the 9-hour number here where it could drift out of sync. Previously this only
+ * checked whether inTime existed at all (never how long ago), so the native background service
+ * kept running — draining GPS/battery and showing the "Active" notification — indefinitely past
+ * that 9-hour window even though every sample it sent was already being discarded server-side.
  */
 function shouldRunBackgroundTracking(payload: {
   attendanceSettings?: { locationTrackingEnabled?: boolean; integrityCheckIntervalSeconds?: number };
-  shift?: { inTime?: string | null };
+  shift?: { inTime?: string | null; trackingWindowElapsed?: boolean };
 } | null): AttendanceTrackingState {
   // Admin-editable at /attendance/integrity (hr_company_settings.integrity_check_interval_seconds);
   // 30s here is only the fallback if the server payload is missing/malformed, matching that
@@ -95,6 +101,9 @@ function shouldRunBackgroundTracking(payload: {
 
   const inTime = payload?.shift?.inTime ? String(payload.shift.inTime) : "";
   if (!inTime) {
+    return { shouldTrack: false, integrityCheckIntervalSeconds };
+  }
+  if (payload?.shift?.trackingWindowElapsed) {
     return { shouldTrack: false, integrityCheckIntervalSeconds };
   }
 

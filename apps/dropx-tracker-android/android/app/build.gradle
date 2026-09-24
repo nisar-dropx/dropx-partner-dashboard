@@ -34,9 +34,12 @@ android {
         // was rejected the same day for Device and Network Abuse policy (see
         // apps/connect/app/(workspace)/layout.tsx's showAppInstallCard doc for the actual fix).
         // 35 (4.5.8) published 24 Sept 2026 with that fix. 36 (4.5.9) fixes a status-bar top
-        // margin doubling on pre-API-35 devices (see applyInsetsToWebView's own doc).
-        versionCode 36
-        versionName "4.5.9"
+        // margin doubling on pre-API-35 devices (see applyInsetsToWebView's own doc). 37
+        // (4.5.10) fixes background tracking never stopping past LOCATION_TRACKING_MS (9h)
+        // post-punch-out (see connect-native-bridge.tsx's shouldRunBackgroundTracking doc) and
+        // widens the GPS sampling interval from 30s to 60s to reduce battery drain.
+        versionCode 37
+        versionName "4.5.10"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

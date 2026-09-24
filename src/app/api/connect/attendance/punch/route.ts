@@ -5,6 +5,7 @@ import {
   loadCompanyStationGeofences,
   loadOpenShift,
   loadStationGeofence,
+  LOCATION_TRACKING_MS,
   parseIntegritySignals,
   resolveCompanyPunchGeofence
 } from "@/lib/biometric/attendance-gps";
@@ -142,7 +143,19 @@ export async function GET(request: NextRequest) {
         outTime: shift.outTime?.toISOString() ?? null,
         punchCount: shift.punchCount,
         pendingApproval: pendingForClient,
-        dutyOnly: pendingForClient
+        dutyOnly: pendingForClient,
+        // The native app's background tracking service (LocationTrackingService) is meant to
+        // keep running for LOCATION_TRACKING_MS (9h) past punch-in even after punch-out — by
+        // design, not a bug — but connect-native-bridge.tsx previously only checked whether
+        // inTime existed at all, never how long ago, so the client-side service kept running
+        // (draining GPS/battery, showing the "Active" notification) indefinitely past that
+        // window while location-heartbeat's own server-side check silently discarded every
+        // sample it received as "tracking_window_elapsed". Computed here, server-side, off the
+        // same LOCATION_TRACKING_MS constant that endpoint already enforces, so the client has
+        // one source of truth to stop against instead of duplicating that 9-hour number itself.
+        trackingWindowElapsed: shift.inTime
+          ? Date.now() - shift.inTime.getTime() > LOCATION_TRACKING_MS
+          : true
       },
       station: assignedStation
         ? {

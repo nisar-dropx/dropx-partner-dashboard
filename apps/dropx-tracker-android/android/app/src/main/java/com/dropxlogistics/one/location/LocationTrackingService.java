@@ -73,8 +73,10 @@ public class LocationTrackingService extends Service {
   private static final int LOCATION_OFF_NOTIFICATION_ID = 4472;
   private static final int INTEGRITY_RISK_NOTIFICATION_ID = 4473;
   private static final int INTERNET_OFF_NOTIFICATION_ID = 4474;
-  /** How often GPS is sampled and the cheap live-position endpoint is posted to. */
-  private static final long LIVE_INTERVAL_MS = 30 * 1000;
+  /** How often GPS is sampled and the cheap live-position endpoint is posted to. Widened from
+   * 30s to 60s to cut background battery drain — halves GPS/radio wake-ups over a full shift
+   * at the cost of the live map being half as fresh. */
+  private static final long LIVE_INTERVAL_MS = 60 * 1000;
   /** Matches HEARTBEAT_MIN_INTERVAL_MS on the server — client-side throttle for the heavier call. */
   private static final long COMPLIANCE_INTERVAL_MS = 10 * 60 * 1000;
 
