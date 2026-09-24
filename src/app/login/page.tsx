@@ -72,7 +72,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   if (isOpsHost) {
     return (
       <>
-        <DocumentTitle pageName="OpsPulse Login" />
+        <DocumentTitle pageName="Login" productName="DropX OpsPulse" />
         <OpsLoginPanel initialMessage={message} nextPath={safeOpsNextPath(searchParams?.next)} />
       </>
     );

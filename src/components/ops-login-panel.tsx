@@ -1,22 +1,33 @@
 "use client";
 
-import { OpsPulseBrand } from "@/components/ops-pulse-brand";
+import Image from "next/image";
 import { useEffect, useState } from "react";
-import { Download, LockKeyhole, MonitorSmartphone, ShieldCheck } from "lucide-react";
+import { useFormStatus } from "react-dom";
+import { Activity, ArrowDownToLine, ArrowRight, Boxes, CircleCheck, Download, LockKeyhole, MonitorSmartphone, ShieldCheck, Truck, Wallet } from "lucide-react";
+import { OpsPulseBrand } from "@/components/ops-pulse-brand";
 import { signInWithGoogle } from "@/app/login/actions";
+import styles from "./ops-login-panel.module.css";
 
-type OpsLoginPanelProps = {
-  initialMessage?: string | null;
-  nextPath?: string;
-};
-
+type OpsLoginPanelProps = { initialMessage?: string | null; nextPath?: string };
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
+function GoogleSignInButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button className={styles.googleButton} type="submit" disabled={pending} aria-busy={pending}>
+      <Image src="/google-g.svg" alt="" width={20} height={20} />
+      <span>{pending ? "Opening Google…" : "Continue with Google"}</span>
+      <ArrowRight size={18} aria-hidden="true" />
+    </button>
+  );
+}
+
 export function OpsLoginPanel({ initialMessage, nextPath = "/" }: OpsLoginPanelProps) {
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [installError, setInstallError] = useState("");
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -29,68 +40,71 @@ export function OpsLoginPanel({ initialMessage, nextPath = "/" }: OpsLoginPanelP
 
   async function installWebApp() {
     if (!installPrompt) return;
-    await installPrompt.prompt();
-    await installPrompt.userChoice;
-    setInstallPrompt(null);
+    setInstallError("");
+    try {
+      await installPrompt.prompt();
+      await installPrompt.userChoice;
+    } catch {
+      setInstallError("Installation could not open. Use your browser’s install menu, or try again later.");
+    } finally {
+      setInstallPrompt(null);
+    }
   }
 
   return (
-    <main className="ops-login-page">
-      <section className="ops-login-story" aria-label="OpsPulse overview">
-        <div className="ops-login-brand">
-          <img src="/dropx-logo.png" alt="DropX" />
-          <span aria-hidden="true" />
+    <main className={styles.page}>
+      <header className={styles.masthead}>
+        <div className={styles.brand}>
+          <Image className={styles.parentLogo} src="/dropx-logo.png" alt="DropX" width={112} height={48} priority />
           <OpsPulseBrand />
         </div>
-        <div className="ops-login-story-copy">
-          <span className="ops-login-kicker">ONE OPERATING VIEW</span>
-          <h1>Run every station from one clear pulse.</h1>
-          <p>Performance, capacity, cash, fleet and action queues—secured to your assigned role and locations.</p>
-        </div>
-        <div className="ops-login-proof">
-          <div><MonitorSmartphone size={20} /><span><strong>Built for every screen</strong><small>Phone, tablet and desktop</small></span></div>
-          <div><ShieldCheck size={20} /><span><strong>Scope-safe by design</strong><small>Only your permitted operations</small></span></div>
-        </div>
-      </section>
-
-      <section className="ops-login-access" aria-label="Sign in to OpsPulse">
-        <div className="ops-login-card">
-          <div className="ops-login-card-heading">
-            <span className="ops-login-card-icon"><LockKeyhole size={22} /></span>
-            <div>
-              <span className="ops-login-kicker">SECURE ACCESS</span>
-              <h2>Sign in to OpsPulse</h2>
-              <p>Continue with your authorised DropX Google account.</p>
+        <span className={styles.headerNote}><span aria-hidden="true" />THE OPERATIONS WORKSPACE</span>
+      </header>
+      <div className={styles.layout}>
+        <section className={styles.story} aria-labelledby="ops-overview-title">
+          <p className={styles.eyebrow}><span aria-hidden="true" /> SEE THE WHOLE PICTURE</p>
+          <h1 id="ops-overview-title">Every station.<br />Every move.<br /><span>One clear pulse.</span></h1>
+          <p className={styles.intro}>Bring your daily operations into focus.<br className={styles.desktopBreak} /> Know what needs attention. Keep your teams moving.</p>
+          <div className={styles.overview} role="group" aria-label="OpsPulse brings four operational areas into one action view">
+            <div className={styles.overviewTop}><span>CONNECTED OPERATIONS</span><span className={styles.overviewCaption}>A single operating view</span></div>
+            <div className={styles.modules}>
+              <div><Activity size={20} aria-hidden="true" /><strong>Performance</strong><span>See the signals</span></div>
+              <div><Boxes size={20} aria-hidden="true" /><strong>Capacity</strong><span>Plan the day</span></div>
+              <div><Wallet size={20} aria-hidden="true" /><strong>Cash</strong><span>Stay in control</span></div>
+              <div><Truck size={20} aria-hidden="true" /><strong>Fleet</strong><span>Keep it moving</span></div>
             </div>
+            <div className={styles.connection} aria-hidden="true"><span /><ArrowDownToLine size={18} /><span /></div>
+            <div className={styles.actionView}><span className={styles.actionIcon}><CircleCheck size={20} aria-hidden="true" /></span><div><strong>Clear priorities. Coordinated action.</strong><span>From station-level signals to the next step.</span></div><ArrowRight size={20} aria-hidden="true" /></div>
           </div>
-
-          {initialMessage ? <div className="ops-login-notice" role="status">{initialMessage}</div> : null}
-
-          <form action={signInWithGoogle}>
-            <input name="next" type="hidden" value={nextPath} />
-            <button className="ops-google-login" type="submit">
-              <img src="/google-g.svg" alt="" />
-              Continue with DropX Google
-            </button>
-          </form>
-
-          <p className="ops-access-footnote">Access is available only to active users enabled for OpsPulse.</p>
-        </div>
-
-        <div className="ops-app-downloads">
-          <a className="ops-apk-download" href="/downloads/DropX-OpsPulse.apk" download>
-            <Download size={18} />
-            <span><strong>Download Android app</strong><small>Latest verified APK</small></span>
-          </a>
-          {installPrompt ? (
-            <button type="button" onClick={() => void installWebApp()}>
-              <MonitorSmartphone size={18} /> Install web app
-            </button>
-          ) : (
-            <p>iPhone: open in Safari, tap Share, then “Add to Home Screen”.</p>
-          )}
-        </div>
-      </section>
+          <p className={styles.storyFooter}>BUILT FOR THE PEOPLE WHO KEEP DROPX MOVING.</p>
+        </section>
+        <section className={styles.access} aria-labelledby="ops-signin-title">
+          <div className={styles.card}>
+            <div className={styles.cardTop}><Image src="/opspulse/mark.svg?v=2" alt="" width={40} height={40} unoptimized /><span><LockKeyhole size={13} aria-hidden="true" /> AUTHORISED ACCESS</span></div>
+            <p className={styles.cardEyebrow}>WELCOME BACK</p>
+            <h2 id="ops-signin-title">Ready to take <br />the next step?</h2>
+            <p className={styles.cardIntro}>Sign in to OpsPulse and pick up where your operation needs you.</p>
+            {initialMessage ? <div className={styles.notice} role="alert">{initialMessage}</div> : null}
+            <form action={signInWithGoogle}>
+              <input name="next" type="hidden" value={nextPath} />
+              <GoogleSignInButton />
+            </form>
+            <p className={styles.accountHint}>Use your authorised DropX Google account.</p>
+            <div className={styles.roleNote}><ShieldCheck size={20} aria-hidden="true" /><div><strong>Your workspace. Your assigned scope.</strong><p>Access is limited to your role and permitted locations.</p></div></div>
+            <p className={styles.accessHelp}>Need access? Contact your DropX administrator.</p>
+          </div>
+          <div className={styles.apps}>
+            <div className={styles.appsHeading}><MonitorSmartphone size={19} aria-hidden="true" /><div><strong>On the move? Take OpsPulse with you.</strong><p>Your operations workspace, wherever the day takes you.</p></div></div>
+            <div className={styles.appActions}>
+              <a href="/downloads/DropX-OpsPulse.apk" download><Download size={17} aria-hidden="true" /><span>Download for Android</span><ArrowRight size={15} aria-hidden="true" /></a>
+              {installPrompt ? <button type="button" onClick={() => void installWebApp()}><MonitorSmartphone size={17} aria-hidden="true" />Install web app</button> : null}
+            </div>
+            <details className={styles.iphone}><summary>Using an iPhone or iPad?</summary><p>Open OpsPulse in Safari, tap Share, then select “Add to Home Screen”.</p></details>
+            {installError ? <p className={styles.installError} role="status">{installError}</p> : null}
+          </div>
+        </section>
+      </div>
+      <footer className={styles.footer}><span>DropX Logistics · OpsPulse</span><span>From insight to action.</span></footer>
     </main>
   );
 }

@@ -1,0 +1,74 @@
+.page { min-height: 100svh; padding: 0 48px; color: #172338; background: #f8f9fb; font-family: Arial, Helvetica, sans-serif; }
+.masthead { max-width: 1336px; height: 112px; margin: auto; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #dfe4ea; }
+.brand { display: flex; align-items: center; gap: 22px; }
+.parentLogo { width: 112px; height: 48px; object-fit: contain; }
+.brand :global(.ops-brand-lockup) { padding-left: 22px; gap: 10px; }
+.brand :global(.ops-brand-mark) { width: 36px; height: 36px; flex-basis: 36px; }
+.brand :global(.ops-brand-copy strong) { font-size: 20px; }
+.brand :global(.ops-brand-copy small) { font-size: 8px; letter-spacing: 1.1px; color: #5e6a7b; }
+.headerNote { display: inline-flex; align-items: center; gap: 9px; color: #626b79; font-size: 9px; font-weight: 700; letter-spacing: 1.7px; }
+.headerNote > span { width: 6px; height: 6px; background: #ef5a2c; border-radius: 2px; }
+.layout { max-width: 1230px; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(360px, .88fr); gap: clamp(48px, 7vw, 112px); align-items: center; min-height: calc(100svh - 180px); margin: auto; padding: 48px 0; }
+.story { min-width: 0; }
+.eyebrow { display: flex; align-items: center; gap: 9px; font-size: 10px; font-weight: 700; letter-spacing: 1.6px; color: #8f411f; margin: 0 0 25px; }
+.eyebrow > span { width: 19px; height: 2px; background: #db5024; }
+.story h1 { margin: 0; font-size: clamp(42px, 4.45vw, 65px); line-height: 1.06; font-weight: 650; color: #172338; letter-spacing: -2.8px; }
+.story h1 > span { color: #c94a1d; }
+.intro { margin: 24px 0 32px; color: #626c79; font-size: 15px; line-height: 1.85; }
+.overview { padding: 22px; border: 1px solid #dce2e9; background: #fff; border-radius: 16px; box-shadow: 0 5px 18px #17233804; }
+.overviewTop { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 23px; font-size: 9px; letter-spacing: 1.3px; font-weight: 700; color: #475569; }
+.overviewCaption { color: #697482; font-size: 10px; letter-spacing: 0; font-weight: 400; }
+.modules { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.modules > div { display: flex; flex-direction: column; gap: 7px; align-items: flex-start; min-width: 0; padding: 14px 9px; background: #f5f7fa; border-radius: 8px; }
+.modules svg { color: #d1532a; margin-bottom: 5px; }
+.modules strong { color: #243247; font-size: 11px; font-weight: 600; }
+.modules span { color: #637084; font-size: 9px; white-space: nowrap; }
+.connection { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 12px 0; color: #8794a5; }
+.connection span { width: 70px; height: 1px; background: #d6dfe9; }
+.actionView { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid #f0d5c7; border-radius: 9px; background: #fff7f2; }
+.actionIcon { display: inline-flex; color: #b84921; }
+.actionView > div { display: flex; flex: 1; flex-direction: column; gap: 5px; }
+.actionView strong { color: #763c25; font-size: 12px; font-weight: 600; }
+.actionView div > span { color: #805e4e; font-size: 10px; line-height: 1.5; }
+.actionView > svg { color: #b84921; flex-shrink: 0; }
+.storyFooter { font-size: 8px; font-weight: 700; letter-spacing: 1.4px; color: #606c7b; margin: 21px 0 0; }
+.access { width: 100%; max-width: 460px; justify-self: end; }
+.card { padding: 32px; background: #162238; border: 1px solid #26344a; border-radius: 20px; color: #fff; box-shadow: 0 18px 48px #17233813; }
+.cardTop { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 36px; }
+.cardTop > span { display: inline-flex; align-items: center; gap: 7px; color: #bdc8d9; font-size: 8px; letter-spacing: 1px; font-weight: 600; }
+.cardEyebrow { color: #ffb693; font-size: 9px; letter-spacing: 1.7px; font-weight: 700; margin: 0 0 14px; }
+.card h2 { font-size: 37px; line-height: 1.12; letter-spacing: -1.25px; font-weight: 500; color: #fff; margin: 0 0 19px; }
+.cardIntro { font-size: 13px; color: #c1cbda; line-height: 1.75; margin: 0 0 27px; max-width: 310px; }
+.googleButton { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; min-height: 54px; border: 1px solid #d7dce3; border-radius: 8px; color: #203047; background: #fff; padding: 12px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s; }
+.googleButton > span { flex: 1; text-align: left; }
+.googleButton > img { flex-shrink: 0; }
+.googleButton:hover { background: #fff1e8; }
+.googleButton:disabled { opacity: .75; cursor: wait; }
+.googleButton:focus-visible { outline: 3px solid #ffad7b; outline-offset: 4px; }
+.accountHint { color: #b2bed0; font-size: 10px; line-height: 1.6; margin: 14px 0 27px; }
+.roleNote { display: flex; align-items: flex-start; gap: 12px; padding-top: 23px; border-top: 1px solid #39465a; }
+.roleNote > svg { color: #ffb693; flex-shrink: 0; }
+.roleNote strong { font-size: 11px; font-weight: 500; color: #eef2f7; }
+.roleNote p { margin: 6px 0 0; font-size: 10px; line-height: 1.6; color: #b2bed0; }
+.accessHelp { margin: 25px 0 0; font-size: 10px; line-height: 1.7; color: #c1cbda; }
+.notice { background: #fff0ec; border: 1px solid #f2b7a5; border-radius: 8px; color: #9a2915; font-size: 12px; line-height: 1.6; padding: 12px; margin-bottom: 18px; overflow-wrap: anywhere; }
+.apps { margin-top: 22px; padding: 0 4px; }
+.appsHeading { display: flex; align-items: flex-start; gap: 11px; }
+.appsHeading > svg { color: #5c697b; flex-shrink: 0; margin-top: 2px; }
+.appsHeading strong { font-size: 11px; font-weight: 600; color: #344155; }
+.appsHeading p { color: #606b7b; font-size: 10px; line-height: 1.6; margin: 4px 0 0; }
+.appActions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px; }
+.appActions a, .appActions button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 11px; border: 1px solid #d7dfe8; background: #fff; color: #344155; text-decoration: none; font-family: inherit; font-size: 11px; font-weight: 600; border-radius: 7px; cursor: pointer; }
+.appActions a:hover, .appActions button:hover { border-color: #a7b4c6; background: #edf1f7; }
+.appActions a:focus-visible, .appActions button:focus-visible, .iphone summary:focus-visible { outline: 3px solid #ba4b22; outline-offset: 3px; }
+.iphone { margin-top: 10px; font-size: 10px; color: #5d6879; }
+.iphone summary { cursor: pointer; width: fit-content; padding: 7px 0; min-height: 28px; }
+.iphone p { color: #515e70; font-size: 11px; line-height: 1.7; margin: 5px 0; }
+.installError { color: #9a2915; font-size: 11px; line-height: 1.7; }
+.footer { max-width: 1336px; min-height: 68px; border-top: 1px solid #dfe4ea; display: flex; align-items: center; justify-content: space-between; gap: 15px; margin: auto; color: #647082; font-size: 10px; }
+@media (min-width: 1700px) { .layout { gap: 120px; } }
+@media (max-width: 1100px) { .page { padding-inline: 28px; } .layout { gap: 36px; grid-template-columns: minmax(0, 1.1fr) minmax(330px, 1fr); } .story h1 { font-size: 48px; } .overview { padding: 16px; } .modules { grid-template-columns: repeat(2, minmax(0, 1fr)); } .modules > div { display: grid; grid-template-columns: 20px 1fr; column-gap: 10px; } .modules svg { grid-row: span 2; align-self: center; margin: 0; } .overviewCaption { display: none; } .card { padding: 27px; } }
+@media (max-width: 760px) { .page { padding-inline: 20px; } .masthead { height: 88px; } .headerNote { display: none; } .brand { gap: 14px; } .parentLogo { width: 92px; height: 42px; } .brand :global(.ops-brand-lockup) { padding-left: 14px; gap: 7px; } .brand :global(.ops-brand-mark) { width: 30px; height: 30px; flex-basis: 30px; } .brand :global(.ops-brand-copy strong) { font-size: 18px; } .brand :global(.ops-brand-copy small) { font-size: 6px; letter-spacing: .8px; } .layout { display: flex; flex-direction: column; align-items: stretch; min-height: auto; padding: 28px 0; gap: 38px; } .access { order: -1; max-width: 480px; align-self: center; } .card { padding: 27px; border-radius: 16px; } .cardTop { margin-bottom: 26px; } .card h2 { font-size: 33px; } .card h2 br { display: none; } .cardIntro { max-width: none; margin-bottom: 23px; } .accountHint { margin-bottom: 23px; } .roleNote { padding-top: 19px; } .accessHelp { margin-top: 20px; } .story { max-width: 480px; width: 100%; align-self: center; } .story h1 { font-size: 42px; letter-spacing: -1.8px; } .eyebrow { margin-bottom: 20px; } .intro { font-size: 14px; margin: 20px 0 25px; } .desktopBreak { display: none; } .storyFooter { font-size: 7px; letter-spacing: 1px; } .footer { font-size: 9px; } }
+@media (max-width: 380px) { .page { padding-inline: 14px; } .brand { gap: 9px; } .brand :global(.ops-brand-lockup) { padding-left: 9px; } .parentLogo { width: 82px; } .brand :global(.ops-brand-copy small) { font-size: 5.5px; } .card { padding: 23px; } .card h2 { font-size: 30px; } .cardTop > span { font-size: 7px; letter-spacing: .5px; } .googleButton { font-size: 12px; padding-inline: 12px; gap: 9px; } .actionView { padding: 10px; gap: 8px; } .actionView > svg { display: none; } .story h1 { font-size: 38px; } }
+@media (max-width: 760px) { .brand :global(.ops-brand-copy strong) { font-size: 19px; } }
+@media (prefers-reduced-motion: reduce) { .googleButton { transition: none; } }
