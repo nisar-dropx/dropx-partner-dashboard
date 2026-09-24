@@ -697,6 +697,11 @@ public class LocationTrackingService extends Service {
     // settings), the warnings no longer apply either.
     NotificationManagerCompat.from(this).cancel(LOCATION_OFF_NOTIFICATION_ID);
     NotificationManagerCompat.from(this).cancel(INTERNET_OFF_NOTIFICATION_ID);
+    // stopForeground() below removes the ongoing "Active" notification when the service is
+    // stopped normally, but on some OEMs (reproduced on Motorola/MTK) the notification can
+    // survive a process kill that doesn't run onDestroy() cleanly — cancelling it explicitly
+    // here too closes that gap so "Active" never outlives the service it describes.
+    NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID);
     uploadExecutor.shutdown();
   }
 
