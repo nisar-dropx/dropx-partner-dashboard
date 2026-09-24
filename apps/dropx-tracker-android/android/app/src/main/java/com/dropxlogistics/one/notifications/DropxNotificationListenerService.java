@@ -11,6 +11,9 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import com.dropxlogistics.one.MainActivity;
 import com.dropxlogistics.one.R;
+import java.util.Collections;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -31,24 +34,40 @@ public class DropxNotificationListenerService extends NotificationListenerServic
   private static final String TAG = "DropxNotifListener";
   private static final String CHANNEL_ID = "dropx_one_notifications";
   private static final AtomicInteger nextNotificationId = new AtomicInteger(6000);
+  // notification.actions.length > 0 alone doesn't reliably stop re-entry: posting our rebuilt
+  // notification can itself trigger a fresh onNotificationPosted callback (observed via the OS
+  // auto-grouping this channel into an "Aggregate_AlertingSection" summary, whose own
+  // post/remove churn re-delivers callbacks for the member notifications too), and by the time
+  // that second callback reads extras, the "current" sbn can already be our own rebuilt one
+  // with its text stripped by BigTextStyle — producing an empty-content notification that keeps
+  // re-triggering itself. Tracking exactly which ids THIS service posted, and skipping those
+  // unconditionally, is the only guard that actually breaks the loop.
+  private static final Set<Integer> shownNotificationIds =
+    Collections.newSetFromMap(new ConcurrentHashMap<>());
 
   @Override
   public void onNotificationPosted(StatusBarNotification sbn) {
     super.onNotificationPosted(sbn);
     if (!getPackageName().equals(sbn.getPackageName())) return;
+    if (shownNotificationIds.contains(sbn.getId())) return;
 
     Notification notification = sbn.getNotification();
     if (notification == null || !CHANNEL_ID.equals(notification.getChannelId())) return;
-    // Already has an action (either DropxMessagingService built it correctly, or this listener
-    // already rebuilt it on a previous pass) — nothing to do, and re-processing our OWN repost
-    // would otherwise loop forever.
+    // Already has an action (DropxMessagingService built it correctly) — nothing to do.
     if (notification.actions != null && notification.actions.length > 0) return;
+    // The OS auto-groups multiple notifications on this channel into a synthetic
+    // "Aggregate_AlertingSection" summary (flags include GROUP_SUMMARY|AUTOGROUP_SUMMARY,
+    // extras carry no real title/text of their own) — not a real message, skip it.
+    if ((notification.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return;
 
     Bundle extras = notification.extras;
     CharSequence titleChars = extras != null ? extras.getCharSequence(Notification.EXTRA_TITLE) : null;
     CharSequence bodyChars = extras != null ? extras.getCharSequence(Notification.EXTRA_TEXT) : null;
     String title = titleChars != null ? titleChars.toString() : "DropX One";
     String body = bodyChars != null ? bodyChars.toString() : "";
+    // Nothing real to show (can happen if this callback fires for a notification whose content
+    // was never fully populated yet) — skip rather than reposting a blank "DropX One" bubble.
+    if (body.trim().isEmpty()) return;
     // Play Services' own auto-posted notification doesn't carry the original FCM data payload
     // as extras (only the notification-block-equivalent title/text it itself derived) — so the
     // mob_app_notifications row id genuinely isn't recoverable from here the way
@@ -60,6 +79,7 @@ public class DropxNotificationListenerService extends NotificationListenerServic
     cancelNotification(sbn.getKey());
 
     int shownNotificationId = nextNotificationId.incrementAndGet();
+    shownNotificationIds.add(shownNotificationId);
     NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
       .setContentTitle(title)
       .setContentText(body)
