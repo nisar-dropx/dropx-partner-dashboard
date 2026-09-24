@@ -15,6 +15,18 @@ function compile(path, mocks = {}) {
   return module.exports;
 }
 const surface = compile("./surface.ts");
+test("Home-screen manifest serves Fin only on Finance hosts", () => {
+  let host = "fin.dropxlogistics.com";
+  const manifest = compile("../../app/manifest.ts", {
+    "next/headers": { headers: () => new Headers({ host }) },
+    "@/lib/finance/surface": surface
+  }).default;
+  assert.equal(manifest().short_name, "Fin");
+  assert.ok(manifest().icons.every(icon => icon.src.startsWith("/finance-brand/")));
+  host = "ops.dropxlogistics.com";
+  assert.equal(manifest().short_name, "OpsPulse");
+  assert.ok(manifest().icons.every(icon => icon.src.startsWith("/opspulse/")));
+});
 const auth = { companyId: "company-1", hasAllLocationAccess: true, locationScopeIds: [], permissions: {}, isMasterOwner: true };
 const hasPermission = (user, code) => user.isMasterOwner || Boolean(user.permissions[code]?.canView || user.permissions[code]?.canAdd || user.permissions[code]?.canEdit);
 const navigation = compile("./navigation.ts", { "@/lib/authorization": { hasPermission }, "@/lib/finance/surface": surface });
