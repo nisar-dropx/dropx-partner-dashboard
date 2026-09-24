@@ -32,11 +32,11 @@ android {
         // Must strictly exceed 9 even though that release was never approved. 33 (4.5.6) was
         // approved 24 Sept 2026 after the background-location policy form was fixed. 34 (4.5.7)
         // was rejected the same day for Device and Network Abuse policy (see
-        // apps/connect/app/(workspace)/layout.tsx's showAppInstallCard doc for the actual fix) —
-        // per Google's own rejection instructions, this version must be a strictly higher
-        // versionCode set to 100% rollout to override/deactivate that noncompliant APK.
-        versionCode 35
-        versionName "4.5.8"
+        // apps/connect/app/(workspace)/layout.tsx's showAppInstallCard doc for the actual fix).
+        // 35 (4.5.8) published 24 Sept 2026 with that fix. 36 (4.5.9) fixes a status-bar top
+        // margin doubling on pre-API-35 devices (see applyInsetsToWebView's own doc).
+        versionCode 36
+        versionName "4.5.9"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

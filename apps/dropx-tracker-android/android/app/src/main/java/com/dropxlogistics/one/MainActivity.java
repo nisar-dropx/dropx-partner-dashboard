@@ -63,15 +63,18 @@ public class MainActivity extends BridgeActivity {
     // content behind the status bar is light makes it switch to dark icons instead.
     new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView()).setAppearanceLightStatusBars(true);
 
-    // Previously relied on Android reserving real status-bar/nav-bar space itself
-    // (setDecorFitsSystemWindows(true), matching globals.css's --dx-safe-top/--dx-safe-bottom
-    // both being 0px for html.native-app) — Android 15 (targetSdk 35+) enforces edge-to-edge
-    // unconditionally and silently ignores that call entirely, so the WebView started drawing
-    // under the status bar with no reserved space, colliding with it. setDecorFitsSystemWindows
-    // is kept here as a harmless no-op on 35+ (still correct on older OS versions this app's
-    // minSdk covers) — the actual fix is injecting the REAL inset sizes into the same CSS
-    // variables globals.css already reads, since the OS no longer reserves that space for us.
-    WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+    // Previously called setDecorFitsSystemWindows(true), on the assumption that Android would
+    // reserve real status-bar/nav-bar space itself, and applyInsetsToWebView() below would only
+    // need to fill in the gap on API 35+ (where edge-to-edge is enforced and that call becomes a
+    // no-op). That assumption was wrong: whether/how much space setDecorFitsSystemWindows(true)
+    // actually reserves is inconsistent across OS versions and OEM skins — branching on
+    // Build.VERSION.SDK_INT to guess when it applies caused a real, reproduced bug (the WebView's
+    // margin AND the OS's own reservation both being applied, doubling the top gap) on multiple
+    // real devices across different Android versions, not just one. The fix is to remove the
+    // guessing entirely: always request edge-to-edge (false), so the OS NEVER reserves system-bar
+    // space on ANY device, and applyInsetsToWebView()'s margin is the ONLY mechanism doing that
+    // job, unconditionally, everywhere. One code path, no version branching, cannot double up.
+    WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
     applySystemBarInsetsToWebView();
 
     showStartupOverlay();
@@ -106,19 +109,23 @@ public class MainActivity extends BridgeActivity {
   }
 
   /**
-   * Reported as oversized status/nav bars on a friend's 3-button-navigation device, even though
-   * the same code looked correct on the reporter's own gesture-navigation phone. Root cause:
-   * systemBars() bundles statusBars() + navigationBars(), and this was margining the WebView by
-   * BOTH unconditionally. With 3-button navigation, the nav bar is real, OS-owned chrome that
-   * Android already reserves layout space for by itself — WindowCompat.setDecorFitsSystemWindows
-   * (still called in onCreate) continues to work for THAT bar on those devices/modes, just not
-   * for the status bar under Android 15+'s enforced edge-to-edge. Margining for navigationBars()
-   * on top of that double-reserves the space, making the bottom bar/margin look twice as tall as
-   * it should. Gesture navigation has no such OS-reserved space (the thin gesture strip overlaps
-   * content by design), so it still needs the manual margin. tappableElement() is the signal
-   * Android exposes for exactly this distinction — it equals navigationBars() in 3-button mode
-   * (a real, tappable, OS-reserved bar) and is empty/zero in gesture mode (nothing tappable
-   * there), letting one check cover both navigation modes and OEM variations correctly.
+   * onCreate() now requests edge-to-edge unconditionally (setDecorFitsSystemWindows(false)) on
+   * every device and API level, so the OS never reserves system-bar space on its own — this
+   * margin is the ONLY thing reserving it, always, everywhere. That replaced an earlier version
+   * of this method that branched on Build.VERSION.SDK_INT to guess whether the OS was "already"
+   * reserving status-bar space — that guess was wrong on multiple real devices across different
+   * Android versions (the OS reservation AND this margin both applying, doubling the top gap),
+   * because exactly how/whether setDecorFitsSystemWindows(true) reserves space is inconsistent
+   * across OS versions and OEM skins. One unconditional code path can't double up with anything.
+   *
+   * The bottom margin still needs a real per-device check, but for a different reason: with
+   * 3-button navigation, the nav bar is a real, OS-drawn, tappable bar — content should stop
+   * above it, not extend a duplicate margin below it, so no extra margin is added there. With
+   * gesture navigation there's no such reserved OS bar (the thin gesture-handle strip overlaps
+   * content by design), so the margin is needed to keep content clear of it. tappableElement()
+   * is the value Android itself reports for "is there a truly reserved, tappable bar here" —
+   * equal to navigationBars() in 3-button mode, empty/zero in gesture mode — so checking it
+   * (rather than the OS version) correctly covers both navigation modes on any device.
    */
   private void applyInsetsToWebView(WindowInsetsCompat insets) {
     if (getBridge() == null || getBridge().getWebView() == null) return;
