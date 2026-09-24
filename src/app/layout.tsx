@@ -5,6 +5,7 @@ import { OpsPwaRegister } from "@/components/ops-pwa-register";
 import { isPeopleHostName } from "@/lib/people/surface";
 import { isFinanceHostName } from "@/lib/finance/surface";
 import "./globals.css";
+import "./fin-brand.css";
 
 function isOpsHost() {
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
@@ -23,7 +24,8 @@ export function generateMetadata(): Metadata {
       title: { default: "DropX Finance", template: "%s · DropX Finance" },
       description: "DropX Finance for payment approvals, reporting and financial administration.",
       applicationName: "DropX Finance",
-      icons: { icon: "/favicon.png", shortcut: "/favicon.png", apple: "/favicon.png" }
+      manifest: "/finance-brand/manifest.webmanifest",
+      icons: { icon: [{ url: "/finance-brand/favicon-32.png", sizes: "32x32", type: "image/png" }, { url: "/finance-brand/favicon-64.png", sizes: "64x64", type: "image/png" }], shortcut: "/finance-brand/favicon-32.png", apple: "/finance-brand/apple-touch-icon.png" }
     };
   }
   if (isOpsHost()) {

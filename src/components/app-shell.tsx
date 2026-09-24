@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { signOut } from "@/app/login/actions";
 import { AppShellFrame } from "@/components/app-shell-frame";
+import { FinanceBrand, FinanceProductBrand } from "@/components/finance-brand";
 import { DocumentTitle } from "@/components/document-title";
 import { InboxNotificationListener } from "@/components/inbox-notification-listener";
 import { PaymentNotificationBell } from "@/components/payment-notification-bell";
@@ -132,6 +133,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
   return (
     <PaymentNotificationProvider initialData={paymentNotifications}>
     <AppShellFrame
+      mobileBrand={isFinanceHost ? <FinanceBrand /> : undefined}
       desktopActions={topActions}
       mobileActions={topActions}
       sidebar={(
@@ -155,7 +157,7 @@ export async function AppShell({ children, active, pageCode }: { children: React
                 <strong>People</strong>
               </div>
             ) : isFinanceHost ? (
-              <div className="people-brand-lockup"><strong>Finance</strong></div>
+              <FinanceProductBrand />
             ) : null}
           </div>
 

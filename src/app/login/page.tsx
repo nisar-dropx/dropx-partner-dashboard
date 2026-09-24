@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { DocumentTitle } from "@/components/document-title";
 import { OpsLoginPanel } from "@/components/ops-login-panel";
+import { FinanceLoginPanel } from "@/components/finance-login-panel";
 import { PeopleLoginPanel } from "@/components/people-login-panel";
 import { SubmitButton } from "@/components/submit-button";
 import { firstAllowedHref } from "@/lib/app-navigation";
@@ -85,6 +86,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         <PeopleLoginPanel initialMessage={message} nextPath={safePeopleNextPath(searchParams?.next)} />
       </>
     );
+  }
+
+  if (isFinanceHost) {
+    return <><DocumentTitle pageName="Login" productName="DropX Finance" /><FinanceLoginPanel initialMessage={message} nextPath={safeFinanceNextPath(searchParams?.next)} /></>;
   }
 
   return (

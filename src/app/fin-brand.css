@@ -1,0 +1,58 @@
+.fin-login { min-height: 100svh; background: #f7f6f2; color: #252b36; font-family: Arial, Helvetica, sans-serif; padding: 0 40px 28px; }
+.fin-masthead { max-width: 1440px; height: 108px; margin: auto; display: flex; align-items: center; justify-content: space-between; }
+.fin-brand { display: inline-flex; align-items: center; gap: 20px; }
+.fin-parent-logo { width: 112px; height: 54px; object-fit: contain; }
+.fin-product-brand { display: inline-flex; align-items: center; gap: 6px; border-left: 1px solid #d9dadd; padding-left: 14px; color: #252b36; flex-shrink: 0; }
+.fin-product-brand img { object-fit: contain; width: 36px; height: 36px; }
+.fin-product-brand > span { display: flex; flex-direction: column; gap: 2px; }
+.fin-product-brand strong { font-size: 27px; line-height: 1; letter-spacing: -1.3px; font-weight: 750; }
+.fin-product-brand small { font-size: 7px; letter-spacing: 1.6px; line-height: 1.4; font-weight: 700; }
+.fin-workspace-label { color: #66685f; font-size: 10px; letter-spacing: 2px; font-weight: 700; }
+.fin-login-layout { max-width: 1440px; margin: auto; display: grid; grid-template-columns: 1.12fr 1fr; min-height: min(740px, calc(100svh - 140px)); border: 1px solid #deded7; border-radius: 18px; overflow: hidden; }
+.fin-story { background: #242b32; color: #fff; padding: 48px 52px 26px; position: relative; display: flex; flex-direction: column; }
+.fin-story-top { display: flex; justify-content: space-between; align-items: center; color: #e6be70; }
+.fin-eyebrow { font-size: 10px; letter-spacing: 1.8px; font-weight: 700; }
+.fin-story h1 { color: #fffefa; font-size: clamp(42px, 4.6vw, 68px); line-height: 1.09; letter-spacing: -3px; font-weight: 500; margin: 48px 0 24px; }
+.fin-story h1 em { color: #efc77c; font-family: Georgia, 'Times New Roman', serif; font-weight: 400; }
+.fin-story-description { color: #c6cbcf; max-width: 400px; font-size: 15px; line-height: 1.8; margin: 0 0 36px; }
+.fin-ledger { margin-top: auto; border-top: 1px solid #596067; }
+.fin-ledger-heading { display: flex; justify-content: space-between; font-size: 9px; letter-spacing: 1.4px; color: #b9c0c6; padding: 19px 0 6px; }
+.fin-ledger-row { display: flex; align-items: center; gap: 20px; padding: 19px 0; border-bottom: 1px solid #424a52; }
+.fin-step { font-family: monospace; font-size: 11px; color: #d9b97e; }
+.fin-ledger-row > div { flex: 1; }
+.fin-ledger-row strong { font-size: 14px; font-weight: 500; }
+.fin-ledger-row p { margin: 6px 0 0; color: #b9c0c6; font-size: 11px; line-height: 1.5; }
+.fin-ledger-row > svg { color: #e6be70; flex-shrink: 0; }
+.fin-story-footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 36px; font-size: 9px; color: #b9c0c6; letter-spacing: .6px; }
+.fin-access { background: #fffefa; display: flex; flex-direction: column; justify-content: center; padding: 70px 56px 26px; }
+.fin-access-content { width: 100%; max-width: 370px; margin: auto; padding: 28px 0 64px; }
+.fin-access-icon { display: inline-flex; width: 52px; height: 52px; align-items: center; justify-content: center; background: #f4eddf; border: 1px solid #e5dccb; border-radius: 15px; margin-bottom: 34px; }
+.fin-access .fin-eyebrow { color: #796644; margin: 0 0 14px; }
+.fin-access h2 { font-size: 36px; font-weight: 500; letter-spacing: -1.4px; line-height: 1.2; margin: 0 0 18px; }
+.fin-access-description { font-size: 15px; line-height: 1.7; color: #64686e; margin: 0 0 32px; max-width: 310px; }
+.fin-signin-form { width: 100%; }
+.fin-google-button { display: flex; align-items: center; justify-content: center; width: fit-content; min-height: 50px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: #252b36; cursor: pointer; gap: 8px; }
+.fin-google-button > span { display: flex; align-items: center; justify-content: center; }
+.fin-google-button img { width: 219px; height: 50px; }
+.fin-google-button:hover { background: #f5f3ed; border-color: #252b36; }
+.fin-google-button:focus-visible { outline: 3px solid #a26b07; outline-offset: 4px; }
+.fin-google-button:disabled { cursor: wait; opacity: .7; }
+.fin-account-hint { font-size: 12px; color: #676c72; line-height: 1.7; margin: 16px 0 32px; }
+.fin-access-note { display: flex; align-items: flex-start; gap: 11px; padding-top: 24px; border-top: 1px solid #e4e3dd; color: #74766f; }
+.fin-access-note svg { flex-shrink: 0; margin-top: 3px; }
+.fin-access-note p { margin: 0; font-size: 11px; line-height: 1.8; color: #666b70; }
+.fin-access-footer { display: flex; justify-content: space-between; gap: 16px; font-size: 9px; line-height: 1.5; color: #6a6e73; }
+.fin-login-error { padding: 14px; background: #fff0ed; border: 1px solid #e6b1a8; border-radius: 8px; color: #962d1c; font-size: 13px; line-height: 1.6; margin-bottom: 20px; overflow-wrap: anywhere; }
+.brand .fin-product-brand { gap: 3px; padding-left: 8px; }
+.brand .fin-product-brand img { width: 29px; height: 29px; }
+.brand .fin-product-brand strong { font-size: 23px; }
+.mobile-topbar .fin-brand { gap: 9px; }
+.mobile-topbar .fin-parent-logo { width: 73px; height: 34px; }
+.mobile-topbar .fin-product-brand { padding-left: 7px; gap: 2px; }
+.mobile-topbar .fin-product-brand img { width: 25px; height: 25px; }
+.mobile-topbar .fin-product-brand strong { font-size: 22px; }
+.mobile-topbar .fin-product-brand small { font-size: 6px; letter-spacing: 1px; }
+@media (min-width: 1600px) { .fin-login-layout { margin-top: 25px; } }
+@media (max-width: 1050px) { .fin-login { padding: 0 24px 24px; } .fin-story { padding: 36px 30px 24px; } .fin-access { padding: 40px 32px 24px; } .fin-story h1 { letter-spacing: -2px; } .fin-story-footer, .fin-access-footer { flex-wrap: wrap; } }
+@media (max-width: 760px) { .fin-login { padding: 0 18px 24px; } .fin-masthead { height: 90px; } .fin-workspace-label { display: none; } .fin-login-layout { display: flex; flex-direction: column; min-height: auto; } .fin-access { order: -1; padding: 30px 26px 22px; } .fin-access-content { padding: 0 0 24px; max-width: 430px; } .fin-access-icon { margin-bottom: 24px; width: 44px; height: 44px; } .fin-access h2 { font-size: 32px; } .fin-access-description { margin-bottom: 24px; } .fin-account-hint { margin-bottom: 24px; } .fin-access-footer { max-width: 430px; width: 100%; margin: auto; } .fin-story { padding: 30px 26px 24px; } .fin-story h1 { font-size: 42px; margin-top: 30px; } .fin-story-description { font-size: 14px; margin-bottom: 24px; } .fin-ledger-row { gap: 14px; } .fin-story-footer { margin-top: 25px; } }
+@media (prefers-reduced-motion: reduce) { .fin-login *, .fin-login *::before, .fin-login *::after { animation: none !important; transition: none !important; } }
