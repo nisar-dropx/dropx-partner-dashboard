@@ -100,18 +100,40 @@ public class MainActivity extends BridgeActivity {
   private void applySystemBarInsetsToWebView() {
     View root = getWindow().getDecorView();
     ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
-      Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-      if (getBridge() != null && getBridge().getWebView() != null) {
-        View webView = getBridge().getWebView();
-        ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) webView.getLayoutParams();
-        if (params != null) {
-          params.topMargin = systemBars.top;
-          params.bottomMargin = systemBars.bottom;
-          webView.setLayoutParams(params);
-        }
-      }
+      applyInsetsToWebView(insets);
       return insets;
     });
+  }
+
+  /**
+   * Reported as oversized status/nav bars on a friend's 3-button-navigation device, even though
+   * the same code looked correct on the reporter's own gesture-navigation phone. Root cause:
+   * systemBars() bundles statusBars() + navigationBars(), and this was margining the WebView by
+   * BOTH unconditionally. With 3-button navigation, the nav bar is real, OS-owned chrome that
+   * Android already reserves layout space for by itself — WindowCompat.setDecorFitsSystemWindows
+   * (still called in onCreate) continues to work for THAT bar on those devices/modes, just not
+   * for the status bar under Android 15+'s enforced edge-to-edge. Margining for navigationBars()
+   * on top of that double-reserves the space, making the bottom bar/margin look twice as tall as
+   * it should. Gesture navigation has no such OS-reserved space (the thin gesture strip overlaps
+   * content by design), so it still needs the manual margin. tappableElement() is the signal
+   * Android exposes for exactly this distinction — it equals navigationBars() in 3-button mode
+   * (a real, tappable, OS-reserved bar) and is empty/zero in gesture mode (nothing tappable
+   * there), letting one check cover both navigation modes and OEM variations correctly.
+   */
+  private void applyInsetsToWebView(WindowInsetsCompat insets) {
+    if (getBridge() == null || getBridge().getWebView() == null) return;
+    View webView = getBridge().getWebView();
+    ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) webView.getLayoutParams();
+    if (params == null) return;
+
+    Insets statusBars = insets.getInsets(WindowInsetsCompat.Type.statusBars());
+    Insets navigationBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars());
+    Insets tappableElement = insets.getInsets(WindowInsetsCompat.Type.tappableElement());
+    boolean threeButtonNav = tappableElement.bottom >= navigationBars.bottom && navigationBars.bottom > 0;
+
+    params.topMargin = statusBars.top;
+    params.bottomMargin = threeButtonNav ? 0 : navigationBars.bottom;
+    webView.setLayoutParams(params);
   }
 
   /**
@@ -169,18 +191,9 @@ public class MainActivity extends BridgeActivity {
     // ViewCompat.getRootWindowInsets() reads the most recently dispatched insets rather than
     // forcing a fresh layout pass, so this is cheap, and covers a device where the inset
     // listener's own callback timing raced the WebView's LayoutParams not existing yet.
-    if (getBridge() != null && getBridge().getWebView() != null) {
-      WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(getWindow().getDecorView());
-      if (insets != null) {
-        Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-        View webView = getBridge().getWebView();
-        ViewGroup.MarginLayoutParams params = (ViewGroup.MarginLayoutParams) webView.getLayoutParams();
-        if (params != null) {
-          params.topMargin = systemBars.top;
-          params.bottomMargin = systemBars.bottom;
-          webView.setLayoutParams(params);
-        }
-      }
+    WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(getWindow().getDecorView());
+    if (insets != null) {
+      applyInsetsToWebView(insets);
     }
   }
 
@@ -212,6 +225,13 @@ public class MainActivity extends BridgeActivity {
     title.setTextSize(20);
     title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
     title.setGravity(Gravity.CENTER);
+    // This container's background is hardcoded to white, but a plain TextView's default text
+    // color comes from the ACTIVE SYSTEM THEME — on a device in dark mode (or certain OEM theme
+    // overlays), that default resolves to a light/white color, rendering as invisible text on
+    // this white background. Reproduced live: buttons (which carry their own styled background)
+    // were visible, title/body text was not. Setting an explicit dark color makes this readable
+    // regardless of the device's system theme.
+    title.setTextColor(Color.BLACK);
     container.addView(title);
 
     TextView body = new TextView(this);
@@ -223,6 +243,7 @@ public class MainActivity extends BridgeActivity {
     );
     body.setTextSize(15);
     body.setGravity(Gravity.CENTER);
+    body.setTextColor(Color.DKGRAY);
     int bodyMarginPx = (int) (16 * getResources().getDisplayMetrics().density);
     LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(
       ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
