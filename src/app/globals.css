@@ -12871,6 +12871,75 @@ tbody tr:hover td {
   font-weight: 700;
 }
 
+/*
+ * Read-only counterpart to .denomination-chip, used by the station-day
+ * "Total denominations" summary — same footprint and visual language as the
+ * per-row editable chip (so the summary reads as clearly related to the rows
+ * below it) but with a count + computed amount stacked instead of an input.
+ */
+.denomination-summary-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 58px;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  padding: 5px 4px 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.denomination-summary-chip strong {
+  font-size: 14px;
+  font-weight: 850;
+  color: #172033;
+  font-variant-numeric: tabular-nums;
+}
+
+.denomination-summary-chip-amount {
+  font-size: 10px;
+  font-weight: 600;
+  color: #667085;
+  font-variant-numeric: tabular-nums;
+}
+
+.total-denominations-summary {
+  margin-bottom: 14px;
+  padding: 12px 14px 13px;
+  border: 1px solid #d9dee7;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, .06);
+}
+
+.total-denominations-summary > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 850;
+  color: #172033;
+  cursor: pointer;
+}
+
+.total-denominations-summary > summary .subtle {
+  font-size: 11px;
+  font-weight: 600;
+  color: #667085;
+  text-transform: none;
+}
+
+.total-denominations-summary .cash-breakdown-grid {
+  margin-top: 10px;
+}
+
+.total-denominations-final {
+  margin-top: 10px;
+  border-radius: 10px;
+}
+
 .cash-live-status {
   display: flex;
   align-items: center;

@@ -133,6 +133,106 @@ function detailDescription(detail: PendingDetail) {
   return stringValue(raw.description) || stringValue(raw.reason) || stringValue(raw.notes) || "Pending in SCC";
 }
 
+type DenominationTotals = Record<DenominationField, number>;
+
+function zeroTotals(): DenominationTotals {
+  return { cash_500_count: 0, cash_200_count: 0, cash_100_count: 0, cash_50_count: 0, cash_20_count: 0, cash_10_count: 0 };
+}
+
+/**
+ * Sums every saved row's denomination counts for the whole station-day, for the
+ * "Total denominations" summary — deliberately reads server-saved row values
+ * (denominationValue/returnDenominationValue against the row itself), not the
+ * per-row in-progress `edits` state, so this total always reflects what is
+ * actually saved rather than an unsaved draft edit in one row's form.
+ */
+function totalDenominations(rows: ExecutiveReconciliationViewRow[]) {
+  const received = zeroTotals();
+  const returned = zeroTotals();
+  let receivedOther = 0;
+  let returnedOther = 0;
+  for (const row of rows) {
+    for (const [field] of denominations) {
+      received[field] += Number(denominationValue(row, field)) || 0;
+      returned[field] += Number(returnDenominationValue(row, returnDenominationFieldMap[field])) || 0;
+    }
+    receivedOther += Number(row.cash_other_amount ?? 0) || 0;
+    returnedOther += Number(row.return_cash_other_amount ?? 0) || 0;
+  }
+  return { received, returned, receivedOther, returnedOther };
+}
+
+function denominationSubtotal(totals: DenominationTotals, otherAmount: number) {
+  return denominations.reduce((sum, [name, , amount]) => sum + totals[name] * amount, otherAmount);
+}
+
+function TotalDenominationsSummary({ rows }: { rows: ExecutiveReconciliationViewRow[] }) {
+  if (!rows.length) return null;
+  const { received, returned, receivedOther, returnedOther } = totalDenominations(rows);
+  const receivedTotal = denominationSubtotal(received, receivedOther);
+  const returnedTotal = denominationSubtotal(returned, returnedOther);
+  const finalTotal = Number((receivedTotal - returnedTotal).toFixed(2));
+  return (
+    <details className="cash-breakdown total-denominations-summary" open>
+      <summary>
+        Total denominations
+        <span className="subtle">{rows.length} associate{rows.length === 1 ? "" : "s"} saved</span>
+      </summary>
+      <div className="cash-breakdown-grid">
+        <div className="cash-breakdown-section received">
+          <div className="cash-breakdown-section-head">
+            <strong>Received from associates</strong>
+            <span className="cash-breakdown-subtotal">{formatAmount(receivedTotal)}</span>
+          </div>
+          <div className="denomination-grid">
+            {denominations.map(([name, label, amount]) => (
+              <div className="denomination-summary-chip" key={`total-received-${name}`}>
+                <span className="denomination-chip-label">₹{label}</span>
+                <strong>{received[name]}</strong>
+                <span className="denomination-summary-chip-amount">{formatAmount(received[name] * amount)}</span>
+              </div>
+            ))}
+            {receivedOther ? (
+              <div className="denomination-summary-chip other">
+                <span className="denomination-chip-label">Other</span>
+                <strong>—</strong>
+                <span className="denomination-summary-chip-amount">{formatAmount(receivedOther)}</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="cash-breakdown-section returned">
+          <div className="cash-breakdown-section-head">
+            <strong>Returned to associates</strong>
+            <span className="cash-breakdown-subtotal">{formatAmount(returnedTotal)}</span>
+          </div>
+          <div className="denomination-grid">
+            {denominations.map(([name, label, amount]) => (
+              <div className="denomination-summary-chip" key={`total-returned-${name}`}>
+                <span className="denomination-chip-label">₹{label}</span>
+                <strong>{returned[name]}</strong>
+                <span className="denomination-summary-chip-amount">{formatAmount(returned[name] * amount)}</span>
+              </div>
+            ))}
+            {returnedOther ? (
+              <div className="denomination-summary-chip other">
+                <span className="denomination-chip-label">Other</span>
+                <strong>—</strong>
+                <span className="denomination-summary-chip-amount">{formatAmount(returnedOther)}</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+      <div className="cash-live-status matched total-denominations-final">
+        <span>Total received <strong>{formatAmount(receivedTotal)}</strong></span>
+        <span>Total returned <strong>{formatAmount(returnedTotal)}</strong></span>
+        <span className="cash-live-result">Final total <strong>{formatAmount(finalTotal)}</strong></span>
+      </div>
+    </details>
+  );
+}
+
 function PendingReconDetails({ row }: { row: ExecutiveReconciliationViewRow }) {
   const details = Array.isArray(row.scc_pending_details) ? row.scc_pending_details : [];
   return (
@@ -263,6 +363,7 @@ export function SavedCashList({
 
   return (
     <div className="reconciliation-entry-list reconciliation-saved-list" aria-label="Executive reconciliation sheet">
+      <TotalDenominationsSummary rows={localRows} />
       {displayRows.length ? displayRows.map((row) => {
         const rowPending = activeKey === row.key;
         const rowError = errorByKey[row.key];
