@@ -176,7 +176,14 @@ export function attendanceDayInsight(
   const payDayType = resolvePayDayType(row);
   if (row.workMode === "wfh" && row.status === "PENDING") {
     return {
-      calendarClass: /upcoming/i.test(label) ? "off" : "on-shift",
+      // WFH (approved, credit not yet finalized) must render as the
+      // "paid-leave" calendar color, not "on-shift" — "on-shift" is the
+      // current-day blue-outline marker, and using it here made an approved
+      // WFH day look like an unremarkable ordinary working day on the
+      // calendar grid even though attendance credit hadn't posted yet. See
+      // globals.css:11785 ("WFH uses paid-leave; holiday uses week-off") for
+      // the color this branch was always meant to use.
+      calendarClass: /upcoming/i.test(label) ? "off" : "paid-leave",
       detail: "WFH is approved. Attendance credit is applied after the scheduled shift ends; no punch times are generated.",
       headline: label,
       label,

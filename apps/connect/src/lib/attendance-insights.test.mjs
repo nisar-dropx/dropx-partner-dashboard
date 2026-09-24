@@ -28,6 +28,16 @@ test("uses the canonical People day status", () => {
 });
 
 test("WFH approval is not a full day or missing-punch warning before finalization", () => {
+  // Calendar tile color matters here too: "Upcoming" (shift hasn't started)
+  // stays "off" (no data yet), but "Day in progress" and "Finalizing" are an
+  // approved WFH day that must render as "paid-leave" like any other WFH
+  // day - not the current-day "on-shift" marker, which made an approved WFH
+  // day whose credit hadn't posted yet look like an ordinary working day.
+  const expectedCalendarClass = {
+    "WFH approved · Upcoming": "off",
+    "WFH approved · Day in progress": "paid-leave",
+    "WFH approved · Finalizing": "paid-leave"
+  };
   for (const label of ["WFH approved · Upcoming", "WFH approved · Day in progress", "WFH approved · Finalizing"]) {
     const insight = attendanceDayInsight(row({ workMode: "wfh", status: "PENDING", attendanceStatus: label,
       inTime: "", outTime: "", workHours: "00:00", punchCount: 0 }));
@@ -35,6 +45,7 @@ test("WFH approval is not a full day or missing-punch warning before finalizatio
     assert.equal(insight.payDayType, "no_record");
     assert.equal(insight.needsRegularization, false);
     assert.deepEqual(insight.issues, []);
+    assert.equal(insight.calendarClass, expectedCalendarClass[label]);
   }
 });
 
