@@ -217,7 +217,7 @@ function TotalDenominationsSummary({ rows }: { rows: ExecutiveReconciliationView
   const returnedTotal = denominationSubtotal(returned, returnedOther);
   const finalTotal = Number((receivedTotal - returnedTotal).toFixed(2));
   return (
-    <details className="total-denominations-summary" open>
+    <details className="total-denominations-summary">
       <summary>
         <span className="total-denominations-summary-title">
           Total denominations
@@ -387,7 +387,16 @@ export function SavedCashList({
         const difference = Number((netCollectedAmount - expectedAmount).toFixed(2));
         const liveStatus = liveReconciliationStatus(expectedAmount, netCollectedAmount);
         return (
-          <article className="reconciliation-entry-card" key={row.key}>
+          <details className="reconciliation-entry-card reconciliation-entry-card-collapsible" key={row.key}>
+            <summary className="reconciliation-entry-summary">
+              <span className="reconciliation-entry-summary-name">{executiveDisplayName(row)}</span>
+              <span className="reconciliation-entry-summary-id subtle">{row.provider_employee_id}</span>
+              <span className="reconciliation-entry-summary-figures">
+                <span>Net kept <strong>{formatAmount(netCollectedAmount)}</strong></span>
+                <span>Expected <strong>{formatAmount(expectedAmount)}</strong></span>
+              </span>
+              <StatusPill status={liveStatus} />
+            </summary>
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -590,7 +599,7 @@ export function SavedCashList({
               ) : null}
               {rowError ? <p className="field-error">{rowError}</p> : null}
             </form>
-          </article>
+          </details>
         );
       }) : (
         <div className="panel-body"><p className="subtle">No saved cash entries.</p></div>

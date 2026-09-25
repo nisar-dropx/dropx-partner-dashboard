@@ -59,7 +59,15 @@ export default async function CashInAssociateNetworkPage() {
   }
 
   const totals = payload?.totals;
-  const refresh = payload?.refreshProgress;
+  // The refresh-progress banner ("Refresh X/38 stations") reflects the
+  // network-wide refresh run, the same thing "Refresh all stations" starts —
+  // a location-scoped user can't see that button (cia-client.tsx hides it
+  // for them), so they must not see its progress either. Without this, a
+  // scoped user loading the page while someone else's (or the background
+  // cron's) network-wide refresh was running saw "Refresh 38/38" banners
+  // and counts for a run that has nothing to do with their own 1-station
+  // view, which read as if the station filtering itself were broken.
+  const refresh = authorization.hasAllLocationAccess ? payload?.refreshProgress : null;
   const refreshActive = Boolean(refresh && refresh.status === "running");
 
   return (
