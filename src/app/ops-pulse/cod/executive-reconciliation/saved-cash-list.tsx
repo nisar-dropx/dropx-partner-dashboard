@@ -166,6 +166,13 @@ function denominationSubtotal(totals: DenominationTotals, otherAmount: number) {
   return denominations.reduce((sum, [name, , amount]) => sum + totals[name] * amount, otherAmount);
 }
 
+/** Received count minus Returned count, per denomination — what the Final total box breaks down. */
+function netTotals(received: DenominationTotals, returned: DenominationTotals): DenominationTotals {
+  const net = zeroTotals();
+  for (const [name] of denominations) net[name] = received[name] - returned[name];
+  return net;
+}
+
 function DenominationSummaryRow({
   tone,
   title,
@@ -173,13 +180,17 @@ function DenominationSummaryRow({
   counts,
   otherAmount
 }: {
-  tone: "received" | "returned";
+  tone: "received" | "returned" | "net";
   title: string;
   total: number;
   counts: DenominationTotals;
   otherAmount: number;
 }) {
-  const hasAny = denominations.some(([name]) => counts[name] > 0) || otherAmount > 0;
+  // "net" (Final total) counts are Received minus Returned per denomination —
+  // can legitimately be negative if more of a note was returned than
+  // received, so it checks for non-zero rather than positive-only like the
+  // received/returned boxes (which only ever hold non-negative counts).
+  const hasAny = denominations.some(([name]) => counts[name] !== 0) || otherAmount !== 0;
   return (
     <div className={`denom-summary-box denom-summary-row ${tone}`}>
       <div className="denom-summary-row-head">
@@ -188,15 +199,15 @@ function DenominationSummaryRow({
       </div>
       {hasAny ? (
         <div className="denomination-grid">
-          {denominations.map(([name, label, amount]) => counts[name] > 0 ? (
-            <div className="denomination-summary-chip" key={`${tone}-${name}`}>
+          {denominations.map(([name, label, amount]) => counts[name] !== 0 ? (
+            <div className={`denomination-summary-chip${counts[name] < 0 ? " negative" : ""}`} key={`${tone}-${name}`}>
               <span className="denomination-chip-label">₹{label}</span>
               <strong>× {counts[name]}</strong>
               <span className="denomination-summary-chip-amount">{formatAmount(counts[name] * amount)}</span>
             </div>
           ) : null)}
           {otherAmount ? (
-            <div className="denomination-summary-chip other">
+            <div className={`denomination-summary-chip other${otherAmount < 0 ? " negative" : ""}`}>
               <span className="denomination-chip-label">Other</span>
               <strong>—</strong>
               <span className="denomination-summary-chip-amount">{formatAmount(otherAmount)}</span>
@@ -204,7 +215,7 @@ function DenominationSummaryRow({
           ) : null}
         </div>
       ) : (
-        <p className="denom-summary-row-empty">None {tone === "received" ? "received" : "returned"} yet.</p>
+        <p className="denom-summary-row-empty">{tone === "received" ? "None received yet." : tone === "returned" ? "None returned yet." : "No net cash yet."}</p>
       )}
     </div>
   );
@@ -216,6 +227,8 @@ function TotalDenominationsSummary({ rows }: { rows: ExecutiveReconciliationView
   const receivedTotal = denominationSubtotal(received, receivedOther);
   const returnedTotal = denominationSubtotal(returned, returnedOther);
   const finalTotal = Number((receivedTotal - returnedTotal).toFixed(2));
+  const net = netTotals(received, returned);
+  const netOther = receivedOther - returnedOther;
   return (
     <div className="total-denominations-summary">
       <div className="total-denominations-summary-head">
@@ -225,13 +238,7 @@ function TotalDenominationsSummary({ rows }: { rows: ExecutiveReconciliationView
       <div className="denom-summary-flex">
         <DenominationSummaryRow tone="received" title="Received from associates" total={receivedTotal} counts={received} otherAmount={receivedOther} />
         <DenominationSummaryRow tone="returned" title="Returned to associates" total={returnedTotal} counts={returned} otherAmount={returnedOther} />
-        <div className="denom-summary-box denom-summary-final">
-          <div className="denom-summary-row-head">
-            <span className="denom-summary-row-title">Final total</span>
-          </div>
-          <strong className="denom-summary-final-amount">{formatAmount(finalTotal)}</strong>
-          <span className="subtle">Received − Returned</span>
-        </div>
+        <DenominationSummaryRow tone="net" title="Final total" total={finalTotal} counts={net} otherAmount={netOther} />
       </div>
     </div>
   );

@@ -13269,22 +13269,27 @@ tbody tr:hover td {
   background: #fdf8ee;
 }
 
-.denom-summary-final {
-  flex: 1 1 180px;
-  min-width: 180px;
-  display: flex;
-  flex-direction: column;
+/* Final total = Received minus Returned, broken down the same way as the
+   other two boxes so a manager can see exactly which denominations make up
+   the net figure, not just a bare number. */
+.denom-summary-row.net {
   border-color: #bbf7d0;
   background: #f0fdf4;
 }
 
-.denom-summary-final-amount {
+.denom-summary-row.net .denom-summary-row-total {
   color: #14532d;
-  font-size: 24px;
-  font-weight: 850;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.15;
-  margin: 2px 0 3px;
+  font-size: 17px;
+}
+
+.denomination-summary-chip.negative {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.denomination-summary-chip.negative strong,
+.denomination-summary-chip.negative .denomination-summary-chip-amount {
+  color: #b91c1c;
 }
 
 .denom-summary-row-head {

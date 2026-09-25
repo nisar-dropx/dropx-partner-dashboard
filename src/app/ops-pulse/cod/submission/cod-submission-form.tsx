@@ -113,7 +113,7 @@ export function CodSubmissionForm({
             required
           />
           <span className="subtle" style={{ display: "block", marginTop: 6 }}>
-            Enter the full name of the person who actually submitted this cash. Checked against the Amazon portal on submit — a portal username (e.g. &quot;dliraja&quot;) instead of a real name will be blocked.
+            Enter the person&apos;s actual name, not a portal username.
           </span>
         </label>
         <label className="span-2">Photo of deposit slip
