@@ -139,14 +139,20 @@ export async function resolveWorkforceLeaveBalance(
   workerType: LeaveWorkerType,
   workerId: string,
   leaveTypeId: string,
-  entitlement: number | null
+  entitlement: number | null,
+  asOf?: string
 ): Promise<WorkforceLeaveBalance> {
+  // asOf (YYYY-MM-DD) lets submission check the balance as of the leave's own
+  // start date - the same date hr_create_workforce_leave_request_with_steps
+  // uses - so a monthly-accrual leave type (CL/SL) is judged on what has been
+  // earned by that month. Omitted, the RPC defaults to today.
   const result = await db().rpc("hr_resolve_leave_balance", {
     p_company_id: companyId,
     p_worker_type: workerType,
     p_worker_id: workerId,
     p_leave_type_id: leaveTypeId,
-    p_entitlement: entitlement
+    p_entitlement: entitlement,
+    ...(asOf ? { p_as_of: asOf } : {})
   });
   if (result.error) throw new Error(result.error.message);
   const row = relationRow(result.data as WorkforceLeaveBalance[] | WorkforceLeaveBalance | null);

@@ -244,7 +244,20 @@ async function validateLeaveSubmission({
     .filter((item) => item.id !== excludeRequestId)
     .reduce((total, item) => total + overlapDays(item.start_date, item.end_date, `${fromDate.slice(0, 4)}-01-01`, `${fromDate.slice(0, 4)}-12-31`), 0);
   if (leaveType.balance_mode === "annual_balance") {
-    const availableDays = Math.max(0, leaveType.annual_allowance - committedDays);
+    // DropX One submits through hr_create_workforce_leave_request_with_proof,
+    // which (unlike the HRMS _with_steps RPC) has no balance check of its own,
+    // so this is the only guard. It must honour the same ledger + monthly
+    // accrual rule HRMS enforces (CL/SL earn 1 day per month from the joining
+    // month, unused days carry forward), judged as of the leave's start date.
+    // Take the stricter of that and the plain annual count so this can never
+    // allow more than it did before.
+    const pendingDays = (balanceResult.data ?? [])
+      .filter((item) => item.id !== excludeRequestId && item.status === "pending")
+      .reduce((total, item) => total + overlapDays(item.start_date, item.end_date, `${fromDate.slice(0, 4)}-01-01`, `${fromDate.slice(0, 4)}-12-31`), 0);
+    const ledger = await resolveWorkforceLeaveBalance(account.companyId, type, account.id, leaveTypeId, leaveType.annual_allowance, fromDate);
+    const annualAvailable = leaveType.annual_allowance - committedDays;
+    const ledgerAvailable = ledger.remaining === null ? annualAvailable : ledger.remaining - pendingDays;
+    const availableDays = Math.max(0, Math.min(annualAvailable, ledgerAvailable));
     if (days > availableDays) throw new Error(`Only ${availableDays} ${leaveType.name} day(s) are available.`);
   }
   return { days, leaveType };
