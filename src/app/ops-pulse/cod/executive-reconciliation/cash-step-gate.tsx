@@ -126,8 +126,10 @@ function ExceptionRowForm({
               try {
                 const result = await requestCashEntryException(formData);
                 if (result?.ok) {
+                  // Stay on the cash sheet: the row drops out of the remaining list and the
+                  // user carries on with the other drivers before continuing to Step 2.
                   onAdded(row.providerEmployeeId);
-                  router.push(result.nextHref || returnHref);
+                  setOpen(false);
                   router.refresh();
                   return;
                 }
@@ -140,7 +142,7 @@ function ExceptionRowForm({
             })();
           }}
         >
-          {submitting ? "Saving…" : "Confirm & continue"}
+          {submitting ? "Saving…" : "Confirm"}
         </button>
       </div>
     </div>
@@ -260,9 +262,9 @@ function TechIssueRowForm({
                       try {
                         const result = await raiseCodTechIssue(formData);
                         if (result?.ok) {
+                          // Same as "will submit later": stay on the cash sheet.
                           onRaised(row.providerEmployeeId);
                           setOpen(false);
-                          router.push(result.nextHref || returnHref);
                           router.refresh();
                           return;
                         }
@@ -275,7 +277,7 @@ function TechIssueRowForm({
                     })();
                   }}
                 >
-                  {submitting ? "Submitting…" : "Report & continue"}
+                  {submitting ? "Submitting…" : "Report"}
                 </button>
               </div>
             </div>

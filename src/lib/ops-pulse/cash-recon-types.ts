@@ -148,6 +148,8 @@ export type DriverReconciliationNormalized = {
   reconciliation: CashReconRow[];
   /** Cash-only expected totals from worker (preferred over paymentInfo.expected which includes MPOS). */
   expectedCash: ExpectedCashSummary | null;
+  /** Tech-issue associates' cash held out of this day (still with the associate; carried forward). */
+  heldCash?: ExpectedCashSummary | null;
 };
 
 export type LiabilitySummaryNormalized = {

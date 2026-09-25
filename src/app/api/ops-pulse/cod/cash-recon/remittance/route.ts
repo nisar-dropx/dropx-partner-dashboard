@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { fetchRemittance, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
+import { requireCompanyId } from "@/lib/company-scope";
+import { loadTechHoldsForDate } from "@/lib/ops-pulse/cod-tech-issues";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -28,7 +30,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "stationCode and date are required." }, { status: 400 });
     }
 
-    const result = await fetchRemittance({ stationCode, date });
+    const techHolds = await loadTechHoldsForDate(requireCompanyId(authorization), stationCode, date);
+    const result = await fetchRemittance({ stationCode, date, techHolds });
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load remittance summary.";

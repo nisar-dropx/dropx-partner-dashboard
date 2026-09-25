@@ -105,6 +105,61 @@ export async function loadTechIssuesForReport(
   return { rows: (data ?? []).map(normalize), error: null };
 }
 
+/** One associate's tech-issue hold for a business date, as the cash recon worker expects it. */
+export type TechHold = {
+  driverId: string;
+  since: string;
+  status: "held" | "released";
+};
+
+function istYmd(iso: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date(iso));
+}
+
+/**
+ * Tech-issue holds that apply to `businessDate` at one station. While an issue is open the
+ * associate's cash stays with them in Amazon, so it is "held" out of every day from the day
+ * it was raised until the day before it is resolved; on the resolve day it is "released" and
+ * all of that carried cash counts in that day's expected cash. Never throws — a lookup
+ * failure just means no holds (the day computes exactly as before this feature).
+ */
+export async function loadTechHoldsForDate(
+  companyId: string,
+  stationCode: string,
+  businessDate: string
+): Promise<TechHold[]> {
+  if (!supabaseAdmin || !stationCode || !businessDate) return [];
+  const code = stationCode.trim().toUpperCase();
+  // Anything resolved on/after the day before is a candidate (resolved_at is UTC; IST
+  // resolve date is computed below).
+  const since = new Date(`${businessDate}T00:00:00+05:30`);
+  since.setUTCDate(since.getUTCDate() - 1);
+  const { data, error } = await supabaseAdmin
+    .from("cod_tech_issues")
+    .select("provider_employee_id, opened_business_date, status, resolved_at")
+    .eq("company_id", companyId)
+    .eq("station_code", code)
+    .lte("opened_business_date", businessDate)
+    .or(`status.eq.Open,resolved_at.gte.${since.toISOString()}`);
+  if (error) {
+    console.error("loadTechHoldsForDate failed", error.message);
+    return [];
+  }
+  const holds: TechHold[] = [];
+  for (const row of data ?? []) {
+    const driverId = String(row.provider_employee_id ?? "").trim();
+    if (!driverId) continue;
+    const resolvedYmd = row.status === "Resolved" && row.resolved_at ? istYmd(row.resolved_at) : null;
+    if (resolvedYmd && resolvedYmd < businessDate) continue;
+    holds.push({
+      driverId,
+      since: row.opened_business_date,
+      status: resolvedYmd === businessDate ? "released" : "held"
+    });
+  }
+  return holds;
+}
+
 /**
  * Raise (or refresh) an open tech issue for one associate at one station,
  * with an optional photo attachment uploaded through the same ops-pulse
@@ -195,6 +250,8 @@ export async function raiseTechIssue(params: {
  */
 export async function resolveTechIssue(params: {
   companyId: string;
+  /** Station the caller was authorised for — the issue must belong to it. */
+  locationId: string;
   id: string;
   resolvedBy: string;
   resolvedByName: string | null;
@@ -204,11 +261,12 @@ export async function resolveTechIssue(params: {
     .from("cod_tech_issues")
     .select("id, photo_storage_bucket, photo_storage_path")
     .eq("company_id", params.companyId)
+    .eq("location_id", params.locationId)
     .eq("id", params.id)
     .eq("status", "Open")
     .maybeSingle();
   if (existing.error) throw new Error(existing.error.message);
-  if (!existing.data) return;
+  if (!existing.data) throw new Error("This tech issue is already resolved or does not belong to this station.");
 
   const now = new Date().toISOString();
   const updated = await supabaseAdmin.from("cod_tech_issues").update({

@@ -14,7 +14,7 @@ import { requirePagePermission, type AuthorizationContext } from "@/lib/authoriz
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { finalizeCodClosure, notifyCodManager } from "@/lib/ops-pulse/cod-day-closure";
 import { addCashEntryException, clearCashEntryExceptionIfAny, loadOpenCashEntryExceptions } from "@/lib/ops-pulse/cash-entry-exceptions";
-import { loadOpenTechIssues, notifyTechIssueOpened, raiseTechIssue, resolveTechIssue } from "@/lib/ops-pulse/cod-tech-issues";
+import { loadTechHoldsForDate, notifyTechIssueOpened, raiseTechIssue, resolveTechIssue } from "@/lib/ops-pulse/cod-tech-issues";
 import { canAccessCodAudit, writeCodAudit } from "@/lib/ops-pulse/cod-audit";
 import { fetchLiabilitySummary, fetchRemittance, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 
@@ -1214,6 +1214,19 @@ export async function confirmDriverReconForDeposit(formData: FormData) {
     assertLocationAccess(authorization, station.id);
     await assertClosureEditable(companyId, businessDate, locationId);
 
+    // Step 2 -> Step 3 stays blocked while any Step 1 "will submit later" exception for this
+    // station-day is still open. (Open tech issues deliberately do NOT block — they are fixed
+    // by another team and carry forward.) Checked BEFORE writing driver_check_status:
+    // validateCodRemittanceDeposit and finalizeCodClosure trust that status, so writing
+    // "Passed" first and only then refusing to navigate left Step 3 reachable anyway.
+    const openExceptions = await loadOpenCashEntryExceptions(companyId, businessDate, [station.id]);
+    if (openExceptions.error) throw new Error(openExceptions.error);
+    if (openExceptions.rows.length > 0) {
+      const names = openExceptions.rows.map((row) => row.associateName).join(", ");
+      const message = `${openExceptions.rows.length} associate${openExceptions.rows.length === 1 ? "" : "s"} still need${openExceptions.rows.length === 1 ? "s" : ""} their cash entered before continuing: ${names}. Enter their cash on Cash sheet first.`;
+      if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
+      redirectWithFlash({ error: message }, withStep(returnHref, 2));
+    }
     const closureResult = await supabaseAdmin
       .from("cod_day_closures")
       .select("id, driver_check_status, is_final_submitted, validation_snapshot")
@@ -1281,33 +1294,6 @@ export async function confirmDriverReconForDeposit(formData: FormData) {
     });
     revalidatePath(pagePath);
     revalidatePath(publicPagePath);
-
-    // Guard documented at requestCashEntryException's own comment but never actually
-    // enforced here: Step 2 -> Step 3 must stay blocked while any Step 1 "will submit
-    // later" exception is still open for this station-day, regardless of the CIA-pending
-    // check above passing. Without this, driver validation could pass through to Deposit &
-    // summary while an associate's cash was never entered - page.tsx's own server-side
-    // activeStep recompute would eventually bounce the user back on next load, but the
-    // button itself gave no warning and could navigate there first.
-    const openExceptions = await loadOpenCashEntryExceptions(companyId, businessDate, [station.id]);
-    if (openExceptions.error) throw new Error(openExceptions.error);
-    if (openExceptions.rows.length > 0) {
-      const names = openExceptions.rows.map((row) => row.associateName).join(", ");
-      const message = `${openExceptions.rows.length} associate${openExceptions.rows.length === 1 ? "" : "s"} still need${openExceptions.rows.length === 1 ? "s" : ""} their cash entered before continuing: ${names}. Enter their cash on Cash sheet first.`;
-      if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
-      redirectWithFlash({ error: message }, withStep(returnHref, 2));
-    }
-
-    // Same guard for open tech issues (not business_date-scoped — a tech issue raised on
-    // an earlier day still blocks today until someone resolves it).
-    const openTechIssues = await loadOpenTechIssues(companyId, [station.id]);
-    if (openTechIssues.error) throw new Error(openTechIssues.error);
-    if (openTechIssues.rows.length > 0) {
-      const names = openTechIssues.rows.map((row) => row.associateName).join(", ");
-      const message = `${openTechIssues.rows.length} associate${openTechIssues.rows.length === 1 ? "" : "s"} still ${openTechIssues.rows.length === 1 ? "has" : "have"} an open tech issue: ${names}. Resolve it before continuing.`;
-      if (clientResponse) return { ok: false, error: message } satisfies CashEntryActionResult;
-      redirectWithFlash({ error: message }, withStep(returnHref, 2));
-    }
 
     const notice = stillPending
       ? "Feedback recorded. Deposit & summary is unlocked; pending Cash In Associate stays visible."
@@ -1378,10 +1364,9 @@ export async function requestCashEntryException(formData: FormData): Promise<Cas
 
     revalidatePath(pagePath);
     revalidatePath(publicPagePath);
-    const notice = `Exception recorded for ${associateName}. You can continue to Driver validation — final close stays locked until their cash is entered.`;
-    const nextHref = withStep(returnHref, 2);
-    if (clientResponse) return { ok: true, notice, nextHref } satisfies CashEntryActionResult;
-    redirectWithFlash({ notice }, nextHref);
+    const notice = `Exception recorded for ${associateName}. Finish the remaining drivers, then continue to Driver validation — Deposit & summary stays locked until their cash is entered.`;
+    if (clientResponse) return { ok: true, notice } satisfies CashEntryActionResult;
+    redirectWithFlash({ notice }, returnHref);
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "Unable to add cash entry exception.";
@@ -1453,10 +1438,9 @@ export async function raiseCodTechIssue(formData: FormData): Promise<CashEntryAc
 
     revalidatePath(pagePath);
     revalidatePath(publicPagePath);
-    const notice = `Tech issue recorded for ${associateName}. Their cash entry stays on hold until it is resolved — this carries forward to every day until then.`;
-    const nextHref = withStep(returnHref, 2);
-    if (clientResponse) return { ok: true, notice, nextHref } satisfies CashEntryActionResult;
-    redirectWithFlash({ notice }, nextHref);
+    const notice = `Tech issue recorded for ${associateName}. Their cash is on hold and carries forward every day until resolved — the rest of the day can still be closed.`;
+    if (clientResponse) return { ok: true, notice } satisfies CashEntryActionResult;
+    redirectWithFlash({ notice }, returnHref);
   } catch (error) {
     if (isNextRedirectError(error)) throw error;
     const message = error instanceof Error ? error.message : "Unable to record the tech issue.";
@@ -1478,6 +1462,7 @@ export async function resolveCodTechIssue(formData: FormData): Promise<CashEntry
 
     await resolveTechIssue({
       companyId,
+      locationId: station.id,
       id: issueId,
       resolvedBy: authorization.userId,
       resolvedByName: authorization.fullName || authorization.email
@@ -1652,7 +1637,11 @@ export async function validateCodRemittanceDeposit(formData: FormData): Promise<
     const collectedCash = Number(String(formData.get("collected_cash") ?? "0").replace(/[,₹\s]/g, ""));
     const collected = Number.isFinite(collectedCash) ? Number(collectedCash.toFixed(2)) : 0;
 
-    let remittance = await fetchRemittance({ stationCode: station.station_code, date: businessDate });
+    let remittance = await fetchRemittance({
+      stationCode: station.station_code,
+      date: businessDate,
+      techHolds: await loadTechHoldsForDate(companyId, station.station_code, businessDate)
+    });
     const payloadRaw = clean(formData.get("remittance_payload"));
     if (payloadRaw) {
       try {

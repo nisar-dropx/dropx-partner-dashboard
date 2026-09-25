@@ -4,6 +4,7 @@ import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import { normalizeAssociateName, type CashReconAssociate } from "@/lib/ops-pulse/cash-recon-types";
 import { fetchDriverReconciliation, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { loadTechHoldsForDate } from "@/lib/ops-pulse/cod-tech-issues";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -136,7 +137,8 @@ export async function POST(request: Request) {
         .filter((row) => row.providerEmployeeId && row.name)
       : [];
 
-    const result = await fetchDriverReconciliation({ stationCode, date, baselineAssociates });
+    const techHolds = await loadTechHoldsForDate(companyId, stationCode, date);
+    const result = await fetchDriverReconciliation({ stationCode, date, baselineAssociates, techHolds });
 
     if (locationId) {
       await persistRosterRows({

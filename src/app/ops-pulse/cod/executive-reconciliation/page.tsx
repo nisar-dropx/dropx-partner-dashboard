@@ -216,7 +216,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
   const exceptedProviderIds = new Set(stationCashExceptions.map((row) => row.providerEmployeeId.trim().toUpperCase()));
   const allCashEntriesResolved = stationCashExceptions.length === 0;
   // Open tech issues for this station — NOT scoped to today's business_date, so an issue
-  // raised on an earlier day still carries forward and blocks Step 2 -> 3 today.
+  // raised on an earlier day still carries forward. They never lock a step.
   const stationTechIssues = techIssuesResult.rows.filter((row) => row.locationId === defaultLocationId);
   const openTechIssueProviderIds = new Set(stationTechIssues.map((row) => row.providerEmployeeId.trim().toUpperCase()));
   const driverRun = portalRunsResult.rows.find((run) => run.check_type === "driver_reconciliation");
@@ -323,9 +323,12 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
   const notSavedRequired = missingRequiredCashEntries(initialRequiredAssociates, gateSavedEntries);
   // Excepted associates ("will submit later") don't block Step 1 -> Step 2, but they still
   // block Step 2 -> Step 3 via allCashEntriesResolved above.
-  const missingServerRequired = notSavedRequired.filter((row) =>
-    !exceptedProviderIds.has(String(row.providerEmployeeId).trim().toUpperCase())
-  );
+  // Tech-issue associates never block (the client gate already skips them; without this
+  // the server bounced the user back to Step 1 right after raising one).
+  const missingServerRequired = notSavedRequired.filter((row) => {
+    const id = String(row.providerEmployeeId).trim().toUpperCase();
+    return !exceptedProviderIds.has(id) && !openTechIssueProviderIds.has(id);
+  });
   // Match client gate: all required cash entered, or no required list + navigating to step 2 (zero-cash day).
   const cashReady = cashReconReady
     ? missingServerRequired.length === 0
@@ -541,10 +544,7 @@ export default async function ExecutiveReconciliationPage({ searchParams }: { se
                     </table>
                   </div>
                   <p className="subtle recon-pending-checklist-note">
-                    {activeStep === 2
-                      ? "Continuing to Deposit & summary stays blocked until every tech issue above is resolved."
-                      : "Deposit & summary and final submission stay locked until every tech issue above is resolved."}
-                    {" "}This carries forward every day until resolved — the station&apos;s reporting manager has been notified.
+                    These associates&apos; cash is on hold and does not block any step. It carries forward every day until resolved — the station&apos;s reporting manager has been notified.
                   </p>
                 </div>
               ) : null}

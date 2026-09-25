@@ -1,3 +1,4 @@
+import type { TechHold } from "@/lib/ops-pulse/cod-tech-issues";
 import {
   buildCashReconAssociates,
   buildRequiredCashAssociates,
@@ -271,12 +272,15 @@ type RawDriverReconciliation = {
   reconciliation?: CashReconRow[];
   reconciliationCount?: number;
   expectedCash?: ExpectedCashSummary | null;
+  heldCash?: ExpectedCashSummary | null;
 };
 
 export async function fetchDriverReconciliation(params: {
   stationCode: string;
   date: string;
   baselineAssociates?: BaselineAssociate[];
+  /** Tech-issue holds for this date (see loadTechHoldsForDate). */
+  techHolds?: TechHold[];
 }): Promise<DriverReconciliationNormalized> {
   const raw = await postWorker<RawDriverReconciliation>("/api/admin/executive/driver-reconciliation", params);
   const drivers = Array.isArray(raw.drivers) ? raw.drivers : [];
@@ -314,7 +318,15 @@ export async function fetchDriverReconciliation(params: {
     missingFromDer,
     requiredForCashEntry,
     reconciliation,
-    expectedCash
+    expectedCash,
+    heldCash: raw.heldCash && typeof raw.heldCash === "object"
+      ? {
+          totalReceived: moneyValue(raw.heldCash.totalReceived),
+          shipmentCount: Number(raw.heldCash.shipmentCount ?? 0) || 0,
+          byDriver: Array.isArray(raw.heldCash.byDriver) ? raw.heldCash.byDriver : [],
+          cashShipments: []
+        }
+      : null
   };
 }
 
@@ -649,6 +661,8 @@ export async function verifyRemittance(params: {
 export async function fetchRemittance(params: {
   stationCode: string;
   date: string;
+  /** Tech-issue holds for this date (see loadTechHoldsForDate). */
+  techHolds?: TechHold[];
 }): Promise<RemittanceSummaryNormalized> {
   const raw = await postWorker<RawRemittanceSummary>("/api/admin/executive/remittance", params);
   const created = Array.isArray(raw.created) ? raw.created.map(mapRemittanceRow) : [];

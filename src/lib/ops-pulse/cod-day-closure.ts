@@ -1,6 +1,7 @@
 import { sendEmail } from "@/lib/email";
 import { fetchDriverReconciliation, fetchLiabilitySummary, fetchRemittance, isCashReconWorkerConfigured } from "@/lib/ops-pulse/cash-recon-worker";
 import { loadOpenCashEntryExceptions } from "@/lib/ops-pulse/cash-entry-exceptions";
+import { loadTechHoldsForDate } from "@/lib/ops-pulse/cod-tech-issues";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 // Keep in sync with DIFFERENCE_REMARKS_RUPEES in deposit-remittance-panel.tsx and actions.ts —
@@ -298,8 +299,9 @@ export async function finalizeCodClosure({
     if (closure.deposit_check_status !== "Passed" && closure.deposit_check_status !== "Exception approved") {
       throw new Error("Validate bank deposit remittance before final COD submission.");
     }
+    const techHolds = await loadTechHoldsForDate(companyId, stationCode, businessDate);
     const [remittance, liability] = await Promise.all([
-      fetchRemittance({ stationCode, date: businessDate }),
+      fetchRemittance({ stationCode, date: businessDate, techHolds }),
       fetchLiabilitySummary({ stationCode, date: businessDate })
     ]);
     remittanceExpected = remittance.remittanceTotalCash;
@@ -325,7 +327,7 @@ export async function finalizeCodClosure({
         );
       }
     } else {
-      const driverRecon = await fetchDriverReconciliation({ stationCode, date: businessDate });
+      const driverRecon = await fetchDriverReconciliation({ stationCode, date: businessDate, techHolds });
       const expectedCashTotal = Number(driverRecon.expectedCash?.totalReceived ?? NaN);
       if (Number.isFinite(expectedCashTotal)) {
         const expectedDiff = Number((remittance.remittanceTotalCash - expectedCashTotal).toFixed(2));
