@@ -1,5 +1,5 @@
-import { ProviderMappingPageContent } from "@/components/provider-mapping-page-content";
+import { redirect } from "next/navigation";
 
-export default function ProviderMappingPage({searchParams}: {searchParams?: {q?:string}}) {
-  return <ProviderMappingPageContent initialQuery={searchParams?.q} />;
+export default function ProviderMappingPage() {
+  redirect("/provider-mapping/provider-first");
 }
