@@ -296,10 +296,18 @@ function readWorkbookRows(buffer: ArrayBuffer, includeAllSheets = false) {
 
 type HawkeyeDateBatch = { reportDate: string; rows: HawkeyeMetricRow[] };
 
-/** yyyy-mm-dd in Asia/Kolkata for a cell XLSX already parsed as a JS Date (cellDates: true). */
+/**
+ * yyyy-mm-dd in Asia/Kolkata for a cell XLSX already parsed as a JS Date (cellDates: true).
+ * CSV downloads of the long format (seen 2026-09-25, "DROPX (2).csv") keep Report_date as
+ * plain text like "9/23/2026 0:00" — Amazon's M/D/YYYY order — so parse those as text.
+ */
 function kolkataDateFromCell(value: unknown) {
-  if (!(value instanceof Date) || !Number.isFinite(value.getTime())) return null;
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(value);
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime())
+      ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(value)
+      : null;
+  }
+  return parseAmazonDate(value);
 }
 
 /**
