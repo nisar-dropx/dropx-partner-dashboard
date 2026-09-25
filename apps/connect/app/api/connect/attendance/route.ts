@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveConnectAttendanceWorker } from "@/lib/connect-attendance-worker";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveAttendancePayDayType } from "@/lib/attendance-pay-day";
+import { approvedLeaveDays } from "@/lib/leave-calendar-days";
 import { userFacingError } from "@/lib/user-facing-error";
 import { fillAttendanceCalendarGaps, loadAttendanceReportRows } from "../../../../../../src/lib/biometric/attendance";
 import { resolveAttendanceRegularizationApprovers } from "../../../../../../src/lib/attendance-regularization-workflow";
@@ -124,15 +125,41 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const leaveTypes = await supabaseAdmin
-      .from("hr_leave_types")
-      .select("attendance_code,attendance_label,is_paid,balance_mode")
-      .eq("company_id", worker.companyId);
+    const leaveColumn = worker.profileType === "employee" ? "employee_id" : worker.profileType === "contractor" ? "contractor_id" : null;
+    const [leaveTypes, approvedLeaveRequests] = await Promise.all([
+      supabaseAdmin
+        .from("hr_leave_types")
+        .select("id,name,attendance_code,attendance_label,is_paid,balance_mode")
+        .eq("company_id", worker.companyId),
+      leaveColumn
+        ? supabaseAdmin
+          .from("hr_leave_requests")
+          .select("start_date,end_date,leave_type_id")
+          .eq("company_id", worker.companyId)
+          .eq(leaveColumn, worker.profileId)
+          .eq("status", "approved")
+          .lte("start_date", range.toDate)
+          .gte("end_date", range.fromDate)
+        : Promise.resolve({ data: [], error: null })
+    ]);
     if (leaveTypes.error) throw new Error(leaveTypes.error.message);
+    if (approvedLeaveRequests.error) throw new Error(approvedLeaveRequests.error.message);
     const labels = new Map((leaveTypes.data ?? []).map((type) => [type.attendance_code, type]));
+    const leaveTypeById = new Map((leaveTypes.data ?? []).map((type) => [type.id, type]));
+    const leaveDays = approvedLeaveDays((approvedLeaveRequests.data ?? []).flatMap((request) => {
+      const type = leaveTypeById.get(request.leave_type_id);
+      return type ? [{
+        startDate: String(request.start_date),
+        endDate: String(request.end_date),
+        attendanceCode: String(type.attendance_code ?? ""),
+        attendanceLabel: type.attendance_label ?? null,
+        name: String(type.name ?? "")
+      }] : [];
+    }), range.fromDate, range.toDate);
 
-    const responseRows = rows.map((row) => {
-      const configured = labels.get(String(row.status ?? ""));
+    /** Leave-type colour/label for a day's status code (a configured leave code, or plain attendance). */
+    const classifyStatus = (status: string, attendanceStatus: string, workMode: string) => {
+      const configured = labels.get(status);
       const unpaidLeave = Boolean(configured) && (
         configured?.is_paid === false
         || String(configured?.balance_mode ?? "") === "unlimited_unpaid"
@@ -148,10 +175,10 @@ export async function GET(request: NextRequest) {
           ? "paid_leave" as const
           : "attendance" as const;
       const payDayType = resolveAttendancePayDayType({
-        status: row.status,
-        statusLabel: statusLabel ?? row.attendanceStatus,
-        attendanceStatus: row.attendanceStatus,
-        workMode: row.workMode ?? "onsite",
+        status,
+        statusLabel: statusLabel ?? attendanceStatus,
+        attendanceStatus,
+        workMode,
         leaveType: configured
           ? {
             attendance_code: configured.attendance_code,
@@ -161,9 +188,17 @@ export async function GET(request: NextRequest) {
           : null,
         isPaidLeave
       });
+      return { statusLabel, statusKind, isPaidLeave, payDayType };
+    };
+
+    const responseRows = rows.map((row) => {
+      // An approved leave day shows as that leave even when the biometric
+      // import produced a row for it (approval does not touch attendance_daily).
+      const status = leaveDays.get(row.punchDate)?.attendanceCode ?? String(row.status ?? "");
+      const { statusLabel, statusKind, isPaidLeave, payDayType } = classifyStatus(status, row.attendanceStatus, row.workMode ?? "onsite");
       return {
         date: row.punchDate,
-        status: row.status,
+        status,
         statusLabel,
         statusKind,
         isPaidLeave,
@@ -189,6 +224,38 @@ export async function GET(request: NextRequest) {
     });
 
     const attendanceDates = new Set(responseRows.map((row) => row.date));
+    // Approved leave on a day with no attendance row at all (the usual case:
+    // nobody punches on a leave day).
+    for (const [date, leave] of leaveDays) {
+      if (attendanceDates.has(date)) continue;
+      attendanceDates.add(date);
+      const { statusLabel, statusKind, isPaidLeave, payDayType } = classifyStatus(leave.attendanceCode, leave.attendanceLabel ?? leave.name, "onsite");
+      responseRows.push({
+        date,
+        status: leave.attendanceCode,
+        statusLabel,
+        statusKind,
+        isPaidLeave,
+        payDayType,
+        attendanceStatus: leave.attendanceLabel ?? leave.name,
+        inTime: "",
+        outTime: "",
+        punches: [],
+        workHours: "",
+        punchCount: 0,
+        lateMinutes: 0,
+        earlyOutMinutes: 0,
+        scheduledStart: "--:--",
+        scheduledEnd: "--:--",
+        scheduledMinutes: 0,
+        shiftName: leave.name,
+        shiftCode: "",
+        shiftSource: "Approved leave",
+        remark: "",
+        workMode: "onsite" as const,
+        regularization: requestByDate.get(date) ?? null
+      });
+    }
     for (const [date, regularization] of requestByDate) {
       if (!attendanceDates.has(date)) {
         attendanceDates.add(date);

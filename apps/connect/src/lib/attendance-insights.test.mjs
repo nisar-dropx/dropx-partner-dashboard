@@ -237,4 +237,17 @@ test("the day a week-off comp-off is taken shows as that leave", () => {
   }));
   assert.equal(compOff.calendarClass, "paid-leave");
   assert.equal(compOff.label, "Approved week-off compensatory off");
+  // "holiday" in the label must not turn a paid comp-off into the rest-day colour.
+  const holidayCompOff = attendanceDayInsight(row({
+    status: "HOLCOMP",
+    statusLabel: "Approved holiday compensatory off",
+    statusKind: "paid_leave",
+    isPaidLeave: true,
+    payDayType: "paid_leave",
+    attendanceStatus: "Approved holiday compensatory off",
+    inTime: "--:--",
+    outTime: "--:--",
+    punchCount: 0
+  }));
+  assert.equal(holidayCompOff.calendarClass, "paid-leave");
 });
