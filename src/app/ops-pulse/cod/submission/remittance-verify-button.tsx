@@ -36,6 +36,7 @@ export function RemittanceVerifyButton() {
             const amountRaw = String(data.get("deposited_amount") ?? "").trim();
             const codPeriodFrom = String(data.get("cod_period_from") ?? "").trim();
             const codPeriodTo = String(data.get("cod_period_to") || data.get("cod_period_from") || "").trim();
+            const submittedBy = String(data.get("submitter_name") ?? "").trim();
             if (!stationCode || !date || !remittanceCode || !amountRaw) {
               setOk(false);
               setMessage("Select a station and fill deposit date, remittance code, and amount before checking.");
@@ -60,6 +61,7 @@ export function RemittanceVerifyButton() {
                     amount: Number(amountRaw.replace(/,/g, "")),
                     codPeriodFrom,
                     codPeriodTo: codPeriodTo || codPeriodFrom,
+                    submittedBy: submittedBy || undefined,
                     fresh: true
                   })
                 });
@@ -72,7 +74,7 @@ export function RemittanceVerifyButton() {
                 if (payload.verified) {
                   setOk(true);
                   setMessage(
-                    "Remittance verified — deposit date = submissionDate, COD period covers creationDate, and amount matches."
+                    "Remittance verified — deposit date = submissionDate, COD period covers creationDate, amount matches, and Submitted By is not a portal login."
                   );
                   return;
                 }

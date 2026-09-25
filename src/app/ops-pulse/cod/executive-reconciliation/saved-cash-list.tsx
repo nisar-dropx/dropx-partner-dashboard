@@ -181,7 +181,7 @@ function DenominationSummaryRow({
 }) {
   const hasAny = denominations.some(([name]) => counts[name] > 0) || otherAmount > 0;
   return (
-    <div className={`denom-summary-row ${tone}`}>
+    <div className={`denom-summary-box denom-summary-row ${tone}`}>
       <div className="denom-summary-row-head">
         <span className="denom-summary-row-title">{title}</span>
         <strong className="denom-summary-row-total">{formatAmount(total)}</strong>
@@ -217,22 +217,23 @@ function TotalDenominationsSummary({ rows }: { rows: ExecutiveReconciliationView
   const returnedTotal = denominationSubtotal(returned, returnedOther);
   const finalTotal = Number((receivedTotal - returnedTotal).toFixed(2));
   return (
-    <details className="total-denominations-summary">
-      <summary>
-        <span className="total-denominations-summary-title">
-          Total denominations
-          <span className="subtle">{rows.length} associate{rows.length === 1 ? "" : "s"} saved</span>
-        </span>
-        <span className="total-denominations-summary-hero">
-          <span>Final total</span>
-          <strong>{formatAmount(finalTotal)}</strong>
-        </span>
-      </summary>
-      <div className="denom-summary-rows">
+    <div className="total-denominations-summary">
+      <div className="total-denominations-summary-head">
+        <span className="total-denominations-summary-title">Total denominations</span>
+        <span className="subtle">{rows.length} associate{rows.length === 1 ? "" : "s"} saved</span>
+      </div>
+      <div className="denom-summary-flex">
         <DenominationSummaryRow tone="received" title="Received from associates" total={receivedTotal} counts={received} otherAmount={receivedOther} />
         <DenominationSummaryRow tone="returned" title="Returned to associates" total={returnedTotal} counts={returned} otherAmount={returnedOther} />
+        <div className="denom-summary-box denom-summary-final">
+          <div className="denom-summary-row-head">
+            <span className="denom-summary-row-title">Final total</span>
+          </div>
+          <strong className="denom-summary-final-amount">{formatAmount(finalTotal)}</strong>
+          <span className="subtle">Received − Returned</span>
+        </div>
       </div>
-    </details>
+    </div>
   );
 }
 

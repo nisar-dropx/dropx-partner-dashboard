@@ -311,6 +311,27 @@ export function alphaNumericRequired(value: FormDataEntryValue | null, field: st
   return alphaNumericFromForm(value, field, { required: true }) as string;
 }
 
+/**
+ * Flags (non-blocking) when the "Submitted By" name someone typed looks like
+ * it was just copied from the Amazon portal's own submittedBy/createdBy login
+ * handle (e.g. "dliraja") rather than actually being the person's name. This
+ * field is never blocked or gated on this — the portal's submittedBy/createdBy
+ * is one login per store/remittance record, not the actual individual who
+ * deposited the cash, so treating a mismatch as an error would be wrong (see
+ * verifyAmazonRemittance in actions.ts). But station teams are used to typing
+ * that same login handle here from when it WAS cross-checked, so this raises
+ * a soft flag for a reviewer to notice and correct later, the same way
+ * amount/date mismatches are flagged rather than silently accepted.
+ */
+export function submitterLooksLikePortalLogin(submittedName: string, portalLogins: Array<string | null | undefined>) {
+  const normalized = submittedName.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!normalized) return false;
+  return portalLogins.some((login) => {
+    const loginNormalized = String(login ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+    return loginNormalized.length > 0 && loginNormalized === normalized;
+  });
+}
+
 export const dailySubmissionAttachmentFields = [
   ["driver_reconciliation", "Driver reconciliation screenshot"],
   ["prepared_deposit", "Prepared deposit / liability screenshot"],

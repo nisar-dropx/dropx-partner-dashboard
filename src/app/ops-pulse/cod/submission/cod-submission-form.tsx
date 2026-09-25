@@ -108,12 +108,12 @@ export function CodSubmissionForm({
           <input
             className="field"
             name="submitter_name"
-            placeholder="Full name of person submitting cash"
-            title="Letters and numbers only"
+            placeholder="e.g. Ravi Kumar"
+            title="Enter the person's full name — not a station code, remittance code, or Amazon portal username"
             required
           />
           <span className="subtle" style={{ display: "block", marginTop: 6 }}>
-            Enter the full name of the person who actually submitted this cash — not the store ID.
+            Enter the full name of the person who actually submitted this cash. Checked against the Amazon portal on submit — a portal username (e.g. &quot;dliraja&quot;) instead of a real name will be blocked.
           </span>
         </label>
         <label className="span-2">Photo of deposit slip

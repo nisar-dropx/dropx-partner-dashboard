@@ -12,6 +12,7 @@ import {
   numberFromForm,
   required,
   clientForFormType,
+  submitterLooksLikePortalLogin,
   type CodAttachment,
   type CodFormType,
   type CodLocationRow
@@ -51,11 +52,13 @@ function readCodSubmissionFields(formData: FormData) {
     clientHint: String(formData.get("client") ?? "").trim().toLowerCase(),
     locationId: required(formData.get("location_id"), "Station"),
     remittanceCode: alphaNumericRequired(formData.get("remittance_code"), "Remittance code").toUpperCase(),
-    // Free-text, HR-entered name of the actual person who submitted the cash —
-    // deliberately never checked against Amazon's remittance-portal submitter
-    // data (that portal only tracks one identity per store/remittance record,
-    // not the individual who physically deposited the cash), so this is
-    // required input, not something derived from or validated against any API.
+    // Free-text, HR-entered name of the actual person who submitted the cash.
+    // Never blocked/gated on the Amazon portal's own submittedBy/createdBy
+    // login handle (that's one login per store/remittance record, not the
+    // individual who deposited the cash) — but it IS compared against that
+    // login as a non-blocking flag (see verifyAmazonRemittance) in case the
+    // habit of typing the portal login here (from when it used to be
+    // required to match) is still happening.
     submitterName: alphaNumericRequired(formData.get("submitter_name"), "Submitted by"),
     amount: numberFromForm(formData.get("deposited_amount"), "Deposited amount"),
     depositDate: dateFromForm(formData.get("deposit_date"), "Deposit date"),
@@ -73,6 +76,7 @@ async function amazonValidationOrPending(params: {
   codPeriodTo: string;
   remittanceCode: string;
   amount: number;
+  submitterName: string;
 }) {
   if (params.formType !== "amazon") {
     return {
@@ -92,7 +96,8 @@ async function amazonValidationOrPending(params: {
     codPeriodFrom: params.codPeriodFrom,
     codPeriodTo: params.codPeriodTo,
     remittanceCode: params.remittanceCode,
-    amount: params.amount
+    amount: params.amount,
+    submitterName: params.submitterName
   });
   return {
     validationStatus: "Matched",
@@ -157,16 +162,13 @@ async function verifyAmazonRemittance(params: {
   codPeriodTo: string;
   remittanceCode: string;
   amount: number;
+  submitterName: string;
 }) {
   if (!isCashReconWorkerConfigured()) {
     throw new Error(
       "Cash recon worker is not configured. Set CASH_RECON_WORKER_URL and CASH_RECON_ADMIN_KEY."
     );
   }
-  // Deliberately doesn't send submitterName to the worker/Amazon-portal check —
-  // that portal only tracks one submitter identity per store/remittance record,
-  // not the actual individual who deposited the cash, so a mismatch there is
-  // meaningless and must never block or influence this verification.
   const verify = await verifyRemittance({
     stationCode: params.stationCode,
     date: params.depositDate,
@@ -200,6 +202,18 @@ async function verifyAmazonRemittance(params: {
         (!verify.codeFound
           ? `Remittance code ${params.remittanceCode} was not found on Amazon portal.`
           : `Remittance code found but details do not match for deposit ${params.depositDate}.`)
+    );
+  }
+  // The Amazon portal's own submittedBy/createdBy is a login handle, not a
+  // person's name (e.g. "dliraja") — someone entering that exact handle in
+  // "Submitted By" means they typed the portal login instead of their actual
+  // name, the same old habit from when this field used to be checked against
+  // the portal. Block it the same way a remittance-code/amount mismatch is
+  // blocked, so the submission never gets recorded with a login handle as
+  // the submitter's identity.
+  if (submitterLooksLikePortalLogin(params.submitterName, [match?.submittedBy, match?.createdBy])) {
+    throw new Error(
+      `"${params.submitterName}" looks like the Amazon portal login, not a person's name. Enter the full name of the person who actually submitted this cash.`
     );
   }
   return {
@@ -257,7 +271,8 @@ export async function createCodSubmission(
       codPeriodFrom: fields.codPeriodFrom,
       codPeriodTo: fields.codPeriodTo,
       remittanceCode: fields.remittanceCode,
-      amount: fields.amount
+      amount: fields.amount,
+      submitterName: fields.submitterName
     });
 
     const submissionId = randomUUID();
@@ -385,7 +400,8 @@ export async function updateCodSubmission(
       codPeriodFrom: fields.codPeriodFrom,
       codPeriodTo: fields.codPeriodTo,
       remittanceCode: fields.remittanceCode,
-      amount: fields.amount
+      amount: fields.amount,
+      submitterName: fields.submitterName
     });
 
     const existingAttachments = Array.isArray(existing.deposit_slip_attachments)

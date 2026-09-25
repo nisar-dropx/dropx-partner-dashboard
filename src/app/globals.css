@@ -13206,91 +13206,54 @@ tbody tr:hover td {
 }
 
 /*
- * Redesigned "Total denominations" summary: the Final total is now the
- * headline figure in the (always-visible) summary row itself, rather than
- * a plain line at the bottom equal in weight to "Total received"/"Total
- * returned" — so the one number a station manager actually needs to check
- * at a glance is immediately visible even with the details collapsed.
- * Received/Returned are separate stacked rows instead of a two-column grid,
- * since Returned is usually mostly-zero and a side-by-side layout gave it
- * equal visual weight to Received regardless of how little cash it holds.
+ * Redesigned "Total denominations": three boxes side by side — Received,
+ * Returned, Final total — laid out horizontally with flexbox so they read as
+ * three peer figures a station manager compares at a glance, instead of the
+ * previous collapsed-by-default <details> with stacked rows (which hid the
+ * numbers behind a click and gave every box equal width regardless of
+ * content). Always visible now; no expand/collapse needed for three boxes
+ * this compact. Wraps to a stacked column below tablet width.
  */
 .total-denominations-summary {
   margin-bottom: 12px;
-  padding: 10px 14px 11px;
+  padding: 12px 14px 13px;
   border: 1px solid #d9dee7;
   border-radius: 12px;
   background: #fff;
   box-shadow: 0 4px 14px rgba(15, 23, 42, .05);
 }
 
-.total-denominations-summary[open] {
-  padding-bottom: 13px;
-}
-
-.total-denominations-summary > summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  cursor: pointer;
-  list-style: none;
-}
-
-.total-denominations-summary > summary::-webkit-details-marker {
-  display: none;
-}
-
-.total-denominations-summary-title {
+.total-denominations-summary-head {
   display: flex;
   align-items: baseline;
   gap: 8px;
+  margin-bottom: 10px;
+}
+
+.total-denominations-summary-title {
   font-size: 14px;
   font-weight: 850;
   color: #172033;
 }
 
-.total-denominations-summary-title .subtle {
+.total-denominations-summary-head .subtle {
   font-size: 11px;
   font-weight: 600;
   color: #667085;
   text-transform: none;
 }
 
-.total-denominations-summary-hero {
+.denom-summary-flex {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  border-radius: 999px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 10px;
 }
 
-.total-denominations-summary-hero span {
-  color: #14532d;
-  font-size: 10px;
-  font-weight: 850;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
-.total-denominations-summary-hero strong {
-  color: #14532d;
-  font-size: 16px;
-  font-weight: 850;
-  font-variant-numeric: tabular-nums;
-}
-
-.denom-summary-rows {
-  display: grid;
-  gap: 8px;
-  margin-top: 11px;
-}
-
-.denom-summary-row {
-  padding: 8px 10px 9px;
+.denom-summary-box {
+  flex: 1 1 220px;
+  min-width: 220px;
+  padding: 10px 12px 11px;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   background: #f8fafc;
@@ -13304,6 +13267,24 @@ tbody tr:hover td {
 .denom-summary-row.returned {
   border-color: #fbdfad;
   background: #fdf8ee;
+}
+
+.denom-summary-final {
+  flex: 1 1 180px;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.denom-summary-final-amount {
+  color: #14532d;
+  font-size: 24px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  margin: 2px 0 3px;
 }
 
 .denom-summary-row-head {
@@ -13445,6 +13426,15 @@ tbody tr:hover td {
   .reconciliation-roster-preview,
   .reconciliation-final-summary {
     grid-template-columns: 1fr;
+  }
+
+  .denom-summary-flex {
+    flex-direction: column;
+  }
+
+  .denom-summary-box,
+  .denom-summary-final {
+    min-width: 0;
   }
 
   .reconciliation-stage-action,

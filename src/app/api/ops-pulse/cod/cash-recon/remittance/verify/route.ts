@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthorization, hasPermission } from "@/lib/authorization";
 import { isCashReconWorkerConfigured, verifyRemittance } from "@/lib/ops-pulse/cash-recon-worker";
+import { submitterLooksLikePortalLogin } from "@/lib/ops-pulse/cod";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -58,9 +59,20 @@ export async function POST(request: Request) {
       amount,
       codPeriodFrom: codPeriodFrom || undefined,
       codPeriodTo: codPeriodTo || undefined,
-      submittedBy: submittedBy || undefined,
       fresh: body.fresh === true
     });
+
+    // Same login-vs-name check the actual submit path enforces (see
+    // verifyAmazonRemittance in submission/actions.ts) — surfaced here too so
+    // the manual "Check remittance" button catches it before a full submit.
+    const match = result.matches[0] ?? null;
+    if (submittedBy && submitterLooksLikePortalLogin(submittedBy, [match?.submittedBy, match?.createdBy])) {
+      return NextResponse.json({
+        ...result,
+        verified: false,
+        failureReason: `"${submittedBy}" looks like the Amazon portal login, not a person's name. Enter the full name of the person who actually submitted this cash.`
+      });
+    }
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to verify remittance.";

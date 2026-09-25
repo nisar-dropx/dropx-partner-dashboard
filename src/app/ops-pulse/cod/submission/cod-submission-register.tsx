@@ -123,9 +123,9 @@ function EditSubmissionModal({
               <input className="field" name="remittance_code" defaultValue={editing.remittanceCode} required title="Alphanumeric remittance / CMS code" />
             </label>
             <label>Submitted By
-              <input className="field" name="submitter_name" defaultValue={editing.submitterName} title="Letters and numbers only" required />
+              <input className="field" name="submitter_name" defaultValue={editing.submitterName} title="Enter the person's full name — not a station code, remittance code, or Amazon portal username" required />
               <span className="subtle" style={{ display: "block", marginTop: 6 }}>
-                Enter the full name of the person who actually submitted this cash — not the store ID.
+                Enter the full name of the person who actually submitted this cash. Checked against the Amazon portal on save — a portal username instead of a real name will be blocked.
               </span>
             </label>
             <label className="span-2">Replace deposit slip photo
@@ -186,6 +186,7 @@ export function CodSubmissionRegister({
               <th>Client</th>
               <th>COD Date</th>
               <th>Deposit Date</th>
+              <th>Submitted By</th>
               <th>Remittance Code</th>
               <th>Amount</th>
               <th>Slip</th>
@@ -202,6 +203,7 @@ export function CodSubmissionRegister({
                 <td>{row.client}</td>
                 <td>{row.codPeriod}</td>
                 <td>{row.depositDateLabel}</td>
+                <td>{row.submitterName || <span className="subtle">Not recorded</span>}</td>
                 <td>{row.remittanceCode}</td>
                 <td>{row.amount}</td>
                 <td>
