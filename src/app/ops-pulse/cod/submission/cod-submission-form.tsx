@@ -108,9 +108,13 @@ export function CodSubmissionForm({
           <input
             className="field"
             name="submitter_name"
-            placeholder="Name of station user"
+            placeholder="Full name of person submitting cash"
             title="Letters and numbers only"
+            required
           />
+          <span className="subtle" style={{ display: "block", marginTop: 6 }}>
+            Enter the full name of the person who actually submitted this cash — not the store ID.
+          </span>
         </label>
         <label className="span-2">Photo of deposit slip
           <input className="field" name="deposit_slip" type="file" accept="image/*" capture="environment" required />

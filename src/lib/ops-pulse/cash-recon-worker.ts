@@ -592,6 +592,13 @@ export async function verifyRemittance(params: {
   submittedBy?: string | null;
   fresh?: boolean;
 }): Promise<RemittanceVerifyResult> {
+  // submittedBy is intentionally never sent to the worker/Amazon-portal check —
+  // the portal only records one submitter identity per store/remittance record,
+  // not the actual individual who deposited the cash, so cross-checking a
+  // human-entered name against it is meaningless and must not gate or
+  // influence verification. The submittedBy param stays on this function's
+  // signature only so existing callers don't need to change; it is unused.
+  void params.submittedBy;
   const raw = await postWorker<RawRemittanceVerify>("/api/admin/executive/remittance/verify", {
     stationCode: params.stationCode,
     date: params.date,
@@ -599,7 +606,6 @@ export async function verifyRemittance(params: {
     amount: params.amount,
     codPeriodFrom: params.codPeriodFrom || undefined,
     codPeriodTo: params.codPeriodTo || undefined,
-    submittedBy: params.submittedBy || undefined,
     fresh: params.fresh === true
   });
 

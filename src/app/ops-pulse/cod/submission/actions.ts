@@ -5,7 +5,6 @@ import { revalidatePath } from "next/cache";
 import { requirePagePermission } from "@/lib/authorization";
 import { requireCompanyId, withCompany } from "@/lib/company-scope";
 import {
-  alphaNumericFromForm,
   alphaNumericRequired,
   dateFromForm,
   depositSlipAttachmentFields,
@@ -52,7 +51,12 @@ function readCodSubmissionFields(formData: FormData) {
     clientHint: String(formData.get("client") ?? "").trim().toLowerCase(),
     locationId: required(formData.get("location_id"), "Station"),
     remittanceCode: alphaNumericRequired(formData.get("remittance_code"), "Remittance code").toUpperCase(),
-    submitterName: alphaNumericFromForm(formData.get("submitter_name"), "Submitted by", { required: false }),
+    // Free-text, HR-entered name of the actual person who submitted the cash —
+    // deliberately never checked against Amazon's remittance-portal submitter
+    // data (that portal only tracks one identity per store/remittance record,
+    // not the individual who physically deposited the cash), so this is
+    // required input, not something derived from or validated against any API.
+    submitterName: alphaNumericRequired(formData.get("submitter_name"), "Submitted by"),
     amount: numberFromForm(formData.get("deposited_amount"), "Deposited amount"),
     depositDate: dateFromForm(formData.get("deposit_date"), "Deposit date"),
     codPeriodFrom: dateFromForm(formData.get("cod_period_from"), "COD from date"),
@@ -69,7 +73,6 @@ async function amazonValidationOrPending(params: {
   codPeriodTo: string;
   remittanceCode: string;
   amount: number;
-  submittedBy: string | null;
 }) {
   if (params.formType !== "amazon") {
     return {
@@ -89,8 +92,7 @@ async function amazonValidationOrPending(params: {
     codPeriodFrom: params.codPeriodFrom,
     codPeriodTo: params.codPeriodTo,
     remittanceCode: params.remittanceCode,
-    amount: params.amount,
-    submittedBy: params.submittedBy
+    amount: params.amount
   });
   return {
     validationStatus: "Matched",
@@ -155,13 +157,16 @@ async function verifyAmazonRemittance(params: {
   codPeriodTo: string;
   remittanceCode: string;
   amount: number;
-  submittedBy: string | null;
 }) {
   if (!isCashReconWorkerConfigured()) {
     throw new Error(
       "Cash recon worker is not configured. Set CASH_RECON_WORKER_URL and CASH_RECON_ADMIN_KEY."
     );
   }
+  // Deliberately doesn't send submitterName to the worker/Amazon-portal check —
+  // that portal only tracks one submitter identity per store/remittance record,
+  // not the actual individual who deposited the cash, so a mismatch there is
+  // meaningless and must never block or influence this verification.
   const verify = await verifyRemittance({
     stationCode: params.stationCode,
     date: params.depositDate,
@@ -169,7 +174,6 @@ async function verifyAmazonRemittance(params: {
     amount: params.amount,
     codPeriodFrom: params.codPeriodFrom,
     codPeriodTo: params.codPeriodTo,
-    submittedBy: params.submittedBy,
     fresh: true
   });
   const match = verify.matches[0] ?? null;
@@ -253,8 +257,7 @@ export async function createCodSubmission(
       codPeriodFrom: fields.codPeriodFrom,
       codPeriodTo: fields.codPeriodTo,
       remittanceCode: fields.remittanceCode,
-      amount: fields.amount,
-      submittedBy: fields.submitterName
+      amount: fields.amount
     });
 
     const submissionId = randomUUID();
@@ -382,8 +385,7 @@ export async function updateCodSubmission(
       codPeriodFrom: fields.codPeriodFrom,
       codPeriodTo: fields.codPeriodTo,
       remittanceCode: fields.remittanceCode,
-      amount: fields.amount,
-      submittedBy: fields.submitterName
+      amount: fields.amount
     });
 
     const existingAttachments = Array.isArray(existing.deposit_slip_attachments)

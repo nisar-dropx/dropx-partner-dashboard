@@ -123,7 +123,10 @@ function EditSubmissionModal({
               <input className="field" name="remittance_code" defaultValue={editing.remittanceCode} required title="Alphanumeric remittance / CMS code" />
             </label>
             <label>Submitted By
-              <input className="field" name="submitter_name" defaultValue={editing.submitterName} title="Letters and numbers only" />
+              <input className="field" name="submitter_name" defaultValue={editing.submitterName} title="Letters and numbers only" required />
+              <span className="subtle" style={{ display: "block", marginTop: 6 }}>
+                Enter the full name of the person who actually submitted this cash — not the store ID.
+              </span>
             </label>
             <label className="span-2">Replace deposit slip photo
               <input className="field" name="deposit_slip" type="file" accept="image/*" capture="environment" />
