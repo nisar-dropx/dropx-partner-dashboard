@@ -19,6 +19,8 @@ type LeaveType = {
   available: number | null;
   isPaid: boolean;
   balanceMode: "annual_balance" | "unlimited_unpaid" | "earned_balance";
+  /** Dates allowed for this type, from the server (null: nothing usable right now). */
+  dateWindow?: { earliest: string; latest: string | null } | null;
 };
 type LeaveApprovalStep = {
   stepOrder: number;
@@ -163,7 +165,12 @@ export function ConnectLeave({
   useEffect(() => { void loadLeave(1); }, [loadLeave]);
   const selectedType = data?.types.find((item) => item.id === leaveTypeId) ?? null;
   const leaveMasterReady = Boolean(data?.types.length);
-  const minimumDate = todayInIndia();
+  // The server sends each leave type's allowed dates; the submit check uses the same
+  // window. undefined = an older server response, so keep the old "today onwards".
+  const dateWindow = selectedType?.dateWindow;
+  const noDatesAvailable = Boolean(selectedType) && dateWindow === null;
+  const minimumDate = dateWindow?.earliest ?? todayInIndia();
+  const maximumDate = dateWindow?.latest ?? undefined;
   const requestedDays = inclusiveDays(fromDate, toDate);
   const isSickLeave = selectedType?.code.toUpperCase() === "SICK";
   const medicalProofRequired = isSickLeave && requestedDays > 1;
@@ -301,12 +308,19 @@ export function ConnectLeave({
           </label>
           {selectedType ? <p className="dx-leave-balance">{selectedType.balanceMode === "unlimited_unpaid"
             ? `Unpaid leave · No balance limit · ${selectedType.pending} pending`
-            : `${selectedType.allowance} yearly · ${selectedType.used} used · ${selectedType.pending} pending`}</p> : null}
+            : selectedType.balanceMode === "earned_balance"
+              ? `Earned comp off · ${selectedType.used} used · ${selectedType.pending} pending`
+              : `${selectedType.allowance} yearly · ${selectedType.used} used · ${selectedType.pending} pending`}</p> : null}
           {!leaveMasterReady ? <p>No active leave type is available. HR can enable one in Leave Policy.</p> : null}
           <div className="dx-leave-dates">
-            <label>From date<input min={minimumDate} onChange={(event) => setFromDate(event.target.value)} type="date" value={fromDate} /></label>
-            <label>To date<input min={fromDate || minimumDate} onChange={(event) => setToDate(event.target.value)} type="date" value={toDate} /></label>
+            <label>From date<input disabled={noDatesAvailable} max={maximumDate} min={minimumDate} onChange={(event) => setFromDate(event.target.value)} type="date" value={fromDate} /></label>
+            <label>To date<input disabled={noDatesAvailable} max={maximumDate} min={fromDate || minimumDate} onChange={(event) => setToDate(event.target.value)} type="date" value={toDate} /></label>
           </div>
+          {noDatesAvailable
+            ? <p className="dx-leave-balance">No {selectedType?.name} is available to use right now.</p>
+            : selectedType && dateWindow
+              ? <p className="dx-leave-balance">You can choose dates from {displayDate(dateWindow.earliest)}{dateWindow.latest ? ` to ${displayDate(dateWindow.latest)}` : " onwards"}.</p>
+              : null}
           <label>Reason<textarea onChange={(event) => setReason(event.target.value)} placeholder="Enter reason for leave" rows={4} value={reason} /></label>
           {isSickLeave ? <section className={`dx-leave-proof${medicalProofRequired ? " required" : ""}`}>
             <div className="dx-leave-proof-head"><span><Paperclip /><strong>Medical proof</strong></span><em>{medicalProofRequired ? "Required" : "Optional for 1 day"}</em></div>

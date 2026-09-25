@@ -182,14 +182,59 @@ test("maps WFH to paid-leave color and holiday to week-off color", () => {
   }));
   assert.equal(wfh.calendarClass, "paid-leave");
   assert.equal(wfh.label, "Present · WFH");
+  // A rest day nobody worked has no punches (the default fixture has a full pair).
+  const noPunches = { inTime: "--:--", outTime: "--:--", workHours: "00:00", punchCount: 0 };
   assert.equal(attendanceDayInsight(row({
     status: "WO",
-    attendanceStatus: "Weekly Off"
+    attendanceStatus: "Weekly Off",
+    ...noPunches
   })).calendarClass, "week-off");
   const holiday = attendanceDayInsight(row({
     status: "H",
-    attendanceStatus: "Holiday"
+    attendanceStatus: "Holiday",
+    ...noPunches
   }));
   assert.equal(holiday.calendarClass, "week-off");
   assert.equal(holiday.label, "Holiday");
+});
+
+test("a worked week off shows as present, not as a day off (SREEKANTH, 13 Sep)", () => {
+  const worked = attendanceDayInsight(row({
+    date: "2026-09-13",
+    status: "P",
+    payDayType: "week_off",
+    attendanceStatus: "Full Day",
+    inTime: "09:49",
+    outTime: "19:37",
+    punchCount: 2
+  }));
+  assert.equal(worked.calendarClass, attendanceDayInsight(row()).calendarClass);
+  assert.equal(worked.label, "Worked on week off");
+  assert.equal(worked.payDayType, "present");
+  assert.equal(attendanceDayInsight(row({ status: "H", attendanceStatus: "Holiday" })).label, "Worked on holiday");
+});
+
+test("a single stray punch on a week off is still a week off", () => {
+  assert.equal(attendanceDayInsight(row({
+    status: "WO",
+    attendanceStatus: "Weekly Off",
+    inTime: "09:49",
+    outTime: "--:--",
+    punchCount: 1
+  })).calendarClass, "week-off");
+});
+
+test("the day a week-off comp-off is taken shows as that leave", () => {
+  const compOff = attendanceDayInsight(row({
+    status: "WOFFCOMP",
+    statusLabel: "Approved week-off compensatory off",
+    statusKind: "paid_leave",
+    isPaidLeave: true,
+    attendanceStatus: "Approved week-off compensatory off",
+    inTime: "--:--",
+    outTime: "--:--",
+    punchCount: 0
+  }));
+  assert.equal(compOff.calendarClass, "paid-leave");
+  assert.equal(compOff.label, "Approved week-off compensatory off");
 });

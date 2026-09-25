@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { requireConnectAccount, type ConnectAccount } from "../../../../src/lib/connect-auth";
 import { resolveWorkforceLeaveApproval, resolveWorkforceLeaveBalance, resolveWorkforceLeaveEntitlements, type LeaveWorkerType } from "../../../../src/lib/connect-leave-data";
 import { notifyConnectLeaveSubmitted } from "../../../../src/lib/connect-leave-notifications";
+import { compOffValidUntil, lastOfMonth, leaveDatesOutsideWindow, leaveDateWindow, type LeaveDateWindow } from "../../../../src/lib/leave-date-window";
 import { supabaseAdmin } from "../../../../src/lib/supabase-admin";
 
 function db() { if (!supabaseAdmin) throw new Error("Database configuration is unavailable."); return supabaseAdmin; }
@@ -113,6 +114,46 @@ async function leaveApprovalPreview(account: ConnectAccount, type: LeaveWorkerTy
   }
 }
 
+/**
+ * Dates this person may request for one leave type (see src/lib/leave-date-window.ts).
+ * The same result feeds the app's date pickers and the submit check. Comp-off windows
+ * come from the person's own comp-off credits and the type's lapse settings.
+ */
+async function leaveWindowFor(
+  account: ConnectAccount,
+  type: LeaveWorkerType,
+  leaveType: { leave_type_id: string; code: string; balance_mode: string },
+  today: string
+): Promise<LeaveDateWindow | null> {
+  if (leaveType.balance_mode !== "earned_balance") {
+    return leaveDateWindow({ code: leaveType.code, balanceMode: leaveType.balance_mode, today });
+  }
+  const [settings, credits] = await Promise.all([
+    db().from("hr_leave_types").select("comp_off_week_off_lapses_monthly,comp_off_holiday_lapse_days")
+      .eq("company_id", account.companyId).eq("id", leaveType.leave_type_id).maybeSingle(),
+    db().from("hr_leave_balance_ledger").select("reference_date,source")
+      .eq("company_id", account.companyId).eq("worker_type", type).eq("worker_id", account.id)
+      .eq("leave_type_id", leaveType.leave_type_id).eq("entry_type", "credit").eq("leave_year", 0)
+      .not("reference_date", "is", null)
+  ]);
+  if (settings.error) throw new Error(settings.error.message);
+  if (credits.error) throw new Error(credits.error.message);
+  const lapse = {
+    weekOffLapsesMonthly: Boolean(settings.data?.comp_off_week_off_lapses_monthly),
+    holidayLapseDays: settings.data?.comp_off_holiday_lapse_days ?? null
+  };
+  const noLapseLatest = lastOfMonth(today, 1);
+  return leaveDateWindow({
+    code: leaveType.code,
+    balanceMode: leaveType.balance_mode,
+    today,
+    credits: (credits.data ?? []).map((credit) => ({
+      referenceDate: String(credit.reference_date),
+      validUntil: compOffValidUntil(String(credit.reference_date), String(credit.source ?? ""), lapse, noLapseLatest)
+    }))
+  });
+}
+
 async function leavePayload(account: ConnectAccount, type: LeaveWorkerType, previewDays = 1) {
   const workerColumn = type === "employee" ? "employee_id" : "contractor_id";
   const year = Number(indiaToday().slice(0, 4));
@@ -173,9 +214,12 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType, prev
     const pending = (requestResult.data ?? []).filter((request) => request.leave_type_id === leaveType.leave_type_id && request.status === "pending")
       .reduce((total, request) => total + overlapDays(request.start_date, request.end_date, yearStart, yearEnd), 0);
     const tracksBalance = leaveType.balance_mode === "annual_balance" || leaveType.balance_mode === "earned_balance";
-    const balance = tracksBalance
-      ? await resolveWorkforceLeaveBalance(account.companyId, type, account.id, leaveType.leave_type_id, leaveType.annual_allowance)
-      : { entitlement: null, used: null, remaining: null };
+    const [balance, dateWindow] = await Promise.all([
+      tracksBalance
+        ? resolveWorkforceLeaveBalance(account.companyId, type, account.id, leaveType.leave_type_id, leaveType.annual_allowance)
+        : Promise.resolve({ entitlement: null, used: null, remaining: null }),
+      leaveWindowFor(account, type, leaveType, indiaToday())
+    ]);
     return {
       id: leaveType.leave_type_id,
       name: leaveType.name,
@@ -186,7 +230,8 @@ async function leavePayload(account: ConnectAccount, type: LeaveWorkerType, prev
       pending,
       available: tracksBalance ? balance.remaining : null,
       isPaid: leaveType.is_paid,
-      balanceMode: leaveType.balance_mode
+      balanceMode: leaveType.balance_mode,
+      dateWindow
     };
   }));
   return {
@@ -220,7 +265,6 @@ async function validateLeaveSubmission({
 }) {
   const today = indiaToday();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate)) throw new Error("Select the leave dates.");
-  if (fromDate < today) throw new Error("A time-off request cannot start in the past.");
   if (toDate < fromDate) throw new Error("The end date cannot be before the start date.");
   if (fromDate.slice(0, 4) !== toDate.slice(0, 4)) throw new Error("Submit separate requests for each leave year.");
   if (reason.length < 3 || reason.length > 1000) throw new Error("Enter a valid reason between 3 and 1,000 characters.");
@@ -228,6 +272,11 @@ async function validateLeaveSubmission({
   const entitlements = await resolveWorkforceLeaveEntitlements({ companyId: account.companyId, workerId: account.id, workerType: type });
   const leaveType = entitlements.find((item) => item.leave_type_id === leaveTypeId);
   if (!leaveType) throw new Error("This leave type is not available for your current location and designation.");
+  // Replaces the old blanket "cannot start in the past": CL/SL may use this month
+  // and next (plus last month on the 1st-2nd), comp-off from the day after the day
+  // worked until it lapses, anything else today onwards.
+  const outsideWindow = leaveDatesOutsideWindow(await leaveWindowFor(account, type, leaveType, today), fromDate, toDate, leaveType.name);
+  if (outsideWindow) throw new Error(outsideWindow);
   const workerColumn = type === "employee" ? "employee_id" : "contractor_id";
   let overlapQuery = db().from("hr_leave_requests").select("id").eq("company_id", account.companyId).eq(workerColumn, account.id)
     .in("status", ["pending", "approved"]).lte("start_date", toDate).gte("end_date", fromDate);

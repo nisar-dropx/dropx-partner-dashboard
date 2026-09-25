@@ -264,7 +264,27 @@ export function attendanceDayInsight(
     };
   }
 
-  if (payDayType === "week_off" || statusIsWeekOff(row, state)) {
+  const isWeekOffDay = payDayType === "week_off" || statusIsWeekOff(row, state);
+  const isHolidayDay = !isWeekOffDay && (payDayType === "paid_holiday" || statusIsHoliday(row, state));
+  // A week off or holiday the person actually worked (a complete in/out pair) is
+  // present, not a rest day - it is also what earns the comp-off. Previously it
+  // kept the grey week-off colour, so a worked 13 Sep looked like a day off.
+  if ((isWeekOffDay || isHolidayDay) && workedFullPunchPair(row)) {
+    const restDay = isWeekOffDay ? "week off" : "holiday";
+    const workedLabel = `Worked on ${restDay}`;
+    return {
+      calendarClass: calendarClassForPayDayType("present", options),
+      detail: `You worked on your ${isWeekOffDay ? "weekly off" : "holiday"}. It counts as present, and a comp-off day is credited when the hours worked meet company policy.`,
+      headline: workedLabel,
+      issues: [],
+      label: workedLabel,
+      needsRegularization: false,
+      payDayType: "present",
+      tone: "green"
+    };
+  }
+
+  if (isWeekOffDay) {
     return {
       calendarClass: "week-off",
       detail: "Weekly off is recorded for this day.",
@@ -277,7 +297,7 @@ export function attendanceDayInsight(
     };
   }
 
-  if (payDayType === "paid_holiday" || statusIsHoliday(row, state)) {
+  if (isHolidayDay) {
     return {
       calendarClass: "week-off",
       detail: "Paid holiday is recorded for this day.",
@@ -402,6 +422,15 @@ export function attendanceDayInsight(
     payDayType: "present",
     tone: issues.length ? "amber" : "green"
   };
+}
+
+function hasClockTime(value: string | null | undefined) {
+  return /^\d{1,2}:\d{2}/.test(String(value ?? "").trim());
+}
+
+/** Both an in and an out punch - a single stray punch on a rest day is not "worked". */
+function workedFullPunchPair(row: AttendanceInsightRow) {
+  return row.punchCount >= 2 && hasClockTime(row.inTime) && hasClockTime(row.outTime);
 }
 
 function statusIsWeekOff(row: AttendanceInsightRow, state: string) {
