@@ -21,6 +21,7 @@ import { isRosterChangePastDeadline, rosterChangeDeadlineMessage } from "@/lib/r
 import {
   applyRosterDrop,
   decodeRosterDragPayload,
+  findRosterWeekOffCapBreach,
   encodeRosterDragPayload,
   moveIsoDate,
   nextRosterOccurrenceOnOrAfter,
@@ -504,6 +505,16 @@ export function OpsRosterPlanner({
     return assignmentsRef.current.get(cellKey(person, assignmentDate)) ?? fallback;
   }, [isRecurring]);
 
+  // Ops allows at most one Week Off per person per Mon-Sun week. Checked here, before
+  // the grid changes, so a second Week Off is refused on the spot instead of only
+  // failing later at Save (saveOpsRosterAssignments keeps the same rule server-side).
+  const weekOffCapMessage = useCallback((drops: Array<{ targetKey: string; payload: RosterDragPayload }>) => {
+    const breach = findRosterWeekOffCapBreach(assignmentsRef.current, drops);
+    if (!breach) return null;
+    const person = people.find((item) => personKey(item) === breach.personKey);
+    return `${person?.name ?? "This person"} already has a week off in the week of ${fullDateLabel(breach.weekStart)}. Only 1 week off is allowed per week.`;
+  }, [people]);
+
   const dropPayload = useCallback(async (person: OpsRosterPerson, date: string, payload: RosterDragPayload | null) => {
     if (!payload) return;
     dragDropHandledRef.current = true;
@@ -516,9 +527,16 @@ export function OpsRosterPlanner({
     const currentPayload = payload.sourceKey && isRecurring
       ? { ...payload, sourceKey: remapCellKeyToTemplate(payload.sourceKey, templateStartRef.current) }
       : payload;
+    const assignmentDate = isRecurring ? recurringTemplateDate(templateStartRef.current, date) : date;
+    const capMessage = weekOffCapMessage([{ targetKey: cellKey(person, assignmentDate), payload: currentPayload }]);
+    if (capMessage) {
+      setMessage({ tone: "error", text: capMessage });
+      setCellPicker(null);
+      return;
+    }
     commitDrop(person, date, currentPayload);
     setCellPicker(null);
-  }, [assignmentAt, commitDrop, ensureEditing, isRecurring, lockReason]);
+  }, [assignmentAt, commitDrop, ensureEditing, isRecurring, lockReason, weekOffCapMessage]);
 
   const removeAssignmentAtKey = useCallback((sourceKey: string) => {
     if (!editingEnabledRef.current) return;
@@ -586,6 +604,16 @@ export function OpsRosterPlanner({
     const locked = cells.find((cell) => lockReason(cell.date, { tool: activeTool }, assignmentAt(cell.person, cell.date)));
     if (locked) {
       setMessage({ tone: "error", text: lockReason(locked.date, { tool: activeTool }, assignmentAt(locked.person, locked.date)) ?? cutoffMessage });
+      return;
+    }
+    // Checked as one batch, so applying Week Off to two selected days of the same
+    // week is refused as a whole rather than half-applied.
+    const capMessage = weekOffCapMessage(cells.map((cell) => ({
+      targetKey: cellKey(cell.person, isRecurring ? recurringTemplateDate(templateStartRef.current, cell.date) : cell.date),
+      payload: { tool: activeTool }
+    })));
+    if (capMessage) {
+      setMessage({ tone: "error", text: capMessage });
       return;
     }
     for (const cell of cells) commitDrop(cell.person, cell.date, { tool: activeTool });

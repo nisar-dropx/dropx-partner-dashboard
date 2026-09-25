@@ -131,3 +131,35 @@ export function applyRosterDrop(current: Map<string, RosterAssignmentValue>, tar
   else assignments.set(targetKey, { dayType: "working", shiftId: payload.tool.shiftId, notes: null });
   return { assignments, dirtyKeys };
 }
+
+/**
+ * Ops roster rule: at most one Week Off per person per Monday-Sunday week.
+ * Simulates `drops` exactly as applyRosterDrop would, so moving an existing
+ * Week Off (its source cell is cleared) or bulk-applying Week Off to several
+ * days is judged on the end result, and returns the first person/week that
+ * would end up with more than one. Only drops that place a Week Off are
+ * checked, so replacing an extra Week Off with a shift is always allowed.
+ * Mirrors findWeekOffCapViolation in lib/ops-pulse/rostering.ts, which stays
+ * the server-side backstop on save and Excel import.
+ */
+export function findRosterWeekOffCapBreach(
+  current: Map<string, RosterAssignmentValue>,
+  drops: Array<{ targetKey: string; payload: RosterDragPayload }>
+): { personKey: string; weekStart: string } | null {
+  if (!drops.some((drop) => drop.payload.tool.kind === "weekly_off")) return null;
+  let next = current;
+  for (const drop of drops) next = applyRosterDrop(next, drop.targetKey, drop.payload).assignments;
+  const checked = new Set<string>();
+  for (const drop of drops) {
+    if (drop.payload.tool.kind !== "weekly_off") continue;
+    const separator = drop.targetKey.lastIndexOf(":");
+    const personKey = drop.targetKey.slice(0, separator);
+    const weekStart = rosterMondayOnOrBefore(drop.targetKey.slice(separator + 1));
+    const id = `${personKey}|${weekStart}`;
+    if (checked.has(id)) continue;
+    checked.add(id);
+    const weekOffs = rosterWeek(weekStart).filter((date) => next.get(`${personKey}:${date}`)?.dayType === "weekly_off").length;
+    if (weekOffs > 1) return { personKey, weekStart };
+  }
+  return null;
+}
