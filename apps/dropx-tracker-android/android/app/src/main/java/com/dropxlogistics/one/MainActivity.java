@@ -109,23 +109,22 @@ public class MainActivity extends BridgeActivity {
   }
 
   /**
-   * onCreate() now requests edge-to-edge unconditionally (setDecorFitsSystemWindows(false)) on
-   * every device and API level, so the OS never reserves system-bar space on its own — this
-   * margin is the ONLY thing reserving it, always, everywhere. That replaced an earlier version
-   * of this method that branched on Build.VERSION.SDK_INT to guess whether the OS was "already"
-   * reserving status-bar space — that guess was wrong on multiple real devices across different
-   * Android versions (the OS reservation AND this margin both applying, doubling the top gap),
-   * because exactly how/whether setDecorFitsSystemWindows(true) reserves space is inconsistent
-   * across OS versions and OEM skins. One unconditional code path can't double up with anything.
+   * onCreate() requests edge-to-edge unconditionally (setDecorFitsSystemWindows(false)) on
+   * every device and API level, so the OS never reserves system-bar space on its own, for
+   * EITHER bar — this margin is the ONLY thing reserving that space, always, everywhere. One
+   * unconditional code path, top and bottom alike, can't double up with anything and doesn't
+   * need to special-case any OS version, OEM skin, or navigation mode.
    *
-   * The bottom margin still needs a real per-device check, but for a different reason: with
-   * 3-button navigation, the nav bar is a real, OS-drawn, tappable bar — content should stop
-   * above it, not extend a duplicate margin below it, so no extra margin is added there. With
-   * gesture navigation there's no such reserved OS bar (the thin gesture-handle strip overlaps
-   * content by design), so the margin is needed to keep content clear of it. tappableElement()
-   * is the value Android itself reports for "is there a truly reserved, tappable bar here" —
-   * equal to navigationBars() in 3-button mode, empty/zero in gesture mode — so checking it
-   * (rather than the OS version) correctly covers both navigation modes on any device.
+   * An earlier version of this method skipped the bottom margin specifically for 3-button
+   * navigation (via a tappableElement() check), on the theory that the OS was "already"
+   * reserving that space so an added margin would double it up — that was true back when
+   * setDecorFitsSystemWindows(true) was still being called (which it no longer is, for exactly
+   * the same doubling problem on the status-bar side). Once edge-to-edge became unconditional,
+   * that theory stopped being true for the nav bar too: reproduced live on a real 3-button-nav
+   * device, the app's own bottom navigation row was rendering flush with, and at the same
+   * height as, the phone's OS back/home/recents buttons — an overlap, not a gap — because
+   * nothing was reserving space for the OS bar any more. Margining by navigationBars() always,
+   * regardless of navigation mode, is what actually keeps content clear of it now.
    */
   private void applyInsetsToWebView(WindowInsetsCompat insets) {
     if (getBridge() == null || getBridge().getWebView() == null) return;
@@ -135,11 +134,9 @@ public class MainActivity extends BridgeActivity {
 
     Insets statusBars = insets.getInsets(WindowInsetsCompat.Type.statusBars());
     Insets navigationBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars());
-    Insets tappableElement = insets.getInsets(WindowInsetsCompat.Type.tappableElement());
-    boolean threeButtonNav = tappableElement.bottom >= navigationBars.bottom && navigationBars.bottom > 0;
 
     params.topMargin = statusBars.top;
-    params.bottomMargin = threeButtonNav ? 0 : navigationBars.bottom;
+    params.bottomMargin = navigationBars.bottom;
     webView.setLayoutParams(params);
   }
 
