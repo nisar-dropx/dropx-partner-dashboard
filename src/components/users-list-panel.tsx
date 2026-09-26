@@ -312,9 +312,9 @@ export function UsersListPanel({
                     ) : "-"}
                   </td>
                   <td><StatusPill status={userStatus(user)} /></td>
-                  <td>{user.people_profile_url
-                    ? <a className="button secondary" href={user.people_profile_url}>Manage in People</a>
-                    : canEdit ? (
+                  <td>
+                    {/* Manage always opens the access modal here; the People profile is a separate, explicit link. */}
+                    {canEdit ? (
                       <button
                         className="button secondary"
                         onClick={(event) => navigateToManage(event, editUserUrl(user.id))}
@@ -323,8 +323,10 @@ export function UsersListPanel({
                       >
                         Manage
                       </button>
-                    )
-                    : "-"}</td>
+                    ) : null}
+                    {user.people_profile_url ? <a className="text-link" href={user.people_profile_url} target="_blank" rel="noreferrer">People profile</a> : null}
+                    {!canEdit && !user.people_profile_url ? "-" : null}
+                  </td>
                 </tr>
               );
             }) : (
@@ -379,7 +381,7 @@ export function UsersListPanel({
                 </div>
                 <div><dt>Portals</dt><dd>{user.portal_codes?.length ? user.portal_codes.map((code) => code === "operations" ? "OpsPulse" : code.charAt(0).toUpperCase() + code.slice(1)).join(", ") : "-"}</dd></div>
               </dl>
-              {user.people_profile_url ? <a className="button secondary mobile-user-manage" href={user.people_profile_url}>Manage in People</a> : canEdit ? (
+              {canEdit ? (
                 <button
                   className="button secondary mobile-user-manage"
                   onClick={(event) => navigateToManage(event, editUserUrl(user.id))}
@@ -389,6 +391,7 @@ export function UsersListPanel({
                   Manage
                 </button>
               ) : null}
+              {user.people_profile_url ? <a className="text-link" href={user.people_profile_url} target="_blank" rel="noreferrer">People profile</a> : null}
             </article>
           );
         }) : <div className="mobile-empty-card">No users match the selected filters.</div>}

@@ -281,9 +281,9 @@ async function loadCanonicalUserAccess(companyId: string, users: UserRow[], loca
         access_source: isLocation ? "location" as const : designation ? "people" as const : "manual" as const,
         portal_codes: [...new Set(memberships.map((membership) => membership.product_code))].sort(),
         people_profile_url: !candidate ? null : candidate.worker_type === "employee" && candidate.employee_id
-          ? `https://people.dropxlogistics.com/employees?edit=${candidate.employee_id}`
+          ? `https://people.dropxlogistics.com/people/${candidate.employee_id}`
           : candidate.worker_type === "contractor" && candidate.contractor_id
-            ? `https://people.dropxlogistics.com/contractors?edit=${candidate.contractor_id}`
+            ? `https://people.dropxlogistics.com/people/contractors/${candidate.contractor_id}`
             : null,
         has_all_location_access: Boolean(candidate?.has_all_location_access || memberships.some((membership) => membership.has_all_location_access)),
         location_scope_ids: canonicalLocationIds
