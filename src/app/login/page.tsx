@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { DocumentTitle } from "@/components/document-title";
 import { OpsLoginPanel } from "@/components/ops-login-panel";
 import { PeopleLoginPanel } from "@/components/people-login-panel";
+import { FleetLoginPanel } from "@/components/fleet-login-panel";
 import { SubmitButton } from "@/components/submit-button";
 import { firstAllowedHref } from "@/lib/app-navigation";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
@@ -15,6 +16,7 @@ import { isPeopleHostName } from "@/lib/people/surface";
 import { firstAllowedFinanceHref, hasFinancePortalAccess } from "@/lib/finance/navigation";
 import { isFinanceHostName, safeFinanceNextPath } from "@/lib/finance/surface";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { hasActiveFleetMembership } from "@/lib/fleet-control";
 import { signInWithGoogle } from "./actions";
 
 type LoginPageProps = {
@@ -28,6 +30,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const isOpsHost = host === "ops.dropxlogistics.com";
   const isPeopleHost = isPeopleHostName(host);
   const isFinanceHost = isFinanceHostName(host);
+  const isFleetHost = host === "fleet.dropxlogistics.com";
   const supabase = createServerSupabaseClient(undefined, isOpsHost ? true : undefined);
   const { data } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
   if (data.user) {
@@ -62,6 +65,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         ? firstAllowedFinanceHref(authorization) ?? "/unauthorized?page=finance_portal&reason=access"
         : requestedPath);
     }
+    if (isFleetHost) {
+      if (!authorization || !(
+        hasPermission(authorization, "fleet_action_center", "access") ||
+        hasPermission(authorization, "fleet_vehicle_view", "access") ||
+        hasPermission(authorization, "payment_approvals", "access") ||
+        await hasActiveFleetMembership(authorization.companyId, authorization.userId)
+      )) redirect("/unauthorized?page=fleet_action_center&reason=access");
+      redirect("/fleet-control");
+    }
     redirect(authorization
       ? firstAllowedHref(authorization) ?? "/unauthorized?page=dashboard_portal&reason=access"
       : "/unauthorized?page=dashboard_portal&reason=access");
@@ -83,6 +95,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       <>
         <DocumentTitle pageName="People Login" productName="DropX People" />
         <PeopleLoginPanel initialMessage={message} nextPath={safePeopleNextPath(searchParams?.next)} />
+      </>
+    );
+  }
+
+  if (isFleetHost) {
+    return (
+      <>
+        <DocumentTitle pageName="Fleet Login" productName="DropX Fleet" />
+        <FleetLoginPanel initialMessage={message} nextPath="/fleet-control" />
       </>
     );
   }

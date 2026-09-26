@@ -5,6 +5,7 @@ import { OpsPwaRegister } from "@/components/ops-pwa-register";
 import { isPeopleHostName } from "@/lib/people/surface";
 import { isFinanceHostName } from "@/lib/finance/surface";
 import "./globals.css";
+import "./fleet-brand.css";
 
 function isOpsHost() {
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
@@ -18,6 +19,14 @@ function isPeopleHost() {
 
 export function generateMetadata(): Metadata {
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
+  if (host === "fleet.dropxlogistics.com") {
+    return {
+      title: { default: "Tropics Fleet", template: "%s · Tropics Fleet" },
+      description: "Fleet availability, vehicle payment approvals and ad-hoc van operations for Tropics Logistics.",
+      applicationName: "Tropics Fleet",
+      icons: { icon: "/fleet-control/mark.svg", shortcut: "/fleet-control/mark.svg" }
+    };
+  }
   if (isFinanceHostName(host)) {
     return {
       title: { default: "DropX Finance", template: "%s · DropX Finance" },
