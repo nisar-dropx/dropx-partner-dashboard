@@ -20,6 +20,7 @@ export type FieldExecutiveListRow = {
   isActive: boolean;
   status: string;
   canEdit?: boolean;
+  activationHref?: string;
 };
 
 const pageSize = 20;
@@ -311,6 +312,7 @@ export function FieldExecutiveList({
                             <Pencil size={15} aria-hidden="true" /> Edit
                           </PendingLink>
                         ) : null}
+                        {row.activationHref ? <a className="row-action-item" href={row.activationHref} target="_blank" rel="noreferrer">Create Amazon ID ↗</a> : null}
                       </div>
                     ) : null}
                   </div>

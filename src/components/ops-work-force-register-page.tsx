@@ -4,6 +4,7 @@ export type WorkForceRegisterSearchParams = {
   edit?: string; error?: string; notice?: string; view?: string;
   full_name?: string; mobile_country_code?: string; mobile?: string; email?: string;
   date_of_join?: string; location_id?: string; designation?: string;
+  status?: string;
 };
 
 export function OpsWorkforceRegisterPage({ searchParams }: { searchParams?: WorkForceRegisterSearchParams }) {
@@ -23,6 +24,7 @@ export function OpsWorkforceRegisterPage({ searchParams }: { searchParams?: Work
       pageCode="delivery_associates"
       pageTitle="Workforce Register"
       returnPath="/work-force-register"
+      registerView={searchParams?.status==="active"?"active":"pending"}
       viewId={searchParams?.view}
       addFormValues={{ fullName: searchParams?.full_name, mobileCountryCode: searchParams?.mobile_country_code, mobile: searchParams?.mobile, email: searchParams?.email, dateOfJoin: searchParams?.date_of_join, locationId: searchParams?.location_id, designation: searchParams?.designation }}
     />
