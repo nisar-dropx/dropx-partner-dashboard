@@ -58,6 +58,20 @@ const biometricUnlockIsFresh = () => {
   const unlockedAt = Number(localStorage.getItem(biometricUnlockTimestampKey));
   return Number.isFinite(unlockedAt) && unlockedAt > 0 && Date.now() - unlockedAt < biometricUnlockGracePeriodMs;
 };
+// Inside the DropX One app, WebView has no WebAuthn/passkeys, so biometric unlock goes through
+// the native plugin's system BiometricPrompt. Browsers keep using passkeys.
+const nativeCredentialMarker = "native";
+type NativeBiometricPlugin = {
+  biometricStatus: () => Promise<{ available: boolean; notEnrolled: boolean }>;
+  authenticateBiometric: (options: { title: string }) => Promise<void>;
+};
+const nativeBiometric = (): NativeBiometricPlugin | null => {
+  const plugin = (window as Window & { Capacitor?: { Plugins?: { DropxOne?: Partial<NativeBiometricPlugin> } } })
+    .Capacitor?.Plugins?.DropxOne;
+  return plugin?.authenticateBiometric && plugin.biometricStatus ? plugin as NativeBiometricPlugin : null;
+};
+const biometricEnabledOnDevice = () =>
+  typeof window !== "undefined" && localStorage.getItem(biometricKey) === "true" && Boolean(localStorage.getItem(credentialKey));
 const accountIdentity = (account?: AppAccount | null) =>
   [account?.reference, account?.biometricId].filter(Boolean).join(" | ");
 const active = (account?: AppAccount | null) => account?.status?.toLowerCase() === "active";
@@ -160,6 +174,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [biometricEnabled, setBiometricEnabled] = useState(biometricEnabledOnDevice);
   const [avatar, setAvatar] = useState("");
   const [leaveSection, setLeaveSection] = useState<"leave" | "wfh">("leave");
   const [lockedAccounts, setLockedAccounts] = useState<AppAccount[]>([]);
@@ -468,11 +483,34 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     return btoa(String.fromCharCode(...new Uint8Array(value))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   }
   async function enrollBiometric(enabled: boolean) {
+    setError("");
     if (!enabled) {
       localStorage.removeItem(biometricKey);
       localStorage.removeItem(credentialKey);
       localStorage.removeItem(biometricUnlockTimestampKey);
+      setBiometricEnabled(false);
       setNotice("Biometric login disabled.");
+      return;
+    }
+    const native = nativeBiometric();
+    if (native) {
+      try {
+        const status = await native.biometricStatus();
+        if (!status.available) {
+          throw new Error(status.notEnrolled
+            ? "Set up a fingerprint, face unlock or screen lock in your phone settings first."
+            : "This phone doesn't support biometric unlock.");
+        }
+        await native.authenticateBiometric({ title: "Enable biometric login" });
+        localStorage.setItem(credentialKey, nativeCredentialMarker);
+        localStorage.setItem(biometricKey, "true");
+        localStorage.setItem(biometricUnlockTimestampKey, String(Date.now()));
+        setBiometricEnabled(true);
+        setNotice("Biometric login enabled.");
+      } catch (reason) {
+        setBiometricEnabled(false);
+        setError(userFacingError(reason, "Unable to enable biometric login. Please try again."));
+      }
       return;
     }
     try {
@@ -489,10 +527,12 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       localStorage.setItem(credentialKey, encoded(credential.rawId));
       localStorage.setItem(biometricKey, "true");
       localStorage.setItem(biometricUnlockTimestampKey, String(Date.now()));
+      setBiometricEnabled(true);
       setNotice("Biometric login enabled.");
     } catch (reason) {
       localStorage.removeItem(biometricKey);
       localStorage.removeItem(biometricUnlockTimestampKey);
+      setBiometricEnabled(false);
       setError(userFacingError(reason, "Unable to enable biometric login. Please try again."));
     }
   }
@@ -501,6 +541,14 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
     try {
       const id = localStorage.getItem(credentialKey);
       if (!id) throw new Error("Biometric login is not configured.");
+      if (id === nativeCredentialMarker) {
+        const native = nativeBiometric();
+        if (!native) throw new Error("Biometric login is not available here. Sign in with your PIN.");
+        await native.authenticateBiometric({ title: "Unlock DropX One" });
+        localStorage.setItem(biometricUnlockTimestampKey, String(Date.now()));
+        route(lockedAccounts);
+        return;
+      }
       await navigator.credentials.get({ publicKey: {
         challenge: crypto.getRandomValues(new Uint8Array(32)),
         allowCredentials: [{ id: bytes(id), type: "public-key" }],
@@ -788,7 +836,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
         <header className="dx-page-intro"><small>Personalisation</small><h1>Settings</h1><p>Control sign-in and the account you open first.</p></header>
         <div className="dx-settings-grid">
           <section className="dx-setting-card"><i><SwitchCamera /></i><span><strong>Default account</strong><small>Choose the workspace shown after sign in.</small></span><label><span className="sr-only">Default account</span><select disabled={pending} value={defaultKey} onChange={(e) => saveDefaultAccount(e.target.value)}><option value="">Ask me every time</option>{accounts.map((row) => <option key={accountKey(row)} value={accountKey(row)}>{row.role || row.profileType} · {row.workspaceLabel || (isWorkforceWorkspace(row) ? "Workforce workspace" : "People workspace")} · {row.companyName} - {row.reference || row.name}</option>)}</select></label></section>
-          <section className="dx-setting-card"><i><Fingerprint /></i><span><strong>Biometric login</strong><small>Use Face ID or device security once every 12 hours on this device.</small></span><label className="toggle"><span>Enable biometric login</span><input aria-label="Enable biometric login" defaultChecked={localStorage.getItem(biometricKey) === "true"} onChange={(e) => enrollBiometric(e.target.checked)} type="checkbox" /></label></section>
+          <section className="dx-setting-card"><i><Fingerprint /></i><span><strong>Biometric login</strong><small>Use Face ID or device security once every 12 hours on this device.</small></span><label className="toggle"><span>Enable biometric login</span><input aria-label="Enable biometric login" checked={biometricEnabled} onChange={(e) => enrollBiometric(e.target.checked)} type="checkbox" /></label></section>
           <section className="dx-setting-card security"><i><LockKeyhole /></i><span><strong>App PIN</strong><small>Change your six-digit sign-in PIN securely.</small></span><button onClick={resetPin}>Change PIN <ChevronRight /></button></section>
         </div>
       </section> : null}

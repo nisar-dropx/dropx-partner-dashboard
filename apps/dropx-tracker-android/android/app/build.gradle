@@ -42,8 +42,9 @@ android {
         // 4.5.9's edge-to-edge fix removed the OS's own reservation for it too (see
         // applyInsetsToWebView's own doc). 39 (4.5.12) sends a hashed ANDROID_ID in the user
         // agent so an account can be bound to one phone (see MainActivity.appendDeviceIdToUserAgent).
-        versionCode 39
-        versionName "4.5.12"
+        // 40 (4.5.13) adds native BiometricPrompt unlock (DropxOnePlugin.authenticateBiometric).
+        versionCode 40
+        versionName "4.5.13"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -91,6 +92,10 @@ dependencies {
 
     // DropxOnePlugin's always-on-in-background location tracking.
     implementation 'com.google.android.gms:play-services-location:21.3.0'
+
+    // DropxOnePlugin.authenticateBiometric(): Android WebView doesn't expose WebAuthn/passkeys,
+    // so app biometric unlock uses the system BiometricPrompt instead.
+    implementation 'androidx.biometric:biometric:1.1.0'
     implementation 'androidx.work:work-runtime:2.9.1'
 
     // DropxMessagingService (notifications/): @capacitor/push-notifications already bundles

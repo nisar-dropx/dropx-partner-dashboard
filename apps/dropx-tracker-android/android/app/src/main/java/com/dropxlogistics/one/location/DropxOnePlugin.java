@@ -49,6 +49,55 @@ import com.getcapacitor.annotation.PermissionCallback;
   }
 )
 public class DropxOnePlugin extends Plugin {
+  private static final int BIOMETRIC_AUTHENTICATORS =
+    androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
+      | androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL;
+
+  /** Whether this phone has a fingerprint/face or screen lock set up that can unlock the app. */
+  @PluginMethod
+  public void biometricStatus(PluginCall call) {
+    int status = androidx.biometric.BiometricManager.from(getContext()).canAuthenticate(BIOMETRIC_AUTHENTICATORS);
+    com.getcapacitor.JSObject result = new com.getcapacitor.JSObject();
+    result.put("available", status == androidx.biometric.BiometricManager.BIOMETRIC_SUCCESS);
+    result.put("notEnrolled", status == androidx.biometric.BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED);
+    call.resolve(result);
+  }
+
+  /**
+   * Shows the system fingerprint/face prompt, falling back to the phone's PIN/pattern. The web
+   * login flow uses this inside the app instead of WebAuthn, which Android WebView doesn't provide.
+   */
+  @PluginMethod
+  public void authenticateBiometric(PluginCall call) {
+    Activity activity = getActivity();
+    if (!(activity instanceof androidx.fragment.app.FragmentActivity)) {
+      call.reject("Biometric unlock is not available right now.");
+      return;
+    }
+    String title = call.getString("title", "Unlock DropX One");
+    activity.runOnUiThread(() -> {
+      androidx.biometric.BiometricPrompt prompt = new androidx.biometric.BiometricPrompt(
+        (androidx.fragment.app.FragmentActivity) activity,
+        ContextCompat.getMainExecutor(activity),
+        new androidx.biometric.BiometricPrompt.AuthenticationCallback() {
+          @Override
+          public void onAuthenticationSucceeded(androidx.biometric.BiometricPrompt.AuthenticationResult result) {
+            call.resolve();
+          }
+
+          @Override
+          public void onAuthenticationError(int errorCode, CharSequence errString) {
+            call.reject(String.valueOf(errString), String.valueOf(errorCode));
+          }
+        }
+      );
+      prompt.authenticate(new androidx.biometric.BiometricPrompt.PromptInfo.Builder()
+        .setTitle(title)
+        .setSubtitle("Use your fingerprint, face or screen lock")
+        .setAllowedAuthenticators(BIOMETRIC_AUTHENTICATORS)
+        .build());
+    });
+  }
 
   @PluginMethod
   public void configureAttendance(PluginCall call) {
