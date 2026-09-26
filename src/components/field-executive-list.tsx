@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { EllipsisVertical, Eye, Pencil, UserRound } from "lucide-react";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
+import { queueAmazonInvitationFromOpsPulse } from "@/app/field-executive/actions";
 
 export type FieldExecutiveListRow = {
   id: string;
@@ -20,6 +21,8 @@ export type FieldExecutiveListRow = {
   isActive: boolean;
   status: string;
   canEdit?: boolean;
+  activationHref?: string;
+  canQueueAmazonId?: boolean;
 };
 
 const pageSize = 20;
@@ -311,6 +314,8 @@ export function FieldExecutiveList({
                             <Pencil size={15} aria-hidden="true" /> Edit
                           </PendingLink>
                         ) : null}
+                        {row.canQueueAmazonId ? <form action={queueAmazonInvitationFromOpsPulse}><input name="workforce_id" type="hidden" value={row.id} /><button className="row-action-item" type="submit">Create Amazon ID</button></form> : null}
+                        {row.activationHref ? <a className="row-action-item" href={row.activationHref} target="_blank" rel="noreferrer">Amazon status ↗</a> : null}
                       </div>
                     ) : null}
                   </div>

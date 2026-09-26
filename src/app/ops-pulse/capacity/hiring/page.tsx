@@ -164,7 +164,7 @@ export default async function CapacityPage({ searchParams }: { searchParams?: Se
   const error = locationResult.error || ruleResult.error || baselineResult.error?.message || associateResult.error?.message || reviewResult.error;
 
   return <AppShell active="Capacity" pageCode="capacity_hiring"><div className="ops-command-center capacity-workspace">
-    <PageHead eyebrow="Workforce Planning" title="Capacity" subtitle="Amazon ID usage with internal and approved external DA coverage." />
+    <PageHead eyebrow="Workforce Planning" title="Capacity" subtitle="Amazon ID usage with internal and approved external DA coverage." action={<a className="button compact" href="/work-force-register?status=pending">Workforce pending</a>} />
     <div className="capacity-tabs-toolbar"><CapacityWorkspaceTabs active="overview" allowed={workspaceTabs} /><CapacityScopeFilter selectedCodes={codes} stations={scopeStations}/></div>
     <CapacityViewTabs active="hiring" allowed={viewTabs} />
     <div className="capacity-basis-strip"><strong>Planning cycle</strong><span>Amazon IDs stay unchanged · approved external DAs classify who operated those IDs · internal DA coverage = total IDs − external DAs</span></div>

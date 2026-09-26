@@ -21066,3 +21066,11 @@ td strong,
     grid-template-columns: 1fr;
   }
 }
+/* All People editable sheet is deliberately isolated from the normal register. */
+.all-people-edit-sheet { min-width: 7200px; }
+.all-people-edit-sheet th { position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+.all-people-edit-sheet td { min-width: 150px; max-width: 280px; vertical-align: top; }
+.all-people-edit-sheet .sheet-cell-input { width: 100%; min-width: 130px; border: 1px solid #d7deea; border-radius: 6px; padding: 7px 8px; background: #fff; font: inherit; }
+.all-people-edit-sheet .sheet-cell-input:focus { border-color: #ef6b3c; outline: 2px solid rgba(239,107,60,.16); }
+.sheet-verification-note, .sheet-save-ok, .sheet-save-error { display: block; margin-top: 5px; font-size: 10px; line-height: 1.3; }
+.sheet-verification-note { color: #7c5a08; }.sheet-save-ok { color: #0d7b4a; }.sheet-save-error { color: #b42318; }.sheet-save-button { min-width: 76px; }

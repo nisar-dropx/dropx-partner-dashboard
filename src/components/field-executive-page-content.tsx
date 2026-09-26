@@ -806,7 +806,10 @@ async function loadFieldExecutiveData(
           { isOwner: ownerAccess }
       ),
       isActive: executive.is_active,
-      status: fieldExecutiveStatus(executive, targetRegister === "workforce")
+      status: fieldExecutiveStatus(executive, targetRegister === "workforce"),
+      activationHref: targetRegister === "workforce" && executive.dropx_id
+        ? `https://workforce.dropxlogistics.com/delivery-network/id-onboarding?view=pending&q=${encodeURIComponent(executive.dropx_id)}` : undefined,
+      canQueueAmazonId: targetRegister === "workforce" && ["approved", "active"].includes(String(executive.onboarding_status ?? ""))
     };
   });
   const uploadUrlRows = await Promise.all(visibleExecutiveRows.map(async (executive) => ({
@@ -861,6 +864,7 @@ export async function FieldExecutivePageContent({
   registerNavigation,
   returnPath = "/workforce",
   showWorkforceSummary = false,
+  registerView = "pending",
   viewId
 }: {
   activeLabel?: string;
@@ -883,6 +887,7 @@ export async function FieldExecutivePageContent({
   registerNavigation?: ReactNode;
   returnPath?: FieldExecutiveRoute;
   showWorkforceSummary?: boolean;
+  registerView?: "pending"|"active";
   viewId?: string;
 }) {
   const authorization = await requirePagePermission(pageCode, "access");
@@ -952,6 +957,12 @@ export async function FieldExecutivePageContent({
     ?? categoryRules.dashboard;
   const editRules = designationOptions.find((option) => option.value === editExecutive?.designation)?.dashboardRules
     ?? categoryRules.dashboard;
+  const pendingStatuses = new Set(["Pending", "Workforce approval pending", "Correction requested", "Activation pending"]);
+  const pendingRegisterRows = executives.filter((row) => pendingStatuses.has(row.status));
+  const activeRegisterRows = executives.filter((row) => row.status === "Active");
+  const registerRows = returnPath === "/work-force-register"
+    ? (registerView === "active" ? activeRegisterRows : pendingRegisterRows)
+    : executives;
 
   return (
     <AppShell active={activeLabel} pageCode={pageCode}>
@@ -962,6 +973,7 @@ export async function FieldExecutivePageContent({
       />
 
       {registerNavigation}
+      {returnPath==="/work-force-register"?<nav className="workforce-lifecycle-tabs" aria-label="Workforce register status"><PendingLink className={registerView==="pending"?"active":""} href="/work-force-register?status=pending">Pending <strong>{pendingRegisterRows.length}</strong></PendingLink><PendingLink className={registerView==="active"?"active":""} href="/work-force-register?status=active">Active <strong>{activeRegisterRows.length}</strong></PendingLink><a href="https://workforce.dropxlogistics.com/delivery-network/id-onboarding?view=pending" target="_blank" rel="noreferrer">Amazon ID queue ↗</a></nav>:null}
 
       {error || errorMessage || notice ? (
         <section className={`panel message-panel ${error || errorMessage ? "error" : "success"}`}>
@@ -1005,7 +1017,7 @@ export async function FieldExecutivePageContent({
       {permission.canAdd && accessSurface !== "ops" ? <FieldExecutiveBulkImportPanel description={bulkImportDescription} entityLabel={entityLabel} returnPath={returnPath} title={bulkImportTitle} /> : null}
       {ownerAccess && accessSurface !== "ops" && returnPath === "/contractors" ? <CompensationBulkUpload kind="contractor_remuneration" /> : null}
 
-      {permission.canView || permission.canEdit ? <FieldExecutiveList basePath={returnPath} canEdit={permission.canEdit} emptyLabel={emptyListLabel} rows={executives} title={listTitle} /> : null}
+      {permission.canView || permission.canEdit ? <FieldExecutiveList basePath={returnPath} canEdit={permission.canEdit} emptyLabel={emptyListLabel} rows={registerRows} title={listTitle} /> : null}
 
       {(permission.canView || permission.canEdit) && viewExecutive ? (
         <div className="modal-backdrop">
