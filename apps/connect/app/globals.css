@@ -9398,6 +9398,41 @@ body {
   letter-spacing: 0.035em;
 }
 
+.dx-upload-file {
+  grid-column: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #3f3b36;
+  font-size: 12px;
+}
+
+.dx-upload-file img {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border: 1px solid #e3ddd5;
+  border-radius: 6px;
+}
+
+.dx-upload-file b {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dx-upload.is-chosen {
+  border-color: #6aa77d;
+}
+
+.dx-upload.is-chosen em {
+  color: #2f7a4a;
+}
+
 .dx-auth input,
 .dx-auth select,
 .dx-settings select,

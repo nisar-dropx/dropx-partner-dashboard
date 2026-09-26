@@ -342,7 +342,28 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
   const [agreementAccepted, setAgreementAccepted] = useState(false);
   const [agreementGatePassed, setAgreementGatePassed] = useState(false);
   const [exitOpen, setExitOpen] = useState(false);
+  const [chosenUploads, setChosenUploads] = useState<Record<string, { fileName: string; previewUrl: string | null }>>({});
+  const chosenUploadsRef = useRef(chosenUploads);
   const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => () => {
+    Object.values(chosenUploadsRef.current).forEach((entry) => {
+      if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
+    });
+  }, []);
+
+  const chooseUpload = (name: string, file: File | undefined) => {
+    const previous = chosenUploadsRef.current[name];
+    if (previous?.previewUrl) URL.revokeObjectURL(previous.previewUrl);
+    const next = { ...chosenUploadsRef.current };
+    if (file) {
+      next[name] = { fileName: file.name, previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null };
+    } else {
+      delete next[name];
+    }
+    chosenUploadsRef.current = next;
+    setChosenUploads(next);
+  };
 
   useEffect(() => {
     Promise.all([
@@ -798,11 +819,22 @@ export function ConnectProfileApp({ account, onPhoto, onSubmitted }: { account: 
     />;
   };
 
-  const upload = (name: string, label: string, slot: string) => enabled.has(name) ? <label className="dx-upload">
-    <span>{label}{required.has(name) ? " *" : ""}</span>
-    <input accept="image/*,.pdf" name={name} required={required.has(name) && !profile.uploads[slot]} type="file" />
-    <em>{profile.uploads[slot] ? "Uploaded" : "Choose file"}</em>
-  </label> : null;
+  // The real <input> is visually hidden by .dx-upload's CSS, so the browser's own "file chosen"
+  // text never shows — the label has to reflect the chosen file itself.
+  const upload = (name: string, label: string, slot: string) => {
+    if (!enabled.has(name)) return null;
+    const chosen = chosenUploads[name];
+    const saved = Boolean(profile.uploads[slot]);
+    return <label className={`dx-upload${chosen ? " is-chosen" : ""}`}>
+      <span>{label}{required.has(name) ? " *" : ""}</span>
+      <input accept="image/*,.pdf" name={name} onChange={(event) => chooseUpload(name, event.target.files?.[0])} required={required.has(name) && !saved} type="file" />
+      <small className="dx-upload-file">
+        {chosen?.previewUrl ? <img alt="" src={chosen.previewUrl} /> : null}
+        <b>{chosen ? chosen.fileName : saved ? "Uploaded" : "No file chosen"}</b>
+      </small>
+      <em>{chosen || saved ? "Change" : "Choose file"}</em>
+    </label>;
+  };
 
   const dlCheck = currentCheck("dl");
   const vehicleCheck = currentCheck("vehicle");
