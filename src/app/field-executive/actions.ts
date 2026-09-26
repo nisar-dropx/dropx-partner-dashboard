@@ -1054,3 +1054,80 @@ export async function bulkImportFieldExecutives(formData: FormData) {
     fieldExecutiveRedirect({ error: error instanceof Error ? friendlyFieldExecutiveError(error.message) : "Unable to import field executives." }, returnPath);
   }
 }
+
+export async function queueAmazonInvitationFromOpsPulse(formData: FormData) {
+  const authorization = await requirePagePermission("delivery_associates", "edit");
+  const destination = "/work-force-register?status=pending";
+  try {
+    if (authorization.readOnly || !supabaseAdmin) throw new Error("Amazon invitation queue is unavailable.");
+    const companyId = requireCompanyId(authorization);
+    const workforceId = required(formData.get("workforce_id"), "Associate");
+    const workforce = await supabaseAdmin.from("workforce")
+      .select("id,full_name,location_id,onboarding_status,stations(station_code)")
+      .eq("company_id", companyId)
+      .eq("id", workforceId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (workforce.error) throw new Error(workforce.error.message);
+    if (!workforce.data) throw new Error("Associate was not found.");
+    if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(workforce.data.location_id)) {
+      throw new Error("Associate is outside your station scope.");
+    }
+    if (!["approved", "active"].includes(String(workforce.data.onboarding_status ?? ""))) {
+      throw new Error("Approve the associate before creating the Amazon ID.");
+    }
+    const latest = await supabaseAdmin.from("workforce_amazon_invitation_requests")
+      .select("id,status")
+      .eq("company_id", companyId)
+      .eq("workforce_id", workforceId)
+      .order("requested_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latest.error) throw new Error(latest.error.message);
+    if (latest.data?.status === "failed") {
+      const retried = await supabaseAdmin.rpc("workforce_retry_amazon_invitation", {
+        p_company: companyId,
+        p_actor: authorization.userId,
+        p_request: latest.data.id,
+        p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds
+      });
+      if (retried.error) throw new Error(retried.error.message);
+      revalidatePath("/work-force-register");
+      redirect(`${destination}&notice=${encodeURIComponent("Amazon ID invitation retry queued from OpsPulse.")}`);
+    }
+    if (latest.data && ["queued", "processing", "sent"].includes(latest.data.status)) {
+      redirect(`${destination}&notice=${encodeURIComponent(`Amazon ID invitation is already ${latest.data.status}.`)}`);
+    }
+    const settings = await supabaseAdmin.from("workforce_amazon_station_settings")
+      .select("associate_email_pattern,invitation_enabled")
+      .eq("company_id", companyId)
+      .eq("station_id", workforce.data.location_id)
+      .maybeSingle();
+    if (settings.error) throw new Error(settings.error.message);
+    if (!settings.data?.invitation_enabled || !settings.data.associate_email_pattern) {
+      throw new Error("Complete and enable the Amazon station invitation master first.");
+    }
+    const station = Array.isArray(workforce.data.stations) ? workforce.data.stations[0] : workforce.data.stations;
+    const generated = await supabaseAdmin.rpc("workforce_amazon_email_from_pattern", {
+      p_pattern: settings.data.associate_email_pattern,
+      p_full_name: workforce.data.full_name,
+      p_station_code: station?.station_code ?? ""
+    });
+    if (generated.error || !generated.data) throw new Error(generated.error?.message || "Unable to generate the station email.");
+    const queued = await supabaseAdmin.rpc("workforce_queue_amazon_invitation", {
+      p_company: companyId,
+      p_actor: authorization.userId,
+      p_actor_name: authorization.fullName || authorization.email || "OpsPulse",
+      p_workforce: workforceId,
+      p_email: generated.data,
+      p_source_portal: "ops_pulse",
+      p_locations: authorization.hasAllLocationAccess ? null : authorization.locationScopeIds
+    });
+    if (queued.error) throw new Error(queued.error.message);
+    revalidatePath("/work-force-register");
+    redirect(`${destination}&notice=${encodeURIComponent("Amazon ID invitation queued from OpsPulse.")}`);
+  } catch (error) {
+    if (error && typeof error === "object" && "digest" in error) throw error;
+    redirect(`${destination}&error=${encodeURIComponent(error instanceof Error ? error.message : "Unable to queue the Amazon invitation.")}`);
+  }
+}

@@ -808,7 +808,8 @@ async function loadFieldExecutiveData(
       isActive: executive.is_active,
       status: fieldExecutiveStatus(executive, targetRegister === "workforce"),
       activationHref: targetRegister === "workforce" && executive.dropx_id
-        ? `https://workforce.dropxlogistics.com/delivery-network/id-onboarding?view=pending&q=${encodeURIComponent(executive.dropx_id)}` : undefined
+        ? `https://workforce.dropxlogistics.com/delivery-network/id-onboarding?view=pending&q=${encodeURIComponent(executive.dropx_id)}` : undefined,
+      canQueueAmazonId: targetRegister === "workforce" && ["approved", "active"].includes(String(executive.onboarding_status ?? ""))
     };
   });
   const uploadUrlRows = await Promise.all(visibleExecutiveRows.map(async (executive) => ({
