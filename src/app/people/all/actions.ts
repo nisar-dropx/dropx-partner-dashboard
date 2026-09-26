@@ -1,94 +1,190 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
-import { dynamicWorkforceTable, isCustomWorkforceCategoryCode, workforceCategoryPageCode } from "@/lib/dynamic-workforce";
+import { canAccessDesignationPortal } from "@/lib/designation-portal-access";
+import { dynamicWorkforceTable, isCustomWorkforceCategoryCode, normalizeWorkforceCategoryCode, workforceCategoryPageCode } from "@/lib/dynamic-workforce";
+import { buildAllPeopleSheetPatch } from "@/lib/all-people-sheet";
+import type { AllPeopleExportKey } from "@/lib/all-people-export";
+import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-type SheetValues = Record<string, string>;
+type SheetChanges = Partial<Record<AllPeopleExportKey, string>>;
+type SheetSource = { categoryCode: string; designationStorage: "id" | "name"; employeeColumns: boolean; pageCode: string; table: string };
+type DesignationRow = { id: string; code: string | null; name: string; onboarding_categories: string[] | null; portal_permissions: unknown };
+type BiometricProfile = { profileType: "employee" | "field_executive" | "contractor" | "vendor" | "worker"; workerType: "employee" | "individual_contract" };
 
-const fixedSources: Record<string, { table: string; pageCode: string; employee: boolean }> = {
-  employees: { table: "employees", pageCode: "employees", employee: true },
-  contractors: { table: "contractors", pageCode: "contractors", employee: false },
-  vendors: { table: "vendors", pageCode: "vendors", employee: false },
-  workers: { table: "helpers", pageCode: "workers", employee: false },
-  workforce: { table: "workforce", pageCode: "delivery_associates", employee: false }
+const fixedSources: Record<string, Omit<SheetSource, "categoryCode">> = {
+  employees: { table: "employees", pageCode: "employees", employeeColumns: true, designationStorage: "id" },
+  contractors: { table: "contractors", pageCode: "contractors", employeeColumns: false, designationStorage: "name" },
+  vendors: { table: "vendors", pageCode: "vendors", employeeColumns: false, designationStorage: "name" },
+  workers: { table: "helpers", pageCode: "workers", employeeColumns: false, designationStorage: "name" },
+  workforce: { table: "workforce", pageCode: "delivery_associates", employeeColumns: false, designationStorage: "id" }
 };
 
-const supportedKeys = [
-  "fullName", "mobileCountryCode", "mobileNumber", "email", "dateOfJoin", "gender", "dateOfBirth",
-  "aadhaarNumber", "panNumber", "eshramUan", "fatherName", "bloodGroup", "handicapped", "address",
-  "stateCode", "pincode", "landmark", "bankAccountNumber", "ifsc", "pfUan", "pfAccountNumber",
-  "esiNumber", "emergencyContactNumber", "emergencyContactName", "emergencyContactRelation",
-  "drivingLicenseNumber", "drivingLicenseExpiry", "vehicleRegistrationNumber", "vehicleRegistrationExpiry",
-  "vehicleInsuranceExpiry", "pollutionExpiry"
-] as const;
+const biometricProfiles: Record<string, BiometricProfile> = {
+  employees: { profileType: "employee", workerType: "employee" },
+  workforce: { profileType: "field_executive", workerType: "individual_contract" },
+  contractors: { profileType: "contractor", workerType: "individual_contract" },
+  vendors: { profileType: "vendor", workerType: "individual_contract" },
+  workers: { profileType: "worker", workerType: "individual_contract" }
+};
 
-function clean(value: string | undefined) {
-  const text = String(value ?? "").trim();
-  return text || null;
+function failure(error: string, code = "VALIDATION_ERROR") { return { ok: false as const, error, code }; }
+function identity(value: unknown) { return String(value ?? "").trim().toLowerCase(); }
+function matchesCategory(row: DesignationRow, code: string) { return (row.onboarding_categories ?? []).includes(code); }
+function sameValue(left: unknown, right: unknown) {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return JSON.stringify((Array.isArray(left) ? left : []).map(String).sort()) === JSON.stringify((Array.isArray(right) ? right : []).map(String).sort());
+  }
+  return String(left ?? "") === String(right ?? "");
+}
+function sameTimestamp(left: unknown, right: unknown) {
+  const a = Date.parse(String(left ?? "")); const b = Date.parse(String(right ?? ""));
+  return Number.isFinite(a) && Number.isFinite(b) && a === b;
+}
+function findDesignation(rows: DesignationRow[], value: unknown) {
+  const key = identity(value);
+  if (!key) return null;
+  const matches = rows.filter((row) => [row.id, row.name, row.code].some((item) => identity(item) === key));
+  return matches.length === 1 ? matches[0] : null;
 }
 
-function dateValue(value: string | undefined) {
-  const raw = clean(value);
-  if (!raw) return null;
-  const match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  return match ? `${match[3]}-${match[2]}-${match[1]}` : raw;
+async function resolveSource(companyId: string, rawCode: string): Promise<SheetSource | null> {
+  const categoryCode = normalizeWorkforceCategoryCode(rawCode);
+  if (!categoryCode || !supabaseAdmin) return null;
+  const fixed = fixedSources[categoryCode];
+  const source = fixed ? { ...fixed, categoryCode } : isCustomWorkforceCategoryCode(categoryCode) ? {
+    categoryCode, designationStorage: "name" as const, employeeColumns: false,
+    pageCode: workforceCategoryPageCode(categoryCode), table: dynamicWorkforceTable(categoryCode)
+  } : null;
+  if (!source) return null;
+  const category = await supabaseAdmin.from("workforce_categories").select("code")
+    .eq("company_id", companyId).eq("code", categoryCode).eq("is_active", true).maybeSingle();
+  return category.error || !category.data ? null : source;
 }
 
-export async function saveAllPeopleSheetRow({ categoryCode, id, values }: { categoryCode: string; id: string; values: SheetValues }) {
+export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expectedUpdatedAt }: {
+  categoryCode: string; id: string; changes: SheetChanges; expectedUpdatedAt: string;
+}) {
   const authorization = await getAuthorization();
-  if (!authorization) return { ok: false, error: "Your session has expired." };
-  const source = fixedSources[categoryCode] ?? (isCustomWorkforceCategoryCode(categoryCode)
-    ? { table: dynamicWorkforceTable(categoryCode), pageCode: workforceCategoryPageCode(categoryCode), employee: false }
-    : null);
-  if (!source || !hasPermission(authorization, source.pageCode, "edit")) return { ok: false, error: "You do not have permission to edit this profile." };
-  if (!supabaseAdmin) return { ok: false, error: "Profile storage is not configured." };
+  if (!authorization) return failure("Your session has expired.", "UNAUTHORIZED");
+  if (!supabaseAdmin) return failure("Profile storage is not configured.", "STORAGE_UNAVAILABLE");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(id ?? ""))) return failure("Profile identifier is invalid.");
+  if (!expectedUpdatedAt || !Number.isFinite(Date.parse(expectedUpdatedAt))) return failure("This row is missing its update version. Refresh the page and try again.", "CONFLICT");
 
   const companyId = requireCompanyId(authorization);
-  const existingResult = await supabaseAdmin.from(source.table).select("id, location_id, pan_number, aadhaar_number, driving_license_no, vehicle_reg_no, bank_account_no, ifsc, ifsc_code").eq("company_id", companyId).eq("id", id).maybeSingle();
-  if (existingResult.error || !existingResult.data) return { ok: false, error: existingResult.error?.message ?? "Profile was not found." };
-  if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(String(existingResult.data.location_id ?? ""))) return { ok: false, error: "You do not have access to this profile location." };
+  const source = await resolveSource(companyId, categoryCode);
+  if (!source || !hasPermission(authorization, source.pageCode, "edit")) return failure("You do not have permission to edit this profile.", "FORBIDDEN");
 
-  const workerOnly = categoryCode === "workforce";
-  const payload: Record<string, string | boolean | null> = {
-    full_name: clean(values.fullName),
-    mobile_country_code: clean(values.mobileCountryCode)?.replace(/^\+/, "") ?? null,
-    mobile: clean(values.mobileNumber)?.replace(/\D/g, "") ?? null,
-    email: clean(values.email)?.toLowerCase() ?? null,
-    date_of_join: dateValue(values.dateOfJoin),
-    bank_account_no: clean(values.bankAccountNumber)?.toUpperCase() ?? null,
-    [source.employee ? "ifsc" : "ifsc_code"]: clean(values.ifsc)?.toUpperCase() ?? null
-  };
-  if (!workerOnly) Object.assign(payload, {
-    gender: clean(values.gender), date_of_birth: dateValue(values.dateOfBirth),
-    aadhaar_number: clean(values.aadhaarNumber)?.replace(/\D/g, "") ?? null,
-    pan_number: clean(values.panNumber)?.toUpperCase() ?? null, eshram_uan: clean(values.eshramUan)?.replace(/\D/g, "") ?? null,
-    father_name: clean(values.fatherName), blood_group: clean(values.bloodGroup),
-    is_handicapped: values.handicapped === "Yes" ? true : values.handicapped === "No" ? false : null,
-    address: clean(values.address), state_code: clean(values.stateCode)?.toUpperCase() ?? null,
-    [source.employee ? "pincode" : "postal_pin"]: clean(values.pincode)?.replace(/\D/g, "") ?? null,
-    landmark: clean(values.landmark), pf_uan: clean(values.pfUan)?.replace(/\D/g, "") ?? null,
-    pf_account_no: clean(values.pfAccountNumber)?.toUpperCase() ?? null, esi_no: clean(values.esiNumber)?.toUpperCase() ?? null,
-    emergency_contact_number: clean(values.emergencyContactNumber)?.replace(/\D/g, "") ?? null,
-    emergency_contact_name: clean(values.emergencyContactName), emergency_contact_relation: clean(values.emergencyContactRelation),
-    driving_license_no: clean(values.drivingLicenseNumber)?.toUpperCase() ?? null, driving_license_exp_date: dateValue(values.drivingLicenseExpiry),
-    vehicle_reg_no: clean(values.vehicleRegistrationNumber)?.toUpperCase() ?? null, vehicle_reg_exp_date: dateValue(values.vehicleRegistrationExpiry),
-    vehicle_insurance_exp_date: dateValue(values.vehicleInsuranceExpiry), vehicle_pollution_exp_date: dateValue(values.pollutionExpiry)
-  });
-  const updateResult = await supabaseAdmin.from(source.table).update(payload).eq("company_id", companyId).eq("id", id);
-  if (updateResult.error) return { ok: false, error: updateResult.error.message };
+  let patch;
+  try {
+    patch = buildAllPeopleSheetPatch(changes, {
+      employeeColumns: source.employeeColumns,
+      mobileDigits: source.categoryCode === "employees" ? { min: 6, max: 15 } : { min: 10, max: 10 }
+    });
+  } catch (error) { return failure(error instanceof Error ? error.message : "The requested changes are invalid."); }
 
-  const changedKinds: string[] = [];
-  if (!workerOnly && String(existingResult.data.pan_number ?? "") !== String(payload.pan_number ?? "")) changedKinds.push("pan", "pan_aadhaar");
-  if (!workerOnly && String(existingResult.data.aadhaar_number ?? "") !== String(payload.aadhaar_number ?? "")) changedKinds.push("pan_aadhaar");
-  if (!workerOnly && String(existingResult.data.driving_license_no ?? "") !== String(payload.driving_license_no ?? "")) changedKinds.push("dl");
-  if (!workerOnly && String(existingResult.data.vehicle_reg_no ?? "") !== String(payload.vehicle_reg_no ?? "")) changedKinds.push("vehicle");
-  const existingIfsc = source.employee ? existingResult.data.ifsc : existingResult.data.ifsc_code;
-  if (String(existingResult.data.bank_account_no ?? "") !== String(payload.bank_account_no ?? "") || String(existingIfsc ?? "") !== String(payload[source.employee ? "ifsc" : "ifsc_code"] ?? "")) changedKinds.push("bank");
-  if (changedKinds.length) await supabaseAdmin.from("connect_profile_verifications").update({ verified: false, manual_review: false, block_submit: true, message: "Reverification required after profile field update.", updated_at: new Date().toISOString() }).eq("company_id", companyId).eq("account_id", id).in("kind", [...new Set(changedKinds)]);
+  const current = await supabaseAdmin.from(source.table).select("*").eq("company_id", companyId).eq("id", id).maybeSingle();
+  if (current.error || !current.data) return failure(current.error?.message ?? "Profile was not found.", "NOT_FOUND");
+  const existing = current.data as Record<string, unknown>;
+  if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(String(existing.location_id ?? ""))) return failure("You do not have access to this profile location.", "FORBIDDEN");
+  if (!sameTimestamp(existing.updated_at, expectedUpdatedAt)) return failure("This row was updated by someone else. Refresh it before saving your changes.", "CONFLICT");
+
+  const master = await supabaseAdmin.from("designations").select("id, code, name, onboarding_categories, portal_permissions")
+    .eq("company_id", companyId).eq("is_active", true);
+  if (master.error) return failure(master.error.message);
+  const designations = (master.data ?? []) as DesignationRow[];
+  const currentDesignation = findDesignation(designations, source.designationStorage === "id" ? existing.designation_id : existing.designation);
+  if (isCustomWorkforceCategoryCode(source.categoryCode) && (!currentDesignation || !matchesCategory(currentDesignation, source.categoryCode))) {
+    return failure("Profile was not found in the requested category.", "NOT_FOUND");
+  }
+  const owner = isCompanyOwner(authorization);
+  if (!canAccessDesignationPortal(currentDesignation, "dashboard", "edit", { isOwner: owner })) return failure("You do not have permission to edit this profile designation.", "FORBIDDEN");
+
+  const payload = { ...patch.payload };
+  if (patch.deferred.location !== undefined) {
+    const location = await supabaseAdmin.from("stations").select("id, station_code").eq("company_id", companyId)
+      .eq("station_code", patch.deferred.location).eq("is_active", true).maybeSingle();
+    if (location.error) return failure(location.error.message);
+    if (!location.data) return failure("Selected location is not available for this company.");
+    const locationId = String(location.data.id);
+    if (!authorization.hasAllLocationAccess && !authorization.locationScopeIds.includes(locationId)) return failure("You do not have access to the selected location.", "FORBIDDEN");
+    payload.location_id = locationId;
+  }
+  if (patch.deferred.designation !== undefined) {
+    const next = findDesignation(designations, patch.deferred.designation);
+    if (!next || !matchesCategory(next, source.categoryCode)) return failure("Selected designation is not available for this category.");
+    if (!canAccessDesignationPortal(next, "dashboard", "edit", { isOwner: owner })) return failure("You do not have permission to assign the selected designation.", "FORBIDDEN");
+    payload[source.designationStorage === "id" ? "designation_id" : "designation"] = source.designationStorage === "id" ? next.id : next.name;
+    if (source.categoryCode === "workforce") payload.designation = next.name;
+  }
+
+  if (source.categoryCode === "employees" && existing.org_position_id) {
+    const position = await supabaseAdmin.from("org_positions")
+      .select("id, designation_id, location_access_mode, location_scope_ids, is_active")
+      .eq("company_id", companyId).eq("id", existing.org_position_id).maybeSingle();
+    if (position.error) return failure(position.error.message);
+    if (!position.data?.is_active) return failure("The employee's portal position is not active. Update it from Positions & Delegation first.");
+    const nextDesignationId = String(payload.designation_id ?? existing.designation_id ?? "");
+    const nextLocationId = String(payload.location_id ?? existing.location_id ?? "");
+    if (position.data.designation_id && position.data.designation_id !== nextDesignationId) {
+      return failure("The selected designation does not match this employee's portal position. Update the position assignment first.");
+    }
+    if (position.data.location_access_mode !== "all_locations" && !(position.data.location_scope_ids ?? []).includes(nextLocationId)) {
+      return failure("The selected location is outside this employee's portal position scope. Update the position assignment first.");
+    }
+    if ("email" in payload && !payload.email) return failure("Email is required while this employee has a portal position.");
+  }
+  if (source.categoryCode === "workforce" && existing.deleted_at && payload.is_active === true) {
+    return failure("Archived workforce profiles cannot be reactivated from the sheet.");
+  }
+
+  for (const [column, value] of Object.entries(payload)) if (sameValue(existing[column], value)) delete payload[column];
+  if (!Object.keys(payload).length) return { ok: true as const, updatedAt: String(existing.updated_at), changedKeys: [] as AllPeopleExportKey[] };
+
+  const nextUpdatedAt = new Date().toISOString();
+  const update = await supabaseAdmin.from(source.table).update({ ...payload, updated_at: nextUpdatedAt })
+    .eq("company_id", companyId).eq("id", id).eq("updated_at", existing.updated_at).select("updated_at").maybeSingle();
+  if (update.error) return failure(update.error.message, "UPDATE_FAILED");
+  if (!update.data) return failure("This row was updated by someone else. Refresh it before saving your changes.", "CONFLICT");
+
+  let warning: string | undefined;
+  const biometricProfile = biometricProfiles[source.categoryCode];
+  if (biometricProfile && ["location_id", "date_of_join", "is_active"].some((column) => column in payload)) {
+    try {
+      await syncBiometricEnrolment({
+        accountId: id,
+        companyId,
+        createdBy: authorization.userId,
+        effectiveFrom: String(payload.date_of_join ?? existing.date_of_join ?? ""),
+        employeeId: biometricProfile.profileType === "employee" ? id : undefined,
+        enrolmentId: String(existing.biometric_id ?? "") || null,
+        fieldExecutiveId: biometricProfile.profileType === "field_executive" ? id : undefined,
+        isActive: Boolean(payload.is_active ?? existing.is_active) && !existing.deleted_at,
+        locationId: String(payload.location_id ?? existing.location_id ?? ""),
+        profileType: biometricProfile.profileType,
+        workerType: biometricProfile.workerType
+      });
+    } catch (error) {
+      warning = `Profile saved, but the linked biometric enrolment could not be synchronized: ${error instanceof Error ? error.message : "unknown error"}`;
+    }
+  }
+
+  const verificationKinds: string[] = [];
+  if ("pan_number" in payload) verificationKinds.push("pan", "pan_aadhaar");
+  if ("aadhaar_number" in payload) verificationKinds.push("pan_aadhaar");
+  if ("driving_license_no" in payload) verificationKinds.push("dl");
+  if ("vehicle_reg_no" in payload) verificationKinds.push("vehicle");
+  if ("bank_account_no" in payload || (source.employeeColumns ? "ifsc" : "ifsc_code") in payload) verificationKinds.push("bank");
+  if ("pf_uan" in payload) verificationKinds.push("pf_uan");
+  if (verificationKinds.length) await supabaseAdmin.from("connect_profile_verifications").update({
+    verified: false, manual_review: false, block_submit: true,
+    message: "Reverification required after profile field update.", updated_at: nextUpdatedAt
+  }).eq("company_id", companyId).eq("account_id", id).in("kind", [...new Set(verificationKinds)]);
 
   revalidatePath("/people/all");
-  return { ok: true };
+  if (source.categoryCode === "workforce") revalidatePath("/people/workforce");
+  return { ok: true as const, updatedAt: String(update.data.updated_at ?? nextUpdatedAt), changedKeys: patch.changedKeys, warning };
 }

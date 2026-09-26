@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Download, EllipsisVertical, Eye, Pencil, Search, X } from "lucide-react";
+import { Download, EllipsisVertical, Eye, Pencil, Save, Search, X } from "lucide-react";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
 import { allPeopleExportColumns, type AllPeopleExportKey, type AllPeopleExportValues } from "@/lib/all-people-export";
@@ -25,13 +25,46 @@ export type AllPeopleRow = {
   viewHref?: string;
   editHref?: string;
   canEdit: boolean;
+  version?: string;
+  locationId?: string;
+  designationId?: string;
+  editableKeys?: AllPeopleExportKey[];
   exportValues: AllPeopleExportValues;
   verificationNotes?: Partial<Record<AllPeopleExportKey, string>>;
 };
 
-const rowsPerPage = 20;
+type PageSize = 20 | 50 | 100 | 500 | "all";
 
-type FilterOption = { value: string; label: string };
+const pageSizeOptions: Array<{ value: PageSize; label: string }> = [
+  { value: 20, label: "20" },
+  { value: 50, label: "50" },
+  { value: 100, label: "100" },
+  { value: 500, label: "500" },
+  { value: "all", label: "All" }
+];
+
+const yesNoOptions = [
+  { value: "Yes", label: "Yes" },
+  { value: "No", label: "No" }
+];
+
+const editableKeys = new Set<AllPeopleExportKey>([
+  "fullName", "mobileCountryCode", "mobileNumber", "email", "dateOfJoin", "location", "designation",
+  "active", "statutoryApplicability", "gender", "dateOfBirth", "aadhaarNumber", "panNumber",
+  "eshramUan", "fatherName", "bloodGroup", "handicapped", "address", "stateCode", "pincode", "landmark",
+  "bankAccountNumber", "ifsc", "pfUan", "pfAccountNumber", "esiNumber", "emergencyContactNumber",
+  "emergencyContactName", "emergencyContactRelation", "drivingLicenseNumber", "drivingLicenseExpiry",
+  "vehicleRegistrationNumber", "vehicleRegistrationExpiry", "vehicleInsuranceExpiry", "pollutionExpiry",
+  "returnRemarks"
+]);
+
+const workforceEditableKeys = new Set<AllPeopleExportKey>([
+  "fullName", "mobileCountryCode", "mobileNumber", "email", "dateOfJoin", "location", "designation",
+  "active", "bankAccountNumber", "ifsc", "returnRemarks"
+]);
+
+type FilterOption = { value: string; label: string; categoryCodes?: string[] };
+type SheetEditOptions = Partial<Record<"location" | "designation" | "status" | "active", FilterOption[]>>;
 
 function MultiCheckFilter({
   allLabel,
@@ -149,31 +182,41 @@ function AllPeopleActionMenu({ row }: { row: AllPeopleRow }) {
   );
 }
 
-export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
+export function AllPeopleRegister({ rows, editOptions = {} }: { rows: AllPeopleRow[]; editOptions?: SheetEditOptions }) {
   const searchParams = useSearchParams();
   const editableSheet = searchParams.get("layout") === "edit-sheet";
+  const tableWrapRef = useRef<HTMLDivElement | null>(null);
+  const stickyScrollRef = useRef<HTMLDivElement | null>(null);
   const [search, setSearch] = useState("");
   const [categories, setCategories] = useState<string[]>([]);
   const [locations, setLocations] = useState<string[]>([]);
   const [designations, setDesignations] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<PageSize>(20);
+  const [sheetEditMode, setSheetEditMode] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportColumnSearch, setExportColumnSearch] = useState("");
   const [selectedExportColumns, setSelectedExportColumns] = useState<AllPeopleExportKey[]>(() => allPeopleExportColumns.map((column) => column.key));
-  const [drafts, setDrafts] = useState<Record<string, AllPeopleExportValues>>({});
-  const [savingId, setSavingId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, Partial<AllPeopleExportValues>>>({});
+  const [savedValues, setSavedValues] = useState<Record<string, Partial<AllPeopleExportValues>>>({});
+  const [versions, setVersions] = useState<Record<string, string>>({});
+  const [savingIds, setSavingIds] = useState<Set<string>>(() => new Set());
+  const [savingAll, setSavingAll] = useState(false);
   const [saveMessage, setSaveMessage] = useState<Record<string, string>>({});
+  const [sheetScrollWidth, setSheetScrollWidth] = useState(0);
+  const [stickyScrollFrame, setStickyScrollFrame] = useState({ left: 0, width: 0, visible: false });
 
   const categoryOptions = useMemo(() => (
     Array.from(new Map(rows.map((row) => [row.categoryCode, row.category])).entries())
       .sort((left, right) => left[1].localeCompare(right[1]))
       .map(([value, label]) => ({ value, label }))
   ), [rows]);
-  const locationOptions = useMemo(() => optionsFrom(rows.map((row) => row.location)), [rows]);
-  const designationOptions = useMemo(() => optionsFrom(rows.map((row) => row.designation)), [rows]);
-  const statusOptions = useMemo(() => optionsFrom(rows.map((row) => row.status)), [rows]);
+  const locationOptions = useMemo(() => editOptions.location ?? optionsFrom(rows.map((row) => row.location)), [editOptions.location, rows]);
+  const designationOptions = useMemo<FilterOption[]>(() => editOptions.designation ?? optionsFrom(rows.map((row) => row.designation)), [editOptions.designation, rows]);
+  const statusOptions = useMemo(() => editOptions.status ?? optionsFrom(rows.map((row) => row.status)), [editOptions.status, rows]);
+  const activeOptions = useMemo(() => editOptions.active ?? yesNoOptions, [editOptions.active]);
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -185,14 +228,71 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
       return !term || `${row.code} ${row.biometricId} ${row.fullName} ${row.mobile} ${row.email} ${row.location} ${row.model} ${row.provider} ${row.designation} ${row.category}`.toLowerCase().includes(term);
     });
   }, [categories, designations, locations, rows, search, statuses]);
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / rowsPerPage));
+  const totalPages = pageSize === "all" ? 1 : Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
-  const visibleRows = filteredRows.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+  const visibleRows = pageSize === "all"
+    ? filteredRows
+    : filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const firstVisibleRecord = filteredRows.length && pageSize !== "all" ? ((currentPage - 1) * pageSize) + 1 : filteredRows.length ? 1 : 0;
+  const lastVisibleRecord = pageSize === "all" ? filteredRows.length : Math.min(currentPage * pageSize, filteredRows.length);
 
-  useEffect(() => setPage(1), [categories, designations, locations, search, statuses]);
+  useEffect(() => setPage(1), [categories, designations, locations, pageSize, search, statuses]);
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+  useEffect(() => {
+    if (!editableSheet) setSheetEditMode(false);
+  }, [editableSheet]);
+  useEffect(() => {
+    if (!editableSheet) return;
+    const tableWrap = tableWrapRef.current;
+    const stickyScroll = stickyScrollRef.current;
+    if (!tableWrap || !stickyScroll) return;
+    const tableWrapElement: HTMLDivElement = tableWrap;
+    const stickyScrollElement: HTMLDivElement = stickyScroll;
+
+    let syncing = false;
+    function syncFromTable() {
+      if (syncing) return;
+      syncing = true;
+      stickyScrollElement.scrollLeft = tableWrapElement.scrollLeft;
+      syncing = false;
+    }
+    function syncFromSticky() {
+      if (syncing) return;
+      syncing = true;
+      tableWrapElement.scrollLeft = stickyScrollElement.scrollLeft;
+      syncing = false;
+    }
+    function updateStickyScroll() {
+      const rect = tableWrapElement.getBoundingClientRect();
+      const hasOverflow = tableWrapElement.scrollWidth > tableWrapElement.clientWidth + 1;
+      setSheetScrollWidth(tableWrapElement.scrollWidth);
+      setStickyScrollFrame({
+        left: Math.max(0, rect.left),
+        width: Math.max(0, Math.min(window.innerWidth, rect.right) - Math.max(0, rect.left)),
+        visible: hasOverflow && rect.top < window.innerHeight - 20 && rect.bottom > 28
+      });
+      syncFromTable();
+    }
+
+    tableWrapElement.addEventListener("scroll", syncFromTable, { passive: true });
+    stickyScrollElement.addEventListener("scroll", syncFromSticky, { passive: true });
+    window.addEventListener("scroll", updateStickyScroll, { passive: true });
+    window.addEventListener("resize", updateStickyScroll);
+    const resizeObserver = new ResizeObserver(updateStickyScroll);
+    resizeObserver.observe(tableWrapElement);
+    const table = tableWrapElement.querySelector("table");
+    if (table) resizeObserver.observe(table);
+    updateStickyScroll();
+    return () => {
+      tableWrapElement.removeEventListener("scroll", syncFromTable);
+      stickyScrollElement.removeEventListener("scroll", syncFromSticky);
+      window.removeEventListener("scroll", updateStickyScroll);
+      window.removeEventListener("resize", updateStickyScroll);
+      resizeObserver.disconnect();
+    };
+  }, [editableSheet, visibleRows.length]);
 
   const selectedExportSet = useMemo(() => new Set(selectedExportColumns), [selectedExportColumns]);
   const visibleExportColumns = useMemo(() => {
@@ -205,22 +305,113 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
   }
 
   function rowKey(row: AllPeopleRow) { return `${row.categoryCode}:${row.id}`; }
-  function valuesFor(row: AllPeopleRow) { return drafts[rowKey(row)] ?? row.exportValues; }
+  function baseValuesFor(row: AllPeopleRow): AllPeopleExportValues {
+    return { ...row.exportValues, ...(savedValues[rowKey(row)] ?? {}) };
+  }
+  function valuesFor(row: AllPeopleRow): AllPeopleExportValues {
+    return { ...baseValuesFor(row), ...(drafts[rowKey(row)] ?? {}) };
+  }
+  function canEditField(row: AllPeopleRow, key: AllPeopleExportKey) {
+    if (!row.canEdit || !row.version) return false;
+    if (row.editableKeys) return row.editableKeys.includes(key);
+    return row.categoryCode === "workforce" ? workforceEditableKeys.has(key) : editableKeys.has(key);
+  }
   function changeValue(row: AllPeopleRow, key: AllPeopleExportKey, value: string) {
     const keyValue = rowKey(row);
-    setDrafts((current) => ({ ...current, [keyValue]: { ...valuesFor(row), [key]: value } }));
+    const baseValue = baseValuesFor(row)[key] ?? "";
+    setDrafts((current) => {
+      const next = { ...current };
+      const patch = { ...(next[keyValue] ?? {}) };
+      if (value === baseValue) delete patch[key];
+      else patch[key] = value;
+      if (Object.keys(patch).length) next[keyValue] = patch;
+      else delete next[keyValue];
+      return next;
+    });
+    setSaveMessage((current) => ({ ...current, [keyValue]: "" }));
   }
+
+  async function persistRow(row: AllPeopleRow, patch: Partial<AllPeopleExportValues>) {
+    const keyValue = rowKey(row);
+    setSaveMessage((current) => ({ ...current, [keyValue]: "" }));
+    const expectedUpdatedAt = versions[keyValue] ?? row.version;
+    if (!expectedUpdatedAt) {
+      setSaveMessage((current) => ({ ...current, [keyValue]: "This row cannot be safely updated. Refresh the page and try again." }));
+      return false;
+    }
+    const result = await saveAllPeopleSheetRow({
+      categoryCode: row.categoryCode,
+      id: row.id,
+      changes: patch,
+      expectedUpdatedAt
+    });
+    setSaveMessage((current) => ({
+      ...current,
+      [keyValue]: result.ok ? result.warning ?? "Saved" : result.error ?? "Unable to save."
+    }));
+    if (!result.ok) return false;
+
+    setSavedValues((current) => ({ ...current, [keyValue]: { ...(current[keyValue] ?? {}), ...patch } }));
+    const updatedAt = "updatedAt" in result && typeof result.updatedAt === "string" ? result.updatedAt : undefined;
+    if (updatedAt) setVersions((current) => ({ ...current, [keyValue]: updatedAt }));
+    setDrafts((current) => {
+      const remainingPatch = { ...(current[keyValue] ?? {}) };
+      for (const [key, value] of Object.entries(patch) as Array<[AllPeopleExportKey, string]>) {
+        if (remainingPatch[key] === value) delete remainingPatch[key];
+      }
+      const next = { ...current };
+      if (Object.keys(remainingPatch).length) next[keyValue] = remainingPatch;
+      else delete next[keyValue];
+      return next;
+    });
+    return true;
+  }
+
   async function saveRow(row: AllPeopleRow) {
     const keyValue = rowKey(row);
-    setSavingId(keyValue);
-    setSaveMessage((current) => ({ ...current, [keyValue]: "" }));
-    const result = await saveAllPeopleSheetRow({ categoryCode: row.categoryCode, id: row.id, values: valuesFor(row) });
-    setSavingId(null);
-    setSaveMessage((current) => ({ ...current, [keyValue]: result.ok ? "Saved" : result.error ?? "Unable to save." }));
-    if (result.ok) setDrafts((current) => { const next = { ...current }; delete next[keyValue]; return next; });
+    const patch = drafts[keyValue];
+    if (!patch || !Object.keys(patch).length) return;
+    setSavingIds((current) => new Set(current).add(keyValue));
+    try {
+      await persistRow(row, patch);
+    } finally {
+      setSavingIds((current) => { const next = new Set(current); next.delete(keyValue); return next; });
+    }
   }
-  const editableKeys = new Set<AllPeopleExportKey>(["fullName", "mobileCountryCode", "mobileNumber", "email", "dateOfJoin", "gender", "dateOfBirth", "aadhaarNumber", "panNumber", "eshramUan", "fatherName", "bloodGroup", "handicapped", "address", "stateCode", "pincode", "landmark", "bankAccountNumber", "ifsc", "pfUan", "pfAccountNumber", "esiNumber", "emergencyContactNumber", "emergencyContactName", "emergencyContactRelation", "drivingLicenseNumber", "drivingLicenseExpiry", "vehicleRegistrationNumber", "vehicleRegistrationExpiry", "vehicleInsuranceExpiry", "pollutionExpiry"]);
-  const sheetRows = editableSheet ? filteredRows : visibleRows;
+
+  const rowByKey = new Map(rows.map((row) => [rowKey(row), row]));
+  const dirtyRows = Object.entries(drafts)
+    .filter(([, patch]) => Object.keys(patch).length)
+    .flatMap(([key, patch]) => rowByKey.has(key) ? [{ key, row: rowByKey.get(key)!, patch }] : []);
+
+  async function saveAllRows() {
+    if (!dirtyRows.length || savingAll) return;
+    const targets = dirtyRows.map((entry) => ({ ...entry, patch: { ...entry.patch } }));
+    setSavingAll(true);
+    setSavingIds((current) => new Set([...current, ...targets.map((entry) => entry.key)]));
+    try {
+      for (const target of targets) await persistRow(target.row, target.patch);
+    } finally {
+      setSavingIds((current) => {
+        const next = new Set(current);
+        for (const target of targets) next.delete(target.key);
+        return next;
+      });
+      setSavingAll(false);
+    }
+  }
+
+  function toggleSheetEditMode() {
+    if (!sheetEditMode) {
+      setSheetEditMode(true);
+      return;
+    }
+    if (dirtyRows.length && !window.confirm(`Discard unsaved changes in ${dirtyRows.length} row${dirtyRows.length === 1 ? "" : "s"}?`)) return;
+    if (dirtyRows.length) setDrafts({});
+    setSheetEditMode(false);
+  }
+
+  const sheetRows = visibleRows;
 
   async function exportPeople() {
     if (!selectedExportColumns.length || !filteredRows.length) return;
@@ -262,8 +453,11 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
     <section className="panel">
       <div className="panel-head toolbar">
         <div>
-          <h2>{editableSheet ? "Editable people sheet" : "People register"}</h2>
-          <p className="subtle">{filteredRows.length} of {rows.length} records</p>
+          <h2>{editableSheet ? "People sheet" : "People register"}</h2>
+          <p className="subtle">
+            {filteredRows.length} of {rows.length} records
+            {editableSheet ? ` · ${sheetEditMode ? `${dirtyRows.length} unsaved row${dirtyRows.length === 1 ? "" : "s"}` : "View only"}` : ""}
+          </p>
         </div>
         <div className="all-people-filters">
           <input className="field all-people-search" onChange={(event) => setSearch(event.target.value)} placeholder="Search ID, name, mobile, email" value={search} />
@@ -271,6 +465,19 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
           <MultiCheckFilter allLabel="All locations" label="Location" onChange={setLocations} options={locationOptions} selected={locations} />
           <MultiCheckFilter allLabel="All designations" label="Designation" onChange={setDesignations} options={designationOptions} selected={designations} />
           <MultiCheckFilter allLabel="All statuses" label="Status" onChange={setStatuses} options={statusOptions} selected={statuses} />
+          {editableSheet ? (
+            <>
+              <button className={sheetEditMode ? "button secondary" : "button"} disabled={savingAll} onClick={toggleSheetEditMode} type="button">
+                {sheetEditMode ? <X aria-hidden="true" size={16} /> : <Pencil aria-hidden="true" size={16} />}
+                {sheetEditMode ? "Cancel editing" : "Edit"}
+              </button>
+              {sheetEditMode ? (
+                <button className="button" disabled={!dirtyRows.length || savingAll || savingIds.size > 0} onClick={saveAllRows} type="button">
+                  <Save aria-hidden="true" size={16} /> {savingAll ? "Saving all…" : `Save all${dirtyRows.length ? ` (${dirtyRows.length})` : ""}`}
+                </button>
+              ) : null}
+            </>
+          ) : null}
           <button className="button secondary all-people-export-trigger" disabled={!filteredRows.length} onClick={() => {
             setExportColumnSearch("");
             setExportOpen(true);
@@ -280,8 +487,77 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
           <PendingLink className="button secondary" href={editableSheet ? "/people/all" : "/people/all?layout=edit-sheet"}>{editableSheet ? "Register view" : "Editable sheet"}</PendingLink>
         </div>
       </div>
-      <div className="table-wrap field-executive-table-wrap employee-table-wrap all-people-table-wrap">
-        {editableSheet ? <table className="all-people-edit-sheet"><thead><tr>{allPeopleExportColumns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Save</th></tr></thead><tbody>{sheetRows.map((row) => { const rowId = rowKey(row); const values = valuesFor(row); return <tr key={rowId}>{allPeopleExportColumns.map((column) => { const editable = row.canEdit && editableKeys.has(column.key) && !(row.categoryCode === "workforce" && !["fullName", "mobileCountryCode", "mobileNumber", "email", "dateOfJoin", "bankAccountNumber", "ifsc"].includes(column.key)); return <td key={column.key}>{editable ? <><input aria-label={`${column.label} for ${row.fullName}`} className="sheet-cell-input" onChange={(event) => changeValue(row, column.key, event.target.value)} value={values[column.key] ?? ""} />{row.verificationNotes?.[column.key] ? <small className="sheet-verification-note">{row.verificationNotes[column.key]}</small> : null}</> : <>{values[column.key] || "-"}{row.verificationNotes?.[column.key] ? <small className="sheet-verification-note">{row.verificationNotes[column.key]}</small> : null}</>}</td>; })}<td><button className="button sheet-save-button" disabled={!row.canEdit || savingId === rowId} onClick={() => saveRow(row)} type="button">{savingId === rowId ? "Saving..." : "Save"}</button>{saveMessage[rowId] ? <small className={saveMessage[rowId] === "Saved" ? "sheet-save-ok" : "sheet-save-error"}>{saveMessage[rowId]}</small> : null}</td></tr>; })}{!sheetRows.length ? <tr><td className="empty-cell" colSpan={allPeopleExportColumns.length + 1}>No people match the selected filters.</td></tr> : null}</tbody></table> : <table>
+      <div className="table-wrap field-executive-table-wrap employee-table-wrap all-people-table-wrap" ref={tableWrapRef}>
+        {editableSheet ? <table className="all-people-edit-sheet">
+          <thead><tr>{allPeopleExportColumns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Save</th></tr></thead>
+          <tbody>
+            {sheetRows.map((row) => {
+              const rowId = rowKey(row);
+              const values = valuesFor(row);
+              const rowPatch = drafts[rowId] ?? {};
+              const rowDirty = Object.keys(rowPatch).length > 0;
+              const rowSaving = savingIds.has(rowId);
+              return (
+                <tr className={rowDirty ? "sheet-row-dirty" : undefined} key={rowId}>
+                  {allPeopleExportColumns.map((column) => {
+                    const editable = canEditField(row, column.key);
+                    const cellDirty = Object.prototype.hasOwnProperty.call(rowPatch, column.key);
+                    const fieldOptions = column.key === "location"
+                      ? locationOptions
+                      : column.key === "designation"
+                        ? designationOptions.filter((option) => !option.categoryCodes?.length || option.categoryCodes.includes(row.categoryCode))
+                        : column.key === "active" || column.key === "handicapped"
+                          ? activeOptions
+                          : undefined;
+                    const cellValue = values[column.key] ?? "";
+                    const linkedField = column.key === "model" || column.key === "provider";
+                    return (
+                      <td className={`${cellDirty ? "sheet-cell-dirty" : ""} ${!editable ? "sheet-cell-readonly" : ""}`.trim()} key={column.key} title={linkedField ? "Linked to location and updated automatically" : !editable ? "Read-only field" : undefined}>
+                        {sheetEditMode && editable ? (
+                          fieldOptions ? (
+                            <select
+                              aria-label={`${column.label} for ${row.fullName}`}
+                              className="sheet-cell-input sheet-cell-select"
+                              disabled={rowSaving}
+                              onChange={(event) => changeValue(row, column.key, event.target.value)}
+                              value={cellValue}
+                            >
+                              <option value="">Select…</option>
+                              {cellValue && !fieldOptions.some((option) => option.value === cellValue) ? <option value={cellValue}>{cellValue}</option> : null}
+                              {fieldOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                            </select>
+                          ) : (
+                            <input
+                              aria-label={`${column.label} for ${row.fullName}`}
+                              className="sheet-cell-input"
+                              disabled={rowSaving}
+                              onChange={(event) => changeValue(row, column.key, event.target.value)}
+                              value={cellValue}
+                            />
+                          )
+                        ) : <span className="sheet-cell-value">{cellValue || "-"}</span>}
+                        {row.verificationNotes?.[column.key] ? <small className="sheet-verification-note">{row.verificationNotes[column.key]}</small> : null}
+                      </td>
+                    );
+                  })}
+                  <td className="sheet-row-actions">
+                    {sheetEditMode ? (
+                      <button className="button sheet-save-button" disabled={!row.canEdit || !rowDirty || rowSaving || savingAll} onClick={() => saveRow(row)} type="button">
+                        {rowSaving ? "Saving…" : "Save"}
+                      </button>
+                    ) : <span className="sheet-view-only-label">View only</span>}
+                    {saveMessage[rowId] ? (
+                      <small className={saveMessage[rowId] === "Saved" ? "sheet-save-ok" : saveMessage[rowId].startsWith("Profile saved") ? "sheet-save-warning" : "sheet-save-error"}>
+                        {saveMessage[rowId]}
+                      </small>
+                    ) : null}
+                  </td>
+                </tr>
+              );
+            })}
+            {!sheetRows.length ? <tr><td className="empty-cell" colSpan={allPeopleExportColumns.length + 1}>No people match the selected filters.</td></tr> : null}
+          </tbody>
+        </table> : <table>
           <thead><tr><th>DropX ID</th><th>Biometric ID</th><th>Full name</th><th>Category</th><th>Mobile</th><th>Email</th><th>Location</th><th>Model</th><th>Provider</th><th>Designation</th><th>Status</th><th>Action</th></tr></thead>
           <tbody>
             {visibleRows.map((row) => (
@@ -296,10 +572,27 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
           </tbody>
         </table>}
       </div>
-      {filteredRows.length && !editableSheet ? (
-        <div className="panel-foot pagination">
+      {editableSheet ? (
+        <div
+          aria-label="People sheet horizontal scrollbar"
+          className={`all-people-sticky-scroll ${stickyScrollFrame.visible ? "visible" : ""}`}
+          ref={stickyScrollRef}
+          style={{ left: stickyScrollFrame.left, width: stickyScrollFrame.width }}
+          tabIndex={stickyScrollFrame.visible ? 0 : -1}
+        >
+          <div style={{ width: sheetScrollWidth }} />
+        </div>
+      ) : null}
+      {filteredRows.length ? (
+        <div className="panel-foot pagination all-people-pagination">
+          <label className="all-people-page-size">
+            <span>Rows</span>
+            <select className="field" onChange={(event) => setPageSize(event.target.value === "all" ? "all" : Number(event.target.value) as PageSize)} value={pageSize}>
+              {pageSizeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
           <button className="pager-button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} type="button">Previous</button>
-          <span>Page {currentPage} of {totalPages}</span>
+          <span>{firstVisibleRecord}–{lastVisibleRecord} of {filteredRows.length} · Page {currentPage} of {totalPages}</span>
           <button className="pager-button" disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)} type="button">Next</button>
         </div>
       ) : null}
