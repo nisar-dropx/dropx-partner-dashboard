@@ -58,9 +58,13 @@ export function AdhocDaFields({ locationId }: { locationId: string }) {
     <input name="adhoc_identity_mode" type="hidden" value={manualMode ? "manual_scc" : "latest_shipment"} />
     <input name="adhoc_manual_name" type="hidden" value={manualMode ? manualName : ""} />
     <input name="adhoc_manual_workforce_id" type="hidden" value={manualMode ? manualWorkforceId : ""} />
+    <div className="payment-form-guidance">
+      <strong>DA list and payroll date are independent</strong>
+      <span>DA names come from the latest Amazon shipment roster. The date below is used only to post the recovery in payroll.</span>
+    </div>
     <div className="form-grid two">
-      <label>Delivery work date *<input className="field" type="date" name="adhoc_work_date" value={date} required onChange={event => setDate(event.target.value)} /></label>
-      <label>DA name / Provider ID *<SearchableSelect key={`${locationId}:${manualMode}`} name="adhoc_shipment_id" options={options} value={manualMode ? "" : selected} onValueChange={useImportedSelection} placeholder={loading ? "Loading station DAs…" : "Search DA name or provider ID"} required={!manualMode} disabled={manualMode} /></label>
+      <label>Payroll deduction work date *<input className="field" type="date" name="adhoc_work_date" value={date} required onChange={event => setDate(event.target.value)} /></label>
+      <label>DA name / Provider ID *<SearchableSelect key={`${locationId}:${manualMode}`} name="adhoc_shipment_id" options={options} value={manualMode ? "" : selected} onValueChange={useImportedSelection} placeholder={loading ? "Loading latest Amazon DA roster…" : "Search latest DA name or provider ID"} required={!manualMode} disabled={manualMode} /></label>
     </div>
     {!locationId ? <p>Select a location first.</p> : null}
     {message ? <p role="alert">{message}</p> : null}

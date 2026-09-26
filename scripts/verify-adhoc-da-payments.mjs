@@ -27,11 +27,16 @@ insert into field_executive_provider_mappings(company_id,station_id,provider_id,
 await db.exec(readFileSync(new URL('../supabase/migrations/20260923143000_adhoc_da_payment_tracking.sql',import.meta.url),'utf8'));
 await db.exec(readFileSync(new URL('../supabase/migrations/20260923144000_adhoc_da_bank_amount_alignment.sql',import.meta.url),'utf8'));
 await db.exec(readFileSync(new URL('../supabase/migrations/20260926133000_adhoc_da_latest_roster_manual_scc.sql',import.meta.url),'utf8'));
+await db.exec(readFileSync(new URL('../supabase/migrations/20260926193000_adhoc_da_current_mapping.sql',import.meta.url),'utf8'));
 const insert=async(overrides={})=>{
  const row={company_id:company,location_id:station,payment_head_id:head,source_system:'OPS_ADHOC_DA',adhoc_shipment_id:shipment,adhoc_work_date:'2026-09-10',request_no:'R1',amount:100,amount_requested:100,amount_approved:90,updated_by:actor,...overrides};
  const keys=Object.keys(row); return (await db.query(`insert into payment_requests(${keys.join(',')}) values(${keys.map((_,i)=>'$'+(i+1)).join(',')}) returning *`,Object.values(row))).rows[0];
 };
 const count=async()=>Number((await db.query('select count(*) from workforce_adjustments')).rows[0].count);
+// A current Provider Mapping may start after the payroll deduction work date.
+// The roster identity must still resolve because the report date and recovery
+// date are intentionally independent.
+await db.exec(`update field_executive_provider_mappings set effective_from=current_date`);
 const independentDate=await insert({request_no:'DATE1',adhoc_work_date:'2026-09-11'});
 assert.equal(independentDate.work_date.toISOString().slice(0,10),'2026-09-11','Roster source date must not replace the selected work date');
 await assert.rejects(()=>insert({location_id:actor}),/valid station/);
