@@ -128,7 +128,7 @@ export async function middleware(request: NextRequest) {
   const isPeopleHost = isPeopleHostName(host);
   const isFinanceHost = isFinanceHostName(host);
   const isDashboardHost = host === "dashboard.dropxlogistics.com";
-  const isFleetHost = host === "fleet.tropicslogistics.com" || host === "fleet.dropxlogistics.com";
+  const isFleetHost = host === "fleet.dropxlogistics.com";
   const isSharedOpsPath = path === "/fleet" || path.startsWith("/fleet/") ||
     path === "/business-documents" || path.startsWith("/business-documents/");
 

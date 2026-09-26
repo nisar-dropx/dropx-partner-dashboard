@@ -30,7 +30,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const isOpsHost = host === "ops.dropxlogistics.com";
   const isPeopleHost = isPeopleHostName(host);
   const isFinanceHost = isFinanceHostName(host);
-  const isFleetHost = host === "fleet.tropicslogistics.com" || host === "fleet.dropxlogistics.com";
+  const isFleetHost = host === "fleet.dropxlogistics.com";
   const supabase = createServerSupabaseClient(undefined, isOpsHost ? true : undefined);
   const { data } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
   if (data.user) {

@@ -19,7 +19,7 @@ function isPeopleHost() {
 
 export function generateMetadata(): Metadata {
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
-  if (host === "fleet.tropicslogistics.com" || host === "fleet.dropxlogistics.com") {
+  if (host === "fleet.dropxlogistics.com") {
     return {
       title: { default: "Tropics Fleet", template: "%s · Tropics Fleet" },
       description: "Fleet availability, vehicle payment approvals and ad-hoc van operations for Tropics Logistics.",
