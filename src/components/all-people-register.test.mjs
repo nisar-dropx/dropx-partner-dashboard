@@ -28,6 +28,7 @@ test("row saves and Save all submit only sparse changed-field patches", () => {
   assert.match(component, /for \(const target of targets\) await persistRow\(target\.row, target\.patch\)/);
   assert.match(component, /Save all\$\{dirtyRows\.length/);
   assert.match(component, /disabled=\{!dirtyRows\.length \|\| savingAll \|\| savingIds\.size > 0\}/);
+  assert.match(component, /const savedPatch = "savedValues" in result \? result\.savedValues : patch/);
 });
 
 test("pagination defaults to 20 and offers 20, 50, 100, 500, and All in sheet mode", () => {
@@ -53,7 +54,7 @@ test("provider and model remain read-only linked fields while location and desig
 });
 
 test("designation editing is limited to options valid for the row category and save warnings remain visible", () => {
-  assert.match(component, /option\.categoryCodes\.includes\(row\.categoryCode\)/);
+  assert.match(component, /option\.categoryCodes === undefined \|\| option\.categoryCodes\.includes\(row\.categoryCode\)/);
   assert.match(component, /result\.warning \?\? "Saved"/);
   assert.match(component, /sheet-save-warning/);
   assert.match(styles, /\.sheet-save-warning\s*\{/);
@@ -73,4 +74,70 @@ test("fixed horizontal scrollbar mirrors the table scroll position", () => {
   assert.match(component, /new ResizeObserver\(updateStickyScroll\)/);
   assert.match(styles, /\.all-people-sticky-scroll\s*\{/);
   assert.match(styles, /\.all-people-sticky-scroll\.visible\s*\{/);
+});
+
+test("edit sheet orders and freezes DropX ID and full name before the scrollable biometric ID", () => {
+  assert.match(component, /const sheetLeadingKeys: AllPeopleExportKey\[\] = \["dropxId", "fullName", "biometricId"\]/);
+  assert.match(component, /<thead><tr>\{sheetColumns\.map/);
+  assert.match(component, /\{sheetColumns\.map\(\(column\) => \{/);
+  assert.match(component, /colSpan=\{sheetColumns\.length \+ 1\}/);
+  assert.match(styles, /\.all-people-edit-sheet th\.sheet-column-dropxId,[\s\S]*?left:\s*0;[\s\S]*?width:\s*140px;/);
+  assert.match(styles, /\.all-people-edit-sheet th\.sheet-column-fullName,[\s\S]*?left:\s*140px;[\s\S]*?width:\s*210px;/);
+  assert.match(styles, /td\.sheet-column-dropxId,[\s\S]*?td\.sheet-column-fullName\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?background:\s*#fff;/);
+});
+
+test("profile files use compact view-only icons without exposing storage paths", () => {
+  for (const key of ["aadhaarFrontFile", "aadhaarBackFile", "panFile", "drivingLicenseFrontFile", "drivingLicenseBackFile", "profilePhotoFile"]) {
+    assert.ok(component.includes(`"${key}"`));
+  }
+  assert.match(component, /\/api\/people\/all-profile-file\?\$\{params\.toString\(\)\}/);
+  assert.match(component, /aria-label=\{`View \$\{column\.label\} for \$\{row\.fullName\}`\}/);
+  assert.match(component, /<Eye aria-hidden="true" size=\{17\} \/>/);
+  assert.match(component, /<iframe referrerPolicy="no-referrer" sandbox=""/);
+  assert.match(component, /cellValue \? \([\s\S]*?sheet-file-view[\s\S]*?: <span className="sheet-cell-value">-<\/span>/);
+  assert.match(styles, /\.sheet-file-view\s*\{[\s\S]*?width:\s*30px;[\s\S]*?height:\s*30px;/);
+});
+
+test("dates, controlled dropdowns, and statutory multi-select tags use typed controls", () => {
+  for (const key of ["dateOfJoin", "dateOfBirth", "drivingLicenseExpiry", "vehicleRegistrationExpiry", "vehicleInsuranceExpiry", "pollutionExpiry"]) {
+    assert.ok(component.includes(`"${key}"`));
+  }
+  assert.match(component, /type=\{dateField \? "date" : "text"\}/);
+  assert.match(component, /value=\{dateField \? toDateInputValue\(cellValue\) : cellValue\}/);
+  assert.match(component, /column\.key === "gender"[\s\S]*?genderOptions/);
+  assert.match(component, /column\.key === "bloodGroup"[\s\S]*?bloodGroupOptions/);
+  assert.match(component, /column\.key === "stateCode"[\s\S]*?stateCodeOptions/);
+  assert.match(component, /const bloodGroupOptions = \["A\+", "A-", "B\+", "B-", "AB\+", "AB-", "O\+", "O-"\]/);
+  assert.match(component, /if \(nextValue === "not_applicable"\)[\s\S]*?onChange\("not_applicable"\)/);
+  assert.match(component, /onChange\(next\.length \? next\.join\(", "\) : "not_applicable"\)/);
+  assert.match(component, /className="sheet-statutory-tag"/);
+});
+
+test("sheet verification mirrors individual edit groups and persists provider results server-side", () => {
+  assert.match(component, /employees: \{ pageCode: "employees", profileType: "employee" \}/);
+  assert.match(component, /workforce: \{ pageCode: "delivery_associates", profileType: "field_executive" \}/);
+  assert.match(component, /contractors: \{ pageCode: "contractors", profileType: "contractor" \}/);
+  assert.match(component, /pan: \["fullName", "panNumber", "aadhaarNumber"\]/);
+  assert.match(component, /bank: \["bankAccountNumber", "ifsc"\]/);
+  assert.match(component, /dl: \["fullName", "drivingLicenseNumber", "dateOfBirth"\]/);
+  assert.match(component, /fullName: \["pan", "dl", "pf_uan"\]/);
+  assert.match(component, /if \(kind === "pan" && !result\.blockSubmit\) next\.push\(await request\("pan_aadhaar"\)\)/);
+  assert.match(component, /onDerivedValue\("drivingLicenseExpiry"/);
+  assert.match(component, /onDerivedValue\("vehicleRegistrationExpiry"/);
+  assert.match(component, /Reverification required after this edit/);
+  assert.match(component, /RC owner: \$\{result\.ownerName\}/);
+  assert.match(component, /Fuel type: \$\{result\.fuelType\}/);
+  assert.match(styles, /\.sheet-verification-note,[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?white-space:\s*normal;/);
+});
+
+test("saved verification note overrides remain authoritative after edit and revert", () => {
+  assert.match(component, /const note = groupDirty[\s\S]*?: verificationNoteOverrides\[rowId\]\?\.\[column\.key\] \?\? row\.verificationNotes\?\.\[column\.key\]/);
+  assert.doesNotMatch(component, /for \(const field of verificationFields\[verificationKind\]\) delete rowNotes\[field\]/);
+});
+
+test("sticky Save column is opaque in header, normal rows, and dirty rows", () => {
+  assert.match(component, /<th className="sheet-row-actions">Save<\/th>/);
+  assert.match(styles, /\.all-people-edit-sheet \.sheet-row-actions\s*\{[\s\S]*?right:\s*0;[\s\S]*?background:\s*#fff;[\s\S]*?box-shadow:/);
+  assert.match(styles, /\.all-people-edit-sheet thead \.sheet-row-actions\s*\{[\s\S]*?background:\s*#f8fafc;/);
+  assert.match(styles, /tr\.sheet-row-dirty > td\.sheet-row-actions,[\s\S]*?background:\s*#fff7c2;/);
 });

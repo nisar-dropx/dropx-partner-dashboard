@@ -9,6 +9,7 @@ import { loadCanonicalWorkforcePeople } from "@/lib/canonical-workforce-people";
 import type { AllPeopleExportValues } from "@/lib/all-people-export";
 import { ALL_PEOPLE_SHEET_EDITABLE_KEYS } from "@/lib/all-people-sheet";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
+import { isMissingVerificationTable } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { redirect } from "next/navigation";
 
@@ -76,6 +77,17 @@ function booleanText(value: unknown) {
 
 function listText(value: unknown) {
   return Array.isArray(value) ? value.map(text).filter(Boolean).join(", ") : text(value);
+}
+
+function expectedVerificationInputKey(row: AllPeopleRow, kind: string) {
+  const value = (key: keyof AllPeopleExportValues) => text(row.exportValues[key]).trim().toUpperCase();
+  if (kind === "pan") return value("panNumber");
+  if (kind === "pan_aadhaar") return `${value("panNumber")}|${value("aadhaarNumber")}`;
+  if (kind === "dl") return `${value("drivingLicenseNumber")}|${value("dateOfBirth").replace(/\//g, "-")}`;
+  if (kind === "vehicle") return value("vehicleRegistrationNumber");
+  if (kind === "bank") return `${value("bankAccountNumber")}|${value("ifsc")}`;
+  if (kind === "pf_uan") return value("pfUan");
+  return "";
 }
 
 function buildExportValues(
@@ -294,16 +306,63 @@ async function loadPeople(
   const categoryRows = sourceRows.filter((row) => row.categoryCode !== "employees"
     || !peopleIdentityKeys(row).some((key) => contractorIdentityKeys.has(key)));
   const allRows = [...categoryRows, ...workforceResult.rows];
-  const verificationResult = allRows.length ? await supabaseAdmin
-    .from("connect_profile_verifications")
-    .select("account_id, kind, verified, message")
-    .eq("company_id", companyId)
-    .in("account_id", allRows.map((row) => row.id)) : { data: [], error: null };
-  if (!verificationResult.error) {
-    const noteColumn: Record<string, keyof AllPeopleExportValues> = { pan: "panNumber", pan_aadhaar: "aadhaarNumber", dl: "drivingLicenseNumber", vehicle: "vehicleRegistrationNumber", bank: "bankAccountNumber", pf_uan: "pfUan" };
-    const notesById = new Map<string, Partial<Record<keyof AllPeopleExportValues, string>>>();
-    for (const item of (verificationResult.data ?? []) as Array<{ account_id: string; kind: string; verified: boolean; message: string | null }>) { const column = noteColumn[item.kind]; if (!column) continue; const current = notesById.get(item.account_id) ?? {}; current[column] = `${item.verified ? "Verified" : "Needs review"}${item.message ? `: ${item.message}` : ""}`; notesById.set(item.account_id, current); }
-    for (const row of allRows) row.verificationNotes = notesById.get(row.id);
+  type VerificationNoteRow = { account_id: string; profile_type: string; kind: string; input_key: string | null; verified: boolean; manual_review: boolean; message: string | null; details: Record<string, unknown> | null; updated_at: string };
+  const verificationRows: VerificationNoteRow[] = [];
+  let verificationError: string | null = null;
+  const accountIds = Array.from(new Set(allRows.map((row) => row.id)));
+  for (let offset = 0; offset < accountIds.length; offset += 100) {
+    const verificationResult = await supabaseAdmin.from("connect_profile_verifications")
+      .select("account_id, profile_type, kind, input_key, verified, manual_review, message, details, updated_at")
+      .eq("company_id", companyId)
+      .in("account_id", accountIds.slice(offset, offset + 100))
+      .order("updated_at", { ascending: false });
+    if (verificationResult.error) {
+      if (!isMissingVerificationTable(verificationResult.error)) verificationError = verificationResult.error.message;
+      break;
+    }
+    verificationRows.push(...(verificationResult.data ?? []) as VerificationNoteRow[]);
+  }
+  if (!verificationError) {
+    const noteColumn: Record<string, keyof AllPeopleExportValues> = {
+      pan: "panNumber",
+      pan_aadhaar: "panNumber",
+      dl: "drivingLicenseNumber",
+      vehicle: "vehicleRegistrationNumber",
+      bank: "ifsc",
+      pf_uan: "pfUan"
+    };
+    const profileTypesByCategory: Record<string, string[]> = {
+      employees: ["employee"],
+      workforce: ["workforce", "field_executive"],
+      contractors: ["contractor"],
+      vendors: ["vendor"],
+      workers: ["worker"]
+    };
+    const notesByRow = new Map<string, Partial<Record<keyof AllPeopleExportValues, string>>>();
+    const rowsById = new Map<string, AllPeopleRow[]>();
+    for (const row of allRows) rowsById.set(row.id, [...(rowsById.get(row.id) ?? []), row]);
+    const seenRowKinds = new Set<string>();
+    for (const item of verificationRows) {
+      const column = noteColumn[item.kind];
+      if (!column) continue;
+      for (const row of rowsById.get(item.account_id) ?? []) {
+        if (!(profileTypesByCategory[row.categoryCode] ?? []).includes(item.profile_type)) continue;
+        const key = `${row.categoryCode}:${row.id}`;
+        const rowKind = `${key}:${item.kind}`;
+        if (seenRowKinds.has(rowKind)) continue;
+        seenRowKinds.add(rowKind);
+        const current = notesByRow.get(key) ?? {};
+        const registeredName = text(item.details?.registeredName).trim().toLowerCase();
+        const nameStillMatches = !["pan", "dl", "pf_uan"].includes(item.kind) || !registeredName || registeredName === row.fullName.trim().toLowerCase();
+        const matchesCurrentValue = nameStillMatches && text(item.input_key).trim().toUpperCase() === expectedVerificationInputKey(row, item.kind);
+        const status = matchesCurrentValue && item.verified ? "Verified" : matchesCurrentValue && item.manual_review ? "Manual review" : "Needs review";
+        const message = matchesCurrentValue ? item.message : "Reverification required after profile field update.";
+        const next = `${status}${message ? `: ${message}` : ""}`;
+        current[column] = current[column] ? `${current[column]} · ${next}` : next;
+        notesByRow.set(key, current);
+      }
+    }
+    for (const row of allRows) row.verificationNotes = notesByRow.get(`${row.categoryCode}:${row.id}`);
   }
   return {
     categories,
@@ -319,7 +378,7 @@ async function loadPeople(
           categoryCodes: designation.onboarding_categories ?? []
         }))
     },
-    error: categoryResult.error?.message ?? designationResult.error?.message ?? locationResult.error?.message ?? allResults.find((result) => result.error)?.error ?? workforceResult.error ?? null
+    error: categoryResult.error?.message ?? designationResult.error?.message ?? locationResult.error?.message ?? allResults.find((result) => result.error)?.error ?? workforceResult.error ?? verificationError ?? null
   };
 }
 

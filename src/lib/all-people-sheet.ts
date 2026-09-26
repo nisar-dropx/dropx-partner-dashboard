@@ -47,6 +47,7 @@ export type AllPeopleSheetPatchOptions = {
 };
 
 export type AllPeopleSheetPatch = {
+  canonicalValues: Partial<Record<AllPeopleSheetEditableKey, string>>;
   changedKeys: AllPeopleSheetEditableKey[];
   deferred: Partial<Record<"location" | "designation", string>>;
   payload: Record<string, string | string[] | boolean | null>;
@@ -219,6 +220,18 @@ function normalizeValue(key: AllPeopleSheetEditableKey, value: string, options: 
   }
 }
 
+function sheetDisplayValue(key: AllPeopleSheetEditableKey, value: string | string[] | boolean | null) {
+  if (value == null) return "";
+  if (Array.isArray(value)) return value.join(", ");
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (key === "mobileCountryCode") return `+${value}`;
+  if (["dateOfJoin", "dateOfBirth", "drivingLicenseExpiry", "vehicleRegistrationExpiry", "vehicleInsuranceExpiry", "pollutionExpiry"].includes(key)) {
+    const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+  }
+  return String(value);
+}
+
 /**
  * Converts a client-supplied sparse change set into a database patch. Only keys
  * present in `changes` are returned; omitted fields can never be cleared by a
@@ -235,6 +248,7 @@ export function buildAllPeopleSheetPatch(changes: unknown, options: AllPeopleShe
 
   const payload: AllPeopleSheetPatch["payload"] = {};
   const deferred: AllPeopleSheetPatch["deferred"] = {};
+  const canonicalValues: AllPeopleSheetPatch["canonicalValues"] = {};
   const changedKeys: AllPeopleSheetEditableKey[] = [];
 
   for (const [rawKey, rawValue] of entries) {
@@ -243,6 +257,7 @@ export function buildAllPeopleSheetPatch(changes: unknown, options: AllPeopleShe
     const key = rawKey as AllPeopleSheetEditableKey;
     const normalized = normalizeValue(key, rawValue, options);
     changedKeys.push(key);
+    canonicalValues[key] = sheetDisplayValue(key, normalized);
 
     if (key === "location" || key === "designation") {
       deferred[key] = String(normalized);
@@ -257,5 +272,5 @@ export function buildAllPeopleSheetPatch(changes: unknown, options: AllPeopleShe
     payload[column] = normalized;
   }
 
-  return { changedKeys, deferred, payload };
+  return { canonicalValues, changedKeys, deferred, payload };
 }
