@@ -128,6 +128,7 @@ export async function middleware(request: NextRequest) {
   const isPeopleHost = isPeopleHostName(host);
   const isFinanceHost = isFinanceHostName(host);
   const isDashboardHost = host === "dashboard.dropxlogistics.com";
+  const isFleetHost = host === "fleet.tropicslogistics.com" || host === "fleet.dropxlogistics.com";
   const isSharedOpsPath = path === "/fleet" || path.startsWith("/fleet/") ||
     path === "/business-documents" || path.startsWith("/business-documents/");
 
@@ -196,6 +197,19 @@ export async function middleware(request: NextRequest) {
 
   if (isFinanceHost && !isPublicAppPath(path) && !isFinancePortalPath(path)) {
     return NextResponse.redirect(surfaceDeniedUrl(request, "finance_portal", path));
+  }
+
+  if (
+    isFleetHost &&
+    !isPublicAppPath(path) &&
+    path !== "/" &&
+    path !== "/fleet-control" &&
+    path !== "/unauthorized"
+  ) {
+    const fleetHomeUrl = request.nextUrl.clone();
+    fleetHomeUrl.pathname = "/";
+    fleetHomeUrl.search = "";
+    return NextResponse.redirect(fleetHomeUrl);
   }
 
   if (
@@ -312,6 +326,14 @@ export async function middleware(request: NextRequest) {
     const rewriteUrl = request.nextUrl.clone();
     rewriteUrl.pathname = "/platform-admin";
     return NextResponse.rewrite(rewriteUrl);
+  }
+
+  if (isFleetHost && path === "/") {
+    const rewriteUrl = request.nextUrl.clone();
+    rewriteUrl.pathname = "/fleet-control";
+    const rewriteResponse = NextResponse.rewrite(rewriteUrl);
+    response.cookies.getAll().forEach((cookie) => rewriteResponse.cookies.set(cookie));
+    return rewriteResponse;
   }
 
   if (isOpsHost && path !== "/unauthorized" && isCleanOpsPath(path)) {
