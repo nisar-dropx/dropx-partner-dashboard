@@ -7,7 +7,7 @@ import type {CodException} from './cod-exceptions';
 export async function checkCodExceptionEmails(){
  if(!supabaseAdmin)throw new Error('Database unavailable.');
  const cutoff=new Date(Date.now()-15*60000).toISOString(),since=new Date(Date.now()-7*86400000).toISOString().slice(0,10);
- const result=await supabaseAdmin.from('cod_daily_exceptions').select('*').eq('kind','Banker Not Reported').neq('email_check_status','Email confirmed').gte('updated_at',since).or(`email_checked_at.is.null,email_checked_at.lt.${cutoff}`).order('email_checked_at',{nullsFirst:true}).limit(2);
+ const result=await supabaseAdmin.from('cod_daily_exceptions').select('*').eq('kind','Banker Not Reported').contains('email_cc',[CONTROL_TOWER_CC]).neq('email_check_status','Email confirmed').gte('updated_at',since).or(`email_checked_at.is.null,email_checked_at.lt.${cutoff}`).order('email_checked_at',{nullsFirst:true}).limit(2);
  if(result.error)throw new Error(result.error.message);
  let checked=0,confirmed=0;
  for(const row of (result.data||[]) as CodException[]){

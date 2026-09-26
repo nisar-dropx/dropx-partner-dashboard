@@ -22,8 +22,8 @@ export function CodExceptionForm({stations,date,canAdd,canEdit,existing}:{statio
     <label>Sent at (IST)<input className="field" name="email_sent_at" type="datetime-local" required defaultValue={existing?.email_sent_at?new Date(Date.parse(existing.email_sent_at)+19800000).toISOString().slice(0,16):undefined}/></label>
     <label>Stakeholder email addresses<input className="field" name="stakeholder_emails" required defaultValue={existing?.stakeholder_emails.join(', ')} placeholder="Comma-separated recipients"/></label>
     <label>Client COD POC email addresses<input className="field" name="client_poc_emails" required defaultValue={existing?.client_poc_emails.join(', ')} placeholder="Comma-separated client contacts"/></label>
-    <label className="span-2">Mandatory CC<input className="field" readOnly value="cd@dropxlogistics.com"/></label>
-    <label className="span-2" style={{display:'flex',gap:10,alignItems:'center'}}><input name="sent_confirmed" type="checkbox" value="yes" required/>The email has been sent to these stakeholders and client COD POCs, with cd@dropxlogistics.com in CC.</label>
+    <label className="span-2">Mandatory CC<input className="field" readOnly value="ct@dropxlogistics.com"/></label>
+    <label className="span-2" style={{display:'flex',gap:10,alignItems:'center'}}><input name="sent_confirmed" type="checkbox" value="yes" required/>The email has been sent to these stakeholders and client COD POCs, with ct@dropxlogistics.com in CC.</label>
    </>}
    {state?.error?<p className="span-2" role="alert" style={{color:'#b91c1c'}}>{state.error}</p>:null}{state?.ok?<p className="span-2" role="status">{state.notice}</p>:null}
    <div className="form-actions span-2"><SubmitButton className="button primary" disabled={!allowed}>Save {kind} update</SubmitButton><button type="button" className="button secondary" onClick={()=>setOpen(false)}>Close</button></div>

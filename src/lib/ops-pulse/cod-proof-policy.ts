@@ -1,4 +1,4 @@
-export const CONTROL_TOWER_CC='cd@dropxlogistics.com';
+export const CONTROL_TOWER_CC='ct@dropxlogistics.com';
 export type ProofExtraction={document_type:'deposit_slip'|'other'|'unclear';readable:boolean;amount:number|null;deposit_date:string|null;remittance_reference:string|null;receipt_reference:string|null;station_code:string|null;deposit_confirmed:boolean};
 export function proofVerdict(value:unknown,expected:{amount:number;date:string;reference:string;station:string}) {
  const v=value as ProofExtraction;
