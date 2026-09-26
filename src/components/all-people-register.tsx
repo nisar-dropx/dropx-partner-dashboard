@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Download, EllipsisVertical, Eye, Pencil, Search, X } from "lucide-react";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
 import { allPeopleExportColumns, type AllPeopleExportKey, type AllPeopleExportValues } from "@/lib/all-people-export";
+import { saveAllPeopleSheetRow } from "@/app/people/all/actions";
 
 export type AllPeopleRow = {
   id: string;
@@ -24,6 +26,7 @@ export type AllPeopleRow = {
   editHref?: string;
   canEdit: boolean;
   exportValues: AllPeopleExportValues;
+  verificationNotes?: Partial<Record<AllPeopleExportKey, string>>;
 };
 
 const rowsPerPage = 20;
@@ -147,6 +150,8 @@ function AllPeopleActionMenu({ row }: { row: AllPeopleRow }) {
 }
 
 export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
+  const searchParams = useSearchParams();
+  const editableSheet = searchParams.get("layout") === "edit-sheet";
   const [search, setSearch] = useState("");
   const [categories, setCategories] = useState<string[]>([]);
   const [locations, setLocations] = useState<string[]>([]);
@@ -157,6 +162,9 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
   const [exporting, setExporting] = useState(false);
   const [exportColumnSearch, setExportColumnSearch] = useState("");
   const [selectedExportColumns, setSelectedExportColumns] = useState<AllPeopleExportKey[]>(() => allPeopleExportColumns.map((column) => column.key));
+  const [drafts, setDrafts] = useState<Record<string, AllPeopleExportValues>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<Record<string, string>>({});
 
   const categoryOptions = useMemo(() => (
     Array.from(new Map(rows.map((row) => [row.categoryCode, row.category])).entries())
@@ -195,6 +203,24 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
   function toggleExportColumn(key: AllPeopleExportKey) {
     setSelectedExportColumns((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
   }
+
+  function rowKey(row: AllPeopleRow) { return `${row.categoryCode}:${row.id}`; }
+  function valuesFor(row: AllPeopleRow) { return drafts[rowKey(row)] ?? row.exportValues; }
+  function changeValue(row: AllPeopleRow, key: AllPeopleExportKey, value: string) {
+    const keyValue = rowKey(row);
+    setDrafts((current) => ({ ...current, [keyValue]: { ...valuesFor(row), [key]: value } }));
+  }
+  async function saveRow(row: AllPeopleRow) {
+    const keyValue = rowKey(row);
+    setSavingId(keyValue);
+    setSaveMessage((current) => ({ ...current, [keyValue]: "" }));
+    const result = await saveAllPeopleSheetRow({ categoryCode: row.categoryCode, id: row.id, values: valuesFor(row) });
+    setSavingId(null);
+    setSaveMessage((current) => ({ ...current, [keyValue]: result.ok ? "Saved" : result.error ?? "Unable to save." }));
+    if (result.ok) setDrafts((current) => { const next = { ...current }; delete next[keyValue]; return next; });
+  }
+  const editableKeys = new Set<AllPeopleExportKey>(["fullName", "mobileCountryCode", "mobileNumber", "email", "dateOfJoin", "gender", "dateOfBirth", "aadhaarNumber", "panNumber", "eshramUan", "fatherName", "bloodGroup", "handicapped", "address", "stateCode", "pincode", "landmark", "bankAccountNumber", "ifsc", "pfUan", "pfAccountNumber", "esiNumber", "emergencyContactNumber", "emergencyContactName", "emergencyContactRelation", "drivingLicenseNumber", "drivingLicenseExpiry", "vehicleRegistrationNumber", "vehicleRegistrationExpiry", "vehicleInsuranceExpiry", "pollutionExpiry"]);
+  const sheetRows = editableSheet ? filteredRows : visibleRows;
 
   async function exportPeople() {
     if (!selectedExportColumns.length || !filteredRows.length) return;
@@ -236,7 +262,7 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
     <section className="panel">
       <div className="panel-head toolbar">
         <div>
-          <h2>People register</h2>
+          <h2>{editableSheet ? "Editable people sheet" : "People register"}</h2>
           <p className="subtle">{filteredRows.length} of {rows.length} records</p>
         </div>
         <div className="all-people-filters">
@@ -251,10 +277,11 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
           }} type="button">
             <Download aria-hidden="true" size={16} /> Export
           </button>
+          <PendingLink className="button secondary" href={editableSheet ? "/people/all" : "/people/all?layout=edit-sheet"}>{editableSheet ? "Register view" : "Editable sheet"}</PendingLink>
         </div>
       </div>
       <div className="table-wrap field-executive-table-wrap employee-table-wrap all-people-table-wrap">
-        <table>
+        {editableSheet ? <table className="all-people-edit-sheet"><thead><tr>{allPeopleExportColumns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Save</th></tr></thead><tbody>{sheetRows.map((row) => { const rowId = rowKey(row); const values = valuesFor(row); return <tr key={rowId}>{allPeopleExportColumns.map((column) => { const editable = row.canEdit && editableKeys.has(column.key) && !(row.categoryCode === "workforce" && !["fullName", "mobileCountryCode", "mobileNumber", "email", "dateOfJoin", "bankAccountNumber", "ifsc"].includes(column.key)); return <td key={column.key}>{editable ? <><input aria-label={`${column.label} for ${row.fullName}`} className="sheet-cell-input" onChange={(event) => changeValue(row, column.key, event.target.value)} value={values[column.key] ?? ""} />{row.verificationNotes?.[column.key] ? <small className="sheet-verification-note">{row.verificationNotes[column.key]}</small> : null}</> : <>{values[column.key] || "-"}{row.verificationNotes?.[column.key] ? <small className="sheet-verification-note">{row.verificationNotes[column.key]}</small> : null}</>}</td>; })}<td><button className="button sheet-save-button" disabled={!row.canEdit || savingId === rowId} onClick={() => saveRow(row)} type="button">{savingId === rowId ? "Saving..." : "Save"}</button>{saveMessage[rowId] ? <small className={saveMessage[rowId] === "Saved" ? "sheet-save-ok" : "sheet-save-error"}>{saveMessage[rowId]}</small> : null}</td></tr>; })}{!sheetRows.length ? <tr><td className="empty-cell" colSpan={allPeopleExportColumns.length + 1}>No people match the selected filters.</td></tr> : null}</tbody></table> : <table>
           <thead><tr><th>DropX ID</th><th>Biometric ID</th><th>Full name</th><th>Category</th><th>Mobile</th><th>Email</th><th>Location</th><th>Model</th><th>Provider</th><th>Designation</th><th>Status</th><th>Action</th></tr></thead>
           <tbody>
             {visibleRows.map((row) => (
@@ -267,9 +294,9 @@ export function AllPeopleRegister({ rows }: { rows: AllPeopleRow[] }) {
             ))}
             {!filteredRows.length ? <tr><td className="empty-cell" colSpan={12}>No people match the selected filters.</td></tr> : null}
           </tbody>
-        </table>
+        </table>}
       </div>
-      {filteredRows.length ? (
+      {filteredRows.length && !editableSheet ? (
         <div className="panel-foot pagination">
           <button className="pager-button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} type="button">Previous</button>
           <span>Page {currentPage} of {totalPages}</span>
