@@ -21066,3 +21066,20 @@ td strong,
     grid-template-columns: 1fr;
   }
 }
+/* Give the selected DropX workforce identity enough horizontal space. */
+.provider-first-row .provider-first-workforce-select {
+  grid-column: span 2;
+  min-width: 360px;
+}
+
+.provider-first-row .provider-first-workforce-select .searchable-input {
+  padding-right: 64px;
+  font-size: 14px;
+}
+
+@media (max-width: 1100px) {
+  .provider-first-row .provider-first-workforce-select {
+    grid-column: auto;
+    min-width: 0;
+  }
+}
