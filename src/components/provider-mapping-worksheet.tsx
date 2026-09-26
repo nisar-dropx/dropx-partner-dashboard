@@ -171,9 +171,9 @@ type ProviderMemberLookupResult = {
   workDate: string | null;
 };
 
-type FilterOption = { value: string; label: string };
+export type MappingFilterOption = { value: string; label: string };
 
-function MappingMultiFilter({
+export function MappingMultiFilter({
   allLabel,
   label,
   options,
@@ -182,7 +182,7 @@ function MappingMultiFilter({
 }: {
   allLabel: string;
   label: string;
-  options: FilterOption[];
+  options: MappingFilterOption[];
   selected: string[];
   setSelected: (values: string[]) => void;
 }) {
