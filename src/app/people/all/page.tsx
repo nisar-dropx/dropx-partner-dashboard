@@ -7,6 +7,8 @@ import { dynamicWorkforceTable, isCustomWorkforceCategoryCode, workforceCategory
 import { canAccessDesignationPortal } from "@/lib/designation-portal-access";
 import { loadCanonicalWorkforcePeople } from "@/lib/canonical-workforce-people";
 import type { AllPeopleExportValues } from "@/lib/all-people-export";
+import { ALL_PEOPLE_SHEET_EDITABLE_KEYS } from "@/lib/all-people-sheet";
+import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { redirect } from "next/navigation";
 
@@ -148,6 +150,7 @@ async function loadPeople(
     return {
       categories: [] as Array<{ code: string; name: string }>,
       rows: [] as AllPeopleRow[],
+      editOptions: { location: [], designation: [] },
       error: "Supabase service role key is not configured."
     };
   }
@@ -159,12 +162,11 @@ async function loadPeople(
     .order("sort_order")
     .order("name");
   const categories = (categoryResult.data ?? []) as Array<{ code: string; name: string }>;
-  const designationResult = await supabaseAdmin
-    .from("designations")
-    .select("id, name, portal_permissions")
-    .eq("company_id", companyId)
-    .eq("is_active", true);
-  const designations = (designationResult.data ?? []) as Array<{ id: string; name: string; portal_permissions: unknown }>;
+  const [designationResult, locationResult] = await Promise.all([
+    supabaseAdmin.from("designations").select("id, code, name, onboarding_categories, portal_permissions").eq("company_id", companyId).eq("is_active", true).order("name"),
+    supabaseAdmin.from("stations").select("id, station_code, station_name, hide_from_location_list").eq("company_id", companyId).eq("is_active", true).order("station_code")
+  ]);
+  const designations = (designationResult.data ?? []) as Array<{ id: string; code: string; name: string; onboarding_categories: string[] | null; portal_permissions: unknown }>;
   const designationById = new Map(designations.map((designation) => [designation.id, designation]));
   const designationByName = new Map(designations.map((designation) => [designation.name.trim().toLowerCase(), designation]));
   const ownerAccess = isCompanyOwner(authorization);
@@ -210,6 +212,7 @@ async function loadPeople(
             : designationByName.get(String(row.designation ?? "").trim().toLowerCase());
           const designation = String(row.designation ?? joinedDesignation?.name ?? "-");
           const status = displayStatus(row[source.statusField], row.is_active !== false);
+          const canEdit = source.canEdit && canAccessDesignationPortal(designationRecord, "dashboard", "edit", { isOwner: ownerAccess });
           return {
             id: String(row.id),
             category: source.category,
@@ -223,7 +226,11 @@ async function loadPeople(
             status,
             viewHref: profileActionHref(source.basePath, "view", row.id),
             editHref: profileActionHref(source.basePath, "edit", row.id),
-            canEdit: source.canEdit && canAccessDesignationPortal(designationRecord, "dashboard", "edit", { isOwner: ownerAccess }),
+            canEdit,
+            version: text(row.updated_at),
+            locationId: text(row.location_id),
+            designationId: text(row.designation_id ?? designationRecord?.id),
+            editableKeys: canEdit ? [...ALL_PEOPLE_SHEET_EDITABLE_KEYS] : [],
             exportValues: buildExportValues(row, source.codeField, source.category, location, model, provider, designation, status, source.employeeDesignation)
           };
         })
@@ -250,6 +257,7 @@ async function loadPeople(
           const designation = String(row.designation ?? "-");
           const designationRecord = designationByName.get(designation.trim().toLowerCase());
           const status = displayStatus(row[source.statusField], row.is_active !== false);
+          const canEdit = source.canEdit && canAccessDesignationPortal(designationRecord, "dashboard", "edit", { isOwner: ownerAccess });
           return {
             id: String(row.id),
             category: source.category,
@@ -263,7 +271,11 @@ async function loadPeople(
             status,
             viewHref: profileActionHref(source.basePath, "view", row.id),
             editHref: profileActionHref(source.basePath, "edit", row.id),
-            canEdit: source.canEdit && canAccessDesignationPortal(designationRecord, "dashboard", "edit", { isOwner: ownerAccess }),
+            canEdit,
+            version: text(row.updated_at),
+            locationId: text(row.location_id),
+            designationId: text(designationRecord?.id),
+            editableKeys: canEdit ? [...ALL_PEOPLE_SHEET_EDITABLE_KEYS] : [],
             exportValues: buildExportValues(row, source.codeField, source.category, location, model, provider, designation, status, false)
           };
         })
@@ -271,7 +283,8 @@ async function loadPeople(
   }));
   const workforceResult = await loadCanonicalWorkforcePeople(companyId, locationScopeIds, hasAllLocationAccess, {
     canView: hasPermission(authorization, "delivery_associates", "access"),
-    canEdit: hasPermission(authorization, "delivery_associates", "edit")
+    canEdit: hasPermission(authorization, "delivery_associates", "edit"),
+    isOwner: ownerAccess
   });
   const allResults = [...results, ...customResults];
   const sourceRows = allResults.flatMap((result) => result.rows);
@@ -295,7 +308,18 @@ async function loadPeople(
   return {
     categories,
     rows: allRows,
-    error: categoryResult.error?.message ?? designationResult.error?.message ?? allResults.find((result) => result.error)?.error ?? workforceResult.error ?? null
+    editOptions: {
+      location: filterOnboardingLocations((locationResult.data ?? []) as Array<{ id: string; station_code: string; station_name: string | null; hide_from_location_list: boolean | null }>, authorization)
+        .map((location) => ({ value: location.station_code, label: location.station_name ? `${location.station_code} · ${location.station_name}` : location.station_code })),
+      designation: designations
+        .filter((designation) => canAccessDesignationPortal(designation, "dashboard", "edit", { isOwner: ownerAccess }))
+        .map((designation) => ({
+          value: designation.name,
+          label: designation.name,
+          categoryCodes: designation.onboarding_categories ?? []
+        }))
+    },
+    error: categoryResult.error?.message ?? designationResult.error?.message ?? locationResult.error?.message ?? allResults.find((result) => result.error)?.error ?? workforceResult.error ?? null
   };
 }
 
@@ -323,7 +347,7 @@ export default async function AllPeoplePage() {
       {data.error ? (
         <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load people</strong><p className="subtle">{data.error}</p></div></section>
       ) : null}
-      <AllPeopleRegister rows={data.rows} />
+      <AllPeopleRegister editOptions={data.editOptions} rows={data.rows} />
     </AppShell>
   );
 }

@@ -21101,10 +21101,141 @@ td strong,
   }
 }
 /* All People editable sheet is deliberately isolated from the normal register. */
-.all-people-edit-sheet { min-width: 7200px; }
-.all-people-edit-sheet th { position: sticky; top: 0; z-index: 1; white-space: nowrap; }
-.all-people-edit-sheet td { min-width: 150px; max-width: 280px; vertical-align: top; }
-.all-people-edit-sheet .sheet-cell-input { width: 100%; min-width: 130px; border: 1px solid #d7deea; border-radius: 6px; padding: 7px 8px; background: #fff; font: inherit; }
-.all-people-edit-sheet .sheet-cell-input:focus { border-color: #ef6b3c; outline: 2px solid rgba(239,107,60,.16); }
-.sheet-verification-note, .sheet-save-ok, .sheet-save-error { display: block; margin-top: 5px; font-size: 10px; line-height: 1.3; }
-.sheet-verification-note { color: #7c5a08; }.sheet-save-ok { color: #0d7b4a; }.sheet-save-error { color: #b42318; }.sheet-save-button { min-width: 76px; }
+.all-people-edit-sheet {
+  min-width: 7200px;
+}
+
+.all-people-edit-sheet th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  white-space: nowrap;
+}
+
+.all-people-edit-sheet td {
+  min-width: 150px;
+  max-width: 280px;
+  vertical-align: top;
+  transition: background-color .15s ease;
+}
+
+.all-people-edit-sheet tr.sheet-row-dirty > td {
+  background: #fff7c2;
+}
+
+.all-people-edit-sheet tr.sheet-row-dirty > td.sheet-cell-dirty {
+  background: #ffd9a8;
+}
+
+.all-people-edit-sheet td.sheet-cell-readonly:not(.sheet-cell-dirty) {
+  color: #596579;
+}
+
+.all-people-edit-sheet .sheet-cell-input {
+  width: 100%;
+  min-width: 130px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 7px 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.all-people-edit-sheet .sheet-cell-select {
+  min-height: 34px;
+}
+
+.all-people-edit-sheet .sheet-cell-dirty .sheet-cell-input {
+  border-color: #e5932f;
+  background: #fff0d6;
+}
+
+.all-people-edit-sheet .sheet-cell-input:focus {
+  border-color: #ef6b3c;
+  outline: 2px solid rgba(239,107,60,.16);
+}
+
+.all-people-edit-sheet .sheet-cell-input:disabled {
+  cursor: wait;
+  opacity: .72;
+}
+
+.sheet-cell-value {
+  display: inline-block;
+  min-height: 22px;
+  white-space: pre-wrap;
+}
+
+.sheet-verification-note,
+.sheet-save-ok,
+.sheet-save-warning,
+.sheet-save-error {
+  display: block;
+  margin-top: 5px;
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.sheet-verification-note { color: #7c5a08; }
+.sheet-save-ok { color: #0d7b4a; }
+.sheet-save-warning { color: #8a5a00; }
+.sheet-save-error { color: #b42318; }
+.sheet-save-button { min-width: 76px; }
+.sheet-row-actions { position: sticky; right: 0; z-index: 1; }
+.sheet-view-only-label { color: var(--muted); font-size: 12px; font-weight: 700; }
+
+.all-people-filters > .button {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  justify-content: center;
+}
+
+.all-people-sticky-scroll {
+  position: fixed;
+  bottom: 0;
+  z-index: 60;
+  height: 20px;
+  border: 1px solid #cbd5e1;
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  background: #f8fafc;
+  box-shadow: 0 -3px 12px rgba(15, 23, 42, .13);
+  opacity: 0;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  pointer-events: none;
+  transition: opacity .12s ease;
+}
+
+.all-people-sticky-scroll.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.all-people-sticky-scroll > div {
+  height: 1px;
+}
+
+.all-people-pagination {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.all-people-page-size {
+  align-items: center;
+  display: inline-flex;
+  gap: 7px;
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.all-people-page-size .field {
+  width: 76px;
+  min-height: 34px;
+  padding: 5px 28px 5px 9px;
+}

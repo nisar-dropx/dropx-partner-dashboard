@@ -2,7 +2,7 @@ import { AllPeopleRegister } from "@/components/all-people-register";
 import { AppShell } from "@/components/app-shell";
 import { PageHead } from "@/components/page-head";
 import { PendingLink } from "@/components/pending-link";
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { loadCanonicalWorkforcePeople } from "@/lib/canonical-workforce-people";
 import { requireCompanyId } from "@/lib/company-scope";
 import { redirect } from "next/navigation";
@@ -20,7 +20,8 @@ export default async function WorkforcePage() {
     authorization.hasAllLocationAccess,
     {
       canView: hasPermission(authorization, "delivery_associates", "access"),
-      canEdit: hasPermission(authorization, "delivery_associates", "edit")
+      canEdit: hasPermission(authorization, "delivery_associates", "edit"),
+      isOwner: isCompanyOwner(authorization)
     }
   );
 
