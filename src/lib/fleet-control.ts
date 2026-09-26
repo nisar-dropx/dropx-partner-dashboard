@@ -7,6 +7,7 @@ import { loadCodLocations, todayKolkata } from "@/lib/ops-pulse/cod";
 import { getPaymentApprovalEligibility } from "@/lib/payment-approval-scope";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isFleetManagerPaymentHead } from "@/lib/fleet-control-payment-scope";
+import { fleetAdHocRequestType } from "@/lib/fleet-control-adhoc-scope";
 
 export type FleetControlVehicle = {
   id: string; vehicleNo: string; stationCode: string; model: string; fuelType: string; status: string; statusLabel: string;
@@ -15,7 +16,7 @@ export type FleetControlVehicle = {
   lastServiceDate: string | null; nextServiceDate: string | null; nextServiceOdometerKm: number | null; lastAuditDate: string | null;
 };
 export type FleetControlPayment = { id: string; requestNo: string; stationCode: string; head: string; amount: number; requestedBy: string; requestedAt: string; workDate: string | null; status: string; statusLabel: string; remarks: string; canApprove: boolean };
-export type FleetControlAdHocRow = { id: string; date: string; stationCode: string; stationName: string; reference: string; source: string; reason: string; remark: string; amount: number };
+export type FleetControlAdHocRow = { id: string; date: string; stationCode: string; stationName: string; requestType: "Van" | "Driver"; reference: string; source: string; reason: string; remark: string; amount: number };
 export type FleetServiceRecord = { id: string; vehicleId: string; vehicleNo: string; stationCode: string; serviceDate: string; serviceType: string; odometerKm: number | null; vendorName: string; vendorContact: string; amount: number; status: string; description: string; invoiceUrl: string; nextServiceDate: string | null; nextServiceOdometerKm: number | null; downtimeHours: number | null };
 export type FleetAudit = { id: string; vehicleId: string; vehicleNo: string; stationCode: string; templateId: string | null; scheduledFor: string; scheduledReason: string; riskScore: number; status: string; score: number | null; summary: string; completedAt: string | null; emailStatus: string; evidenceCount: number };
 export type FleetAuditSuggestion = { vehicleId: string; vehicleNo: string; stationCode: string; riskScore: number; reasons: string[]; recommendedFor: string };
@@ -59,7 +60,7 @@ export async function hasActiveFleetMembership(companyId: string | null, userId:
 }
 
 export async function loadFleetControlData(companyId: string, authorization: AuthorizationContext): Promise<FleetControlData> {
-  const today = todayKolkata(); const monthStart = `${today.slice(0, 7)}-01`; const errors: string[] = [];
+  const today = todayKolkata(); const activityStart = addDays(today, -92); const errors: string[] = [];
   const locationsResult = await loadCodLocations(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess); if (locationsResult.error) errors.push(locationsResult.error);
   const locations = locationsResult.locations.filter(isAdHocActivityLocation); const stationCodes = locations.map((location) => normalized(location.station_code));
   const canManageFleet = authorization.isMasterOwner || hasPermission(authorization, "fleet_maintenance", "edit") || hasPermission(authorization, "fleet_vehicle_view", "edit");
@@ -71,13 +72,17 @@ export async function loadFleetControlData(companyId: string, authorization: Aut
   if (!authorization.hasAllLocationAccess) vehicleQuery = vehicleQuery.in("station_code", stationCodes.length ? stationCodes : ["__NO_STATION__"]);
   let paymentQuery = supabaseAdmin.from("payment_requests").select("id,request_no,location_id,location_code,station_code,payment_head_id,amount,amount_approved,amount_requested,status,approval_status,current_approver_user_id,current_approver_role_id,current_approver_role_ids,requested_by,created_at,work_date,remarks,notes,details,profiles:requested_by(full_name,email)").eq("company_id", companyId).order("created_at", { ascending: false }).limit(1000);
   if (!authorization.hasAllLocationAccess) paymentQuery = paymentQuery.in("location_id", authorization.locationScopeIds.length ? authorization.locationScopeIds : ["00000000-0000-0000-0000-000000000000"]);
-  const [vehiclesResult, headsResult, paymentsResult, adHocResult] = await Promise.all([vehicleQuery, supabaseAdmin.from("payment_heads").select("id,code,name").eq("company_id", companyId).eq("is_active", true), paymentQuery, loadAdHocActivity(companyId, locations, monthStart, today)]);
+  const [vehiclesResult, headsResult, paymentsResult, adHocResult] = await Promise.all([vehicleQuery, supabaseAdmin.from("payment_heads").select("id,code,name").eq("company_id", companyId).eq("is_active", true), paymentQuery, loadAdHocActivity(companyId, locations, activityStart, today)]);
   if (vehiclesResult.error) errors.push(vehiclesResult.error.message); if (headsResult.error) errors.push(headsResult.error.message); if (paymentsResult.error) errors.push(paymentsResult.error.message); if (adHocResult.error) errors.push(adHocResult.error);
   let vehicles = ((vehiclesResult.data ?? []) as VehicleRow[]).map((row) => mapVehicle(row, today)); const vehicleById = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
   const heads = (headsResult.data ?? []) as PaymentHeadRow[]; const vehicleHeadIds = new Set(heads.filter(isFleetManagerPaymentHead).map((head) => head.id)); const headById = new Map(heads.map((head) => [head.id, head]));
   const paymentRows = ((paymentsResult.data ?? []) as unknown as PaymentRow[]).filter((row) => vehicleHeadIds.has(row.payment_head_id)); const pendingRows = paymentRows.filter(isPendingPayment); const eligibleIds = await getPaymentApprovalEligibility(companyId, authorization, pendingRows); const canEditApprovals = hasPermission(authorization, "payment_approvals", "edit");
   const payments = paymentRows.map((row): FleetControlPayment => { const head = headById.get(row.payment_head_id); const profile = firstRelation(row.profiles); return { id: row.id, requestNo: text(row.request_no) || row.id, stationCode: normalized(row.station_code || row.location_code) || "UNASSIGNED", head: text(head?.name || head?.code) || "Vehicle expense", amount: numberValue(row.amount_approved ?? row.amount ?? row.amount_requested), requestedBy: text(profile?.full_name || profile?.email) || "Station team", requestedAt: row.created_at, workDate: row.work_date, status: normalized(row.approval_status || row.status).toLowerCase(), statusLabel: paymentStatus(row), remarks: text(row.remarks || row.notes) || "No remarks recorded", canApprove: canEditApprovals && eligibleIds.has(row.id) }; });
-  const adHocRows = adHocResult.stations.flatMap((station) => station.days.flatMap((day) => day.entries.filter((entry) => entry.category === "Van").map((entry): FleetControlAdHocRow => ({ id: entry.id, date: day.date, stationCode: station.code, stationName: station.name, reference: entry.reference, source: entry.source, reason: entry.reason, remark: entry.remark, amount: entry.amount })))).sort((a, b) => b.date.localeCompare(a.date) || a.stationCode.localeCompare(b.stationCode));
+  const adHocRows = adHocResult.stations.flatMap((station) => station.days.flatMap((day) => day.entries.flatMap((entry): FleetControlAdHocRow[] => {
+    const requestType = fleetAdHocRequestType(entry);
+    return requestType ? [{ id: entry.id, date: day.date, stationCode: station.code, stationName: station.name, requestType, reference: entry.reference, source: entry.source, reason: entry.reason, remark: entry.remark, amount: entry.amount }] : [];
+  })))
+    .sort((a, b) => b.date.localeCompare(a.date) || a.stationCode.localeCompare(b.stationCode) || a.requestType.localeCompare(b.requestType));
 
   const scopeVehicleIds = vehicles.map((vehicle) => vehicle.id); const scoped = scopeVehicleIds.length ? scopeVehicleIds : ["00000000-0000-0000-0000-000000000000"];
   const [serviceResult, auditResult, templateResult, checklistResult, settingsResult, membershipResult, wheelseyeResult, gpsSyncResult, fuelSyncResult, evidenceResult] = await Promise.all([

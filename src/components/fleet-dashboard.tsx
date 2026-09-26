@@ -1817,7 +1817,7 @@ function getRouteZoom(points: { lat: number; lng: number }[]) {
   return 8;
 }
 
-function RouteMap({
+export function RouteMap({
   currentPoint,
   points
 }: {

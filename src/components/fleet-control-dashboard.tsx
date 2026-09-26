@@ -5,11 +5,8 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
-  BarChart3,
   Bell,
-  CalendarDays,
   Check,
-  ChevronDown,
   CircleDollarSign,
   ClipboardCheck,
   Download,
@@ -35,18 +32,20 @@ import {
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { PaymentApprovalActionForm } from "@/components/payment-approval-action-form";
 import { FleetBrand } from "@/components/fleet-brand";
+import { FleetAdHocCapacity } from "@/components/fleet-adhoc-capacity";
+import { FleetTrackingWorkspace } from "@/components/fleet-tracking-workspace";
 import type { FleetAudit, FleetAuditSuggestion, FleetControlData, FleetControlPayment, FleetControlVehicle } from "@/lib/fleet-control";
 
-type Section = "overview" | "vehicles" | "service" | "audits" | "approvals" | "adhoc" | "reports" | "settings";
+type Section = "overview" | "vehicles" | "tracking" | "service" | "audits" | "approvals" | "adhoc" | "settings";
 
 const sections: Array<{ key: Section; label: string; icon: typeof LayoutDashboard }> = [
   { key: "overview", label: "Command Center", icon: LayoutDashboard },
   { key: "vehicles", label: "Vehicles", icon: Truck },
+  { key: "tracking", label: "Tracking & Efficiency", icon: Gauge },
   { key: "service", label: "Service History", icon: History },
   { key: "audits", label: "Vehicle Audits", icon: ClipboardCheck },
-  { key: "approvals", label: "Approvals", icon: CircleDollarSign },
-  { key: "adhoc", label: "Ad-hoc Vans", icon: Activity },
-  { key: "reports", label: "Reports", icon: BarChart3 },
+  { key: "approvals", label: "Vehicle Payments", icon: CircleDollarSign },
+  { key: "adhoc", label: "Ad-hoc Capacity", icon: Activity },
   { key: "settings", label: "Settings & Access", icon: Settings }
 ];
 
@@ -103,6 +102,10 @@ function documentMessage(vehicle: FleetControlVehicle) {
   return `${vehicle.nextDocument} in ${vehicle.nextDocumentDays}d`;
 }
 
+function PlacementFilter({ options, value, onChange }: { options: FleetControlData["stationOptions"]; value: string; onChange: (value: string) => void }) {
+  return <label className="fc-placement-filter"><span>Vehicle placement</span><select onChange={(event) => onChange(event.target.value)} value={value}><option value="ALL">All placements</option>{options.map((option) => <option key={option.code} value={option.code}>{option.code} · {option.name}</option>)}</select></label>;
+}
+
 export function FleetControlDashboard({
   approveAction,
   data,
@@ -125,13 +128,16 @@ export function FleetControlDashboard({
   const [mobileNav, setMobileNav] = useState(false);
   const [query, setQuery] = useState("");
   const [station, setStation] = useState("ALL");
+  const [vehicleSort, setVehicleSort] = useState("vehicle");
+  const [serviceSort, setServiceSort] = useState("date_desc");
+  const [auditSort, setAuditSort] = useState("date_desc");
+  const [paymentSort, setPaymentSort] = useState("date_desc");
   const [vehicles, setVehicles] = useState(data.vehicles);
   const [selectedVehicle, setSelectedVehicle] = useState<FleetControlVehicle | null>(null);
   const [selectedPayment, setSelectedPayment] = useState<FleetControlPayment | null>(() => data.payments.find((payment) => payment.id === initialRequestId) ?? null);
   const [savingVehicle, setSavingVehicle] = useState<string | null>(null);
   const [flash, setFlash] = useState(message);
   const [addVehicle, setAddVehicle] = useState(false);
-  const [adHocDate, setAdHocDate] = useState(data.today);
   const [serviceModal, setServiceModal] = useState(false);
   const [auditModal, setAuditModal] = useState<FleetAuditSuggestion | null | "manual">(null);
   const [completeAudit, setCompleteAudit] = useState<FleetAudit | null>(null);
@@ -163,20 +169,23 @@ export function FleetControlDashboard({
     const matchStation = station === "ALL" || vehicle.stationCode === station;
     const needle = query.trim().toLowerCase();
     return matchStation && (!needle || `${vehicle.vehicleNo} ${vehicle.model} ${vehicle.stationCode} ${vehicle.statusLabel}`.toLowerCase().includes(needle));
-  }), [query, station, vehicles]);
+  }).sort((a, b) => vehicleSort === "placement" ? a.stationCode.localeCompare(b.stationCode) || a.vehicleNo.localeCompare(b.vehicleNo) : vehicleSort === "status" ? a.statusLabel.localeCompare(b.statusLabel) || a.vehicleNo.localeCompare(b.vehicleNo) : vehicleSort === "document" ? (a.nextDocumentDays ?? 9999) - (b.nextDocumentDays ?? 9999) : a.vehicleNo.localeCompare(b.vehicleNo)), [query, station, vehicleSort, vehicles]);
 
   const filteredPayments = useMemo(() => data.payments.filter((payment) => {
     const matchStation = station === "ALL" || payment.stationCode === station;
     const needle = query.trim().toLowerCase();
     return matchStation && (!needle || `${payment.requestNo} ${payment.head} ${payment.stationCode} ${payment.requestedBy}`.toLowerCase().includes(needle));
-  }), [data.payments, query, station]);
+  }).sort((a, b) => paymentSort === "amount_desc" ? b.amount - a.amount : paymentSort === "placement" ? a.stationCode.localeCompare(b.stationCode) : paymentSort === "head" ? a.head.localeCompare(b.head) : b.requestedAt.localeCompare(a.requestedAt)), [data.payments, paymentSort, query, station]);
 
-  const filteredAdHoc = useMemo(() => data.adHocRows.filter((row) => {
-    const matchStation = station === "ALL" || row.stationCode === station;
-    const matchDate = !adHocDate || row.date === adHocDate;
+  const filteredService = useMemo(() => data.serviceHistory.filter((item) => {
     const needle = query.trim().toLowerCase();
-    return matchStation && matchDate && (!needle || `${row.reference} ${row.stationCode} ${row.reason} ${row.remark}`.toLowerCase().includes(needle));
-  }), [adHocDate, data.adHocRows, query, station]);
+    return (station === "ALL" || item.stationCode === station) && (!needle || `${item.vehicleNo} ${item.stationCode} ${item.serviceType} ${item.vendorName}`.toLowerCase().includes(needle));
+  }).sort((a, b) => serviceSort === "amount_desc" ? b.amount - a.amount : serviceSort === "vehicle" ? a.vehicleNo.localeCompare(b.vehicleNo) : serviceSort === "placement" ? a.stationCode.localeCompare(b.stationCode) : b.serviceDate.localeCompare(a.serviceDate)), [data.serviceHistory, query, serviceSort, station]);
+
+  const filteredAudits = useMemo(() => data.audits.filter((item) => {
+    const needle = query.trim().toLowerCase();
+    return (station === "ALL" || item.stationCode === station) && (!needle || `${item.vehicleNo} ${item.stationCode} ${item.status} ${item.scheduledReason}`.toLowerCase().includes(needle));
+  }).sort((a, b) => auditSort === "risk_desc" ? b.riskScore - a.riskScore : auditSort === "vehicle" ? a.vehicleNo.localeCompare(b.vehicleNo) : auditSort === "status" ? a.status.localeCompare(b.status) : b.scheduledFor.localeCompare(a.scheduledFor)), [auditSort, data.audits, query, station]);
 
   const active = vehicles.filter((vehicle) => vehicle.status === "active").length;
   const underService = vehicles.filter((vehicle) => ["under_service", "breakdown"].includes(vehicle.status)).length;
@@ -300,7 +309,6 @@ export function FleetControlDashboard({
           <button aria-label="Open navigation" className="fc-menu" onClick={() => setMobileNav(true)} type="button"><Menu size={20} /></button>
           <div><span>Fleet Control</span><strong>{title}</strong></div>
           <label className="fc-search"><Search size={17} /><input onChange={(event) => setQuery(event.target.value)} placeholder="Search vehicle, station or request" value={query} /></label>
-          <label className="fc-station"><span>Scope</span><select onChange={(event) => setStation(event.target.value)} value={station}><option value="ALL">All stations</option>{data.stationOptions.map((option) => <option key={option.code} value={option.code}>{option.code} · {option.name}</option>)}</select><ChevronDown size={14} /></label>
           <button aria-label="Notifications" className="fc-icon-button" type="button"><Bell size={18} />{pendingPayments.length ? <i /> : null}</button>
         </header>
 
@@ -316,7 +324,7 @@ export function FleetControlDashboard({
                 <p>One control room for availability, vehicle expenses, documents and daily ad-hoc van demand.</p>
               </div>
               <div className="fc-hero-actions">
-                <button className="fc-button secondary" onClick={() => changeSection("reports")} type="button"><Download size={16} /> Export report</button>
+                <button className="fc-button secondary" onClick={() => changeSection("tracking")} type="button"><Gauge size={16} /> Live GPS & mileage</button>
                 {data.capabilities.canAddVehicles ? <button className="fc-button primary" onClick={() => setAddVehicle(true)} type="button"><Plus size={17} /> Add vehicle</button> : null}
               </div>
             </section>
@@ -325,7 +333,7 @@ export function FleetControlDashboard({
               <article><span className="mint"><Truck size={19} /></span><div><small>Fleet availability</small><strong>{availability}%</strong><p>{active} of {vehicles.length} vehicles active</p></div><b className="up">Live</b></article>
               <article><span className="amber"><Wrench size={19} /></span><div><small>Under service</small><strong>{underService}</strong><p>{vehicles.filter((vehicle) => vehicle.status === "breakdown").length} breakdown today</p></div><b>Action</b></article>
               <article><span className="blue"><CircleDollarSign size={19} /></span><div><small>Awaiting your approval</small><strong>{money(data.counts.pendingAmount)}</strong><p>{pendingPayments.length} vehicle payment requests</p></div><b className={pendingPayments.length ? "hot" : "up"}>{pendingPayments.length ? "Review" : "Clear"}</b></article>
-              <article><span className="purple"><Activity size={19} /></span><div><small>Ad-hoc vans today</small><strong>{todayAdHoc.length}</strong><p>{money(todayAdHoc.reduce((sum, row) => sum + row.amount, 0))} operational usage</p></div><b>View only</b></article>
+              <article><span className="purple"><Activity size={19} /></span><div><small>Ad-hoc capacity today</small><strong>{todayAdHoc.length}</strong><p>{todayAdHoc.filter((row) => row.requestType === "Van").length} vans · {todayAdHoc.filter((row) => row.requestType === "Driver").length} drivers</p></div><b>View only</b></article>
             </section>
 
             <section className="fc-overview-grid">
@@ -345,10 +353,10 @@ export function FleetControlDashboard({
               </article>
 
               <article className="fc-panel fc-ad-hoc-panel">
-                <div className="fc-panel-head"><div><span className="fc-eyebrow">Day view</span><h2>Ad-hoc van activity</h2></div><button onClick={() => changeSection("adhoc")} type="button">Daily table <ArrowRight size={15} /></button></div>
+                <div className="fc-panel-head"><div><span className="fc-eyebrow">Live requests</span><h2>Ad-hoc capacity</h2></div><button onClick={() => changeSection("adhoc")} type="button">Open summary <ArrowRight size={15} /></button></div>
                 <div className="fc-activity-list">
-                  {todayAdHoc.slice(0, 5).map((row) => <div key={`${row.id}-${row.date}`}><span>{row.stationCode}</span><div><strong>{row.reason}</strong><small>{row.reference} · {row.source}</small></div><b>{money(row.amount)}</b></div>)}
-                  {!todayAdHoc.length ? <div className="fc-empty compact"><Activity size={30} /><strong>No ad-hoc van today</strong><p>Submitted station requests will appear here.</p></div> : null}
+                  {todayAdHoc.slice(0, 5).map((row) => <div key={`${row.id}-${row.date}`}><span>{row.stationCode}</span><div><strong>{row.requestType} · {row.reason}</strong><small>{row.reference} · {row.source}</small></div><b>{money(row.amount)}</b></div>)}
+                  {!todayAdHoc.length ? <div className="fc-empty compact"><Activity size={30} /><strong>No ad-hoc request today</strong><p>Submitted van and driver requests will appear here.</p></div> : null}
                 </div>
               </article>
 
@@ -363,35 +371,35 @@ export function FleetControlDashboard({
           </> : null}
 
           {section === "vehicles" ? <section className="fc-section">
-            <div className="fc-section-head"><div><span className="fc-eyebrow">Vehicle master</span><h1>Fleet registry</h1><p>Live allocation, availability and document readiness across every station.</p></div>{data.capabilities.canAddVehicles ? <button className="fc-button primary" onClick={() => setAddVehicle(true)} type="button"><Plus size={17} /> Add vehicle</button> : null}</div>
+            <div className="fc-section-head"><div><span className="fc-eyebrow">Vehicle master</span><h1>Fleet registry</h1><p>Live allocation, availability and document readiness across every station.</p></div><div className="fc-section-actions"><PlacementFilter onChange={setStation} options={data.stationOptions} value={station} />{data.capabilities.canAddVehicles ? <button className="fc-button primary" onClick={() => setAddVehicle(true)} type="button"><Plus size={17} /> Add vehicle</button> : null}</div></div>
             <div className="fc-segment-cards"><article><small>Total fleet</small><strong>{vehicles.length}</strong></article><article><small>Active</small><strong>{active}</strong></article><article><small>Under service</small><strong>{underService}</strong></article><article><small>Document attention</small><strong>{attentionVehicles.length}</strong></article></div>
             <div className="fc-table-panel">
-              <div className="fc-table-toolbar"><span>{filteredVehicles.length} vehicles</span><small>Status changes are recorded against the current vehicle master.</small></div>
+              <div className="fc-table-toolbar"><span>{filteredVehicles.length} vehicles</span><div className="fc-toolbar-actions"><label>Sort <select onChange={(event) => setVehicleSort(event.target.value)} value={vehicleSort}><option value="vehicle">Vehicle number</option><option value="placement">Placement</option><option value="status">Status</option><option value="document">Document urgency</option></select></label><button onClick={() => downloadCsv(`fleet-vehicles-${data.today}.csv`, [["Vehicle","Placement","Model","Fuel","Status","Next document","Expiry"], ...filteredVehicles.map((item) => [item.vehicleNo,item.stationCode,item.model,item.fuelType,item.statusLabel,item.nextDocument,item.nextDocumentDate])])} type="button"><Download size={15} /> Download</button></div></div>
               <div className="fc-table-scroll"><table><thead><tr><th>Vehicle</th><th>Station</th><th>Type</th><th>Status</th><th>Next document</th><th>Action</th></tr></thead><tbody>
                 {filteredVehicles.map((vehicle) => <tr key={vehicle.vehicleNo}><td><button className="fc-vehicle-link" onClick={() => setSelectedVehicle(vehicle)} type="button"><span><Truck size={17} /></span><div><strong>{vehicle.vehicleNo}</strong><small>{vehicle.model}</small></div></button></td><td><b className="fc-station-chip">{vehicle.stationCode}</b></td><td>{vehicle.fuelType}</td><td><span className={`fc-status ${statusTone(vehicle.status)}`}><i />{vehicle.statusLabel}</span></td><td><strong className={vehicle.nextDocumentDays != null && vehicle.nextDocumentDays <= 30 ? "fc-date-risk" : ""}>{vehicle.nextDocument ?? "Incomplete"}</strong><small className="fc-cell-note">{vehicle.nextDocumentDate ? date(vehicle.nextDocumentDate) : "No valid date"}</small></td><td><button className="fc-row-action" onClick={() => setSelectedVehicle(vehicle)} type="button">Manage <ArrowRight size={14} /></button></td></tr>)}
               </tbody></table></div>
-              {!filteredVehicles.length ? <div className="fc-empty"><Search size={32} /><strong>No matching vehicle</strong><p>Change the search or station scope.</p></div> : null}
+              {!filteredVehicles.length ? <div className="fc-empty"><Search size={32} /><strong>No matching vehicle</strong><p>Change the search or vehicle placement filter.</p></div> : null}
             </div>
           </section> : null}
 
           {section === "service" ? <section className="fc-section">
-            <div className="fc-section-head"><div><span className="fc-eyebrow">Maintenance lifecycle</span><h1>Service history</h1><p>Every repair, workshop bill, service due point and vehicle downtime in one timeline.</p></div>{data.capabilities.canManageFleet ? <button className="fc-button primary" onClick={() => setServiceModal(true)} type="button"><Plus size={17} /> Record service</button> : null}</div>
+            <div className="fc-section-head"><div><span className="fc-eyebrow">Maintenance lifecycle</span><h1>Service history</h1><p>Every repair, workshop bill, service due point and vehicle downtime in one timeline.</p></div><div className="fc-section-actions"><PlacementFilter onChange={setStation} options={data.stationOptions} value={station} />{data.capabilities.canManageFleet ? <button className="fc-button primary" onClick={() => setServiceModal(true)} type="button"><Plus size={17} /> Record service</button> : null}</div></div>
             <div className="fc-segment-cards"><article><small>Service records</small><strong>{data.serviceHistory.length}</strong></article><article><small>Due soon</small><strong>{data.counts.serviceDue}</strong></article><article><small>Maintenance spend</small><strong>{money(data.serviceHistory.reduce((sum, item) => sum + item.amount, 0))}</strong></article><article><small>Vehicles covered</small><strong>{new Set(data.serviceHistory.map((item) => item.vehicleId)).size}</strong></article></div>
-            <div className="fc-table-panel"><div className="fc-table-toolbar"><span>{data.serviceHistory.length} maintenance events</span><button onClick={() => downloadCsv(`fleet-service-${data.today}.csv`, [["Date","Vehicle","Station","Type","Vendor","Amount","Status","Next service"], ...data.serviceHistory.map((item) => [item.serviceDate,item.vehicleNo,item.stationCode,item.serviceType,item.vendorName,item.amount,item.status,item.nextServiceDate])])} type="button"><Download size={15} /> Export</button></div><div className="fc-table-scroll"><table><thead><tr><th>Date</th><th>Vehicle</th><th>Service / issue</th><th>Workshop</th><th>Amount</th><th>Status</th><th>Next due</th><th>Evidence</th></tr></thead><tbody>{data.serviceHistory.filter((item) => station === "ALL" || item.stationCode === station).map((item) => <tr key={item.id}><td>{date(item.serviceDate)}</td><td><strong>{item.vehicleNo}</strong><small className="fc-cell-note">{item.stationCode}</small></td><td><strong>{item.serviceType}</strong><small className="fc-cell-note">{item.description || "No description"}</small></td><td>{item.vendorName || "—"}<small className="fc-cell-note">{item.vendorContact}</small></td><td><strong>{money(item.amount)}</strong></td><td><span className={`fc-status ${item.status === "completed" ? "good" : "warn"}`}><i />{item.status}</span></td><td>{date(item.nextServiceDate)}<small className="fc-cell-note">{item.nextServiceOdometerKm ? `${item.nextServiceOdometerKm.toLocaleString("en-IN")} km` : ""}</small></td><td>{item.invoiceUrl ? <a className="fc-link" href={item.invoiceUrl} rel="noreferrer" target="_blank">Bill <ExternalLink size={13} /></a> : "—"}</td></tr>)}</tbody></table></div>{!data.serviceHistory.length ? <div className="fc-empty"><History size={34} /><strong>No service history yet</strong><p>Record routine service, tyres, oil, batteries, accidents and workshop repairs.</p></div> : null}</div>
+            <div className="fc-table-panel"><div className="fc-table-toolbar"><span>{filteredService.length} maintenance events</span><div className="fc-toolbar-actions"><label>Sort <select onChange={(event) => setServiceSort(event.target.value)} value={serviceSort}><option value="date_desc">Latest first</option><option value="vehicle">Vehicle</option><option value="placement">Placement</option><option value="amount_desc">Highest amount</option></select></label><button onClick={() => downloadCsv(`fleet-service-${data.today}.csv`, [["Date","Vehicle","Placement","Type","Vendor","Amount","Status","Next service"], ...filteredService.map((item) => [item.serviceDate,item.vehicleNo,item.stationCode,item.serviceType,item.vendorName,item.amount,item.status,item.nextServiceDate])])} type="button"><Download size={15} /> Download</button></div></div><div className="fc-table-scroll"><table><thead><tr><th>Date</th><th>Vehicle</th><th>Service / issue</th><th>Workshop</th><th>Amount</th><th>Status</th><th>Next due</th><th>Evidence</th></tr></thead><tbody>{filteredService.map((item) => <tr key={item.id}><td>{date(item.serviceDate)}</td><td><strong>{item.vehicleNo}</strong><small className="fc-cell-note">{item.stationCode}</small></td><td><strong>{item.serviceType}</strong><small className="fc-cell-note">{item.description || "No description"}</small></td><td>{item.vendorName || "—"}<small className="fc-cell-note">{item.vendorContact}</small></td><td><strong>{money(item.amount)}</strong></td><td><span className={`fc-status ${item.status === "completed" ? "good" : "warn"}`}><i />{item.status}</span></td><td>{date(item.nextServiceDate)}<small className="fc-cell-note">{item.nextServiceOdometerKm ? `${item.nextServiceOdometerKm.toLocaleString("en-IN")} km` : ""}</small></td><td>{item.invoiceUrl ? <a className="fc-link" href={item.invoiceUrl} rel="noreferrer" target="_blank">Bill <ExternalLink size={13} /></a> : "—"}</td></tr>)}</tbody></table></div>{!filteredService.length ? <div className="fc-empty"><History size={34} /><strong>No matching service history</strong><p>Change the search or vehicle placement filter.</p></div> : null}</div>
           </section> : null}
 
           {section === "audits" ? <section className="fc-section">
-            <div className="fc-section-head"><div><span className="fc-eyebrow">Routine assurance</span><h1>Vehicle audits</h1><p>Risk-ranked recommendations, configurable checks, photo and video evidence, actions and audit email history.</p></div>{data.capabilities.canManageFleet ? <button className="fc-button primary" onClick={() => setAuditModal("manual")} type="button"><Plus size={17} /> Schedule audit</button> : null}</div>
+            <div className="fc-section-head"><div><span className="fc-eyebrow">Routine assurance</span><h1>Vehicle audits</h1><p>Risk-ranked recommendations, configurable checks, photo and video evidence, actions and audit email history.</p></div><div className="fc-section-actions"><PlacementFilter onChange={setStation} options={data.stationOptions} value={station} />{data.capabilities.canManageFleet ? <button className="fc-button primary" onClick={() => setAuditModal("manual")} type="button"><Plus size={17} /> Schedule audit</button> : null}</div></div>
             {!data.featureReady ? <div className="fc-setup-banner"><ListChecks size={20} /><div><strong>Fleet workflow migration is ready</strong><p>Apply the included migration to activate service history, audits, evidence and access management.</p></div></div> : null}
             <div className="fc-audit-layout"><article className="fc-panel"><div className="fc-panel-head"><div><span className="fc-eyebrow">System suggestions</span><h2>Vehicles to audit next</h2><p>Risk combines status, documents, service and audit age.</p></div><b>{data.auditSuggestions.length}</b></div><div className="fc-recommendations">{data.auditSuggestions.slice(0,8).map((item) => <div key={item.vehicleId}><span className={`fc-risk ${item.riskScore >= 50 ? "high" : "medium"}`}>{item.riskScore}</span><div><strong>{item.vehicleNo} <small>{item.stationCode}</small></strong><p>{item.reasons.join(" · ")}</p></div>{data.capabilities.canManageFleet ? <button onClick={() => setAuditModal(item)} type="button">Schedule</button> : null}</div>)}{!data.auditSuggestions.length ? <div className="fc-empty compact"><ShieldCheck size={30} /><strong>No risk-based audit is due</strong><p>Scheduled audits and future risk signals will appear here.</p></div> : null}</div></article><article className="fc-panel"><div className="fc-panel-head"><div><span className="fc-eyebrow">Audit programme</span><h2>Control summary</h2></div></div><div className="fc-audit-summary"><div><strong>{data.auditTemplates[0]?.cadenceDays ?? data.settings.defaultAuditCadenceDays} days</strong><small>Routine cadence</small></div><div><strong>{data.checklistItems.length}</strong><small>Checklist controls</small></div><div><strong>{data.audits.filter((item) => item.status === "failed").length}</strong><small>Failed audits</small></div><div><strong>{data.audits.reduce((sum,item) => sum + item.evidenceCount,0)}</strong><small>Evidence files</small></div></div><div className="fc-evidence-callout"><Video size={20} /><div><strong>Walk-around video required</strong><p>Completed audits retain photos, video links, findings, actions and email delivery status.</p></div></div></article></div>
-            <div className="fc-table-panel"><div className="fc-table-toolbar"><span>{data.audits.length} scheduled and completed audits</span><small>Audit emails use the legacy subject pattern with linked evidence.</small></div><div className="fc-table-scroll"><table><thead><tr><th>Scheduled</th><th>Vehicle</th><th>Reason</th><th>Risk</th><th>Status</th><th>Score</th><th>Evidence</th><th>Email</th><th>Action</th></tr></thead><tbody>{data.audits.filter((item) => station === "ALL" || item.stationCode === station).map((item) => <tr key={item.id}><td>{date(item.scheduledFor)}</td><td><strong>{item.vehicleNo}</strong><small className="fc-cell-note">{item.stationCode}</small></td><td>{item.scheduledReason}</td><td><span className={`fc-risk ${item.riskScore >= 50 ? "high" : "medium"}`}>{item.riskScore}</span></td><td><span className={`fc-status ${item.status === "passed" ? "good" : item.status === "failed" ? "bad" : "warn"}`}><i />{item.status}</span></td><td>{item.score == null ? "—" : `${item.score}%`}</td><td>{item.evidenceCount}</td><td>{item.emailStatus.replaceAll("_", " ")}</td><td>{["scheduled","in_progress"].includes(item.status) && data.capabilities.canManageFleet ? <button className="fc-row-action" onClick={() => setCompleteAudit(item)} type="button">Perform <ArrowRight size={14} /></button> : "—"}</td></tr>)}</tbody></table></div>{!data.audits.length ? <div className="fc-empty"><ClipboardCheck size={34} /><strong>No audit records yet</strong><p>Schedule the first routine audit or accept a system recommendation.</p></div> : null}</div>
+            <div className="fc-table-panel"><div className="fc-table-toolbar"><span>{filteredAudits.length} scheduled and completed audits</span><div className="fc-toolbar-actions"><label>Sort <select onChange={(event) => setAuditSort(event.target.value)} value={auditSort}><option value="date_desc">Latest scheduled</option><option value="risk_desc">Highest risk</option><option value="vehicle">Vehicle</option><option value="status">Status</option></select></label><button onClick={() => downloadCsv(`fleet-audits-${data.today}.csv`, [["Scheduled","Vehicle","Placement","Reason","Risk","Status","Score","Evidence","Email"], ...filteredAudits.map((item) => [item.scheduledFor,item.vehicleNo,item.stationCode,item.scheduledReason,item.riskScore,item.status,item.score,item.evidenceCount,item.emailStatus])])} type="button"><Download size={15} /> Download</button></div></div><div className="fc-table-scroll"><table><thead><tr><th>Scheduled</th><th>Vehicle</th><th>Reason</th><th>Risk</th><th>Status</th><th>Score</th><th>Evidence</th><th>Email</th><th>Action</th></tr></thead><tbody>{filteredAudits.map((item) => <tr key={item.id}><td>{date(item.scheduledFor)}</td><td><strong>{item.vehicleNo}</strong><small className="fc-cell-note">{item.stationCode}</small></td><td>{item.scheduledReason}</td><td><span className={`fc-risk ${item.riskScore >= 50 ? "high" : "medium"}`}>{item.riskScore}</span></td><td><span className={`fc-status ${item.status === "passed" ? "good" : item.status === "failed" ? "bad" : "warn"}`}><i />{item.status}</span></td><td>{item.score == null ? "—" : `${item.score}%`}</td><td>{item.evidenceCount}</td><td>{item.emailStatus.replaceAll("_", " ")}</td><td>{["scheduled","in_progress"].includes(item.status) && data.capabilities.canManageFleet ? <button className="fc-row-action" onClick={() => setCompleteAudit(item)} type="button">Perform <ArrowRight size={14} /></button> : "—"}</td></tr>)}</tbody></table></div>{!filteredAudits.length ? <div className="fc-empty"><ClipboardCheck size={34} /><strong>No matching audit records</strong><p>Change the search or vehicle placement filter.</p></div> : null}</div>
           </section> : null}
 
           {section === "approvals" ? <section className="fc-section">
-            <div className="fc-section-head"><div><span className="fc-eyebrow">Fleet-owned payments</span><h1>Approval desk</h1><p>Approve maintenance, service, repair, tyre and compliance expenses routed to the Fleet Manager.</p></div><button className="fc-button secondary" onClick={() => changeSection("reports")} type="button"><BarChart3 size={16} /> Payment report</button></div>
+            <div className="fc-section-head"><div><span className="fc-eyebrow">Fleet-owned payments</span><h1>Approval desk</h1><p>Approve maintenance, service, repair, tyre and compliance expenses routed to the Fleet Manager.</p></div><div className="fc-section-actions"><PlacementFilter onChange={setStation} options={data.stationOptions} value={station} /><button className="fc-button secondary" onClick={() => downloadCsv(`fleet-payments-${data.today}.csv`, [["Request", "Placement", "Head", "Amount", "Requested by", "Created", "Status"], ...filteredPayments.map((payment) => [payment.requestNo, payment.stationCode, payment.head, payment.amount, payment.requestedBy, payment.requestedAt, payment.statusLabel])])} type="button"><Download size={16} /> Download</button></div></div>
             <div className="fc-approval-layout">
               <div className="fc-panel fc-queue">
-                <div className="fc-panel-head"><div><h2>Your queue</h2><p>{pendingPayments.length} requests awaiting action</p></div><b>{money(pendingPayments.reduce((sum, item) => sum + item.amount, 0))}</b></div>
+                <div className="fc-panel-head"><div><h2>Your queue</h2><p>{pendingPayments.length} requests awaiting action</p></div><label className="fc-queue-sort">Sort<select onChange={(event) => setPaymentSort(event.target.value)} value={paymentSort}><option value="date_desc">Latest</option><option value="amount_desc">Amount</option><option value="placement">Placement</option><option value="head">Payment head</option></select></label></div>
                 <div className="fc-queue-list">{filteredPayments.map((payment) => <button className={selectedPayment?.id === payment.id ? "active" : ""} key={payment.id} onClick={() => setSelectedPayment(payment)} type="button"><span className={`fc-status ${statusTone(payment.statusLabel.toLowerCase())}`}><i />{payment.statusLabel}</span><strong>{payment.head}</strong><small>{payment.requestNo} · {payment.stationCode}</small><b>{money(payment.amount)}</b></button>)}</div>
                 {!filteredPayments.length ? <div className="fc-empty"><CircleDollarSign size={32} /><strong>No matching payment</strong><p>Fleet Manager-owned vehicle payments will appear here. Ad-hoc vans stay in the visibility view.</p></div> : null}
               </div>
@@ -406,17 +414,9 @@ export function FleetControlDashboard({
             </div>
           </section> : null}
 
-          {section === "adhoc" ? <section className="fc-section">
-            <div className="fc-section-head"><div><span className="fc-eyebrow">Operations demand · visibility only</span><h1>Day-level ad-hoc vans</h1><p>See where additional vans are being used, why they were required and the recorded cost. Approval remains with Operations.</p></div><label className="fc-date-filter"><CalendarDays size={16} /><input max={data.today} onChange={(event) => setAdHocDate(event.target.value)} type="date" value={adHocDate} /></label></div>
-            <div className="fc-ad-hoc-summary"><article><small>Jobs on {date(adHocDate, false)}</small><strong>{filteredAdHoc.length}</strong></article><article><small>Recorded usage cost</small><strong>{money(filteredAdHoc.reduce((sum, row) => sum + row.amount, 0))}</strong></article><article><small>Stations using ad-hoc vans</small><strong>{new Set(filteredAdHoc.map((row) => row.stationCode)).size}</strong></article><div><span><Wrench size={16} /> Breakdown-ready workflow</span><p>When “Vehicle breakdown” is selected as the reason, the request model is ready to require an affected fleet vehicle. Activation is deliberately deferred.</p></div></div>
-            <div className="fc-table-panel"><div className="fc-table-toolbar"><span>{filteredAdHoc.length} day-level entries</span><button onClick={() => downloadCsv(`adhoc-vans-${adHocDate}.csv`, [["Date", "Station", "Reference", "Reason", "Remarks", "Source", "Amount"], ...filteredAdHoc.map((row) => [row.date, row.stationCode, row.reference, row.reason, row.remark, row.source, row.amount])])} type="button"><Download size={15} /> Export CSV</button></div><div className="fc-table-scroll"><table><thead><tr><th>Date</th><th>Station</th><th>Request</th><th>Reason</th><th>Operational remark</th><th>Source</th><th>Amount</th></tr></thead><tbody>{filteredAdHoc.map((row) => <tr key={`${row.id}-${row.date}`}><td>{date(row.date, false)}</td><td><b className="fc-station-chip">{row.stationCode}</b></td><td><strong>{row.reference}</strong></td><td>{row.reason}</td><td className="fc-wide-cell">{row.remark}</td><td><span className="fc-source">{row.source}</span></td><td><strong>{money(row.amount)}</strong></td></tr>)}</tbody></table></div>{!filteredAdHoc.length ? <div className="fc-empty"><Activity size={34} /><strong>No ad-hoc van entries</strong><p>No submitted van request matches this date and station.</p></div> : null}</div>
-          </section> : null}
+          {section === "tracking" ? <section className="fc-section"><FleetTrackingWorkspace /></section> : null}
 
-          {section === "reports" ? <section className="fc-section">
-            <div className="fc-section-head"><div><span className="fc-eyebrow">Decision intelligence</span><h1>Fleet payment report</h1><p>Fleet-owned expense approvals and operating availability, with ad-hoc demand shown separately for visibility.</p></div><button className="fc-button primary" onClick={() => downloadCsv(`fleet-payments-${data.today}.csv`, [["Request", "Station", "Head", "Amount", "Requested by", "Created", "Status"], ...filteredPayments.map((payment) => [payment.requestNo, payment.stationCode, payment.head, payment.amount, payment.requestedBy, payment.requestedAt, payment.statusLabel])])} type="button"><Download size={16} /> Download report</button></div>
-            <div className="fc-report-grid"><article className="fc-panel"><span>Fleet-owned payments</span><strong>{money(filteredPayments.reduce((sum, payment) => sum + payment.amount, 0))}</strong><small>{filteredPayments.length} requests in the current data window</small></article><article className="fc-panel"><span>Approved / paid</span><strong>{money(filteredPayments.filter((payment) => ["Approved", "Paid", "Processing"].includes(payment.statusLabel)).reduce((sum, payment) => sum + payment.amount, 0))}</strong><small>Completed and processing vehicle expenses</small></article><article className="fc-panel"><span>Ad-hoc van MTD · view only</span><strong>{money(data.adHocRows.reduce((sum, row) => sum + row.amount, 0))}</strong><small>{data.adHocRows.length} deployments excluded from Fleet approval totals</small></article><article className="fc-panel"><span>Availability</span><strong>{availability}%</strong><small>{active} active vehicles across {data.stationOptions.length} stations</small></article></div>
-            <div className="fc-report-layout"><article className="fc-panel"><div className="fc-panel-head"><div><h2>Expense mix</h2><p>Vehicle payment requests by head</p></div></div><div className="fc-bars">{[...new Map(filteredPayments.map((payment) => [payment.head, 0])).keys()].map((head) => { const total = filteredPayments.filter((payment) => payment.head === head).reduce((sum, payment) => sum + payment.amount, 0); const max = Math.max(1, ...filteredPayments.map((payment) => payment.amount)); return <div key={head}><p><span>{head}</span><b>{money(total)}</b></p><i><span style={{ width: `${Math.max(4, Math.min(100, (total / max) * 100))}%` }} /></i></div>; })}{!filteredPayments.length ? <div className="fc-empty compact"><BarChart3 size={30} /><strong>No payment data</strong></div> : null}</div></article><article className="fc-panel"><div className="fc-panel-head"><div><h2>Operational signals</h2><p>Issues requiring management attention</p></div></div><div className="fc-signal-list"><p><span className="bad"><AlertTriangle size={16} /></span><span><strong>{vehicles.filter((vehicle) => vehicle.status === "breakdown").length} vehicles in breakdown</strong><small>Immediate replacement or repair decision</small></span></p><p><span className="warn"><FileCheck2 size={16} /></span><span><strong>{attentionVehicles.length} document renewals</strong><small>Expired or due within 30 days</small></span></p><p><span className="blue"><CircleDollarSign size={16} /></span><span><strong>{pendingPayments.length} pending approvals</strong><small>{money(pendingPayments.reduce((sum, item) => sum + item.amount, 0))} awaiting your decision</small></span></p><p><span className="purple"><Gauge size={16} /></span><span><strong>{todayAdHoc.length} ad-hoc vans today</strong><small>{new Set(todayAdHoc.map((row) => row.stationCode)).size} stations using additional capacity</small></span></p></div></article></div>
-          </section> : null}
+          {section === "adhoc" ? <section className="fc-section"><FleetAdHocCapacity rows={data.adHocRows} today={data.today} /></section> : null}
 
           {section === "settings" ? <section className="fc-section">
             <div className="fc-section-head"><div><span className="fc-eyebrow">Administration</span><h1>Settings & access</h1><p>Control audit policy, checklist masters, portal users and Fleet integrations.</p></div></div>
