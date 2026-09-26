@@ -6,7 +6,6 @@ import { SearchableSelect, type SearchableSelectOption } from "./searchable-sele
 type AdhocDaResponse = {
   options: SearchableSelectOption[];
   workforceOptions: SearchableSelectOption[];
-  sourceDate: string | null;
   error?: string;
 };
 
@@ -15,7 +14,6 @@ export function AdhocDaFields({ locationId }: { locationId: string }) {
   const [options, setOptions] = useState<SearchableSelectOption[]>([]);
   const [workforceOptions, setWorkforceOptions] = useState<SearchableSelectOption[]>([]);
   const [selected, setSelected] = useState("");
-  const [sourceDate, setSourceDate] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
@@ -25,7 +23,7 @@ export function AdhocDaFields({ locationId }: { locationId: string }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    setOptions([]); setWorkforceOptions([]); setSelected(""); setSourceDate(""); setMessage("");
+    setOptions([]); setWorkforceOptions([]); setSelected(""); setMessage("");
     setManualName(""); setManualWorkforceId(""); setManualOpen(false);
     if (!locationId) return;
     setLoading(true);
@@ -36,7 +34,6 @@ export function AdhocDaFields({ locationId }: { locationId: string }) {
         if (!controller.signal.aborted) {
           setOptions(body.options ?? []);
           setWorkforceOptions(body.workforceOptions ?? []);
-          setSourceDate(body.sourceDate || "");
           if (!body.options?.length) setMessage("No imported DA names are available for this station. Use ‘DA name not available’ and enter the SCC name.");
         }
       }).catch(error => { if (!controller.signal.aborted) setMessage(error.message); })
@@ -63,14 +60,12 @@ export function AdhocDaFields({ locationId }: { locationId: string }) {
     <input name="adhoc_manual_workforce_id" type="hidden" value={manualMode ? manualWorkforceId : ""} />
     <div className="form-grid two">
       <label>Delivery work date *<input className="field" type="date" name="adhoc_work_date" value={date} required onChange={event => setDate(event.target.value)} /></label>
-      <label>DA name / Provider ID *<SearchableSelect key={`${locationId}:${sourceDate}:${manualMode}`} name="adhoc_shipment_id" options={options} value={manualMode ? "" : selected} onValueChange={useImportedSelection} placeholder={loading ? "Loading latest station DAs…" : "Search latest DA name or provider ID"} required={!manualMode} disabled={manualMode} /></label>
+      <label>DA name / Provider ID *<SearchableSelect key={`${locationId}:${manualMode}`} name="adhoc_shipment_id" options={options} value={manualMode ? "" : selected} onValueChange={useImportedSelection} placeholder={loading ? "Loading station DAs…" : "Search DA name or provider ID"} required={!manualMode} disabled={manualMode} /></label>
     </div>
     {!locationId ? <p>Select a location first.</p> : null}
     {message ? <p role="alert">{message}</p> : null}
     {manualMode ? <div className="payment-form-guidance success"><strong>Manual SCC name selected</strong><span>{manualName} · payroll associate linked</span><button className="button secondary compact" onClick={() => setManualOpen(true)} type="button">Change</button></div> : null}
     {!manualMode ? <button className="button secondary compact" disabled={!locationId || loading} onClick={() => setManualOpen(true)} type="button">DA name not available</button> : null}
-    {sourceDate ? <p className="subtle">Names are loaded from the latest available Amazon daily shipment count for this station: <strong>{sourceDate}</strong>. Your selected delivery work date remains <strong>{date}</strong> and controls the later payroll deduction.</p> : null}
-    <p className="subtle">The roster source date is used only to identify the associate. Once Finance processes the payment, the paid amount is deducted once from that associate’s future payroll using the selected delivery work date. Pending, returned or rejected requests are not deducted.</p>
 
     {manualOpen ? <div className="modal-backdrop" onMouseDown={event => { if (event.currentTarget === event.target) setManualOpen(false); }}>
       <section aria-label="DA name not available" aria-modal="true" className="modal-panel adhoc-da-manual-modal" role="dialog">
