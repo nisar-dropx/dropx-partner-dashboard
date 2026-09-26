@@ -665,7 +665,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
   const loggedIn = ["accounts","activation","dashboard","profile","documents","connect","approvals","requests","payments","work","advances","earnings","refer","reimbursements","attendance","roster","leave","lop","wfh","performance","settings"].includes(step);
   const screenLabel: Partial<Record<Step, string>> = {
     accounts: "Accounts",
-    activation: "Amazon ID status",
+    activation: "Work setup",
     dashboard: "Today",
     profile: "My profile",
     documents: "Documents",
@@ -709,7 +709,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       </div>
       <nav>
         <small className="dx-nav-label">Workspace</small>
-        {account.activationOnly ? <button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck />Amazon ID status</button> : isWorkforceWorkspace(account) ? <>
+        {account.activationOnly ? <button aria-current={step === "activation" ? "page" : undefined} className={step === "activation" ? "active" : ""} onClick={() => open("activation")}><ShieldCheck />Work setup</button> : isWorkforceWorkspace(account) ? <>
           <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Gauge />Home</button>
           {workforcePaymentsAvailable(account) ? <button aria-current={step === "payments" ? "page" : undefined} className={step === "payments" ? "active" : ""} onClick={() => open("payments")}><CreditCard />Payments</button> : null}
           {workforceWorkAvailable(account) ? <button aria-current={step === "work" ? "page" : undefined} className={step === "work" ? "active" : ""} onClick={() => open("work")}><CalendarDays />Work schedule</button> : null}
@@ -765,7 +765,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
         </span>
       </section>
       <nav>
-        {account.activationOnly ? <button onClick={() => open("activation")}><ShieldCheck />Amazon ID status<ChevronRight /></button> : isWorkforceWorkspace(account) ? <>
+        {account.activationOnly ? <button onClick={() => open("activation")}><ShieldCheck />Work setup<ChevronRight /></button> : isWorkforceWorkspace(account) ? <>
           <button onClick={() => open("dashboard")}><Gauge />Home<ChevronRight /></button>
           {workforcePaymentsAvailable(account) ? <button onClick={() => open("payments")}><CreditCard />Payments<ChevronRight /></button> : null}
           {workforceWorkAvailable(account) ? <button onClick={() => open("work")}><CalendarDays />Work schedule<ChevronRight /></button> : null}
@@ -858,7 +858,7 @@ export function ConnectLoginFlow({ showAppInstallCard = true }: { showAppInstall
       </section> : null}
     </main>}
     {loggedIn && account ? <nav aria-label="Primary navigation" className="dx-mobile-nav">
-      {account.activationOnly ? <button aria-current="page" className="active" onClick={() => open("activation")}><ShieldCheck /><span>ID status</span></button> : isWorkforceWorkspace(account) ? <>
+      {account.activationOnly ? <button aria-current="page" className="active" onClick={() => open("activation")}><ShieldCheck /><span>Setup</span></button> : isWorkforceWorkspace(account) ? <>
         <button aria-current={step === "dashboard" ? "page" : undefined} className={step === "dashboard" ? "active" : ""} onClick={() => open("dashboard")}><Home /><span>Home</span></button>
         {workforcePaymentsAvailable(account) ? <button aria-current={step === "payments" ? "page" : undefined} className={step === "payments" ? "active" : ""} onClick={() => open("payments")}><IndianRupee /><span>Payments</span></button> : null}
         {workforceWorkAvailable(account) ? <button aria-current={step === "work" ? "page" : undefined} className={step === "work" ? "active" : ""} onClick={() => open("work")}><CalendarDays /><span>Work</span></button> : null}

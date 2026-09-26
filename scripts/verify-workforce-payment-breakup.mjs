@@ -15,8 +15,8 @@ assert.doesNotMatch(oneRoute, /SWA_COD|SWA_PREPAID/, "SWA COD and prepaid must n
 
 assert.match(oneBreakup, /\["delivery", "c_return", "mfn", "mfn_return"\]/, "DropX One must keep the four requested payment categories");
 assert.match(oneBreakup, /DropX associate/, "DropX One must identify the registered associate");
-assert.match(oneBreakup, /Amazon ID/, "DropX One must show the mapped provider ID");
-assert.match(oneBreakup, /Amazon name/, "DropX One must show the source associate name");
+assert.match(oneBreakup, /Partner ID/, "DropX One must show the mapped partner ID without coupling the shared UI to Amazon");
+assert.match(oneBreakup, /Partner name/, "DropX One must show the source partner-account name");
 
 assert.match(workforcePage, /dailyBreakdown/, "Workforce must calculate a daily payment breakup");
 assert.match(workforcePage, /source === "total_delivery"/, "Workforce must support the combined Delivery metric");
@@ -25,7 +25,7 @@ assert.match(workforcePage, /"MFN return"/, "Workforce must use the requested MF
 assert.match(workforceTable, /aria-expanded=\{expanded\}/, "The Workforce breakup must be keyboard-accessible");
 assert.match(workforceTable, /"Breakup"/, "Workforce must expose the daily breakup action");
 assert.match(workforceTable, /DropX associate/, "Workforce must identify the registered associate");
-assert.match(workforceTable, /Amazon ID/, "Workforce must show the mapped provider ID");
-assert.match(workforceTable, /Amazon name/, "Workforce must show the source associate name");
+assert.match(workforceTable, /Partner ID/, "Workforce must show the mapped partner ID without coupling the shared UI to Amazon");
+assert.match(workforceTable, /Partner name/, "Workforce must show the source partner-account name");
 
 console.log("Workforce payment breakup verification passed.");

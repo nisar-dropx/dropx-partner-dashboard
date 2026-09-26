@@ -16,8 +16,8 @@ export function ConnectDailyPaymentBreakdown({ associateName, providers }: { ass
       return <section className={styles.provider} key={provider.providerMemberId}>
         <header>
           <span><small>DropX associate</small><strong>{associateName}</strong></span>
-          <span><small>Amazon ID</small><strong>{provider.providerMemberId || "—"}</strong></span>
-          {provider.providerMemberName ? <span><small>Amazon name</small><strong>{provider.providerMemberName}</strong></span> : null}
+          <span><small>Partner ID</small><strong>{provider.providerMemberId || "—"}</strong></span>
+          {provider.providerMemberName ? <span><small>Partner name</small><strong>{provider.providerMemberName}</strong></span> : null}
         </header>
         <div className={styles.lines}>
           {activityOrder.map((code) => {

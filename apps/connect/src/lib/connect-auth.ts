@@ -1059,6 +1059,6 @@ export async function requireConnectAccount(profileType: ConnectAccount["profile
   const canonicalProfileType = profileType === "field_executive" ? "workforce" : profileType;
   const account = accounts.find((item) => item.profileType === canonicalProfileType && item.id === accountId);
   if (!account) throw new Error("This account is not available for the current login.");
-  if (account.activationOnly && !options.allowActivationOnly) throw new Error("Complete Amazon ID activation to unlock this workspace.");
+  if (account.activationOnly && !options.allowActivationOnly) throw new Error("Complete the required work setup to unlock this workspace.");
   return account;
 }
