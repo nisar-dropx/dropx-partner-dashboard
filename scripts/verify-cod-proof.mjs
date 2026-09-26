@@ -4,15 +4,24 @@ import {createRequire} from 'node:module';
 import ts from 'typescript';
 import {PGlite} from '@electric-sql/pglite';
 const require=createRequire(import.meta.url);
-function compile(file,deps={}){const exports={};new Function('require','exports',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(n=>deps[n]??require(n),exports);return exports;}
+function compile(file,deps={}){const exports={};new Function('require','exports',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(n=>deps[n]??require(n),exports);return exports;}
 const policy=compile('src/lib/ops-pulse/cod-proof-policy.ts');
 const expected={amount:100,date:'2026-09-26',reference:'AC123',station:'NLRC'};
-const extracted={document_type:'deposit_slip',readable:true,amount:100,deposit_date:expected.date,remittance_reference:'AC-123',receipt_reference:'A4842738',station_code:'NLRC',deposit_confirmed:true};
+const extracted={document_type:'deposit_slip',readable:true,amount:100,deposit_date:expected.date,remittance_reference:'AC-123',receipt_reference:'A4842738',station_code:'NLRC',deposit_confirmed:true,seal_status:'visible',seal_clarity:'high',seal_issuer:'Radiant Cash Management',seal_evidence:'Blue rectangular ink stamp at bottom right with Radiant text'};
 assert.equal(policy.proofVerdict(extracted,expected).status,'Valid');
 for(const patch of [{readable:false},{amount:99},{amount:null},{deposit_date:'2026-09-25'},{remittance_reference:'OTHER'},{station_code:'OTHER'},{deposit_confirmed:false},{document_type:'other'}])assert.equal(policy.proofVerdict({...extracted,...patch},expected).status,'Not valid');
 assert.equal(policy.proofVerdict({...extracted,remittance_reference:null,receipt_reference:'A4934620'},expected).status,'Valid','A CMS serial is not the Amazon remittance code');
+for(const patch of [{seal_status:'missing',seal_clarity:'not_applicable',seal_issuer:null,seal_evidence:null},{seal_status:'unclear',seal_clarity:'low'},{seal_status:'visible',seal_clarity:'low'},{seal_evidence:''}]){
+ const result=policy.proofVerdict({...extracted,...patch},expected);assert.equal(result.status,'Not valid');assert.match(result.reason,/seal/);
+}
+assert.equal(policy.proofVerdict({...extracted,seal_clarity:'medium',seal_issuer:null},expected).status,'Valid','Recognisable medium-clarity seal passes even when issuer text is incomplete');
+assert.throws(()=>policy.proofVerdict({...extracted,seal_status:'maybe'},expected));
 assert.throws(()=>policy.proofVerdict({readable:true},expected));
 assert.throws(()=>policy.emailList('someone@example.com\nmalformed'));
+const {CodSlipCheckDetails}=compile('src/components/cod-slip-check-details.tsx',{'@/lib/date-format':compile('src/lib/date-format.ts')});
+const view=require('react-dom/server').renderToStaticMarkup(require('react').createElement(CodSlipCheckDetails,{result:{policy_version:4,proof_version:1,extracted:{...extracted,seal_clarity:'medium',seal_issuer:null}},checkedAt:'2026-09-26T12:00:00Z',amount:100,date:expected.date,station:'NLRC',reference:'AC123'}));
+assert.match(view,/Seal visible/);assert.match(view,/medium/);assert.match(view,/Sufficient/);assert.match(view,/Issuer not fully readable/);
+
 const {matchesCodEmail}=compile('src/lib/ops-pulse/cod-mail-evidence.ts',{'./cod-proof-policy':policy});
 const record={email_subject:'Banker not reported — NLRC',sender_email:'nlrc@dropxlogistics.com',email_sent_at:'2026-09-26T13:30:00Z',stakeholder_emails:['ops@dropxlogistics.com'],client_poc_emails:['client@example.com']};
 const message={internalDate:String(Date.parse(record.email_sent_at)),payload:{headers:[{name:'Subject',value:record.email_subject},{name:'From',value:'Station <nlrc@dropxlogistics.com>'},{name:'To',value:'ops@dropxlogistics.com, client@example.com'},{name:'Cc',value:'Control Tower <ct@dropxlogistics.com>'}]}};
@@ -28,6 +37,11 @@ for(const kind of ['No Cash','Banker Not Reported']){const row=pending.buildCodP
 assert.equal(pending.buildCodPendingRows([station],[slip],expected.date,new Date(),[exception])[0].status,'Complete','Later deposit takes precedence');
 assert.equal(pending.buildCodPendingRows([station],[{...slip,ai_status:'Not valid'}],expected.date)[0].status,'Not valid');
 const digest=compile('src/lib/cod-pending-digest.ts',{'./ops-pulse/cod-pending-data':{},'./ops-pulse/cod-ageing-data':{},'./ops-pulse/cod-ageing':{ageingBands:[]},'./cod-pending-mail-scope':{}});
+const sealFailure=policy.proofVerdict({...extracted,seal_status:'missing',seal_clarity:'not_applicable',seal_issuer:null,seal_evidence:null},expected);
+const sealRows=pending.buildCodPendingRows([station],[{...slip,ai_status:sealFailure.status,ai_summary:sealFailure.reason}],expected.date);
+const sealEmail=digest.buildCodDigestMessages(sealRows,{stations:[],uploadDate:expected.date,dataDate:'2026-09-25'},[{email:'test@example.com',stationIds:['s']}],expected.date,'evening','COD {{month}} {{year}}')[0];
+assert.match(sealEmail.html,/seal is missing/);assert.ok(!/\bAI\b|GPT|OpenAI/i.test(sealEmail.html));
+assert.match(pending.codPendingCsv(sealRows),/seal is missing/);
 const rows=pending.buildCodPendingRows([station],[{...slip,ai_status:'Not valid',ai_summary:'Slip amount does not match.'}],expected.date);
 const email=digest.buildCodDigestMessages(rows,{stations:[],uploadDate:expected.date,dataDate:'2026-09-25'},[{email:'test@example.com',stationIds:['s']}],expected.date,'evening','COD {{month}} {{year}}')[0];
 assert.match(email.html,/Not valid/);assert.match(email.html,/Slip amount does not match/);assert.ok(!/\bAI\b|GPT|OpenAI/i.test(email.html));assert.match(email.html,/color:#b91c1c;font-weight:bold[^>]*>Slip amount/);
@@ -39,16 +53,18 @@ await db.exec(readFileSync('supabase/migrations/20260925035330_cod_slip_gpt_vali
 await db.exec(readFileSync('supabase/migrations/20260926121610_cod_proof_queue_history.sql','utf8'));
 await db.exec(readFileSync('supabase/migrations/20260926122500_cod_receipt_reference_validation.sql','utf8'));
 await db.exec(readFileSync('supabase/migrations/20260926131000_cod_control_tower_address.sql','utf8'));
+await db.exec(readFileSync('supabase/migrations/20260926210000_cod_seal_validation.sql','utf8'));
 const company='11111111-1111-1111-1111-111111111111',location='22222222-2222-2222-2222-222222222222',user='33333333-3333-3333-3333-333333333333';
 await db.query('insert into companies values($1)',[company]);await db.query('insert into stations values($1)',[location]);
 const {rows:[submission]}=await db.query(`insert into cod_submissions(company_id,location_id,created_by,deposited_amount,deposit_date,last_updater_name) values($1,$2,$3,100,'2026-09-26','Station User') returning *`,[company,location,user]);
 assert.equal(submission.ai_status,'Validation pending');
 assert.equal((await db.query('select * from claim_cod_proof_check()')).rows.length,0,'Old worker cannot claim slips');
-const {rows:[claim]}=await db.query('select * from claim_cod_proof_check_v2()');assert.ok(claim.proof_check_token);
-assert.equal((await db.query('select * from claim_cod_proof_check_v2()')).rows.length,0,'Claim is exclusive');
+assert.equal((await db.query('select * from claim_cod_proof_check_v2()')).rows.length,0,'Pre-seal worker cannot claim slips');
+const {rows:[claim]}=await db.query('select * from claim_cod_proof_check_v4()');assert.ok(claim.proof_check_token);
+assert.equal((await db.query('select * from claim_cod_proof_check_v4()')).rows.length,0,'Claim is exclusive');
 await db.query("update cod_submissions set deposited_amount=110,last_updated_by=$2,last_updater_name='Updater' where id=$1",[submission.id,user]);
 const stale=await db.query("update cod_submissions set ai_status='Valid' where id=$1 and proof_check_token=$2 and proof_version=$3 returning id",[claim.id,claim.proof_check_token,claim.proof_version]);assert.equal(stale.rows.length,0,'Stale proof result rejected');
-const {rows:[claim2]}=await db.query('select * from claim_cod_proof_check_v2()');assert.equal(claim2.proof_version,2);
+const {rows:[claim2]}=await db.query('select * from claim_cod_proof_check_v4()');assert.equal(claim2.proof_version,2);
 await db.query("update cod_submissions set ai_status='Valid',ai_summary='Matched',proof_check_token=null where id=$1",[submission.id]);
 let history=(await db.query('select * from cod_proof_history order by created_at')).rows;assert.deepEqual(history.map(h=>h.event),['Uploaded','Submission updated','Validation completed']);assert.equal(history[1].actor_name,'Updater');assert.equal(history[2].actor_name,'Automatic validation');
 await db.query("update cod_submissions set remarks='Changed proof details' where id=$1",[submission.id]);assert.equal((await db.query('select ai_status from cod_submissions')).rows[0].ai_status,'Validation pending');
@@ -60,6 +76,6 @@ const {rows:[ex]}=await db.query(base+`,proof)`+values+`'No Cash','No cash',$3,$
 assert.equal((await db.query('select event from cod_proof_history where exception_id=$1',[ex.id])).rows[0].event,'Daily update recorded');
 await assert.rejects(()=>db.query(base+`,email_subject,sender_email,stakeholder_emails,client_poc_emails,email_sent_at,email_cc) values($1,$2,'2026-09-25','Banker Not Reported','Absent',$3,$3,'User','Banker missing','station@dropxlogistics.com',ARRAY['ops@dropxlogistics.com'],ARRAY['client@example.com'],now(),ARRAY['other@dropxlogistics.com'])`,[company,location,user]),/check constraint/);
 await db.query(base+`,email_subject,sender_email,stakeholder_emails,client_poc_emails,email_sent_at,email_cc) values($1,$2,'2026-09-25','Banker Not Reported','Absent',$3,$3,'User','Banker missing','station@dropxlogistics.com',ARRAY['ops@dropxlogistics.com'],ARRAY['client@example.com'],now(),ARRAY['ct@dropxlogistics.com'])`,[company,location,user]);
-await db.exec('set role authenticated');await assert.rejects(()=>db.query('select * from cod_daily_exceptions'),/permission denied/);await assert.rejects(()=>db.query('select * from cod_proof_history'),/permission denied/);await assert.rejects(()=>db.query('select * from claim_cod_proof_check_v2()'),/permission denied/);await db.exec('reset role');
+await db.exec('set role authenticated');await assert.rejects(()=>db.query('select * from cod_daily_exceptions'),/permission denied/);await assert.rejects(()=>db.query('select * from cod_proof_history'),/permission denied/);await assert.rejects(()=>db.query('select * from claim_cod_proof_check_v4()'),/permission denied/);await db.exec('reset role');
 await db.close();
 console.log('PASS COD proof: extraction checks, mailbox evidence, exception reporting, red email reasons, no model branding, SQL queue claims, stale-result rejection, edit resets, audit identity, required proof/CC and denied client access.');

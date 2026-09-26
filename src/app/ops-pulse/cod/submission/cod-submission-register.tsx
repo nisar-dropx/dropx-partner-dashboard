@@ -1,5 +1,6 @@
 "use client";
 
+import {CodSlipCheckDetails} from '@/components/cod-slip-check-details';
 import {proofTone} from '@/lib/ops-pulse/cod-proof-policy';
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -40,6 +41,8 @@ export type CodRegisterRow = {
   status: string;
   proofStatus:string;
   proofReason:string;
+  proofResult?:Record<string,unknown>|null;
+  proofCheckedAt?:string|null;
   hasSlip: boolean;
   slipUrl: string | null;
 };
@@ -238,7 +241,7 @@ export function CodSubmissionRegister({
                     <span className="subtle">Missing</span>
                   )}
                 </td>
-                <td><StatusPill status={row.status} /><div><span className={`status-pill ${proofTone(row.proofStatus)}`}>{row.proofStatus}</span><p style={{whiteSpace:'normal',maxWidth:300,color:proofTone(row.proofStatus)==='bad'?'#b91c1c':undefined}}>{row.proofReason}</p></div></td>
+                <td><StatusPill status={row.status} /><div><span className={`status-pill ${proofTone(row.proofStatus)}`}>{row.proofStatus}</span><p style={{whiteSpace:'normal',maxWidth:300,color:proofTone(row.proofStatus)==='bad'?'#b91c1c':undefined}}>{row.proofReason}</p><CodSlipCheckDetails result={row.proofResult} checkedAt={row.proofCheckedAt} amount={row.amountRaw} date={row.depositDate} station={row.stationCode} reference={row.remittanceCode}/></div></td>
                 <td>{row.remarks || "-"}</td>
                 <td>
                   {canEdit ? (

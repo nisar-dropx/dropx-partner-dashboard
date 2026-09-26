@@ -15,7 +15,7 @@ export async function loadCodPendingReport(db:SupabaseClient,companyId:string,sc
   if(!all)q=q.in('id',scope);return q.order('id').range(offset,offset+999);
  })).filter(isCodReportStation);
  if(!stations.length)return [];
- const slips=await pagedCodRows<PendingSlip>(offset=>db.from('cod_submissions').select('id,location_id,deposit_date,cod_period_from,cod_period_to,cod_date,remittance_code,reference_no,deposited_amount,validated_amount,validation_status,ai_status,ai_summary,proof_checked_at,last_updater_name,remarks,validation_remarks,submitter_name,created_at,attachments,deposit_slip_attachments').eq('company_id',companyId).eq('deposit_date',date).in('location_id',stations.map(s=>s.id)).order('id').range(offset,offset+999));
+ const slips=await pagedCodRows<PendingSlip>(offset=>db.from('cod_submissions').select('id,location_id,deposit_date,cod_period_from,cod_period_to,cod_date,remittance_code,reference_no,deposited_amount,validated_amount,validation_status,ai_status,ai_summary,ai_result,proof_checked_at,last_updater_name,remarks,validation_remarks,submitter_name,created_at,attachments,deposit_slip_attachments').eq('company_id',companyId).eq('deposit_date',date).in('location_id',stations.map(s=>s.id)).order('id').range(offset,offset+999));
  const exceptions=await loadCodExceptions(db,companyId,scope,all,date);
  return buildCodPendingRows(stations,slips,date,new Date(),exceptions);
 }

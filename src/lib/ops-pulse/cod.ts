@@ -87,6 +87,7 @@ export type CodSubmissionRow = {
   ai_confidence?: number | string | null;
   ai_summary?: string | null;
   ai_result?: Record<string, unknown> | null;
+  proof_checked_at?: string | null;
   created_at: string;
   stations?: CodLocationRow | CodLocationRow[] | null;
 };
@@ -672,7 +673,7 @@ export async function loadCodSubmissions(
   if (!supabaseAdmin) return { rows: [] as CodSubmissionRow[], error: "Supabase service role key is not configured." };
   let query = supabaseAdmin
     .from("cod_submissions")
-    .select("id, submission_no, form_type, client, channel, location_id, station_code, cod_period_from, cod_period_to, cod_date, deposit_date, remittance_creation_date, remittance_creation_time, remittance_submission_date, remittance_amount, cod_as_per_erp, cod_amount, deposited_amount, remittance_code, deposit_window, cod_master_id, payment_mode, reference_no, proof_url, submitter_name, remarks, status, validation_status, validated_amount, validated_at, validation_remarks, validation_payload, attachments, deposit_slip_attachments, ai_status, ai_confidence, ai_summary, created_at, stations (id, station_code, station_name, state, providers (code, name), location_models (code, name))")
+    .select("id, submission_no, form_type, client, channel, location_id, station_code, cod_period_from, cod_period_to, cod_date, deposit_date, remittance_creation_date, remittance_creation_time, remittance_submission_date, remittance_amount, cod_as_per_erp, cod_amount, deposited_amount, remittance_code, deposit_window, cod_master_id, payment_mode, reference_no, proof_url, submitter_name, remarks, status, validation_status, validated_amount, validated_at, validation_remarks, validation_payload, attachments, deposit_slip_attachments, ai_status, ai_confidence, ai_summary, ai_result, proof_checked_at, created_at, stations (id, station_code, station_name, state, providers (code, name), location_models (code, name))")
     .eq("company_id", companyId)
     .order("created_at", { ascending: false });
 

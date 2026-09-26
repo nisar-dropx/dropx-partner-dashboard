@@ -142,6 +142,8 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
       status: row.validation_status,
       proofStatus: proofStatus(row.ai_status),
       proofReason: row.ai_summary||'',
+      proofResult: row.ai_result,
+      proofCheckedAt: row.proof_checked_at,
       hasSlip: slips.length > 0,
       slipUrl: slips.length ? depositSlipViewUrl(row.id) : null
     };
