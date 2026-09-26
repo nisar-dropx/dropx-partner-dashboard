@@ -1,5 +1,6 @@
 import type {ProofExtraction} from '@/lib/ops-pulse/cod-proof-policy';
 import {formatDashboardDate as formatDate,formatDashboardDateTime as formatDateTime} from '@/lib/date-format';
+const cellStyle={whiteSpace:'normal' as const,overflowWrap:'anywhere' as const};
 const money=new Intl.NumberFormat('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const formatAmount=(value:number|string|null)=>money.format(Number(value)||0);
 
@@ -11,7 +12,7 @@ export function CodSlipCheckDetails({result,checkedAt,amount,date,station,refere
  const normalize=(value:string)=>value.toUpperCase().replace(/[^A-Z0-9]/g,'');
  const seal=v.seal_status==='visible'&&['high','medium'].includes(v.seal_clarity)&&v.seal_evidence?'Seal visible':v.seal_status==='missing'?'Seal missing':'Seal unclear';
  const rows=[
-  ['Deposited amount',`₹${formatAmount(amount)}`,v.amount==null?'Not readable':`₹${formatAmount(v.amount)}`,v.amount!=null&&Math.abs(Number(amount)-v.amount)<=0.01?'Match':'Mismatch / unreadable'],
+  ['Deposited amount',amount==null?'Not available':`₹${formatAmount(amount)}`,v.amount==null?'Not readable':`₹${formatAmount(v.amount)}`,amount!=null&&v.amount!=null&&Math.abs(Number(amount)-v.amount)<=0.01?'Match':'Mismatch / unreadable'],
   ['Deposit date',formatDate(date),v.deposit_date?formatDate(v.deposit_date):'Not readable',v.deposit_date===date?.slice(0,10)?'Match':'Mismatch / unreadable'],
   ['Station',station||'—',v.station_code||'Not visible',!v.station_code?'Not checked — not visible':normalize(v.station_code)===normalize(station)?'Match':'Mismatch'],
   ['Marketplace remittance',reference||'—',v.remittance_reference||'Not printed',!v.remittance_reference?'Not checked — not printed':normalize(v.remittance_reference)===normalize(reference)?'Match':'Mismatch'],
@@ -22,7 +23,7 @@ export function CodSlipCheckDetails({result,checkedAt,amount,date,station,refere
  ];
  return <details style={{margin:'12px 0',whiteSpace:'normal'}}><summary style={{cursor:'pointer',fontWeight:600,color:seal==='Seal visible'?'#15803d':'#b91c1c'}}>Validation checks · {seal}</summary>
   <p><strong>Checked:</strong> {formatDateTime(checkedAt)} · Slip version {String(result?.proof_version??'—')}</p>
-  <div className="table-wrap"><table><thead><tr><th>Check</th><th>Submitted / required</th><th>Read from slip</th><th>Result</th></tr></thead><tbody>{rows.map(([label,expected,read,outcome])=><tr key={label}><td>{label}</td><td>{expected}</td><td>{read}</td><td style={{color:/Mismatch|Missing|Seal missing|Seal unclear|Insufficient/.test(outcome)?'#b91c1c':undefined}}>{outcome}</td></tr>)}</tbody></table></div>
+  <div className="table-wrap"><table style={{width:'100%',minWidth:0,tableLayout:'fixed'}}><thead><tr><th style={cellStyle}>Check</th><th style={cellStyle}>Submitted / required</th><th style={cellStyle}>Read from slip</th><th style={cellStyle}>Result</th></tr></thead><tbody>{rows.map(([label,expected,read,outcome])=><tr key={label}><td style={cellStyle}>{label}</td><td style={cellStyle}>{expected}</td><td style={cellStyle}>{read}</td><td style={{...cellStyle,color:/Mismatch|Missing|Seal missing|Seal unclear|Insufficient/.test(outcome)?'#b91c1c':undefined}}>{outcome}</td></tr>)}</tbody></table></div>
   <p><strong>Seal evidence:</strong> {v.seal_evidence||'No identifiable bank / CMS seal could be read.'}</p>
   <p className="subtle">A printed logo or signature alone does not count as a seal. These checks verify visible document details, not seal authenticity or bank settlement.</p>
  </details>;
