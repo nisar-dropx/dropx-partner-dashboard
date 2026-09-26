@@ -5932,6 +5932,36 @@ h3 {
   max-height: calc(100vh - 24px);
 }
 
+.adhoc-da-fields {
+  position: relative;
+}
+
+.adhoc-da-manual-modal {
+  width: min(780px, 100%);
+}
+
+.payment-form-guidance {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid #f1c27d;
+  border-radius: 8px;
+  background: #fff8e8;
+  color: #6f4300;
+}
+
+.payment-form-guidance span {
+  flex: 1;
+}
+
+.payment-form-guidance.success {
+  border-color: #a8d8b5;
+  background: #eef9f1;
+  color: #1f6a35;
+}
+
 .profile-review-panel {
   margin: 4px 14px 18px;
   overflow: hidden;

@@ -28,6 +28,33 @@ function required(value: FormDataEntryValue | null, field: string) {
   return text;
 }
 
+function adhocDaIdentityFields(formData: FormData, workDate: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(workDate)) throw new Error("Select a valid delivery work date.");
+  const identityMode = clean(formData.get("adhoc_identity_mode"));
+  if (identityMode === "manual_scc") {
+    const manualName = required(formData.get("adhoc_manual_name"), "Exact SCC associate name");
+    const workforceId = required(formData.get("adhoc_manual_workforce_id"), "DropX payroll associate");
+    if (manualName.length < 2 || manualName.length > 160) throw new Error("Enter the exact SCC associate name (2–160 characters).");
+    if (!/^[a-f0-9-]{36}$/i.test(workforceId)) throw new Error("Select a valid DropX payroll associate.");
+    return {
+      source_system: "OPS_ADHOC_DA",
+      adhoc_shipment_id: null,
+      adhoc_work_date: workDate,
+      adhoc_da_name: manualName,
+      adhoc_workforce_id: workforceId
+    };
+  }
+  const shipmentId = required(formData.get("adhoc_shipment_id"), "DA name / Provider ID");
+  if (!/^[a-f0-9-]{36}$/i.test(shipmentId)) throw new Error("Select a valid DA from the latest Amazon roster.");
+  return {
+    source_system: "OPS_ADHOC_DA",
+    adhoc_shipment_id: shipmentId,
+    adhoc_work_date: workDate,
+    adhoc_da_name: null,
+    adhoc_workforce_id: null
+  };
+}
+
 function safeFileName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
 }
@@ -520,9 +547,8 @@ export async function createPaymentRequest(formData: FormData) {
 
     const requestNo = await nextPaymentRequestNo(companyId);
     const isAdhocDa = headResult.data.code === "ADHOC_DA";
-    const adhocShipmentId = isAdhocDa ? required(formData.get("adhoc_shipment_id"), "DA name / Provider ID") : null;
     const workDate = isAdhocDa ? required(formData.get("adhoc_work_date"), "Delivery work date") : new Date().toISOString().slice(0, 10);
-    if (isAdhocDa && (!/^[a-f0-9-]{36}$/i.test(adhocShipmentId!) || !/^\d{4}-\d{2}-\d{2}$/.test(workDate))) throw new Error("Select a valid DA and work date.");
+    const adhocFields = isAdhocDa ? adhocDaIdentityFields(formData, workDate) : {};
     const legacyAccountValue = bankAccountNo ?? paymentReference ?? paymentPortal ?? locationResult.data.station_code;
     const legacyIfscValue = ifsc ?? (isUpiPayment ? "UPI" : "ONLINE");
     const legacyHolderValue = accountHolderName ?? verifiedUpiHolderName ?? submittedUpiHolderName ?? paymentPortal ?? "Online Payment";
@@ -577,7 +603,7 @@ export async function createPaymentRequest(formData: FormData) {
     }
 
     const requestPayload = withCompany({
-      ...(isAdhocDa ? { source_system: "OPS_ADHOC_DA", adhoc_shipment_id: adhocShipmentId, adhoc_work_date: workDate } : {}),
+      ...adhocFields,
       request_no: requestNo,
       location_id: locationResult.data.id,
       location_code: locationResult.data.station_code,
@@ -878,11 +904,9 @@ export async function submitPaymentBankDetails(formData: FormData) {
       .eq("company_id", companyId)
       .single();
     if (headError || !headData) throw new Error("Payment head not found for this company.");
-    const adhocFields = headData.code === "ADHOC_DA" ? {
-      source_system: "OPS_ADHOC_DA",
-      adhoc_shipment_id: required(formData.get("adhoc_shipment_id"), "DA name / Provider ID"),
-      adhoc_work_date: required(formData.get("adhoc_work_date"), "Delivery work date")
-    } : {};
+    const adhocFields = headData.code === "ADHOC_DA"
+      ? adhocDaIdentityFields(formData, required(formData.get("adhoc_work_date"), "Delivery work date"))
+      : {};
     if (!normalizePaymentModes(headData.supported_payment_modes).includes(paymentMode)) {
       throw new Error("The selected payment method is not supported by this payment head.");
     }
