@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     .order("work_date", { ascending: false }).limit(1).maybeSingle();
   if (latest.error) return Response.json({ error: "Unable to identify the latest Amazon shipment roster." }, { status: 503 });
   const sourceDate = latest.data?.work_date ?? null;
-  const options = new Map<string, { value: string; label: string; helper: string }>();
+  const options = new Map<string, { value: string; label: string }>();
   for (let offset = 0; offset < 10000; offset += 1000) {
     const result = sourceDate ? await supabaseAdmin.from("cps_shipment_daily").select("id,client,provider_employee_id,provider_employee_name,total_delivery")
       .eq("company_id", company).eq("station_code", station.data.station_code).eq("work_date", sourceDate).ilike("client", "amazon").order("id").range(offset, offset + 999)
@@ -29,7 +29,7 @@ export async function GET(request: Request) {
     for (const row of result.data ?? []) {
       if (!row.provider_employee_id) continue;
       const key = row.provider_employee_id.trim().toUpperCase();
-      if (!options.has(key)) options.set(key, { value: row.id, label: `${row.provider_employee_name || "Unnamed DA"} — ${row.provider_employee_id}`, helper: `${row.client} · ${station.data.station_code} · roster ${sourceDate}` });
+      if (!options.has(key)) options.set(key, { value: row.id, label: `${row.provider_employee_name || "Unnamed DA"} — ${row.provider_employee_id}` });
     }
     if ((result.data?.length ?? 0) < 1000) {
       const workforce = await supabaseAdmin.from("workforce").select("id,dropx_id,full_name")
@@ -37,8 +37,7 @@ export async function GET(request: Request) {
       if (workforce.error) return Response.json({ error: "Unable to load station payroll associates." }, { status: 503 });
       return Response.json({
         options: [...options.values()].sort((a, b) => a.label.localeCompare(b.label)),
-        workforceOptions: (workforce.data ?? []).map(row => ({ value: row.id, label: row.full_name, helper: row.dropx_id || "No DropX ID" })),
-        sourceDate
+        workforceOptions: (workforce.data ?? []).map(row => ({ value: row.id, label: row.full_name, helper: row.dropx_id || "No DropX ID" }))
       }, { headers: { "Cache-Control": "no-store" } });
     }
   }
