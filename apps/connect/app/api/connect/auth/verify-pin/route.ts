@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { userFacingError } from "@/lib/user-facing-error";
 import { createConnectSession, findConnectAccounts, normalizeConnectMobile, verifySecretHash } from "@/lib/connect-auth";
+import { assertDeviceAllowed, bindDevice, DeviceBindingError } from "@/lib/connect-device-binding";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export async function POST(request: Request) {
@@ -47,9 +48,14 @@ export async function POST(request: Request) {
         error: "You don't have access to DropX One. Contact HR or your platform administrator for access."
       }, { status: 403 });
     }
+    await assertDeviceAllowed(accounts, request);
+    await bindDevice({ accounts, countryCode, mobile, request });
     await createConnectSession({ countryCode, mobile, request });
     return NextResponse.json({ ok: true, accounts });
   } catch (error) {
+    if (error instanceof DeviceBindingError) {
+      return NextResponse.json({ error: error.message, code: "device_bound" }, { status: 403 });
+    }
     return NextResponse.json({ error: userFacingError(error, "Unable to verify PIN.") }, { status: 500 });
   }
 }

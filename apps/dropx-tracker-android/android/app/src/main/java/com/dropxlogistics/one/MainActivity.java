@@ -76,6 +76,7 @@ public class MainActivity extends BridgeActivity {
     // job, unconditionally, everywhere. One code path, no version branching, cannot double up.
     WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
     applySystemBarInsetsToWebView();
+    appendDeviceIdToUserAgent();
 
     showStartupOverlay();
   }
@@ -100,6 +101,28 @@ public class MainActivity extends BridgeActivity {
    * within its parent, independent of anything inside the page — is what Google's edge-to-edge
    * migration guidance recommends and what actually worked here.
    */
+  /**
+   * Lets the server bind an account to one phone (apps/connect's connect-device-binding.ts reads
+   * "DropXDevice/<id>" from the user agent at login). ANDROID_ID is used instead of IMEI because
+   * Play policy doesn't allow reading hardware identifiers for this; it's sent hashed so the raw
+   * value never leaves the device.
+   */
+  private void appendDeviceIdToUserAgent() {
+    if (getBridge() == null || getBridge().getWebView() == null) return;
+    String androidId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
+    if (androidId == null || androidId.isEmpty()) return;
+    try {
+      byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(androidId.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      StringBuilder hex = new StringBuilder();
+      for (byte b : digest) hex.append(String.format("%02x", b));
+      android.webkit.WebSettings settings = getBridge().getWebView().getSettings();
+      settings.setUserAgentString(settings.getUserAgentString() + " DropXDevice/" + hex);
+    } catch (java.security.NoSuchAlgorithmException ignored) {
+      // SHA-256 is always available on Android.
+    }
+  }
+
   private void applySystemBarInsetsToWebView() {
     View root = getWindow().getDecorView();
     ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {

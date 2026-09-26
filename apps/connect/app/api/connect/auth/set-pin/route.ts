@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { userFacingError } from "@/lib/user-facing-error";
 import { createConnectSession, createSecretHash, findConnectAccounts, normalizeConnectMobile } from "@/lib/connect-auth";
+import { assertDeviceAllowed, bindDevice, DeviceBindingError } from "@/lib/connect-device-binding";
 import { verifyOtpHash } from "@/lib/connect-otp";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -50,6 +51,8 @@ export async function POST(request: Request) {
       }, { status: 403 });
     }
 
+    await assertDeviceAllowed(accounts, request);
+
     await supabaseAdmin.from("connect_whatsapp_otp_requests").update({
       status: "verified",
       used_at: new Date().toISOString(),
@@ -68,9 +71,13 @@ export async function POST(request: Request) {
     }, { onConflict: "country_code,mobile_number" });
     if (upsertResult.error) throw new Error(upsertResult.error.message);
 
+    await bindDevice({ accounts, countryCode, mobile, request });
     await createConnectSession({ countryCode, mobile, request });
     return NextResponse.json({ ok: true, accounts });
   } catch (error) {
+    if (error instanceof DeviceBindingError) {
+      return NextResponse.json({ error: error.message, code: "device_bound" }, { status: 403 });
+    }
     return NextResponse.json({ error: userFacingError(error, "Unable to create PIN.") }, { status: 500 });
   }
 }

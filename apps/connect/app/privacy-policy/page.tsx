@@ -38,7 +38,7 @@ export default function PrivacyPolicyPage() {
             <p>
               This policy applies to employees, field executives, and
               independent contractors who use the DropX One app for
-              attendance, dispatch, and workforce management. Last updated 23
+              attendance, dispatch, and workforce management. Last updated 26
               September 2026.
             </p>
           </div>
@@ -119,6 +119,10 @@ export default function PrivacyPolicyPage() {
                 location, VPN use) are recorded against your employee/
                 contractor profile to calculate attendance and detect
                 policy-relevant anomalies for your employer&rsquo;s review.
+                The app also sends a one-way hashed device identifier when
+                you sign in, so your account can be used on only one phone
+                at a time. It is not your IMEI or phone number, and your
+                employer&rsquo;s HR team can reset it if you change phones.
               </p>
             </div>
           </div>

@@ -40,9 +40,10 @@ android {
         // widens the GPS sampling interval from 30s to 60s to reduce battery drain. 38 (4.5.11)
         // fixes the bottom nav bar overlapping the OS's own 3-button bar, reproduced live after
         // 4.5.9's edge-to-edge fix removed the OS's own reservation for it too (see
-        // applyInsetsToWebView's own doc).
-        versionCode 38
-        versionName "4.5.11"
+        // applyInsetsToWebView's own doc). 39 (4.5.12) sends a hashed ANDROID_ID in the user
+        // agent so an account can be bound to one phone (see MainActivity.appendDeviceIdToUserAgent).
+        versionCode 39
+        versionName "4.5.12"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
