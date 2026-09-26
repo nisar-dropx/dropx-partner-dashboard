@@ -1,5 +1,6 @@
 "use client";
 
+import {proofTone} from '@/lib/ops-pulse/cod-proof-policy';
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -37,6 +38,8 @@ export type CodRegisterRow = {
   submitterName: string;
   remarks: string;
   status: string;
+  proofStatus:string;
+  proofReason:string;
   hasSlip: boolean;
   slipUrl: string | null;
 };
@@ -235,7 +238,7 @@ export function CodSubmissionRegister({
                     <span className="subtle">Missing</span>
                   )}
                 </td>
-                <td><StatusPill status={row.status} /></td>
+                <td><StatusPill status={row.status} /><div><span className={`status-pill ${proofTone(row.proofStatus)}`}>{row.proofStatus}</span><p style={{whiteSpace:'normal',maxWidth:300,color:proofTone(row.proofStatus)==='bad'?'#b91c1c':undefined}}>{row.proofReason}</p></div></td>
                 <td>{row.remarks || "-"}</td>
                 <td>
                   {canEdit ? (

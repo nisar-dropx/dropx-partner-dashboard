@@ -8,7 +8,7 @@ const policy=compile('src/lib/ops-pulse/cod-pending.ts'),ageing=compile('src/lib
 const station={id:'s1',station_code:'NLRC',station_name:'Station one',providers:{code:'AMAZON'},location_models:{code:'EDSP'}};
 const other={...station,id:'s2',station_code:'GNTI'};
 const date='2026-09-02',now=new Date('2026-09-02T15:00:00Z');
-const slip={id:'a',location_id:'s1',deposit_date:date,cod_period_from:'2026-08-30',cod_period_to:'2026-09-01',cod_date:null,remittance_code:'AC1',reference_no:null,deposited_amount:100,validated_amount:100,validation_status:'Matched',remarks:null,validation_remarks:null,submitter_name:'Team',created_at:'2026-09-02T14:00:00Z',deposit_slip_attachments:[{storage_path:'proof.png',storage_bucket:'slips'}],attachments:[]};
+const slip={id:'a',location_id:'s1',deposit_date:date,cod_period_from:'2026-08-30',cod_period_to:'2026-09-01',cod_date:null,remittance_code:'AC1',reference_no:null,deposited_amount:100,validated_amount:100,validation_status:'Matched',ai_status:'Valid',remarks:null,validation_remarks:null,submitter_name:'Team',created_at:'2026-09-02T14:00:00Z',deposit_slip_attachments:[{storage_path:'proof.png',storage_bucket:'slips'}],attachments:[]};
 let rows=policy.buildCodPendingRows([station,other],[slip],date,now);
 assert.equal(rows.find(r=>r.station.id==='s2').status,'Missing slip');
 assert.equal(rows.find(r=>r.station.id==='s2').overdue,true);
@@ -72,7 +72,7 @@ assert.equal(delivery.dueReportDate({...limited,config:{...limited.config,schedu
 assert.equal(delivery.dueReportDate({...limited,config:{...limited.config,schedule_time:'09:00',day_offset:-1}},new Date('2026-09-04T03:30:00Z')),null);
 assert.notEqual(delivery.digestThreadKey('c','ops','cod_pending_evening','u','2026-09'),delivery.digestThreadKey('c','ops','cod_pending_evening','u','2026-10'));
 // Loader integration: failed imports do not create a zero report; morning has the same source cutoff.
-const data=compile('src/lib/ops-pulse/cod-pending-data.ts',{'server-only':{},'./cod-pending':policy});
+const data=compile('src/lib/ops-pulse/cod-pending-data.ts',{'server-only':{},'./cod-pending':policy,'./cod-exceptions':{loadCodExceptions:async()=>[]}});
 let pages=0;await assert.rejects(()=>data.pagedCodRows(async()=>{pages++;return {data:null,error:{message:'db failure'}}}),/db failure/);assert.equal(pages,1);
 let filters=[];const fakeDb={from(table){const q={};for(const method of ['select','eq','is','gte','lte','in','order','limit','range'])q[method]=(...args)=>{filters.push([table,method,...args]);return q;};q.maybeSingle=async()=>({data:{id:'batch1',file_name:'file',created_at:'2026-09-02T08:30:00Z',completed_at:'2026-09-02T08:31:00Z',row_count:0},error:null});q.then=(a,b)=>Promise.resolve({data:[],count:0,error:null}).then(a,b);return q;}};
 const ageData=compile('src/lib/ops-pulse/cod-ageing-data.ts',{'server-only':{},'./review-cod':{},'./cod-pending-data':data,'./cod-pending':policy,'./cod-ageing':ageing});

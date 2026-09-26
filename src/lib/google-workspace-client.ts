@@ -456,7 +456,7 @@ export class GoogleLocationMailClient {
   private readonly mailboxEmail: string;
   private cachedToken: { token: string; expiresAt: number } | null = null;
 
-  constructor(mailboxEmail: string) {
+  constructor(mailboxEmail: string, private readonly signal?: AbortSignal) {
     const serviceAccount = serviceAccountFromEnvironment();
     const federation = federationFromEnvironment();
     if (!serviceAccount && !federation) throw new Error("Google Workspace workload identity is not configured.");
@@ -487,6 +487,7 @@ export class GoogleLocationMailClient {
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me${path}`, {
       ...init,
+      signal: init?.signal ?? this.signal,
       cache: "no-store",
       headers: {
         authorization: `Bearer ${await this.accessToken()}`,
@@ -511,6 +512,10 @@ export class GoogleLocationMailClient {
     if (input.pageToken) params.set("pageToken", input.pageToken);
     if (input.query) params.set("q", input.query);
     return this.request<{ messages?: Array<{ id: string; threadId: string }>; nextPageToken?: string; resultSizeEstimate?: number }>(`/messages?${params}`);
+  }
+
+  getMessageMetadata(messageId: string) {
+    return this.request<GoogleMailMessage>(`/messages/${encodeURIComponent(messageId)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Date`);
   }
 
   getMessage(messageId: string) {

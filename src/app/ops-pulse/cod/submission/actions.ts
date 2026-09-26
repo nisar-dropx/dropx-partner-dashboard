@@ -242,6 +242,8 @@ async function uploadSlipPhotos(companyId: string, submissionId: string, formDat
 }
 
 function revalidateCodPaths() {
+  revalidatePath("/cod/pending");
+  revalidatePath("/ops-pulse/cod/pending");
   revalidatePath("/ops-pulse/cod/submission");
   revalidatePath("/cod/submission");
   revalidatePath("/ops-pulse/cod/reports");
@@ -309,6 +311,8 @@ export async function createCodSubmission(
         cod_period_to: fields.codPeriodTo,
         created_at: nowIso,
         created_by: authorization.userId,
+        last_updated_by: authorization.userId,
+        last_updater_name: authorization.fullName || authorization.email,
         deposit_date: fields.depositDate,
         deposit_slip_attachments: depositAttachments,
         deposited_amount: fields.amount,
@@ -431,6 +435,8 @@ export async function updateCodSubmission(
     });
 
     const updateRow = {
+      last_updated_by: authorization.userId,
+      last_updater_name: authorization.fullName || authorization.email,
       attachments: depositAttachments,
       client: formType ? clientForFormType(formType) : null,
       cod_amount: fields.amount,

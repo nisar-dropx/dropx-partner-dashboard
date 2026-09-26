@@ -1,3 +1,8 @@
+import {CodExceptionForm} from './cod-exception-form';
+import {loadCodExceptions,type CodException} from '@/lib/ops-pulse/cod-exceptions';
+import {CodExceptionDetails,CodHistory} from '@/components/cod-proof-details';
+import {loadCodHistory} from '@/lib/ops-pulse/cod-proof-history';
+import {proofStatus} from '@/lib/ops-pulse/cod-proof-policy';
 import { cookies } from "next/headers";
 import { CodSectionTabs } from "@/components/cod-section-tabs";
 import { PageHead } from "@/components/page-head";
@@ -20,7 +25,7 @@ import {
   locationLabel,
   formTypeLabel
 } from "@/lib/ops-pulse/cod";
-import { isSupabaseAdminConfigured } from "@/lib/supabase-admin";
+import { supabaseAdmin, isSupabaseAdminConfigured } from "@/lib/supabase-admin";
 import { CodSubmissionForm } from "./cod-submission-form";
 import { CodSubmissionRegister, type CodRegisterRow } from "./cod-submission-register";
 
@@ -107,6 +112,9 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
     ? searchParams.deposit_date
     : today;
 
+  let exceptions:CodException[]=[], exceptionError='';
+  try{if(supabaseAdmin)exceptions=await loadCodExceptions(supabaseAdmin,companyId,authorization.locationScopeIds,authorization.hasAllLocationAccess,defaultDepositDate);}catch{exceptionError='Daily updates could not be loaded. Please retry.';}
+  const history=await loadCodHistory(companyId,submissionsResult.rows.map(r=>r.id),exceptions.map(e=>e.id));
   const registerRows: CodRegisterRow[] = submissionsResult.rows.map((row) => {
     const station = firstRelation(row.stations);
     const slips = depositAttachmentsFor(row);
@@ -132,6 +140,8 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
       submitterName: row.submitter_name ?? "",
       remarks: row.remarks ?? "",
       status: row.validation_status,
+      proofStatus: proofStatus(row.ai_status),
+      proofReason: row.ai_summary||'',
       hasSlip: slips.length > 0,
       slipUrl: slips.length ? depositSlipViewUrl(row.id) : null
     };
@@ -184,6 +194,13 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
             </div>
           </section>
 
+          <section className="panel"><div className="panel-head"><div><h2>Daily COD updates</h2><p className="subtle">Record Banker Not Reported with an email already sent, or No Cash with an ERP screenshot.</p></div></div><div className="panel-body">
+            <CodExceptionForm stations={stationOptions} date={defaultDepositDate} canAdd={Boolean(permission.canAdd)} canEdit={Boolean(permission.canEdit)}/>
+            <form action="/cod/submission" style={{display:'flex',gap:12,alignItems:'end',marginTop:20}}><label>Update date<input className="field" name="deposit_date" type="date" defaultValue={defaultDepositDate}/></label><button className="button secondary">Show updates</button></form>
+            {exceptionError?<p role="alert">{exceptionError}</p>:null}
+            {exceptions.map(item=><div key={item.id} style={{borderTop:'1px solid #e2e8f0',padding:'16px 0'}}><strong>{stationOptions.find(s=>s.value===item.location_id)?.label||'Station'} · {item.kind}</strong><CodExceptionDetails item={item}/><CodHistory rows={history.rows.filter(h=>h.exception_id===item.id)} error={history.error}/><CodExceptionForm stations={stationOptions} date={defaultDepositDate} existing={item} canAdd={Boolean(permission.canAdd)} canEdit={Boolean(permission.canEdit)}/></div>)}
+            {!exceptionError&&!exceptions.length?<p className="subtle">No exception updates for this date.</p>:null}
+          </div></section>
           <section className="panel">
             <div className="panel-body">
               <form action="/cod/submission" className="form-grid four">
@@ -224,6 +241,7 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
               stationOptions={stationOptions}
             />
           </section>
+          <section className="panel"><div className="panel-head"><h2>Submission history</h2></div><div className="panel-body"><CodHistory rows={history.rows.filter(h=>h.submission_id)} error={history.error}/></div></section>
         </>
       ) : null}
     </>

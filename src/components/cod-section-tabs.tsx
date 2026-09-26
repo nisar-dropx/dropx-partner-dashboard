@@ -11,7 +11,7 @@ const codSections = [
   { href: "/cod/cash-in-associate", key: "cash-in-associate", label: "Cash In Associate", visible: true },
   { href: "/cod/validation", key: "validation", label: "Validation", visible: false },
   { href: "/cod/portal-checks", key: "portal-checks", label: "Portal Checks", visible: false },
-  { href: "/cod/pending", key: "pending", label: "Daily COD Pending", visible: true }
+  { href: "/cod/pending", key: "pending", label: "Daily COD Review", visible: true }
 ] as const;
 
 export function CodSectionTabs({ active }: { active: typeof codSections[number]["key"] }) {
