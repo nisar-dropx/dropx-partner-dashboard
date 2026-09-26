@@ -16412,6 +16412,14 @@ td strong,
   gap: 7px;
 }
 
+.capacity-table-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .capacity-table-pager a,
 .capacity-table-pager i {
   align-items: center;
