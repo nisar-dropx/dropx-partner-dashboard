@@ -34,6 +34,8 @@ test("sensitive edits reuse matching server-persisted verification and safely in
   assert.match(action, /details\.registeredName/);
   assert.match(action, /matchingKinds = new Set/);
   assert.match(action, /kindsToInvalidate = uniqueVerificationKinds\.filter/);
+  assert.match(action, /invalidatedVerificationKinds = kindsToInvalidate/);
+  assert.match(action, /invalidatedVerificationKinds,[\s\S]*?savedValues: patch\.canonicalValues/);
   assert.match(action, /\.in\("profile_type", storedProfileTypes\)\.in\("kind", kindsToInvalidate\)/);
   assert.match(action, /verified_at: null/);
   assert.match(action, /details: \{ invalidated: true, reason: "profile_field_update" \}/);

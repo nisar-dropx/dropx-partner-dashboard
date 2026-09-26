@@ -21226,6 +21226,7 @@ td strong,
 }
 
 .sheet-verification-note,
+.sheet-view-verification-note,
 .sheet-save-ok,
 .sheet-save-warning,
 .sheet-save-error {
@@ -21238,6 +21239,23 @@ td strong,
 }
 
 .sheet-verification-note { color: #7c5a08; }
+.sheet-view-verification-note { color: #475569; }
+.sheet-view-verification-note.success { color: #0d7b4a; }
+.sheet-view-verification-note.warning { color: #8a5a00; }
+.sheet-view-verification-note.error { color: #b42318; }
+.sheet-view-verification-note.neutral { color: #475569; }
+.sheet-expired-date { color: #b42318; font-weight: 800; }
+.sheet-screen-reader-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .sheet-save-ok { color: #0d7b4a; }
 .sheet-save-warning { color: #8a5a00; }
 .sheet-save-error { color: #b42318; }
@@ -21340,25 +21358,52 @@ td strong,
 
 .sheet-verification-control {
   display: grid;
-  justify-items: start;
+  width: 100%;
   gap: 3px;
-  margin-top: 5px;
+}
+
+.sheet-verification-input-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.sheet-verification-input-wrap.has-button {
+  min-width: 220px;
+}
+
+.sheet-verification-input-wrap.has-button .sheet-cell-input {
+  padding-right: 98px;
+}
+
+.all-people-edit-sheet.is-editing td.sheet-column-panNumber,
+.all-people-edit-sheet.is-editing td.sheet-column-ifsc,
+.all-people-edit-sheet.is-editing td.sheet-column-pfUan,
+.all-people-edit-sheet.is-editing td.sheet-column-drivingLicenseNumber,
+.all-people-edit-sheet.is-editing td.sheet-column-vehicleRegistrationNumber {
+  min-width: 230px;
 }
 
 .sheet-verify-button {
+  position: absolute;
+  top: 50%;
+  right: 4px;
   display: inline-flex;
-  min-height: 28px;
+  min-height: 26px;
   align-items: center;
   gap: 5px;
+  transform: translateY(-50%);
   border: 1px solid #d2a43a;
   border-radius: 6px;
   padding: 4px 8px;
   color: #725109;
   background: #fff8dd;
+  cursor: pointer;
   font-size: 11px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
+.sheet-verify-button:not(:disabled):hover { border-color: #b88718; background: #fff1b8; }
 .sheet-verify-button:disabled { cursor: not-allowed; opacity: .6; }
 .sheet-view-only-label { color: var(--muted); font-size: 12px; font-weight: 700; }
 

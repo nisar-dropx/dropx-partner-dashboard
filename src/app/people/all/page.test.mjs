@@ -30,3 +30,21 @@ test("verification notes are loaded in bounded batches and query errors remain v
   assert.match(page, /!isMissingVerificationTable\(verificationResult\.error\)/);
   assert.match(page, /workforceResult\.error \?\? verificationError \?\? null/);
 });
+
+test("view verification summaries retain structured provider details separately from edit messages", () => {
+  assert.match(page, /manual_review, display_name, message, details, updated_at/);
+  assert.match(page, /const summariesByRow = new Map/);
+  assert.match(page, /buildVerificationViewSummary\(\{/);
+  assert.match(page, /display_name: item\.display_name/);
+  assert.match(page, /details: item\.details/);
+  assert.match(page, /row\.verificationNotes = notesByRow\.get\(key\)/);
+  assert.match(page, /row\.verificationSummaries = summariesByRow\.get\(key\)/);
+});
+
+test("view summaries reject stale inputs and normalize DL date formats", () => {
+  assert.match(page, /function comparableVerificationInputKey\(kind: string, value: unknown\)/);
+  assert.match(page, /const inputMatchesCurrent = comparableVerificationInputKey\(item\.kind, item\.input_key\) === comparableVerificationInputKey\(item\.kind, expectedVerificationInputKey\(row, item\.kind\)\)/);
+  assert.match(page, /if \(inputMatchesCurrent\) \{/);
+  assert.match(page, /matchNames\(row\.fullName, providerName\)\.status/);
+  assert.match(page, /nameMatchStatus: currentNameMatch/);
+});
