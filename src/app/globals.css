@@ -5936,6 +5936,10 @@ h3 {
   position: relative;
 }
 
+.form-grid.adhoc-da-single-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .adhoc-da-manual-modal {
   width: min(780px, 100%);
 }
