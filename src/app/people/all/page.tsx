@@ -86,6 +86,18 @@ function buildExportValues(
   employee: boolean
 ): AllPeopleExportValues {
   const countryCode = text(row.mobile_country_code).replace(/^\+/, "");
+  const allRows = [...categoryRows, ...workforceResult.rows];
+  const verificationResult = allRows.length ? await supabaseAdmin
+    .from("connect_profile_verifications")
+    .select("account_id, kind, verified, message")
+    .eq("company_id", companyId)
+    .in("account_id", allRows.map((row) => row.id)) : { data: [], error: null };
+  if (!verificationResult.error) {
+    const noteColumn: Record<string, keyof AllPeopleExportValues> = { pan: "panNumber", pan_aadhaar: "aadhaarNumber", dl: "drivingLicenseNumber", vehicle: "vehicleRegistrationNumber", bank: "bankAccountNumber", pf_uan: "pfUan" };
+    const notesById = new Map<string, Partial<Record<keyof AllPeopleExportValues, string>>>();
+    for (const item of (verificationResult.data ?? []) as Array<{ account_id: string; kind: string; verified: boolean; message: string | null }>) { const column = noteColumn[item.kind]; if (!column) continue; const current = notesById.get(item.account_id) ?? {}; current[column] = `${item.verified ? "Verified" : "Needs review"}${item.message ? `: ${item.message}` : ""}`; notesById.set(item.account_id, current); }
+    for (const row of allRows) row.verificationNotes = notesById.get(row.id);
+  }
   return {
     dropxId: text(row[codeField]),
     biometricId: text(row.biometric_id),
@@ -282,7 +294,7 @@ async function loadPeople(
     || !peopleIdentityKeys(row).some((key) => contractorIdentityKeys.has(key)));
   return {
     categories,
-    rows: [...categoryRows, ...workforceResult.rows],
+    rows: allRows,
     error: categoryResult.error?.message ?? designationResult.error?.message ?? allResults.find((result) => result.error)?.error ?? workforceResult.error ?? null
   };
 }
