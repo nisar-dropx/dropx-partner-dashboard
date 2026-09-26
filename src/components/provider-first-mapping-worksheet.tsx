@@ -1,10 +1,10 @@
 "use client";
 
-import { FormEvent, useDeferredValue, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { saveProviderFirstMappingWorksheet } from "@/app/provider-mapping/actions";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SubmitButton } from "@/components/submit-button";
-import type { PaymentMethodOption } from "@/components/provider-mapping-worksheet";
+import { MappingMultiFilter, type PaymentMethodOption } from "@/components/provider-mapping-worksheet";
 import { matchNames } from "@/lib/name-match";
 
 export type ProviderFirstWorker = {
@@ -67,11 +67,10 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", canEdit, mapp
   const initialSignatures = useMemo(() => initialRows.map(signature), [initialRows]);
   const [rows, setRows] = useState(initialRows);
   const [query, setQuery] = useState(initialQuery);
-  const deferredQuery = useDeferredValue(query);
-  const [stationFilter, setStationFilter] = useState("all");
-  const [methodFilter, setMethodFilter] = useState("all");
-  const [mappingFilter, setMappingFilter] = useState("all");
-  const [validationFilter, setValidationFilter] = useState("all");
+  const [stationFilters, setStationFilters] = useState<string[]>([]);
+  const [methodFilters, setMethodFilters] = useState<string[]>([]);
+  const [mappingFilters, setMappingFilters] = useState<string[]>([]);
+  const [validationFilters, setValidationFilters] = useState<string[]>([]);
   const [errors, setErrors] = useState<Record<number, string>>({});
   const paymentMethodById = useMemo(() => new Map(paymentMethods.map((method) => [method.id, method])), [paymentMethods]);
   const paymentOptions = useMemo(() => paymentMethods.map((method) => ({ value: method.id, label: method.name, helper: method.code })), [paymentMethods]);
@@ -93,17 +92,19 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", canEdit, mapp
     const hasLocationMismatch = Boolean(worker && worker.stationId !== row.stationId);
     const hasConflict = isMappedToAnotherMember(row, worker);
     const text = [row.providerMemberId, row.providerMemberName, row.dropxId, row.dropxName, row.stationLabel].join(" ").toLowerCase();
-    const matchesQuery = !deferredQuery.trim() || text.includes(deferredQuery.trim().toLowerCase());
-    const matchesStation = stationFilter === "all" || row.stationId === stationFilter;
-    const matchesMethod = methodFilter === "all" || row.paymentMethodId === methodFilter;
-    const matchesMapping = mappingFilter === "all" || (mappingFilter === "mapped" ? Boolean(row.workforceId) : !row.workforceId);
+    const matchesQuery = !query.trim() || text.includes(query.trim().toLowerCase());
+    const matchesStation = stationFilters.length === 0 || stationFilters.includes(row.stationId);
+    const matchesMethod = methodFilters.length === 0 || methodFilters.includes(row.paymentMethodId || "unassigned");
     const hasIssue = hasNameMismatch || hasLocationMismatch || hasConflict;
-    const matchesValidation = validationFilter === "all" || (validationFilter === "needs_attention" ? hasIssue : Boolean(row.workforceId) && !hasIssue);
-    return matchesQuery && matchesStation && matchesMethod && matchesMapping && matchesValidation || dirtyRows[index] ? [index] : [];
-  })), [rows, workers, deferredQuery, stationFilter, methodFilter, mappingFilter, validationFilter, dirtyRows]);
+    const mappingStatus = row.workforceId ? "mapped" : "unmapped";
+    const validationStatus = hasIssue ? "needs_attention" : row.workforceId ? "ready" : "unmapped";
+    const matchesMapping = mappingFilters.length === 0 || mappingFilters.includes(mappingStatus);
+    const matchesValidation = validationFilters.length === 0 || validationFilters.includes(validationStatus);
+    return (matchesQuery && matchesStation && matchesMethod && matchesMapping && matchesValidation) || dirtyRows[index] ? [index] : [];
+  })), [rows, workers, query, stationFilters, methodFilters, mappingFilters, validationFilters, dirtyRows]);
   const visibleCount = Array.from(visibleRows).filter((index) => !dirtyRows[index]).length;
-  const hasFilters = Boolean(query || stationFilter !== "all" || methodFilter !== "all" || mappingFilter !== "all" || validationFilter !== "all");
-  function clearFilters() { setQuery(""); setStationFilter("all"); setMethodFilter("all"); setMappingFilter("all"); setValidationFilter("all"); }
+  const hasFilters = Boolean(query || stationFilters.length || methodFilters.length || mappingFilters.length || validationFilters.length);
+  function clearFilters() { setQuery(""); setStationFilters([]); setMethodFilters([]); setMappingFilters([]); setValidationFilters([]); }
 
   function update(index: number, change: Partial<ProviderFirstMappingRow>) {
     setErrors((current) => { const next = { ...current }; delete next[index]; return next; });
@@ -172,10 +173,10 @@ export function ProviderFirstMappingWorksheet({ initialQuery = "", canEdit, mapp
       <div className="panel-head provider-first-panel-head"><div><h2>Provider member mapping</h2></div><SubmitButton className="button mapping-save-all" disabled={!canEdit || !hasDirty || hasDirtyNameMismatch || hasDirtyMappingConflict || hasDirtyLocationMismatch} disabledText={!canEdit ? "No edit access" : hasDirtyLocationMismatch ? "Fix location mismatches" : hasDirtyMappingConflict ? "Resolve mapping conflicts" : hasDirtyNameMismatch ? "Fix name mismatches" : "No edits"}>Save changes</SubmitButton></div>
             <div className="provider-first-filters">
         <label className="provider-first-search"><span>Search</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Provider member, DropX ID or name" /></label>
-        <label><span>Location</span><select value={stationFilter} onChange={(event) => setStationFilter(event.target.value)}><option value="all">All locations</option>{stations.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
-        <label><span>Payment method</span><select value={methodFilter} onChange={(event) => setMethodFilter(event.target.value)}><option value="all">All methods</option>{paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</select></label>
-        <label><span>Mapping</span><select value={mappingFilter} onChange={(event) => setMappingFilter(event.target.value)}><option value="all">All records</option><option value="mapped">Mapped</option><option value="unmapped">Unmapped</option></select></label>
-        <label><span>Validation</span><select value={validationFilter} onChange={(event) => setValidationFilter(event.target.value)}><option value="all">All statuses</option><option value="ready">Ready</option><option value="needs_attention">Needs attention</option></select></label>
+        <MappingMultiFilter allLabel="All locations" label="Location" options={stations.map(([value, label]) => ({ value, label }))} selected={stationFilters} setSelected={setStationFilters} />
+        <MappingMultiFilter allLabel="All methods" label="Payment method" options={[{ value: "unassigned", label: "No payment method" }, ...paymentMethods.map((method) => ({ value: method.id, label: method.name }))]} selected={methodFilters} setSelected={setMethodFilters} />
+        <MappingMultiFilter allLabel="All records" label="Mapping" options={[{ value: "mapped", label: "Mapped" }, { value: "unmapped", label: "Unmapped" }]} selected={mappingFilters} setSelected={setMappingFilters} />
+        <MappingMultiFilter allLabel="All statuses" label="Validation" options={[{ value: "ready", label: "Ready" }, { value: "needs_attention", label: "Needs attention" }, { value: "unmapped", label: "Unmapped" }]} selected={validationFilters} setSelected={setValidationFilters} />
         <div className="provider-first-filter-summary"><strong>{visibleCount}</strong><span>shown</span>{hasFilters ? <button className="button secondary compact" onClick={clearFilters} type="button">Clear</button> : null}</div>
       </div>
       <div className="mapping-rows">{rows.map((row, index) => {
