@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Download, EllipsisVertical, Eye, Pencil, Save, Search, X } from "lucide-react";
+import { Download, EllipsisVertical, Eye, Pencil, Save, Search, ShieldCheck, X } from "lucide-react";
 import { PendingLink } from "@/components/pending-link";
 import { StatusPill } from "@/components/status-pill";
 import { allPeopleExportColumns, type AllPeopleExportKey, type AllPeopleExportValues } from "@/lib/all-people-export";
@@ -35,6 +35,25 @@ export type AllPeopleRow = {
 
 type PageSize = 20 | 50 | 100 | 500 | "all";
 
+type SheetVerificationKind = "pan" | "pan_aadhaar" | "dl" | "vehicle" | "bank" | "pf_uan";
+type SheetVerificationResult = {
+  kind: SheetVerificationKind;
+  inputKey?: string;
+  verified?: boolean;
+  manualReview?: boolean;
+  blockSubmit?: boolean;
+  name?: string;
+  accountName?: string;
+  ownerName?: string;
+  fuelType?: string;
+  message?: string;
+  warning?: string;
+  expiryDate?: string;
+  registrationExpiryDate?: string;
+  insuranceExpiryDate?: string;
+  pollutionExpiryDate?: string;
+};
+
 const pageSizeOptions: Array<{ value: PageSize; label: string }> = [
   { value: 20, label: "20" },
   { value: 50, label: "50" },
@@ -46,6 +65,67 @@ const pageSizeOptions: Array<{ value: PageSize; label: string }> = [
 const yesNoOptions = [
   { value: "Yes", label: "Yes" },
   { value: "No", label: "No" }
+];
+
+const genderOptions = [
+  { value: "Male", label: "Male" },
+  { value: "Female", label: "Female" },
+  { value: "Other", label: "Other" }
+];
+
+const bloodGroupOptions = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+  .map((value) => ({ value, label: value }));
+
+const stateCodeOptions = [
+  "AP", "AR", "AS", "BR", "CG", "GA", "GJ", "HR", "HP", "JH", "KA", "KL", "MP", "MH", "MN", "ML", "MZ", "NL", "OD", "PB", "RJ", "SK", "TN", "TS", "TR", "UP", "UK", "WB", "AN", "CH", "DN", "DL", "JK", "LA", "LD", "PY"
+].map((value) => ({ value, label: value }));
+
+const statutoryOptions = [
+  { value: "not_applicable", label: "Not applicable" },
+  { value: "pf", label: "PF" },
+  { value: "esi", label: "ESI" }
+];
+
+const dateFieldKeys = new Set<AllPeopleExportKey>([
+  "dateOfJoin", "dateOfBirth", "drivingLicenseExpiry", "vehicleRegistrationExpiry", "vehicleInsuranceExpiry", "pollutionExpiry"
+]);
+
+const fileFieldKeys = new Set<AllPeopleExportKey>([
+  "aadhaarFrontFile", "aadhaarBackFile", "panFile", "drivingLicenseFrontFile", "drivingLicenseBackFile", "profilePhotoFile"
+]);
+
+const verificationFields: Record<Exclude<SheetVerificationKind, "pan_aadhaar">, AllPeopleExportKey[]> = {
+  pan: ["fullName", "panNumber", "aadhaarNumber"],
+  bank: ["bankAccountNumber", "ifsc"],
+  dl: ["fullName", "drivingLicenseNumber", "dateOfBirth"],
+  vehicle: ["vehicleRegistrationNumber"],
+  pf_uan: ["fullName", "pfUan"]
+};
+
+const verificationAnchorByField: Partial<Record<AllPeopleExportKey, Exclude<SheetVerificationKind, "pan_aadhaar">>> = {
+  panNumber: "pan",
+  ifsc: "bank",
+  drivingLicenseNumber: "dl",
+  vehicleRegistrationNumber: "vehicle",
+  pfUan: "pf_uan"
+};
+
+const verificationKindsByField: Partial<Record<AllPeopleExportKey, Array<Exclude<SheetVerificationKind, "pan_aadhaar">>>> = {
+  fullName: ["pan", "dl", "pf_uan"],
+  panNumber: ["pan"],
+  aadhaarNumber: ["pan"],
+  bankAccountNumber: ["bank"],
+  ifsc: ["bank"],
+  drivingLicenseNumber: ["dl"],
+  dateOfBirth: ["dl"],
+  vehicleRegistrationNumber: ["vehicle"],
+  pfUan: ["pf_uan"]
+};
+
+const sheetLeadingKeys: AllPeopleExportKey[] = ["dropxId", "fullName", "biometricId"];
+const sheetColumns = [
+  ...sheetLeadingKeys.map((key) => allPeopleExportColumns.find((column) => column.key === key)!),
+  ...allPeopleExportColumns.filter((column) => !sheetLeadingKeys.includes(column.key))
 ];
 
 const editableKeys = new Set<AllPeopleExportKey>([
@@ -136,6 +216,201 @@ function optionsFrom(values: string[]) {
     .map((value) => ({ value, label: value }));
 }
 
+function toDateInputValue(value: string) {
+  const raw = value.trim();
+  const display = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return display ? `${display[3]}-${display[2]}-${display[1]}` : raw;
+}
+
+function toDisplayDateValue(value?: string) {
+  const raw = String(value ?? "").trim();
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  const display = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  return display ? `${display[1].padStart(2, "0")}/${display[2].padStart(2, "0")}/${display[3]}` : raw;
+}
+
+function parseStatutoryValue(value: string) {
+  return Array.from(new Set(value.split(/[,;|]/).map((item) => item.trim().toLowerCase().replace(/[ -]+/g, "_")).filter(Boolean)));
+}
+
+function sheetDocumentHref(row: AllPeopleRow, field: AllPeopleExportKey) {
+  const params = new URLSearchParams({ category: row.categoryCode, id: row.id, field });
+  return `/api/people/all-profile-file?${params.toString()}#toolbar=0&navpanes=0`;
+}
+
+function verificationConfig(categoryCode: string) {
+  const configs: Record<string, { pageCode: string; profileType: string }> = {
+    employees: { pageCode: "employees", profileType: "employee" },
+    contractors: { pageCode: "contractors", profileType: "contractor" },
+    vendors: { pageCode: "vendors", profileType: "vendor" },
+    workers: { pageCode: "workers", profileType: "worker" },
+    workforce: { pageCode: "delivery_associates", profileType: "field_executive" }
+  };
+  return configs[categoryCode] ?? null;
+}
+
+function verificationResultMessage(result?: SheetVerificationResult) {
+  if (!result) return "";
+  const status = result.verified ? "Verified" : result.manualReview ? "Manual review" : "Failed";
+  const details = [
+    result.name ? `${result.kind === "pf_uan" ? "PF UAN" : result.kind === "dl" ? "DL" : "PAN"} name: ${result.name}` : "",
+    result.accountName ? `Bank name: ${result.accountName}` : "",
+    result.ownerName ? `RC owner: ${result.ownerName}` : "",
+    result.fuelType ? `Fuel type: ${result.fuelType}` : "",
+    result.warning || result.message || ""
+  ].filter(Boolean);
+  const uniqueDetails = [...new Set(details)];
+  return uniqueDetails.length ? `${status}: ${uniqueDetails.join(" · ")}` : status;
+}
+
+function SheetStatutorySelect({ disabled, label, onChange, value }: {
+  disabled: boolean;
+  label: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selected = parseStatutoryValue(value);
+  const selectedSet = new Set(selected);
+
+  useEffect(() => {
+    if (!open) return;
+    function close(event: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  function toggle(nextValue: string) {
+    if (nextValue === "not_applicable") {
+      onChange("not_applicable");
+      return;
+    }
+    const withoutNotApplicable = selected.filter((item) => item !== "not_applicable");
+    const next = selectedSet.has(nextValue)
+      ? withoutNotApplicable.filter((item) => item !== nextValue)
+      : [...withoutNotApplicable, nextValue];
+    onChange(next.length ? next.join(", ") : "not_applicable");
+  }
+
+  return (
+    <div className="sheet-statutory-select" ref={rootRef}>
+      <button aria-expanded={open} aria-label={label} className="sheet-statutory-trigger" disabled={disabled} onClick={() => setOpen((current) => !current)} type="button">
+        <span className="sheet-statutory-tags">
+          {selected.length ? selected.map((item) => <span className="sheet-statutory-tag" key={item}>{statutoryOptions.find((option) => option.value === item)?.label ?? item}</span>) : <span className="sheet-statutory-placeholder">Select…</span>}
+        </span>
+        <span aria-hidden="true">▾</span>
+      </button>
+      {open ? (
+        <div className="sheet-statutory-menu">
+          {statutoryOptions.map((option) => (
+            <label key={option.value}>
+              <input checked={selectedSet.has(option.value)} onChange={() => toggle(option.value)} type="checkbox" />
+              <span>{option.label}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SheetVerificationControl({
+  disabled,
+  kind,
+  onDerivedValue,
+  onResults,
+  results,
+  row,
+  values
+}: {
+  disabled: boolean;
+  kind: Exclude<SheetVerificationKind, "pan_aadhaar">;
+  onDerivedValue: (key: AllPeopleExportKey, value: string) => void;
+  onResults: (results: SheetVerificationResult[]) => void;
+  results: Partial<Record<SheetVerificationKind, SheetVerificationResult>>;
+  row: AllPeopleRow;
+  values: AllPeopleExportValues;
+}) {
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState("");
+  const config = verificationConfig(row.categoryCode);
+
+  const payload = {
+    accountId: row.id,
+    profileType: config?.profileType,
+    pageCode: config?.pageCode,
+    fullName: values.fullName,
+    panNumber: values.panNumber,
+    aadhaarNumber: values.aadhaarNumber,
+    dateOfBirth: values.dateOfBirth,
+    drivingLicenseNo: values.drivingLicenseNumber,
+    vehicleRegNo: values.vehicleRegistrationNumber,
+    bankAccountNo: values.bankAccountNumber,
+    ifsc: values.ifsc,
+    pfUan: values.pfUan
+  };
+  const missing = kind === "pan" && (!payload.panNumber || !payload.aadhaarNumber)
+    ? "PAN and Aadhaar are required."
+    : kind === "dl" && (!payload.drivingLicenseNo || !payload.dateOfBirth)
+      ? "DL number and date of birth are required."
+      : kind === "vehicle" && !payload.vehicleRegNo
+        ? "Vehicle number is required."
+        : kind === "bank" && (!payload.bankAccountNo || !payload.ifsc)
+          ? "Bank account and IFSC are required."
+          : kind === "pf_uan" && !payload.pfUan
+            ? "PF UAN is required."
+            : "";
+
+  async function request(target: SheetVerificationKind) {
+    const response = await fetch("/api/profile-verification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, kind: target })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || "Unable to verify.");
+    return { ...body, kind: target } as SheetVerificationResult;
+  }
+
+  async function verify() {
+    if (!config || missing) return;
+    setRunning(true);
+    setError("");
+    try {
+      const result = await request(kind);
+      const next = [result];
+      if (kind === "pan" && !result.blockSubmit) next.push(await request("pan_aadhaar"));
+      if (kind === "dl" && result.expiryDate) onDerivedValue("drivingLicenseExpiry", toDisplayDateValue(result.expiryDate));
+      if (kind === "vehicle") {
+        if (result.registrationExpiryDate) onDerivedValue("vehicleRegistrationExpiry", toDisplayDateValue(result.registrationExpiryDate));
+        if (result.insuranceExpiryDate) onDerivedValue("vehicleInsuranceExpiry", toDisplayDateValue(result.insuranceExpiryDate));
+        const electric = /electric|\bev\b/i.test(result.fuelType ?? "");
+        onDerivedValue("pollutionExpiry", electric ? "" : toDisplayDateValue(result.pollutionExpiryDate));
+      }
+      onResults(next);
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Unable to verify.");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  if (!config) return <small className="sheet-verification-note">Verification is unavailable for this custom category.</small>;
+  return (
+    <div className="sheet-verification-control">
+      <button className="sheet-verify-button" disabled={disabled || running || Boolean(missing)} onClick={verify} type="button">
+        <ShieldCheck aria-hidden="true" size={14} /> {running ? "Verifying…" : results[kind] ? "Verify again" : "Verify"}
+      </button>
+      {missing ? <small className="sheet-verification-note">{missing}</small> : null}
+      {error ? <small className="sheet-save-error">{error}</small> : null}
+    </div>
+  );
+}
+
 function AllPeopleActionMenu({ row }: { row: AllPeopleRow }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -205,6 +480,9 @@ export function AllPeopleRegister({ rows, editOptions = {} }: { rows: AllPeopleR
   const [savingIds, setSavingIds] = useState<Set<string>>(() => new Set());
   const [savingAll, setSavingAll] = useState(false);
   const [saveMessage, setSaveMessage] = useState<Record<string, string>>({});
+  const [sheetVerificationResults, setSheetVerificationResults] = useState<Record<string, Partial<Record<SheetVerificationKind, SheetVerificationResult>>>>({});
+  const [verificationNoteOverrides, setVerificationNoteOverrides] = useState<Record<string, Partial<Record<AllPeopleExportKey, string>>>>({});
+  const [documentPreview, setDocumentPreview] = useState<{ href: string; label: string } | null>(null);
   const [sheetScrollWidth, setSheetScrollWidth] = useState(0);
   const [stickyScrollFrame, setStickyScrollFrame] = useState({ left: 0, width: 0, visible: false });
 
@@ -243,6 +521,14 @@ export function AllPeopleRegister({ rows, editOptions = {} }: { rows: AllPeopleR
   useEffect(() => {
     if (!editableSheet) setSheetEditMode(false);
   }, [editableSheet]);
+  useEffect(() => {
+    if (!documentPreview) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setDocumentPreview(null);
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [documentPreview]);
   useEffect(() => {
     if (!editableSheet) return;
     const tableWrap = tableWrapRef.current;
@@ -329,6 +615,54 @@ export function AllPeopleRegister({ rows, editOptions = {} }: { rows: AllPeopleR
       return next;
     });
     setSaveMessage((current) => ({ ...current, [keyValue]: "" }));
+    const verificationKinds = verificationKindsByField[key] ?? [];
+    if (verificationKinds.length) {
+      setSheetVerificationResults((current) => {
+        const next = { ...current };
+        const rowResults = { ...(next[keyValue] ?? {}) };
+        for (const verificationKind of verificationKinds) {
+          delete rowResults[verificationKind];
+          if (verificationKind === "pan") delete rowResults.pan_aadhaar;
+        }
+        if (Object.keys(rowResults).length) next[keyValue] = rowResults;
+        else delete next[keyValue];
+        return next;
+      });
+    }
+  }
+
+  function setRowVerificationResults(row: AllPeopleRow, nextResults: SheetVerificationResult[]) {
+    const keyValue = rowKey(row);
+    setSheetVerificationResults((current) => {
+      const rowResults = { ...(current[keyValue] ?? {}) };
+      for (const result of nextResults) rowResults[result.kind] = result;
+      return { ...current, [keyValue]: rowResults };
+    });
+  }
+
+  function verificationKindsForPatch(patch: Partial<AllPeopleExportValues>) {
+    return Array.from(new Set((Object.keys(patch) as AllPeopleExportKey[])
+      .flatMap((key) => verificationKindsByField[key] ?? [])
+      .filter((kind): kind is Exclude<SheetVerificationKind, "pan_aadhaar"> => Boolean(kind))));
+  }
+
+  function updateVerificationNotesAfterSave(row: AllPeopleRow, patch: Partial<AllPeopleExportValues>) {
+    const keyValue = rowKey(row);
+    const results = sheetVerificationResults[keyValue] ?? {};
+    const kinds = verificationKindsForPatch(patch);
+    if (!kinds.length) return;
+    setVerificationNoteOverrides((current) => {
+      const rowNotes = { ...(current[keyValue] ?? {}) };
+      for (const kind of kinds) {
+        const result = results[kind];
+        const panAadhaar = kind === "pan" ? results.pan_aadhaar : undefined;
+        const messages = [verificationResultMessage(result), verificationResultMessage(panAadhaar)].filter(Boolean);
+        const message = messages.length ? messages.join(" · ") : "Needs review: Reverification required after profile field update.";
+        const anchor = Object.entries(verificationAnchorByField).find(([, candidate]) => candidate === kind)?.[0] as AllPeopleExportKey | undefined;
+        if (anchor) rowNotes[anchor] = message;
+      }
+      return { ...current, [keyValue]: rowNotes };
+    });
   }
 
   async function persistRow(row: AllPeopleRow, patch: Partial<AllPeopleExportValues>) {
@@ -351,7 +685,9 @@ export function AllPeopleRegister({ rows, editOptions = {} }: { rows: AllPeopleR
     }));
     if (!result.ok) return false;
 
-    setSavedValues((current) => ({ ...current, [keyValue]: { ...(current[keyValue] ?? {}), ...patch } }));
+    const savedPatch = "savedValues" in result ? result.savedValues : patch;
+    setSavedValues((current) => ({ ...current, [keyValue]: { ...(current[keyValue] ?? {}), ...savedPatch } }));
+    updateVerificationNotesAfterSave(row, patch);
     const updatedAt = "updatedAt" in result && typeof result.updatedAt === "string" ? result.updatedAt : undefined;
     if (updatedAt) setVersions((current) => ({ ...current, [keyValue]: updatedAt }));
     setDrafts((current) => {
@@ -407,7 +743,10 @@ export function AllPeopleRegister({ rows, editOptions = {} }: { rows: AllPeopleR
       return;
     }
     if (dirtyRows.length && !window.confirm(`Discard unsaved changes in ${dirtyRows.length} row${dirtyRows.length === 1 ? "" : "s"}?`)) return;
-    if (dirtyRows.length) setDrafts({});
+    if (dirtyRows.length) {
+      setDrafts({});
+      setSheetVerificationResults({});
+    }
     setSheetEditMode(false);
   }
 
@@ -489,7 +828,7 @@ export function AllPeopleRegister({ rows, editOptions = {} }: { rows: AllPeopleR
       </div>
       <div className="table-wrap field-executive-table-wrap employee-table-wrap all-people-table-wrap" ref={tableWrapRef}>
         {editableSheet ? <table className="all-people-edit-sheet">
-          <thead><tr>{allPeopleExportColumns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Save</th></tr></thead>
+          <thead><tr>{sheetColumns.map((column) => <th className={`sheet-column-${column.key}`} key={column.key}>{column.label}</th>)}<th className="sheet-row-actions">Save</th></tr></thead>
           <tbody>
             {sheetRows.map((row) => {
               const rowId = rowKey(row);
@@ -499,22 +838,57 @@ export function AllPeopleRegister({ rows, editOptions = {} }: { rows: AllPeopleR
               const rowSaving = savingIds.has(rowId);
               return (
                 <tr className={rowDirty ? "sheet-row-dirty" : undefined} key={rowId}>
-                  {allPeopleExportColumns.map((column) => {
+                  {sheetColumns.map((column) => {
                     const editable = canEditField(row, column.key);
                     const cellDirty = Object.prototype.hasOwnProperty.call(rowPatch, column.key);
                     const fieldOptions = column.key === "location"
                       ? locationOptions
                       : column.key === "designation"
-                        ? designationOptions.filter((option) => !option.categoryCodes?.length || option.categoryCodes.includes(row.categoryCode))
+                        ? designationOptions.filter((option) => option.categoryCodes === undefined || option.categoryCodes.includes(row.categoryCode))
                         : column.key === "active" || column.key === "handicapped"
                           ? activeOptions
+                          : column.key === "gender"
+                            ? genderOptions
+                            : column.key === "bloodGroup"
+                              ? bloodGroupOptions
+                              : column.key === "stateCode"
+                                ? stateCodeOptions
                           : undefined;
                     const cellValue = values[column.key] ?? "";
                     const linkedField = column.key === "model" || column.key === "provider";
+                    const fileField = fileFieldKeys.has(column.key);
+                    const dateField = dateFieldKeys.has(column.key);
+                    const verificationKind = verificationAnchorByField[column.key];
+                    const groupDirty = verificationKind
+                      ? verificationFields[verificationKind].some((key) => Object.prototype.hasOwnProperty.call(rowPatch, key))
+                      : false;
+                    const rowVerificationResults = sheetVerificationResults[rowId] ?? {};
+                    const note = groupDirty
+                      ? [verificationResultMessage(verificationKind ? rowVerificationResults[verificationKind] : undefined), verificationKind === "pan" ? verificationResultMessage(rowVerificationResults.pan_aadhaar) : ""].filter(Boolean).join(" · ") || "Reverification required after this edit."
+                      : verificationNoteOverrides[rowId]?.[column.key] ?? row.verificationNotes?.[column.key];
                     return (
-                      <td className={`${cellDirty ? "sheet-cell-dirty" : ""} ${!editable ? "sheet-cell-readonly" : ""}`.trim()} key={column.key} title={linkedField ? "Linked to location and updated automatically" : !editable ? "Read-only field" : undefined}>
-                        {sheetEditMode && editable ? (
-                          fieldOptions ? (
+                      <td className={`${cellDirty ? "sheet-cell-dirty" : ""} ${!editable ? "sheet-cell-readonly" : ""} sheet-column-${column.key}`.trim()} key={column.key} title={linkedField ? "Linked to location and updated automatically" : !editable && !fileField ? "Read-only field" : undefined}>
+                        {fileField ? (
+                          cellValue ? (
+                            <button
+                              aria-label={`View ${column.label} for ${row.fullName}`}
+                              className="icon-button sheet-file-view"
+                              onClick={() => setDocumentPreview({ href: sheetDocumentHref(row, column.key), label: `${column.label} · ${row.fullName}` })}
+                              title={`View ${column.label}`}
+                              type="button"
+                            >
+                              <Eye aria-hidden="true" size={17} />
+                            </button>
+                          ) : <span className="sheet-cell-value">-</span>
+                        ) : sheetEditMode && editable ? (
+                          column.key === "statutoryApplicability" ? (
+                            <SheetStatutorySelect
+                              disabled={rowSaving}
+                              label={`${column.label} for ${row.fullName}`}
+                              onChange={(value) => changeValue(row, column.key, value)}
+                              value={cellValue}
+                            />
+                          ) : fieldOptions ? (
                             <select
                               aria-label={`${column.label} for ${row.fullName}`}
                               className="sheet-cell-input sheet-cell-select"
@@ -531,12 +905,24 @@ export function AllPeopleRegister({ rows, editOptions = {} }: { rows: AllPeopleR
                               aria-label={`${column.label} for ${row.fullName}`}
                               className="sheet-cell-input"
                               disabled={rowSaving}
-                              onChange={(event) => changeValue(row, column.key, event.target.value)}
-                              value={cellValue}
+                              onChange={(event) => changeValue(row, column.key, dateField ? toDisplayDateValue(event.target.value) : event.target.value)}
+                              type={dateField ? "date" : "text"}
+                              value={dateField ? toDateInputValue(cellValue) : cellValue}
                             />
                           )
                         ) : <span className="sheet-cell-value">{cellValue || "-"}</span>}
-                        {row.verificationNotes?.[column.key] ? <small className="sheet-verification-note">{row.verificationNotes[column.key]}</small> : null}
+                        {note ? <small className="sheet-verification-note">{note}</small> : null}
+                        {sheetEditMode && verificationKind && groupDirty ? (
+                          <SheetVerificationControl
+                            disabled={rowSaving || savingAll}
+                            kind={verificationKind}
+                            onDerivedValue={(key, value) => changeValue(row, key, value)}
+                            onResults={(results) => setRowVerificationResults(row, results)}
+                            results={rowVerificationResults}
+                            row={row}
+                            values={values}
+                          />
+                        ) : null}
                       </td>
                     );
                   })}
@@ -555,7 +941,7 @@ export function AllPeopleRegister({ rows, editOptions = {} }: { rows: AllPeopleR
                 </tr>
               );
             })}
-            {!sheetRows.length ? <tr><td className="empty-cell" colSpan={allPeopleExportColumns.length + 1}>No people match the selected filters.</td></tr> : null}
+            {!sheetRows.length ? <tr><td className="empty-cell" colSpan={sheetColumns.length + 1}>No people match the selected filters.</td></tr> : null}
           </tbody>
         </table> : <table>
           <thead><tr><th>DropX ID</th><th>Biometric ID</th><th>Full name</th><th>Category</th><th>Mobile</th><th>Email</th><th>Location</th><th>Model</th><th>Provider</th><th>Designation</th><th>Status</th><th>Action</th></tr></thead>
@@ -651,6 +1037,24 @@ export function AllPeopleRegister({ rows, editOptions = {} }: { rows: AllPeopleR
                 <Download aria-hidden="true" size={16} /> {exporting ? "Preparing..." : "Export Excel"}
               </button>
             </div>
+          </section>
+        </div>
+      ) : null}
+      {documentPreview ? (
+        <div className="modal-backdrop sheet-document-backdrop" onMouseDown={(event) => {
+          if (event.currentTarget === event.target) setDocumentPreview(null);
+        }}>
+          <section aria-labelledby="sheet-document-preview-title" aria-modal="true" className="modal-panel sheet-document-preview" role="dialog">
+            <div className="panel-head">
+              <div>
+                <h2 id="sheet-document-preview-title">{documentPreview.label}</h2>
+                <p className="subtle">View only</p>
+              </div>
+              <button aria-label="Close document preview" className="icon-button" onClick={() => setDocumentPreview(null)} type="button">
+                <X aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <iframe referrerPolicy="no-referrer" sandbox="" src={documentPreview.href} title={documentPreview.label} />
           </section>
         </div>
       ) : null}

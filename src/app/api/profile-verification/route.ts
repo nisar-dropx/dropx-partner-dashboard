@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthorization, hasPermission } from "@/lib/authorization";
+import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { requireCompanyId } from "@/lib/company-scope";
+import { canAccessDesignationPortal } from "@/lib/designation-portal-access";
 import { matchNames } from "@/lib/name-match";
-import { isMissingVerificationTable } from "@/lib/profile-verifications";
+import { isMissingVerificationTable, saveProfileVerification } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { callVerificationProvider } from "@/lib/verification-api-audit";
 import {
   isWorkforceProfileType,
   nonEmployeeConfigForProfileType,
+  type WorkforceProfileType,
   workforceTable
 } from "@/lib/workforce-profiles";
 
@@ -132,21 +134,45 @@ async function dashboardAccount(accountId: string, profileType: string, pageCode
   if (!authorization) throw new Error("Login required.");
   if (!isWorkforceProfileType(profileType)) throw new Error("Invalid profile type.");
   const config = nonEmployeeConfigForProfileType(profileType);
-  const permissionCode = profileType === "employee" ? "employees" : config!.pageCode;
+  const permissionCode = profileType === "employee"
+    ? "employees"
+    : profileType === "workforce"
+      ? "delivery_associates"
+      : config!.pageCode;
   if (!hasPermission(authorization, permissionCode, "edit")) {
     throw new Error("Permission required.");
   }
   const companyId = requireCompanyId(authorization);
   const table = workforceTable(profileType);
+  const designationField = ["employee", "workforce", "field_executive"].includes(profileType) ? "designation_id" : "designation";
   const result = await supabaseAdmin
     .from(table)
-    .select(profileType === "employee" ? "id, company_id, employee_code, full_name" : "id, company_id, dropx_id, full_name")
+    .select(profileType === "employee"
+      ? `id, company_id, location_id, designation_id, employee_code, full_name`
+      : `id, company_id, location_id, ${designationField}, dropx_id, full_name`)
     .eq("id", accountId)
     .eq("company_id", companyId)
     .maybeSingle();
   if (result.error) throw new Error(result.error.message);
   const row = result.data;
   if (!row) throw new Error("Account not found.");
+  const locationId = text(row.location_id);
+  if (!isCompanyOwner(authorization) && !authorization.hasAllLocationAccess &&
+      (!locationId || !authorization.locationScopeIds.includes(locationId))) {
+    throw new Error("This profile is outside your location access.");
+  }
+  const designationResult = await supabaseAdmin.from("designations")
+    .select("id, name, portal_permissions")
+    .eq("company_id", companyId)
+    .eq("is_active", true);
+  if (designationResult.error) throw new Error(designationResult.error.message);
+  const designationValue = text((row as Record<string, unknown>)[designationField]);
+  const designation = (designationResult.data ?? []).find((item) => designationField === "designation_id"
+    ? text(item.id) === designationValue
+    : text(item.name).toLowerCase() === designationValue.toLowerCase());
+  if (!canAccessDesignationPortal(designation, "dashboard", "edit", { isOwner: isCompanyOwner(authorization) })) {
+    throw new Error("This designation does not allow profile verification from Dashboard.");
+  }
   const accountCode = profileType === "employee"
     ? compact((row as { employee_code?: unknown }).employee_code)
     : compact((row as { dropx_id?: unknown }).dropx_id);
@@ -265,6 +291,16 @@ export async function POST(request: NextRequest) {
       source: "dashboard",
       verificationKind: kind
     };
+    async function persistResult(result: Record<string, unknown>) {
+      await saveProfileVerification({
+        accountId,
+        companyId: account.companyId,
+        kind,
+        profileType: profileType as WorkforceProfileType,
+        result: { ...result, registeredName }
+      });
+      return verifiedResponse(result);
+    }
 
     if (kind === "pan") {
       const panNumber = text(payload.panNumber).toUpperCase();
@@ -297,7 +333,7 @@ export async function POST(request: NextRequest) {
               : "PAN verification failed.",
         rawStatus: body?.status ?? null
       };
-      return verifiedResponse(result);
+      return await persistResult(result);
     }
 
     if (kind === "pan_aadhaar") {
@@ -333,7 +369,7 @@ export async function POST(request: NextRequest) {
             text(body?.message) ||
             (verified ? "PAN Aadhaar link verified." : "PAN Aadhaar link verification failed.")
       };
-      return verifiedResponse(result);
+      return await persistResult(result);
     }
 
     if (kind === "dl") {
@@ -377,7 +413,7 @@ export async function POST(request: NextRequest) {
                 ? "DL name mismatch."
                 : "DL verification failed."
       };
-      return verifiedResponse(result);
+      return await persistResult(result);
     }
 
     if (kind === "vehicle") {
@@ -402,7 +438,7 @@ export async function POST(request: NextRequest) {
         insuranceExpiryDate: normalizeDate(data?.vehicle_insurance_upto ?? data?.insurance_upto),
         pollutionExpiryDate: isElectricFuel(fuelType) ? "" : normalizeDate(data?.pucc_upto)
       };
-      return verifiedResponse(result);
+      return await persistResult(result);
     }
 
     if (kind === "bank") {
@@ -424,7 +460,7 @@ export async function POST(request: NextRequest) {
         accountName: compact(resource?.creditorName),
         message: verified ? text(body?.message) || "Bank account checked." : "Bank verification failed."
       };
-      return verifiedResponse(result);
+      return await persistResult(result);
     }
 
     if (kind === "pf_uan") {
@@ -458,7 +494,7 @@ export async function POST(request: NextRequest) {
               : "PF UAN verification failed.",
         rawStatus: body?.status ?? null
       };
-      return verifiedResponse(result);
+      return await persistResult(result);
     }
 
     throw new Error("Unsupported verification type.");

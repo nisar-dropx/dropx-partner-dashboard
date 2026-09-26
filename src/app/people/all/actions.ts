@@ -8,7 +8,9 @@ import { dynamicWorkforceTable, isCustomWorkforceCategoryCode, normalizeWorkforc
 import { buildAllPeopleSheetPatch } from "@/lib/all-people-sheet";
 import type { AllPeopleExportKey } from "@/lib/all-people-export";
 import { syncBiometricEnrolment } from "@/lib/biometric/enrolments";
+import { saveProfileVerification } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import type { WorkforceProfileType } from "@/lib/workforce-profiles";
 
 type SheetChanges = Partial<Record<AllPeopleExportKey, string>>;
 type SheetSource = { categoryCode: string; designationStorage: "id" | "name"; employeeColumns: boolean; pageCode: string; table: string };
@@ -30,6 +32,32 @@ const biometricProfiles: Record<string, BiometricProfile> = {
   vendors: { profileType: "vendor", workerType: "individual_contract" },
   workers: { profileType: "worker", workerType: "individual_contract" }
 };
+
+const verificationProfileTypes: Partial<Record<string, WorkforceProfileType>> = {
+  employees: "employee",
+  workforce: "field_executive",
+  contractors: "contractor",
+  vendors: "vendor",
+  workers: "worker"
+};
+
+type VerificationKind = "pan" | "pan_aadhaar" | "dl" | "vehicle" | "bank" | "pf_uan";
+
+function verificationDateKey(value: unknown) {
+  const raw = String(value ?? "").trim();
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return (iso ? `${iso[3]}-${iso[2]}-${iso[1]}` : raw.replace(/\//g, "-")).toUpperCase();
+}
+
+function verificationInputKey(kind: VerificationKind, source: SheetSource, existing: Record<string, unknown>, payload: Record<string, unknown>) {
+  const value = (column: string) => String(Object.prototype.hasOwnProperty.call(payload, column) ? payload[column] ?? "" : existing[column] ?? "").trim().toUpperCase();
+  if (kind === "pan") return value("pan_number");
+  if (kind === "pan_aadhaar") return `${value("pan_number")}|${value("aadhaar_number")}`;
+  if (kind === "dl") return `${value("driving_license_no")}|${verificationDateKey(Object.prototype.hasOwnProperty.call(payload, "date_of_birth") ? payload.date_of_birth : existing.date_of_birth)}`;
+  if (kind === "vehicle") return value("vehicle_reg_no");
+  if (kind === "pf_uan") return value("pf_uan");
+  return `${value("bank_account_no")}|${value(source.employeeColumns ? "ifsc" : "ifsc_code")}`;
+}
 
 function failure(error: string, code = "VALIDATION_ERROR") { return { ok: false as const, error, code }; }
 function identity(value: unknown) { return String(value ?? "").trim().toLowerCase(); }
@@ -142,9 +170,79 @@ export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expecte
   }
 
   for (const [column, value] of Object.entries(payload)) if (sameValue(existing[column], value)) delete payload[column];
-  if (!Object.keys(payload).length) return { ok: true as const, updatedAt: String(existing.updated_at), changedKeys: [] as AllPeopleExportKey[] };
+  if (!Object.keys(payload).length) return {
+    ok: true as const,
+    updatedAt: String(existing.updated_at),
+    changedKeys: [] as AllPeopleExportKey[],
+    savedValues: patch.canonicalValues
+  };
 
   const nextUpdatedAt = new Date().toISOString();
+  const verificationKinds: VerificationKind[] = [];
+  if ("pan_number" in payload) verificationKinds.push("pan", "pan_aadhaar");
+  if ("aadhaar_number" in payload) verificationKinds.push("pan_aadhaar");
+  if ("driving_license_no" in payload || "date_of_birth" in payload) verificationKinds.push("dl");
+  if ("vehicle_reg_no" in payload) verificationKinds.push("vehicle");
+  if ("bank_account_no" in payload || (source.employeeColumns ? "ifsc" : "ifsc_code") in payload) verificationKinds.push("bank");
+  if ("pf_uan" in payload) verificationKinds.push("pf_uan");
+  if ("full_name" in payload) verificationKinds.push("pan", "dl", "pf_uan");
+  const uniqueVerificationKinds = [...new Set(verificationKinds)];
+  const verificationProfileType = verificationProfileTypes[source.categoryCode];
+  if (uniqueVerificationKinds.length && verificationProfileType) {
+    try {
+      const storedProfileTypes = verificationProfileType === "field_executive" ? ["workforce", "field_executive"] : [verificationProfileType];
+      const stored = await supabaseAdmin.from("connect_profile_verifications")
+        .select("kind, input_key, details")
+        .eq("company_id", companyId)
+        .eq("account_id", id)
+        .in("profile_type", storedProfileTypes)
+        .in("kind", uniqueVerificationKinds);
+      if (stored.error) throw new Error(stored.error.message);
+      const effectiveFullName = identity(payload.full_name ?? existing.full_name);
+      const nameSensitiveKinds = new Set<VerificationKind>(["pan", "dl", "pf_uan"]);
+      const matchingKinds = new Set((stored.data ?? []).flatMap((item) => {
+        const kind = String(item.kind ?? "") as VerificationKind;
+        const details = item.details && typeof item.details === "object" ? item.details as Record<string, unknown> : {};
+        const nameMatches = !("full_name" in payload) || !nameSensitiveKinds.has(kind)
+          || (Boolean(identity(details.registeredName)) && identity(details.registeredName) === effectiveFullName);
+        return nameMatches && String(item.input_key ?? "").trim().toUpperCase() === verificationInputKey(kind, source, existing, payload) ? [kind] : [];
+      }));
+      const kindsToInvalidate = uniqueVerificationKinds.filter((kind) => !matchingKinds.has(kind));
+      if (kindsToInvalidate.length) {
+        const invalidate = await supabaseAdmin.from("connect_profile_verifications").update({
+          verified: false,
+          manual_review: false,
+          block_submit: true,
+          verified_at: null,
+          details: { invalidated: true, reason: "profile_field_update" },
+          message: "Reverification required after profile field update.",
+          updated_at: nextUpdatedAt
+        }).eq("company_id", companyId).eq("account_id", id).in("profile_type", storedProfileTypes).in("kind", kindsToInvalidate);
+        if (invalidate.error) throw new Error(invalidate.error.message);
+      }
+
+      for (const kind of kindsToInvalidate) {
+        const inputKey = verificationInputKey(kind, source, existing, payload);
+        if (!inputKey.replace(/\|/g, "")) continue;
+        await saveProfileVerification({
+          accountId: id,
+          companyId,
+          kind,
+          profileType: verificationProfileType,
+          result: {
+            inputKey,
+            verified: false,
+            manualReview: false,
+            blockSubmit: true,
+            message: "Reverification required after profile field update."
+          }
+        });
+      }
+    } catch (error) {
+      return failure(`Verification status could not be updated, so the profile was not saved: ${error instanceof Error ? error.message : "unknown error"}`, "VERIFICATION_UPDATE_FAILED");
+    }
+  }
+
   const update = await supabaseAdmin.from(source.table).update({ ...payload, updated_at: nextUpdatedAt })
     .eq("company_id", companyId).eq("id", id).eq("updated_at", existing.updated_at).select("updated_at").maybeSingle();
   if (update.error) return failure(update.error.message, "UPDATE_FAILED");
@@ -172,19 +270,13 @@ export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expecte
     }
   }
 
-  const verificationKinds: string[] = [];
-  if ("pan_number" in payload) verificationKinds.push("pan", "pan_aadhaar");
-  if ("aadhaar_number" in payload) verificationKinds.push("pan_aadhaar");
-  if ("driving_license_no" in payload) verificationKinds.push("dl");
-  if ("vehicle_reg_no" in payload) verificationKinds.push("vehicle");
-  if ("bank_account_no" in payload || (source.employeeColumns ? "ifsc" : "ifsc_code") in payload) verificationKinds.push("bank");
-  if ("pf_uan" in payload) verificationKinds.push("pf_uan");
-  if (verificationKinds.length) await supabaseAdmin.from("connect_profile_verifications").update({
-    verified: false, manual_review: false, block_submit: true,
-    message: "Reverification required after profile field update.", updated_at: nextUpdatedAt
-  }).eq("company_id", companyId).eq("account_id", id).in("kind", [...new Set(verificationKinds)]);
-
   revalidatePath("/people/all");
   if (source.categoryCode === "workforce") revalidatePath("/people/workforce");
-  return { ok: true as const, updatedAt: String(update.data.updated_at ?? nextUpdatedAt), changedKeys: patch.changedKeys, warning };
+  return {
+    ok: true as const,
+    updatedAt: String(update.data.updated_at ?? nextUpdatedAt),
+    changedKeys: patch.changedKeys,
+    savedValues: patch.canonicalValues,
+    warning
+  };
 }

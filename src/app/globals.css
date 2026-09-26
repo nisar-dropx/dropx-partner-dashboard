@@ -21110,6 +21110,8 @@ td strong,
 }
 /* All People editable sheet is deliberately isolated from the normal register. */
 .all-people-edit-sheet {
+  border-collapse: separate;
+  border-spacing: 0;
   min-width: 7200px;
 }
 
@@ -21125,6 +21127,54 @@ td strong,
   max-width: 280px;
   vertical-align: top;
   transition: background-color .15s ease;
+}
+
+.all-people-edit-sheet th.sheet-column-dropxId,
+.all-people-edit-sheet td.sheet-column-dropxId {
+  left: 0;
+  min-width: 140px;
+  width: 140px;
+  max-width: 140px;
+}
+
+.all-people-edit-sheet th.sheet-column-fullName,
+.all-people-edit-sheet td.sheet-column-fullName {
+  left: 140px;
+  min-width: 210px;
+  width: 210px;
+  max-width: 210px;
+  box-shadow: 5px 0 9px -8px rgba(15, 23, 42, .65);
+}
+
+.all-people-edit-sheet th.sheet-column-dropxId,
+.all-people-edit-sheet th.sheet-column-fullName {
+  z-index: 6;
+  background: #f8fafc;
+}
+
+.all-people-edit-sheet td.sheet-column-dropxId,
+.all-people-edit-sheet td.sheet-column-fullName {
+  position: sticky;
+  z-index: 3;
+  background: #fff;
+}
+
+.all-people-edit-sheet th.sheet-column-aadhaarFrontFile,
+.all-people-edit-sheet th.sheet-column-aadhaarBackFile,
+.all-people-edit-sheet th.sheet-column-panFile,
+.all-people-edit-sheet th.sheet-column-drivingLicenseFrontFile,
+.all-people-edit-sheet th.sheet-column-drivingLicenseBackFile,
+.all-people-edit-sheet th.sheet-column-profilePhotoFile,
+.all-people-edit-sheet td.sheet-column-aadhaarFrontFile,
+.all-people-edit-sheet td.sheet-column-aadhaarBackFile,
+.all-people-edit-sheet td.sheet-column-panFile,
+.all-people-edit-sheet td.sheet-column-drivingLicenseFrontFile,
+.all-people-edit-sheet td.sheet-column-drivingLicenseBackFile,
+.all-people-edit-sheet td.sheet-column-profilePhotoFile {
+  min-width: 92px;
+  width: 92px;
+  max-width: 92px;
+  text-align: center;
 }
 
 .all-people-edit-sheet tr.sheet-row-dirty > td {
@@ -21183,6 +21233,8 @@ td strong,
   margin-top: 5px;
   font-size: 10px;
   line-height: 1.3;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .sheet-verification-note { color: #7c5a08; }
@@ -21190,8 +21242,142 @@ td strong,
 .sheet-save-warning { color: #8a5a00; }
 .sheet-save-error { color: #b42318; }
 .sheet-save-button { min-width: 76px; }
-.sheet-row-actions { position: sticky; right: 0; z-index: 1; }
+.all-people-edit-sheet .sheet-row-actions {
+  position: sticky;
+  right: 0;
+  z-index: 4;
+  min-width: 116px;
+  width: 116px;
+  max-width: 116px;
+  border-left: 1px solid #d5deea;
+  background: #fff;
+  box-shadow: -6px 0 10px -9px rgba(15, 23, 42, .72);
+}
+
+.all-people-edit-sheet thead .sheet-row-actions {
+  z-index: 7;
+  background: #f8fafc;
+}
+
+.all-people-edit-sheet tr.sheet-row-dirty > td.sheet-row-actions,
+.all-people-edit-sheet tr.sheet-row-dirty > td.sheet-column-dropxId,
+.all-people-edit-sheet tr.sheet-row-dirty > td.sheet-column-fullName {
+  background: #fff7c2;
+}
+
+.all-people-edit-sheet tr.sheet-row-dirty > td.sheet-column-fullName.sheet-cell-dirty {
+  background: #ffd9a8;
+}
+
+.sheet-file-view {
+  margin: 0 auto;
+  width: 30px;
+  height: 30px;
+  color: #31527b;
+  background: #eef4fb;
+}
+
+.sheet-statutory-select {
+  position: relative;
+  min-width: 210px;
+}
+
+.sheet-statutory-trigger {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 4px 7px;
+  color: var(--ink);
+  background: #fff;
+  text-align: left;
+}
+
+.sheet-statutory-tags {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sheet-statutory-tag {
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: #ffe8df;
+  color: #8c341d;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.sheet-statutory-placeholder { color: var(--muted); }
+
+.sheet-statutory-menu {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 4px);
+  left: 0;
+  display: grid;
+  min-width: 210px;
+  gap: 7px;
+  border: 1px solid #d5deea;
+  border-radius: 8px;
+  padding: 9px;
+  background: #fff;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, .16);
+}
+
+.sheet-statutory-menu label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.sheet-verification-control {
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  margin-top: 5px;
+}
+
+.sheet-verify-button {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #d2a43a;
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: #725109;
+  background: #fff8dd;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.sheet-verify-button:disabled { cursor: not-allowed; opacity: .6; }
 .sheet-view-only-label { color: var(--muted); font-size: 12px; font-weight: 700; }
+
+.sheet-document-backdrop { z-index: 120; }
+
+.sheet-document-preview {
+  display: grid;
+  width: min(1100px, calc(100vw - 32px));
+  height: min(840px, calc(100vh - 32px));
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+
+.sheet-document-preview iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #eef2f7;
+}
 
 .all-people-filters > .button {
   align-items: center;

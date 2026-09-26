@@ -16,6 +16,10 @@ test("builds a minimal patch containing only the changed canonical fields", () =
   }, employee);
 
   assert.deepEqual(result, {
+    canonicalValues: {
+      fullName: "Jane Doe",
+      email: "jane@example.com"
+    },
     changedKeys: ["fullName", "email"],
     deferred: {},
     payload: {
@@ -98,6 +102,15 @@ test("normalizes dates, booleans, identifiers, and explicit clearing", () => {
     pan_number: "ABCDE1234F",
     statutory_applicability: ["pf", "esi"],
     profile_return_remarks: null
+  });
+  assert.deepEqual(result.canonicalValues, {
+    dateOfJoin: "26/09/2026",
+    active: "Yes",
+    handicapped: "No",
+    aadhaarNumber: "123456789012",
+    panNumber: "ABCDE1234F",
+    statutoryApplicability: "pf, esi",
+    returnRemarks: ""
   });
 });
 
