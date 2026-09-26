@@ -12,6 +12,24 @@ export function isLocalApprovalStage(step: ApprovalStage) {
   return step.has_local_candidates ?? step.candidates.some(candidate => candidate.scope !== "company");
 }
 
+/**
+ * Repairs a persisted step pointer when the named assignee role belongs to one
+ * unambiguous configured step but the request still points at another step.
+ * Never infer a step for roles reused at multiple levels.
+ */
+export function effectiveApprovalStepOrder(
+  steps: ApprovalStage[],
+  storedStepOrder: number,
+  assignedRoleId: string | null | undefined
+) {
+  if (!assignedRoleId) return storedStepOrder;
+  const storedStep = steps.find(step => step.step_order === storedStepOrder);
+  if (storedStep?.candidates.some(candidate => candidate.role_id === assignedRoleId)) return storedStepOrder;
+
+  const matchingSteps = steps.filter(step => step.candidates.some(candidate => candidate.role_id === assignedRoleId));
+  return matchingSteps.length === 1 ? matchingSteps[0].step_order : storedStepOrder;
+}
+
 export async function resolveInitialStage<T extends ApprovalStage>(
   steps: T[], resolve: (step: T) => Promise<StageTarget>
 ) {

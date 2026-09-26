@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {resolveInitialStage, initialStageStatus, hasInitialApprovalForStage, hasInitialApprovalForPersistedRequest, matchesCurrentPaymentAssignee, isPendingPaymentApproval} from './payment-stage-policy.ts';
+import {resolveInitialStage, initialStageStatus, hasInitialApprovalForStage, hasInitialApprovalForPersistedRequest, matchesCurrentPaymentAssignee, isPendingPaymentApproval, effectiveApprovalStepOrder} from './payment-stage-policy.ts';
 
 const step=(order,role,scope='station',required=false)=>({step_order:order,candidates:[{role_id:role,scope}],is_required:required});
 const steps=[step(1,'senior'),step(2,'cluster'),step(3,'business','company'),step(4,'finance','company',true)];
@@ -60,6 +60,16 @@ test('broad roles do not override a named manager assignment, unnamed role pools
   assert.equal(matchesCurrentPaymentAssignee('business-user',['business'],request),false);
   assert.equal(matchesCurrentPaymentAssignee('cluster-user',['cluster'],request),true);
   assert.equal(matchesCurrentPaymentAssignee('business-user',['business'],{...request,current_approver_user_id:null}),true);
+});
+test('repairs a stale step pointer when the assigned role belongs to one later step',()=>{
+  assert.equal(effectiveApprovalStepOrder(steps,1,'business'),3);
+});
+test('does not infer a step when a role is reused at multiple levels',()=>{
+  const ambiguous=[step(1,'area'),step(2,'area','company',true)];
+  assert.equal(effectiveApprovalStepOrder(ambiguous,1,'area'),1);
+});
+test('keeps a valid stored step unchanged',()=>{
+  assert.equal(effectiveApprovalStepOrder(steps,2,'cluster'),2);
 });
 test('routing on both surfaces no longer skips an approver based on roster availability',()=>{
   for(const file of ['./payment-approval-steps.ts','../../apps/connect/src/lib/payment-approval-steps.ts']) {

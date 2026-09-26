@@ -9,6 +9,7 @@ import { sendPaymentNotification } from "@/lib/payment-email-notifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { findPositionApprover } from "@/lib/position-access";
 import { advanceApproval, loadApprovalSteps } from "@/lib/payment-approval-steps";
+import { effectiveApprovalStepOrder } from "@/lib/payment-stage-policy";
 
 function clean(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
@@ -394,6 +395,12 @@ export async function approvePaymentRequest(formData: FormData) {
   const roleCode = String(role?.code ?? authorization.roleCode ?? "USER").trim().toUpperCase();
   const ownerCanFinalize = authorization.isMasterOwner || roleCode === "OWNER";
 
+  const steps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id) : [];
+  const storedStepOrder = Number(request.current_step_order) || 1;
+  const approvalStepOrder = steps.length
+    ? effectiveApprovalStepOrder(steps, storedStepOrder, request.current_approver_role_id)
+    : storedStepOrder;
+
   await insertPaymentApprovalLog({
     payment_request_id: request.id,
     approver_user_id: authorization.userId,
@@ -402,9 +409,6 @@ export async function approvePaymentRequest(formData: FormData) {
     action: "approved",
     comments
   }, companyId);
-
-  const steps = request.payment_head_id ? await loadApprovalSteps(companyId, request.payment_head_id) : [];
-  const storedStepOrder = Number(request.current_step_order) || 1;
 
   if (steps.length) {
     if (ownerCanFinalize) {
@@ -418,12 +422,12 @@ export async function approvePaymentRequest(formData: FormData) {
         updated_by: authorization.userId
       });
     } else {
-      const advance = await advanceApproval(companyId, steps, storedStepOrder, request.location_id);
+      const advance = await advanceApproval(companyId, steps, approvalStepOrder, request.location_id);
       if (advance.done) {
         await updatePaymentRequest(request.id, companyId, {
           status: "approved",
           approval_status: "FINAL_APPROVED",
-          current_step_order: storedStepOrder,
+          current_step_order: approvalStepOrder,
           current_approver_user_id: null,
           current_approver_role_id: null,
           current_approver_role_ids: [],
