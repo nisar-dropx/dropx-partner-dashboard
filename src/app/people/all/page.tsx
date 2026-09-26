@@ -8,6 +8,8 @@ import { canAccessDesignationPortal } from "@/lib/designation-portal-access";
 import { loadCanonicalWorkforcePeople } from "@/lib/canonical-workforce-people";
 import type { AllPeopleExportValues } from "@/lib/all-people-export";
 import { ALL_PEOPLE_SHEET_EDITABLE_KEYS } from "@/lib/all-people-sheet";
+import { buildVerificationViewSummary, peopleDateKey, type AllPeopleVerificationSummary } from "@/lib/all-people-verification-view";
+import { matchNames } from "@/lib/name-match";
 import { filterOnboardingLocations } from "@/lib/onboarding-location-access";
 import { isMissingVerificationTable } from "@/lib/profile-verifications";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -88,6 +90,20 @@ function expectedVerificationInputKey(row: AllPeopleRow, kind: string) {
   if (kind === "bank") return `${value("bankAccountNumber")}|${value("ifsc")}`;
   if (kind === "pf_uan") return value("pfUan");
   return "";
+}
+
+function comparableVerificationInputKey(kind: string, value: unknown) {
+  const raw = text(value).trim().toUpperCase();
+  if (kind !== "dl") return raw;
+  const [license = "", date = ""] = raw.split("|");
+  const iso = date.match(/^(\d{4})[-/](\d{2})[-/](\d{2})$/);
+  const display = date.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+  const normalizedDate = iso
+    ? `${iso[1]}${iso[2]}${iso[3]}`
+    : display
+      ? `${display[3]}${display[2]}${display[1]}`
+      : date.replace(/\D/g, "");
+  return `${license}|${normalizedDate}`;
 }
 
 function buildExportValues(
@@ -306,13 +322,13 @@ async function loadPeople(
   const categoryRows = sourceRows.filter((row) => row.categoryCode !== "employees"
     || !peopleIdentityKeys(row).some((key) => contractorIdentityKeys.has(key)));
   const allRows = [...categoryRows, ...workforceResult.rows];
-  type VerificationNoteRow = { account_id: string; profile_type: string; kind: string; input_key: string | null; verified: boolean; manual_review: boolean; message: string | null; details: Record<string, unknown> | null; updated_at: string };
+  type VerificationNoteRow = { account_id: string; profile_type: string; kind: string; input_key: string | null; verified: boolean; manual_review: boolean; display_name: string | null; message: string | null; details: Record<string, unknown> | null; updated_at: string };
   const verificationRows: VerificationNoteRow[] = [];
   let verificationError: string | null = null;
   const accountIds = Array.from(new Set(allRows.map((row) => row.id)));
   for (let offset = 0; offset < accountIds.length; offset += 100) {
     const verificationResult = await supabaseAdmin.from("connect_profile_verifications")
-      .select("account_id, profile_type, kind, input_key, verified, manual_review, message, details, updated_at")
+      .select("account_id, profile_type, kind, input_key, verified, manual_review, display_name, message, details, updated_at")
       .eq("company_id", companyId)
       .in("account_id", accountIds.slice(offset, offset + 100))
       .order("updated_at", { ascending: false });
@@ -339,6 +355,7 @@ async function loadPeople(
       workers: ["worker"]
     };
     const notesByRow = new Map<string, Partial<Record<keyof AllPeopleExportValues, string>>>();
+    const summariesByRow = new Map<string, Partial<Record<keyof AllPeopleExportValues, AllPeopleVerificationSummary>>>();
     const rowsById = new Map<string, AllPeopleRow[]>();
     for (const row of allRows) rowsById.set(row.id, [...(rowsById.get(row.id) ?? []), row]);
     const seenRowKinds = new Set<string>();
@@ -354,15 +371,41 @@ async function loadPeople(
         const current = notesByRow.get(key) ?? {};
         const registeredName = text(item.details?.registeredName).trim().toLowerCase();
         const nameStillMatches = !["pan", "dl", "pf_uan"].includes(item.kind) || !registeredName || registeredName === row.fullName.trim().toLowerCase();
-        const matchesCurrentValue = nameStillMatches && text(item.input_key).trim().toUpperCase() === expectedVerificationInputKey(row, item.kind);
+        const inputMatchesCurrent = comparableVerificationInputKey(item.kind, item.input_key) === comparableVerificationInputKey(item.kind, expectedVerificationInputKey(row, item.kind));
+        const matchesCurrentValue = nameStillMatches && inputMatchesCurrent;
         const status = matchesCurrentValue && item.verified ? "Verified" : matchesCurrentValue && item.manual_review ? "Manual review" : "Needs review";
         const message = matchesCurrentValue ? item.message : "Reverification required after profile field update.";
         const next = `${status}${message ? `: ${message}` : ""}`;
         current[column] = current[column] ? `${current[column]} · ${next}` : next;
         notesByRow.set(key, current);
+
+        if (inputMatchesCurrent) {
+          const providerName = text(item.details?.name || item.display_name);
+          const currentNameMatch = ["pan", "dl", "pf_uan"].includes(item.kind) && providerName
+            ? matchNames(row.fullName, providerName).status
+            : undefined;
+          const viewSummary = buildVerificationViewSummary({
+            kind: item.kind,
+            verified: item.verified,
+            manual_review: item.manual_review,
+            display_name: item.display_name,
+            message: item.message,
+            details: item.details,
+            nameMatchStatus: currentNameMatch
+          });
+          if (viewSummary) {
+            const summaries = summariesByRow.get(key) ?? {};
+            summaries[viewSummary.column] = viewSummary.summary;
+            summariesByRow.set(key, summaries);
+          }
+        }
       }
     }
-    for (const row of allRows) row.verificationNotes = notesByRow.get(`${row.categoryCode}:${row.id}`);
+    for (const row of allRows) {
+      const key = `${row.categoryCode}:${row.id}`;
+      row.verificationNotes = notesByRow.get(key);
+      row.verificationSummaries = summariesByRow.get(key);
+    }
   }
   return {
     categories,
@@ -406,7 +449,7 @@ export default async function AllPeoplePage() {
       {data.error ? (
         <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load people</strong><p className="subtle">{data.error}</p></div></section>
       ) : null}
-      <AllPeopleRegister editOptions={data.editOptions} rows={data.rows} />
+      <AllPeopleRegister editOptions={data.editOptions} rows={data.rows} today={peopleDateKey()} />
     </AppShell>
   );
 }

@@ -174,6 +174,7 @@ export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expecte
     ok: true as const,
     updatedAt: String(existing.updated_at),
     changedKeys: [] as AllPeopleExportKey[],
+    invalidatedVerificationKinds: [] as VerificationKind[],
     savedValues: patch.canonicalValues
   };
 
@@ -187,6 +188,7 @@ export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expecte
   if ("pf_uan" in payload) verificationKinds.push("pf_uan");
   if ("full_name" in payload) verificationKinds.push("pan", "dl", "pf_uan");
   const uniqueVerificationKinds = [...new Set(verificationKinds)];
+  let invalidatedVerificationKinds: VerificationKind[] = [];
   const verificationProfileType = verificationProfileTypes[source.categoryCode];
   if (uniqueVerificationKinds.length && verificationProfileType) {
     try {
@@ -208,6 +210,7 @@ export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expecte
         return nameMatches && String(item.input_key ?? "").trim().toUpperCase() === verificationInputKey(kind, source, existing, payload) ? [kind] : [];
       }));
       const kindsToInvalidate = uniqueVerificationKinds.filter((kind) => !matchingKinds.has(kind));
+      invalidatedVerificationKinds = kindsToInvalidate;
       if (kindsToInvalidate.length) {
         const invalidate = await supabaseAdmin.from("connect_profile_verifications").update({
           verified: false,
@@ -276,6 +279,7 @@ export async function saveAllPeopleSheetRow({ categoryCode, id, changes, expecte
     ok: true as const,
     updatedAt: String(update.data.updated_at ?? nextUpdatedAt),
     changedKeys: patch.changedKeys,
+    invalidatedVerificationKinds,
     savedValues: patch.canonicalValues,
     warning
   };

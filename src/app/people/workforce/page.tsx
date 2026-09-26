@@ -5,6 +5,7 @@ import { PendingLink } from "@/components/pending-link";
 import { getAuthorization, hasPermission, isCompanyOwner } from "@/lib/authorization";
 import { loadCanonicalWorkforcePeople } from "@/lib/canonical-workforce-people";
 import { requireCompanyId } from "@/lib/company-scope";
+import { peopleDateKey } from "@/lib/all-people-verification-view";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +32,7 @@ export default async function WorkforcePage() {
       {data.error ? (
         <section className="panel message-panel error"><div className="panel-body"><strong>Unable to load workforce</strong><p className="subtle">{data.error}</p></div></section>
       ) : null}
-      <AllPeopleRegister rows={data.rows} />
+      <AllPeopleRegister rows={data.rows} today={peopleDateKey()} />
     </AppShell>
   );
 }

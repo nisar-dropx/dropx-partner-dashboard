@@ -78,9 +78,9 @@ test("fixed horizontal scrollbar mirrors the table scroll position", () => {
 
 test("edit sheet orders and freezes DropX ID and full name before the scrollable biometric ID", () => {
   assert.match(component, /const sheetLeadingKeys: AllPeopleExportKey\[\] = \["dropxId", "fullName", "biometricId"\]/);
-  assert.match(component, /<thead><tr>\{sheetColumns\.map/);
-  assert.match(component, /\{sheetColumns\.map\(\(column\) => \{/);
-  assert.match(component, /colSpan=\{sheetColumns\.length \+ 1\}/);
+  assert.match(component, /<thead><tr>\{activeSheetColumns\.map/);
+  assert.match(component, /\{activeSheetColumns\.map\(\(column\) => \{/);
+  assert.match(component, /colSpan=\{activeSheetColumns\.length \+ 1\}/);
   assert.match(styles, /\.all-people-edit-sheet th\.sheet-column-dropxId,[\s\S]*?left:\s*0;[\s\S]*?width:\s*140px;/);
   assert.match(styles, /\.all-people-edit-sheet th\.sheet-column-fullName,[\s\S]*?left:\s*140px;[\s\S]*?width:\s*210px;/);
   assert.match(styles, /td\.sheet-column-dropxId,[\s\S]*?td\.sheet-column-fullName\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?background:\s*#fff;/);
@@ -121,7 +121,7 @@ test("sheet verification mirrors individual edit groups and persists provider re
   assert.match(component, /bank: \["bankAccountNumber", "ifsc"\]/);
   assert.match(component, /dl: \["fullName", "drivingLicenseNumber", "dateOfBirth"\]/);
   assert.match(component, /fullName: \["pan", "dl", "pf_uan"\]/);
-  assert.match(component, /if \(kind === "pan" && !result\.blockSubmit\) next\.push\(await request\("pan_aadhaar"\)\)/);
+  assert.match(component, /if \(kind === "pan" && !result\.blockSubmit\) \{[\s\S]*?next\.push\(await request\("pan_aadhaar"\)\)[\s\S]*?if \(stale\(\)\) return/);
   assert.match(component, /onDerivedValue\("drivingLicenseExpiry"/);
   assert.match(component, /onDerivedValue\("vehicleRegistrationExpiry"/);
   assert.match(component, /Reverification required after this edit/);
@@ -131,8 +131,56 @@ test("sheet verification mirrors individual edit groups and persists provider re
 });
 
 test("saved verification note overrides remain authoritative after edit and revert", () => {
-  assert.match(component, /const note = groupDirty[\s\S]*?: verificationNoteOverrides\[rowId\]\?\.\[column\.key\] \?\? row\.verificationNotes\?\.\[column\.key\]/);
+  assert.match(component, /const editNote = sheetEditMode[\s\S]*?: verificationNoteOverrides\[rowId\]\?\.\[column\.key\] \?\? row\.verificationNotes\?\.\[column\.key\]/);
   assert.doesNotMatch(component, /for \(const field of verificationFields\[verificationKind\]\) delete rowNotes\[field\]/);
+});
+
+test("view mode uses concise field-specific summaries and swaps PAN before Aadhaar only there", () => {
+  assert.match(component, /const activeSheetColumns = sheetEditMode \? sheetColumns : viewSheetColumns/);
+  assert.match(component, /column\.key === "aadhaarNumber"[\s\S]*?candidate\.key === "panNumber"/);
+  assert.match(component, /column\.key === "panNumber"[\s\S]*?candidate\.key === "aadhaarNumber"/);
+  const mapping = component.match(/const viewVerificationKindByField[^=]*= \{([\s\S]*?)\n\};/)?.[1] ?? "";
+  for (const [field, kind] of [
+    ["panNumber", "pan"],
+    ["aadhaarNumber", "pan_aadhaar"],
+    ["bankAccountNumber", "bank"],
+    ["pfUan", "pf_uan"],
+    ["drivingLicenseNumber", "dl"],
+    ["vehicleRegistrationNumber", "vehicle"]
+  ]) assert.match(mapping, new RegExp(`${field}: "${kind}"`));
+  assert.doesNotMatch(mapping, /ifsc:/);
+  assert.match(component, /const viewSummary = !sheetEditMode/);
+  assert.match(component, /verificationSummaryInvalidations\[rowId\][\s\S]*?\.includes\(viewVerificationKind\)/);
+  assert.match(component, /savedSummaryInvalidated \? undefined : row\.verificationSummaries\?\.\[column\.key\]/);
+  assert.match(component, /sheet-view-verification-note \$\{viewSummary\.tone\}/);
+  assert.match(styles, /\.sheet-view-verification-note\.success\s*\{\s*color:\s*#0d7b4a;/);
+  assert.match(styles, /\.sheet-view-verification-note\.warning\s*\{\s*color:\s*#8a5a00;/);
+  assert.match(styles, /\.sheet-view-verification-note\.error\s*\{\s*color:\s*#b42318;/);
+});
+
+test("in-flight verification results cannot attach to changed field values", () => {
+  assert.match(component, /const requestedFingerprint = verificationFingerprint\(kind, values\)/);
+  assert.match(component, /latestFingerprintRef\.current === requestedFingerprint/);
+  assert.match(component, /Values changed during verification\. Verify again\./);
+  assert.match(component, /if \(stale\(\)\) return/);
+  assert.match(component, /requestFingerprint: verificationFingerprint\(item\.kind, values\)/);
+  assert.match(component, /liveVerificationResult\.requestFingerprint === verificationFingerprint\(viewVerificationKind, values\)/);
+});
+
+test("expired vehicle dates turn red in view mode only", () => {
+  assert.match(component, /!sheetEditMode && vehicleExpiryFieldKeys\.has\(column\.key\) && isExpiredPeopleDate\(cellValue, currentDate\)/);
+  assert.match(component, /expiredVehicleDate \? "sheet-expired-date"/);
+  assert.match(component, /sheet-screen-reader-only"> Expired\.<\/span>/);
+  assert.match(styles, /\.sheet-expired-date\s*\{\s*color:\s*#b42318;\s*font-weight:\s*800;/);
+});
+
+test("edit-mode Verify button sits inside the input and uses a hand cursor", () => {
+  assert.match(component, /sheet-verification-input-wrap \$\{config \? "has-button" : ""\}[\s\S]*?\{children\}[\s\S]*?<button[^>]*className="sheet-verify-button"/);
+  assert.match(component, /<SheetVerificationControl[\s\S]*?>\s*\{textInput\}\s*<\/SheetVerificationControl>/);
+  assert.match(styles, /\.sheet-verification-input-wrap\s*\{[\s\S]*?position:\s*relative;/);
+  assert.match(styles, /\.sheet-verification-input-wrap\.has-button \.sheet-cell-input\s*\{[\s\S]*?padding-right:\s*98px;/);
+  assert.match(styles, /\.sheet-verify-button\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?right:\s*4px;[\s\S]*?cursor:\s*pointer;/);
+  assert.match(styles, /\.sheet-verify-button:disabled\s*\{\s*cursor:\s*not-allowed;/);
 });
 
 test("sticky Save column is opaque in header, normal rows, and dirty rows", () => {
