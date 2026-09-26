@@ -1,6 +1,10 @@
 import {CONTROL_TOWER_CC} from './cod-proof-policy';
 export type EmailEvidence={internalDate?:string;payload?:{headers?:{name:string;value:string}[]}};
-const addresses=(raw:string)=>[...raw.toLowerCase().replace(/"(?:[^"\\]|\\.)*"/g,'').matchAll(/[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/g)].map(m=>m[0]);
+const addresses=(raw:string)=>raw.toLowerCase().replace(/"(?:[^"\\]|\\.)*"/g,'').split(/[,;]/).flatMap(part=>{
+ const brackets=[...part.matchAll(/<([^<>]+)>/g)];
+ const values=brackets.length?brackets.map(m=>m[1].trim()):[part.trim()];
+ return values.filter(v=>/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(v));
+});
 export function matchesCodEmail(message:EmailEvidence,record:{email_subject:string|null;sender_email:string|null;email_sent_at:string|null;stakeholder_emails:string[];client_poc_emails:string[]}){
  const header=(name:string)=>(message.payload?.headers||[]).filter(h=>h.name.toLowerCase()===name).map(h=>h.value).join(', ');
  const subject=(s:string)=>s.trim().replace(/\s+/g,' ').toLowerCase();

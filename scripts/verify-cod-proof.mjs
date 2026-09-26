@@ -18,6 +18,7 @@ const message={internalDate:String(Date.parse(record.email_sent_at)),payload:{he
 assert.equal(matchesCodEmail(message,record),true);
 for(const name of ['Subject','From','To','Cc'])assert.equal(matchesCodEmail({...message,payload:{headers:message.payload.headers.filter(h=>h.name!==name)}},record),false,`Missing ${name} cannot confirm email`);
 assert.equal(matchesCodEmail({...message,internalDate:String(Date.parse(record.email_sent_at)-7200000)},record),false);
+assert.equal(matchesCodEmail({...message,payload:{headers:message.payload.headers.map(h=>h.name==='Cc'?{...h,value:'cd@dropxlogistics.com <other@example.com>'}:h)}},record),false,'A display name is not the actual CC address');
 const pending=compile('src/lib/ops-pulse/cod-pending.ts');
 const station={id:'s',station_code:'NLRC',station_name:'Test',providers:{code:'AMAZON'}};
 const exception={id:'e',location_id:'s',kind:'No Cash',reason:'ERP no cash',email_check_status:'Not applicable'};
@@ -34,6 +35,7 @@ await db.exec(`create role anon;create role authenticated;create role service_ro
 create table cod_submissions(id uuid primary key default gen_random_uuid(),company_id uuid not null,location_id uuid,created_by uuid,created_at timestamptz default now(),deposit_date date,cod_period_from date,cod_period_to date,station_code text,remittance_code text,reference_no text,deposited_amount numeric,submitter_name text,remarks text,attachments jsonb,deposit_slip_attachments jsonb,ai_status text,ai_summary text,ai_result jsonb,ai_confidence numeric);
 grant all on cod_submissions to service_role;grant usage on schema public to service_role;`);
 await db.exec(readFileSync('supabase/migrations/20260925035330_cod_slip_gpt_validation.sql','utf8'));
+await db.exec(readFileSync('supabase/migrations/20260926121610_cod_proof_queue_history.sql','utf8'));
 const company='11111111-1111-1111-1111-111111111111',location='22222222-2222-2222-2222-222222222222',user='33333333-3333-3333-3333-333333333333';
 await db.query('insert into companies values($1)',[company]);await db.query('insert into stations values($1)',[location]);
 const {rows:[submission]}=await db.query(`insert into cod_submissions(company_id,location_id,created_by,deposited_amount,deposit_date,last_updater_name) values($1,$2,$3,100,'2026-09-26','Station User') returning *`,[company,location,user]);
