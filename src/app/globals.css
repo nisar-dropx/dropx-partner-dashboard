@@ -21005,3 +21005,64 @@ td strong,
     grid-template-columns: 1fr;
   }
 }
+/* Keep every Provider Member First filter and date field aligned at narrow widths. */
+.provider-first-filters > * {
+  min-width: 0;
+  align-self: end;
+}
+
+.provider-first-filters .mapping-filter-field {
+  display: grid;
+  gap: 5px;
+}
+
+.provider-first-filters .mapping-filter-field > .mapping-field-label {
+  min-height: 12px;
+  color: #667085;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.provider-first-filters .bulk-multi-filter,
+.provider-first-filters .bulk-multi-filter-trigger {
+  width: 100%;
+}
+
+.provider-first-filters .bulk-multi-filter-trigger {
+  min-height: 42px;
+  border: 1px solid #d8e1ec;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.provider-first-filters .mapping-filter-menu {
+  left: 0;
+  right: auto;
+  width: max(100%, 320px);
+}
+
+.provider-first-row .mapping-period-row {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(180px, 260px));
+  justify-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.provider-first-row .mapping-period-row > label {
+  min-width: 0;
+}
+
+.provider-first-row .mapping-period-row .worksheet-input {
+  min-width: 0;
+  width: 100%;
+}
+
+@media (max-width: 760px) {
+  .provider-first-row .mapping-period-row {
+    grid-column: auto;
+    grid-template-columns: 1fr;
+  }
+}
