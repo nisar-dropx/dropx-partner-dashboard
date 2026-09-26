@@ -31,12 +31,14 @@ export function moveIsoDate(value: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
-/** Inclusive last calendar day of the month that contains `today` (YYYY-MM-DD). */
+/** Sunday ending the week that contains the last day of `today`'s month (YYYY-MM-DD). */
 export function rosterMonthEnd(today: string) {
   if (!validIsoDate(today)) throw new Error("A valid roster date is required.");
   const [year, month] = today.split("-").map(Number);
-  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  return `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  const lastDay = new Date(Date.UTC(year, month, 0));
+  // Extend to the Sunday closing the month's final week so that week is always shown in full.
+  lastDay.setUTCDate(lastDay.getUTCDate() + ((7 - lastDay.getUTCDay()) % 7));
+  return lastDay.toISOString().slice(0, 10);
 }
 
 /** Monday on or before the given date. */
