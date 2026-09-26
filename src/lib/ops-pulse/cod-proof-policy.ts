@@ -1,8 +1,8 @@
 export const CONTROL_TOWER_CC='cd@dropxlogistics.com';
-export type ProofExtraction={document_type:'deposit_slip'|'other'|'unclear';readable:boolean;amount:number|null;deposit_date:string|null;reference:string|null;station_code:string|null;deposit_confirmed:boolean};
+export type ProofExtraction={document_type:'deposit_slip'|'other'|'unclear';readable:boolean;amount:number|null;deposit_date:string|null;remittance_reference:string|null;receipt_reference:string|null;station_code:string|null;deposit_confirmed:boolean};
 export function proofVerdict(value:unknown,expected:{amount:number;date:string;reference:string;station:string}) {
  const v=value as ProofExtraction;
- if(!v||!['deposit_slip','other','unclear'].includes(v.document_type)||typeof v.readable!=='boolean'||typeof v.deposit_confirmed!=='boolean'||!(v.amount===null||typeof v.amount==='number'&&Number.isFinite(v.amount))||!['deposit_date','reference','station_code'].every(k=>v[k as keyof ProofExtraction]===null||typeof v[k as keyof ProofExtraction]==='string'))throw new Error('Invalid extraction response.');
+ if(!v||!['deposit_slip','other','unclear'].includes(v.document_type)||typeof v.readable!=='boolean'||typeof v.deposit_confirmed!=='boolean'||!(v.amount===null||typeof v.amount==='number'&&Number.isFinite(v.amount))||!['deposit_date','remittance_reference','receipt_reference','station_code'].every(k=>v[k as keyof ProofExtraction]===null||typeof v[k as keyof ProofExtraction]==='string'))throw new Error('Invalid extraction response.');
  const reasons:string[]=[];
  if(v.document_type!=='deposit_slip')reasons.push('The uploaded image does not clearly show a CMS / bank deposit slip.');
  if(!v.readable)reasons.push('The slip is unreadable. Upload a clear, complete photo.');
@@ -11,8 +11,8 @@ export function proofVerdict(value:unknown,expected:{amount:number;date:string;r
  if(!v.deposit_date)reasons.push('Deposit date is not readable on the slip.');
  else if(v.deposit_date!==expected.date)reasons.push(`Slip date ${v.deposit_date} does not match deposit date ${expected.date}.`);
  const normalize=(s:string)=>s.toUpperCase().replace(/[^A-Z0-9]/g,'');
- if(!v.reference)reasons.push('Remittance / reference number is not readable on the slip.');
- else if(normalize(v.reference)!==normalize(expected.reference))reasons.push('Slip reference does not match the submitted remittance code.');
+ if(!v.receipt_reference&&!v.remittance_reference)reasons.push('Receipt / transaction number is not readable on the slip.');
+ if(v.remittance_reference&&normalize(v.remittance_reference)!==normalize(expected.reference))reasons.push('Remittance code printed on the slip does not match the submitted code.');
  if(v.station_code&&normalize(v.station_code)!==normalize(expected.station))reasons.push('Station code on the slip does not match the selected station.');
  if(!v.deposit_confirmed)reasons.push('The slip does not show a completed deposit acknowledgement.');
  return {status:reasons.length?'Not valid':'Valid',reason:reasons.join(' ')||'Deposit slip details match the submitted deposit.',extracted:v};
