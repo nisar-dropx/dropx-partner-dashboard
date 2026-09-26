@@ -19,8 +19,8 @@ async function allRows(query: any): Promise<any[]> {
 
 export async function GET(request: NextRequest) {
   try {
-    const account = await requireConnectAccount(request.nextUrl.searchParams.get("profileType") as ConnectAccount["profileType"], request.nextUrl.searchParams.get("accountId") ?? "");
-    if (account.workspace !== "workforce" || !account.pageAccess.some(code => ["dashboard", "earnings", "profile"].includes(code))) return NextResponse.json({error:"This view is not enabled for your account."},{status:403,headers});
+    const account = await requireConnectAccount(request.nextUrl.searchParams.get("profileType") as ConnectAccount["profileType"], request.nextUrl.searchParams.get("accountId") ?? "",{allowActivationOnly:true});
+    if (account.workspace !== "workforce" || (!account.activationOnly && !account.pageAccess.some(code => ["dashboard", "earnings", "profile"].includes(code)))) return NextResponse.json({error:"This view is not enabled for your account."},{status:403,headers});
     if (!supabaseAdmin) throw new Error("Joining details are temporarily unavailable.");
     const db = supabaseAdmin, company = account.companyId;
     let personQuery = db.from("workforce").select("id,location_id,source_profile_type,source_profile_id,onboarding_status,lifecycle_status,is_active,onboarding_approved_at,last_working_date")
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
     }
     const state = joiningState(person,plan,mappings,attendance,today);
     const entitlements = plan ? trainingEntitlements(person,plan,mappings,attendance,plan.eligible_from,today) : [];
-    const payVisible = account.pageAccess.includes("earnings");
+    const payVisible = !account.activationOnly && account.pageAccess.includes("earnings");
     const paymentHolds = payVisible ? await allRows(db.from('workforce_payment_holds').select('id,period_start,period_end,status,requested_at').eq('company_id',company).eq('workforce_id',person.id).neq('status','released').order('requested_at',{ascending:false}).order('id')) : [];
     // Deliberate allowlist: internal notes, portal credentials, other staff and documents never leave this endpoint.
     return NextResponse.json({
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
       firstPunch:state.firstPunch,mappingEffectiveFrom:state.mapping?.effective_from ?? null,
       providerStage:plan ? providerStages[plan.provider_stage] : null,nextFollowUp:plan?.next_follow_up_on ?? null,updatedAt:plan?.updated_at ?? null,
       tasks:plan ? Object.entries(amazonTasks).filter(([,task])=>task.owner==="Associate").map(([code,task])=>({code,label:task.label,status:amazonTaskStates[plan.amazon_tasks?.[code as keyof typeof amazonTasks] ?? "pending"]})) : [],
-      training:plan?.mode === "training" ? {dailyRate:payVisible ? Number(plan.daily_rate ?? 0):null,minimumMinutes:plan.minimum_minutes,acceptedOn:plan.terms_accepted_on,
+      training:!account.activationOnly&&plan?.mode === "training" ? {dailyRate:payVisible ? Number(plan.daily_rate ?? 0):null,minimumMinutes:plan.minimum_minutes,acceptedOn:plan.terms_accepted_on,
         eligibleDays:entitlements.filter(row=>!row.holds.length).length,reviewDays:entitlements.filter(row=>row.holds.length).length,
         eligibleAmount:payVisible ? entitlements.filter(row=>!row.holds.length).reduce((sum,row)=>sum+row.amount,0):null,
         days:entitlements.map(row=>({date:row.attendance.punch_date,minutes:Number(row.attendance.work_minutes ?? 0),amount:payVisible ? row.amount:null,holds:row.holds})).sort((a,b)=>b.date.localeCompare(a.date))} : null

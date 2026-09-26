@@ -17795,3 +17795,28 @@ img.dx-selfie-live {
 .dx-joining-days > li > div { display: grid; gap: 6px; }
 .dx-joining-days ul { padding-left: 18px; color: #8a4a19; line-height: 1.5; }
 .dx-joining-tasks li { display: flex; justify-content: space-between; gap: 12px; }
+.dx-activation-only,
+.dx-refer-earn { max-width: 980px; margin: 0 auto; }
+.dx-activation-only .dx-page-intro h1,
+.dx-refer-earn .dx-page-intro h1 { font-size: clamp(25px, 3vw, 31px); }
+.dx-activation-only .dx-joining-card { max-width: 760px; margin-top: 14px; border-top: 3px solid #f06a36; }
+.dx-refer-earn .dx-page-intro { position: relative; padding-right: 52px; }
+.dx-refer-earn .dx-page-intro > button { position: absolute; top: 4px; right: 0; width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid #dfe5ed; border-radius: 11px; background: #fff; color: #526178; }
+.dx-refer-earn .dx-settings-grid { align-items: start; }
+.dx-referral-form { grid-template-columns: 42px minmax(0,1fr) minmax(180px,.75fr); }
+.dx-referral-form > label { display: grid; gap: 5px; color: #667085; font-size: 12px; }
+.dx-referral-form input,
+.dx-referral-form select { min-height: 40px; padding: 8px 10px; border: 1px solid #dfe5ed; border-radius: 9px; background: #fff; color: #1f2a3d; }
+.dx-referral-form > button { min-height: 40px; display: inline-flex; gap: 7px; align-items: center; justify-content: center; border: 0; border-radius: 9px; background: #ed5b2a; color: #fff; font-weight: 750; }
+.dx-referral-mobile { display: grid; grid-template-columns: 100px minmax(0,1fr); gap: 8px; }
+.dx-referral-mobile label { display: grid; gap: 5px; color: #667085; font-size: 12px; }
+.dx-referral-rule { grid-column: 2/-1; padding: 11px 0; border-top: 1px solid #edf0f5; }
+.dx-referral-rule strong,.dx-referral-rule small { display: block; }
+.dx-referral-rule small,.dx-referral-rule p { color: #667085; font-size: 12px; line-height: 1.5; }
+.dx-referral-history { margin-top: 14px; }
+.dx-referral-history > div { grid-column: 2/-1; }
+.dx-referral-history article { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-top: 1px solid #edf0f5; }
+.dx-referral-history article div,.dx-referral-history article span { display: grid; gap: 3px; }
+.dx-referral-history article span { text-align: right; }
+.dx-referral-history article small { color: #7b8799; font-size: 11px; }
+@media(max-width:720px){.dx-referral-form{grid-template-columns:38px minmax(0,1fr)}.dx-referral-form>label,.dx-referral-form>.dx-referral-mobile,.dx-referral-form>button{grid-column:1/-1}.dx-referral-history article{align-items:flex-start}.dx-referral-history article span{min-width:110px}}

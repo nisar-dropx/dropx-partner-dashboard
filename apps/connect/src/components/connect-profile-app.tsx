@@ -26,6 +26,9 @@ export type AppAccount = {
   isDefault?: boolean;
   workspace?: "people" | "workforce";
   workspaceLabel?: string;
+  designationCode?: string | null;
+  activationOnly?: boolean;
+  activationStage?: string | null;
 };
 
 type Profile = {

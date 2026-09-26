@@ -2000,6 +2000,13 @@ export async function POST(request: Request) {
     }
 
     await importStep("Recalculate CPS rows", () => recalculateCps(companyId, factRows.map((row) => ({ stationCode: row.normalized?.stationCode, workDate: row.normalized?.workDate }))));
+    if (["amazon_shipments", "da_inapp_onboarding"].includes(sourceType)) {
+      await importStep("Refresh Provider ID suggestions", async () => {
+        const result = await db.rpc("workforce_reconcile_amazon_activations", { p_company: companyId });
+        if (result.error) throw new Error(result.error.message);
+        return result;
+      });
+    }
     const factRowCount = sourceType === "amazon_shipments" ? aggregateAmazonRows(factRows, batch.data.id, companyId).length : valid.length;
     const amazonWeekMessage = amazonWeeks.length
       ? ` Amazon week${amazonWeeks.length === 1 ? "" : "s"} ${amazonWeeks.map((week) => `${week.amazon_week_no} (${week.amazon_week_from} to ${week.amazon_week_to})`).join(", ")}.`

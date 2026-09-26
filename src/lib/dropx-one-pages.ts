@@ -13,6 +13,7 @@ export const dropxOnePageOptions = [
   { value: "leave", label: "Leave" },
   { value: "wfh", label: "Work from home" },
   { value: "performance", label: "Performance" },
+  { value: "refer_earn", label: "Refer & Earn" },
   { value: "settings", label: "Settings" }
 ] as const;
 

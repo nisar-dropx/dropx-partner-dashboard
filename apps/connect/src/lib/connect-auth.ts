@@ -31,6 +31,9 @@ export type ConnectAccount = {
   label: string;
   workspace: "people" | "workforce";
   workspaceLabel: string;
+  designationCode: string | null;
+  activationOnly: boolean;
+  activationStage: string | null;
 };
 
 type AccountRow = {
@@ -76,6 +79,7 @@ type DesignationAccessRow = {
   designation_category_id?: string | null;
   onboarding_categories: string[] | null;
   app_page_access?: string[] | null;
+  dropx_one_activation_gate?: boolean | null;
 };
 
 type DesignationCategoryRow = {
@@ -783,7 +787,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
   const designationResult = companyIds.length
     ? await supabaseAdmin
       .from("designations")
-      .select("id, company_id, code, name, designation_category_id, onboarding_categories, app_page_access")
+      .select("id, company_id, code, name, designation_category_id, onboarding_categories, app_page_access, dropx_one_activation_gate")
       .in("company_id", companyIds)
       .eq("is_active", true)
     : { data: [], error: null };
@@ -803,12 +807,14 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
     }
     designationRows = (fallbackResult.data ?? []).map((designation) => ({
       ...designation,
-      app_page_access: null
+      app_page_access: null,
+      dropx_one_activation_gate: false
     })) as DesignationAccessRow[];
   } else if (designationResult.error) {
     throw new Error(designationResult.error.message);
   }
   const pageAccessByDesignationId = new Map<string, string[] | null>();
+  const activationGateByDesignationId = new Map<string, boolean>();
   const designationNameById = new Map<string, string>();
   const designationCodeById = new Map<string, string | null>();
   const pageAccessByDesignationKey = new Map<string, string[] | null>();
@@ -833,6 +839,7 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       ? (designation as { app_page_access: unknown[] }).app_page_access.map(String)
       : null;
     pageAccessByDesignationId.set(String(designation.id), pages);
+    activationGateByDesignationId.set(String(designation.id), Boolean(designation.dropx_one_activation_gate));
     designationNameById.set(String(designation.id), String(designation.name || designation.code));
     designationCodeById.set(String(designation.id), designation.code ? String(designation.code) : null);
     peopleModuleByDesignationId.set(
@@ -938,6 +945,29 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
         pageAccess.push("business_trip");
       }
 
+      let activationOnly = false;
+      let activationStage: string | null = null;
+      if (workspace === "workforce" && account.profile_type === "workforce" && designationId && activationGateByDesignationId.get(designationId)) {
+        const [planResult, mappingResult] = await Promise.all([
+          supabaseAdmin!.from("workforce_joining_plans")
+            .select("provider_stage")
+            .eq("company_id", account.company_id)
+            .eq("workforce_id", account.id)
+            .maybeSingle(),
+          supabaseAdmin!.from("field_executive_provider_mappings")
+            .select("id")
+            .eq("company_id", account.company_id)
+            .eq("workforce_id", account.id)
+            .neq("status", "cancelled")
+            .limit(1)
+        ]);
+        if (planResult.error && !isMissingColumnError(planResult.error)) throw new Error(planResult.error.message);
+        if (mappingResult.error && !isMissingColumnError(mappingResult.error)) throw new Error(mappingResult.error.message);
+        activationStage = String(planResult.data?.provider_stage ?? "not_started");
+        const activated = activationStage === "activated" || Boolean(mappingResult.data?.length);
+        activationOnly = !activated;
+      }
+
       return {
       id: account.id,
       companyId: account.company_id,
@@ -955,14 +985,17 @@ export async function findConnectAccounts(countryCode: string, mobile: string) {
       status: account.status ?? null,
       biometricId: account.biometric_id ?? null,
       profilePhotoUrl: await signedProfilePhotoUrl(account.profile_photo_path),
-      pageAccess,
+      pageAccess: activationOnly ? ["activation"] : pageAccess,
       isDefault: defaultPreference?.default_company_id === account.company_id &&
         defaultPreference?.default_profile_type === account.profile_type &&
         defaultPreference?.default_account_id === account.id,
       companyName: companyNameById.get(account.company_id) ?? "Company",
       label: accountLabel(account, companyNameById),
       workspace,
-      workspaceLabel: workspace === "people" ? "People workspace" : "Workforce workspace"
+      workspaceLabel: workspace === "people" ? "People workspace" : "Workforce workspace",
+      designationCode: designationId ? designationCodeById.get(designationId) ?? null : null,
+      activationOnly,
+      activationStage
       };
     }));
 }
@@ -1010,7 +1043,7 @@ export async function createConnectSession({
   });
 }
 
-export async function requireConnectAccount(profileType: ConnectAccount["profileType"], accountId: string) {
+export async function requireConnectAccount(profileType: ConnectAccount["profileType"], accountId: string, options:{allowActivationOnly?:boolean}={}) {
   if (!supabaseAdmin) throw new Error("Supabase service role key is not configured.");
   const token = cookies().get(connectSessionCookieName)?.value;
   if (!token) throw new Error("Connect session expired. Please log in again.");
@@ -1026,5 +1059,6 @@ export async function requireConnectAccount(profileType: ConnectAccount["profile
   const canonicalProfileType = profileType === "field_executive" ? "workforce" : profileType;
   const account = accounts.find((item) => item.profileType === canonicalProfileType && item.id === accountId);
   if (!account) throw new Error("This account is not available for the current login.");
+  if (account.activationOnly && !options.allowActivationOnly) throw new Error("Complete Amazon ID activation to unlock this workspace.");
   return account;
 }
