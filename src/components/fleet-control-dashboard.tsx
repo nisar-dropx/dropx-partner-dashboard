@@ -96,8 +96,8 @@ type FleetPaymentDetail = {
 };
 
 function statusTone(status: string) {
-  if (status === "active" || status === "approved" || status === "paid") return "good";
-  if (status === "under_service" || status === "in approval" || status === "processing") return "warn";
+  if (status === "active" || status === "ready for finance" || status === "paid") return "good";
+  if (status === "under_service" || status === "in approval" || status === "processing" || status.includes("pending")) return "warn";
   if (status === "breakdown" || status === "rejected") return "bad";
   return "neutral";
 }
@@ -447,6 +447,11 @@ export function FleetControlDashboard({
                   <div className="fc-detail-top"><span className="fc-request-icon"><CircleDollarSign size={19} /></span><div><small>{selectedPayment.requestNo}</small><h2>{selectedPayment.head}</h2><p>{selectedPayment.stationCode} · requested by {selectedPayment.requestedBy}</p></div><strong>{money(selectedPayment.amount)}</strong></div>
                   <div className="fc-detail-grid"><div><small>Request date</small><strong>{date(selectedPayment.requestedAt)}</strong></div><div><small>Work date</small><strong>{date(selectedPayment.workDate)}</strong></div><div><small>Approval status</small><span className={`fc-status ${statusTone(selectedPayment.statusLabel.toLowerCase())}`}><i />{selectedPayment.statusLabel}</span></div><div><small>Station</small><strong>{selectedPayment.stationCode}</strong></div></div>
                   <section className="fc-remarks"><small>Station remarks</small><p>{selectedPayment.remarks}</p></section>
+                  <section className={`fc-payout-next ${selectedPayment.canSubmitPayoutDetails ? "actionable" : ""}`}>
+                    <CircleDollarSign size={19} />
+                    <div><small>Payment lifecycle · next action</small><strong>{selectedPayment.lifecycleLabel}</strong><p>{selectedPayment.nextAction}</p></div>
+                    {selectedPayment.canSubmitPayoutDetails ? <a className="fc-payout-link" href={`https://ops.dropxlogistics.com/payments/requests?bank=${encodeURIComponent(selectedPayment.id)}`}><span>Submit payout details</span><ExternalLink size={13} /></a> : null}
+                  </section>
                   {paymentDetailError ? <div className="fc-detail-load-error">{paymentDetailError}</div> : null}
                   <div className="fc-payment-support-grid">
                     <section className="fc-evidence-panel">
