@@ -141,6 +141,20 @@ function profileFieldRules(formData: FormData, categories: string[]) {
   ]));
 }
 
+async function saveFleetEligibility(companyId: string, designationId: string, enabled: boolean, actorId: string) {
+  const existing = await supabaseAdmin!.from("designation_product_access_policies").select("id,default_role_id").eq("company_id", companyId).eq("designation_id", designationId).eq("product_code", "fleet").maybeSingle();
+  if (existing.error) throw new Error(existing.error.message);
+  const now = new Date().toISOString();
+  const result = existing.data
+    ? await supabaseAdmin!.from("designation_product_access_policies").update({ is_enabled: enabled, updated_by: actorId, updated_at: now }).eq("id", existing.data.id)
+    : await supabaseAdmin!.from("designation_product_access_policies").insert({ company_id: companyId, designation_id: designationId, product_code: "fleet", default_role_id: null, location_access_mode: "role_based", is_enabled: enabled, updated_by: actorId, updated_at: now });
+  if (result.error) throw new Error(result.error.message);
+  if (enabled && existing.data?.default_role_id) {
+    const reconciled = await supabaseAdmin!.rpc("reconcile_designation_product_memberships", { p_company_id: companyId, p_designation_id: designationId, p_actor_user_id: actorId });
+    if (reconciled.error) throw new Error(reconciled.error.message);
+  }
+}
+
 export async function createDesignation(formData: FormData) {
   const authorization = await requirePagePermission("designations", "add");
   const companyId = requireCompanyId(authorization);
@@ -153,7 +167,7 @@ export async function createDesignation(formData: FormData) {
     await validateOnboardingCategories(companyId, categories);
     const roleIds = onboardingRoleIds(formData);
     await validateOnboardingRoles(companyId, roleIds);
-    const { error } = await supabaseAdmin.from("designations").insert(withCompany({
+    const { data: created, error } = await supabaseAdmin.from("designations").insert(withCompany({
       code,
       name,
       provider_ids: providerIds(formData),
@@ -166,8 +180,9 @@ export async function createDesignation(formData: FormData) {
       portal_permissions: portalPermissions(formData),
       is_field_operations: formData.has("is_field_operations"),
       is_active: true
-    }, companyId));
-    if (error) throw new Error(error.message);
+    }, companyId)).select("id").single();
+    if (error || !created) throw new Error(error?.message ?? "Designation could not be created.");
+    await saveFleetEligibility(companyId, created.id, formData.has("fleet_access_enabled"), authorization.userId);
 
     revalidatePath("/master/designations");
     designationRedirect({ notice: "Designation added." });
@@ -212,6 +227,7 @@ export async function updateDesignation(formData: FormData) {
       .eq("id", id)
       .eq("company_id", companyId);
     if (error) throw new Error(error.message);
+    await saveFleetEligibility(companyId, id, status && formData.has("fleet_access_enabled"), authorization.userId);
 
     revalidatePath("/master/designations");
     designationRedirect({ notice: "Designation updated." });

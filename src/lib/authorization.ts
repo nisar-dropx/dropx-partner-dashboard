@@ -321,6 +321,8 @@ export const getAuthorization = cache(async (): Promise<AuthorizationContext | n
       ? "people"
       : accessSurface === "finance"
         ? "finance"
+        : accessSurface === "fleet"
+          ? "fleet"
         : null;
   if (surfaceProductCode) {
     const membershipResult = await supabaseAdmin.from("company_product_memberships")

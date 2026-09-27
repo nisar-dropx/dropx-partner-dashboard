@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownUp, Download, RefreshCw, Search, Route, Fuel, Gauge, CircleAlert } from 'lucide-react';
 import { dailyFleetCsv, istDate, shiftDay, sortDailyRows, validateReportRange, type DailyFleetReport, type DailyFleetRow, type SortColumn } from '@/lib/fleet/daily-report';
+import { FleetMultiSelect } from '@/components/fleet-multi-select';
+import type { FleetControlData } from '@/lib/fleet-control';
 import './fleet-daily-report.css';
 
 const numeric = (value: number | null, digits = 1) => value === null ? '—' : value.toLocaleString('en-IN', { maximumFractionDigits: digits });
@@ -24,7 +26,7 @@ export function FleetReports({ fuelReports }: { fuelReports: ReactNode }) {
     {view === 'daily' ? <DailyFleetReportView /> : fuelReports}
   </div>;
 }
-export function DailyFleetReportView() {
+export function DailyFleetReportView({ stationOptions: masterStations = [] }: { stationOptions?: FleetControlData["stationOptions"] }) {
   const today = istDate();
   const yesterday = shiftDay(today, -1);
   const [range, setRange] = useState({ from: yesterday, to: yesterday });
@@ -33,10 +35,12 @@ export function DailyFleetReportView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
-  const [station, setStation] = useState('');
-  const [vehicle, setVehicle] = useState('');
-  const [fuelType, setFuelType] = useState('');
-  const [status, setStatus] = useState('');
+  const [stations, setStations] = useState<string[]>([]);
+  const [clusters, setClusters] = useState<string[]>([]);
+  const [regions, setRegions] = useState<string[]>([]);
+  const [selectedVehicles, setSelectedVehicles] = useState<string[]>([]);
+  const [fuelTypes, setFuelTypes] = useState<string[]>([]);
+  const [statuses, setStatuses] = useState<string[]>([]);
   const [sort, setSort] = useState<{ column: SortColumn; direction: 'asc' | 'desc' }>({ column: 'date', direction: 'desc' });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -56,15 +60,17 @@ export function DailyFleetReportView() {
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [range, version]);
-  useEffect(() => { setPage(1); }, [search, station, vehicle, fuelType, status, sort, pageSize]);
+  useEffect(() => { setPage(1); }, [search, stations, clusters, regions, selectedVehicles, fuelTypes, statuses, sort, pageSize]);
 
   const vehicles = report?.vehicles ?? [];
   const stationOptions = [...new Set(vehicles.map(v => v.station_code))].sort();
   const fuelOptions = [...new Set(vehicles.map(v => v.fuel_type).filter(Boolean))].sort();
+  const stationByCode = useMemo(() => new Map(masterStations.map((station) => [station.code, station])), [masterStations]);
+  const filterOption = (values: string[]) => [...new Set(values.filter(Boolean))].sort().map((value) => ({ value, label: value }));
   const rows = useMemo(() => {
     const query = search.trim().toLowerCase().replace(/\s+/g, '');
-    return sortDailyRows((report?.rows ?? []).filter(row => (!station || row.station_code === station) && (!vehicle || row.vehicle_no === vehicle) && (!fuelType || row.fuel_type === fuelType) && (!status || row.dataStatus === status) && (!query || `${row.vehicle_no} ${row.station_code} ${row.model}`.toLowerCase().replace(/\s+/g, '').includes(query))), sort.column, sort.direction);
-  }, [report, search, station, vehicle, fuelType, status, sort]);
+    return sortDailyRows((report?.rows ?? []).filter(row => (!stations.length || stations.includes(row.station_code)) && (!clusters.length || clusters.includes(stationByCode.get(row.station_code)?.cluster ?? 'Unassigned cluster')) && (!regions.length || regions.includes(stationByCode.get(row.station_code)?.region ?? 'Unassigned region')) && (!selectedVehicles.length || selectedVehicles.includes(row.vehicle_no)) && (!fuelTypes.length || fuelTypes.includes(row.fuel_type)) && (!statuses.length || statuses.includes(row.dataStatus)) && (!query || `${row.vehicle_no} ${row.station_code} ${row.model}`.toLowerCase().replace(/\s+/g, '').includes(query))), sort.column, sort.direction);
+  }, [report, search, stations, clusters, regions, selectedVehicles, fuelTypes, statuses, sort, stationByCode]);
   const totals = useMemo(() => rows.reduce((total, row) => {
     total.km += row.km ?? 0; total.litres += row.litres ?? 0; total.amount += row.fuelAmount ?? 0;
     if (row.km === null) total.missing++;
@@ -121,11 +127,13 @@ export function DailyFleetReportView() {
       </form>
       {draftError ? <p className="daily-form-error" role="alert">{draftError}</p> : datesChanged ? <p className="daily-filter-note">Apply dates to update the report. Currently showing {dateLabel(range.from)}–{dateLabel(range.to)}.</p> : null}
       <div className="daily-select-filters">
-        <label>Station<select disabled={syncing} value={station} onChange={e => { setStation(e.target.value); setVehicle(''); }}><option value="">All permitted stations</option>{stationOptions.map(value => <option key={value}>{value}</option>)}</select></label>
-        <label>Vehicle<select disabled={syncing} value={vehicle} onChange={e => setVehicle(e.target.value)}><option value="">All vehicles</option>{vehicles.filter(v => !station || v.station_code === station).map(v => <option key={v.vehicle_no} value={v.vehicle_no}>{v.vehicle_no}</option>)}</select></label>
-        <label>Fuel type<select disabled={syncing} value={fuelType} onChange={e => setFuelType(e.target.value)}><option value="">All fuel types</option>{fuelOptions.map(value => <option key={value}>{value}</option>)}</select></label>
-        <label>Data availability<select disabled={syncing} value={status} onChange={e => setStatus(e.target.value)}><option value="">All vehicle-days</option>{Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        <button className="daily-clear" type="button" disabled={syncing} onClick={() => { setSearch(''); setStation(''); setVehicle(''); setFuelType(''); setStatus(''); }}>Clear filters</button>
+        {masterStations.length ? <FleetMultiSelect allLabel="All regions" disabled={syncing} label="Region" onChange={setRegions} options={filterOption(masterStations.map((station) => station.region))} values={regions} /> : null}
+        {masterStations.length ? <FleetMultiSelect allLabel="All clusters" disabled={syncing} label="Cluster" onChange={setClusters} options={filterOption(masterStations.map((station) => station.cluster))} values={clusters} /> : null}
+        <FleetMultiSelect allLabel="All permitted stations" disabled={syncing} label="Station" onChange={setStations} options={stationOptions.filter((code) => (!clusters.length || clusters.includes(stationByCode.get(code)?.cluster ?? 'Unassigned cluster')) && (!regions.length || regions.includes(stationByCode.get(code)?.region ?? 'Unassigned region'))).map((value) => ({ value, label: value }))} values={stations} />
+        <FleetMultiSelect allLabel="All vehicles" disabled={syncing} label="Vehicle" onChange={setSelectedVehicles} options={vehicles.filter(v => !stations.length || stations.includes(v.station_code)).map(v => ({ value: v.vehicle_no, label: v.vehicle_no, helper: v.model }))} values={selectedVehicles} />
+        <FleetMultiSelect allLabel="All fuel types" disabled={syncing} label="Fuel type" onChange={setFuelTypes} options={filterOption(fuelOptions)} searchable={false} values={fuelTypes} />
+        <FleetMultiSelect allLabel="All vehicle-days" disabled={syncing} label="Data availability" onChange={setStatuses} options={Object.entries(statusLabel).map(([value, label]) => ({ value, label }))} values={statuses} />
+        <button className="daily-clear" type="button" disabled={syncing} onClick={() => { setSearch(''); setStations([]); setClusters([]); setRegions([]); setSelectedVehicles([]); setFuelTypes([]); setStatuses([]); }}>Clear filters</button>
       </div>
     </section>
     {error ? <div className="daily-error" role="alert">{error} <button type="button" onClick={() => setVersion(v => v + 1)}>Retry</button></div> : null}

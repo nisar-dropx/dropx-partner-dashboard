@@ -297,6 +297,7 @@ function membershipProductCode(surface: ReturnType<typeof currentAdminAccessSurf
   if (surface === "ops") return "operations";
   if (surface === "people") return "people";
   if (surface === "finance") return "finance";
+  if (surface === "fleet") return "fleet";
   return null;
 }
 
@@ -329,7 +330,8 @@ const businessProducts = [
   { code: "operations", label: "OpsPulse", href: "https://ops.dropxlogistics.com/users?section=roles" },
   { code: "workforce", label: "Workforce", href: "https://workforce.dropxlogistics.com/users?section=roles" },
   { code: "recruit", label: "Recruit", href: "https://recruit.dropxlogistics.com/settings/access" },
-  { code: "finance", label: "Finance", href: "https://fin.dropxlogistics.com/users?section=roles" }
+  { code: "finance", label: "Finance", href: "https://fin.dropxlogistics.com/users?section=roles" },
+  { code: "fleet", label: "Fleet", href: "https://fleet.dropxlogistics.com/users?section=roles" }
 ] as const;
 
 const locationBusinessProducts = businessProducts.filter((product) => product.code !== "finance");

@@ -310,7 +310,7 @@ export async function configureSurfaceDesignationRole(formData: FormData) {
     if (!supabaseAdmin) throw new Error("Supabase service role key is not configured");
     if (!designationId || !/^[0-9a-f-]{36}$/i.test(designationId)) throw new Error("Select a valid People designation.");
     const surface = currentAdminAccessSurface();
-    const expectedProduct = surface === "ops" ? "operations" : surface === "finance" ? "finance" : null;
+    const expectedProduct = surface === "ops" ? "operations" : surface === "finance" ? "finance" : surface === "fleet" ? "fleet" : null;
     const productCode = clean(formData.get("product_code"));
     if (!expectedProduct || productCode !== expectedProduct) throw new Error("Configure this designation inside its owning portal.");
 
@@ -356,7 +356,7 @@ export async function configureSurfaceDesignationRole(formData: FormData) {
 
 // A station mailbox is an operational identity. Finance is intentionally excluded:
 // only individually accountable Owner, Finance, and Accounts identities may enter it.
-const locationPortalProducts = ["people", "operations", "workforce", "recruit"] as const;
+const locationPortalProducts = ["people", "operations", "workforce", "recruit", "fleet"] as const;
 const protectedMembershipSources = new Set(["manual", "person_override", "product_owner", "product_admin"]);
 const dashboardLocationSources = new Set(["location_master", "legacy_dashboard", "recruit"]);
 
@@ -373,6 +373,8 @@ export async function configureSurfaceLocationRole(formData: FormData) {
         ? "people"
         : currentAdminAccessSurface() === "finance"
           ? "finance"
+          : currentAdminAccessSurface() === "fleet"
+            ? "fleet"
           : null;
     if (!surfaceProduct || surfaceProduct !== productCode) throw new Error("Location menus must be configured inside the selected portal.");
 

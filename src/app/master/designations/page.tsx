@@ -47,6 +47,7 @@ type DesignationRow = {
   portal_permissions?: unknown;
   profile_field_rules?: unknown;
   is_field_operations?: boolean | null;
+  fleet_access_enabled?: boolean;
   is_active: boolean;
 };
 
@@ -182,10 +183,14 @@ async function loadDesignations(companyId: string, locationScopeIds: string[], h
     ? (locationsResult.data ?? [])
     : (locationsResult.data ?? []).filter((location) => locationScopeIds.includes(location.id) && !location.hide_from_location_list);
 
+  const fleetPolicies = (designationRows as DesignationRow[]).length ? await supabaseAdmin.from("designation_product_access_policies").select("designation_id,is_enabled").eq("company_id", companyId).eq("product_code", "fleet").in("designation_id", (designationRows as DesignationRow[]).map((designation) => designation.id)) : { data: [], error: null };
+  const fleetEnabled = new Set((fleetPolicies.data ?? []).filter((policy) => policy.is_enabled).map((policy) => policy.designation_id));
+
   return {
     designations: (designationRows as DesignationRow[]).map((designation) => ({
       ...designation,
-      onboarding_categories: normalizeDesignationCategories(designation.onboarding_categories)
+      onboarding_categories: normalizeDesignationCategories(designation.onboarding_categories),
+      fleet_access_enabled: fleetEnabled.has(designation.id)
     })),
     providers: (providersResult.data ?? []) as ProviderRow[],
     locations: locations as LocationRow[],
@@ -282,7 +287,7 @@ export default async function DesignationsPage({
                   <th>Categories</th>
                   <th>Models</th>
                   <th>App pages</th>
-                  <th>Field operations</th>
+                  <th>Portal eligibility</th>
                   <th>Status</th>
                   {pagePermission.canEdit ? <th>Action</th> : null}
                 </tr>
@@ -320,7 +325,7 @@ export default async function DesignationsPage({
                           </div>
                         ) : <span className="subtle">No pages</span>}
                       </td>
-                      <td>{designation.is_field_operations ? <span className="mini-tag">Included</span> : <span className="subtle">-</span>}</td>
+                      <td><div className="mini-chip-list">{designation.is_field_operations ? <span className="mini-tag">Field Operations</span> : null}{designation.fleet_access_enabled ? <span className="mini-tag">Fleet</span> : null}{!designation.is_field_operations && !designation.fleet_access_enabled ? <span className="subtle">-</span> : null}</div></td>
                       <td><StatusPill status={designation.is_active ? "Active" : "Inactive"} /></td>
                       {pagePermission.canEdit ? <td><PendingLink className="button secondary compact" href={`/master/designations?edit=${designation.id}`} scroll={false}>Edit</PendingLink></td> : null}
                     </tr>

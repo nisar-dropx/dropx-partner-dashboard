@@ -4,6 +4,8 @@ import { Activity, ArrowDownUp, Download, Gauge, MapPin, RefreshCw, Route, Searc
 import { useEffect, useMemo, useState } from "react";
 import { DailyFleetReportView } from "@/components/fleet-daily-report";
 import { RouteMap } from "@/components/fleet-dashboard";
+import { FleetMultiSelect } from "@/components/fleet-multi-select";
+import type { FleetControlData } from "@/lib/fleet-control";
 
 type GpsRow = {
   vehicle_no: string;
@@ -58,15 +60,17 @@ function downloadCsv(rows: GpsRow[], stationByVehicle: Map<string, string>) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function FleetTrackingWorkspace() {
+export function FleetTrackingWorkspace({ stationOptions }: { stationOptions: FleetControlData["stationOptions"] }) {
   const [view, setView] = useState<"live" | "efficiency">("live");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState("");
   const [search, setSearch] = useState("");
-  const [placement, setPlacement] = useState("");
-  const [ignition, setIgnition] = useState("");
+  const [placements, setPlacements] = useState<string[]>([]);
+  const [clusters, setClusters] = useState<string[]>([]);
+  const [regions, setRegions] = useState<string[]>([]);
+  const [ignition, setIgnition] = useState<string[]>([]);
   const [sort, setSort] = useState<{ key: "vehicle" | "speed" | "time"; direction: "asc" | "desc" }>({ key: "vehicle", direction: "asc" });
   const [movementDate, setMovementDate] = useState(isoToday());
   const [route, setRoute] = useState<RouteHistory | null>(null);
@@ -98,20 +102,27 @@ export function FleetTrackingWorkspace() {
   const metrics = summary?.vehicleMetrics ?? [];
   const stationByVehicle = useMemo(() => new Map(metrics.map((row) => [row.vehicle_no, row.station_code])), [metrics]);
   const modelByVehicle = useMemo(() => new Map(metrics.map((row) => [row.vehicle_no, `${row.model} · ${row.fuel_type}`])), [metrics]);
-  const placements = [...new Set(metrics.map((row) => row.station_code).filter(Boolean))].sort();
+  const stationByCode = useMemo(() => new Map(stationOptions.map((station) => [station.code, station])), [stationOptions]);
+  const option = (values: string[]) => [...new Set(values.filter(Boolean))].sort().map((value) => ({ value, label: value }));
+  const visiblePlacements = [...new Set(metrics.map((row) => row.station_code).filter(Boolean))].sort().filter((code) => {
+    const station = stationByCode.get(code);
+    return (!clusters.length || clusters.includes(station?.cluster ?? "Unassigned cluster")) && (!regions.length || regions.includes(station?.region ?? "Unassigned region"));
+  });
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const filtered = (summary?.gpsLive ?? []).filter((row) => {
       const station = stationByVehicle.get(row.vehicle_no) ?? "";
       return (!needle || `${row.vehicle_no} ${station} ${modelByVehicle.get(row.vehicle_no) ?? ""}`.toLowerCase().includes(needle))
-        && (!placement || station === placement)
-        && (!ignition || (ignition === "on" ? row.ignition : !row.ignition));
+        && (!placements.length || placements.includes(station))
+        && (!clusters.length || clusters.includes(stationByCode.get(station)?.cluster ?? "Unassigned cluster"))
+        && (!regions.length || regions.includes(stationByCode.get(station)?.region ?? "Unassigned region"))
+        && (!ignition.length || ignition.includes(row.ignition ? "on" : "off"));
     });
     return filtered.sort((a, b) => {
       const order = sort.key === "speed" ? a.speed - b.speed : sort.key === "time" ? String(a.gps_time ?? "").localeCompare(String(b.gps_time ?? "")) : a.vehicle_no.localeCompare(b.vehicle_no);
       return order * (sort.direction === "asc" ? 1 : -1);
     });
-  }, [summary, stationByVehicle, modelByVehicle, search, placement, ignition, sort]);
+  }, [summary, stationByVehicle, modelByVehicle, stationByCode, search, placements, clusters, regions, ignition, sort]);
   const selected = (summary?.gpsLive ?? []).find((row) => row.vehicle_no === selectedVehicle) ?? rows[0] ?? null;
   const moving = rows.filter((row) => row.speed > 0).length;
 
@@ -138,7 +149,7 @@ export function FleetTrackingWorkspace() {
       <button className={view === "efficiency" ? "active" : ""} onClick={() => setView("efficiency")} type="button"><Gauge size={16} /> Distance, fuel &amp; mileage</button>
     </nav>
 
-    {view === "efficiency" ? <DailyFleetReportView /> : <>
+    {view === "efficiency" ? <DailyFleetReportView stationOptions={stationOptions} /> : <>
       <div className="fc-section-head fc-tracking-heading"><div><span className="fc-eyebrow">WheelsEye live feed</span><h1>Vehicle tracking</h1><p>Current GPS position and historical movement for vehicles that have tracking configured.</p></div><button className="fc-button secondary" disabled={refreshing} onClick={() => loadLive(true)} type="button"><RefreshCw className={refreshing ? "spin" : ""} size={16} /> Refresh live</button></div>
       {summary?.error ? <div className="fc-flash error"><span>{summary.error}</span></div> : null}
       <section className="fc-tracking-kpis">
@@ -151,8 +162,10 @@ export function FleetTrackingWorkspace() {
         <aside className="fc-panel fc-gps-list">
           <div className="fc-gps-filters">
             <label><span>Find vehicle</span><div><Search size={15} /><input onChange={(event) => setSearch(event.target.value)} placeholder="Vehicle or model" value={search} /></div></label>
-            <label><span>Current placement</span><select onChange={(event) => setPlacement(event.target.value)} value={placement}><option value="">All placements</option>{placements.map((value) => <option key={value}>{value}</option>)}</select></label>
-            <label><span>Ignition</span><select onChange={(event) => setIgnition(event.target.value)} value={ignition}><option value="">All states</option><option value="on">On</option><option value="off">Off</option></select></label>
+            <FleetMultiSelect allLabel="All regions" label="Region" onChange={setRegions} options={option(stationOptions.map((station) => station.region))} values={regions} />
+            <FleetMultiSelect allLabel="All clusters" label="Cluster" onChange={setClusters} options={option(stationOptions.map((station) => station.cluster))} values={clusters} />
+            <FleetMultiSelect allLabel="All placements" label="Current placement" onChange={setPlacements} options={visiblePlacements.map((value) => ({ value, label: value, helper: stationByCode.get(value)?.name }))} values={placements} />
+            <FleetMultiSelect allLabel="All states" label="Ignition" onChange={setIgnition} options={[{ value: "on", label: "On" }, { value: "off", label: "Off" }]} searchable={false} values={ignition} />
           </div>
           <div className="fc-gps-list-head"><button onClick={() => changeSort("vehicle")} type="button">Vehicle <ArrowDownUp size={12} /></button><button onClick={() => changeSort("speed")} type="button">Speed <ArrowDownUp size={12} /></button><button onClick={() => downloadCsv(rows, stationByVehicle)} type="button"><Download size={13} /> CSV</button></div>
           <div className="fc-gps-rows">{loading ? <div className="fc-empty compact">Loading tracked vehicles…</div> : rows.map((row) => <button className={selected?.vehicle_no === row.vehicle_no ? "active" : ""} key={row.vehicle_no} onClick={() => { setSelectedVehicle(row.vehicle_no); setRoute(null); }} type="button"><span className={row.ignition ? "online" : "offline"}><i /></span><div><strong>{row.vehicle_no}</strong><small>{stationByVehicle.get(row.vehicle_no) ?? "Unmapped"} · {modelByVehicle.get(row.vehicle_no) ?? "Vehicle"}</small></div><b>{number(row.speed)} km/h</b></button>)}{!loading && !rows.length ? <div className="fc-empty compact">No GPS vehicle matches the filters.</div> : null}</div>

@@ -204,6 +204,7 @@ export async function middleware(request: NextRequest) {
     !isPublicAppPath(path) &&
     path !== "/" &&
     path !== "/fleet-control" &&
+    path !== "/users" &&
     path !== "/unauthorized"
   ) {
     const fleetHomeUrl = request.nextUrl.clone();

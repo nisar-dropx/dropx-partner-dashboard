@@ -3,7 +3,7 @@ import { isPeopleHostName } from "@/lib/people/surface";
 import { isFinanceHostName } from "@/lib/finance/surface";
 
 export type AccessSurface = "dashboard" | "ops";
-export type AdminAccessSurface = AccessSurface | "people" | "finance";
+export type AdminAccessSurface = AccessSurface | "people" | "finance" | "fleet";
 
 export const opsAccessPageCodes = [
   'ops_notification_settings',
@@ -168,6 +168,22 @@ const financePageCodes = new Set([
   "payment_settings"
 ]);
 
+const fleetPageCodes = new Set([
+  "users",
+  "payment_approvals",
+  "payment_reports",
+  "fleet",
+  "fleet_action_center",
+  "fleet_vehicle_view",
+  "fleet_date_view",
+  "fleet_station_view",
+  "fleet_tracking",
+  "fleet_fuel_log",
+  "fleet_live_gps",
+  "fleet_maintenance",
+  "fleet_reports"
+]);
+
 export function currentAccessSurface(): AccessSurface {
   const host = (
     headers().get("x-forwarded-host") ??
@@ -185,17 +201,19 @@ export function currentAdminAccessSurface(): AdminAccessSurface {
   ).split(":")[0].toLowerCase();
   if (isPeopleHostName(host)) return "people";
   if (isFinanceHostName(host)) return "finance";
+  if (host === "fleet.dropxlogistics.com" || host.startsWith("fleet-")) return "fleet";
   return host === "ops.dropxlogistics.com" || host.startsWith("ops-") ? "ops" : "dashboard";
 }
 
 export function pageBelongsToSurface(code: string, surface: AdminAccessSurface) {
   if (surface === "people") return peoplePageCodes.has(code) || code.startsWith("workforce_category_");
   if (surface === "finance") return financePageCodes.has(code);
+  if (surface === "fleet") return fleetPageCodes.has(code);
   if (["finance_pricing", "finance_revenue", "finance_pnl"].includes(code)) return false;
   if (sharedPageCodes.has(code)) return true;
   return surface === "ops" ? opsPageCodes.has(code) : !opsPageCodes.has(code);
 }
 
 export function accessSurfaceLabel(surface: AdminAccessSurface) {
-  return surface === "ops" ? "OpsPulse" : surface === "people" ? "People" : surface === "finance" ? "Finance" : "Dashboard";
+  return surface === "ops" ? "OpsPulse" : surface === "people" ? "People" : surface === "finance" ? "Finance" : surface === "fleet" ? "Fleet" : "Dashboard";
 }

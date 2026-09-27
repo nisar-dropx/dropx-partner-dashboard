@@ -70,6 +70,8 @@ export type AdHocActivityEntry = {
   reason: string;
   remark: string;
   countedInTotal: boolean;
+  paymentHeadCode?: string;
+  paymentHeadName?: string;
 };
 
 export type AdHocActivityStation = {
@@ -389,7 +391,9 @@ export async function loadAdHocActivity(
         amount: requestAmount,
         reason: requestReason(request),
         remark: requestRemark(request),
-        countedInTotal: true
+        countedInTotal: true,
+        paymentHeadCode: String(head.code ?? "").trim(),
+        paymentHeadName: String(head.name ?? head.code ?? "Ad-hoc request").trim()
       });
     }
     station.totalCount += 1;
@@ -432,7 +436,9 @@ export async function loadAdHocActivity(
       amount: cashbookAmount,
       reason: String(cashbook.cps_sub_head || cashbook.category || cashbook.expense_type || "Adhoc Van").trim(),
       remark: String(cashbook.remarks ?? "").trim() || "No remark recorded",
-      countedInTotal
+      countedInTotal,
+      paymentHeadCode: "CASHBOOK_ADHOC_VAN",
+      paymentHeadName: "Ad-hoc Van · Cashbook"
     });
     stationDays.set(cashbook.expense_date, day);
     daysByStation.set(station.id, stationDays);

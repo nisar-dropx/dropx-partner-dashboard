@@ -47,6 +47,7 @@ type DesignationInitial = {
   portal_permissions?: unknown;
   profile_field_rules?: unknown;
   is_field_operations?: boolean | null;
+  fleet_access_enabled?: boolean;
   is_active: boolean;
 };
 
@@ -508,6 +509,18 @@ export function DesignationForm({
           <span>
             <strong>Field Operations</strong>
             <small>Include people with this designation in ID &amp; Pay Mapping.</small>
+          </span>
+        </label>
+        <label className="check-row designation-field-operations">
+          <input
+            className="matrix-checkbox"
+            defaultChecked={Boolean(initial?.fleet_access_enabled)}
+            name="fleet_access_enabled"
+            type="checkbox"
+          />
+          <span>
+            <strong>Fleet portal access</strong>
+            <small>Make this People designation eligible for Fleet. Fleet Settings controls its menus and actions.</small>
           </span>
         </label>
         {initial ? (
