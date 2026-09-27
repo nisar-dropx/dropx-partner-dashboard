@@ -1,6 +1,7 @@
 "use client";
 
 import {CodSlipCheckDetails} from '@/components/cod-slip-check-details';
+import {compactCodReason} from '@/lib/ops-pulse/cod-return-policy';
 import {proofTone} from '@/lib/ops-pulse/cod-proof-policy';
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -39,6 +40,8 @@ export type CodRegisterRow = {
   submitterName: string;
   remarks: string;
   status: string;
+  proofVersion:number;
+  returned:boolean;
   proofStatus:string;
   proofReason:string;
   proofResult?:Record<string,unknown>|null;
@@ -87,7 +90,7 @@ function EditSubmissionModal({
       >
         <div className="panel-head toolbar">
           <div>
-            <h2>Edit COD submission</h2>
+            <h2>{editing.returned?'Re-upload returned slip':'Edit COD submission'}</h2>{editing.returned?<p style={{color:'#b91c1c'}}>{editing.proofReason}</p>:null}
             <p className="subtle">Update details and optionally replace the deposit slip photo. Amazon rows are re-verified on save.</p>
           </div>
           <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>×</button>
@@ -100,7 +103,7 @@ function EditSubmissionModal({
           ) : null}
           <form action={formAction} className="form-grid three" encType="multipart/form-data" style={{ position: "relative" }}>
             <CodSubmitPendingOverlay isAmazon={isAmazon} savingLabel="Saving changes…" />
-            <input type="hidden" name="submission_id" value={editing.id} />
+            <input type="hidden" name="submission_id" value={editing.id} /><input type="hidden" name="proof_version" value={editing.proofVersion} />
             {client ? <input type="hidden" name="client" value={client} /> : null}
             <input type="hidden" name="station_code" value={selected?.stationCode || editing.stationCode} />
             <label className="span-2">Station
@@ -135,9 +138,9 @@ function EditSubmissionModal({
               </span>
             </label>
             <label className="span-2">Replace deposit slip photo
-              <input className="field" name="deposit_slip" type="file" accept="image/*" capture="environment" />
+              <input className="field" name="deposit_slip" required={editing.returned} type="file" accept="image/*" capture="environment" />
               <span className="subtle" style={{ display: "block", marginTop: 6 }}>
-                Leave empty to keep the current slip. Upload JPG/PNG only if replacing.
+                {editing.returned?'A replacement photo is required for this returned slip.':'Leave empty to keep the current slip. Upload JPG/PNG only if replacing.'}
               </span>
             </label>
             {editing.hasSlip && editing.slipUrl ? (
@@ -168,17 +171,19 @@ function EditSubmissionModal({
 }
 
 export function CodSubmissionRegister({
+  editId,
   canEdit,
   client,
   rows,
   stationOptions
 }: {
+  editId?:string;
   canEdit: boolean;
   client: string;
   rows: CodRegisterRow[];
   stationOptions: CodRegisterStationOption[];
 }) {
-  const [editing, setEditing] = useState<CodRegisterRow | null>(null);
+  const [editing, setEditing] = useState<CodRegisterRow | null>(()=>canEdit?rows.find(r=>r.id===editId)||null:null);
   const [preview, setPreview] = useState<CodRegisterRow | null>(null);
 
   return (
@@ -241,12 +246,12 @@ export function CodSubmissionRegister({
                     <span className="subtle">Missing</span>
                   )}
                 </td>
-                <td><StatusPill status={row.status} /><div><span className={`status-pill ${proofTone(row.proofStatus)}`}>{row.proofStatus}</span><p style={{whiteSpace:'normal',maxWidth:300,color:proofTone(row.proofStatus)==='bad'?'#b91c1c':undefined}}>{row.proofReason}</p><CodSlipCheckDetails result={row.proofResult} checkedAt={row.proofCheckedAt} amount={row.amountRaw} date={row.depositDate} station={row.stationCode} reference={row.remittanceCode}/></div></td>
+                <td><StatusPill status={row.status} /><div><span className={`status-pill ${proofTone(row.proofStatus)}`}>{row.proofStatus}</span><p style={{whiteSpace:'normal',maxWidth:300,color:proofTone(row.proofStatus)==='bad'?'#b91c1c':undefined}}>{compactCodReason(row.proofReason)}</p><CodSlipCheckDetails result={row.proofResult} checkedAt={row.proofCheckedAt} amount={row.amountRaw} date={row.depositDate} station={row.stationCode} reference={row.remittanceCode}/></div></td>
                 <td>{row.remarks || "-"}</td>
                 <td>
                   {canEdit ? (
                     <button type="button" className="button secondary" style={{ padding: "4px 10px", minHeight: 0 }} onClick={() => setEditing(row)}>
-                      Edit
+                      {row.returned?'Re-upload':'Edit'}
                     </button>
                   ) : (
                     <span className="subtle">—</span>

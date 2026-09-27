@@ -36,17 +36,43 @@ const slip={id:'a',location_id:'s',deposit_date:expected.date,created_at:'2026-0
 for(const kind of ['No Cash','Banker Not Reported']){const row=pending.buildCodPendingRows([station],[],expected.date,new Date(),[{...exception,kind}])[0];assert.equal(row.status,kind);assert.equal(row.pending,false);assert.equal(row.updateRecorded,true);assert.equal(row.validation,'Not required');}
 assert.equal(pending.buildCodPendingRows([station],[slip],expected.date,new Date(),[exception])[0].status,'Complete','Later deposit takes precedence');
 assert.equal(pending.buildCodPendingRows([station],[{...slip,ai_status:'Not valid'}],expected.date)[0].status,'Not valid');
-const digest=compile('src/lib/cod-pending-digest.ts',{'./ops-pulse/cod-pending-data':{},'./ops-pulse/cod-ageing-data':{},'./ops-pulse/cod-ageing':{ageingBands:[]},'./cod-pending-mail-scope':{}});
+const digest=compile('src/lib/cod-pending-digest.ts',{'./ops-pulse/cod-pending-data':{},'./ops-pulse/cod-ageing-data':{},'./ops-pulse/cod-ageing':{ageingBands:[]},'./cod-pending-mail-scope':{},'./ops-pulse/cod-return-policy':compile('src/lib/ops-pulse/cod-return-policy.ts')});
 const sealFailure=policy.proofVerdict({...extracted,seal_status:'missing',seal_clarity:'not_applicable',seal_issuer:null,seal_evidence:null},expected);
 const sealRows=pending.buildCodPendingRows([station],[{...slip,ai_status:sealFailure.status,ai_summary:sealFailure.reason}],expected.date);
 const sealEmail=digest.buildCodDigestMessages(sealRows,{stations:[],uploadDate:expected.date,dataDate:'2026-09-25'},[{email:'test@example.com',stationIds:['s']}],expected.date,'evening','COD {{month}} {{year}}')[0];
-assert.match(sealEmail.html,/seal is missing/);assert.ok(!/\bAI\b|GPT|OpenAI/i.test(sealEmail.html));
+assert.match(sealEmail.html,/Seal missing/);assert.ok(!/\bAI\b|GPT|OpenAI/i.test(sealEmail.html));
 assert.match(pending.codPendingCsv(sealRows),/seal is missing/);
 const rows=pending.buildCodPendingRows([station],[{...slip,ai_status:'Not valid',ai_summary:'Slip amount does not match.'}],expected.date);
 const email=digest.buildCodDigestMessages(rows,{stations:[],uploadDate:expected.date,dataDate:'2026-09-25'},[{email:'test@example.com',stationIds:['s']}],expected.date,'evening','COD {{month}} {{year}}')[0];
-assert.match(email.html,/Not valid/);assert.match(email.html,/Slip amount does not match/);assert.ok(!/\bAI\b|GPT|OpenAI/i.test(email.html));assert.match(email.html,/color:#b91c1c;font-weight:bold[^>]*>Slip amount/);
+assert.match(email.html,/Not valid/);assert.match(email.html,/Amount mismatch/);assert.ok(!/\bAI\b|GPT|OpenAI/i.test(email.html));assert.match(email.html,/color:#b91c1c;font-weight:bold[^>]*>Amount mismatch/);
+const returns=compile('src/lib/ops-pulse/cod-return-policy.ts');
+for(const email of ['jamsheer@dropxlogistics.com','ct@dropxlogistics.com','tech@dropxlogistics.com']){
+ const auth={companyId:'company',email,roleCode:'MANAGER'};
+ assert.equal(returns.canReturnCodSlip(auth),true);
+ for(const patch of [{isPreview:true},{readOnly:true},{roleCode:'LOCATION'},{email:'other@dropxlogistics.com'}])assert.equal(returns.canReturnCodSlip({...auth,...patch}),false);
+}
+assert.equal(policy.proofVerdict({...extracted,station_code:'NLCC',uncertain_fields:['station_code']},expected).status,'Details unclear');
+assert.equal(policy.proofVerdict({...extracted,amount:100,uncertain_fields:['amount']},expected).status,'Details unclear','Even an expected value cannot pass if its writing is uncertain');
+assert.equal(policy.proofVerdict(policy.reconcileProofReadings({...extracted,amount:700}, {...extracted,amount:100}),expected).status,'Details unclear');
+assert.equal(policy.proofVerdict(policy.reconcileProofReadings({...extracted,amount:700}, {...extracted,amount:700}),expected).status,'Not valid','Consistent clear mismatches stay invalid');
+const returnedRows=pending.buildCodPendingRows([station],[{...slip,returned_at:'2026-09-27',return_reason:'Wrong photo'}],expected.date);
+assert.equal(returnedRows[0].status,'Returned');assert.equal(returnedRows[0].pending,true);
+let actor={companyId:'company',email:'ct@dropxlogistics.com',locationScopeIds:['s'],hasAllLocationAccess:false};let called=0;
+const returnAction=compile('src/app/ops-pulse/cod/pending/actions.ts',{'next/cache':{revalidatePath:()=>{}},'@/lib/authorization':{requirePagePermission:async()=>actor},'@/lib/company-scope':{requireCompanyId:()=>actor.companyId},'@/lib/ops-pulse/cod-pending-access':{canAccessDailyCodPending:()=>true},'@/lib/ops-pulse/cod-return-policy':returns,'@/lib/supabase-admin':{supabaseAdmin:{from(){const q={select:()=>q,eq:()=>q,single:async()=>({data:{location_id:'s'}})};return q;},rpc:async()=>{called++;return {data:'id'};}}}}).returnCodSlip;
+const form=new FormData();form.set('submission_id','id');form.set('proof_version','1');form.set('reason','Wrong slip');
+assert.equal((await returnAction({ok:false,message:''},form)).ok,true);assert.equal(called,1);
+for(const patch of [{isPreview:true},{email:'manager@dropxlogistics.com'},{locationScopeIds:['other']}]){const before=actor;actor={...actor,...patch};assert.equal((await returnAction({ok:false,message:''},form)).ok,false);assert.equal(called,1);actor=before;}
+const returnEmail=returns.returnMail({station:'NLRC',date:'2026-09-26',reference:'AC123',reason:'Wrong <image>',actor:'Control Tower',submissionId:'one',locationId:'loc'});
+assert.match(returnEmail.html,/Wrong &lt;image&gt;/);assert.match(returnEmail.html,/edit=one/);assert.ok(!/\bAI\b|GPT|OpenAI/i.test(returnEmail.html));
+// SMTP is mocked; test actual sender threading without sending any business email.
+let currentThread=null,jobIndex=0;const sentMail=[],finished=[],jobUpdates=[];
+const mailJobs=[{id:'return1',company_id:'company',location_id:'s',submission_id:'one',deposit_date:'2026-09-30',reference:'AC1',reason:'Wrong slip',actor_name:'CT'},{id:'return2',company_id:'company',location_id:'s',submission_id:'two',deposit_date:'2026-10-01',reference:'AC2',reason:'Wrong slip again',actor_name:'CT'}];
+const fakeMailDb={from(table){let update=null;const q={};for(const key of ['select','eq','in'])q[key]=()=>q;q.update=value=>{update=value;return q;};const result=()=>({data:table==='stations'?{station_code:'NLRC',station_email:'nlrc@dropxlogistics.com'}:table==='email_notification_settings'?{is_enabled:true,smtp_host:'example.invalid',smtp_port:587,smtp_pass:'test',smtp_from:'ops@dropxlogistics.com'}:table==='cod_return_threads'?currentThread:table==='hr_user_person_links'?[{user_id:'cm',person_id:'person'}]:table==='profiles'?[{id:'cm',email:'cm@dropxlogistics.com'}]:[],error:null});q.single=async()=>result();q.maybeSingle=async()=>result();q.then=(ok,fail)=>{if(update)jobUpdates.push(update);return Promise.resolve(result()).then(ok,fail);};return q;},async rpc(name,args){if(name==='claim_cod_return_mail')return {data:jobIndex<mailJobs.length?[mailJobs[jobIndex++]]:[]};finished.push(args);currentThread={subject:args.p_subject,root_message_id:args.p_root,last_message_id:args.p_message};return {data:null,error:null};}};
+const mailWorker=compile('src/lib/ops-pulse/cod-return-mail.ts',{'server-only':{},nodemailer:{default:{createTransport:()=>({sendMail:async mail=>{sentMail.push(mail);return {accepted:[mail.to,...mail.cc]};},close:()=>{}})}},'@/lib/supabase-admin':{supabaseAdmin:fakeMailDb},'@/lib/people-operational-hierarchy':{loadPeopleOperationalHierarchy:async()=>({byLocation:new Map([['s',{clusterManagers:[{personId:'person'}]}]])})},'./cod-return-policy':returns});
+assert.equal((await mailWorker.deliverCodReturns()).sent,2);
+assert.equal(sentMail[0].to,'nlrc@dropxlogistics.com');assert.deepEqual(sentMail[0].cc,['cm@dropxlogistics.com']);assert.equal(sentMail[1].subject,sentMail[0].subject);assert.equal(sentMail[1].inReplyTo,sentMail[0].messageId);assert.deepEqual(sentMail[1].references,[sentMail[0].messageId]);assert.equal(finished[1].p_root,finished[0].p_root,'Thread survives a month boundary');
 const db=new PGlite();
-await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create table companies(id uuid primary key);create table stations(id uuid primary key);create table profiles(id uuid primary key,full_name text);
+await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create table companies(id uuid primary key);create table stations(id uuid primary key);create table profiles(id uuid primary key,full_name text,email text,company_id uuid,is_active boolean);
 create table cod_submissions(id uuid primary key default gen_random_uuid(),company_id uuid not null,location_id uuid,created_by uuid,created_at timestamptz default now(),deposit_date date,cod_period_from date,cod_period_to date,station_code text,remittance_code text,reference_no text,deposited_amount numeric,submitter_name text,remarks text,attachments jsonb,deposit_slip_attachments jsonb,ai_status text,ai_summary text,ai_result jsonb,ai_confidence numeric);
 grant all on cod_submissions to service_role;grant usage on schema public to service_role;`);
 await db.exec(readFileSync('supabase/migrations/20260925035330_cod_slip_gpt_validation.sql','utf8'));
@@ -77,5 +103,37 @@ assert.equal((await db.query('select event from cod_proof_history where exceptio
 await assert.rejects(()=>db.query(base+`,email_subject,sender_email,stakeholder_emails,client_poc_emails,email_sent_at,email_cc) values($1,$2,'2026-09-25','Banker Not Reported','Absent',$3,$3,'User','Banker missing','station@dropxlogistics.com',ARRAY['ops@dropxlogistics.com'],ARRAY['client@example.com'],now(),ARRAY['other@dropxlogistics.com'])`,[company,location,user]),/check constraint/);
 await db.query(base+`,email_subject,sender_email,stakeholder_emails,client_poc_emails,email_sent_at,email_cc) values($1,$2,'2026-09-25','Banker Not Reported','Absent',$3,$3,'User','Banker missing','station@dropxlogistics.com',ARRAY['ops@dropxlogistics.com'],ARRAY['client@example.com'],now(),ARRAY['ct@dropxlogistics.com'])`,[company,location,user]);
 await db.exec('set role authenticated');await assert.rejects(()=>db.query('select * from cod_daily_exceptions'),/permission denied/);await assert.rejects(()=>db.query('select * from cod_proof_history'),/permission denied/);await assert.rejects(()=>db.query('select * from claim_cod_proof_check_v4()'),/permission denied/);await db.exec('reset role');
+// Apply return workflow after exercising the prior queue, then verify the new handover.
+await db.exec(readFileSync('supabase/migrations/20260927090000_cod_slip_returns.sql','utf8'));
+await db.exec(readFileSync('supabase/migrations/20260927091000_cod_handwriting_checks.sql','utf8'));
+await db.query("insert into profiles values($1,'Reviewer','tech@dropxlogistics.com',$2,true)",[user,company]);
+await db.query("update cod_submissions set deposit_slip_attachments=$2 where id=$1",[submission.id,[{storage_path:company+'/original.jpg'}]]);
+const current=(await db.query('select * from cod_submissions where id=$1',[submission.id])).rows[0];
+await assert.rejects(()=>db.query('select return_cod_slip($1,$2,$3,$4,$5)',[company,submission.id,current.proof_version-1,user,'Wrong photo']),/Slip changed/);
+await assert.rejects(()=>db.query('select return_cod_slip($1,$2,$3,$4,$5)',[company,submission.id,current.proof_version,'44444444-4444-4444-4444-444444444444','Wrong photo']),/access denied/);
+await db.query('select return_cod_slip($1,$2,$3,$4,$5)',[company,submission.id,current.proof_version,user,'Wrong photo']);
+await assert.rejects(()=>db.query('select return_cod_slip($1,$2,$3,$4,$5)',[company,submission.id,current.proof_version,user,'Wrong photo']),/already been returned/);
+assert.equal((await db.query('select * from cod_slip_returns')).rows.length,1,'Double-click cannot enqueue duplicate mail');
+assert.equal((await db.query('select * from claim_cod_proof_check_v4()')).rows.length,0);
+assert.equal((await db.query('select * from claim_cod_proof_check_v5()')).rows.length,0,'Returned slips are held for replacement');
+await db.query("update cod_submissions set ai_status='Valid',returned_at=null where id=$1",[submission.id]);
+assert.ok((await db.query('select returned_at from cod_submissions')).rows[0].returned_at,'Worker result cannot clear return');
+await db.query("update cod_submissions set remarks='Edited only' where id=$1",[submission.id]);
+assert.ok((await db.query('select returned_at from cod_submissions')).rows[0].returned_at,'Remarks cannot clear return');
+await assert.rejects(()=>db.query("update cod_submissions set deposit_date='2026-09-25' where id=$1",[submission.id]),/original station and deposit date/);
+const mail=(await db.query('select * from claim_cod_return_mail()')).rows[0];assert.ok(mail);
+assert.equal((await db.query('select * from claim_cod_return_mail()')).rows.length,0,'Email claim is exclusive');
+await db.query('select finish_cod_return_mail($1,$2,$3,$4,$5)',[mail.id,'COD slip corrections · NLRC','root','first',['station@dropxlogistics.com','cm@dropxlogistics.com']]);
+await db.query("update cod_submissions set deposit_slip_attachments=$2,last_updated_by=$3,last_updater_name='Station' where id=$1",[submission.id,[{storage_path:company+'/replacement.jpg'}],user]);
+const replaced=(await db.query('select * from cod_submissions')).rows[0];assert.equal(replaced.returned_at,null);assert.equal(replaced.ai_status,'Validation pending');assert.ok(replaced.proof_version>current.proof_version);
+assert.ok((await db.query('select resubmitted_at from cod_slip_returns')).rows[0].resubmitted_at);
+assert.ok((await db.query("select * from cod_proof_history where event='Returned slip re-uploaded'")).rows.length);
+await db.query('select return_cod_slip($1,$2,$3,$4,$5)',[company,submission.id,replaced.proof_version,user,'Still wrong photo']);
+const secondMail=(await db.query('select * from claim_cod_return_mail()')).rows[0];
+await db.query('select finish_cod_return_mail($1,$2,$3,$4,$5)',[secondMail.id,'COD slip corrections · NLRC','root','second',['station@dropxlogistics.com','newcm@dropxlogistics.com']]);
+const thread=(await db.query('select * from cod_return_threads')).rows;assert.equal(thread.length,1);assert.equal(thread[0].root_message_id,'root');assert.equal(thread[0].last_message_id,'second');
+await db.exec('set role authenticated');
+for(const sql of ['select * from cod_slip_returns','select * from cod_return_threads','select * from claim_cod_return_mail()','select * from claim_cod_proof_check_v5()'])await assert.rejects(()=>db.query(sql),/permission denied/);
+await db.exec('reset role');
 await db.close();
 console.log('PASS COD proof: extraction checks, mailbox evidence, exception reporting, red email reasons, no model branding, SQL queue claims, stale-result rejection, edit resets, audit identity, required proof/CC and denied client access.');

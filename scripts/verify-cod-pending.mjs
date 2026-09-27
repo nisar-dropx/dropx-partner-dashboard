@@ -45,7 +45,7 @@ assert.deepEqual(scope.resolveCodRecipients([station,nowStore],mixedMembership,r
 const allMembership=[{...memberships[0],has_all_location_access:true}];
 assert.deepEqual(scope.resolveCodRecipients([station,nowStore],allMembership,roles,profiles,new Set(['r']),'example.com')[0].stationIds,['s1'],'Company-wide report also excludes Amazon Now');
 assert.equal(scope.resolveCodRecipients([station,nowStore],allMembership,roles,[{...profiles[0],email:' STORE@example.com '}],new Set(['r']),'example.com').length,0,'Amazon Now store mailbox is excluded even with broad access');
-const digest=compile('src/lib/cod-pending-digest.ts',{'./ops-pulse/cod-pending-data':{},'./ops-pulse/cod-ageing-data':{},'./ops-pulse/cod-ageing':ageing,'./cod-pending-mail-scope':scope});
+const digest=compile('src/lib/cod-pending-digest.ts',{'./ops-pulse/cod-pending-data':{},'./ops-pulse/cod-ageing-data':{},'./ops-pulse/cod-ageing':ageing,'./cod-pending-mail-scope':scope,'./ops-pulse/cod-return-policy':compile('src/lib/ops-pulse/cod-return-policy.ts')});
 const source={uploadDate:date,dataDate:'2026-09-01',batchId:'batch1',importedAt:'2026-09-02T08:30:00Z',fileName:'file.csv',error:null,stations:[age,{...age,stationCode:'GNTI',total:999999}]};
 const recipients=[{email:'user@example.com',name:'User',stationIds:['s1']}];
 const evening=digest.buildCodDigestMessages(rows,source,recipients,date,'evening','OpsPulse | COD report | {{month}} {{year}}')[0];

@@ -30,6 +30,7 @@ import { CodSubmissionForm } from "./cod-submission-form";
 import { CodSubmissionRegister, type CodRegisterRow } from "./cod-submission-register";
 
 type SearchParams = {
+  edit?: string;
   client?: string;
   from?: string;
   location?: string;
@@ -88,6 +89,7 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
     loadCodSubmissions(companyId, authorization.locationScopeIds, authorization.hasAllLocationAccess, {
       fromDate: searchParams?.from ?? "",
       formType: selectedClient,
+      submissionId: searchParams?.edit,
       locationId: searchParams?.location ?? "",
       toDate: searchParams?.to ?? "",
       validationStatus: searchParams?.status ?? ""
@@ -140,8 +142,10 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
       submitterName: row.submitter_name ?? "",
       remarks: row.remarks ?? "",
       status: row.validation_status,
-      proofStatus: proofStatus(row.ai_status),
-      proofReason: row.ai_summary||'',
+      proofStatus: row.returned_at?'Returned':proofStatus(row.ai_status),
+      proofVersion: row.proof_version||1,
+      returned: Boolean(row.returned_at),
+      proofReason: (row.returned_at?row.return_reason:row.ai_summary)||'',
       proofResult: row.ai_result,
       proofCheckedAt: row.proof_checked_at,
       hasSlip: slips.length > 0,
@@ -236,7 +240,7 @@ export default async function CodSubmissionPage({ searchParams }: { searchParams
               </div>
               <span className="count-badge">{registerRows.length} records</span>
             </div>
-            <CodSubmissionRegister
+            <CodSubmissionRegister editId={searchParams?.edit}
               canEdit={Boolean(permission.canEdit) && isSupabaseAdminConfigured}
               client={selectedClient}
               rows={registerRows}

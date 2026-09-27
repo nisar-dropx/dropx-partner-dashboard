@@ -379,7 +379,7 @@ export async function updateCodSubmission(
 
     const { data: existing, error: existingError } = await supabaseAdmin
       .from("cod_submissions")
-      .select("id, location_id, form_type, deposit_slip_attachments, attachments")
+      .select("id, location_id, deposit_date, form_type, deposit_slip_attachments, attachments, proof_version, returned_at")
       .eq("company_id", companyId)
       .eq("id", submissionId)
       .maybeSingle();
@@ -393,6 +393,9 @@ export async function updateCodSubmission(
       throw new Error("You do not have access to this submission.");
     }
 
+    const version=Number(formData.get('proof_version'));
+    if(version!==existing.proof_version)throw new Error('This slip changed. Refresh before editing.');
+    if(existing.returned_at&&(fields.locationId!==existing.location_id||fields.depositDate!==existing.deposit_date))throw new Error('Keep the original station and deposit date for this returned slip.');
     const station = await stationDetails(companyId, fields.locationId);
     const formType =
       resolveFormType(station, fields.clientHint) ||
@@ -416,6 +419,7 @@ export async function updateCodSubmission(
 
     const uploaded = await uploadSlipPhotos(companyId, submissionId, formData);
 
+    if(existing.returned_at&&!uploaded.length)throw new Error('Upload a replacement photo for this returned slip.');
     const depositAttachments = uploaded.length ? uploaded : existingAttachments;
     if (!depositAttachments.length) {
       throw new Error("Upload a photo of the deposit slip (JPG or PNG).");
@@ -464,18 +468,11 @@ export async function updateCodSubmission(
       validation_payload: amazon.validationPayload ?? EMPTY_JSON,
       updated_at: new Date().toISOString()
     };
-    let { error } = await supabaseAdmin
-      .from("cod_submissions")
-      .update(updateRow)
-      .eq("company_id", companyId)
-      .eq("id", submissionId);
-    if (error && isMissingFormPayloadColumn(error)) {
-      ({ error } = await supabaseAdmin
-        .from("cod_submissions")
-        .update(withoutFormPayload(updateRow))
-        .eq("company_id", companyId)
-        .eq("id", submissionId));
-    }
+    let query=supabaseAdmin.from('cod_submissions').update(updateRow).eq('company_id',companyId).eq('id',submissionId).eq('proof_version',version);
+    query=existing.returned_at?query.eq('returned_at',existing.returned_at):query.is('returned_at',null);
+    const saved=await query.select('id');
+    if(!saved.error&&!saved.data?.length)throw new Error('Slip changed while saving. Refresh and try again.');
+    let {error}=saved;
     if (error) throw new Error(error.message);
 
     revalidateCodPaths();

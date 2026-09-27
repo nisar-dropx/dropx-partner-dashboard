@@ -11,6 +11,7 @@ export function CodSlipCheckDetails({result,checkedAt,amount,date,station,refere
  if(!v||Number(result?.policy_version)<4)return <p className="subtle">Seal check pending. An earlier receipt check does not confirm the seal.</p>;
  const normalize=(value:string)=>value.toUpperCase().replace(/[^A-Z0-9]/g,'');
  const seal=v.seal_status==='visible'&&['high','medium'].includes(v.seal_clarity)&&v.seal_evidence?'Seal visible':v.seal_status==='missing'?'Seal missing':'Seal unclear';
+ const uncertain=v.uncertain_fields||[];
  const rows=[
   ['Deposited amount',amount==null?'Not available':`₹${formatAmount(amount)}`,v.amount==null?'Not readable':`₹${formatAmount(v.amount)}`,amount!=null&&v.amount!=null&&Math.abs(Number(amount)-v.amount)<=0.01?'Match':'Mismatch / unreadable'],
   ['Deposit date',formatDate(date),v.deposit_date?formatDate(v.deposit_date):'Not readable',v.deposit_date===date?.slice(0,10)?'Match':'Mismatch / unreadable'],
@@ -20,9 +21,9 @@ export function CodSlipCheckDetails({result,checkedAt,amount,date,station,refere
   ['Bank / CMS seal','Required · medium clarity or better',v.seal_issuer||'Issuer not fully readable',seal],
   ['Seal clarity','Medium or high',v.seal_clarity||'Not assessed',['high','medium'].includes(v.seal_clarity)?'Sufficient':'Insufficient'],
   ['Deposit acknowledgement','Required',v.deposit_confirmed?'Visible':'Not visible',v.deposit_confirmed?'Present':'Missing']
- ];
+ ].map(row=>{const key:Record<string,string>={'Deposited amount':'amount','Deposit date':'deposit_date',Station:'station_code','Marketplace remittance':'remittance_reference','Receipt / transaction number':'receipt_reference'};return uncertain.includes(key[row[0]])?[...row.slice(0,3),'Handwriting unclear']:row;});
  return <details style={{margin:'12px 0',whiteSpace:'normal'}}><summary style={{cursor:'pointer',fontWeight:600,color:seal==='Seal visible'?'#15803d':'#b91c1c'}}>Validation checks · {seal}</summary>
-  <p><strong>Checked:</strong> {formatDateTime(checkedAt)} · Slip version {String(result?.proof_version??'—')}</p>
+  {uncertain.length?<p style={{color:'#b91c1c'}}>Handwriting needs a clearer photo. Ambiguous readings are not confirmed mismatches.</p>:null}<p><strong>Checked:</strong> {formatDateTime(checkedAt)} · Slip version {String(result?.proof_version??'—')}</p>
   <div className="table-wrap"><table style={{width:'100%',minWidth:0,tableLayout:'fixed'}}><thead><tr><th style={cellStyle}>Check</th><th style={cellStyle}>Submitted / required</th><th style={cellStyle}>Read from slip</th><th style={cellStyle}>Result</th></tr></thead><tbody>{rows.map(([label,expected,read,outcome])=><tr key={label}><td style={cellStyle}>{label}</td><td style={cellStyle}>{expected}</td><td style={cellStyle}>{read}</td><td style={{...cellStyle,color:/Mismatch|Missing|Seal missing|Seal unclear|Insufficient/.test(outcome)?'#b91c1c':undefined}}>{outcome}</td></tr>)}</tbody></table></div>
   <p><strong>Seal evidence:</strong> {v.seal_evidence||'No identifiable bank / CMS seal could be read.'}</p>
   <p className="subtle">A printed logo or signature alone does not count as a seal. These checks verify visible document details, not seal authenticity or bank settlement.</p>
