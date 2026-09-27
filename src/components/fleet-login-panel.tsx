@@ -33,7 +33,7 @@ export function FleetLoginPanel({ initialMessage, nextPath = "/" }: { initialMes
           </form>
           <p className="fleet-login-footnote">Access is limited to active users enabled for Fleet operations.</p>
         </div>
-        <p className="fleet-login-legal">DropX Fleet · Tropics Logistics vehicle operations</p>
+        <p className="fleet-login-legal">DropX Fleet · Vehicle operations</p>
       </section>
     </main>
   );

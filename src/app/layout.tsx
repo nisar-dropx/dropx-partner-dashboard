@@ -21,9 +21,9 @@ export function generateMetadata(): Metadata {
   const host = (headers().get("x-forwarded-host") ?? headers().get("host") ?? "").split(":")[0].toLowerCase();
   if (host === "fleet.dropxlogistics.com") {
     return {
-      title: { default: "Tropics Fleet", template: "%s · Tropics Fleet" },
-      description: "Fleet availability, vehicle payment approvals and ad-hoc van operations for Tropics Logistics.",
-      applicationName: "Tropics Fleet",
+      title: { default: "DropX Fleet", template: "%s · DropX Fleet" },
+      description: "DropX Fleet for vehicle availability, payment approvals, tracking, service and audits.",
+      applicationName: "DropX Fleet",
       icons: { icon: "/fleet-control/mark.svg", shortcut: "/fleet-control/mark.svg" }
     };
   }
