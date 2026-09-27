@@ -22,7 +22,12 @@ function metricValue(row: Record<string, unknown>, source: string) {
   if (source === "seller_return") return number("mfn_return");
   return 0;
 }
-function validMonth(value: string | null) { if(value && !/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) throw new Error("Choose a valid month."); return value || workforcePaymentMonth().from.slice(0,7); }
+function validMonth(value: string | null) {
+  const current = workforcePaymentMonth().from.slice(0, 7);
+  if (value && !/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) throw new Error("Choose a valid month.");
+  if (value && value > current) throw new Error("Choose the current month or an earlier month.");
+  return value || current;
+}
 
 export async function GET(request: Request) {
   try {

@@ -12,6 +12,18 @@
   min-width: 0;
 }
 
+.headingRow {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.headingRow > :global(.dx-page-intro) {
+  margin: 0;
+  min-width: 0;
+}
+
 .page :global(.dx-workforce-mtd-breakdown) > header,
 .page :global(.dx-workforce-ledger) > header,
 .page :global(.dx-workforce-statements) > header {
@@ -44,3 +56,10 @@
 .ledger > header > button:hover { background: #f8fafc; }
 .ledger > header > button:focus-visible { outline: 2px solid #7f56d9; outline-offset: 3px; }
 .ledger > header > button > svg { width: 18px; height: 18px; }
+
+@media (max-width: 600px) {
+  .headingRow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

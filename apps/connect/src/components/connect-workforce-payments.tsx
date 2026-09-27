@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, ChevronDown, ChevronRight, Download, IndianRupee, ReceiptText, RefreshCw, Route, WalletCards } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, IndianRupee, ReceiptText, RefreshCw, Route, WalletCards } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AppAccount } from "./connect-profile-app";
 import { ConnectAdvances } from "./connect-advances";
@@ -15,8 +15,12 @@ import {ConnectProductionBreakdown} from './connect-production-breakdown';
 import {ConnectDailyPaymentBreakdown,type DailyPaymentProvider} from './connect-daily-payment-breakdown';
 import paymentStyles from './connect-workforce-payments.module.css';
 import {AssociatePayouts} from './associate-payouts';
+import {currentPayoutMonth,payoutMonthLabel,payoutMonthLongLabel,shiftPayoutMonth} from '@/lib/payout-dispute';
+import monthStyles from './payout-month-control.module.css';
 
 type PaymentData = {
+  month: string;
+  hasPaymentMapping: boolean;
   period: string;
   mapping: Array<{ id: string; providerMemberId: string | null; provider: string | null; paymentMethod: string | null; effectiveFrom: string | null; effectiveTo: string | null }>;
   summary: { deliveries: number; earnings: number; workingDays: number; latestDate: string | null; rateLines: Array<{ code: string; label: string; count: number; rate: number; amount: number; sharedRate?: boolean }> };
@@ -26,6 +30,7 @@ type PaymentData = {
 };
 
 type EarningsData = {
+  month: string;
   summary: { grossAmount: number; netAmount:number; baseAmount:number; incentiveAmount:number; additions:number; deductionAmount:number };
   incentives:OwnIncentiveSummary;
   adjustments:OwnAdjustmentLedger;
@@ -54,19 +59,21 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
   const [loading, setLoading] = useState(true);
   const [expandedDate, setExpandedDate] = useState("");
   const [calculated,setCalculated]=useState<EarningsData|null>(null);
+  const [month,setMonth]=useState(currentPayoutMonth);
+  const [payoutLocked,setPayoutLocked]=useState(false);
   const generation=useRef(0);
   const load = useCallback(async () => {
     const version=++generation.current;
     setLoading(true); setError("");setEstimateError('');setData(null);setCalculated(null);setExpandedDate('');
     if(!earningsAllowed&&!rateCardAllowed){setLoading(false);return;}
     try {
-      const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType });
+      const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType, month });
       const [details, estimate] = await Promise.all([
         paymentSectionResult(async()=>{
           const response=await fetch(`/api/connect/workforce-payments?${query}`,{cache:'no-store'});
           const payload=await response.json();
           if(!response.ok)throw new Error(payload.error||'Unable to load payment statements and rate details.');
-          if(!payload.summary||!Array.isArray(payload.mapping)||!Array.isArray(payload.daily)||!Array.isArray(payload.statements)||!Array.isArray(payload.rateCard))throw new Error('Payment details could not be verified. Please retry.');
+          if(payload.month!==month||typeof payload.hasPaymentMapping!=="boolean"||!payload.summary||!Array.isArray(payload.mapping)||!Array.isArray(payload.daily)||!Array.isArray(payload.statements)||!Array.isArray(payload.rateCard))throw new Error('Payment details could not be verified. Please retry.');
           return payload as PaymentData;
         },'Unable to load payment details.'),
         paymentSectionResult(async()=>{
@@ -75,7 +82,7 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
           const payload=await response.json();
           if(!response.ok)throw new Error(payload.error||'Unable to reconcile your payment estimate. Please retry.');
           const result=payload as EarningsData;
-          if(!result.adjustments||!result.incentives||!Array.isArray(result.incentives.campaigns)||!Number.isFinite(result.summary?.incentiveAmount)||!Number.isFinite(result.summary?.netAmount)||!Array.isArray(result.earnings)||result.earnings.some(m=>!Array.isArray(m.daily)||m.daily.some(r=>!Number.isFinite(r.amount))))throw new Error('Your payment estimate could not be reconciled. Please retry.');
+          if(result.month!==month||!result.adjustments||!result.incentives||!Array.isArray(result.incentives.campaigns)||!Number.isFinite(result.summary?.incentiveAmount)||!Number.isFinite(result.summary?.netAmount)||!Array.isArray(result.earnings)||result.earnings.some(m=>!Array.isArray(m.daily)||m.daily.some(r=>!Number.isFinite(r.amount))))throw new Error('Your payment estimate could not be reconciled. Please retry.');
           reconcileOwnProduction(result.earnings,result.summary);
           return result;
         },'Unable to reconcile your payment estimate. Please retry.')
@@ -97,16 +104,18 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
     } catch (reason) {
       if(version===generation.current)setError(reason instanceof Error ? reason.message : "Unable to load earnings.");
     } finally { if(version===generation.current)setLoading(false); }
-  }, [account.id, account.profileType,earningsAllowed,rateCardAllowed]);
+  }, [account.id, account.profileType,earningsAllowed,month,rateCardAllowed]);
   useEffect(() => { void load();return()=>{generation.current++;}; }, [load]);
   useEffect(() => { if (((tab === "earnings"||tab==='statements') && !earningsAllowed) || (tab === "advances" && !advancesAllowed) || (tab === "rate-card" && !rateCardAllowed)) setTab(firstTab); }, [advancesAllowed, earningsAllowed, firstTab, rateCardAllowed, tab]);
   const mapping = data?.mapping[0];
   const visibleError=error||(tab==='earnings'?estimateError:'');
-  const hasMap = Boolean(data?.mapping.length);
+  const hasMap = Boolean(data?.hasPaymentMapping);
+  const hasCurrentMap = Boolean(data?.mapping.length);
   const entries = useMemo(() => data?.rateCard ?? [], [data]);
   const productionDays=calculated?.earnings.flatMap(earning=>earning.daily)??[];
   const dailyProduction=calculated?reconcileOwnProduction(calculated.earnings,calculated.summary):[];
   const paymentDayByDate = useMemo(() => new Map((data?.daily ?? []).map((day) => [day.date, day])), [data]);
+  const futureMonth = month >= currentPayoutMonth();
   const statementLabel = (start: string, end: string) => `${new Intl.DateTimeFormat("en-IN", { month: "short", year: "numeric" }).format(new Date(`${start}T00:00:00`))} · ${date(start)} – ${date(end)}`;
   const downloadStatement = (statementId: string) => {
     const query = new URLSearchParams({ accountId: account.id, profileType: account.profileType, statementId });
@@ -114,9 +123,22 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
   };
 
   return <section className={`dx-workforce-payments ${paymentStyles.page}`}>
-    <header className="dx-page-intro">
-      <small>My pay</small><h1>Payments</h1><p>Live earnings and period payouts.</p>
-    </header>
+    <div className={paymentStyles.headingRow}>
+      <header className="dx-page-intro">
+        <small>My pay</small><h1>Payments</h1><p>Live earnings and period payouts.</p>
+      </header>
+      {earningsAllowed ? <div className={monthStyles.monthPicker}>
+        <span>Payment month</span>
+        <div className={monthStyles.monthControl} role="group" aria-label="Earnings and payout month">
+          <button type="button" aria-label="Previous earnings and payout month" disabled={payoutLocked || (tab === "earnings" && loading)} onClick={() => setMonth((current) => shiftPayoutMonth(current, -1))}><ChevronLeft /></button>
+          <strong aria-live="polite" aria-atomic="true">
+            <span aria-hidden="true">{payoutMonthLabel(month)}</span>
+            <span className={monthStyles.srOnly}>Showing earnings and payouts for {payoutMonthLongLabel(month)}</span>
+          </strong>
+          <button type="button" aria-label="Next earnings and payout month" disabled={futureMonth || payoutLocked || (tab === "earnings" && loading)} onClick={() => setMonth((current) => shiftPayoutMonth(current, 1))}><ChevronRight /></button>
+        </div>
+      </div> : null}
+    </div>
     <nav aria-label="Payment section" className="dx-workforce-tabs">
       {earningsAllowed ? <button className={tab === "earnings" ? "active" : ""} onClick={() => setTab("earnings")}><IndianRupee />Live earnings</button> : null}
       {earningsAllowed ? <button className={tab === "statements" ? "active" : ""} onClick={() => setTab("statements")}><ReceiptText />Payouts</button> : null}
@@ -128,7 +150,7 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
     {tab !== "advances" && tab !== "statements" && loading ? <div className="dx-loader"><span /><small>Loading your payment details…</small></div> : null}
     {tab !== "advances" && tab !== "statements" && visibleError ? <div role="alert" className="dx-alert error">{visibleError}{tab==='earnings'&&estimateError&&!error?<p>Your payouts and rate card remain available in their tabs.</p>:null}<button onClick={() => void load()}><RefreshCw />Retry</button></div> : null}
     {tab === "earnings" && earningsAllowed && data && calculated && !loading && !visibleError ? <>
-      {!hasMap ? <section className="dx-workforce-empty"><i><Route /></i><div><strong>Payment mapping is being set up</strong><p>Your profile is active, but it is not yet connected to a provider ID and rate card. Your station team can complete the mapping before live earnings appear here.</p></div></section> : <>
+      {!hasMap ? month === currentPayoutMonth() ? <section className="dx-workforce-empty"><i><Route /></i><div><strong>Payment mapping is being set up</strong><p>Your profile is active, but it is not yet connected to a provider ID and rate card. Your station team can complete the mapping before live earnings appear here.</p></div></section> : <section className="dx-workforce-empty"><i><IndianRupee /></i><div><strong>No live earnings for {payoutMonthLabel(month)}</strong><p>No payment mapping or production activity was found for this month.</p></div></section> : <>
         <section className="dx-workforce-payment-hero"><span><small>{data.period}</small><strong>{money(data.summary.earnings)}</strong><em>Estimated live earnings</em></span>{rateCardAllowed?<button onClick={() => setTab("rate-card")}>View rate card <ChevronRight /></button>:null}</section>
         {calculated?<p className="dx-workforce-payment-note">Production {money(calculated.summary.baseAmount)} · Incentives {money(calculated.summary.incentiveAmount)} · Adjustments {money(calculated.summary.additions-calculated.summary.deductionAmount)}</p>:null}
         <section className="dx-workforce-payment-stats"><article><Route /><span><strong>{dailyProduction.reduce((sum,day)=>sum+day.deliveries,0).toLocaleString('en-IN')}</strong><small>Deliveries</small></span></article><article><CalendarDays /><span><strong>{dailyProduction.length}</strong><small>Active days</small></span></article><article><IndianRupee /><span><strong>{date(dailyProduction[0]?.date??null)}</strong><small>Latest import</small></span></article></section>
@@ -139,10 +161,10 @@ function WorkforcePayments({ account }: { account: AppAccount }) {
       </>}
       {calculated&&!hasMap?<ConnectPayAdjustments ledger={calculated.adjustments}/>:null}
     </> : null}
-    {tab === "statements" && earningsAllowed ? <AssociatePayouts key={`${account.profileType}:${account.id}`} accountId={account.id} profileType={account.profileType}/> : null}
+    {tab === "statements" && earningsAllowed ? <AssociatePayouts key={`${account.profileType}:${account.id}`} accountId={account.id} profileType={account.profileType} month={month} onMonthLockChange={setPayoutLocked}/> : null}
     {tab === "rate-card" && rateCardAllowed && data && !loading && !error ? <>
       <p className="dx-workforce-payment-note">Reference rates for your active provider mapping.</p>
-      {!hasMap ? <section className="dx-workforce-empty"><i><ReceiptText /></i><div><strong>No active rate card yet</strong><p>Once your provider ID is mapped, the applicable station rate card will appear here.</p></div></section> : <section className="dx-workforce-rate-card"><header><small>Active mapping</small><h2>{mapping?.paymentMethod || "Rate card"}</h2><p>{mapping?.provider ? `${mapping.provider} · ` : ""}Provider ID {mapping?.providerMemberId || "—"}</p></header><div className="dx-workforce-rate-meta"><span>Effective from <b>{date(mapping?.effectiveFrom ?? null)}</b></span><span>Valid to <b>{date(mapping?.effectiveTo ?? null)}</b></span></div>{entries.length ? <div className="dx-workforce-rate-lines">{entries.map((entry, index) => <article key={`${entry.code}:${index}`}><span><strong>{label(entry.code)}</strong><small>{entry.providerMemberId ? `Provider ID ${entry.providerMemberId}` : "Active mapping"}</small></span><b>{money(entry.rate)}</b></article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>Rate details are not published yet</strong><small>Your payment mapping is active. The station can publish rate details when they are ready.</small></div>}</section>}
+      {!hasCurrentMap ? <section className="dx-workforce-empty"><i><ReceiptText /></i><div><strong>No active rate card yet</strong><p>Once your provider ID is mapped, the applicable station rate card will appear here.</p></div></section> : <section className="dx-workforce-rate-card"><header><small>Active mapping</small><h2>{mapping?.paymentMethod || "Rate card"}</h2><p>{mapping?.provider ? `${mapping.provider} · ` : ""}Provider ID {mapping?.providerMemberId || "—"}</p></header><div className="dx-workforce-rate-meta"><span>Effective from <b>{date(mapping?.effectiveFrom ?? null)}</b></span><span>Valid to <b>{date(mapping?.effectiveTo ?? null)}</b></span></div>{entries.length ? <div className="dx-workforce-rate-lines">{entries.map((entry, index) => <article key={`${entry.code}:${index}`}><span><strong>{label(entry.code)}</strong><small>{entry.providerMemberId ? `Provider ID ${entry.providerMemberId}` : "Active mapping"}</small></span><b>{money(entry.rate)}</b></article>)}</div> : <div className="dx-empty"><ReceiptText /><strong>Rate details are not published yet</strong><small>Your payment mapping is active. The station can publish rate details when they are ready.</small></div>}</section>}
     </> : null}
   </section>;
 }
