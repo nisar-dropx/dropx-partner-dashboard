@@ -91,6 +91,16 @@ function canSubmitBankDetails(request: PaymentRequestRow, userId: string) {
   return isApproved && !isRejectedOrReturned && !isAlreadyProcessing && !hasSubmittedPaymentDetails(request);
 }
 
+function paymentLifecycleLabel(request: PaymentRequestRow, userId: string) {
+  if (canSubmitBankDetails(request, userId)) return "Payout details required";
+  const status = String(request.status ?? "").toUpperCase();
+  const approvalStatus = String(request.approval_status ?? "").toUpperCase();
+  const isFinalApproved = status === "APPROVED" || approvalStatus === "APPROVED" || status === "OWNER_APPROVED" || approvalStatus === "OWNER_APPROVED";
+  if (isFinalApproved && !hasSubmittedPaymentDetails(request)) return "Payout details pending";
+  if (isFinalApproved && hasSubmittedPaymentDetails(request)) return "Ready for Finance";
+  return paymentStatusLabel(request);
+}
+
 function optionsFromText(text: string | null) {
   return (text ?? "").split(",").map((option) => option.trim()).filter(Boolean);
 }
@@ -315,7 +325,7 @@ export default async function PaymentRequestsPage({
       <PageHead
         eyebrow="Payments"
         title="Payment Requests"
-        subtitle="Request location expenses using the fields configured in Payment Heads."
+        subtitle="Lifecycle: request → approval → requester submits verified payout details → Finance processing → paid."
         action={<span className={`status-pill ${isSupabaseAdminConfigured ? "good" : "warn"}`}>{isSupabaseAdminConfigured ? "Database connected" : "Database key missing"}</span>}
       />
 
@@ -401,12 +411,12 @@ export default async function PaymentRequestsPage({
                       <td>{request.account_holder_name ?? "-"}</td>
                       <td>{request.payment_mode === "upi_payment" ? request.payment_reference ?? "-" : request.bank_account_no ?? "-"}</td>
                       <td>{request.payment_mode === "online_payment" ? request.payment_portal ?? "-" : request.ifsc ?? "-"}</td>
-                      <td><StatusPill status={paymentStatusLabel(request)} /></td>
+                      <td><StatusPill status={paymentLifecycleLabel(request, authorization.userId)} /></td>
                       <td>{formatDashboardDate(request.created_at)}</td>
                       {pagePermission.canAdd ? (
                         <td>
                           {canSubmitBankDetails(request, authorization.userId) ? (
-                            <PendingLink className="button compact" href={`/payments/requests?bank=${request.id}`} scroll={false}>Submit details</PendingLink>
+                            <PendingLink className="button compact" href={`/payments/requests?bank=${request.id}`} scroll={false}>Submit payout details</PendingLink>
                           ) : isResubmittable(request, authorization.userId) ? (
                             <PendingLink className="button secondary compact" href={`/payments/requests?resubmit=${request.id}`} scroll={false}>Resubmit</PendingLink>
                           ) : "-"}
