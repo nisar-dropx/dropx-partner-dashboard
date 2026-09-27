@@ -5,7 +5,7 @@ import ts from 'typescript';
 const require=createRequire(import.meta.url);
 function compile(file,deps={}){const exports={};new Function('require','exports',ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText)(n=>deps[n]??require(n),exports);return exports;}
 const policy=compile('src/lib/ops-pulse/cod-pending.ts'),ageing=compile('src/lib/ops-pulse/cod-ageing.ts');
-const station={id:'s1',station_code:'NLRC',station_name:'Station one',providers:{code:'AMAZON'},location_models:{code:'EDSP'}};
+const station={is_active:true,id:'s1',station_code:'NLRC',station_name:'Station one',providers:{code:'AMAZON'},location_models:{code:'EDSP'}};
 const other={...station,id:'s2',station_code:'GNTI'};
 const date='2026-09-02',now=new Date('2026-09-02T15:00:00Z');
 const slip={id:'a',location_id:'s1',deposit_date:date,cod_period_from:'2026-08-30',cod_period_to:'2026-09-01',cod_date:null,remittance_code:'AC1',reference_no:null,deposited_amount:100,validated_amount:100,validation_status:'Matched',ai_status:'Valid',remarks:null,validation_remarks:null,submitter_name:'Team',created_at:'2026-09-02T14:00:00Z',deposit_slip_attachments:[{storage_path:'proof.png',storage_bucket:'slips'}],attachments:[]};
@@ -29,7 +29,7 @@ const line=(bucket,amount,pendingDate='2026-08-01')=>({bucket,amount,pendingDate
 const age=ageing.buildAgeingStation('NLRC',[line('2 DAYS',100),line('3-4 DAYS',200),line('5-7 DAYS',300),line('2021',50,'2021-01-01'),line('0-1 DAYS',500)],'2026-09-01');
 assert.equal(age.total,650);assert.equal(age.overTwo,550);assert.equal(age.recent,500);assert.equal(age.bands['Other / older'],50);
 assert.equal(ageing.previousCodDate('2026-09-01'),'2026-08-31');
-const scope=compile('src/lib/cod-pending-mail-scope.ts',{'server-only':{},'./ops-pulse/cod-pending-data':{}});
+const scope=compile('src/lib/cod-pending-mail-scope.ts',{'server-only':{},'./ops-pulse/cod-pending-data':{},'./ops-pulse/cod-pending':policy});
 const profiles=[{id:'u',email:'user@example.com',full_name:'User'}],roles=[{id:'r',code:'OPERATIONS_STM',location_access_mode:'role_based'}];
 const memberships=[{user_id:'u',role_id:'r',has_all_location_access:false,location_scope_ids:['s1']}];
 assert.deepEqual(scope.resolveCodRecipients([station,other],memberships,roles,profiles,new Set(['r']),'example.com')[0].stationIds,['s1']);
@@ -45,6 +45,19 @@ assert.deepEqual(scope.resolveCodRecipients([station,nowStore],mixedMembership,r
 const allMembership=[{...memberships[0],has_all_location_access:true}];
 assert.deepEqual(scope.resolveCodRecipients([station,nowStore],allMembership,roles,profiles,new Set(['r']),'example.com')[0].stationIds,['s1'],'Company-wide report also excludes Amazon Now');
 assert.equal(scope.resolveCodRecipients([station,nowStore],allMembership,roles,[{...profiles[0],email:' STORE@example.com '}],new Set(['r']),'example.com').length,0,'Amazon Now store mailbox is excluded even with broad access');
+// One eligibility policy drives the table, station filter, CSV and both email runs.
+const inactive={...station,id:'closed',station_code:'ERSE',is_active:false,station_email:'closed@example.com'};
+for(const model of ['EDSP','XPT','AMXL'])assert.equal(policy.isCodReportStation({...station,location_models:{code:model}}),true);
+for(const model of ['ODH','MDH'])assert.equal(policy.isCodReportStation({...station,providers:[{code:'FLIPKART'}],location_models:[{code:model}]}),true);
+for(const excluded of [nowStore,inactive,{...station,is_active:null},{...station,is_active:undefined},{...station,location_models:null},{...station,location_models:{code:'UNKNOWN'}},{...station,providers:{code:'OTHER'}}])assert.equal(policy.isCodReportStation(excluded),false);
+for(const location_models of [{code:'NOW'},[{code:'NOW'}],{name:'Amazon Now'},{code:' amazon_now '}])assert.equal(policy.isCodReportStation({...station,location_models}),false);
+assert.equal(policy.isCodReportStation({...station,providers:{name:'Amazon Now'}}),false);
+const eligibleRows=policy.buildCodPendingRows([station,nowStore,inactive],[],date,now);
+assert.deepEqual(eligibleRows.map(r=>r.station.id),['s1']);
+assert.ok(!policy.codPendingCsv(eligibleRows).includes('ERSE'));
+assert.ok(!policy.codPendingCsv(eligibleRows).includes('TCC3'));
+assert.equal(scope.resolveCodRecipients([station,inactive],[{...memberships[0],location_scope_ids:['closed']}],roles,profiles,new Set(['r']),'example.com').length,0);
+for(const email of ['store@example.com','closed@example.com'])assert.equal(scope.resolveCodRecipients([station],allMembership,roles,[{...profiles[0],email}],new Set(['r']),'example.com',[station,nowStore,inactive]).length,0,'Prefiltered report must not lose excluded mailbox protection');
 const digest=compile('src/lib/cod-pending-digest.ts',{'./ops-pulse/cod-pending-data':{},'./ops-pulse/cod-ageing-data':{},'./ops-pulse/cod-ageing':ageing,'./cod-pending-mail-scope':scope,'./ops-pulse/cod-return-policy':compile('src/lib/ops-pulse/cod-return-policy.ts')});
 const source={uploadDate:date,dataDate:'2026-09-01',batchId:'batch1',importedAt:'2026-09-02T08:30:00Z',fileName:'file.csv',error:null,stations:[age,{...age,stationCode:'GNTI',total:999999}]};
 const recipients=[{email:'user@example.com',name:'User',stationIds:['s1']}];
@@ -77,6 +90,18 @@ let pages=0;await assert.rejects(()=>data.pagedCodRows(async()=>{pages++;return 
 let filters=[];const fakeDb={from(table){const q={};for(const method of ['select','eq','is','gte','lte','in','order','limit','range'])q[method]=(...args)=>{filters.push([table,method,...args]);return q;};q.maybeSingle=async()=>({data:{id:'batch1',file_name:'file',created_at:'2026-09-02T08:30:00Z',completed_at:'2026-09-02T08:31:00Z',row_count:0},error:null});q.then=(a,b)=>Promise.resolve({data:[],count:0,error:null}).then(a,b);return q;}};
 const ageData=compile('src/lib/ops-pulse/cod-ageing-data.ts',{'server-only':{},'./review-cod':{},'./cod-pending-data':data,'./cod-pending':policy,'./cod-ageing':ageing});
 const loaded=await ageData.loadCodAgeing(fakeDb,'company',date,['NLRC']);assert.equal(loaded.dataDate,'2026-09-01');assert.equal(loaded.batchId,'batch1');assert.ok(filters.some(f=>f[1]==='lte'&&f[2]==='completed_at'&&f[3]==='2026-09-02T20:30:00+05:30'));
+// Verify database-side active filtering and independent directory lookup for mail.
+filters=[];await data.loadCodPendingReport(fakeDb,'company',['s1'],false,date);
+assert.ok(filters.some(f=>f[0]==='stations'&&f[1]==='eq'&&f[2]==='is_active'&&f[3]===true));
+assert.ok(filters.some(f=>f[0]==='stations'&&f[1]==='select'&&f[2].includes('is_active')));
+const directoryTables={stations:[station,nowStore,inactive],company_product_memberships:allMembership,user_roles:roles,profiles:[{...profiles[0],email:'store@example.com'}],app_pages:[{id:'cod'}],role_page_permissions:[{role_id:'r',can_view:true}]};
+const directoryDb={from(table){const q={};for(const method of ['select','eq','in','order','range'])q[method]=()=>q;q.then=(ok,fail)=>Promise.resolve({data:directoryTables[table]||[],error:null}).then(ok,fail);return q;}};
+const mailLoader=compile('src/lib/cod-pending-mail-scope.ts',{'server-only':{},'./ops-pulse/cod-pending-data':data,'./ops-pulse/cod-pending':policy});
+assert.equal((await mailLoader.loadCodMailRecipients(directoryDb,'company',[station],'example.com')).length,0);
+directoryTables.profiles=profiles;
+assert.deepEqual((await mailLoader.loadCodMailRecipients(directoryDb,'company',[station],'example.com'))[0].stationIds,['s1']);
+directoryTables.stations=[{...station,is_active:false},nowStore,inactive];
+assert.equal((await mailLoader.loadCodMailRecipients(directoryDb,'company',[station],'example.com')).length,0,'Recheck station master before delivery even if passed report row is stale');
 console.log('PASS COD: missing stations, deposit-date matching, proof, short/excess, duplicates, deadlines, late uploads, scope, safe exports, D-1 ageing, >2-day alerts, pinned source cutoff, monthly email subject and both reminder windows.');
 const access=compile('src/lib/ops-pulse/cod-pending-access.ts',{'@/lib/authorization':{hasPermission:a=>a.allowed}});
 for(const roleCode of ['LOCATION','OPERATIONS_LOCATION','PEOPLE_LOCATION'])assert.equal(access.canAccessDailyCodPending({allowed:true,roleCode}),false);

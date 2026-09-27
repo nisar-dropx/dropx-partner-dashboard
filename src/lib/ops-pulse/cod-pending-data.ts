@@ -11,7 +11,7 @@ export async function loadCodPendingReport(db:SupabaseClient,companyId:string,sc
  if(!companyId||!validReportDate(date))throw new Error('Choose a valid report date.');
  if(!all&&!scope.length)return [];
  const stations=(await pagedCodRows<PendingStation>(offset=>{
-  let q=db.from('stations').select('id,station_code,station_name,station_email,hide_from_location_list,providers(code,name),location_models(code,name)').eq('company_id',companyId).eq('is_active',true);
+  let q=db.from('stations').select('id,station_code,station_name,station_email,is_active,hide_from_location_list,providers(code,name),location_models(code,name)').eq('company_id',companyId).eq('is_active',true);
   if(!all)q=q.in('id',scope);return q.order('id').range(offset,offset+999);
  })).filter(isCodReportStation);
  if(!stations.length)return [];

@@ -1,16 +1,26 @@
 import type {CodException} from './cod-exceptions';
 // Pure daily-slip policy shared by the report, export and scheduled reminders.
-export type PendingStation = { id:string; station_code:string; station_name:string|null; station_email?:string|null; hide_from_location_list?:boolean|null; providers?:unknown; location_models?:unknown };
+export type PendingStation = { id:string; station_code:string; station_name:string|null; station_email?:string|null; is_active?:boolean|null; hide_from_location_list?:boolean|null; providers?:unknown; location_models?:unknown };
 export type PendingSlip = { returned_at?:string|null; return_reason?:string|null; returned_by_name?:string|null; proof_version?:number;  id:string; location_id:string|null; deposit_date:string|null; cod_period_from:string|null; cod_period_to:string|null; cod_date:string|null; remittance_code?:string|null; reference_no:string|null; deposited_amount:number|string|null; validated_amount:number|string|null; validation_status:string; ai_status?:string|null; ai_summary?:string|null; ai_result?:Record<string,unknown>|null; proof_checked_at?:string|null; last_updater_name?:string|null; remarks:string|null; validation_remarks:string|null; submitter_name:string|null; created_at:string; attachments:unknown; deposit_slip_attachments:unknown };
 export const pendingStatuses = ['Returned','Details unclear','Not valid','Validation unavailable','Validation pending','Banker Not Reported','No Cash','Missing slip','Slip missing proof','Rejected','Short','Excess','Duplicate review','Pending verification','Complete'] as const;
 export type PendingStatus = typeof pendingStatuses[number];
 export function validReportDate(date:string) { return /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date+'T00:00:00Z')) && new Date(date+'T00:00:00Z').toISOString().slice(0,10)===date; }
-export function codClient(station:PendingStation) {
- const relation=(v:unknown)=>{const r=(Array.isArray(v)?v[0]:v) as {code?:string;name?:string}|null;return `${r?.code||''} ${r?.name||''}`.toLowerCase();};
- const value=relation(station.providers)+' '+relation(station.location_models);
- return /amazon|edsp|xpt/.test(value)?'amazon':/flipkart|odh|mdh/.test(value)?'flipkart':'';
+function stationRelationValues(relation:unknown) {
+ const row=(Array.isArray(relation)?relation[0]:relation) as {code?:string;name?:string}|null;
+ return [row?.code,row?.name].map(value=>String(value||'').trim().toUpperCase().replace(/[_-]+/g,' ').replace(/\s+/g,' '));
 }
-export function isCodReportStation(station:PendingStation) {return Boolean(codClient(station))&&!station.hide_from_location_list&&!/^TEST(?:$|[\s_-])/i.test(station.station_code.trim());}
+export function isAmazonNowStation(station:PendingStation) {
+ const models=stationRelationValues(station.location_models),providers=stationRelationValues(station.providers);
+ return models.includes('NOW')||[...models,...providers].includes('AMAZON NOW');
+}
+export function codClient(station:PendingStation) {
+ if(isAmazonNowStation(station))return '';
+ const providers=stationRelationValues(station.providers),models=stationRelationValues(station.location_models);
+ if(providers.includes('AMAZON')&&models.some(model=>['EDSP','XPT','AMXL'].includes(model)))return 'amazon';
+ if(providers.includes('FLIPKART')&&models.some(model=>['ODH','MDH'].includes(model)))return 'flipkart';
+ return '';
+}
+export function isCodReportStation(station:PendingStation) {return station.is_active===true&&Boolean(codClient(station))&&!station.hide_from_location_list&&!/^TEST(?:$|[\s_-])/i.test(station.station_code.trim());}
 export function nullableMoney(value:unknown) {if(value==null||value==='')return null;const n=Number(value);return Number.isFinite(n)?Math.round(n*100)/100:null;}
 export function hasSlipProof(slip:PendingSlip) { return [slip.deposit_slip_attachments,slip.attachments].some(value=>Array.isArray(value)&&value.some(item=>item?.storage_path&&item?.storage_bucket)); }
 export function buildCodPendingRows(stations:PendingStation[],slips:PendingSlip[],date:string,now=new Date(),exceptions:CodException[]=[]) {

@@ -30,7 +30,7 @@ for(const name of ['Subject','From','To','Cc'])assert.equal(matchesCodEmail({...
 assert.equal(matchesCodEmail({...message,internalDate:String(Date.parse(record.email_sent_at)-7200000)},record),false);
 assert.equal(matchesCodEmail({...message,payload:{headers:message.payload.headers.map(h=>h.name==='Cc'?{...h,value:'ct@dropxlogistics.com <other@example.com>'}:h)}},record),false,'A display name is not the actual CC address');
 const pending=compile('src/lib/ops-pulse/cod-pending.ts');
-const station={id:'s',station_code:'NLRC',station_name:'Test',providers:{code:'AMAZON'}};
+const station={is_active:true,id:'s',station_code:'NLRC',station_name:'Test',providers:{code:'AMAZON'},location_models:{code:'EDSP'}};
 const exception={id:'e',location_id:'s',kind:'No Cash',reason:'ERP no cash',email_check_status:'Not applicable'};
 const slip={id:'a',location_id:'s',deposit_date:expected.date,created_at:'2026-09-26T13:00:00Z',validation_status:'Matched',ai_status:'Valid',deposited_amount:100,validated_amount:100,deposit_slip_attachments:[{storage_path:'proof',storage_bucket:'bucket'}]};
 for(const kind of ['No Cash','Banker Not Reported']){const row=pending.buildCodPendingRows([station],[],expected.date,new Date(),[{...exception,kind}])[0];assert.equal(row.status,kind);assert.equal(row.pending,false);assert.equal(row.updateRecorded,true);assert.equal(row.validation,'Not required');}
