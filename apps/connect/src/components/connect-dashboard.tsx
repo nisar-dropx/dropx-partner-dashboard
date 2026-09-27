@@ -17,6 +17,7 @@ import {
   Route,
   Target,
   UserRound,
+  UsersRound,
   UserRoundX
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -185,6 +186,7 @@ export function ConnectDashboard({
   onPayments,
   onPerformance,
   onProfile,
+  onRefer,
   onRoster,
   onWork,
   variant = "people"
@@ -199,6 +201,7 @@ export function ConnectDashboard({
   onPayments: () => void;
   onPerformance: () => void;
   onProfile: () => void;
+  onRefer: () => void;
   onRoster: () => void;
   onWork: () => void;
   variant?: "people" | "workforce";
@@ -484,6 +487,7 @@ export function ConnectDashboard({
   const leaveAllowed = pageAccess.includes("leave");
   const performanceAllowed = account.profileType === "employee" || account.profileType === "contractor" || pageAccess.includes("performance");
   const advancesAllowed = pageAccess.includes("advances");
+  const referAllowed = variant === "workforce" && pageAccess.includes("refer_earn");
   const fullDayCount = attendance.summary.fullDay ?? attendance.summary.present;
   const halfDayCount = attendance.summary.halfDay ?? 0;
   const lateInCount = attendance.summary.lateIn ?? 0;
@@ -580,6 +584,7 @@ export function ConnectDashboard({
         {!workforce && leaveAllowed ? <button onClick={onLeave}><i className="pink"><CalendarDays /></i><span><strong>Time off</strong><small>Request leave</small></span><ChevronRight /></button> : null}
         {performanceAllowed ? <button onClick={onPerformance}><i className="purple"><Target /></i><span><strong>Performance</strong><small>Goals & reviews</small></span><ChevronRight /></button> : null}
         {workforce && pageAccess.includes("connect") ? <button onClick={onConnect}><i className="pink"><MessageCircleMore /></i><span><strong>Connect</strong><small>Updates, Workforce team and Speak Up</small></span><ChevronRight /></button> : null}
+        {referAllowed ? <button onClick={onRefer}><i className="green"><UsersRound /></i><span><strong>Refer &amp; Earn</strong><small>Refer a candidate and track the reward</small></span><ChevronRight /></button> : null}
         {!workforce && advancesAllowed ? <button onClick={onAdvances}><i className="amber"><IndianRupee /></i><span><strong>My pay</strong><small>Advances</small></span><ChevronRight /></button> : null}
         {profileAllowed && !workforce ? <button onClick={onProfile}><i className="green"><UserRound /></i><span><strong>Profile</strong><small>Personal details</small></span><ChevronRight /></button> : null}
       </div>
