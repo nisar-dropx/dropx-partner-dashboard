@@ -242,8 +242,8 @@ export function BulkWhatsAppPanel({
   const searchParams = useSearchParams();
   const [isHistoryRefreshing, startHistoryRefresh] = useTransition();
   const [sourceMode, setSourceMode] = useState<"database" | "excel">("database");
-  const [selectedProfileId, setSelectedProfileId] = useState(profiles.find((profile) => profile.is_default)?.id ?? profiles[0]?.id ?? "");
-  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [selectedProfileId, setSelectedProfileId] = useState(profiles.find((profile) => profile.id === searchParams.get("profile"))?.id ?? profiles.find((profile) => profile.is_default)?.id ?? profiles[0]?.id ?? "");
+  const [selectedTemplateId, setSelectedTemplateId] = useState(templates.find((template) => template.template_id === searchParams.get("template") && template.whatsapp_profile_id === searchParams.get("profile") && template.status === "APPROVED")?.template_id ?? "");
   const [mappings, setMappings] = useState<Record<string, MappingRule>>({});
   const [constantMappings, setConstantMappings] = useState<Record<string, string>>({});
   const [templateHeaderFile, setTemplateHeaderFile] = useState<File | null>(null);
@@ -638,6 +638,7 @@ export function BulkWhatsAppPanel({
             <p className="subtle">Select recipients from existing data or upload an Excel file, then map template variables.</p>
           </div>
           <div className="panel-head-actions">
+            <a className="button secondary" href="/notifications/whatsapp/templates">Templates · Create / manage</a>
             <button className="button secondary history-button" onClick={openHistory} type="button">History</button>
             {whatsAppEnabled ? <span className="status-pill good">Enabled</span> : null}
           </div>
@@ -656,123 +657,9 @@ export function BulkWhatsAppPanel({
       </section>
 
       <section className="panel">
-        <div className="panel-head toolbar">
-          <div>
-            <h2>{sourceMode === "database" ? "Recipients" : "Excel recipients"}</h2>
-            <p className="subtle">
-              {sourceMode === "database"
-                ? `${sendListContacts.length} in send list, ${checkedContacts.length} selected`
-                : `${excelRows.length} rows loaded`}
-            </p>
-          </div>
-          {sourceMode === "database" ? (
-            <div className="bulk-recipient-filters">
-              <input className="field" onChange={(event) => updateFilters(() => setSearch(event.target.value))} placeholder="Search ID, name, mobile, email" value={search} />
-              <MultiCheckFilter label="All data" onChange={(values) => updateFilters(() => setContactSources(values))} options={sourceOptions} selected={contactSources} />
-              <MultiCheckFilter label="All providers" onChange={(values) => updateFilters(() => setContactProviders(values))} options={providerOptions} selected={contactProviders} />
-              <MultiCheckFilter label="All models" onChange={(values) => updateFilters(() => setContactModels(values))} options={modelOptions} selected={contactModels} />
-              <MultiCheckFilter label="All locations" onChange={(values) => updateFilters(() => setContactLocations(values))} options={locationOptions} selected={contactLocations} />
-              <MultiCheckFilter label="All designations" onChange={(values) => updateFilters(() => setContactRoles(values))} options={roleOptions} selected={contactRoles} />
-              <MultiCheckFilter label="All statuses" onChange={(values) => updateFilters(() => setContactStatuses(values))} options={statusOptions} selected={contactStatuses} />
-            </div>
-          ) : (
-            <input
-              accept=".xlsx,.xls,.csv"
-              className="field bulk-file-input"
-              name="bulk_file"
-              onChange={(event) => void readExcel(event.target.files?.[0] ?? null)}
-              required={sourceMode === "excel"}
-              type="file"
-            />
-          )}
-        </div>
-
-        {sourceMode === "database" ? (
-          <>
-            <div className="bulk-list-actions">
-              <div className="bulk-filter-counts">
-                <strong>{filteredContacts.length}</strong> filtered
-                <span>{visibleContacts.length} on page</span>
-                <span>{checkedContacts.length} selected</span>
-              </div>
-              <button className="button ghost compact" disabled={!visibleContacts.length} onClick={checkCurrentPage} type="button">Select Current</button>
-              <button className="button ghost compact" disabled={!filteredContacts.length} onClick={checkAllFiltered} type="button">Select All Filtered</button>
-              <button className="button secondary compact" disabled={!checkedIds.size} onClick={addCheckedToSendList} type="button">Add to list</button>
-              <button className="button ghost compact" disabled={!sendListIds.size && !checkedIds.size} onClick={clearSendList} type="button">Clear</button>
-            </div>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th><input aria-label="Select visible recipients" checked={visibleContacts.length > 0 && visibleContacts.every((contact) => checkedIds.has(contact.id))} onChange={toggleVisibleContacts} type="checkbox" /></th>
-                    <th>Name</th>
-                    <th>Mobile</th>
-                    <th>Source</th>
-                    <th>Location</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleContacts.length ? visibleContacts.map((contact) => (
-                    <tr key={contact.id}>
-                      <td><input checked={checkedIds.has(contact.id)} onChange={() => toggleContact(contact.id)} type="checkbox" /></td>
-                      <td>
-                        <strong>{contact.name}</strong><br />
-                        <span className="subtle">
-                          {[contact.dropx_id, contact.email].filter(Boolean).join(" · ") || "-"}
-                        </span>
-                      </td>
-                      <td>{displayMobile(contact.mobile, contact.country_code)}</td>
-                      <td>
-                        <strong>{contact.source}</strong><br />
-                        <span className="subtle">{contact.designation || contact.role || "-"}</span>
-                      </td>
-                      <td>{contact.location || "-"}</td>
-                      <td>{contact.status}</td>
-                    </tr>
-                  )) : <tr><td className="empty-cell" colSpan={6}>No contacts found.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-            {totalPages > 1 ? (
-              <div className="panel-foot pagination">
-                <button className="pager-button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} type="button">Prev</button>
-                <span>Page {currentPage} of {totalPages}</span>
-                <button className="pager-button" disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)} type="button">Next</button>
-              </div>
-            ) : null}
-            <div className="bulk-send-list">
-              <div className="bulk-send-list-head">
-                <strong>Send list</strong>
-                <span className="subtle">{sendListContacts.length} contact{sendListContacts.length === 1 ? "" : "s"}</span>
-              </div>
-              {sendListContacts.length ? (
-                <div className="bulk-send-list-tags">
-                  {sendListContacts.map((contact) => (
-                    <button key={contact.id} onClick={() => removeFromSendList(contact.id)} title="Remove from send list" type="button">
-                      <span>{contact.name}</span>
-                      <small>{contact.mobile}</small>
-                      <strong>x</strong>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="subtle">Select contacts above and click Add to list.</p>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="panel-body bulk-excel-summary">
-            <div><span className="subtle">Detected headers</span><strong>{excelHeaders.length ? excelHeaders.join(", ") : "Upload a file to detect headers"}</strong></div>
-            <div><span className="subtle">Required</span><strong>Mobile number column, country code rule, and any variable columns used by the template</strong></div>
-          </div>
-        )}
-      </section>
-
-      <section className="panel">
         <div className="panel-head">
           <div>
-            <h2>Template and variable mapping</h2>
+            <h2>1. Choose your template</h2>
             <p className="subtle">Use a recipient field, Excel column, or constant value for each WhatsApp variable.</p>
           </div>
         </div>
@@ -935,6 +822,121 @@ export function BulkWhatsAppPanel({
         </div>
       </section>
 
+      <section className="panel">
+        <div className="panel-head toolbar">
+          <div>
+            <h2>{sourceMode === "database" ? "2. Choose recipients" : "2. Upload recipients"}</h2>
+            <p className="subtle">
+              {sourceMode === "database"
+                ? `${sendListContacts.length} in send list, ${checkedContacts.length} selected`
+                : `${excelRows.length} rows loaded`}
+            </p>
+          </div>
+          {sourceMode === "database" ? (
+            <div className="bulk-recipient-filters">
+              <input className="field" onChange={(event) => updateFilters(() => setSearch(event.target.value))} placeholder="Search ID, name, mobile, email" value={search} />
+              <MultiCheckFilter label="All data" onChange={(values) => updateFilters(() => setContactSources(values))} options={sourceOptions} selected={contactSources} />
+              <MultiCheckFilter label="All providers" onChange={(values) => updateFilters(() => setContactProviders(values))} options={providerOptions} selected={contactProviders} />
+              <MultiCheckFilter label="All models" onChange={(values) => updateFilters(() => setContactModels(values))} options={modelOptions} selected={contactModels} />
+              <MultiCheckFilter label="All locations" onChange={(values) => updateFilters(() => setContactLocations(values))} options={locationOptions} selected={contactLocations} />
+              <MultiCheckFilter label="All designations" onChange={(values) => updateFilters(() => setContactRoles(values))} options={roleOptions} selected={contactRoles} />
+              <MultiCheckFilter label="All statuses" onChange={(values) => updateFilters(() => setContactStatuses(values))} options={statusOptions} selected={contactStatuses} />
+            </div>
+          ) : (
+            <input
+              accept=".xlsx,.xls,.csv"
+              className="field bulk-file-input"
+              name="bulk_file"
+              onChange={(event) => void readExcel(event.target.files?.[0] ?? null)}
+              required={sourceMode === "excel"}
+              type="file"
+            />
+          )}
+        </div>
+
+        {sourceMode === "database" ? (
+          <>
+            <div className="bulk-list-actions">
+              <div className="bulk-filter-counts">
+                <strong>{filteredContacts.length}</strong> filtered
+                <span>{visibleContacts.length} on page</span>
+                <span>{checkedContacts.length} selected</span>
+              </div>
+              <button className="button ghost compact" disabled={!visibleContacts.length} onClick={checkCurrentPage} type="button">Select Current</button>
+              <button className="button ghost compact" disabled={!filteredContacts.length} onClick={checkAllFiltered} type="button">Select All Filtered</button>
+              <button className="button secondary compact" disabled={!checkedIds.size} onClick={addCheckedToSendList} type="button">Add to list</button>
+              <button className="button ghost compact" disabled={!sendListIds.size && !checkedIds.size} onClick={clearSendList} type="button">Clear</button>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th><input aria-label="Select visible recipients" checked={visibleContacts.length > 0 && visibleContacts.every((contact) => checkedIds.has(contact.id))} onChange={toggleVisibleContacts} type="checkbox" /></th>
+                    <th>Name</th>
+                    <th>Mobile</th>
+                    <th>Source</th>
+                    <th>Location</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleContacts.length ? visibleContacts.map((contact) => (
+                    <tr key={contact.id}>
+                      <td><input checked={checkedIds.has(contact.id)} onChange={() => toggleContact(contact.id)} type="checkbox" /></td>
+                      <td>
+                        <strong>{contact.name}</strong><br />
+                        <span className="subtle">
+                          {[contact.dropx_id, contact.email].filter(Boolean).join(" · ") || "-"}
+                        </span>
+                      </td>
+                      <td>{displayMobile(contact.mobile, contact.country_code)}</td>
+                      <td>
+                        <strong>{contact.source}</strong><br />
+                        <span className="subtle">{contact.designation || contact.role || "-"}</span>
+                      </td>
+                      <td>{contact.location || "-"}</td>
+                      <td>{contact.status}</td>
+                    </tr>
+                  )) : <tr><td className="empty-cell" colSpan={6}>No contacts found.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {totalPages > 1 ? (
+              <div className="panel-foot pagination">
+                <button className="pager-button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} type="button">Prev</button>
+                <span>Page {currentPage} of {totalPages}</span>
+                <button className="pager-button" disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)} type="button">Next</button>
+              </div>
+            ) : null}
+            <div className="bulk-send-list">
+              <div className="bulk-send-list-head">
+                <strong>Send list</strong>
+                <span className="subtle">{sendListContacts.length} contact{sendListContacts.length === 1 ? "" : "s"}</span>
+              </div>
+              {sendListContacts.length ? (
+                <div className="bulk-send-list-tags">
+                  {sendListContacts.map((contact) => (
+                    <button key={contact.id} onClick={() => removeFromSendList(contact.id)} title="Remove from send list" type="button">
+                      <span>{contact.name}</span>
+                      <small>{contact.mobile}</small>
+                      <strong>x</strong>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="subtle">Select contacts above and click Add to list.</p>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="panel-body bulk-excel-summary">
+            <div><span className="subtle">Detected headers</span><strong>{excelHeaders.length ? excelHeaders.join(", ") : "Upload a file to detect headers"}</strong></div>
+            <div><span className="subtle">Required</span><strong>Mobile number column, country code rule, and any variable columns used by the template</strong></div>
+          </div>
+        )}
+      </section>
+
+
       <input name="variable_mappings_json" type="hidden" value={JSON.stringify(effectiveMappings)} />
       <input name="selected_recipients_json" type="hidden" value={JSON.stringify(sendListContacts)} />
       <div className="bulk-submit-row">
@@ -980,8 +982,8 @@ export function BulkWhatsAppPanel({
             <div className="form-actions modal-actions confirmation-actions">
               {progress.phase === "confirm" ? (
                 <>
-                  <button className="button secondary" onClick={() => setProgress((current) => ({ ...current, open: false }))} type="button">No</button>
-                  <button className="button" onClick={() => void startProgressSend()} type="button">Yes</button>
+                  <button className="button secondary" onClick={() => setProgress((current) => ({ ...current, open: false }))} type="button">Cancel</button>
+                  <button className="button" onClick={() => void startProgressSend()} type="button">Confirm send</button>
                 </>
               ) : progress.phase === "done" ? (
                 <button className="button" onClick={() => setProgress((current) => ({ ...current, open: false }))} type="button">Close</button>

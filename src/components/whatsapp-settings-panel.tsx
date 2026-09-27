@@ -520,7 +520,7 @@ export function WhatsAppSettingsPanel({
 
       <section className={`panel ${canUseWhatsApp ? "" : "disabled-form-area"}`}>
         <div className="panel-head">
-          <div><h2>Message templates</h2><p className="subtle">Fetch template names, languages, status, and variables directly from Meta.</p></div>
+          <div><h2>Message templates</h2><p className="subtle">Create templates and track Meta approval.</p><a className="button secondary compact" href="/notifications/whatsapp/templates">Open template library</a></div>
           {canEdit ? <form action={syncWhatsAppTemplates}><SubmitButton className="button secondary" disabled={!canUseWhatsApp || !profiles.some((profile) => profile.is_default && profile.is_active)} pendingText="Syncing">Sync templates</SubmitButton></form> : null}
         </div>
         <div className="panel-body whatsapp-template-summary">
