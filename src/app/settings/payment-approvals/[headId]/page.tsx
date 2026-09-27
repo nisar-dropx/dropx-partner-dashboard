@@ -118,7 +118,11 @@ export default async function PaymentApprovalStepsPage({ params }: { params: { h
           })}
 
           {pagePermission.canEdit ? (
-            <div className="form-actions">
+            <div className="form-actions payment-approval-save-actions">
+              <label className="payment-approval-step-required">
+                <input name="apply_to_unapproved_open_requests" type="checkbox" value="1" />
+                Apply this chain to open requests that have no approval in their current cycle
+              </label>
               <SubmitButton>Save approval steps</SubmitButton>
             </div>
           ) : null}

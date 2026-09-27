@@ -76,3 +76,15 @@ export function isPendingPaymentApproval(status: string | null, approvalStatus: 
   const terminal = new Set(["FINAL_APPROVED", "RE_APPROVED", "PROCESSED", "PROCESSING", "RETURNED", "REJECTED", "CANCELLED"]);
   return String(status).toUpperCase() !== "APPROVED" && !terminal.has(String(status).toUpperCase()) && !terminal.has(String(approvalStatus).toUpperCase());
 }
+
+export function canApplyApprovalChainToOpenRequest(
+  request: { status: string | null; approval_status: string | null; approval_cycle: number | null },
+  approvals: { action: string | null; approval_cycle: number | null }[]
+) {
+  if (!isPendingPaymentApproval(request.status, request.approval_status)) return false;
+  const cycle = Number(request.approval_cycle) || 1;
+  return !approvals.some(approval =>
+    (Number(approval.approval_cycle) || 1) === cycle &&
+    String(approval.action).trim().toLowerCase() === "approved"
+  );
+}

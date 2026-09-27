@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {resolveInitialStage, initialStageStatus, hasInitialApprovalForStage, hasInitialApprovalForPersistedRequest, matchesCurrentPaymentAssignee, isPendingPaymentApproval} from './payment-stage-policy.ts';
+import {resolveInitialStage, initialStageStatus, hasInitialApprovalForStage, hasInitialApprovalForPersistedRequest, matchesCurrentPaymentAssignee, isPendingPaymentApproval, canApplyApprovalChainToOpenRequest} from './payment-stage-policy.ts';
 
 const step=(order,role,scope='station',required=false)=>({step_order:order,candidates:[{role_id:role,scope}],is_required:required});
 const steps=[step(1,'senior'),step(2,'cluster'),step(3,'business','company'),step(4,'finance','company',true)];
@@ -20,6 +20,14 @@ test('intermediate approvals stay visible on mobile; completed and processor que
     assert.equal(isPendingPaymentApproval(status,approval),true);
   for (const [status,approval] of [['approved','FINAL_APPROVED'],['processed','PROCESSED'],['resubmitted','RE_APPROVED'],['returned','RETURNED']])
     assert.equal(isPendingPaymentApproval(status,approval),false);
+});
+
+test('a new approval chain only re-routes untouched requests in their current cycle',()=>{
+  const pending={status:'pending',approval_status:'PENDING',approval_cycle:2};
+  assert.equal(canApplyApprovalChainToOpenRequest(pending,[{action:'created',approval_cycle:2}]),true);
+  assert.equal(canApplyApprovalChainToOpenRequest(pending,[{action:'approved',approval_cycle:1}]),true);
+  assert.equal(canApplyApprovalChainToOpenRequest(pending,[{action:'approved',approval_cycle:2}]),false);
+  assert.equal(canApplyApprovalChainToOpenRequest({...pending,status:'approved'},[]),false);
 });
 
 test('missing optional senior manager routes to cluster manager, not business head',async()=>{
