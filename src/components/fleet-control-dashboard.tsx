@@ -11,8 +11,11 @@ import {
   ClipboardCheck,
   Download,
   ExternalLink,
+  Eye,
   FileCheck2,
+  FileText,
   Gauge,
+  GitBranch,
   History,
   LayoutDashboard,
   ListChecks,
@@ -73,6 +76,24 @@ function date(value: string | null | undefined, includeYear = true) {
     timeZone: "Asia/Kolkata"
   }).format(parsed);
 }
+
+function dateTime(value: string | null | undefined) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }).format(parsed);
+}
+
+function actionLabel(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+type FleetPaymentDetail = {
+  answers: Array<{ id: string; label: string; value: string }>;
+  attachments: Array<{ id: string; label: string; fileName: string }>;
+  history: Array<{ id: string; action: string; actor: string; role: string; comments: string; createdAt: string }>;
+  currentStage: string | null;
+};
 
 function statusTone(status: string) {
   if (status === "active" || status === "approved" || status === "paid") return "good";
@@ -135,6 +156,9 @@ export function FleetControlDashboard({
   const [vehicles, setVehicles] = useState(data.vehicles);
   const [selectedVehicle, setSelectedVehicle] = useState<FleetControlVehicle | null>(null);
   const [selectedPayment, setSelectedPayment] = useState<FleetControlPayment | null>(() => data.payments.find((payment) => payment.id === initialRequestId) ?? null);
+  const [paymentDetail, setPaymentDetail] = useState<FleetPaymentDetail | null>(null);
+  const [paymentDetailError, setPaymentDetailError] = useState("");
+  const [paymentDetailLoading, setPaymentDetailLoading] = useState(false);
   const [savingVehicle, setSavingVehicle] = useState<string | null>(null);
   const [flash, setFlash] = useState(message);
   const [addVehicle, setAddVehicle] = useState(false);
@@ -153,6 +177,21 @@ export function FleetControlDashboard({
     window.addEventListener("popstate", updateFromUrl);
     return () => window.removeEventListener("popstate", updateFromUrl);
   }, []);
+
+  useEffect(() => {
+    if (!selectedPayment) { setPaymentDetail(null); setPaymentDetailError(""); return; }
+    const controller = new AbortController();
+    setPaymentDetail(null); setPaymentDetailError(""); setPaymentDetailLoading(true);
+    fetch(`/api/fleet-control/payment-detail?requestId=${encodeURIComponent(selectedPayment.id)}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Unable to load payment evidence and history.");
+        setPaymentDetail(payload);
+      })
+      .catch((error) => { if (error?.name !== "AbortError") setPaymentDetailError(error instanceof Error ? error.message : "Unable to load payment evidence and history."); })
+      .finally(() => { if (!controller.signal.aborted) setPaymentDetailLoading(false); });
+    return () => controller.abort();
+  }, [selectedPayment]);
 
   function changeSection(next: Section) {
     setSection(next);
@@ -408,6 +447,20 @@ export function FleetControlDashboard({
                   <div className="fc-detail-top"><span className="fc-request-icon"><CircleDollarSign size={19} /></span><div><small>{selectedPayment.requestNo}</small><h2>{selectedPayment.head}</h2><p>{selectedPayment.stationCode} · requested by {selectedPayment.requestedBy}</p></div><strong>{money(selectedPayment.amount)}</strong></div>
                   <div className="fc-detail-grid"><div><small>Request date</small><strong>{date(selectedPayment.requestedAt)}</strong></div><div><small>Work date</small><strong>{date(selectedPayment.workDate)}</strong></div><div><small>Approval status</small><span className={`fc-status ${statusTone(selectedPayment.statusLabel.toLowerCase())}`}><i />{selectedPayment.statusLabel}</span></div><div><small>Station</small><strong>{selectedPayment.stationCode}</strong></div></div>
                   <section className="fc-remarks"><small>Station remarks</small><p>{selectedPayment.remarks}</p></section>
+                  {paymentDetailError ? <div className="fc-detail-load-error">{paymentDetailError}</div> : null}
+                  <div className="fc-payment-support-grid">
+                    <section className="fc-evidence-panel">
+                      <div className="fc-mini-head"><span><FileText size={15} /></span><div><strong>Attachments & details</strong><small>{paymentDetailLoading ? "Loading evidence…" : `${paymentDetail?.attachments.length ?? 0} files attached`}</small></div></div>
+                      {paymentDetailLoading ? <div className="fc-detail-loading">Loading request evidence…</div> : <>
+                        <div className="fc-attachment-list">{paymentDetail?.attachments.map((attachment) => <a href={`/api/payments/requests/attachment?answer_id=${encodeURIComponent(attachment.id)}`} key={attachment.id} rel="noreferrer" target="_blank"><span><FileText size={14} /></span><div><strong>{attachment.fileName}</strong><small>{attachment.label}</small></div><Eye size={15} /><b>View</b></a>)}{!paymentDetail?.attachments.length ? <p>No attachment was uploaded with this request.</p> : null}</div>
+                        {paymentDetail?.answers.length ? <div className="fc-answer-list">{paymentDetail.answers.map((answer) => <p key={answer.id}><span>{answer.label}</span><strong>{answer.value}</strong></p>)}</div> : null}
+                      </>}
+                    </section>
+                    <section className="fc-approval-flow">
+                      <div className="fc-mini-head"><span><GitBranch size={15} /></span><div><strong>Approval flow</strong><small>{paymentDetail?.currentStage ? `Pending with ${paymentDetail.currentStage}` : "Complete decision history"}</small></div></div>
+                      {paymentDetailLoading ? <div className="fc-detail-loading">Loading approval trail…</div> : <div className="fc-flow-list">{paymentDetail?.history.map((entry, index) => <article key={entry.id}><i className={entry.action.toLowerCase()} /><div><header><strong>{actionLabel(entry.action)}</strong><time>{dateTime(entry.createdAt)}</time></header><p>{entry.actor}<span>{entry.role}</span></p>{entry.comments ? <small>{entry.comments}</small> : null}</div>{index < (paymentDetail?.history.length ?? 0) - 1 ? <b /> : null}</article>)}{!paymentDetail?.history.length ? <p className="fc-flow-empty">No approval action has been recorded yet.</p> : null}{paymentDetail?.currentStage ? <article className="current"><i /><div><header><strong>Current approval</strong><time>Now</time></header><p>{paymentDetail.currentStage}</p><small>Awaiting decision</small></div></article> : null}</div>}
+                    </section>
+                  </div>
                   {selectedPayment.canApprove ? <PaymentApprovalActionForm approveAction={approveAction} rejectAction={rejectAction} requestId={selectedPayment.id} requestRemarks={null} returnAction={returnAction} status="pending" /> : <div className="fc-readonly-note"><ShieldCheck size={18} /><span><strong>Decision trail protected</strong><small>This request is not currently assigned to you for approval.</small></span></div>}
                 </> : <div className="fc-empty detail"><CircleDollarSign size={40} /><strong>Select a payment request</strong><p>Review the request, amount, station remarks and current approval stage.</p></div>}
               </div>
