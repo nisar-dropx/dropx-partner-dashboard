@@ -24,8 +24,8 @@ test('UI gates estimates on reconciled data, independently retains document tabs
  assert.match(source,/tab === "earnings" && earningsAllowed && data && calculated && !loading && !visibleError/);
  assert.match(source,/tab === "statements" && earningsAllowed \? <AssociatePayouts/);
  const payouts=readFileSync(new URL('../components/associate-payouts.tsx',import.meta.url),'utf8');
- assert.match(payouts,/if\(!r.ok\)throw new Error\(b.error\)/);
- assert.match(payouts,/Loading payouts/);
+ assert.match(payouts,/if\s*\(!response\.ok\)\s*throw new Error\(body\.error\)/);
+ assert.match(payouts,/Loading finalized earnings/);
  assert.match(source,/tab === "rate-card" && rateCardAllowed && data && !loading && !error/);
  assert.match(source,/setError\(details.error\);setEstimateError\(estimate.error\)/);
  assert.match(source,/if\(version!==generation.current\)return;/);
