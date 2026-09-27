@@ -1,12 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  currentPayoutMonth,
   decodePayoutDisputeReason,
   encodePayoutDisputeReason,
   isCompleteCalendarMonth,
   legacyPayoutDisputeCategory,
   normalizePayoutDisputeAreas,
+  payoutMonthForPeriod,
+  payoutMonthLabel,
+  payoutMonthLongLabel,
   payoutReviewState,
+  shiftPayoutMonth,
 } from "./payout-dispute.ts";
 
 test("normalizes, validates and de-duplicates multi-area disputes", () => {
@@ -44,4 +49,19 @@ test("distinguishes a complete calendar month from partial payroll periods", () 
   assert.equal(isCompleteCalendarMonth("2026-09-01", "2026-09-15"), false);
   assert.equal(isCompleteCalendarMonth("2026-09-16", "2026-09-30"), false);
   assert.equal(isCompleteCalendarMonth("2026-09-01", "2026-10-31"), false);
+});
+
+test("uses Attendance-style month navigation in India time", () => {
+  assert.equal(currentPayoutMonth(new Date("2026-09-30T18:00:00Z")), "2026-09");
+  assert.equal(currentPayoutMonth(new Date("2026-09-30T19:00:00Z")), "2026-10");
+  assert.equal(shiftPayoutMonth("2026-01", -1), "2025-12");
+  assert.equal(shiftPayoutMonth("2026-12", 1), "2027-01");
+  assert.equal(payoutMonthLabel("2026-09"), "Sep-26");
+  assert.equal(payoutMonthLongLabel("2026-09"), "September 2026");
+});
+
+test("files a payout under the month in which its pay period ends", () => {
+  assert.equal(payoutMonthForPeriod("2026-09-01", "2026-09-30"), "2026-09");
+  assert.equal(payoutMonthForPeriod("2026-08-26", "2026-09-25"), "2026-09");
+  assert.equal(payoutMonthForPeriod("invalid", "invalid"), "");
 });

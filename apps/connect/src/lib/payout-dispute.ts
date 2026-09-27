@@ -73,3 +73,42 @@ export function isCompleteCalendarMonth(from: string, to: string) {
   if (month < 1 || month > 12) return false;
   return to === new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
 }
+
+export function currentPayoutMonth(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "2-digit",
+    timeZone: "Asia/Kolkata",
+  }).formatToParts(now);
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  return year && month ? `${year}-${month}` : now.toISOString().slice(0, 7);
+}
+
+export function shiftPayoutMonth(value: string, amount: number) {
+  const match = /^(\d{4})-(\d{2})$/.exec(value);
+  if (!match) return currentPayoutMonth();
+  const shifted = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1 + amount, 1));
+  return shifted.toISOString().slice(0, 7);
+}
+
+export function payoutMonthLabel(value: string) {
+  const match = /^(\d{4})-(\d{2})$/.exec(value);
+  if (!match) return value;
+  return new Intl.DateTimeFormat("en", { month: "short", year: "2-digit", timeZone: "UTC" })
+    .format(new Date(`${value}-01T00:00:00Z`))
+    .replace(" ", "-");
+}
+
+export function payoutMonthLongLabel(value: string) {
+  const match = /^(\d{4})-(\d{2})$/.exec(value);
+  if (!match) return value;
+  return new Intl.DateTimeFormat("en", { month: "long", year: "numeric", timeZone: "UTC" })
+    .format(new Date(`${value}-01T00:00:00Z`));
+}
+
+/** Cross-month pay periods are filed under the month in which the period ends. */
+export function payoutMonthForPeriod(from: string, to: string) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(to)) return to.slice(0, 7);
+  return /^\d{4}-\d{2}-\d{2}$/.test(from) ? from.slice(0, 7) : "";
+}

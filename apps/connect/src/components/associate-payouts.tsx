@@ -1,14 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
+  currentPayoutMonth,
   decodePayoutDisputeReason,
   isCompleteCalendarMonth,
   PAYOUT_DISPUTE_AREAS,
+  payoutMonthForPeriod,
+  payoutMonthLabel,
+  payoutMonthLongLabel,
+  shiftPayoutMonth,
   type PayoutDisputeArea,
   type PayoutReviewState,
 } from "@/lib/payout-dispute";
 import styles from "./associate-payouts.module.css";
+import monthStyles from "./payout-month-control.module.css";
 
 type Row = Record<string, any>;
 type Payout = Row & {
@@ -44,24 +51,39 @@ export function AssociatePayouts({ accountId, profileType }: { accountId: string
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState("");
+  const [month, setMonth] = useState(currentPayoutMonth);
   const [tab, setTab] = useState("summary");
   const [notice, setNotice] = useState("");
   const [disputeAreas, setDisputeAreas] = useState<PayoutDisputeArea[]>([]);
+  const loadGeneration = useRef(0);
   const query = new URLSearchParams({ accountId, profileType }).toString();
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     setLoading(true);
     try {
       const response = await fetch(`/api/connect/payout-review?${query}`, { cache: "no-store" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error);
+      if (generation !== loadGeneration.current) return;
       setPayouts(body.payouts);
       setError("");
     } catch (loadError) {
+      if (generation !== loadGeneration.current) return;
       setError(loadError instanceof Error ? loadError.message : "Unable to load finalized earnings.");
     } finally {
-      setLoading(false);
+      if (generation === loadGeneration.current) setLoading(false);
     }
+  }, [query]);
+
+  useEffect(() => {
+    setPayouts([]);
+    setMonth(currentPayoutMonth());
+    setSelected("");
+    setTab("summary");
+    setDisputeAreas([]);
+    setNotice("");
+    setError("");
   }, [query]);
 
   useEffect(() => { void load(); }, [load]);
@@ -102,7 +124,9 @@ export function AssociatePayouts({ accountId, profileType }: { accountId: string
     }
   }
 
-  const payout = payouts.find((item) => item.id === selected) ?? payouts[0];
+  const monthPayouts = payouts.filter((item) => payoutMonthForPeriod(item.from, item.to) === month);
+  const payout = monthPayouts.find((item) => item.id === selected) ?? monthPayouts[0];
+  const futureMonth = month >= currentPayoutMonth();
   const reviewMessage = payout?.reviewState === "open"
     ? `Disputes accepted until ${localTime(payout.reviewUntil!)} IST.`
     : payout?.reviewState === "expired"
@@ -118,6 +142,14 @@ export function AssociatePayouts({ accountId, profileType }: { accountId: string
     setTab("disputes");
   }
 
+  function moveMonth(amount: number) {
+    setMonth((current) => shiftPayoutMonth(current, amount));
+    setSelected("");
+    setTab("summary");
+    setDisputeAreas([]);
+    setNotice("");
+  }
+
   return <section className={styles.card}>
     <header className={styles.heading}>
       <div><small>Published by Workforce</small><h2>Finalized earnings</h2><p>Review the frozen pay-period calculation and raise a dispute before the deadline.</p></div>
@@ -125,15 +157,26 @@ export function AssociatePayouts({ accountId, profileType }: { accountId: string
     </header>
     {error ? <p className={styles.error} role="alert">{error}</p> : null}
     {notice ? <p className={styles.success} role="status">{notice}</p> : null}
+    <div className={monthStyles.monthBar}>
+      <span>Finalized month</span>
+      <div className={monthStyles.monthControl} role="group" aria-label="Payout month">
+        <button type="button" aria-label="Previous payout month" disabled={loading || busy} onClick={() => moveMonth(-1)}><ChevronLeft /></button>
+        <strong aria-live="polite" aria-atomic="true">
+          <span aria-hidden="true">{payoutMonthLabel(month)}</span>
+          <span className={monthStyles.srOnly}>Showing finalized earnings for {payoutMonthLongLabel(month)}</span>
+        </strong>
+        <button type="button" aria-label="Next payout month" disabled={futureMonth || loading || busy} onClick={() => moveMonth(1)}><ChevronRight /></button>
+      </div>
+    </div>
     {loading ? <p>Loading finalized earnings…</p> : !payout ? <div className={styles.empty}>
-      <strong>No finalized monthly earnings published yet</strong>
-      <p>Live earnings remain available in the Live earnings tab. A monthly statement appears here only after Workforce freezes and publishes it for review.</p>
+      <strong>No finalized earnings published for {payoutMonthLabel(month)}</strong>
+      <p>Live earnings remain available in the Live earnings tab. This month appears here after Workforce freezes and publishes it for review.</p>
     </div> : <>
-      <label className={styles.period}>Month / pay period
+      {monthPayouts.length > 1 ? <label className={styles.period}>Pay period
         <select value={payout.id} onChange={(event) => { setSelected(event.target.value); setTab("summary"); setDisputeAreas([]); }}>
-          {payouts.map((item) => <option key={item.id} value={item.id}>{periodLabel(item.from, item.to)} · {item.status}</option>)}
+          {monthPayouts.map((item) => <option key={item.id} value={item.id}>{periodLabel(item.from, item.to)} · {item.status}</option>)}
         </select>
-      </label>
+      </label> : null}
       <div className={styles.total}>
         <div><small>{periodLabel(payout.from, payout.to)} · {payout.status}</small><span>Final net earnings for this period</span><strong>{money(payout.net)}</strong></div>
         <a href={`/api/connect/payout-slip?${query}&runId=${encodeURIComponent(payout.id)}`} target="_blank" rel="noreferrer">View PDF</a>
