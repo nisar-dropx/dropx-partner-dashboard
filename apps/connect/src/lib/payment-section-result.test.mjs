@@ -26,6 +26,12 @@ test('UI gates estimates on reconciled data, independently retains document tabs
  const payouts=readFileSync(new URL('../components/associate-payouts.tsx',import.meta.url),'utf8');
  assert.match(payouts,/if\s*\(!response\.ok\)\s*throw new Error\(body\.error\)/);
  assert.match(payouts,/Loading finalized earnings/);
+ assert.match(payouts,/aria-label="Previous payout month"/);
+ assert.match(payouts,/aria-label="Next payout month"/);
+ assert.match(payouts,/aria-live="polite"/);
+ assert.match(payouts,/No finalized earnings published for/);
+ assert.match(payouts,/generation !== loadGeneration\.current/);
+ assert.match(payouts,/setPayouts\(\[\]\)/);
  assert.match(source,/tab === "rate-card" && rateCardAllowed && data && !loading && !error/);
  assert.match(source,/setError\(details.error\);setEstimateError\(estimate.error\)/);
  assert.match(source,/if\(version!==generation.current\)return;/);
