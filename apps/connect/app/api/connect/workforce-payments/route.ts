@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireConnectAccount } from "@/lib/connect-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { workforcePaymentMonth } from "@/lib/workforce-payment-period";
+import { workforcePaymentMonth, workforcePaymentPeriod } from "@/lib/workforce-payment-period";
 import {paymentMappingForDay} from "@/lib/workforce-payment-mapping";
 import { workforcePaymentStatus } from "@/lib/workforce-payment-status";
 import {personalPaymentCard} from '@/lib/personal-payment-card';
@@ -29,6 +29,7 @@ function relationName(value: Mapping["providers"] | Mapping["payment_methods"]) 
 export async function GET(request: NextRequest) {
   try {
     if (!supabaseAdmin) throw new Error("Payments are unavailable right now.");
+    const admin = supabaseAdmin;
     const accountId = request.nextUrl.searchParams.get("accountId") ?? "";
     const profileType = request.nextUrl.searchParams.get("profileType") as "employee" | "workforce" | "field_executive" | "contractor" | "vendor" | "worker";
     const account = await requireConnectAccount(profileType, accountId);
@@ -48,16 +49,25 @@ export async function GET(request: NextRequest) {
       if(source.data?.source_profile_id && legacyColumns[source.data.source_profile_type])identityFilters.push(`and(workforce_id.is.null,${legacyColumns[source.data.source_profile_type]}.eq.${source.data.source_profile_id})`);
     }
 
-    const period = workforcePaymentMonth();
-    const mappingResult = await supabaseAdmin.from("field_executive_provider_mappings")
+    const currentPeriod = workforcePaymentMonth();
+    const currentMonth = currentPeriod.from.slice(0, 7);
+    const month = request.nextUrl.searchParams.get("month") || currentMonth;
+    const period = workforcePaymentPeriod(month);
+    if (month > currentMonth) throw new Error("Choose the current month or an earlier month.");
+    const loadMappings = (target: { from: string; to: string }) => admin.from("field_executive_provider_mappings")
       .select("id,provider_member_id,effective_from,effective_to,payment_values,pay_type,providers(name,code),stations(station_code),payment_methods(name),workforce_id,field_executive_id,contractor_id,employee_id")
       .eq("company_id", account.companyId)
-      .neq("status", "cancelled").lt("effective_from",period.to).or(`effective_to.is.null,effective_to.gte.${period.from}`)
+      .neq("status", "cancelled").lt("effective_from",target.to).or(`effective_to.is.null,effective_to.gte.${target.from}`)
       .or(identityFilters.length ? identityFilters.join(","):"id.eq.00000000-0000-0000-0000-000000000000").order("effective_from",{ascending:false}).limit(1000);
+    const mappingResult = await loadMappings(period);
     if (mappingResult.error) throw new Error("We could not load your payment mapping. Please try again.");
 
     if((mappingResult.data ?? []).length>=1000) throw new Error("Too many mapping versions to reconcile safely. Please contact Workforce.");
     const mappings = (mappingResult.data ?? []) as Mapping[];
+    const currentMappingResult = month === currentMonth ? mappingResult : await loadMappings(currentPeriod);
+    if (currentMappingResult.error) throw new Error("We could not load your current rate card. Please try again.");
+    if ((currentMappingResult.data ?? []).length >= 1000) throw new Error("Too many current mapping versions to reconcile safely. Please contact Workforce.");
+    const currentMappings = (currentMappingResult.data ?? []) as Mapping[];
     const providerMemberIds = [...new Set(mappings.map((mapping) => mapping.provider_member_id).filter((id): id is string => Boolean(id)))];
     const dailyResult = providerMemberIds.length
       ? await supabaseAdmin.from("cps_shipment_daily")
@@ -171,13 +181,15 @@ export async function GET(request: NextRequest) {
         grossAmount: Number(item.gross_amount ?? 0), netAmount: Number(item.net_amount ?? 0)
       }];
     });
-    const rateCard = mappings.flatMap((mapping) => Object.entries(mapping.payment_values ?? {})
+    const rateCard = currentMappings.flatMap((mapping) => Object.entries(mapping.payment_values ?? {})
       .filter(([key, value]) => !key.startsWith('DROPX_') && Number.isFinite(Number(value)))
       .map(([code, value]) => ({ code, rate: Number(value), providerMemberId: mapping.provider_member_id, effectiveFrom: mapping.effective_from, effectiveTo: mapping.effective_to })));
 
     return NextResponse.json({
+      month,
       period: period.label,
-      mapping: mappings.map((mapping) => ({
+      hasPaymentMapping: mappings.length > 0,
+      mapping: currentMappings.map((mapping) => ({
         id: mapping.id,
         providerMemberId: mapping.provider_member_id,
         provider: relationName(mapping.providers),

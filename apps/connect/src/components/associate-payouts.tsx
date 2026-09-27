@@ -1,21 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
-  currentPayoutMonth,
   decodePayoutDisputeReason,
   isCompleteCalendarMonth,
   PAYOUT_DISPUTE_AREAS,
   payoutMonthForPeriod,
   payoutMonthLabel,
-  payoutMonthLongLabel,
-  shiftPayoutMonth,
   type PayoutDisputeArea,
   type PayoutReviewState,
 } from "@/lib/payout-dispute";
 import styles from "./associate-payouts.module.css";
-import monthStyles from "./payout-month-control.module.css";
 
 type Row = Record<string, any>;
 type Payout = Row & {
@@ -45,13 +40,13 @@ function periodLabel(from: string, to: string) {
     : `${localDate(from)} – ${localDate(to)}`;
 }
 
-export function AssociatePayouts({ accountId, profileType }: { accountId: string; profileType: string }) {
+export function AssociatePayouts({ accountId, profileType, month, onMonthLockChange }: { accountId: string; profileType: string; month: string; onMonthLockChange?: (locked: boolean) => void }) {
   const [payouts, setPayouts] = useState<Payout[]>([]);
-  const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState("");
-  const [month, setMonth] = useState(currentPayoutMonth);
   const [tab, setTab] = useState("summary");
   const [notice, setNotice] = useState("");
   const [disputeAreas, setDisputeAreas] = useState<PayoutDisputeArea[]>([]);
@@ -67,10 +62,10 @@ export function AssociatePayouts({ accountId, profileType }: { accountId: string
       if (!response.ok) throw new Error(body.error);
       if (generation !== loadGeneration.current) return;
       setPayouts(body.payouts);
-      setError("");
-    } catch (loadError) {
+      setLoadError("");
+    } catch (reason) {
       if (generation !== loadGeneration.current) return;
-      setError(loadError instanceof Error ? loadError.message : "Unable to load finalized earnings.");
+      setLoadError(reason instanceof Error ? reason.message : "Unable to load finalized earnings.");
     } finally {
       if (generation === loadGeneration.current) setLoading(false);
     }
@@ -78,26 +73,39 @@ export function AssociatePayouts({ accountId, profileType }: { accountId: string
 
   useEffect(() => {
     setPayouts([]);
-    setMonth(currentPayoutMonth());
     setSelected("");
     setTab("summary");
     setDisputeAreas([]);
     setNotice("");
-    setError("");
+    setLoadError("");
+    setActionError("");
   }, [query]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    setSelected("");
+    setTab("summary");
+    setDisputeAreas([]);
+    setNotice("");
+    setActionError("");
+  }, [month]);
+
+  useEffect(() => {
+    onMonthLockChange?.(loading || busy);
+    return () => onMonthLockChange?.(false);
+  }, [busy, loading, onMonthLockChange]);
 
   async function send(event: React.FormEvent<HTMLFormElement>, payout: Payout, disputeId?: string) {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
     if (!disputeId && !disputeAreas.length) {
-      setError("Select at least one area to dispute.");
+      setActionError("Select at least one area to dispute.");
       return;
     }
     setBusy(true);
-    setError("");
+    setActionError("");
     setNotice("");
     try {
       const response = await fetch(`/api/connect/payout-review?${query}`, {
@@ -118,7 +126,7 @@ export function AssociatePayouts({ accountId, profileType }: { accountId: string
       setNotice(disputeId ? "Reply sent." : "Dispute sent to Workforce and your station team.");
       await load();
     } catch (sendError) {
-      setError(sendError instanceof Error ? sendError.message : "Unable to send the dispute.");
+      setActionError(sendError instanceof Error ? sendError.message : "Unable to send the dispute.");
     } finally {
       setBusy(false);
     }
@@ -126,7 +134,6 @@ export function AssociatePayouts({ accountId, profileType }: { accountId: string
 
   const monthPayouts = payouts.filter((item) => payoutMonthForPeriod(item.from, item.to) === month);
   const payout = monthPayouts.find((item) => item.id === selected) ?? monthPayouts[0];
-  const futureMonth = month >= currentPayoutMonth();
   const reviewMessage = payout?.reviewState === "open"
     ? `Disputes accepted until ${localTime(payout.reviewUntil!)} IST.`
     : payout?.reviewState === "expired"
@@ -142,33 +149,15 @@ export function AssociatePayouts({ accountId, profileType }: { accountId: string
     setTab("disputes");
   }
 
-  function moveMonth(amount: number) {
-    setMonth((current) => shiftPayoutMonth(current, amount));
-    setSelected("");
-    setTab("summary");
-    setDisputeAreas([]);
-    setNotice("");
-  }
-
   return <section className={styles.card}>
     <header className={styles.heading}>
       <div><small>Published by Workforce</small><h2>Finalized earnings</h2><p>Review the frozen pay-period calculation and raise a dispute before the deadline.</p></div>
       <button type="button" onClick={() => void load()} disabled={loading}>Refresh</button>
     </header>
-    {error ? <p className={styles.error} role="alert">{error}</p> : null}
+    {loadError ? <p className={styles.error} role="alert">{loadError}</p> : null}
+    {actionError ? <p className={styles.error} role="alert">{actionError}</p> : null}
     {notice ? <p className={styles.success} role="status">{notice}</p> : null}
-    <div className={monthStyles.monthBar}>
-      <span>Finalized month</span>
-      <div className={monthStyles.monthControl} role="group" aria-label="Payout month">
-        <button type="button" aria-label="Previous payout month" disabled={loading || busy} onClick={() => moveMonth(-1)}><ChevronLeft /></button>
-        <strong aria-live="polite" aria-atomic="true">
-          <span aria-hidden="true">{payoutMonthLabel(month)}</span>
-          <span className={monthStyles.srOnly}>Showing finalized earnings for {payoutMonthLongLabel(month)}</span>
-        </strong>
-        <button type="button" aria-label="Next payout month" disabled={futureMonth || loading || busy} onClick={() => moveMonth(1)}><ChevronRight /></button>
-      </div>
-    </div>
-    {loading ? <p>Loading finalized earnings…</p> : !payout ? <div className={styles.empty}>
+    {loading ? <p>Loading finalized earnings…</p> : loadError ? null : !payout ? <div className={styles.empty}>
       <strong>No finalized earnings published for {payoutMonthLabel(month)}</strong>
       <p>Live earnings remain available in the Live earnings tab. This month appears here after Workforce freezes and publishes it for review.</p>
     </div> : <>
