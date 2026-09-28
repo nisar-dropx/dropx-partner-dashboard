@@ -4,6 +4,8 @@ Route: `/request-tracker`. API: `/api/request-tracker`.
 
 This is a read-only, company-owner Dashboard surface. Ordinary Reports grants do not enable cross-portal access. Both the server page and API enforce owner access; the API takes company identity only from the session. Confidential contact, identity, banking and file fields are recursively protected before event storage and API output. Existing source portals retain authority and permissions.
 
+People reimbursement and leave approval routes are loaded as explicitly labelled current snapshots. Pending approvers are resolved from those source steps; they are not presented as immutable historical events.
+
 The register has exact-reference and UUID lookup, source-type and status filtering, stable pagination, an expandable timeline, explicit linked records and nested source details. Database changes and legacy workflow records have separate provenance. Missing sources are shown as unavailable. Current-stage duration is only derived from an actual matching transition in the loaded event page; unknown duration is not inferred from last update.
 
 ## Database release

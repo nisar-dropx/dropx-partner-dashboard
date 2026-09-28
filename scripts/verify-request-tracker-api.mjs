@@ -11,14 +11,25 @@ assert.equal(model.waiting({status:'paid',approval_status:'FINAL_APPROVED'}),'No
 assert.equal(model.waiting({approval_status:'NO_APPROVER_CONFIGURED'}),'Approver configuration');
 assert.equal(model.eventActor({source:'Database change',record:{recorded_actor_id:'someone'}},{}),'Backend / service','row attribution is not forged into authenticated identity');
 assert.equal(model.age('invalid'),'—');assert.equal(model.eventTime({source:'steps',record:{created_at:'2026-09-01',decided_at:'2026-09-28'}}),'2026-09-28');
-let authorization=null,surface='dashboard',calls=[];
+const claimId='12345678-1234-1234-1234-123456789abc', approverId='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+const pendingStep={claim_id:claimId,status:'pending',step_order:2,step_name:'Manager',approver_user_id:approverId};
+assert.equal(model.waiting({status:'pending_approval'},{[approverId]:'Approver Name'},[pendingStep]),'Approver Name');
+assert.equal(model.waiting({status:'paid'},{[approverId]:'Approver Name'},[pendingStep]),'No active approval recorded');
+assert.equal(model.waiting({status:'returned'},{},[pendingStep]),'Requester correction');
+let authorization=null,surface='dashboard',calls=[],sourceCalls=[],rpcData=null;
+const from=table=>{
+ const call={table}; sourceCalls.push(call);
+ const result={data:table==='hr_expense_approval_steps'?[pendingStep]:table==='profiles'?[{id:approverId,full_name:'Approver Name'}]:[],error:null};
+ const builder={select:value=>{call.select=value;return builder;},eq:(key,value)=>{call[key]=value;return builder;},in:(key,value)=>{call.ids=value;return builder;},order:()=>builder,limit:()=>Promise.resolve(result),then:(resolve,reject)=>Promise.resolve(result).then(resolve,reject)};
+ return builder;
+};
 const route=compile('src/app/api/request-tracker/route.ts',{
  'next/server':{NextResponse:{json:(v,o)=>new Response(JSON.stringify(v),o)}},
  '@/lib/authorization':{getAuthorization:async()=>authorization,isCompanyOwner:a=>a.isMasterOwner||a.roleCode==='OWNER'},
  '@/lib/access-surface':{currentAdminAccessSurface:()=>surface},
  '@/lib/request-tracker/model':model,
  '@/lib/request-tracker/links.json':links,
- '@/lib/supabase-admin':{supabaseAdmin:{rpc:async(name,args)=>{calls.push({name,args});return {data:null,error:null};}}}
+ '@/lib/supabase-admin':{supabaseAdmin:{from,rpc:async(name,args)=>{calls.push({name,args});return {data:rpcData,error:null};}}}
 });
 const get=(query='')=>route.GET(new Request('https://dashboard.dropxlogistics.com/api/request-tracker'+query));
 assert.equal((await get()).status,401);
@@ -27,3 +38,10 @@ authorization={...authorization,roleCode:'OWNER'};surface='ops';assert.equal((aw
 assert.equal((await get('?type=not-a-source')).status,400);assert.equal((await get('?offset=-1')).status,400);assert.equal((await get('?offset=1.5')).status,400);
 const response=await get('?type=payment&id=12345678-1234-1234-1234-123456789abc&company_id=attacker-company');assert.equal(response.status,404);assert.equal(calls[0].args.p_company,'real-company');assert.equal(response.headers.get('cache-control'),'private, no-store');
 console.log('Request Tracker API/model checks passed: signed-out/non-owner/cross-portal denial, tenant source, invalid inputs, no-store and terminal-state precedence.');
+
+rpcData={rows:[{kind:'expense_claim',label:'Reimbursement bill claim',portal:'People',record:{id:claimId,status:'pending_approval'}}],warnings:[]};
+const routingResponse=await get('?type=expense_claim');const routingBody=await routingResponse.json();
+assert.equal(routingResponse.status,200);assert.equal(routingBody.rows[0].routing[0].approver_user_id,approverId);
+assert.equal(routingBody.names[approverId],'Approver Name');
+const stepQuery=sourceCalls.find(call=>call.table==='hr_expense_approval_steps');assert.equal(stepQuery.company_id,'real-company');assert.deepEqual(stepQuery.ids,[claimId]);assert.ok(!stepQuery.select.includes('*'));
+console.log('Current People routing checks passed: pending approver resolution, terminal precedence, tenant filter and explicit field selection.');

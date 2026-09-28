@@ -1,6 +1,6 @@
 import catalog from './catalog.json';
 export type RecordData = Record<string, unknown>;
-export type TrackerRow = { kind: string; label: string; portal: string; record: RecordData };
+export type TrackerRow = { kind: string; label: string; portal: string; record: RecordData; routing?: RecordData[] };
 export type TrackerEvent = { source: string; record: RecordData };
 export type Related = { kind: string; id: string; reference: string; label: string; status?: string };
 export type Detail = TrackerRow & { events: TrackerEvent[]; hasMore: boolean; warnings: string[]; auditSince: string; deleted: boolean; related: Related[]; names: Record<string,string> };
@@ -24,13 +24,16 @@ export function eventActor(event: TrackerEvent, names: Record<string,string>) {
  if(event.source==='Database change') return id ? (names[id] || id) : 'Backend / service';
  return text(row,'actor_name','approver_name','actor_label','actor') || names[id] || id || 'Not recorded';
 }
-export function waiting(row: RecordData,names: Record<string,string>={}) {
+export function waiting(row: RecordData,names: Record<string,string>={}, routing: RecordData[]=[]) {
  const status=state(row).toLowerCase();
  if (status.includes('no_approver')) return 'Approver configuration';
  if (/^(paid|processed|completed|closed|cancelled|canceled|rejected|withdrawn|resolved|reversed|deleted)$/.test(status)) return 'No active approval recorded';
+ if(status==='payment_rejected') return 'Payment rejected · review in source';
  if(status.includes('return')) return 'Requester correction';
  const person=text(row,'current_approver_user_id','assigned_to','assigned_user_id','reviewer_id');
  if(person) return names[person] || person;
+ const pending=routing.filter(step=>text(step,'status')==='pending');
+ if(pending.length)return pending.map(step=>names[text(step,'approver_user_id')]||text(step,'approver_user_id','step_name')||'Pending approver not recorded').join(', ');
  const roles=Array.isArray(row.current_approver_role_ids)?row.current_approver_role_ids:[];
  const role=text(row,'current_approver_role_id');
  if(role || roles.length) return [...new Set([role,...roles].filter(Boolean))].map(id=>names[String(id)]||String(id)).join(', ');
