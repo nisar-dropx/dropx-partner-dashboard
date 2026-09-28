@@ -38,7 +38,7 @@ export function adhocDaReport(payments: AdhocPayment[], shipments: AdhocShipment
       "Approved amount": row.amount_approved == null ? "" : n(row.amount_approved), "Paid amount": paid,
       "Paid / processed at": row.processed_at || row.paid_at || "", "Bank reference": row.utr_cin || "",
       "Deduction ID": row.adhoc_adjustment_id || "", "Deduction posting date": deduction?.effective_date || "",
-      "Deduction status": deduction?.status || (tracked ? "Not paid" : "Historical — not linked; no automatic deduction"), "Payroll run ID": deduction?.payroll_run_id || ""
+      "Deduction status": deduction?.status || (row.adhoc_da_name ? (paid ? "Paid — awaiting identity reconciliation" : "Not paid") : "Historical — not linked; no automatic deduction"), "Payroll run ID": deduction?.payroll_run_id || ""
     };
   });
   const summary = [...groups.values()].map(group => {
@@ -47,7 +47,7 @@ export function adhocDaReport(payments: AdhocPayment[], shipments: AdhocShipment
       "Amazon delivered (selected range)": group.tracked ? counts?.amazon ?? 0 : "", "Total delivered (selected range)": group.tracked ? counts?.delivered ?? 0 : "",
       "Payment requests": group.requests, "Requested amount": round(group.requested), "Paid amount": round(group.paid),
       "Recovery in payroll snapshot": round(group.recovered), "Recovery awaiting payroll": round(group.pending),
-      "Tracking": group.tracked ? "Linked" : "Historical — needs manual reconciliation" };
+      "Tracking": group.tracked ? "Linked" : (group.client ? "Reference captured — identity reconciliation pending" : "Historical — needs manual reconciliation") };
   });
   return { summary, details };
 }

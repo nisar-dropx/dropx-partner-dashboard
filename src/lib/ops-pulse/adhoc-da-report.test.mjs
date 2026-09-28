@@ -22,3 +22,11 @@ test('posted adjustment is distinguished from still awaiting payroll',()=>{
  assert.equal(result.summary[0]['Recovery awaiting payroll'],0);
  assert.equal(result.details[0]['Payroll run ID'],'run1');
 });
+test('paid reference-only DAs are pending reconciliation, never historical or recovered',()=>{
+ const result=adhocDaReport([{...payment,adhoc_workforce_id:null,adhoc_adjustment_id:null}],[],[]);
+ assert.equal(result.details[0]['Deduction status'],'Paid — awaiting identity reconciliation');
+ assert.equal(result.summary[0]['Tracking'],'Reference captured — identity reconciliation pending');
+ assert.equal(result.summary[0]['Paid amount'],100);
+ assert.equal(result.summary[0]['Recovery awaiting payroll'],0);
+ assert.equal(result.summary[0]['Recovery in payroll snapshot'],0);
+});
