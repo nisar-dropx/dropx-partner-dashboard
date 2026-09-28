@@ -16,13 +16,13 @@ export function state(row: RecordData) {
  if(/^(paid|processed|completed|closed|cancelled|canceled|rejected|withdrawn|resolved|reversed|deleted)$/i.test(current))return current;
  return text(row,'approval_status','status','state') || 'Not recorded';
 }
-export function eventTime(event: TrackerEvent) { return text(event.record,'recorded_at','created_at','timestamp','at','decided_at'); }
+export function eventTime(event: TrackerEvent) { return text(event.record,'recorded_at','decided_at','created_at','timestamp','at'); }
 export function eventAction(event: TrackerEvent) { return human(text(event.record,'operation','event_type','event_code','action','status') || (event.source==='workforce_payout_dispute_events'?'Message':'Workflow update')); }
 export function eventActor(event: TrackerEvent, names: Record<string,string>) {
  const row=event.record;
  const id=text(row,'actor_id','actor_user_id','approver_user_id','decided_by','actor_profile_id');
  if(event.source==='Database change') return id ? (names[id] || id) : 'Backend / service';
- return text(row,'actor_name','actor_label','actor') || names[id] || id || 'Not recorded';
+ return text(row,'actor_name','approver_name','actor_label','actor') || names[id] || id || 'Not recorded';
 }
 export function waiting(row: RecordData,names: Record<string,string>={}) {
  const status=state(row).toLowerCase();

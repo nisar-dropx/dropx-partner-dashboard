@@ -13,6 +13,7 @@ try{
  create table public.hr_expense_claims(id uuid primary key,company_id uuid,claim_no text,payment_request_id uuid,status text,created_at timestamptz default now());
  grant select,insert,update,delete on all tables in schema public to service_role;`);
  await db.exec(readFileSync(new URL('../supabase/migrations/20260928123000_dashboard_request_tracker.sql',import.meta.url),'utf8'));
+ await db.exec(readFileSync(new URL('../supabase/migrations/20260928132000_request_tracker_deployed_sources.sql',import.meta.url),'utf8'));
  await db.exec('set role service_role');
  await db.query('insert into payment_requests(id,company_id,request_no,status,bank_account_no,details) values($1,$2,$3,$4,$5,$6)',[id,company,'PAY-123','pending','sensitive-account',JSON.stringify({bank:{number:'nested-secret'},items:[{password:'secret',amount:42}]})]);
  await db.query('insert into payment_requests(id,company_id,request_no,status) values($1,$2,$3,$4)',[randomUUID(),other,'PAY-123','paid']);
@@ -21,7 +22,7 @@ try{
  const search=async(kind='',q='',offset=0)=>(await db.query('select request_tracker_search($1,$2,$3,$4,$5) result',[company,kind,q,'',offset])).rows[0].result;
  const detail=async(c=company)=>(await db.query('select request_tracker_detail($1,$2,$3) result',[c,'payment',id])).rows[0].result;
  const found=await search('','PAY-123');assert.equal(found.rows.length,1,'tenant isolation for duplicate aliases');assert.ok(found.warnings.length,'unavailable sources are explicit');
- assert.equal(found.rows[0].record.bank_account_no,'[Protected]');assert.equal(found.rows[0].record.details.bank,'[Protected]');assert.equal(found.rows[0].record.details.items[0].password,'[Protected]');
+ assert.equal((await db.query('select request_tracker_redact($1) v',[JSON.stringify({bank_status:'failed',bank_account_no:'secret',cookie:'secret'})])).rows[0].v.bank_status,'failed');assert.equal(found.rows[0].record.bank_account_no,'[Protected]');assert.equal(found.rows[0].record.details.bank,'[Protected]');assert.equal(found.rows[0].record.details.items[0].password,'[Protected]');
  assert.equal((await search('payment',id)).rows.length,1,'UUID lookup');assert.equal((await search('payment',"' OR 1=1 --")).rows.length,0,'parameterized search');
  assert.equal(await detail(other),null,'detail tenant isolation');
  let d=await detail();assert.equal(d.events.length,3,'legacy dual-FK approval and new audit both retained');assert.ok(d.events.some(e=>e.source==='payment_request_approvals'));

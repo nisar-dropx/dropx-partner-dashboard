@@ -261,13 +261,13 @@
     "key": "trip",
     "label": "Business trip / site visit request",
     "portal": "People",
-    "table": "hr_site_visit_requests",
+    "table": "hr_business_trip_requests",
     "aliases": [
       "request_no"
     ],
     "history": [
       {
-        "table": "hr_site_visit_approval_steps",
+        "table": "hr_business_trip_approval_steps",
         "keys": [
           "request_id"
         ]

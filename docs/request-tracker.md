@@ -8,7 +8,7 @@ The register has exact-reference and UUID lookup, source-type and status filteri
 
 ## Database release
 
-Apply `supabase/migrations/20260928123000_dashboard_request_tracker.sql` from the pushed release commit before promoting Dashboard. It registers 49 source families (shared Fleet payments use the canonical payment family), creates service-readable audit tables and read-only RPCs, and attaches mutation triggers only to existing tenant-bearing root/child tables. Composite queues without verified tenant mapping remain unavailable. New domain tables added later require an adapter/trigger migration.
+Apply `supabase/migrations/20260928123000_dashboard_request_tracker.sql` from the pushed release commit and `supabase/migrations/20260928132000_request_tracker_deployed_sources.sql` before promoting Dashboard. The second migration aligns the deployed People business-trip table and preserves decision timestamps and non-sensitive bank outcome fields. It registers 49 source families (shared Fleet payments use the canonical payment family), creates service-readable audit tables and read-only RPCs, and attaches mutation triggers only to existing tenant-bearing root/child tables. Composite queues without verified tenant mapping remain unavailable. New domain tables added later require an adapter/trigger migration.
 
 The audit covers subsequent changes to installed root tables and registered child tables. Earlier history depends on retained source events. Legacy audit rows may be mutable; the screen identifies their provenance. RPCs are executable only by the existing backend service role; browser roles cannot call them. Service-role users cannot edit/delete tracker audit rows. Database superusers remain outside that protection.
 

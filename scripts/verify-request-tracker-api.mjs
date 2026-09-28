@@ -10,7 +10,7 @@ assert.equal(model.state({status:'paid',approval_status:'FINAL_APPROVED'}),'paid
 assert.equal(model.waiting({status:'paid',approval_status:'FINAL_APPROVED'}),'No active approval recorded');
 assert.equal(model.waiting({approval_status:'NO_APPROVER_CONFIGURED'}),'Approver configuration');
 assert.equal(model.eventActor({source:'Database change',record:{recorded_actor_id:'someone'}},{}),'Backend / service','row attribution is not forged into authenticated identity');
-assert.equal(model.age('invalid'),'—');
+assert.equal(model.age('invalid'),'—');assert.equal(model.eventTime({source:'steps',record:{created_at:'2026-09-01',decided_at:'2026-09-28'}}),'2026-09-28');
 let authorization=null,surface='dashboard',calls=[];
 const route=compile('src/app/api/request-tracker/route.ts',{
  'next/server':{NextResponse:{json:(v,o)=>new Response(JSON.stringify(v),o)}},
