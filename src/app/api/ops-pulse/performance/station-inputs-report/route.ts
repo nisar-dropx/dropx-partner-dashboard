@@ -25,10 +25,16 @@ export async function GET(request: Request) {
     const trend = await loadReviewTrends(companyId, station, query.date, "station"), dates = trendDates(query.date, days);
     const series = new Map(trend.series.map((entry) => [entry.key, entry]));
     const point = (key: string, date: string) => series.get(key)?.points.find((entry) => entry.date === date)?.value ?? null;
-    return workbookResponse([
-      { name: "Vehicle timings", rows: dates.map((date) => ({ Date: date, "First vehicle arrival IST": formatTrendValue(point("arrival", date), "time"), "Last unloading complete IST": formatTrendValue(point("unloading", date), "time") })) },
-      { name: "EMD at 12 p.m.", rows: dates.map((date) => ({ Date: date, "EMD at 12 p.m. (%)": point("emd", date) })) }
-    ], `ops-pulse-station-inputs-${query.station}-${dates[0]}-to-${query.date}.xlsx`);
+    return workbookResponse([{
+      name: "Vehicle and EMD",
+      rows: dates.map((date) => ({
+        Date: date,
+        "Vehicle arrival time": formatTrendValue(point("arrival", date), "time"),
+        "Unloading completed time": formatTrendValue(point("unloading", date), "time"),
+        "Shipment count": point("shipments", date),
+        EMD: point("emd", date),
+      })),
+    }], `ops-pulse-vehicle-and-emd-${query.station}-${dates[0]}-to-${query.date}.xlsx`);
   } catch (error) {
     console.error("Station input report failed", { station: query.station, error: error instanceof Error ? error.message : "unknown" });
     return Response.json({ error: "The station input report could not be generated. Please retry." }, { status: 503, headers });

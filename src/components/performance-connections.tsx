@@ -12,8 +12,8 @@ function clockValue(value:string|null) {
 function persistedConnectionId(id:string|undefined) {
   return id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id : "";
 }
-export function PerformanceConnections({connections,date,stationCode,canEdit}:{
-  connections:PerformanceConnection[]; date:string; stationCode:string; canEdit:boolean;
+export function PerformanceConnections({connections,date,stationCode,canEdit,shipmentCount}:{
+  connections:PerformanceConnection[]; date:string; stationCode:string; canEdit:boolean; shipmentCount:number|null;
 }) {
   const [adding,setAdding]=useState(false);
   const timingForm=(connection:PerformanceConnection|null,index:number,isAdditional=false)=> <ReviewActionForm
@@ -30,7 +30,7 @@ export function PerformanceConnections({connections,date,stationCode,canEdit}:{
     <button className="button secondary">Save vehicle timings</button>
   </ReviewActionForm>;
   return <section className="review-vehicles" aria-label="Station vehicles">
-    <header><span><strong>Station vehicles · {Math.max(1,connections.length)}</strong><small>Vehicle 1 is required · arrival & unloading in IST</small></span>
+    <header><span><strong>Station vehicles · {Math.max(1,connections.length)}</strong><small>Vehicle 1 is required · arrival & unloading in IST · Shipment count: {shipmentCount == null ? "Not available" : shipmentCount.toLocaleString("en-IN")}</small></span>
       <div className="review-history-actions"><TrendButton group="station" metric="arrival" label="Vehicle timings"/>{canEdit?<button type="button" className="button secondary" aria-expanded={adding} aria-controls="review-new-vehicle" onClick={()=>setAdding(v=>!v)}>{adding?"Close additional vehicle":"+ Add vehicle"}</button>:null}</div>
     </header>
     {!connections.length ? <div className="review-vehicle-required">

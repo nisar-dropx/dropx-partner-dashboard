@@ -21,12 +21,13 @@ const component=compile('src/components/performance-connections.tsx',{
   '@/components/review-action-form':{ReviewActionForm:({children,...props})=>React.createElement('form',{className:props.className},children)},
   '@/components/performance-trends':{TrendButton:()=>null}
 });
-const html=renderToStaticMarkup(React.createElement(component.PerformanceConnections,{connections:[{id:'a',version:1,label:'Vehicle 1',arrival_at:'2026-09-09T07:35:00+05:30',unloading_at:'2026-09-09T08:25:00+05:30',clearance_at:'2026-09-09T09:00:00+05:30'}],date:'2026-09-09',stationCode:'GDRD',canEdit:true}));
+const html=renderToStaticMarkup(React.createElement(component.PerformanceConnections,{connections:[{id:'a',version:1,label:'Vehicle 1',arrival_at:'2026-09-09T07:35:00+05:30',unloading_at:'2026-09-09T08:25:00+05:30',clearance_at:'2026-09-09T09:00:00+05:30'}],date:'2026-09-09',stationCode:'GDRD',canEdit:true,shipmentCount:1234}));
 assert.ok(html.includes('Arrived 07:35 · Unloaded 08:25'));
+assert.ok(html.includes('Shipment count: 1,234'),'Vehicle section shows the Review Desk daily shipment count');
 assert.ok(!/clearance|Vehicle cleared|09:00/.test(html),'retired field absent from summary, read and edit views');
 assert.ok(!/<details[^>]+open/.test(html),'existing vehicles start collapsed');
 assert.ok(html.includes('Close Vehicle 1 timings')&&html.includes('aria-controls="review-new-vehicle"'));
-const requiredVehicle=renderToStaticMarkup(React.createElement(component.PerformanceConnections,{connections:[],date:'2026-09-09',stationCode:'GDRD',canEdit:true}));
+const requiredVehicle=renderToStaticMarkup(React.createElement(component.PerformanceConnections,{connections:[],date:'2026-09-09',stationCode:'GDRD',canEdit:true,shipmentCount:null}));
 assert.ok(requiredVehicle.includes('Vehicle 1 · required')&&requiredVehicle.includes('Save both timings before a manager can complete this review.'),'Vehicle 1 is present and clearly required before completion');
 const css=read('src/app/ops-pulse/performance/review-desk.css');
 assert.ok(css.includes('position: static; width: auto; max-width: 100%'),'drilldowns stay inline');
@@ -45,5 +46,7 @@ const requiredEmdMigration=read('supabase/migrations/20260928210000_require_revi
 assert.ok(requiredEmdMigration.includes('ops_assert_review_station_inputs')&&requiredEmdMigration.includes('emd_noon_pct is not null'),'database completion also requires EMD at 12 p.m.');
 assert.ok(read('src/components/performance-noon-emd.tsx').includes('metric="emd"'),'EMD has a direct history control alongside vehicle timings');
 assert.ok(read('src/components/performance-trends.tsx').includes('Download Vehicle + EMD Excel'),'station history offers a combined workbook');
+const stationReport=read('src/app/api/ops-pulse/performance/station-inputs-report/route.ts');
+assert.ok(stationReport.includes('name: "Vehicle and EMD"')&&stationReport.includes('"Shipment count"')&&stationReport.includes('EMD: point("emd", date)'),'station workbook has one combined daily Vehicle and EMD sheet');
 assert.ok(!migration.includes('clearance_at=')&&!migration.includes('delete from'));
 console.log('PASS compact Review Desk: retired field, closed vehicle rows, close/Escape/focus, preserved drafts, mobile targets and inline panels.');

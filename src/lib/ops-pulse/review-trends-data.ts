@@ -236,7 +236,7 @@ export async function loadReviewTrends(
       details,
     );
   } else if (group === "station") {
-    const [inputs, connections, targetResult] = await Promise.all([
+    const [inputs, connections, capacity, details, shipments, targetResult] = await Promise.all([
       readTrendPages((offset) =>
         db
           .from("ops_performance_daily_inputs")
@@ -257,6 +257,41 @@ export async function loadReviewTrends(
           .gte("service_date", from)
           .lte("service_date", endDate)
           .order("service_date")
+          .order("id")
+          .range(offset, offset + 999),
+      ),
+      readTrendPages((offset) =>
+        db
+          .from("capacity_station_daily_cache")
+          .select("work_date,delivered")
+          .eq("company_id", companyId)
+          .eq("station_code", code)
+          .gte("work_date", from)
+          .lte("work_date", endDate)
+          .order("work_date")
+          .range(offset, offset + 999),
+      ),
+      readTrendPages((offset) =>
+        db
+          .from("delivered_shipment_facts")
+          .select("work_date,package_count")
+          .eq("company_id", companyId)
+          .eq("station_code", code)
+          .gte("work_date", from)
+          .lte("work_date", endDate)
+          .order("work_date")
+          .order("id")
+          .range(offset, offset + 999),
+      ),
+      readTrendPages((offset) =>
+        db
+          .from("cps_shipment_daily")
+          .select("work_date,total_delivery")
+          .eq("company_id", companyId)
+          .eq("station_code", code)
+          .gte("work_date", from)
+          .lte("work_date", endDate)
+          .order("work_date")
           .order("id")
           .range(offset, offset + 999),
       ),
@@ -309,6 +344,51 @@ export async function loadReviewTrends(
         }),
       });
     }
+    const totalsByDate = (rows: TrendRow[], dateKey: string, valueKey: string, defaultValue: number | null = null) => {
+      const totals = new Map<string, number>();
+      const present = new Set<string>();
+      for (const row of rows) {
+        const date = String(row[dateKey] ?? "");
+        const value = trendNumber(row[valueKey]);
+        if (!date || (value == null && defaultValue == null)) continue;
+        present.add(date);
+        totals.set(date, (totals.get(date) ?? 0) + (value ?? defaultValue ?? 0));
+      }
+      return { present, totals };
+    };
+    const capacityByDate = totalsByDate(capacity, "work_date", "delivered"),
+      detailByDate = totalsByDate(details, "work_date", "package_count", 1),
+      shipmentByDate = totalsByDate(shipments, "work_date", "total_delivery");
+    series.push({
+      key: "shipments",
+      label: "Shipment count",
+      unit: "number",
+      target: null,
+      direction: "higher",
+      note: "Same daily delivered count used in the Review Desk. Capacity is preferred when present; package-level and payroll shipment feeds fill any gap.",
+      points: dates.map((date) => {
+        const capacityValue = capacityByDate.totals.get(date),
+          detailValue = detailByDate.totals.get(date),
+          shipmentValue = shipmentByDate.totals.get(date),
+          value = capacityValue && capacityValue > 0
+            ? capacityValue
+            : detailValue && detailValue > 0
+              ? detailValue
+              : shipmentValue ?? capacityValue ?? detailValue ?? null,
+          source = capacityValue && capacityValue > 0
+            ? "Daily capacity"
+            : detailValue && detailValue > 0
+              ? "Delivered shipment detail"
+              : shipmentValue != null
+                ? "Daily shipment feed"
+                : capacityByDate.present.has(date)
+                  ? "Daily capacity"
+                  : detailByDate.present.has(date)
+                    ? "Delivered shipment detail"
+                    : null;
+        return { date, value, note: source ? `${source} · ${formatTrendValue(value, "number")}` : "Shipment count not imported" };
+      }),
+    });
   } else {
     const settings = await db
       .from("ops_performance_station_settings")

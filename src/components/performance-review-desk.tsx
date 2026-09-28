@@ -314,7 +314,7 @@ export function PerformanceReviewDesk(props: Props) {
         <ReviewScorecard key={`${selectedCode}-${date}`} metrics={metrics}/>
         {props.stationTargetsError ? <p role="alert">{props.stationTargetsError}</p> : null}
         <div className="review-station-updates" id="review-station-updates">
-          <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
+          <PerformanceConnections key={`${selectedCode}-${date}`} connections={connections} date={date} stationCode={selectedCode} canEdit={canEditConnections} shipmentCount={snapshot.deliveryDataAvailable ? snapshot.deliveredCount : null}/>
           <PerformanceNoonEmdEntry target={props.stationTargets.emdNoonTarget} entry={props.noonEmd.row} error={props.noonEmd.error} date={date} stationCode={selectedCode} canEdit={canEditConnections}/>
         </div>
         {rcaRows.length ? (
