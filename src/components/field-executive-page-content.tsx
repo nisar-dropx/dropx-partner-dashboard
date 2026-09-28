@@ -1,3 +1,4 @@
+import { loadPartnerOnboardingStates } from "@/lib/partner-onboarding";
 import { WorkforceCostReadiness } from "@/components/workforce-cost-readiness";
 import type { ReactNode } from "react";
 import { bulkImportFieldExecutives, createFieldExecutive, reviewFieldExecutiveProfile, updateFieldExecutive } from "@/app/field-executive/actions";
@@ -226,17 +227,17 @@ function fieldExecutiveStatus(
 
 function WorkforceRegisterSummary({ rows }: { rows: FieldExecutiveListRow[] }) {
   const registrationPending = rows.filter((row) =>
-    row.status === "Pending" || row.status === "Correction requested"
+    row.partnerOnboarding ? !row.partnerOnboarding.registration_ready : row.status === "Pending" || row.status === "Correction requested"
   ).length;
   const approvalPending = rows.filter((row) =>
-    row.status === "Workforce approval pending" || row.status === "Activation pending"
+    row.partnerOnboarding ? Boolean(row.partnerOnboarding.due_kind) : row.status === "Workforce approval pending" || row.status === "Activation pending"
   ).length;
-  const active = rows.filter((row) => row.status === "Active").length;
+  const active = rows.filter((row) => row.partnerOnboarding?row.partnerOnboarding.mapping_confirmed:row.status === "Active").length;
   return (
     <section className="workforce-register-summary" aria-label="Workforce registration summary">
       <article><span>Total in scope</span><strong>{rows.length}</strong></article>
       <article><span>Registration pending</span><strong>{registrationPending}</strong></article>
-      <article><span>Approval pending</span><strong>{approvalPending}</strong></article>
+      <article><span>Follow-up due</span><strong>{approvalPending}</strong></article>
       <article><span>Active associates</span><strong>{active}</strong></article>
     </section>
   );
@@ -552,7 +553,7 @@ function AddFieldExecutiveForm({
           <WorkforceMobileInput required defaultValue={values?.mobile ?? ""} />
         </div>
       </label>
-      <label>Email<WorkforceEmailInput required defaultValue={values?.email ?? ""} /></label>
+      <label>Email<WorkforceEmailInput required defaultValue={values?.email ?? ""} /><small>Use the created mailbox. Where the partner workflow requires it, end the name with .stationcode before @. Any valid domain is allowed.</small></label>
       <label>Date of join<input className="field" name="date_of_join" required type="date" defaultValue={values?.dateOfJoin ?? ""} /></label>
       <ScopedDesignationFields
         designationName="designation"
@@ -784,6 +785,7 @@ async function loadFieldExecutiveData(
   const visibleExecutiveRows = ((executivesResult.data ?? []) as unknown as ExecutiveRow[])
     .filter((executive) => authorization.hasAllLocationAccess || allowedLocationIds.has(executive.location_id))
     .filter((executive) => ownerAccess || allowedDesignationNames.has(String(executive.designation ?? "")));
+  const partnerStates = targetRegister === "workforce" && supabaseAdmin ? await loadPartnerOnboardingStates(supabaseAdmin, companyId, visibleExecutiveRows.map(row=>row.id)) : new Map();
   const executives = visibleExecutiveRows
     .map((executive) => {
     const location = firstRelation(executive.stations);
@@ -806,10 +808,11 @@ async function loadFieldExecutiveData(
           { isOwner: ownerAccess }
       ),
       isActive: executive.is_active,
-      status: fieldExecutiveStatus(executive, targetRegister === "workforce"),
+      status: partnerStates.get(executive.id)?.label || fieldExecutiveStatus(executive, targetRegister === "workforce"),
       activationHref: targetRegister === "workforce" && executive.dropx_id
         ? `https://workforce.dropxlogistics.com/delivery-network/id-onboarding?view=pending&q=${encodeURIComponent(executive.dropx_id)}` : undefined,
-      canQueueAmazonId: targetRegister === "workforce" && ["approved", "active"].includes(String(executive.onboarding_status ?? ""))
+      partnerOnboarding: partnerStates.get(executive.id),
+      canQueueAmazonId: Boolean(partnerStates.get(executive.id)?.can_trigger)
     };
   });
   const uploadUrlRows = await Promise.all(visibleExecutiveRows.map(async (executive) => ({
@@ -887,7 +890,7 @@ export async function FieldExecutivePageContent({
   registerNavigation?: ReactNode;
   returnPath?: FieldExecutiveRoute;
   showWorkforceSummary?: boolean;
-  registerView?: "pending"|"active";
+  registerView?: "pending"|"active"|"due";
   viewId?: string;
 }) {
   const authorization = await requirePagePermission(pageCode, "access");
@@ -958,10 +961,11 @@ export async function FieldExecutivePageContent({
   const editRules = designationOptions.find((option) => option.value === editExecutive?.designation)?.dashboardRules
     ?? categoryRules.dashboard;
   const pendingStatuses = new Set(["Pending", "Workforce approval pending", "Correction requested", "Activation pending"]);
-  const pendingRegisterRows = executives.filter((row) => pendingStatuses.has(row.status));
-  const activeRegisterRows = executives.filter((row) => row.status === "Active");
+  const pendingRegisterRows = executives.filter((row) => row.partnerOnboarding ? !row.partnerOnboarding.mapping_confirmed : pendingStatuses.has(row.status));
+  const activeRegisterRows = executives.filter((row) => row.partnerOnboarding ? row.partnerOnboarding.mapping_confirmed : row.status === "Active");
+  const dueRegisterRows=executives.filter(row=>Boolean(row.partnerOnboarding?.due_kind));
   const registerRows = returnPath === "/work-force-register"
-    ? (registerView === "active" ? activeRegisterRows : pendingRegisterRows)
+    ? (registerView === "due"?dueRegisterRows:registerView === "active" ? activeRegisterRows : pendingRegisterRows)
     : executives;
 
   return (
@@ -973,7 +977,7 @@ export async function FieldExecutivePageContent({
       />
 
       {registerNavigation}
-      {returnPath==="/work-force-register"?<nav className="workforce-lifecycle-tabs" aria-label="Workforce register status"><PendingLink className={registerView==="pending"?"active":""} href="/work-force-register?status=pending">Pending <strong>{pendingRegisterRows.length}</strong></PendingLink><PendingLink className={registerView==="active"?"active":""} href="/work-force-register?status=active">Active <strong>{activeRegisterRows.length}</strong></PendingLink><a href="https://workforce.dropxlogistics.com/delivery-network/id-onboarding?view=pending" target="_blank" rel="noreferrer">Amazon ID queue ↗</a></nav>:null}
+      {returnPath==="/work-force-register"?<nav className="workforce-lifecycle-tabs" aria-label="Workforce register status"><PendingLink className={registerView==="pending"?"active":""} href="/work-force-register?status=pending">Pending <strong>{pendingRegisterRows.length}</strong></PendingLink><PendingLink className={registerView==="active"?"active":""} href="/work-force-register?status=active">Active <strong>{activeRegisterRows.length}</strong></PendingLink><PendingLink className={registerView==="due"?"active":""} href="/work-force-register?status=due">Due <strong>{dueRegisterRows.length}</strong></PendingLink><a href="https://workforce.dropxlogistics.com/delivery-network/associates?view=pending" target="_blank" rel="noreferrer">Workforce follow-up ↗</a></nav>:null}
 
       {error || errorMessage || notice ? (
         <section className={`panel message-panel ${error || errorMessage ? "error" : "success"}`}>

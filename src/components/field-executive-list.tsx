@@ -1,5 +1,6 @@
 "use client";
 
+import {PartnerProgressNote} from "./partner-progress-note";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EllipsisVertical, Eye, Pencil, UserRound } from "lucide-react";
 import { PendingLink } from "@/components/pending-link";
@@ -23,6 +24,7 @@ export type FieldExecutiveListRow = {
   canEdit?: boolean;
   activationHref?: string;
   canQueueAmazonId?: boolean;
+  partnerOnboarding?:import("@/lib/partner-onboarding").PartnerOnboardingState;
 };
 
 const pageSize = 20;
@@ -292,7 +294,7 @@ export function FieldExecutiveList({
                 <td>{row.location}</td>
                 <td>{row.designation}</td>
                 <td><StatusPill status={row.status} /></td>
-                {showActions ? <td className="action-cell">
+                {showActions ? <td className="action-cell">{row.partnerOnboarding?<><PartnerProgressNote state={row.partnerOnboarding} workforceId={row.id} canEdit={Boolean(row.canEdit)}/><small style={{display:"block",maxWidth:260}}>{row.partnerOnboarding.instruction}</small></>:null}{row.canQueueAmazonId ? <form action={queueAmazonInvitationFromOpsPulse}><input name="workforce_id" type="hidden" value={row.id} /><button className="row-action-item" type="submit">Create Amazon ID</button></form> : null}
                   <div className="row-action-menu" ref={openMenuId === row.id ? menuRef : undefined}>
                     <button
                       aria-expanded={openMenuId === row.id}
@@ -314,7 +316,7 @@ export function FieldExecutiveList({
                             <Pencil size={15} aria-hidden="true" /> Edit
                           </PendingLink>
                         ) : null}
-                        {row.canQueueAmazonId ? <form action={queueAmazonInvitationFromOpsPulse}><input name="workforce_id" type="hidden" value={row.id} /><button className="row-action-item" type="submit">Create Amazon ID</button></form> : null}
+
                         {row.activationHref ? <a className="row-action-item" href={row.activationHref} target="_blank" rel="noreferrer">Amazon status ↗</a> : null}
                       </div>
                     ) : null}
